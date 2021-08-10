@@ -1,0 +1,8 @@
+{
+    "port": 3000,
+    "serverTickSpeed": 33.33,
+    "playerBaseRadius": 7.5,
+    "worldWidth":1366,
+    "worldHeight":768,
+    "maxPlayersInRoom" : 5
+}

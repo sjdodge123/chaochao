@@ -24,6 +24,15 @@ body {
 	margin-top: -10%;
 }
 
+#gameWindow{
+	background: black;
+	position: relative;
+	overflow: none;
+	display: none;
+	width: 100%;
+	height: 100%;
+}
+
 
 #game-title{
     font-family: "San Francisco";

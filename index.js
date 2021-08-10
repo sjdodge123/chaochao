@@ -8,14 +8,26 @@ const path = require('path');
 const htmlPath = path.join(__dirname, 'client');
 app.use(express.static(htmlPath));
 
-server.listen(process.env.PORT || 3000, () => {
+var utils = require('./server/utils.js');
+var messenger = require('./server/messenger.js');
+var c = utils.loadConfig();
+
+//Base Server vars
+var clientCount = 0;
+
+server.listen(c.port, () => {
   console.log('listening on *:3000');
+  messenger.build(io);
 });
 
-io.on('connection', (socket) => {
-    console.log('a user connected');
-    socket.on('disconnect', () => {
-      console.log('user disconnected');
+io.on('connection', (client) => {
+    clientCount++;
+    messenger.addMailBox(client.id,client);
+    //console.log('a user connected');
+    client.on('disconnect', () => {
+      //console.log('user disconnected');
+      messenger.removeMailBox(client.id);
+      clientCount--;
     });
   });
   
