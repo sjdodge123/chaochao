@@ -38,14 +38,23 @@ function clientConnect() {
 	server.on("playerLeft", function(id){
 		var name = clientList[id];
 		if(name != null){
-			console.log(playerList);
-			console.log(name + " disconnected");
 			delete clientList[id];
 			delete playerList[id];
-			console.log(playerList);
 			return;
 		}
-		console.log("I disconnected");
+	});
+
+	server.on("gameUpdates",function(updatePacket){
+		updatePlayerList(updatePacket.playerList);
+		gameStarted = updatePacket.state;
+		totalPlayers = updatePacket.totalPlayers;
+		timeSinceLastCom = 0;
+
+		/*
+		if(myShip != null && myShip.weapon != null){
+			currentWeaponCooldown = myShip.weapon.cooldown*1000;
+		}
+		*/
 	});
 
     return server;

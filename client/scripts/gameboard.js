@@ -49,6 +49,25 @@ function createPlayer(dataArray,isAI){
     */
 }
 
+function updatePlayerList(packet){
+	if(packet == null){
+		return;
+	}
+	packet = JSON.parse(packet);
+	for(var i=0;i<packet.length;i++){
+		var player = packet[i];
+		if(playerList[player[0]] != null){
+			playerList[player[0]].id = player[0];
+			playerList[player[0]].x = player[1];
+			playerList[player[0]].y = player[2];
+			//playerList[player[0]].weapon.angle = player[3];
+			playerList[player[0]].velX = player[4];
+			playerList[player[0]].velY = player[5];
+		}
+	}
+}
+
+
 function worldResize(payload){
 	payload = JSON.parse(payload);
 	world = {};

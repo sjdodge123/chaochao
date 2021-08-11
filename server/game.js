@@ -2,6 +2,7 @@
 var utils = require('./utils.js');
 var c = utils.loadConfig();
 var messenger = require('./messenger.js');
+var _engine = require('./engine.js');
 var compressor = require('./compressor.js');
 
 exports.getRoom = function(sig,size){
@@ -16,8 +17,9 @@ class Room {
         this.playerList = {};
         this.clientCount = 0;
         this.alive = true;
-        this.world = new World(0,0,c.worldWidth,c.worldHeight,this.sig);
-        this.game = new Game(this.clientList,this.playerList,this.sig);
+		this.engine = _engine.getEngine(this.playerList);
+        this.world = new World(0,0,c.worldWidth,c.worldHeight,this.engine,this.sig);
+        this.game = new Game(this.clientList,this.playerList,this.world,this.engine,this.sig);
     }
     join(clientID){
         var client = messenger.getClient(clientID);
@@ -35,7 +37,7 @@ class Room {
 		this.clientCount--;
     }
     update(dt){
-		//this.game.update(dt);
+		this.game.update(dt);
 		//this.checkForDeaths();
 		this.sendUpdates();
 	}
@@ -58,23 +60,85 @@ class Room {
 	}
     hasSpace(){
 		if(this.clientCount < this.size){
+			return true;
+			/*
 			if(!this.game.active && !this.game.gameEnded){
 				return true;
 			}
+			*/
 		}
 		return false;
 	}
 }
 
 class Game {
-    constructor(clientList,playerList,world,roomSig){
+    constructor(clientList,playerList,world,engine,roomSig){
         this.clientList = clientList;
         this.playerList = playerList;
         this.roomSig = roomSig 
         this.world = world;
+		this.engine = engine;
         this.gameEnded = false;
         this.active = false;
+		this.gameBoard = new GameBoard(world,playerList,engine,roomSig);
     }
+	start(){
+		//messenger.messageRoomBySig(this.roomSig,'gameStart',null);
+		//this.gameBoard.clean();
+		this.active = true;
+		this.world.resize();
+		//this.gameBoard.populateWorld();
+		//this.gameBoard.resetPlayers();
+		//this.checkForAISpawn();
+		//this.randomLocShips();
+	}
+	update(dt){
+		if(!this.active){
+			this.start();
+		}
+		this.gameBoard.update(this.active,dt);
+		this.world.update(dt);
+	}
+}
+
+class GameBoard {
+	constructor(world,playerList,engine,roomSig){
+		this.world = world;
+		this.playerList = playerList;
+		this.engine = engine;
+		this.roomSig = roomSig;
+	}
+	update(active,dt){
+		this.engine.update(dt);
+		this.checkCollisions(active);
+		this.updatePlayers(active,dt);
+	}
+	checkCollisions(active){
+		//In game running
+		if(active){
+			var objectArray = [];
+			for(var player in this.playerList){
+				_engine.preventEscape(this.playerList[player],this.world);
+				objectArray.push(this.playerList[player]);
+			}
+			this.engine.broadBase(objectArray);
+		}
+		// In lobby state
+		else{
+			for(var player in this.playerList){
+				_engine.preventEscape(this.playerList[player],this.world);
+			}
+		}
+	}
+	updatePlayers(active,dt){
+		for(var playerID in this.playerList){
+			var player = this.playerList[playerID];
+			if(active){
+				this.world.checkForMapDamage(player);
+			}
+			player.update(dt);
+		}
+	}
 }
 
 class Shape {
@@ -171,8 +235,9 @@ class Rect extends Shape{
 }
 
 class World extends Rect{
-    constructor(x,y,width,height,roomSig){
+    constructor(x,y,width,height,engine,roomSig){
         super(x,y,width,height, 0, "white");
+		this.engine = engine;
         this.roomSig = roomSig;
 		this.a
     }
@@ -202,6 +267,18 @@ class World extends Rect{
 	}
     getRandomLoc(){
 		return {x:Math.floor(Math.random()*(this.width - this.x)) + this.x, y:Math.floor(Math.random()*(this.height - this.y)) + this.y};
+	}
+	checkForMapDamage(object){
+
+	}
+	resize(){
+		this.width = c.worldWidth;
+		this.height = c.worldHeight;
+		this.baseBoundRadius = this.width;
+		this.center = {x:this.width/2,y:this.height/2};
+		this.engine.setWorldBounds(this.width,this.height);
+		var data = compressor.worldResize(this);
+		messenger.messageRoomBySig(this.roomSig,'worldResize',data);
 	}
 }
 
@@ -282,10 +359,42 @@ class Circle extends Shape{
 class Player extends Circle {
     constructor(x,y,angle,color,id,roomSig){
         super(x,y,c.playerBaseRadius,color);
+		this.enabled = true;
+		this.alive = true;
         this.color = color;
         this.id = id;
         this.roomSig = roomSig;
+
+		//Movement
+		this.moveForward = false;
+		this.moveBackward = false;
+		this.turnLeft = false;
+		this.turnRight = false;
+
+		//Engine Variables
+		this.newX = this.x;
+		this.newY = this.y;
+		this.velX = 0;
+		this.velY = 0;
+		this.dragCoeff = c.playerDragCoeff;
+		this.brakeCoeff = c.playerBrakeCoeff;
+		this.maxVelocity = c.playerMaxSpeed;
+		this.acel = c.playerBaseAcel;
     }
+	update(dt){
+		if(!this.alive){
+			return;
+		}
+		this.dt = dt;
+		this.move();
+	}
+	move(){
+		this.x = this.newX;
+		this.y = this.newY;
+	}
+	getSpeedBonus(){
+		return 0;
+	}
 }
 
 

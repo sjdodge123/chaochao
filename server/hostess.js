@@ -44,6 +44,9 @@ exports.updateRooms = function(dt){
 		}
 	}
 }
+exports.getRoomBySig = function(sig){
+	return roomList[sig];
+}
 
 function getRoomCount(){
 	var count = 0;

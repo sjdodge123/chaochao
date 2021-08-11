@@ -46,7 +46,7 @@ function checkForMail(client){
 		//Add this player to the list of current clients in the room
 		room.clientList[client.id] = client.id;
 
-		//Spawn a ship for the new player
+		//Spawn a player for the new player
 		room.playerList[client.id] = room.world.spawnNewPlayer(client.id);
 
 		//Send the current gamestate to the new player
@@ -73,6 +73,22 @@ function checkForMail(client){
 
 	client.on('playerLeaveRoom',function(){
 		hostess.kickFromRoom(client.id);
+	});
+
+	client.on('movement',function(packet){
+		var room = hostess.getRoomBySig(roomMailList[client.id]);
+		if(room == undefined){
+			return;
+		}
+		var player = room.playerList[client.id];
+		if(player != null){
+			if(player.enabled){
+				player.moveForward = packet.moveForward;
+				player.moveBackward = packet.moveBackward;
+				player.turnLeft = packet.turnLeft;
+				player.turnRight = packet.turnRight;
+			}
+		}
 	});
 
 
