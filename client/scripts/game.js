@@ -84,6 +84,7 @@ function gameLoop(dt){
 }
 
 function drawObjects(dt){
+    drawBackground(dt);
     drawPlayers(dt);
 }
 
@@ -104,6 +105,9 @@ function drawPlayer(player){
     gameContext.lineWidth = 1.5;
     gameContext.strokeStyle = "black";
     gameContext.stroke();
+}
+function drawBackground() {
+	gameContext.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
 }
 
 function resize(){
