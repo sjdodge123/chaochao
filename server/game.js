@@ -22,13 +22,13 @@ class Room {
     join(clientID){
         var client = messenger.getClient(clientID);
         messenger.addRoomToMailBox(clientID,this.sig);
-        client.join(this.sig);
+        client.join(String(this.sig));
         this.clientCount++;
     }
     leave(clientID){
         messenger.messageRoomBySig(this.sig,'playerLeft',clientID);
         var client = messenger.getClient(clientID);
-		client.leave(this.sig);
+		client.leave(String(this.sig));
         messenger.removeRoomMailBox(clientID);
 		delete this.clientList[clientID];
 		delete this.playerList[clientID];
@@ -40,6 +40,7 @@ class Room {
 		this.sendUpdates();
 	}
     sendUpdates(){
+		console.log("Room "+ this.sig + " sending updates!");
 		var playerData = compressor.sendPlayerUpdates(this.playerList);
 		messenger.messageRoomBySig(this.sig,"gameUpdates",{
 			playerList:playerData,

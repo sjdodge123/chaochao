@@ -32,7 +32,6 @@ function clientConnect() {
 	});
 
 	server.on("playerJoin", function(appendPlayerList){
-		console.log("New player join!");
 		clientList[appendPlayerList.id] = appendPlayerList.id;
 		appendNewPlayer(appendPlayerList.player);
 	});
@@ -42,6 +41,6 @@ function clientConnect() {
 
 
 function clientSendStart(){
-	server.emit('enterLobby');
+	server.emit('enterGame');
 }
 

@@ -39,7 +39,7 @@ exports.getTotalPlayers = function(){
 function checkForMail(client){
     client.emit("welcome",client.id);
 
-    client.on('enterLobby', function(message){
+    client.on('enterGame', function(){
         var roomSig = hostess.findARoom(client.id);
 		var room = hostess.joinARoom(roomSig,client.id);
 
@@ -68,13 +68,12 @@ function checkForMail(client){
 			id:client.id,
 			player:appendPlayerData
 		};
-		messageRoomBySig(roomSig,"playerJoin",appendPlayerList);
-		//client.broadcast.to(roomSig).emit("playerJoin",appendPlayerList);
+		client.broadcast.to(String(roomSig)).emit("playerJoin",appendPlayerList);
     });
 
 }
 
 
 function messageRoomBySig(sig,header,payload){
-	io.to(sig).emit(header,payload);
+	io.to(String(sig)).emit(header,payload);
 }
