@@ -35,10 +35,21 @@ function clientConnect() {
 		clientList[appendPlayerList.id] = appendPlayerList.id;
 		appendNewPlayer(appendPlayerList.player);
 	});
+	server.on("playerLeft", function(id){
+		var name = clientList[id];
+		if(name != null){
+			console.log(playerList);
+			console.log(name + " disconnected");
+			delete clientList[id];
+			delete playerList[id];
+			console.log(playerList);
+			return;
+		}
+		console.log("I disconnected");
+	});
 
     return server;
 }
-
 
 function clientSendStart(){
 	server.emit('enterGame');

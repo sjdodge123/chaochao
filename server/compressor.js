@@ -14,7 +14,7 @@ exports.sendPlayerUpdates = function(playerList){
 			player.id,
 			player.x,
 			player.y,
-			player.weapon.angle,
+			//player.weapon.angle,
 			player.velX,
 			player.velY,
 		];

@@ -101,6 +101,9 @@ function drawPlayer(player){
     gameContext.arc(player.x, player.y, player.radius, 0, 2 * Math.PI);
     gameContext.fillStyle = player.color;
     gameContext.fill();
+    gameContext.lineWidth = 1.5;
+    gameContext.strokeStyle = "black";
+    gameContext.stroke();
 }
 
 function resize(){

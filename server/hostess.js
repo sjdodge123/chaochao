@@ -18,9 +18,31 @@ exports.findARoom = function(clientID){
     }
     return generateNewRoom();
 }
+exports.kickFromRoom = function(clientID){
+	var room = searchForRoom(clientID);
+	if(room != undefined){
+		room.leave(clientID);
+	}
+}
 exports.joinARoom = function(sig,clientID){
 	roomList[sig].join(clientID);
 	return roomList[sig];
+}
+exports.updateRooms = function(dt){
+	for(var sig in roomList){
+		var room = roomList[sig];
+		if(room == null){
+			delete roomList[sig];
+			continue;
+		}
+		if(!room.game.gameEnded){
+			room.update(dt);
+		} else if(room.alive){
+			room.alive = false;
+			messenger.messageRoomBySig(room.sig,"gameOver",room.game.winner);
+			reclaimRoom(room.sig); //setTimeout(reclaimRoom,roomKickTimeout*1000,room.sig);
+		}
+	}
 }
 
 function getRoomCount(){
@@ -29,6 +51,15 @@ function getRoomCount(){
 		count++;
 	}
 	return count;
+}
+function searchForRoom(id){
+	var room;
+	for(var sig in roomList){
+		if(roomList[sig].checkRoom(id)){
+			room = roomList[sig];
+		}
+	}
+	return room;
 }
 
 function generateRoomSig(){

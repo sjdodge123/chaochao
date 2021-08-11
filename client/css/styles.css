@@ -25,7 +25,7 @@ body {
 }
 
 #gameWindow{
-	background: black;
+	background: #F0F0F0;
 	position: relative;
 	overflow: none;
 	display: none;

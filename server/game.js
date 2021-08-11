@@ -40,7 +40,6 @@ class Room {
 		this.sendUpdates();
 	}
     sendUpdates(){
-		console.log("Room "+ this.sig + " sending updates!");
 		var playerData = compressor.sendPlayerUpdates(this.playerList);
 		messenger.messageRoomBySig(this.sig,"gameUpdates",{
 			playerList:playerData,
@@ -175,12 +174,13 @@ class World extends Rect{
     constructor(x,y,width,height,roomSig){
         super(x,y,width,height, 0, "white");
         this.roomSig = roomSig;
+		this.a
     }
     update(dt){
 		
 	}
     spawnNewPlayer(id){
-        var player = new Player(0,0, 90, "red", id,this.roomSig);
+        var player = new Player(0,0, 90, utils.getColor(), id,this.roomSig);
 		var loc = this.findFreeLoc(player);
 		player.x = loc.x;
 		player.y = loc.y;

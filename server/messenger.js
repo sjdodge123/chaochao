@@ -71,6 +71,11 @@ function checkForMail(client){
 		client.broadcast.to(String(roomSig)).emit("playerJoin",appendPlayerList);
     });
 
+	client.on('playerLeaveRoom',function(){
+		hostess.kickFromRoom(client.id);
+	});
+
+
 }
 
 
