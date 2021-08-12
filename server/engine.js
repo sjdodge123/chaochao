@@ -103,7 +103,6 @@ class Engine {
 		}
 	}
     broadBase(objectArray){
-
 		this.quadTree.clear();
 		var collidingBeams = [];
 		var beamList = [];

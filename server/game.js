@@ -61,12 +61,9 @@ class Room {
 	}
     hasSpace(){
 		if(this.clientCount < this.size){
-			return true;
-			/*
-			if(!this.game.active && !this.game.gameEnded){
+			if(!this.game.locked){
 				return true;
 			}
-			*/
 		}
 		return false;
 	}
@@ -80,17 +77,26 @@ class Game {
         this.world = world;
 		this.engine = engine;
         this.gameEnded = false;
-        this.active = false;
+        this.locked = false;
+
+		//Game stats
 		this.playerCount = 0;
+		this.lobbyButtonPressedCount = 0;
+
+		//Timers
+		this.lobbyWaitTime = c.lobbyWaitTime;
+		this.lobbyTimer = null;
+		this.lobbyTimeLeft = this.lobbyWaitTime;
+
 		this.stateMap = c.stateMap;
 		this.currentState = this.stateMap.waiting;
 		this.gameBoard = new GameBoard(world,playerList,engine,roomSig);
     }
-	start(){
-		console.log("Game starting");
-		//messenger.messageRoomBySig(this.roomSig,'gameStart',null);
-		//this.gameBoard.clean();
-		this.active = true;
+	startOverview(){
+		this.currentState = this.stateMap.overview;
+		messenger.messageRoomBySig(this.roomSig,'startOverview',null);
+		this.gameBoard.clean();
+		this.locked = true;
 		this.world.resize();
 		//this.gameBoard.populateWorld();
 		//this.gameBoard.resetPlayers();
@@ -99,32 +105,68 @@ class Game {
 	}
 	update(dt){
 		this.getPlayerCount();
+		//In Waiting State
 		if(this.currentState == this.stateMap.waiting){
 			this.checkLobbyStart();
 		}
+		//In Lobby State
 		if(this.currentState == this.stateMap.lobby){
 			this.checkGameStart();
 		}
-		this.gameBoard.update(this.active,dt);
+		if(this.currentState == this.stateMap.overview){
+			console.log("In overview");
+			//this.checkOverviewTimer();
+		}
+		this.gameBoard.update(this.currentState,dt);
 		this.world.update(dt);
 	}
 	checkLobbyStart(){
 		if(this.playerCount >= c.minPlayersToStart){
 			this.currentState = this.stateMap.lobby;
+			this.world.resize();
 			this.gameBoard.startLobby();
 		}
 	}
 	checkGameStart(){
+		//Reset back to waiting if someone leaves
 		if(this.playerCount < c.minPlayersToStart){
 			console.log("Start Waiting");
 			this.currentState = this.stateMap.waiting;
 		}
+		//If majority of players stand on the gamestart button start the timer
+		var percentPlayers = (this.lobbyButtonPressedCount/this.playerCount) * 100;
+		if(percentPlayers > 50){
+			this.startLobbyTimer();
+			return;
+		}
+		this.resetLobbyTimer();
+	}
+	startLobbyTimer(){
+		if(this.lobbyTimer != null){
+			this.lobbyTimeLeft = ((this.lobbyWaitTime*1000 - (Date.now() - this.lobbyTimer))/(1000)).toFixed(1);
+			if(this.lobbyTimeLeft > 0){
+				return;
+			}
+			this.resetLobbyTimer();
+			this.startOverview();
+			return;
+		}
+		this.lobbyTimer = Date.now();
+	}
+	resetLobbyTimer(){
+		this.lobbyTimer = null;
 	}
 	getPlayerCount(){
 		var playerCount = 0;
+		var lobbyButtonPressedCount = 0;
 		for(var playerID in this.playerList){
+			if(this.playerList[playerID].hittingLobbyButton){
+				this.playerList[playerID].hittingLobbyButton = false;
+				lobbyButtonPressedCount++;
+			}
 			playerCount++;
 		}
+		this.lobbyButtonPressedCount = lobbyButtonPressedCount;
 		this.playerCount = playerCount;
 		return playerCount;
 	}
@@ -136,21 +178,22 @@ class GameBoard {
 		this.playerList = playerList;
 		this.engine = engine;
 		this.roomSig = roomSig;
+		this.stateMap = c.stateMap;
 		this.lobbyStartButton;
 	}
-	update(active,dt){
+	update(currentState,dt){
 		this.engine.update(dt);
-		this.checkCollisions(active);
-		this.updatePlayers(active,dt);
+		this.checkCollisions(currentState);
+		this.updatePlayers(currentState,dt);
 	}
-	checkCollisions(active){
-		//In game running
-		if(active){
+	checkCollisions(currentState){
+		if(currentState ==  this.stateMap.lobby){
 			var objectArray = [];
 			for(var player in this.playerList){
 				_engine.preventEscape(this.playerList[player],this.world);
 				objectArray.push(this.playerList[player]);
 			}
+			objectArray.push(this.lobbyStartButton);
 			this.engine.broadBase(objectArray);
 		}
 		// In lobby state
@@ -163,16 +206,19 @@ class GameBoard {
 	updatePlayers(active,dt){
 		for(var playerID in this.playerList){
 			var player = this.playerList[playerID];
+			/*
 			if(active){
 				this.world.checkForMapDamage(player);
-			}
+			}*/
 			player.update(dt);
 		}
 	}
 	startLobby(){
-		console.log("Start Lobby");
 		this.lobbyStartButton = new LobbyStartButton(this.world.center.x,this.world.center.y,0,"red");
 		messenger.messageRoomBySig(this.roomSig,"startLobby",compressor.sendLobbyStart(this.lobbyStartButton));
+	}
+	clean(){
+		this.lobbyStartButton = null;
 	}
 }
 
@@ -399,7 +445,11 @@ class Circle extends Shape{
 
 class LobbyStartButton extends Circle{
 	constructor(x,y,angle,color){
-		super(x,y,50,color);
+		super(x,y,75,color);
+		this.isLobbyStart = true;
+	}
+	handleHit(object){
+		
 	}
 }
 
@@ -411,6 +461,9 @@ class Player extends Circle {
         this.color = color;
         this.id = id;
         this.roomSig = roomSig;
+
+		//Game Variables
+		this.hittingLobbyButton = false;
 
 		//Movement
 		this.moveForward = false;
@@ -427,7 +480,7 @@ class Player extends Circle {
 		this.brakeCoeff = c.playerBrakeCoeff;
 		this.maxVelocity = c.playerMaxSpeed;
 		this.acel = c.playerBaseAcel;
-
+		
 		this.currentSpeedBonus = 0;
     }
 	update(dt){
@@ -448,6 +501,10 @@ class Player extends Circle {
 		if(object.isWall){
 			messenger.messageUser(this.id,"collideWithObject");
 			_engine.preventMovement(this,object,this.dt);
+		}
+		if(object.isLobbyStart){
+			this.hittingLobbyButton = true;
+			return;
 		}
 		if(object.owner != this.id && object.alive && object.damage != null){
 			/*

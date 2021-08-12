@@ -8,10 +8,14 @@
     "maxPlayersInRoom" : 10,
     "forceConstant" :5000000,
 
+    "lobbyWaitTime": 5,
+
     "stateMap": {
         "waiting": 0,
 		"lobby": 1,
-        "active": 2
+        "overview":2,
+        "gated": 3,
+        "racing": 4
     },
 
     "playerDragCoeff": 0.095,

@@ -46,18 +46,25 @@ function drawLobbyStartButton(){
     if(lobbyStartButton != null){
         gameContext.save();
         gameContext.beginPath();
-        /*
-        for (i=0; i< 360; i++) {
+        gameContext.arc(lobbyStartButton.x, lobbyStartButton.y, lobbyStartButton.radius, 0, 2 * Math.PI);
+        gameContext.lineWidth = 3;
+        gameContext.stroke();
+
+        gameContext.beginPath();
+        gameContext.arc(lobbyStartButton.x, lobbyStartButton.y, lobbyStartButton.radius, 0, 2 * Math.PI);
+        gameContext.clip();
+        for (i=0; i<  360; i++) {
             var angle = 0.1 * i;
-            var x = lobbyStartButton.x + (5 + 2 * angle)*Math.cos(angle);
-            var y = lobbyStartButton.y + (5 + 2 * angle)*Math.sin(angle);
+            var x = lobbyStartButton.x + (4 + 2 * angle)*Math.cos(angle);
+            var y = lobbyStartButton.y + (4 + 2 * angle)*Math.sin(angle);
             gameContext.lineTo(x, y);
           }
-          */
-        gameContext.arc(lobbyStartButton.x, lobbyStartButton.y, lobbyStartButton.radius, 0, 2 * Math.PI);
-        // gameContext.arc(lobbyStartButton.x, lobbyStartButton.y, lobbyStartButton.radius/1.6, 0, 4 * Math.PI);
-        gameContext.lineWidth = 3;
+        gameContext.lineWidth = 2;
+        
+        
+        gameContext.strokeStyle = lobbyStartButton.color;
         gameContext.stroke();
         gameContext.restore();
     }
 }
+
