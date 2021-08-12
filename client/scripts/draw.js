@@ -2,6 +2,7 @@ function drawObjects(dt){
     drawBackground(dt);
     drawWorld(dt);
     drawLobbyStartButton();
+    drawGate();
     drawPlayers(dt);
 }
 
@@ -64,6 +65,17 @@ function drawLobbyStartButton(){
         
         gameContext.strokeStyle = lobbyStartButton.color;
         gameContext.stroke();
+        gameContext.restore();
+    }
+}
+function drawGate(){
+    if(gate != null){
+        gameContext.save();
+		gameContext.beginPath();
+        gameContext.lineWidth = 5;
+        gameContext.rect(gate.x,gate.y,gate.width,gate.height);
+        gameContext.fillStyle = "grey";
+        gameContext.fill();
         gameContext.restore();
     }
 }

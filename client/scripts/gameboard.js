@@ -2,6 +2,7 @@ var mousex,
 	mousey,
 	gameState,
 	lobbyStartButton,
+	gate,
 	world,
 	playerList,
 	clientList;
@@ -96,6 +97,9 @@ function checkGameState(payload){
 	}
 	payload = JSON.parse(payload);
 	gameState = payload[0];
+	if(gameState == config.stateMap.waiting){
+		lobbyStartButton = null;
+	}
 	if(gameState == config.stateMap.lobby){
 		lobbyStartButton = {};
 		lobbyStartButton.x = payload[1];
@@ -103,8 +107,13 @@ function checkGameState(payload){
 		lobbyStartButton.radius = payload[3];
 		lobbyStartButton.color = payload[4];
 	}
-	if(gameState == config.stateMap.waiting){
-		lobbyStartButton = {};
+	if(gameState == config.stateMap.gated){
+		lobbyStartButton = null;
+		gate = {};
+		gate.x = payload[1];
+		gate.y = payload[2];
+		gate.width = payload[3];
+		gate.height = payload[4];
 	}
 }
 

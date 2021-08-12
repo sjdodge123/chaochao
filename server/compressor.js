@@ -55,6 +55,12 @@ exports.gameState = function(game){
 		packet[3] = game.gameBoard.lobbyStartButton.radius;
 		packet[4] = game.gameBoard.lobbyStartButton.color;	
 	}
+	if(game.currentState == game.stateMap.gated){
+		packet[1] = game.gameBoard.startingGate.x;
+		packet[2] = game.gameBoard.startingGate.y;
+		packet[3] = game.gameBoard.startingGate.width;
+		packet[4] = game.gameBoard.startingGate.height;
+	}
 	packet = JSON.stringify(packet);
 	return packet;
 }

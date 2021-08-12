@@ -4,7 +4,7 @@
     "playerBaseRadius": 7.5,
     "worldWidth":1366,
     "worldHeight":768,
-    "minPlayersToStart": 2,
+    "minPlayersToStart": 1,
     "maxPlayersInRoom" : 10,
     "forceConstant" :5000000,
 

@@ -92,17 +92,6 @@ class Game {
 		this.currentState = this.stateMap.waiting;
 		this.gameBoard = new GameBoard(world,playerList,engine,roomSig);
     }
-	startOverview(){
-		this.currentState = this.stateMap.overview;
-		messenger.messageRoomBySig(this.roomSig,'startOverview',null);
-		this.gameBoard.clean();
-		this.locked = true;
-		this.world.resize();
-		//this.gameBoard.populateWorld();
-		//this.gameBoard.resetPlayers();
-		//this.checkForAISpawn();
-		//this.randomLocShips();
-	}
 	update(dt){
 		this.getPlayerCount();
 		//In Waiting State
@@ -113,6 +102,12 @@ class Game {
 		if(this.currentState == this.stateMap.lobby){
 			this.checkGameStart();
 		}
+		//In Gated State
+		if(this.currentState == this.stateMap.gated){
+			//
+			
+		}
+		//In Overview State
 		if(this.currentState == this.stateMap.overview){
 			console.log("In overview");
 			//this.checkOverviewTimer();
@@ -122,16 +117,13 @@ class Game {
 	}
 	checkLobbyStart(){
 		if(this.playerCount >= c.minPlayersToStart){
-			this.currentState = this.stateMap.lobby;
-			this.world.resize();
-			this.gameBoard.startLobby();
+			this.startLobby();
 		}
 	}
 	checkGameStart(){
 		//Reset back to waiting if someone leaves
 		if(this.playerCount < c.minPlayersToStart){
-			console.log("Start Waiting");
-			this.currentState = this.stateMap.waiting;
+			this.startWaiting();
 		}
 		//If majority of players stand on the gamestart button start the timer
 		var percentPlayers = (this.lobbyButtonPressedCount/this.playerCount) * 100;
@@ -148,10 +140,36 @@ class Game {
 				return;
 			}
 			this.resetLobbyTimer();
-			this.startOverview();
+			this.startGated();
 			return;
 		}
 		this.lobbyTimer = Date.now();
+	}
+	startWaiting(){
+		console.log("Start Waiting");
+		this.currentState = this.stateMap.waiting;
+	}
+	startLobby(){
+		console.log("Start Lobby")
+		this.currentState = this.stateMap.lobby;
+		this.world.resize();
+		this.gameBoard.startLobby();
+	}
+	startGated(){
+		console.log("Start Gated");
+		this.locked = true;
+		this.gameBoard.setupMap();
+		this.currentState = this.stateMap.gated;
+	}
+	startOverview(){
+		console.log("Start Overview");
+		this.currentState = this.stateMap.overview;
+		messenger.messageRoomBySig(this.roomSig,'startOverview',null);
+		this.world.resize();
+		//this.gameBoard.populateWorld();
+		
+		//this.checkForAISpawn();
+		//this.randomLocShips();
 	}
 	resetLobbyTimer(){
 		this.lobbyTimer = null;
@@ -180,6 +198,7 @@ class GameBoard {
 		this.roomSig = roomSig;
 		this.stateMap = c.stateMap;
 		this.lobbyStartButton;
+		this.startingGate = null;
 	}
 	update(currentState,dt){
 		this.engine.update(dt);
@@ -187,7 +206,13 @@ class GameBoard {
 		this.updatePlayers(currentState,dt);
 	}
 	checkCollisions(currentState){
-		if(currentState ==  this.stateMap.lobby){
+		if(currentState == this.stateMap.waiting){
+			for(var player in this.playerList){
+				_engine.preventEscape(this.playerList[player],this.world);
+			}
+			return;
+		}
+		if(currentState == this.stateMap.lobby){
 			var objectArray = [];
 			for(var player in this.playerList){
 				_engine.preventEscape(this.playerList[player],this.world);
@@ -195,11 +220,12 @@ class GameBoard {
 			}
 			objectArray.push(this.lobbyStartButton);
 			this.engine.broadBase(objectArray);
+			return;
 		}
-		// In lobby state
-		else{
+		if(currentState == this.stateMap.gated){
 			for(var player in this.playerList){
 				_engine.preventEscape(this.playerList[player],this.world);
+				_engine.preventEscape(this.playerList[player],this.startingGate);
 			}
 		}
 	}
@@ -216,6 +242,27 @@ class GameBoard {
 	startLobby(){
 		this.lobbyStartButton = new LobbyStartButton(this.world.center.x,this.world.center.y,0,"red");
 		messenger.messageRoomBySig(this.roomSig,"startLobby",compressor.sendLobbyStart(this.lobbyStartButton));
+	}
+	setupMap(){
+		this.clean();
+		this.resetPlayers();
+		this.startingGate = new Gate(0,0,75,this.world.height);
+		this.gatePlayers();
+		
+	}
+	gatePlayers(){
+		for(var playerID in this.playerList){
+			var player = this.playerList[playerID];
+			var loc = this.startingGate.findFreeLoc(player);
+			player.x = loc.x;
+			player.y = loc.y;
+		}
+	}
+	resetPlayers(){
+		for(var playerID in this.playerList){
+			var player = this.playerList[playerID];
+			player.reset();
+		}
 	}
 	clean(){
 		this.lobbyStartButton = null;
@@ -313,6 +360,23 @@ class Rect extends Shape{
 	testCircle(circle){
 		return circle.testRect(this);
 	}
+	getRandomLoc(){
+		return {x:Math.floor(Math.random()*(this.width - this.x)) + this.x, y:Math.floor(Math.random()*(this.height - this.y)) + this.y};
+	}
+	findFreeLoc(obj){
+		var loc = this.getSafeLoc(obj.width || obj.radius);
+        /*
+		if(this.engine.checkCollideAll(loc)){
+			return this.findFreeLoc(obj);
+		}
+        */
+		return loc;
+	}
+    getSafeLoc(size){
+		var objW = size + 5 + c.playerBaseRadius * 2;
+		var objH = size + 5 + c.playerBaseRadius * 2;
+		return {x:Math.floor(Math.random()*(this.width - 2*objW - this.x)) + this.x + objW, y:Math.floor(Math.random()*(this.height - 2*objH - this.y)) + this.y + objH, width: objW};
+	}
 }
 
 class Gate extends Rect {
@@ -338,23 +402,6 @@ class World extends Rect{
 		player.y = loc.y;
 		return player;
     }
-    findFreeLoc(obj){
-		var loc = this.getSafeLoc(obj.width || obj.radius);
-        /*
-		if(this.engine.checkCollideAll(loc)){
-			return this.findFreeLoc(obj);
-		}
-        */
-		return loc;
-	}
-    getSafeLoc(size){
-		var objW = size + 5 + c.playerBaseRadius * 2;
-		var objH = size + 5 + c.playerBaseRadius * 2;
-		return {x:Math.floor(Math.random()*(this.width - 2*objW - this.x)) + this.x + objW, y:Math.floor(Math.random()*(this.height - 2*objH - this.y)) + this.y + objH, width: objW};
-	}
-    getRandomLoc(){
-		return {x:Math.floor(Math.random()*(this.width - this.x)) + this.x, y:Math.floor(Math.random()*(this.height - this.y)) + this.y};
-	}
 	checkForMapDamage(object){
 
 	}
@@ -506,30 +553,24 @@ class Player extends Circle {
 			this.hittingLobbyButton = true;
 			return;
 		}
-		if(object.owner != this.id && object.alive && object.damage != null){
-			/*
-			//Figure out damage
-			if(object.isBeam == true){
-				if(object.dealingDamage == true){
-					this.takeDamage(object.damage);
-				}
-			} else{
-				this.takeDamage(object.damage);
-			}
-
-			//Alert things
-			if(this.health < 1){
-				this.iDied(object.owner);
-			}
-			if(object.isBeam == true){
-				if(object.dealingDamage == true){
-					messenger.messageUser(object.owner,"shotLanded",{id:this.id,damage:object.damage,crit:(object.isCrit == true)});
-				}
-				return;
-			}
-			messenger.messageUser(object.owner,"shotLanded",{id:this.id,damage:object.damage,crit:(object.isCrit == true)});
-			*/
-		}
+	}
+	reset(){
+		this.alive = true;
+		this.enabled = true;
+		this.x = 0;
+		this.y = 0;
+		this.newX = this.x;
+		this.newY = this.y;
+		this.velX = 0;
+		this.velY = 0;
+		this.dragCoeff = c.playerDragCoeff;
+		this.brakeCoeff = c.playerBrakeCoeff;
+		this.maxVelocity = c.playerMaxSpeed;
+		this.acel = c.playerBaseAcel;
+		this.moveForward = false;
+		this.moveBackward = false;
+		this.turnLeft = false;
+		this.turnRight = false;
 	}
 }
 
