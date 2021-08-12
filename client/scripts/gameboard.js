@@ -1,5 +1,8 @@
 var mousex,
 	mousey,
+	gameState,
+	lobbyStartButton,
+	world,
 	playerList,
 	clientList;
 
@@ -85,4 +88,34 @@ function appendNewPlayer(packet){
 	if(playerList[player[0]] == null){
 		createPlayer(player);
 	}
+}
+
+function checkGameState(payload){
+	if(payload == null){
+		return;
+	}
+	payload = JSON.parse(payload);
+	gameState = payload[0];
+	if(gameState == config.stateMap.lobby){
+		lobbyStartButton = {};
+		lobbyStartButton.x = payload[1];
+		lobbyStartButton.y = payload[2];
+		lobbyStartButton.radius = payload[3];
+		lobbyStartButton.color = payload[4];
+	}
+	if(gameState == config.stateMap.waiting){
+		lobbyStartButton = {};
+	}
+}
+
+function spawnLobbyStartButton(payload){
+	if(payload == null){
+		return;
+	}
+	payload = JSON.parse(payload);
+	lobbyStartButton = {};
+	lobbyStartButton.x = payload[0];
+	lobbyStartButton.y = payload[1];
+	lobbyStartButton.radius = payload[2];
+	lobbyStartButton.color = payload[3];
 }

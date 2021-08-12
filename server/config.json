@@ -4,11 +4,18 @@
     "playerBaseRadius": 7.5,
     "worldWidth":1366,
     "worldHeight":768,
-    "maxPlayersInRoom" : 5,
+    "minPlayersToStart": 2,
+    "maxPlayersInRoom" : 10,
     "forceConstant" :5000000,
 
-    "playerDragCoeff": 0.045,
+    "stateMap": {
+        "waiting": 0,
+		"lobby": 1,
+        "active": 2
+    },
+
+    "playerDragCoeff": 0.095,
     "playerBrakeCoeff": 0.235,
-    "playerMaxSpeed":1500,
-    "playerBaseAcel":500
+    "playerMaxSpeed":100,
+    "playerBaseAcel":300
 }

@@ -10,6 +10,7 @@ function clientConnect() {
 	server.on("gameState", function(gameState){
 		config = gameState.config;
 		clientList = gameState.clientList;
+		checkGameState(gameState.game);
 		connectSpawnPlayers(gameState.playerList);
 		worldResize(gameState.world);
 		interval = config.serverTickSpeed;
@@ -46,7 +47,7 @@ function clientConnect() {
 
 	server.on("gameUpdates",function(updatePacket){
 		updatePlayerList(updatePacket.playerList);
-		gameStarted = updatePacket.state;
+		checkGameState(updatePacket.state);
 		totalPlayers = updatePacket.totalPlayers;
 		timeSinceLastCom = 0;
 
@@ -55,6 +56,9 @@ function clientConnect() {
 			currentWeaponCooldown = myShip.weapon.cooldown*1000;
 		}
 		*/
+	});
+	server.on("startLobby",function(packet){
+		spawnLobbyStartButton(packet);
 	});
 
     return server;

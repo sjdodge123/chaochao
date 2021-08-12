@@ -43,9 +43,10 @@ class Room {
 	}
     sendUpdates(){
 		var playerData = compressor.sendPlayerUpdates(this.playerList);
+		var gameStateData = compressor.gameState(this.game);
 		messenger.messageRoomBySig(this.sig,"gameUpdates",{
 			playerList:playerData,
-			state:this.game.active,
+			state:gameStateData,
 			totalPlayers:messenger.getTotalPlayers()
 			//shrinkTimeLeft:this.game.timeLeftUntilShrink
 		});
@@ -80,9 +81,13 @@ class Game {
 		this.engine = engine;
         this.gameEnded = false;
         this.active = false;
+		this.playerCount = 0;
+		this.stateMap = c.stateMap;
+		this.currentState = this.stateMap.waiting;
 		this.gameBoard = new GameBoard(world,playerList,engine,roomSig);
     }
 	start(){
+		console.log("Game starting");
 		//messenger.messageRoomBySig(this.roomSig,'gameStart',null);
 		//this.gameBoard.clean();
 		this.active = true;
@@ -93,11 +98,35 @@ class Game {
 		//this.randomLocShips();
 	}
 	update(dt){
-		if(!this.active){
-			this.start();
+		this.getPlayerCount();
+		if(this.currentState == this.stateMap.waiting){
+			this.checkLobbyStart();
+		}
+		if(this.currentState == this.stateMap.lobby){
+			this.checkGameStart();
 		}
 		this.gameBoard.update(this.active,dt);
 		this.world.update(dt);
+	}
+	checkLobbyStart(){
+		if(this.playerCount >= c.minPlayersToStart){
+			this.currentState = this.stateMap.lobby;
+			this.gameBoard.startLobby();
+		}
+	}
+	checkGameStart(){
+		if(this.playerCount < c.minPlayersToStart){
+			console.log("Start Waiting");
+			this.currentState = this.stateMap.waiting;
+		}
+	}
+	getPlayerCount(){
+		var playerCount = 0;
+		for(var playerID in this.playerList){
+			playerCount++;
+		}
+		this.playerCount = playerCount;
+		return playerCount;
 	}
 }
 
@@ -107,6 +136,7 @@ class GameBoard {
 		this.playerList = playerList;
 		this.engine = engine;
 		this.roomSig = roomSig;
+		this.lobbyStartButton;
 	}
 	update(active,dt){
 		this.engine.update(dt);
@@ -138,6 +168,11 @@ class GameBoard {
 			}
 			player.update(dt);
 		}
+	}
+	startLobby(){
+		console.log("Start Lobby");
+		this.lobbyStartButton = new LobbyStartButton(this.world.center.x,this.world.center.y,0,"red");
+		messenger.messageRoomBySig(this.roomSig,"startLobby",compressor.sendLobbyStart(this.lobbyStartButton));
 	}
 }
 
@@ -234,12 +269,18 @@ class Rect extends Shape{
 	}
 }
 
+class Gate extends Rect {
+	constructor (x,y,width,height) {
+		super(x,y,width,height,0,"grey");
+	}
+}
+
 class World extends Rect{
     constructor(x,y,width,height,engine,roomSig){
         super(x,y,width,height, 0, "white");
 		this.engine = engine;
         this.roomSig = roomSig;
-		this.a
+		this.center = {x:width/2,y:height/2};
     }
     update(dt){
 		
@@ -356,6 +397,12 @@ class Circle extends Shape{
 	}
 }
 
+class LobbyStartButton extends Circle{
+	constructor(x,y,angle,color){
+		super(x,y,50,color);
+	}
+}
+
 class Player extends Circle {
     constructor(x,y,angle,color,id,roomSig){
         super(x,y,c.playerBaseRadius,color);
@@ -380,6 +427,8 @@ class Player extends Circle {
 		this.brakeCoeff = c.playerBrakeCoeff;
 		this.maxVelocity = c.playerMaxSpeed;
 		this.acel = c.playerBaseAcel;
+
+		this.currentSpeedBonus = 0;
     }
 	update(dt){
 		if(!this.alive){
@@ -393,7 +442,7 @@ class Player extends Circle {
 		this.y = this.newY;
 	}
 	getSpeedBonus(){
-		return 0;
+		return this.currentSpeedBonus;
 	}
 	handleHit(object){
 		if(object.isWall){

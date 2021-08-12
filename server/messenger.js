@@ -52,13 +52,15 @@ function checkForMail(client){
 		//Send the current gamestate to the new player
 		var worldData = compressor.worldResize(room.world);
 		var playerData = compressor.playerSpawns(room.playerList);
+		var gameData = compressor.gameState(room.game);
+		
 		var gameState = {
 			clientList:room.clientList,
 			playerList:playerData,
+			game:gameData,
 			config:c,
 			myID:client.id,
-			world:worldData,
-			maxLobbyTime:c.lobbyWaitTime
+			world:worldData
 		};
 		client.emit("gameState" , gameState);
 

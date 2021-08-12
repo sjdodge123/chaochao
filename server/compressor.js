@@ -36,6 +36,29 @@ exports.worldResize = function(world){
 	packet = JSON.stringify(packet);
 	return packet;
 }
+exports.sendLobbyStart = function(lobbyStartButton){
+	var packet = [];
+	packet[0] = lobbyStartButton.x;
+	packet[1] = lobbyStartButton.y;
+	packet[2] = lobbyStartButton.radius;
+	packet[3] = lobbyStartButton.color;	
+
+	packet = JSON.stringify(packet);
+	return packet;
+}
+exports.gameState = function(game){
+	var packet = [];
+	packet[0] = game.currentState;
+	if(game.currentState == game.stateMap.lobby){
+		packet[1] = game.gameBoard.lobbyStartButton.x;
+		packet[2] = game.gameBoard.lobbyStartButton.y;
+		packet[3] = game.gameBoard.lobbyStartButton.radius;
+		packet[4] = game.gameBoard.lobbyStartButton.color;	
+	}
+	packet = JSON.stringify(packet);
+	return packet;
+}
+
 exports.playerSpawns = function(playerList){
 	var packet = [];
 	for(prop in playerList){
@@ -71,4 +94,8 @@ exports.appendPlayer = function(player){
 	listItem = null;
 	prop = null;
 	return packet;
+}
+
+function packlobbyStartButton(lobbyStartButton){
+	
 }

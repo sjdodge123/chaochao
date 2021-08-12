@@ -1,5 +1,7 @@
 function drawObjects(dt){
     drawBackground(dt);
+    drawWorld(dt);
+    drawLobbyStartButton();
     drawPlayers(dt);
 }
 
@@ -17,11 +19,45 @@ function drawPlayers(dt){
     }
 }
 function drawPlayer(player){
+    gameContext.save();
     gameContext.beginPath();
     gameContext.arc(player.x, player.y, player.radius, 0, 2 * Math.PI);
     gameContext.fillStyle = player.color;
     gameContext.fill();
-    gameContext.lineWidth = 1.5;
+    
     gameContext.strokeStyle = "black";
     gameContext.stroke();
+    gameContext.restore();
+}
+
+function drawWorld(){
+	if(world != null){
+		gameContext.save();
+		gameContext.beginPath();
+        gameContext.lineWidth = 3;
+        gameContext.strokeStyle = "grey";
+        gameContext.rect(world.x,world.y,world.width,world.height);
+        gameContext.stroke();
+        gameContext.restore();
+	}
+}
+
+function drawLobbyStartButton(){
+    if(lobbyStartButton != null){
+        gameContext.save();
+        gameContext.beginPath();
+        /*
+        for (i=0; i< 360; i++) {
+            var angle = 0.1 * i;
+            var x = lobbyStartButton.x + (5 + 2 * angle)*Math.cos(angle);
+            var y = lobbyStartButton.y + (5 + 2 * angle)*Math.sin(angle);
+            gameContext.lineTo(x, y);
+          }
+          */
+        gameContext.arc(lobbyStartButton.x, lobbyStartButton.y, lobbyStartButton.radius, 0, 2 * Math.PI);
+        // gameContext.arc(lobbyStartButton.x, lobbyStartButton.y, lobbyStartButton.radius/1.6, 0, 4 * Math.PI);
+        gameContext.lineWidth = 3;
+        gameContext.stroke();
+        gameContext.restore();
+    }
 }
