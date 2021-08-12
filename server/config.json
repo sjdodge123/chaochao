@@ -9,6 +9,7 @@
     "forceConstant" :5000000,
 
     "lobbyWaitTime": 5,
+    "gatedWaitTime": 5,
 
     "stateMap": {
         "waiting": 0,

@@ -88,6 +88,10 @@ class Game {
 		this.lobbyTimer = null;
 		this.lobbyTimeLeft = this.lobbyWaitTime;
 
+		this.gatedWaitTime = c.gatedWaitTime;
+		this.gatedTimer = null;
+		this.gatedTimeLeft = this.gatedWaitTime;
+
 		this.stateMap = c.stateMap;
 		this.currentState = this.stateMap.waiting;
 		this.gameBoard = new GameBoard(world,playerList,engine,roomSig);
@@ -100,12 +104,15 @@ class Game {
 		}
 		//In Lobby State
 		if(this.currentState == this.stateMap.lobby){
-			this.checkGameStart();
+			this.checkGatedStart();
 		}
 		//In Gated State
 		if(this.currentState == this.stateMap.gated){
-			//
-			
+			this.checkRacingStart();
+		}
+		//In Racing State
+		if(this.currentState == this.stateMap.racing){
+			console.log("go go speed racer");
 		}
 		//In Overview State
 		if(this.currentState == this.stateMap.overview){
@@ -120,7 +127,7 @@ class Game {
 			this.startLobby();
 		}
 	}
-	checkGameStart(){
+	checkGatedStart(){
 		//Reset back to waiting if someone leaves
 		if(this.playerCount < c.minPlayersToStart){
 			this.startWaiting();
@@ -132,6 +139,18 @@ class Game {
 			return;
 		}
 		this.resetLobbyTimer();
+	}
+	checkRacingStart(){
+		if(this.gatedTimer != null){
+			this.gatedTimeLeft = ((this.gatedWaitTime*1000 - (Date.now() - this.gatedTimer))/(1000)).toFixed(1);
+			if(this.gatedTimeLeft > 0){
+				return;
+			}
+			this.resetGatedTimer();
+			this.startRace();
+			return;
+		}
+		this.gatedTimer = Date.now();
 	}
 	startLobbyTimer(){
 		if(this.lobbyTimer != null){
@@ -161,6 +180,10 @@ class Game {
 		this.gameBoard.setupMap();
 		this.currentState = this.stateMap.gated;
 	}
+	startRace(){
+		console.log("Start race");
+		this.currentState = this.stateMap.racing;
+	}
 	startOverview(){
 		console.log("Start Overview");
 		this.currentState = this.stateMap.overview;
@@ -173,6 +196,9 @@ class Game {
 	}
 	resetLobbyTimer(){
 		this.lobbyTimer = null;
+	}
+	resetGatedTimer(){
+		this.gatedTimer = null;
 	}
 	getPlayerCount(){
 		var playerCount = 0;
