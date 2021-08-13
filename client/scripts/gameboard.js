@@ -4,6 +4,8 @@ var mousex,
 	lobbyStartButton,
 	gate,
 	world,
+	mapID,
+	currentMap,
 	playerList,
 	clientList;
 
@@ -114,6 +116,15 @@ function checkGameState(payload){
 		gate.y = payload[2];
 		gate.width = payload[3];
 		gate.height = payload[4];
+	}
+}
+
+function loadNewMap(id){
+	for(var i=0;i<maps.length;i++){
+		if(id == maps[i].id){
+			currentMap = maps[i];
+			console.log(currentMap);
+		}
 	}
 }
 

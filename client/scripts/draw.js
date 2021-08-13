@@ -3,6 +3,7 @@ function drawObjects(dt){
     drawWorld(dt);
     drawLobbyStartButton();
     drawGate();
+    drawMap();
     drawPlayers(dt);
 }
 
@@ -77,6 +78,24 @@ function drawGate(){
         gameContext.fillStyle = "grey";
         gameContext.fill();
         gameContext.restore();
+    }
+}
+
+function drawMap(){
+    if(currentMap != null){
+        gameContext.beginPath();
+        gameContext.strokeStyle = '#000';
+        var edges = currentMap.edges,
+			iEdge = edges.length,
+			edge, v;
+        while (iEdge--) {
+            edge = edges[iEdge];
+            v = edge.va;
+            gameContext.moveTo(v.x,v.y);
+            v = edge.vb;
+            gameContext.lineTo(v.x,v.y);
+        }
+        gameContext.stroke();
     }
 }
 

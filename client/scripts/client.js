@@ -60,6 +60,9 @@ function clientConnect() {
 	server.on("startLobby",function(packet){
 		spawnLobbyStartButton(packet);
 	});
+	server.on("newMap",function(newMapID){
+		loadNewMap(newMapID);
+	});
 
     return server;
 }

@@ -1,4 +1,7 @@
 var lastFrame = new Date();
+var fs = require('fs');
+const { map } = require('jquery');
+var maps = [];
 var c = require('./config.json');
 c.port =  process.env.PORT || c.port;
 
@@ -33,4 +36,13 @@ exports.dotProduct = function(a, b){
 
 exports.loadConfig = function(){
     return c;
+}
+exports.loadMaps = function(){
+    maps = [];
+    var normalizedPath = require("path").join(__dirname, "../client/maps");
+    fs.readdirSync(normalizedPath).forEach(function(file){
+        maps.push(require("../client/maps/" + file));
+    });
+    return maps;
+    
 }

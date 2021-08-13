@@ -8,6 +8,7 @@ var server = null,
     gameCanvas = null,
     newWidth = 0,
     newHeight = 0,
+    maps = [],
     gameRunning = null;
 
     //Input Vars
@@ -22,15 +23,25 @@ var server = null,
 var then = Date.now(),
     dt;
 
-window.onload = function() {
+$(function(){
     server = clientConnect();
     setupPage();
-}
+});
 
 function setupPage(){
+    
+    //TODO: Find out how to load all the maps
+    $.getJSON("../maps/demo-map.json",function(data){
+        maps.push(data);
+    });
 
     $("#guestPlay").on("submit", function () {
         enterLobby();
+        return false;
+    });
+
+    $("#createMap").on("submit", function () {
+        window.location = '/create.html';
         return false;
     });
 

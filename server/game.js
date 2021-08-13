@@ -112,7 +112,7 @@ class Game {
 		}
 		//In Racing State
 		if(this.currentState == this.stateMap.racing){
-			console.log("go go speed racer");
+			//console.log("go go speed racer");
 		}
 		//In Overview State
 		if(this.currentState == this.stateMap.overview){
@@ -225,6 +225,8 @@ class GameBoard {
 		this.stateMap = c.stateMap;
 		this.lobbyStartButton;
 		this.startingGate = null;
+		this.maps = utils.loadMaps();
+		this.currentMap = null;
 	}
 	update(currentState,dt){
 		this.engine.update(dt);
@@ -272,9 +274,9 @@ class GameBoard {
 	setupMap(){
 		this.clean();
 		this.resetPlayers();
+		this.loadNextMap();
 		this.startingGate = new Gate(0,0,75,this.world.height);
 		this.gatePlayers();
-		
 	}
 	gatePlayers(){
 		for(var playerID in this.playerList){
@@ -292,6 +294,16 @@ class GameBoard {
 	}
 	clean(){
 		this.lobbyStartButton = null;
+	}
+	loadNextMap(){
+		/*for(var i=0;i<this.maps.length;i++){
+			if(this.currentMap != this.maps[i]){
+				this.currentMap = this.maps[i];
+			}
+		}
+		*/
+		this.currentMap = this.maps[0];
+		messenger.messageRoomBySig(this.roomSig,"newMap",this.currentMap.id);
 	}
 }
 

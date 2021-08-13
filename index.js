@@ -43,7 +43,16 @@ process.on( 'SIGINT', function() {
     process.exit();
 });
 
-//Gamestate updates
+
+
+/*
+app.get("/create",function(request,response){
+  response.render('pages/create');
+});
+*/
+
+
+//Server updates
 function update(){
   if(serverSleeping){
       return;
