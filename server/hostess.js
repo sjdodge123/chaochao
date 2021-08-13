@@ -8,8 +8,9 @@ var roomList = {},
 
 exports.findARoom = function(clientID){
     if(getRoomCount() == 0){
-        console.log("No rooms exist; Starting a new room");
-        return generateNewRoom();
+		var sig = generateNewRoom();
+        console.log("No rooms exist; Starting a new room:" + sig);
+        return sig;
     }
     for(var sig2 in roomList){
         if(roomList[sig2].hasSpace()){
@@ -22,6 +23,10 @@ exports.kickFromRoom = function(clientID){
 	var room = searchForRoom(clientID);
 	if(room != undefined){
 		room.leave(clientID);
+		if(room.clientCount == 0){
+			console.log("Deleting room");
+			delete roomList[room.sig];
+		}
 	}
 }
 exports.joinARoom = function(sig,clientID){

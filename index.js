@@ -34,6 +34,7 @@ io.on('connection', (client) => {
       hostess.kickFromRoom(client.id);
       messenger.removeMailBox(client.id);
       clientCount--;
+      checkForSleep();
     });
   });
   
@@ -57,6 +58,7 @@ function update(){
   if(serverSleeping){
       return;
   }
+
   var dt = utils.getDT();
   hostess.updateRooms(dt);
   if(pendingReboot == false){

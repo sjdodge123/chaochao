@@ -234,28 +234,33 @@ class GameBoard {
 		this.updatePlayers(currentState,dt);
 	}
 	checkCollisions(currentState){
+		var objectArray = [];
 		if(currentState == this.stateMap.waiting){
 			for(var player in this.playerList){
 				_engine.preventEscape(this.playerList[player],this.world);
 			}
-			return;
 		}
 		if(currentState == this.stateMap.lobby){
-			var objectArray = [];
 			for(var player in this.playerList){
 				_engine.preventEscape(this.playerList[player],this.world);
 				objectArray.push(this.playerList[player]);
 			}
 			objectArray.push(this.lobbyStartButton);
-			this.engine.broadBase(objectArray);
-			return;
 		}
 		if(currentState == this.stateMap.gated){
 			for(var player in this.playerList){
 				_engine.preventEscape(this.playerList[player],this.world);
 				_engine.preventEscape(this.playerList[player],this.startingGate);
+				objectArray.push(this.playerList[player]);
 			}
 		}
+		if(currentState == this.stateMap.racing){
+			for(var player in this.playerList){
+				_engine.preventEscape(this.playerList[player],this.world);
+				objectArray.push(this.playerList[player]);
+			}
+		}
+		this.engine.broadBase(objectArray);
 	}
 	updatePlayers(active,dt){
 		for(var playerID in this.playerList){

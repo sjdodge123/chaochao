@@ -277,9 +277,9 @@ function setMousePos(x,y){
 
 function generateVMap(){
     var vMap;
-    var siteNum = 100;
+    var siteNum = 250;
     var sites = [];
-    var margin = 0.025;
+    var margin = 0.015;
     bbox = {xl:map.x,xr:map.width,yt:map.y,yb:map.height};
 
     var xmargin = map.width*margin,

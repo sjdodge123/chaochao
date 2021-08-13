@@ -21,6 +21,6 @@
 
     "playerDragCoeff": 0.095,
     "playerBrakeCoeff": 0.235,
-    "playerMaxSpeed":100,
+    "playerMaxSpeed":50,
     "playerBaseAcel":300
 }
