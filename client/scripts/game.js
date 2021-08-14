@@ -34,6 +34,12 @@ function setupPage(){
     $.getJSON("../maps/demo-map.json",function(data){
         maps.push(data);
     });
+    $.getJSON("../maps/demo-map2.json",function(data){
+        maps.push(data);
+    });
+    $.getJSON("../maps/demo-map3.json",function(data){
+        maps.push(data);
+    });
 
     $("#guestPlay").on("submit", function () {
         enterLobby();

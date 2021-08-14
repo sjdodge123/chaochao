@@ -123,7 +123,6 @@ function loadNewMap(id){
 	for(var i=0;i<maps.length;i++){
 		if(id == maps[i].id){
 			currentMap = maps[i];
-			console.log(currentMap);
 		}
 	}
 }

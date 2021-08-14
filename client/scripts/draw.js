@@ -80,22 +80,69 @@ function drawGate(){
         gameContext.restore();
     }
 }
-
 function drawMap(){
     if(currentMap != null){
-        gameContext.beginPath();
-        gameContext.strokeStyle = '#000';
-        var edges = currentMap.edges,
-			iEdge = edges.length,
-			edge, v;
-        while (iEdge--) {
-            edge = edges[iEdge];
-            v = edge.va;
+        var cells = currentMap.cells,
+            iCell = cells.length;
+
+        while(iCell--){
+            gameContext.beginPath();
+            var cell = cells[iCell];
+            var halfedges = cell.halfedges;
+            var nHalfedges = halfedges.length;
+            if(nHalfedges == 0){
+                continue;
+            }
+            var v = getStartpoint(halfedges[0]);
             gameContext.moveTo(v.x,v.y);
-            v = edge.vb;
-            gameContext.lineTo(v.x,v.y);
+            for(var i=0;i<nHalfedges;i++){
+                v = getEndpoint(halfedges[i]);
+                gameContext.lineTo(v.x,v.y);
+            }
+            gameContext.lineWidth = 2;
+            gameContext.fillStyle = locateColor(cell.id);
+            gameContext.strokeStyle = 'black';
+            gameContext.fill();
+            gameContext.stroke();
         }
-        gameContext.stroke();
     }
 }
+
+function locateColor(id){
+    if(id == null){
+        return "white";
+    }
+    for(var type in config.tileMap){
+        if(id == config.tileMap[type].id){
+            return config.tileMap[type].color;
+        }
+    }
+}
+
+function getStartpoint(halfedge){
+    if(compareSite(halfedge.edge.lSite,halfedge.site)){
+        return halfedge.edge.va;
+    }
+    return halfedge.edge.vb;
+}
+function getEndpoint(halfedge){
+    if(compareSite(halfedge.edge.lSite,halfedge.site)){
+        return halfedge.edge.vb;
+    }
+    return halfedge.edge.va;
+}
+
+function compareSite(siteA,siteB){
+    if(siteA.voronoiId != siteB.voronoiId){
+        return false;
+    }
+    if(siteA.x != siteB.x){
+        return false;
+    }
+    if(siteA.y != siteB.y){
+        return false;
+    }
+    return true;
+}
+
 

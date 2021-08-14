@@ -2,10 +2,13 @@ var server,
     createCanvas,
     voronoi = new Voronoi(),
     vMap,
+    mousex = 0,
+    mousey = 0,
     treemap = null,
     lastCell,
     brushID,
     brushColor,
+    cellToRender = null,
     newWidth = 0,
     newHeight = 0,
     world = {x:0,y:0,width:1366,height:768},
@@ -56,7 +59,7 @@ var then = Date.now(),
     dt;
 
 window.onload = function() {
-    server = clientConnect();
+    //server = clientConnect();
     setupPage();
     enter();
 }
@@ -122,6 +125,7 @@ function setupPage(){
 }
 
 function enter(){
+    resize();
     vMap = generateVMap();
     $('#createWindow').show();
     gameRunning = true;
@@ -178,6 +182,8 @@ function drawEditor(dt){
     drawGate();
     drawMap();
     drawVMap();
+    drawPointerCircle();
+    renderCells();
     //drawPlayers(dt);
 }
 function drawBackground() {
@@ -302,32 +308,39 @@ function cellUnderMouse(evt) {
     var rect = createCanvas.getBoundingClientRect();
     x = (((evt.pageX - rect.left)/newWidth)*createCanvas.width);
     y = (((evt.pageY - rect.top )/newHeight)*createCanvas.height);
+    setMousePos(x,y);
     cellid = cellIdFromPoint(x,y);
+    console.log(cellid);
     if (lastCell !== cellid) {
         if (lastCell !== undefined) {
-            renderCell(lastCell, 'red', 'black');
+            cellToRender = vMap[lastCell];
+            //renderCell(lastCell, 'red', 'black');
         }
         if (cellid !== undefined) {
-            renderCell(cellid, 'red', 'black');
+            cellToRender = vMap[cellid];
+            //renderCell(cellid, 'red', 'black');
         }
         lastCell = cellid;
-        }
+    }
+
 }
 
-function cellIdFromPoint(x, y) {
+function cellIdFromPoint(xmouse, ymouse) {
     // We build the treemap on-demand
     if (treemap === null) {
         treemap = buildTreemap();
     }
     // Get the Voronoi cells from the tree map given x,y
-    var items = treemap.retrieve({x:x,y:y}),
+    var items = treemap.retrieve({x:xmouse,y:ymouse}),
         iItem = items.length,
         cells = vMap.cells,
         cell, cellid;
     while (iItem--) {
         cellid = items[iItem].cellid;
         cell = cells[cellid];
-        if (cell.pointIntersection(x,y) > 0) {
+        //console.log(cell);
+        //console.log(xmouse,ymouse);
+        if (cell.pointIntersection(xmouse,ymouse) > 0) {
             return cellid;
             }
         }
@@ -335,40 +348,60 @@ function cellIdFromPoint(x, y) {
 }
 function buildTreemap(){
     var treemap = new QuadTree({
-        x: bbox.xl,
-        y: bbox.yt,
-        width: bbox.xr-bbox.xl,
-        height: bbox.yb-bbox.yt
+        x: map.x,
+        y: map.y,
+        width: map.width,
+        height: map.height
         });
     var cells = vMap.cells,
         iCell = cells.length;
     while (iCell--) {
-        bbox = cells[iCell].getBbox();
-        bbox.cellid = iCell;
-        treemap.insert(bbox);
+        var box = cells[iCell].getBbox();
+        box.cellid = iCell;
+        treemap.insert(box);
         }
     return treemap;
 }
 
-function renderCell (id, fillStyle, strokeStyle) {
-    if (id === undefined) {return;}
-    var cell = vMap.cells[id];
+function renderCells(){
+    var cells = vMap.cells,
+    iCell = cells.length,
+    cell;
+    //console.log(vMap);
+
+    while (iCell--) {
+        cell = cells[iCell];
+        renderCell(cell);
+    }
+}
+
+function renderCell (cell) {
+    var fillStyle = "red",
+        strokeStyle = "black";
     if (!cell) {return;}
-    console.log(id);
     // edges
     createContext.beginPath();
-    var halfedges = cell.halfedges,
-        nHalfedges = halfedges.length,
-        v = halfedges[0].getStartpoint();
+    var halfedges = cell.halfedges;
+    var nHalfedges = halfedges.length;
+    if(nHalfedges == 0){
+        return;
+    }
+    var v = getStartpoint(halfedges[0]);
     createContext.moveTo(v.x,v.y);
     for (var iHalfedge=0; iHalfedge<nHalfedges; iHalfedge++) {
-        v = halfedges[iHalfedge].getEndpoint();
+        v = getEndpoint(halfedges[iHalfedge]);
         createContext.lineTo(v.x,v.y);
-        }
+    }
     createContext.fillStyle = fillStyle;
     createContext.strokeStyle = strokeStyle;
     createContext.fill();
     createContext.stroke();
+}
+function getStartpoint(halfedge){
+    return halfedge.edge.lSite === halfedge.site ? halfedge.edge.va : halfedge.edge.vb;
+}
+function getEndpoint(halfedge){
+    return halfedge.edge.lSite === halfedge.site ? halfedge.edge.vb : halfedge.edge.va;
 }
 function exportToJSON(){
     var jsonData = JSON.stringify(vMap);
@@ -378,4 +411,11 @@ function exportToJSON(){
         console.log(err);
         alert("Export failed");
     });
+}
+
+function drawPointerCircle(x,y){
+    createContext.beginPath();
+    createContext.arc(mousex, mousey, 15, 0, 2 * Math.PI);
+    createContext.fillStyle = "red";
+    createContext.fill();
 }

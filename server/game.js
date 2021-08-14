@@ -301,13 +301,11 @@ class GameBoard {
 		this.lobbyStartButton = null;
 	}
 	loadNextMap(){
-		/*for(var i=0;i<this.maps.length;i++){
+		for(var i=0;i<this.maps.length;i++){
 			if(this.currentMap != this.maps[i]){
 				this.currentMap = this.maps[i];
 			}
 		}
-		*/
-		this.currentMap = this.maps[0];
 		messenger.messageRoomBySig(this.roomSig,"newMap",this.currentMap.id);
 	}
 }
