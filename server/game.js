@@ -301,6 +301,10 @@ class GameBoard {
 		this.lobbyStartButton = null;
 	}
 	loadNextMap(){
+		//Specify a particular map for testing
+		//this.currentMap = this.maps[3];
+		
+		//Cycle in order of file order
 		for(var i=0;i<this.maps.length;i++){
 			if(this.currentMap != this.maps[i]){
 				this.currentMap = this.maps[i];

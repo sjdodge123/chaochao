@@ -110,7 +110,7 @@ function drawMap(){
 
 function locateColor(id){
     if(id == null){
-        return "white";
+        return "red";
     }
     for(var type in config.tileMap){
         if(id == config.tileMap[type].id){

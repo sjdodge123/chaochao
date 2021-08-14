@@ -40,6 +40,9 @@ function setupPage(){
     $.getJSON("../maps/demo-map3.json",function(data){
         maps.push(data);
     });
+    $.getJSON("../maps/demo-map4.json",function(data){
+        maps.push(data);
+    });
 
     $("#guestPlay").on("submit", function () {
         enterLobby();
