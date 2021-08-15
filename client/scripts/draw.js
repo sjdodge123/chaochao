@@ -99,9 +99,9 @@ function drawMap(){
                 v = getEndpoint(halfedges[i]);
                 gameContext.lineTo(v.x,v.y);
             }
-            gameContext.lineWidth = 2;
+            gameContext.lineWidth = 0.5;
             gameContext.fillStyle = locateColor(cell.id);
-            gameContext.strokeStyle = 'black';
+            gameContext.strokeStyle = '#adadad';
             gameContext.fill();
             gameContext.stroke();
         }

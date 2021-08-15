@@ -8,7 +8,7 @@ var server,
     lastCell,
     brushID,
     brushColor = "black",
-    currentCells = null,
+    currentCells = [],
     newWidth = 0,
     newHeight = 0,
     world = {x:0,y:0,width:1366,height:768},
@@ -234,7 +234,6 @@ function handleClick(event){
             for(var i=0;i<currentCells.length;i++){
                 vMap.cells[currentCells[i]].id = newId;
             }
-            
         }
     }
     event.preventDefault();
@@ -255,7 +254,7 @@ function setMousePos(x,y){
 
 function generateVMap(){
     resize();
-    voronoi = new Voronoi();
+    //voronoi = new Voronoi();
     var vMap = null;
     var siteNum = 250;
     var sites = [];
@@ -276,7 +275,7 @@ function generateVMap(){
     var cells = vMap.cells;
         iCells = cells.length;
     while(iCells--){
-        vMap.cells[iCells].id = 1;
+        cells[iCells].id = 1;
     }
     return vMap;
 }
@@ -291,55 +290,19 @@ function cellUnderMouse(evt) {
 }
 
 function cellIdFromPoint(xmouse, ymouse) {
-    var iCell = vMap.cells.length;
+    var cells = vMap.cells;
+    var iCell = cells.length;
     while(iCell--){
-        if(pointIntersection(xmouse,ymouse,vMap.cells[iCell]) > 0){
-            //vMap.cells[iCell].id = 0;
-            currentCells.push(iCell);         
+        if(pointIntersection(xmouse,ymouse,cells[iCell]) > 0){
+            currentCells.push(iCell);
+            //cells[iCell].id = 0;
         }
     }
-    //This aint work
-    /*
-    // We build the treemap on-demand
-    if (treemap === null) {
-        treemap = buildTreemap();
-    }
-    // Get the Voronoi cells from the tree map given x,y
-    var items = treemap.retrieve({x:xmouse,y:ymouse}),
-        iItem = items.length,
-        cells = vMap.cells,
-        cell, cellid;
-    while (iItem--) {
-        cellid = items[iItem].cellid;
-        cell = cells[cellid];
-        if (pointIntersection(xmouse,ymouse,cell) > 0) {
-            return cellid;
-        }
-    }
-    return undefined;
-    */
 }
-function buildTreemap(){
-    var treemap = new QuadTree({
-        x: map.x,
-        y: map.y,
-        width: map.width,
-        height: map.height
-        });
-    var cells = vMap.cells,
-        iCell = cells.length;
-    while (iCell--) {
-        var box = getBbox(cells[iCell]);
-        box.cellid = iCell;
-        treemap.insert(box);
-    }
-    return treemap;
-}
-
 function renderCells(){
     var cells = vMap.cells,
-    iCell = cells.length,
-    cell;
+        iCell = cells.length,
+        cell;
 
     while (iCell--) {
         cell = cells[iCell];
@@ -348,7 +311,6 @@ function renderCells(){
 }
 
 function renderCell (cell,iCell) {
-    var strokeStyle = "black";
     if (!cell) {return;}
     // edges
     createContext.beginPath();
@@ -363,24 +325,43 @@ function renderCell (cell,iCell) {
         v = getEndpoint(halfedges[iHalfedge]);
         createContext.lineTo(v.x,v.y);
     }
+    var color = locateColor(cell.id);
+
+    //Check for brush
     for(var i=0;i<currentCells.length;i++){
         if(iCell == currentCells[i]){
             createContext.fillStyle = brushColor;
             break;
         }
-        createContext.fillStyle = (locateColor(cell.id));
+        createContext.fillStyle = color;
     }
-
-    //createContext.fillStyle = "white";
-    createContext.strokeStyle = strokeStyle;
+    createContext.strokeStyle = '#adadad';
     createContext.fill();
     createContext.stroke();
 }
 function getStartpoint(halfedge){
-    return halfedge.edge.lSite === halfedge.site ? halfedge.edge.va : halfedge.edge.vb;
+    if(compareSite(halfedge.edge.lSite,halfedge.site)){
+        return halfedge.edge.va;
+    }
+    return halfedge.edge.vb;
 }
 function getEndpoint(halfedge){
-    return halfedge.edge.lSite === halfedge.site ? halfedge.edge.vb : halfedge.edge.va;
+    if(compareSite(halfedge.edge.lSite,halfedge.site)){
+        return halfedge.edge.vb;
+    }
+    return halfedge.edge.va;
+}
+function compareSite(siteA,siteB){
+    if(siteA.voronoiId != siteB.voronoiId){
+        return false;
+    }
+    if(siteA.x != siteB.x){
+        return false;
+    }
+    if(siteA.y != siteB.y){
+        return false;
+    }
+    return true;
 }
 function exportToJSON(){
     vMap.id = makeid(32);
