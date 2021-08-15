@@ -112,6 +112,7 @@ class Game {
 		}
 		//In Racing State
 		if(this.currentState == this.stateMap.racing){
+			this.checkForWinners();
 			//console.log("go go speed racer");
 		}
 		//In Overview State
@@ -151,6 +152,32 @@ class Game {
 			return;
 		}
 		this.gatedTimer = Date.now();
+	}
+	checkForWinners(){
+		var playersConcluded = 0;
+		var firstPlaceSig = null;
+		var secondPlaceSig = null;
+		for(var player in this.playerList){
+			if(!this.playerList[player].alive){
+				playersConcluded++;
+				continue;
+			}
+			if(this.playerList[player].reachedGoal == true){
+				playersConcluded++;
+				if(firstPlaceSig == null){
+					firstPlaceSig = player;
+					continue;
+				}
+				if(secondPlaceSig == null){
+					secondPlaceSig = player;
+					continue;
+				}
+				//TODO: Rankings
+			}
+		}
+		if(playersConcluded >= this.playerCount){
+			this.startOverview();
+		}
 	}
 	startLobbyTimer(){
 		if(this.lobbyTimer != null){
@@ -257,6 +284,7 @@ class GameBoard {
 		if(currentState == this.stateMap.racing){
 			for(var player in this.playerList){
 				_engine.preventEscape(this.playerList[player],this.world);
+				_engine.checkCollideCells(this.playerList[player],this.currentMap);
 				objectArray.push(this.playerList[player]);
 			}
 		}
@@ -558,6 +586,8 @@ class Player extends Circle {
 
 		//Game Variables
 		this.hittingLobbyButton = false;
+		this.reachedGoal = false;
+		this.timeReached = null;
 
 		//Movement
 		this.moveForward = false;
@@ -600,6 +630,16 @@ class Player extends Circle {
 			this.hittingLobbyButton = true;
 			return;
 		}
+		if(object.isMapCell){
+			//TODO why is this showing multiple hits
+			console.log("Player is running on a " + object.id + " cell");
+			if(object.id == 6){
+				this.reachedGoal = true;
+				this.timeReached = Date.now();
+				return;
+			}
+			
+		}
 	}
 	reset(){
 		this.alive = true;
@@ -618,6 +658,8 @@ class Player extends Circle {
 		this.moveBackward = false;
 		this.turnLeft = false;
 		this.turnRight = false;
+		this.reachedGoal = false;
+		this.timeReached = null;
 	}
 }
 

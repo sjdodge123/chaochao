@@ -120,7 +120,6 @@ function checkGameState(payload){
 }
 
 function loadNewMap(id){
-	console.log("loading map " + id);
 	for(var i=0;i<maps.length;i++){
 		if(id == maps[i].id){
 			currentMap = maps[i];
