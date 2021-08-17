@@ -1,4 +1,4 @@
-# chaochao
+# Chao Chao
 
 Multiplayer web based slow paced racing game
 
