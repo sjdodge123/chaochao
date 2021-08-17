@@ -82,6 +82,8 @@ class Game {
 		//Game stats
 		this.playerCount = 0;
 		this.lobbyButtonPressedCount = 0;
+		this.firstPlaceSig = null;
+		this.secondPlaceSig = null;
 
 		//Timers
 		this.lobbyWaitTime = c.lobbyWaitTime;
@@ -106,6 +108,7 @@ class Game {
 		if(this.currentState == this.stateMap.lobby){
 			this.checkGatedStart();
 		}
+		
 		//In Gated State
 		if(this.currentState == this.stateMap.gated){
 			this.checkRacingStart();
@@ -117,7 +120,6 @@ class Game {
 		}
 		//In Overview State
 		if(this.currentState == this.stateMap.overview){
-			console.log("In overview");
 			//this.checkOverviewTimer();
 		}
 		this.gameBoard.update(this.currentState,dt);
@@ -155,27 +157,37 @@ class Game {
 	}
 	checkForWinners(){
 		var playersConcluded = 0;
-		var firstPlaceSig = null;
-		var secondPlaceSig = null;
+
 		for(var player in this.playerList){
-			if(!this.playerList[player].alive){
+			if(!this.playerList[player].alive && !this.playerList[player].reachedGoal){
 				playersConcluded++;
 				continue;
 			}
 			if(this.playerList[player].reachedGoal == true){
 				playersConcluded++;
-				if(firstPlaceSig == null){
-					firstPlaceSig = player;
+				if(this.firstPlaceSig == null){
+					if(this.playerList[player].notches == c.playerNotchesToWin){
+						//Game over player wins
+						this.gameOver();
+						return;
+					}
+					this.firstPlaceSig = player;
+					this.playerList[player].notches += 2;
+					messenger.messageRoomBySig(this.roomSig,"firstPlaceWinner",player);
 					continue;
 				}
-				if(secondPlaceSig == null){
-					secondPlaceSig = player;
+				if(this.secondPlaceSig == null && player != this.firstPlaceSig){
+					this.secondPlaceSig = player;
+					messenger.messageRoomBySig(this.roomSig,"secondPlaceWinner",player);
+					if(this.playerList[player].notches != c.playerNotchesToWin){
+						this.playerList[player].notches += 1;
+					}
 					continue;
 				}
 				//TODO: Rankings
 			}
 		}
-		if(playersConcluded >= this.playerCount){
+		if(playersConcluded == this.playerCount){
 			this.startOverview();
 		}
 	}
@@ -193,6 +205,7 @@ class Game {
 	}
 	startWaiting(){
 		console.log("Start Waiting");
+		messenger.messageRoomBySig(this.roomSig,"startWaiting",null);
 		this.currentState = this.stateMap.waiting;
 	}
 	startLobby(){
@@ -206,16 +219,19 @@ class Game {
 		this.locked = true;
 		this.gameBoard.setupMap();
 		this.currentState = this.stateMap.gated;
+		messenger.messageRoomBySig(this.roomSig,"startGated",null);
 	}
 	startRace(){
 		console.log("Start race");
 		this.currentState = this.stateMap.racing;
+		messenger.messageRoomBySig(this.roomSig,"startRace",null);
 	}
 	startOverview(){
 		console.log("Start Overview");
 		this.currentState = this.stateMap.overview;
-		messenger.messageRoomBySig(this.roomSig,'startOverview',null);
-		this.world.resize();
+		messenger.messageRoomBySig(this.roomSig,'startOverview',compressor.sendNotchUpdates(this.playerList));
+
+		//this.world.resize();
 		//this.gameBoard.populateWorld();
 		
 		//this.checkForAISpawn();
@@ -226,6 +242,10 @@ class Game {
 	}
 	resetGatedTimer(){
 		this.gatedTimer = null;
+	}
+	resetForRace(){
+		this.firstPlaceSig = null;
+		this.secondPlaceSig = null;
 	}
 	getPlayerCount(){
 		var playerCount = 0;
@@ -240,6 +260,10 @@ class Game {
 		this.lobbyButtonPressedCount = lobbyButtonPressedCount;
 		this.playerCount = playerCount;
 		return playerCount;
+	}
+	gameOver(){
+		console.log("Game Over");
+		this.currentState = this.stateMap.gameOver;
 	}
 }
 
@@ -266,9 +290,13 @@ class GameBoard {
 			for(var player in this.playerList){
 				_engine.preventEscape(this.playerList[player],this.world);
 			}
+			return;
 		}
 		if(currentState == this.stateMap.lobby){
 			for(var player in this.playerList){
+				if(!this.playerList[player].alive){
+					continue;
+				}
 				_engine.preventEscape(this.playerList[player],this.world);
 				objectArray.push(this.playerList[player]);
 			}
@@ -276,6 +304,9 @@ class GameBoard {
 		}
 		if(currentState == this.stateMap.gated){
 			for(var player in this.playerList){
+				if(!this.playerList[player].alive){
+					continue;
+				}
 				_engine.preventEscape(this.playerList[player],this.world);
 				_engine.preventEscape(this.playerList[player],this.startingGate);
 				objectArray.push(this.playerList[player]);
@@ -283,6 +314,9 @@ class GameBoard {
 		}
 		if(currentState == this.stateMap.racing){
 			for(var player in this.playerList){
+				if(!this.playerList[player].alive){
+					continue;
+				}
 				_engine.preventEscape(this.playerList[player],this.world);
 				_engine.checkCollideCells(this.playerList[player],this.currentMap);
 				objectArray.push(this.playerList[player]);
@@ -540,7 +574,6 @@ class Circle extends Shape{
 
 	}
 	lineIntersectCircle(a, b){
-
 	    var ap, ab, dirAB, magAB, projMag, perp, perpMag;
 	    ap = {x: this.x - a.x, y: this.y - a.y};
 	    ab = {x: b.x - a.x, y: b.y - a.y};
@@ -588,6 +621,7 @@ class Player extends Circle {
 		this.hittingLobbyButton = false;
 		this.reachedGoal = false;
 		this.timeReached = null;
+		this.notches = 0;
 
 		//Movement
 		this.moveForward = false;
@@ -622,18 +656,29 @@ class Player extends Circle {
 		return this.currentSpeedBonus;
 	}
 	handleHit(object){
+		/*
 		if(object.isWall){
 			messenger.messageUser(this.id,"collideWithObject");
 			_engine.preventMovement(this,object,this.dt);
 		}
+		*/
 		if(object.isLobbyStart){
 			this.hittingLobbyButton = true;
 			return;
 		}
 		if(object.isMapCell){
 			//TODO why is this showing multiple hits
-			console.log("Player is running on a " + object.id + " cell");
+			//console.log("Player is running on a " + object.id + " cell");
+
+			if(object.id == 3){
+				this.alive = false;
+				this.notches -= 1;
+				messenger.messageRoomBySig(this.roomSig,"playerDied",this.id);
+				return;
+			}
+
 			if(object.id == 6){
+				this.alive = false;
 				this.reachedGoal = true;
 				this.timeReached = Date.now();
 				return;

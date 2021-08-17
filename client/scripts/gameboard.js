@@ -15,6 +15,25 @@ function resetGameboard(){
 	playerList = {};
 	clientList = {};
 }
+function updateGameboard(dt){
+	if(currentState == config.stateMap.racing){
+		updateTrails();
+	}
+}
+function resetTrails(){
+	for(var id in playerList){
+		var player = playerList[id];
+		player.trail.reset(player);
+	}
+}
+
+function updateTrails(){
+	
+	for(var id in playerList){
+		var player = playerList[id];
+		player.trail.update({x:player.x, y:player.y});
+	}
+}
 
 
 function connectSpawnPlayers(packet){
@@ -36,14 +55,12 @@ function createPlayer(dataArray,isAI){
 	playerList[index] = {};
 	playerList[index].radius = config.playerBaseRadius;
 	playerList[index].id = dataArray[0];
-	var shipX, shipY, shipColor;
-	shipX = dataArray[1];
-	shipY = dataArray[2];
-	shipColor = dataArray[3];
-
-	playerList[index].x = shipX;
-	playerList[index].y = shipY;
-	playerList[index].color = shipColor;
+	playerList[index].x = dataArray[1];
+	playerList[index].y = dataArray[2];
+	playerList[index].color = dataArray[3];
+	playerList[index].alive = true;
+	playerList[index].notches = 0;
+	playerList[index].trail = new Trail({x:dataArray[1],y:dataArray[2]});
     /*
 	playerList[index].weapon = {}
 	playerList[index].weapon.angle = dataArray[4];
@@ -67,8 +84,21 @@ function updatePlayerList(packet){
 			playerList[player[0]].x = player[1];
 			playerList[player[0]].y = player[2];
 			//playerList[player[0]].weapon.angle = player[3];
-			playerList[player[0]].velX = player[4];
-			playerList[player[0]].velY = player[5];
+			playerList[player[0]].velX = player[3];
+			playerList[player[0]].velY = player[4];
+		}
+	}
+}
+function updatePlayerNotches(packet){
+	if(packet == null){
+		return;
+	}
+	packet = JSON.parse(packet);
+	for(var i=0;i<packet.length;i++){
+		var player = packet[i];
+		if(playerList[player[0]] != null){
+			oldNotches[player[0]] = playerList[player[0]].notches;
+			playerList[player[0]].notches = player[1];
 		}
 	}
 }
@@ -137,4 +167,26 @@ function spawnLobbyStartButton(payload){
 	lobbyStartButton.y = payload[1];
 	lobbyStartButton.radius = payload[2];
 	lobbyStartButton.color = payload[3];
+}
+
+class Trail {
+	constructor(initialPosition){
+		this.vertices = [];
+		this.maxLength = 1000;
+		for (var i = 0; i < this.maxLength; i++){
+			this.vertices.push(initialPosition);
+		}
+	}
+	update(currentPosition){
+		for (var i = this.maxLength - 1; i > 0; i--){
+			this.vertices[i] = this.vertices[i-1];
+		}
+		this.vertices[0] = currentPosition;
+	}
+	reset(player){
+		this.vertices = [];
+		for (var i = 0; i < this.maxLength; i++){
+			this.vertices.push({x:player.x,y:player.y});
+		}
+	}
 }

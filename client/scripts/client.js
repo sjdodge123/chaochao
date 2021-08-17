@@ -14,6 +14,22 @@ function clientConnect() {
 		connectSpawnPlayers(gameState.playerList);
 		worldResize(gameState.world);
 		interval = config.serverTickSpeed;
+		gameRunning = true;
+		init();
+		//Testing overview state
+		/*
+		currentState = config.stateMap.overview;
+		for(var i=0;i<10;i++){
+			playerList[i] = {};
+			playerList[i].id = i;
+			playerList[i].color = getColor();
+		}
+		for(var player in playerList){
+			oldNotches[player] = getRandomInt(0,config.playerNotchesToWin-1);
+			playerList[player].notches = oldNotches[player] + getRandomInt(-1,2);
+		}
+		*/
+
 		/*
 		for(var id in clientList){
 			eventLog.addEvent(clientList[id] + " has joined the battle");
@@ -57,12 +73,46 @@ function clientConnect() {
 		}
 		*/
 	});
-	server.on("startLobby",function(packet){
-		spawnLobbyStartButton(packet);
-	});
+	
 	server.on("newMap",function(newMapID){
 		loadNewMap(newMapID);
 	});
+	server.on("firstPlaceWinner",function(id){
+		//createFirstRankSymbol();
+		playerList[id].alive = false;
+	});
+	server.on("secondPlaceWinner",function(id){
+		//createSecondRankSymbol();
+		playerList[id].alive = false;
+	});
+	server.on("playerDied",function(id){
+		//playLavaNoise();
+		playerList[id].alive = false;
+	});
+
+	//Game State Map changes
+	server.on("startWaiting",function(packet){
+		currentState = config.stateMap.waiting;
+	});
+	server.on("startLobby",function(packet){
+		//spawnLobbyStartButton(packet);
+		currentState = config.stateMap.lobby;
+	});
+	server.on("startGated",function(packet){
+		currentState = config.stateMap.gated;
+	});
+	server.on("startRace",function(packet){
+		oldNotches = {};
+		resetTrails();
+		currentState = config.stateMap.racing;
+	});
+	server.on("startOverview",function(packet){
+		updatePlayerNotches(packet);
+		currentState = config.stateMap.overview;
+	});
+	
+	
+
 
     return server;
 }

@@ -4,11 +4,10 @@ var server,
     vMap,
     mousex = 0,
     mousey = 0,
-    treemap = null,
     lastCell,
     brushID,
     brushColor = "black",
-    currentCells = [],
+    currentCell = null,
     newWidth = 0,
     newHeight = 0,
     world = {x:0,y:0,width:1366,height:768},
@@ -153,7 +152,7 @@ function animloop(){
     }
 }
 function gameLoop(dt){
-    currentCells = [];
+    //currentCells = [];
     cellIdFromPoint(mousex,mousey);
     drawEditor(dt);
 }
@@ -230,10 +229,16 @@ function clientConnect(){
 function handleClick(event){
     switch(event.which){
         case 1:{
-            var newId = locateId(brushColor);
+            console.log("ID: " + currentCell);
+            console.log(vMap.cells[currentCell]);
+            //var newId = locateId(brushColor);
+            //vMap.cells[currentCell].id = newId;
+
+            /*
             for(var i=0;i<currentCells.length;i++){
                 vMap.cells[currentCells[i]].id = newId;
             }
+            */
         }
     }
     event.preventDefault();
@@ -294,8 +299,9 @@ function cellIdFromPoint(xmouse, ymouse) {
     var iCell = cells.length;
     while(iCell--){
         if(pointIntersection(xmouse,ymouse,cells[iCell]) > 0){
-            currentCells.push(iCell);
-            //cells[iCell].id = 0;
+            currentCell = iCell;
+            //currentCells.push(iCell);
+            cells[iCell].id = 0;
         }
     }
 }
@@ -328,6 +334,7 @@ function renderCell (cell,iCell) {
     var color = locateColor(cell.id);
 
     //Check for brush
+    /*
     for(var i=0;i<currentCells.length;i++){
         if(iCell == currentCells[i]){
             createContext.fillStyle = brushColor;
@@ -335,6 +342,13 @@ function renderCell (cell,iCell) {
         }
         createContext.fillStyle = color;
     }
+    */
+    if(iCell == currentCell){
+        createContext.fillStyle = brushColor;
+    } else{
+        
+    }
+    
     createContext.strokeStyle = '#adadad';
     createContext.fill();
     createContext.stroke();

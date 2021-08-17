@@ -26,6 +26,22 @@ exports.sendPlayerUpdates = function(playerList){
 	prop = null;
 	return packet;
 }
+exports.sendNotchUpdates = function(playerList){
+	var packet = [];
+	for(prop in playerList){
+		player = playerList[prop];
+		listItem = [
+			player.id,
+			player.notches
+		];
+		packet.push(listItem);
+	}
+	packet = JSON.stringify(packet);
+	player = null;
+	listItem = null;
+	prop = null;
+	return packet;
+}
 exports.worldResize = function(world){
 	var packet = [];
 	packet[0] = world.x;

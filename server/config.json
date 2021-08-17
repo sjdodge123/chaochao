@@ -4,7 +4,7 @@
     "playerBaseRadius": 7.5,
     "worldWidth":1366,
     "worldHeight":768,
-    "minPlayersToStart": 1,
+    "minPlayersToStart": 3,
     "maxPlayersInRoom" : 10,
     "forceConstant" :5000000,
 
@@ -53,11 +53,13 @@
 		"lobby": 1,
         "overview":2,
         "gated": 3,
-        "racing": 4
+        "racing": 4,
+        "gameOver": 5
     },
-
+    "playerNotchesToWin": 6,
     "playerDragCoeff": 0.095,
     "playerBrakeCoeff": 0.235,
-    "playerMaxSpeed":50,
+    "playerMaxSpeed_prod":50,
+    "playerMaxSpeed":350,
     "playerBaseAcel":300
 }

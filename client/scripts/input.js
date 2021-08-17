@@ -17,7 +17,7 @@ function setMousePos(x,y){
 function handleClick(event){
     switch(event.which){
         case 1:{
-            iAmFiring = true;
+            //iAmFiring = true;
             break;
         }
     }

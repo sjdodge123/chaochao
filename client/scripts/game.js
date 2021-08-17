@@ -9,6 +9,8 @@ var server = null,
     newWidth = 0,
     newHeight = 0,
     maps = [],
+    oldNotches = {},
+    currentState = null;
     gameRunning = null;
 
     //Input Vars
@@ -40,9 +42,11 @@ function setupPage(){
     $.getJSON("../maps/demo-map3.json",function(data){
         maps.push(data);
     });
+    /*
     $.getJSON("../maps/demo-map4.json",function(data){
         maps.push(data);
     });
+    */
 
     $("#guestPlay").on("submit", function () {
         enterLobby();
@@ -72,8 +76,6 @@ function enterLobby(){
     $('#main').hide();
     $('#gameWindow').show();
     clientSendStart();
-    gameRunning = true;
-    init();
 }
 function init(){
     animloop();
@@ -98,7 +100,7 @@ function animloop(){
 }
 function gameLoop(dt){
     drawObjects(dt);
-    //updateGameboard();
+    updateGameboard(dt);
     //drawBackground();
     //drawHUD();
 }
