@@ -5,6 +5,7 @@ var mousex,
 	world,
 	mapID,
 	currentMap,
+	punchList,
 	playerList,
 	clientList;
 
@@ -13,6 +14,7 @@ resetGameboard();
 function resetGameboard(){
 	playerList = {};
 	clientList = {};
+	punchList = {};
 }
 function updateGameboard(dt){
 	if(currentState == config.stateMap.racing){
@@ -164,6 +166,23 @@ function spawnLobbyStartButton(payload){
 	lobbyStartButton.y = payload[1];
 	lobbyStartButton.radius = payload[2];
 	lobbyStartButton.color = payload[3];
+}
+function spawnPunch(payload){
+	if(payload == null){
+		return;
+	}
+	payload = JSON.parse(payload);
+	var punch = {};
+	punch.ownerId = payload[0];
+	punch.x = payload[1];
+	punch.y = payload[2];
+	punch.color = payload[3];
+	punchList[punch.ownerId] = punch;
+}
+function terminatePunch(id){
+	if(punchList[id] != null){
+		delete punchList[id];
+	}
 }
 
 function resetPlayers(){

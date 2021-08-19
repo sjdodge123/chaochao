@@ -2,11 +2,12 @@
     "port": 3000,
     "serverTickSpeed": 33.33,
     "playerBaseRadius": 7.5,
+    "punchRadius": 12,
     "worldWidth":1366,
     "worldHeight":768,
     "minPlayersToStart": 1,
     "maxPlayersInRoom" : 10,
-    "forceConstant" :5000000,
+    "forceConstant" :25000,
 
     "tileMap":{
         "slow":{
@@ -60,9 +61,10 @@
         "gameOver": 5
     },
     "playerNotchesToWin": 6,
-    "playerDragCoeff": 0.095,
+    "playerDragCoeff": 0.25,
     "playerBrakeCoeff": 0.235,
-    "playerMaxSpeed":50,
+    "playerMaxSpeed":1000,
+    "playerMaxSpeed_prod":50,
     "playerMaxSpeed_test":350,
     "playerBaseAcel":300
 }

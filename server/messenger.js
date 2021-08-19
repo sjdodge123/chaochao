@@ -89,6 +89,7 @@ function checkForMail(client){
 				player.moveBackward = packet.moveBackward;
 				player.turnLeft = packet.turnLeft;
 				player.turnRight = packet.turnRight;
+				player.attack = packet.attack;
 			}
 		}
 	});

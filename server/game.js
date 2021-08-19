@@ -317,6 +317,7 @@ class GameBoard {
 	constructor(world,playerList,engine,roomSig){
 		this.world = world;
 		this.playerList = playerList;
+		this.punchList = {};
 		this.engine = engine;
 		this.roomSig = roomSig;
 		this.stateMap = c.stateMap;
@@ -346,6 +347,9 @@ class GameBoard {
 				_engine.preventEscape(this.playerList[player],this.world);
 				objectArray.push(this.playerList[player]);
 			}
+			for(var punchId in this.punchList){
+				objectArray.push(this.punchList[punchId]);
+			}
 			objectArray.push(this.lobbyStartButton);
 		}
 		if(currentState == this.stateMap.gated){
@@ -357,6 +361,9 @@ class GameBoard {
 				_engine.preventEscape(this.playerList[player],this.startingGate);
 				objectArray.push(this.playerList[player]);
 			}
+			for(var punchId in this.punchList){
+				objectArray.push(this.punchList[punchId]);
+			}
 		}
 		if(currentState == this.stateMap.racing){
 			for(var player in this.playerList){
@@ -366,6 +373,9 @@ class GameBoard {
 				_engine.preventEscape(this.playerList[player],this.world);
 				_engine.checkCollideCells(this.playerList[player],this.currentMap);
 				objectArray.push(this.playerList[player]);
+			}
+			for(var punchId in this.punchList){
+				objectArray.push(this.punchList[punchId]);
 			}
 		}
 		this.engine.broadBase(objectArray);
@@ -378,7 +388,19 @@ class GameBoard {
 				this.world.checkForMapDamage(player);
 			}*/
 			player.update(dt);
+			if(player.punch != null){
+				this.punchList[player.id] = player.punch;
+				setTimeout(this.terminatePunch,100,{id:player.id,punchList:this.punchList,roomSig:this.roomSig});
+				player.punch = null;
+			}
 		}
+	}
+	terminatePunch(packet){
+		if(packet.punchList[packet.id] != undefined){
+			messenger.messageRoomBySig(packet.roomSig,"terminatePunch",packet.id);
+			delete packet.punchList[packet.id];
+		}
+		
 	}
 	startLobby(){
 		this.lobbyStartButton = new LobbyStartButton(this.world.center.x,this.world.center.y,0,"red");
@@ -680,6 +702,8 @@ class Player extends Circle {
 		this.moveBackward = false;
 		this.turnLeft = false;
 		this.turnRight = false;
+		this.attack = false;
+		this.punch = null;
 
 		//Engine Variables
 		this.newX = this.x;
@@ -699,6 +723,10 @@ class Player extends Circle {
 		}
 		this.dt = dt;
 		this.move();
+		if(this.attack){
+			this.punch = new Punch(this.x,this.y,c.punchRadius,this.color,this.id,this.roomSig);
+			messenger.messageRoomBySig(this.roomSig,"punch",compressor.sendPunch(this.punch));
+		}
 	}
 	move(){
 		this.x = this.newX;
@@ -716,6 +744,10 @@ class Player extends Circle {
 		*/
 		if(object.isLobbyStart){
 			this.hittingLobbyButton = true;
+			return;
+		}
+		if(object.isPunch && object.ownerId != this.id){
+			_engine.punchPlayer(this,object);
 			return;
 		}
 		if(object.isMapCell){
@@ -790,8 +822,22 @@ class Player extends Circle {
 		this.moveBackward = false;
 		this.turnLeft = false;
 		this.turnRight = false;
+		this.attack = false;
 		this.reachedGoal = false;
 		this.timeReached = null;
+		this.punch = null;
+	}
+}
+
+class Punch extends Circle{
+	constructor(x,y,radius,color,ownerId,roomSig){
+		super(x,y,radius,color);
+		this.ownerId = ownerId;
+		this.roomSig = roomSig;
+		this.isPunch = true;
+	}
+	handleHit(object){
+
 	}
 }
 

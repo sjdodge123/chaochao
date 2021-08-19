@@ -118,6 +118,15 @@ exports.appendPlayer = function(player){
 	return packet;
 }
 
-function packlobbyStartButton(lobbyStartButton){
-	
+exports.sendPunch = function(punch){
+	var packet = [];
+	packet[0] = punch.ownerId;
+	packet[1] = punch.x;
+	packet[2] = punch.y;
+	packet[3] = punch.color;
+	packet = JSON.stringify(packet);
+	player = null;
+	listItem = null;
+	prop = null;
+	return packet;
 }

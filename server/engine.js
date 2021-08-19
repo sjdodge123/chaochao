@@ -15,6 +15,9 @@ exports.preventEscape = function (obj, bound) {
 exports.checkCollideCells = function (player, map) {
 	checkCollideCells(player, map);
 }
+exports.punchPlayer = function(player,punch){
+	punchPlayer(player,punch);
+}
 
 class Engine {
 	constructor(playerList) {
@@ -76,9 +79,14 @@ class Engine {
 					braking = true;
 				}
 			}
+			var punchingSlowDown = 1;
+			if(player.attack){
+				punchingSlowDown = 0.01;
+			}
+
 			var newVelX, newVelY, newVel, newDirX, newDirY;
-			newVelX = player.velX + (player.acel + player.getSpeedBonus()) * dirX * this.dt;
-			newVelY = player.velY + (player.acel + player.getSpeedBonus()) * dirY * this.dt;
+			newVelX = punchingSlowDown*player.velX + (player.acel + player.getSpeedBonus()) * dirX * this.dt;
+			newVelY = punchingSlowDown*player.velY + (player.acel + player.getSpeedBonus()) * dirY * this.dt;
 
 			if (braking) {
 				newVelX -= player.brakeCoeff * player.velX;
@@ -326,6 +334,19 @@ function preventEscape(obj, bound) {
 		obj.newY = obj.y;
 		obj.velY = -obj.velY * 0.25;
 	}
+}
+
+function punchPlayer(player,punch){
+	var distance = utils.getMag(punch.x - player.x,punch.y - player.y);
+	var velCont = _calcVelCont(distance,player,punch.x,punch.y);
+	player.velX += velCont.velContX;
+	player.velY += velCont.velContY;
+}
+function _calcVelCont(distance,object,x,y){
+	var velCont = {velContX:0,velContY:0};
+	velCont.velContX = (forceConstant/Math.pow(distance,2))*(object.x - x)/distance;
+	velCont.velContY = (forceConstant/Math.pow(distance,2))*(object.y - y)/distance;
+	return velCont;
 }
 
 function checkCollideCells(player, map) {

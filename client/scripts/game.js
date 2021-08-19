@@ -14,7 +14,7 @@ var server = null,
     gameRunning = null;
 
     //Input Vars
-    var iAmFiring = false,
+    var attack = false,
     moveForward = false,
     moveBackward = false,
     turnLeft = false,

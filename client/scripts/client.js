@@ -124,6 +124,14 @@ function clientConnect() {
 	server.on("resetGame",function(){
 		fullReset();
 	});
+	server.on("punch",function(packet){
+		spawnPunch(packet);
+	});
+	server.on("terminatePunch",function(id){
+		terminatePunch(id);
+	});
+
+
     return server;
 }
 

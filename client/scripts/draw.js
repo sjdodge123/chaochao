@@ -19,6 +19,7 @@ function drawObjects(dt){
         drawMap();
     }
     drawPlayers(dt);
+    drawPunches();
     if(currentState == config.stateMap.gameOver){
         drawGameOverScreen();
     }
@@ -35,6 +36,21 @@ function drawGameOverScreen(){
     gameContext.fillStyle = playerList[playerWon].color;
     gameContext.rect(0,0,gameCanvas.width, gameCanvas.height);
     gameContext.fill();
+    gameContext.restore();
+}
+
+function drawPunches(){
+    for(var id in punchList){
+        drawPunch(punchList[id]);
+    }
+}
+
+function drawPunch(punch){
+    gameContext.save();
+    gameContext.beginPath();
+    gameContext.strokeStyle = punch.color;
+    gameContext.arc(punch.x, punch.y, config.punchRadius, 0, 2 * Math.PI);
+    gameContext.stroke();
     gameContext.restore();
 }
 
@@ -94,8 +110,9 @@ function drawWorld(){
 }
 
 function drawLobbyStartButton(){
+    gameContext.save();
     if(lobbyStartButton != null){
-        gameContext.save();
+        
         gameContext.beginPath();
         gameContext.arc(lobbyStartButton.x, lobbyStartButton.y, lobbyStartButton.radius, 0, 2 * Math.PI);
         gameContext.lineWidth = 3;
@@ -113,8 +130,9 @@ function drawLobbyStartButton(){
         gameContext.lineWidth = 2;
         gameContext.strokeStyle = lobbyStartButton.color;
         gameContext.stroke();
-        gameContext.restore();
+        
     }
+    gameContext.restore();
 }
 function drawGate(){
     if(gate != null){

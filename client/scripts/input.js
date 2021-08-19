@@ -17,7 +17,7 @@ function setMousePos(x,y){
 function handleClick(event){
     switch(event.which){
         case 1:{
-            iAmFiring = true;
+            //iAmFiring = true;
             break;
         }
     }
@@ -26,7 +26,7 @@ function handleClick(event){
 function handleUnClick(event){
     switch(event.which){
         case 1:{
-            iAmFiring = false;
+            //iAmFiring = false;
             //server.emit("stopFire");
             break;
         }
@@ -42,8 +42,9 @@ function keyDown(evt){
         case 39: {turnRight = true; break;}//Right key
         case 83: {moveBackward = true; break;} //Down key
         case 40: {moveBackward = true; break;} //Down key
+        case 32: {attack = true; break;} // Spacebar
     }
-    server.emit('movement',{turnLeft:turnLeft,moveForward:moveForward,turnRight:turnRight,moveBackward:moveBackward});
+    server.emit('movement',{turnLeft:turnLeft,moveForward:moveForward,turnRight:turnRight,moveBackward:moveBackward,attack:attack});
 }
 function keyUp(evt){
     switch(evt.keyCode) {
@@ -55,6 +56,7 @@ function keyUp(evt){
         case 39: {turnRight = false; break;}//Right key
         case 83: {moveBackward = false; break;} //Down key
         case 40: {moveBackward = false; break;} //Down key
+        case 32: {attack = false; break;} // Spacebar
     }
-    server.emit('movement',{turnLeft:turnLeft,moveForward:moveForward,turnRight:turnRight,moveBackward:moveBackward});
+    server.emit('movement',{turnLeft:turnLeft,moveForward:moveForward,turnRight:turnRight,moveBackward:moveBackward,attack:attack});
 }
