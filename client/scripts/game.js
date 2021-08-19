@@ -32,14 +32,11 @@ $(function(){
 
 function setupPage(){
     
-    //TODO: Find out how to load all the maps
-    $.getJSON("../maps/demo-map1.json",function(data){
+    //TODO: Find out how to load all the maps  
+    $.getJSON("../maps/ice_funnel.json",function(data){
         maps.push(data);
     });
-    $.getJSON("../maps/demo-map2.json",function(data){
-        maps.push(data);
-    });
-    $.getJSON("../maps/demo-map3.json",function(data){
+    $.getJSON("../maps/lobster_claw.json",function(data){
         maps.push(data);
     });
     /*

@@ -324,6 +324,7 @@ class GameBoard {
 		this.lobbyStartButton;
 		this.startingGate = null;
 		this.maps = utils.loadMaps();
+		this.mapsPlayed = [];
 		this.currentMap = null;
 	}
 	update(currentState,dt){
@@ -414,6 +415,7 @@ class GameBoard {
 		this.gatePlayers();
 	}
 	resetGame(){
+		this.mapsPlayed = [];
 		this.resetPlayers();
 		for(var playerID in this.playerList){
 			var player = this.playerList[playerID];
@@ -450,7 +452,26 @@ class GameBoard {
 			}
 		}
 		*/
+		//TODO Fix Random Map
+		/*
+		if(this.maps.length == this.mapsPlayed.length){
+			this.mapsPlayed = [];
+		}
+		this.currentMap = this.maps[this.getRandomMapR()];
+		this.mapsPlayed.push(this.currentMap);
+		*/
+
 		messenger.messageRoomBySig(this.roomSig,"newMap",this.currentMap.id);
+		
+	}
+	getRandomMapR(){
+		var nextMap = utils.getRandomInt(0,this.maps.length-1);
+		for(var i=0;i<this.mapsPlayed.length;i++){
+			if(nextMap == this.mapsPlayed[i]){
+				return this.getRandomMapR();
+			}
+		}
+		return nextMap;
 	}
 }
 
@@ -756,20 +777,21 @@ class Player extends Circle {
 
 			//Slow
 			if(object.id == 0){
-				this.maxVelocity = object.maxSpeed;
+				this.acel = object.acel;
 				this.dragCoeff = object.dragCoeff;
+				this.brakeCoeff = object.brakeCoeff;
 			}
 			//Normal
 			if(object.id == 1){
-				this.maxVelocity = c.playerMaxSpeed;
-				this.acel = c.playerBaseAcel;
-				this.brakeCoeff = c.playerBrakeCoeff;
-				this.dragCoeff = c.playerDragCoeff;
+				this.acel = object.acel;
+				this.brakeCoeff = object.brakeCoeff;
+				this.dragCoeff = object.dragCoeff;
 			}
 			//Fast
 			if(object.id == 2){
-				this.maxVelocity = object.maxSpeed;
 				this.acel = object.acel;
+				this.dragCoeff = object.dragCoeff;
+				this.brakeCoeff = object.brakeCoeff;
 			}
 			//Lava
 			if(object.id == 3){
@@ -782,7 +804,6 @@ class Player extends Circle {
 			}
 			//Ice
 			if(object.id == 4){
-				this.maxVelocity = object.maxSpeed;
 				this.acel = object.acel;
 				this.brakeCoeff = object.brakeCoeff;
 				this.dragCoeff = object.dragCoeff;
