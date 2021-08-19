@@ -4,7 +4,7 @@
     "playerBaseRadius": 7.5,
     "worldWidth":1366,
     "worldHeight":768,
-    "minPlayersToStart": 3,
+    "minPlayersToStart": 1,
     "maxPlayersInRoom" : 10,
     "forceConstant" :5000000,
 
@@ -47,6 +47,8 @@
     },
     "lobbyWaitTime": 5,
     "gatedWaitTime": 5,
+    "newRaceWaitTime": 10,
+    "gameOverTime": 10,
 
     "stateMap": {
         "waiting": 0,
@@ -59,7 +61,7 @@
     "playerNotchesToWin": 6,
     "playerDragCoeff": 0.095,
     "playerBrakeCoeff": 0.235,
-    "playerMaxSpeed_prod":50,
-    "playerMaxSpeed":350,
+    "playerMaxSpeed":50,
+    "playerMaxSpeed_test":350,
     "playerBaseAcel":300
 }

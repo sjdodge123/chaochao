@@ -1,4 +1,5 @@
-var config;
+var config,
+	playerWon = null;
 
 function clientConnect() {
 	var server = io();
@@ -19,6 +20,7 @@ function clientConnect() {
 		//Testing overview state
 		/*
 		currentState = config.stateMap.overview;
+		
 		for(var i=0;i<10;i++){
 			playerList[i] = {};
 			playerList[i].id = i;
@@ -28,8 +30,8 @@ function clientConnect() {
 			oldNotches[player] = getRandomInt(0,config.playerNotchesToWin-1);
 			playerList[player].notches = oldNotches[player] + getRandomInt(-1,2);
 		}
+		calculateNotchMoveAmt();
 		*/
-
 		/*
 		for(var id in clientList){
 			eventLog.addEvent(clientList[id] + " has joined the battle");
@@ -95,7 +97,7 @@ function clientConnect() {
 		currentState = config.stateMap.waiting;
 	});
 	server.on("startLobby",function(packet){
-		//spawnLobbyStartButton(packet);
+		spawnLobbyStartButton(packet);
 		currentState = config.stateMap.lobby;
 	});
 	server.on("startGated",function(packet){
@@ -108,12 +110,20 @@ function clientConnect() {
 	});
 	server.on("startOverview",function(packet){
 		updatePlayerNotches(packet);
+		calculateNotchMoveAmt();
 		currentState = config.stateMap.overview;
 	});
-	
-	
+	server.on("startGameover",function(player){
+		playerWon = player;
+		currentState = config.stateMap.gameOver;
+	});
 
-
+	server.on("resetPlayers",function(){
+		resetPlayers();
+	});
+	server.on("resetGame",function(){
+		fullReset();
+	});
     return server;
 }
 

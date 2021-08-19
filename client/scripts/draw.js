@@ -1,3 +1,5 @@
+var notchDistanceApart = 0;
+
 function drawObjects(dt){
     if(config == null){
         return;
@@ -17,10 +19,23 @@ function drawObjects(dt){
         drawMap();
     }
     drawPlayers(dt);
+    if(currentState == config.stateMap.gameOver){
+        drawGameOverScreen();
+    }
 }
 
 function drawBackground() {
 	gameContext.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
+}
+function drawGameOverScreen(){
+    if(playerWon == null){
+        return;
+    }
+    gameContext.save();
+    gameContext.fillStyle = playerList[playerWon].color;
+    gameContext.rect(0,0,gameCanvas.width, gameCanvas.height);
+    gameContext.fill();
+    gameContext.restore();
 }
 
 function drawPlayers(dt){
@@ -30,12 +45,12 @@ function drawPlayers(dt){
             continue;
         }
         if(currentState == config.stateMap.racing){
-            drawTrail(player)
+            drawTrail(player);
         }
         if(player.alive == false){
             continue;
         }
-       drawPlayer(player);
+        drawPlayer(player);
     }
 }
 function drawPlayer(player){
@@ -50,15 +65,13 @@ function drawPlayer(player){
     gameContext.strokeStyle = "black";
     gameContext.stroke();
     gameContext.restore();
-    
-    
-    
 }
 function drawTrail(player){
     gameContext.save();
     gameContext.beginPath();
     gameContext.moveTo(player.trail.vertices[0].x,player.trail.vertices[0].y);
-    for (var i = 0; i < player.trail.vertices.length; i++){
+    var len = player.trail.vertices.length;
+    for (var i = 0; i < len; i++){
         var point = player.trail.vertices[i];
         gameContext.lineWidth = 3;
         gameContext.strokeStyle = player.color;
@@ -98,8 +111,6 @@ function drawLobbyStartButton(){
             gameContext.lineTo(x, y);
           }
         gameContext.lineWidth = 2;
-        
-        
         gameContext.strokeStyle = lobbyStartButton.color;
         gameContext.stroke();
         gameContext.restore();
@@ -137,8 +148,6 @@ function drawMap(){
                 gameContext.lineTo(v.x,v.y);
             }
             var color = locateColor(cell.id);
-            gameContext.shadowColor = color;
-            gameContext.shadowBlur = 3;
             gameContext.lineWidth = 0.5;
             gameContext.fillStyle = color;
             gameContext.strokeStyle = '#adadad';
@@ -205,7 +214,7 @@ function drawOldNotches(){
         count++;
     }
     var distanceApart =  7;
-    var notchDistanceApart = config.playerNotchesToWin*20;
+    
     var offSetX = gameCanvas.width/2 - config.playerNotchesToWin*notchDistanceApart*.5;
     var offSetY = gameCanvas.height/2 - (count*config.playerBaseRadius*distanceApart*.5);
     gameContext.translate(offSetX,offSetY);
@@ -221,13 +230,26 @@ function drawPlayerIcon(player,notchDistanceApart){
     gameContext.beginPath();
     gameContext.shadowColor = player.color;
     gameContext.shadowBlur = 10;
-    gameContext.arc(0 + oldNotches[player.id]*notchDistanceApart, 0, config.playerBaseRadius*2, 0, 2 * Math.PI);
+    var moveAmt = 0;
+    if(player.distanceToMove > 0){
+        moveAmt = 0.5;
+        player.distanceToMove -= moveAmt;
+        gameContext.arc(oldNotches[player.id]*notchDistanceApart, 0, config.playerBaseRadius*2, 0, 2 * Math.PI);
+    } else if(player.distanceToMove < 0){
+        moveAmt = -0.5;
+        player.distanceToMove -= moveAmt;
+        gameContext.arc(oldNotches[player.id]*notchDistanceApart, 0, config.playerBaseRadius*2, 0, 2 * Math.PI);
+    } else{
+        gameContext.arc(player.notches*notchDistanceApart, 0, config.playerBaseRadius*2, 0, 2 * Math.PI);
+    }
     gameContext.fillStyle = player.color;
     gameContext.fill();
+    
 }
+
 function drawNotches(distanceApart){
     gameContext.beginPath();
-    for(var i=0;i<config.playerNotchesToWin;i++){
+    for(var i=0;i<config.playerNotchesToWin+1;i++){
         gameContext.arc(i*distanceApart, 0, 2, 0, 2 * Math.PI);  
     }
     gameContext.fillStyle = "grey";
@@ -235,9 +257,24 @@ function drawNotches(distanceApart){
 }
 function drawGoalPost(player,distanceApart){
     gameContext.beginPath();
-    gameContext.rect(-15 + config.playerNotchesToWin*distanceApart,-15,30,30);
+    gameContext.rect(-15 + (config.playerNotchesToWin+1)*distanceApart,-15,30,30);
     
-    if(oldNotches[player.id] == config.playerNotchesToWin-1){
+    //If the animation is complete
+    if(player.distanceToMove == 0){
+        if(player.notches == config.playerNotchesToWin){
+            gameContext.shadowColor = "white";
+            gameContext.shadowBlur = 10;
+            gameContext.fillStyle = "white"
+            gameContext.fill();
+        } else{
+            gameContext.shadowColor = "grey";
+            gameContext.strokeStyle = "grey";
+            gameContext.stroke();
+        }
+        return;
+    }
+    //Animation hasnt occurred yet
+    if(oldNotches[player.id] == config.playerNotchesToWin){
         gameContext.shadowColor = "white";
         gameContext.shadowBlur = 10;
         gameContext.fillStyle = "white"
@@ -246,6 +283,13 @@ function drawGoalPost(player,distanceApart){
         gameContext.shadowColor = "grey";
         gameContext.strokeStyle = "grey";
         gameContext.stroke();
+    }
+}
+function calculateNotchMoveAmt(){
+    notchDistanceApart = config.playerNotchesToWin*20;
+    for(var id in playerList){
+        playerList[id].deltaNotches = playerList[id].notches - oldNotches[id];
+        playerList[id].distanceToMove = playerList[id].deltaNotches*notchDistanceApart;
     }
 }
 

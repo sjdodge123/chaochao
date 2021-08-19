@@ -1,6 +1,5 @@
 var mousex,
 	mousey,
-	gameState,
 	lobbyStartButton,
 	gate,
 	world,
@@ -28,7 +27,6 @@ function resetTrails(){
 }
 
 function updateTrails(){
-	
 	for(var id in playerList){
 		var player = playerList[id];
 		player.trail.update({x:player.x, y:player.y});
@@ -101,9 +99,8 @@ function updatePlayerNotches(packet){
 			playerList[player[0]].notches = player[1];
 		}
 	}
+	
 }
-
-
 function worldResize(payload){
 	payload = JSON.parse(payload);
 	world = {};
@@ -128,18 +125,18 @@ function checkGameState(payload){
 		return;
 	}
 	payload = JSON.parse(payload);
-	gameState = payload[0];
-	if(gameState == config.stateMap.waiting){
+	currentState = payload[0];
+	if(currentState == config.stateMap.waiting){
 		lobbyStartButton = null;
 	}
-	if(gameState == config.stateMap.lobby){
+	if(currentState == config.stateMap.lobby){
 		lobbyStartButton = {};
 		lobbyStartButton.x = payload[1];
 		lobbyStartButton.y = payload[2];
 		lobbyStartButton.radius = payload[3];
 		lobbyStartButton.color = payload[4];
 	}
-	if(gameState == config.stateMap.gated){
+	if(currentState == config.stateMap.gated){
 		lobbyStartButton = null;
 		gate = {};
 		gate.x = payload[1];
@@ -169,10 +166,31 @@ function spawnLobbyStartButton(payload){
 	lobbyStartButton.color = payload[3];
 }
 
+function resetPlayers(){
+	for(var id in playerList){
+		var player = playerList[id];
+		player.alive = true;
+		player.trail = new Trail({x:player.x,y:player.y});
+	}
+}
+
+function fullReset(){
+	playerWon = null;
+	oldNotches = {};
+	for(var id in playerList){
+		var player = playerList[id];
+		player.alive = true;
+		player.trail = new Trail({x:player.x,y:player.y});
+		player.notches = 0;
+		oldNotches[id] = player.notches;
+	}
+	
+}
+
 class Trail {
 	constructor(initialPosition){
 		this.vertices = [];
-		this.maxLength = 1000;
+		this.maxLength = 3000;
 		for (var i = 0; i < this.maxLength; i++){
 			this.vertices.push(initialPosition);
 		}

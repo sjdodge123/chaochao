@@ -94,10 +94,22 @@ class Game {
 		this.gatedTimer = null;
 		this.gatedTimeLeft = this.gatedWaitTime;
 
+		this.newRaceWaitTime = c.newRaceWaitTime;
+		this.newRaceTimer = null;
+		this.newRaceTimeLeft = this.newRaceWaitTime;
+
+		this.gameOverWaitTime = c.gameOverTime;
+		this.gameOverTimer = null;
+		this.gameOverTimeLeft = this.gameOverWaitTime;
+
+		//State mgmt
 		this.stateMap = c.stateMap;
 		this.currentState = this.stateMap.waiting;
 		this.gameBoard = new GameBoard(world,playerList,engine,roomSig);
+
+		
     }
+
 	update(dt){
 		this.getPlayerCount();
 		//In Waiting State
@@ -120,7 +132,11 @@ class Game {
 		}
 		//In Overview State
 		if(this.currentState == this.stateMap.overview){
-			//this.checkOverviewTimer();
+			this.checkNewRaceTimer();
+		}
+		//In Gameover state
+		if(this.currentState == this.stateMap.gameOver){
+			this.checkGameOverTimer();
 		}
 		this.gameBoard.update(this.currentState,dt);
 		this.world.update(dt);
@@ -155,6 +171,43 @@ class Game {
 		}
 		this.gatedTimer = Date.now();
 	}
+	checkNewRaceTimer(){
+		if(this.newRaceTimer != null){
+			this.newRaceTimeLeft = ((this.newRaceWaitTime*1000 - (Date.now() - this.newRaceTimer))/(1000)).toFixed(1);
+			if(this.newRaceTimeLeft > 0){
+				return;
+			}
+			this.newRaceTimer = null;
+			this.startGated();
+			return;
+		}
+		this.newRaceTimer = Date.now();
+	}
+	checkGameOverTimer(){
+		if(this.gameOverTimer != null){
+			this.gameOverTimeLeft = ((this.gameOverWaitTime*1000 - (Date.now() - this.gameOverTimer))/(1000)).toFixed(1);
+			if(this.gameOverTimeLeft > 0){
+				return;
+			}
+			this.gameOverTimer = null;
+			this.resetGame();
+			this.startWaiting();
+			return;
+		}
+		this.gameOverTimer = Date.now();
+	}
+	startLobbyTimer(){
+		if(this.lobbyTimer != null){
+			this.lobbyTimeLeft = ((this.lobbyWaitTime*1000 - (Date.now() - this.lobbyTimer))/(1000)).toFixed(1);
+			if(this.lobbyTimeLeft > 0){
+				return;
+			}
+			this.resetLobbyTimer();
+			this.startGated();
+			return;
+		}
+		this.lobbyTimer = Date.now();
+	}
 	checkForWinners(){
 		var playersConcluded = 0;
 
@@ -168,40 +221,26 @@ class Game {
 				if(this.firstPlaceSig == null){
 					if(this.playerList[player].notches == c.playerNotchesToWin){
 						//Game over player wins
-						this.gameOver();
+						this.gameOver(player);
 						return;
 					}
 					this.firstPlaceSig = player;
-					this.playerList[player].notches += 2;
+					this.playerList[player].addNotch();
+					this.playerList[player].addNotch();
 					messenger.messageRoomBySig(this.roomSig,"firstPlaceWinner",player);
 					continue;
 				}
 				if(this.secondPlaceSig == null && player != this.firstPlaceSig){
 					this.secondPlaceSig = player;
 					messenger.messageRoomBySig(this.roomSig,"secondPlaceWinner",player);
-					if(this.playerList[player].notches != c.playerNotchesToWin){
-						this.playerList[player].notches += 1;
-					}
+					this.playerList[player].addNotch();
 					continue;
 				}
-				//TODO: Rankings
 			}
 		}
 		if(playersConcluded == this.playerCount){
 			this.startOverview();
 		}
-	}
-	startLobbyTimer(){
-		if(this.lobbyTimer != null){
-			this.lobbyTimeLeft = ((this.lobbyWaitTime*1000 - (Date.now() - this.lobbyTimer))/(1000)).toFixed(1);
-			if(this.lobbyTimeLeft > 0){
-				return;
-			}
-			this.resetLobbyTimer();
-			this.startGated();
-			return;
-		}
-		this.lobbyTimer = Date.now();
 	}
 	startWaiting(){
 		console.log("Start Waiting");
@@ -217,6 +256,7 @@ class Game {
 	startGated(){
 		console.log("Start Gated");
 		this.locked = true;
+		this.resetForRace();
 		this.gameBoard.setupMap();
 		this.currentState = this.stateMap.gated;
 		messenger.messageRoomBySig(this.roomSig,"startGated",null);
@@ -247,6 +287,11 @@ class Game {
 		this.firstPlaceSig = null;
 		this.secondPlaceSig = null;
 	}
+	resetGame(){
+		this.locked = false;
+		this.gameBoard.resetGame();
+		messenger.messageRoomBySig(this.roomSig,"resetGame",null);
+	}
 	getPlayerCount(){
 		var playerCount = 0;
 		var lobbyButtonPressedCount = 0;
@@ -261,9 +306,10 @@ class Game {
 		this.playerCount = playerCount;
 		return playerCount;
 	}
-	gameOver(){
+	gameOver(player){
 		console.log("Game Over");
 		this.currentState = this.stateMap.gameOver;
+		messenger.messageRoomBySig(this.roomSig,'startGameover',player);
 	}
 }
 
@@ -345,6 +391,13 @@ class GameBoard {
 		this.startingGate = new Gate(0,0,75,this.world.height);
 		this.gatePlayers();
 	}
+	resetGame(){
+		this.resetPlayers();
+		for(var playerID in this.playerList){
+			var player = this.playerList[playerID];
+			player.notches = 0;
+		}
+	}
 	gatePlayers(){
 		for(var playerID in this.playerList){
 			var player = this.playerList[playerID];
@@ -354,6 +407,7 @@ class GameBoard {
 		}
 	}
 	resetPlayers(){
+		messenger.messageRoomBySig(this.roomSig,"resetPlayers",null);
 		for(var playerID in this.playerList){
 			var player = this.playerList[playerID];
 			player.reset();
@@ -507,13 +561,11 @@ class World extends Rect{
     spawnNewPlayer(id){
         var player = new Player(0,0, 90, utils.getColor(), id,this.roomSig);
 		var loc = this.findFreeLoc(player);
+		player.initialLoc = loc;
 		player.x = loc.x;
 		player.y = loc.y;
 		return player;
     }
-	checkForMapDamage(object){
-
-	}
 	resize(){
 		this.width = c.worldWidth;
 		this.height = c.worldHeight;
@@ -672,7 +724,9 @@ class Player extends Circle {
 
 			if(object.id == 3){
 				this.alive = false;
-				this.notches -= 1;
+				if(this.notches > 0){
+					this.notches -= 1;
+				}
 				messenger.messageRoomBySig(this.roomSig,"playerDied",this.id);
 				return;
 			}
@@ -686,11 +740,18 @@ class Player extends Circle {
 			
 		}
 	}
+	addNotch(){
+		if(this.notches+1 >= c.playerNotchesToWin){
+			this.notches = c.playerNotchesToWin;
+			return;
+		}
+		this.notches += 1;
+	}
 	reset(){
 		this.alive = true;
 		this.enabled = true;
-		this.x = 0;
-		this.y = 0;
+		this.x = this.initialLoc.x;
+		this.y = this.initialLoc.y;
 		this.newX = this.x;
 		this.newY = this.y;
 		this.velX = 0;
