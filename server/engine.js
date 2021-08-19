@@ -335,7 +335,8 @@ function checkCollideCells(player, map) {
 	while (iCell--) {
 		cell = cells[iCell];
 		if (pointIntersection(player.x, player.y, cells[iCell]) > 0) {
-			var mapCell = {id:cell.id,color:locateColor(cell.id),isMapCell:true};
+			var mapCell = locateCell(cell.id);
+			mapCell.isMapCell = true;
 			player.handleHit(mapCell);
 		}
 	}
@@ -385,10 +386,10 @@ function compareSite(siteA,siteB){
     }
     return true;
 }
-function locateColor(id){
+function locateCell(id){
     for(var type in c.tileMap){
         if(id == c.tileMap[type].id){
-            return c.tileMap[type].color;
+            return c.tileMap[type];
         }
     }
 }

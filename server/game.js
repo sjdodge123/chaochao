@@ -722,6 +722,24 @@ class Player extends Circle {
 			//TODO why is this showing multiple hits
 			//console.log("Player is running on a " + object.id + " cell");
 
+			//Slow
+			if(object.id == 0){
+				this.maxVelocity = object.maxSpeed;
+				this.dragCoeff = object.dragCoeff;
+			}
+			//Normal
+			if(object.id == 1){
+				this.maxVelocity = c.playerMaxSpeed;
+				this.acel = c.playerBaseAcel;
+				this.brakeCoeff = c.playerBrakeCoeff;
+				this.dragCoeff = c.playerDragCoeff;
+			}
+			//Fast
+			if(object.id == 2){
+				this.maxVelocity = object.maxSpeed;
+				this.acel = object.acel;
+			}
+			//Lava
 			if(object.id == 3){
 				this.alive = false;
 				if(this.notches > 0){
@@ -730,7 +748,15 @@ class Player extends Circle {
 				messenger.messageRoomBySig(this.roomSig,"playerDied",this.id);
 				return;
 			}
+			//Ice
+			if(object.id == 4){
+				this.maxVelocity = object.maxSpeed;
+				this.acel = object.acel;
+				this.brakeCoeff = object.brakeCoeff;
+				this.dragCoeff = object.dragCoeff;
+			}
 
+			//Goal
 			if(object.id == 6){
 				this.alive = false;
 				this.reachedGoal = true;
