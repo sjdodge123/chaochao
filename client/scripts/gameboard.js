@@ -195,6 +195,7 @@ function resetPlayers(){
 
 function fullReset(){
 	playerWon = null;
+	decodedColorName = '';
 	oldNotches = {};
 	for(var id in playerList){
 		var player = playerList[id];

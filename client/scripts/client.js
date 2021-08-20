@@ -115,6 +115,7 @@ function clientConnect() {
 	});
 	server.on("startGameover",function(player){
 		playerWon = player;
+		decodedColorName = Colors.decode(playerList[player].color);
 		currentState = config.stateMap.gameOver;
 	});
 

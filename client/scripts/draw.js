@@ -1,4 +1,5 @@
-var notchDistanceApart = 0;
+var notchDistanceApart = 0,
+    decodedColorName = '';
 
 function drawObjects(dt){
     if(config == null){
@@ -36,6 +37,13 @@ function drawGameOverScreen(){
     gameContext.fillStyle = playerList[playerWon].color;
     gameContext.rect(0,0,gameCanvas.width, gameCanvas.height);
     gameContext.fill();
+    gameContext.restore();
+    
+    gameContext.save();
+    gameContext.fillStyle = "black";
+    gameContext.font = '48px serif';
+    var winString = decodedColorName + " won the game.";
+    gameContext.fillText(winString, gameCanvas.width/2 - 400, (gameCanvas.height+48)/2);
     gameContext.restore();
 }
 

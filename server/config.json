@@ -52,7 +52,7 @@
         }
     },
     "lobbyWaitTime": 5,
-    "gatedWaitTime": 5,
+    "gatedWaitTime": 7,
     "newRaceWaitTime": 10,
     "gameOverTime": 10,
 
