@@ -2,6 +2,7 @@ var lastFrame = new Date();
 var fs = require('fs');
 const { map } = require('jquery');
 var maps = [];
+var mapListing = [];
 var c = require('./config.json');
 c.port =  process.env.PORT || c.port;
 
@@ -10,7 +11,6 @@ Colors.names = {
     aqua: "#00ffff",
     azure: "#f0ffff",
     beige: "#f5f5dc",
-    black: "#000000",
     blue: "#0000ff",
     brown: "#a52a2a",
     cyan: "#00ffff",
@@ -97,8 +97,12 @@ exports.loadMaps = function(){
     maps = [];
     var normalizedPath = require("path").join(__dirname, "../client/maps");
     fs.readdirSync(normalizedPath).forEach(function(file){
+        mapListing.push(file);
         maps.push(require("../client/maps/" + file));
     });
     return maps;
     
+}
+exports.getMapListings = function(){
+    return mapListing;
 }

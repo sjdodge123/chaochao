@@ -15,6 +15,7 @@ function resetGameboard(){
 	playerList = {};
 	clientList = {};
 	punchList = {};
+	currentMap = {};
 }
 function updateGameboard(dt){
 	if(currentState == config.stateMap.racing){
@@ -149,9 +150,10 @@ function checkGameState(payload){
 }
 
 function loadNewMap(id){
+	currentMap = {};
 	for(var i=0;i<maps.length;i++){
 		if(id == maps[i].id){
-			currentMap = maps[i];
+			currentMap = JSON.parse(JSON.stringify(maps[i]));
 		}
 	}
 }
@@ -207,6 +209,19 @@ function fullReset(){
 	
 }
 
+function collapseCells(cells){
+	for(var i=0;i<currentMap.cells.length;i++){
+		var cell = currentMap.cells[i];
+		for(var j=0;j<cells.length;j++){
+			if(cells[j] == cell.site.voronoiId){
+				cell.id = config.tileMap.lava.id;
+				cell.color = config.tileMap.lava.color;
+			}
+		}
+	}
+	
+}
+
 class Trail {
 	constructor(initialPosition){
 		this.vertices = [];
@@ -228,3 +243,5 @@ class Trail {
 		}
 	}
 }
+
+

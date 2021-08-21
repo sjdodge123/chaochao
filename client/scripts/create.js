@@ -7,13 +7,12 @@ var server,
     lastCell,
     brushID,
     brushColor = "black",
-    currentCells = [],
+    currentCell = null,
     newWidth = 0,
     newHeight = 0,
     world = {x:0,y:0,width:1366,height:768},
     gate = {x:0,y:0,width:75,height:world.height},
-    map = {x:0+gate.width,y:0,width:world.width,height:world.height},
-    bbox = {xl:map.x,xr:map.width,yt:map.y,yb:map.height},
+    map = {x:75,y:0,width:world.width,height:world.height},
     createContext;
 
 var tileTypes = {
@@ -130,7 +129,6 @@ function init(){
     //window.addEventListener("keydown", keyDown, false);
     //window.addEventListener("keyup", keyUp, false);
     window.addEventListener('contextmenu', function(ev) {
-        ev.preventDefault();
         return false;
     }, false);
 }
@@ -145,8 +143,7 @@ function animloop(){
     }
 }
 function gameLoop(dt){
-    currentCells = [];
-    cellIdFromPoint(mousex,mousey);
+    currentCell = cellIdFromPoint(mousex,mousey);
     drawEditor(dt);
 }
 
@@ -173,7 +170,7 @@ function drawEditor(dt){
     drawBackground(dt);
     drawWorld(dt);
     drawGate();
-    drawMap();
+    //drawMap();
     renderCells();
     drawPointerCircle();
     //drawPlayers(dt);
@@ -209,7 +206,7 @@ function drawMap(){
 		createContext.beginPath();
         createContext.lineWidth = 5;
         createContext.rect(map.x,map.y,map.width,map.height);
-        createContext.fillStyle = "#F0F0F0";
+        createContext.fillStyle = "RED";
         createContext.fill();
         createContext.restore();
     }
@@ -223,13 +220,14 @@ function handleClick(event){
     switch(event.which){
         case 1:{
             var newId = locateId(brushColor);
-            for(var i=0;i<currentCells.length;i++){
-                vMap.cells[currentCells[i]].id = newId;
+            var cells = vMap.cells;
+            for(var i=0;i<cells.length;i++){
+                if(currentCell == cells[i].site.voronoiId){
+                    cells[i].id = newId;
+                }
             }
-    
         }
     }
-    event.preventDefault();
 }
 function handleUnClick(event){
     switch(event.which){
@@ -247,12 +245,11 @@ function setMousePos(x,y){
 
 function generateVMap(){
     resize();
-    //voronoi = new Voronoi();
-    var vMap = null;
+    var localMap = null;
     var siteNum = 250;
     var sites = [];
-    var margin = 0.015;
-    bbox = {xl:map.x,xr:map.width,yt:map.y,yb:map.height};
+    var margin = 0.07;
+    var localbbox = {xl:map.x,xr:map.width,yt:map.y,yb:map.height};
 
     var xmargin = map.width*margin,
 			ymargin = map.height*margin,
@@ -264,13 +261,13 @@ function generateVMap(){
     for(var i=0;i<siteNum;i++){
         sites.push({x:Math.round((xo+Math.random()*dx)*10)/10,y:Math.round((yo+Math.random()*dy)*10)/10});
     }
-    vMap = voronoi.compute(sites,bbox);
-    var cells = vMap.cells;
+    localMap = voronoi.compute(sites,localbbox);
+    var cells = localMap.cells;
         iCells = cells.length;
     while(iCells--){
         cells[iCells].id = 1;
     }
-    return vMap;
+    return localMap;
 }
 
 function cellUnderMouse(evt) {
@@ -286,10 +283,9 @@ function cellIdFromPoint(xmouse, ymouse) {
     var cells = vMap.cells;
     var iCell = cells.length;
     while(iCell--){
-        if(pointIntersection(xmouse,ymouse,cells[iCell]) > 0){
-            //currentCell = iCell;
-            currentCells.push(iCell);
-            //cells[iCell].id = 0;
+        var cell = cells[iCell];
+        if(pointIntersection(xmouse,ymouse,cell) > 0){
+            return cells[iCell].site.voronoiId;
         }
     }
 }
@@ -299,12 +295,11 @@ function renderCells(){
         cell;
 
     while (iCell--) {
-        cell = cells[iCell];
-        renderCell(cell,iCell);
+        renderCell(cells[iCell]);
     }
 }
 
-function renderCell (cell,iCell) {
+function renderCell (cell) {
     if (!cell) {return;}
     // edges
     createContext.beginPath();
@@ -320,26 +315,24 @@ function renderCell (cell,iCell) {
         createContext.lineTo(v.x,v.y);
     }
     var color = locateColor(cell.id);
-
-    //Check for brush
-    for(var i=0;i<currentCells.length;i++){
-        if(iCell == currentCells[i]){
-            createContext.fillStyle = brushColor;
-            break;
-        }
-        createContext.fillStyle = color;
-    }
-    /*
-    if(iCell == currentCell){
+    
+    if(cell.site.voronoiId == currentCell){
         createContext.fillStyle = brushColor;
     } else{
-        
+        createContext.fillStyle = color;
     }
-    */
     
     createContext.strokeStyle = '#adadad';
     createContext.fill();
     createContext.stroke();
+
+    /*
+    v = cell.site;
+    createContext.fillStyle = '#44f';
+    createContext.beginPath();
+    createContext.rect(v.x-2/3,v.y-2/3,2,2);
+    createContext.fill();
+    */
 }
 function getStartpoint(halfedge){
     if(compareSite(halfedge.edge.lSite,halfedge.site)){
@@ -366,7 +359,17 @@ function compareSite(siteA,siteB){
     return true;
 }
 function exportToJSON(){
+    var author = $("#author").val();
+    if(author == ""){
+        author = "anonymous";
+    }
+    var name = $("#name").val();
+    if(name == ""){
+        name="unknown";
+    }
     vMap.id = makeid(32);
+    vMap.author = author;
+    vMap.name = name;
     var jsonData = JSON.stringify(vMap);
     navigator.clipboard.writeText(jsonData).then(function() {
         alert("Copied to Clipboard!");

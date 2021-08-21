@@ -49,6 +49,7 @@ function checkForMail(client){
 		//Spawn a player for the new player
 		room.playerList[client.id] = room.world.spawnNewPlayer(client.id);
 
+		client.emit("maplisting" , utils.getMapListings());
 		//Send the current gamestate to the new player
 		var worldData = compressor.worldResize(room.world);
 		var playerData = compressor.playerSpawns(room.playerList);

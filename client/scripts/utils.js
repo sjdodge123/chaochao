@@ -9,7 +9,6 @@ Colors.names = {
     aqua: "#00ffff",
     azure: "#f0ffff",
     beige: "#f5f5dc",
-    black: "#000000",
     blue: "#0000ff",
     brown: "#a52a2a",
     cyan: "#00ffff",

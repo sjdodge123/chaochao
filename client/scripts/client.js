@@ -8,6 +8,14 @@ function clientConnect() {
 		myID = id;
 	});
 
+	server.on("maplisting",function(mapnames){
+		for(var i=0;i<mapnames.length;i++){
+			$.getJSON("../maps/" + mapnames[i],function(data){
+				maps.push(data);
+			});
+		}
+	});
+
 	server.on("gameState", function(gameState){
 		config = gameState.config;
 		clientList = gameState.clientList;
@@ -131,7 +139,9 @@ function clientConnect() {
 	server.on("terminatePunch",function(id){
 		terminatePunch(id);
 	});
-
+	server.on('collapsedCells',function(cells){
+		collapseCells(cells);
+	});
 
     return server;
 }

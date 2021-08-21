@@ -12,17 +12,37 @@
         <div id="createWindow">
             <canvas id="createCanvas" width="1366" height="768"></canvas>
         </div>
-        <div id="controlPanel" style="position:absolute;  width:1366;height:768;">
-            <button id="rebuildButton" class="btn" >Rebuild</button>
-            <button id="slowTileButton" class="btn" >Slow Tile</button>
-            <button id="normalTileButton" class="btn" >Normal Tile</button>
-            <button id="fastTileButton" class="btn" >Fast Tile</button>
-            <button id="lavaTileButton" class="btn" >Lava Tile</button>
-            <button id="iceTileButton" class="btn" >Ice Tile</button>
-            <button id="abilityTileButton" class="btn" >Ability Tile</button>
-            <button id="goalTileButton" class="btn" >Goal</button>
-            <button id="exportButton" class="btn" >Export</button>
-        </div>
+
+        <nav class="navbar fixed-bottom navbar-expand-sm navbar-dark bg-dark">
+            <a class="navbar-brand" href="/">ChaoChao</a>
+            <div class="collapse navbar-collapse" id="navbarCollapse">
+                <ul class="navbar-nav mr-auto">
+                    <li class="nav-item active"><button id="rebuildButton" class="btn" >Rebuild</button></li>
+                    <li class="nav-item"><button id="slowTileButton" class="btn" >Slow Tile</button></li>
+                    <li class="nav-item"><button id="normalTileButton" class="btn" >Normal Tile</button></li>
+                    <li class="nav-item"><button id="fastTileButton" class="btn" >Fast Tile</button></li>
+                    <li class="nav-item"><button id="lavaTileButton" class="btn" >Lava Tile</button></li>
+                    <li class="nav-item"><button id="iceTileButton" class="btn" >Ice Tile</button></li>
+                    <li class="nav-item"><button id="abilityTileButton" class="btn" >Ability Tile</button></li>
+                    <li class="nav-item"><button id="goalTileButton" class="btn" >Goal</button></li>
+                    <li class="nav-item"><button id="exportButton" class="btn" >Export</button></li>
+                </ul>
+                <input type="text" id="author" name="author" placeholder="author"></input>
+                <input type="text" id="name" name="name" placeholder="map name"></input>
+              </div>
+        </nav>
+        
+        
+        
+        
+        
+        
+        
+        
+        
+       
+       
+       
 
         <!-- Load bootstrap -->
         <script src="https://code.jquery.com/jquery-3.3.1.slim.min.js" integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo" crossorigin="anonymous"></script>

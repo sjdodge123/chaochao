@@ -5,9 +5,9 @@
     "punchRadius": 12,
     "worldWidth":1366,
     "worldHeight":768,
-    "minPlayersToStart": 3,
+    "minPlayersToStart": 2,
     "maxPlayersInRoom" : 15,
-    "forceConstant" :20000,
+    "forceConstant" :10000,
 
     "tileMap":{
         "slow":{

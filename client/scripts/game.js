@@ -32,25 +32,12 @@ $(function(){
 
 function setupPage(){
     
-    //TODO: Find out how to load all the maps  
-    $.getJSON("../maps/ice_funnel.json",function(data){
-        maps.push(data);
-    });
-    $.getJSON("../maps/lobster_claw.json",function(data){
-        maps.push(data);
-    });
-    /*
-    $.getJSON("../maps/demo-map4.json",function(data){
-        maps.push(data);
-    });
-    */
-
     $("#guestPlay").on("submit", function () {
         enterLobby();
         return false;
     });
 
-    $("#createMap").on("submit", function () {
+    $("#createButton").on("click", function () {
         window.location = '/create.html';
         return false;
     });
@@ -67,6 +54,7 @@ function setupPage(){
 
     gameCanvas = document.getElementById('gameCanvas');
     gameContext = gameCanvas.getContext('2d');
+    resize();
 }
 
 function enterLobby(){

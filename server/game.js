@@ -106,8 +106,6 @@ class Game {
 		this.stateMap = c.stateMap;
 		this.currentState = this.stateMap.waiting;
 		this.gameBoard = new GameBoard(world,playerList,engine,roomSig);
-
-		
     }
 
 	update(dt){
@@ -128,7 +126,9 @@ class Game {
 		//In Racing State
 		if(this.currentState == this.stateMap.racing){
 			this.checkForWinners();
-			//console.log("go go speed racer");
+			if(this.collapsing == true){
+				this.gameBoard.collapseMap();
+			}
 		}
 		//In Overview State
 		if(this.currentState == this.stateMap.overview){
@@ -227,6 +227,7 @@ class Game {
 					this.firstPlaceSig = player;
 					this.playerList[player].addNotch();
 					this.playerList[player].addNotch();
+					this.startCollapse();
 					messenger.messageRoomBySig(this.roomSig,"firstPlaceWinner",player);
 					continue;
 				}
@@ -239,6 +240,7 @@ class Game {
 			}
 		}
 		if(playersConcluded == this.playerCount){
+			this.collapsing = false;
 			this.startOverview();
 		}
 	}
@@ -270,12 +272,9 @@ class Game {
 		console.log("Start Overview");
 		this.currentState = this.stateMap.overview;
 		messenger.messageRoomBySig(this.roomSig,'startOverview',compressor.sendNotchUpdates(this.playerList));
-
-		//this.world.resize();
-		//this.gameBoard.populateWorld();
-		
-		//this.checkForAISpawn();
-		//this.randomLocShips();
+	}
+	startCollapse(){
+		this.collapsing = true;
 	}
 	resetLobbyTimer(){
 		this.lobbyTimer = null;
@@ -289,6 +288,7 @@ class Game {
 	}
 	resetGame(){
 		this.locked = false;
+		this.collapsing = false;
 		this.gameBoard.resetGame();
 		messenger.messageRoomBySig(this.roomSig,"resetGame",null);
 	}
@@ -325,7 +325,7 @@ class GameBoard {
 		this.startingGate = null;
 		this.maps = utils.loadMaps();
 		this.mapsPlayed = [];
-		this.currentMap = null;
+		this.currentMap = {};
 	}
 	update(currentState,dt){
 		this.engine.update(dt);
@@ -384,10 +384,6 @@ class GameBoard {
 	updatePlayers(active,dt){
 		for(var playerID in this.playerList){
 			var player = this.playerList[playerID];
-			/*
-			if(active){
-				this.world.checkForMapDamage(player);
-			}*/
 			player.update(dt);
 			if(player.punch != null){
 				this.punchList[player.id] = player.punch;
@@ -413,6 +409,18 @@ class GameBoard {
 		this.loadNextMap();
 		this.startingGate = new Gate(0,0,75,this.world.height);
 		this.gatePlayers();
+	}
+	collapseMap(){
+		var collapsedCells = [];
+		var cells = this.currentMap.cells;
+		for(var i=0;i<cells.length;i++){
+			if(cells[i].id != 3){
+				cells[i].id = 3;
+				collapsedCells.push(cells[i].site.voronoiId);
+				break;
+			}
+		}
+		messenger.messageRoomBySig(this.roomSig,'collapsedCells',collapsedCells);
 	}
 	resetGame(){
 		this.mapsPlayed = [];
@@ -442,16 +450,16 @@ class GameBoard {
 	}
 	loadNextMap(){
 		//Specify a particular map for testing
-		this.currentMap = this.maps[0];
+		this.currentMap = {};
+		//this.currentMap = JSON.parse(JSON.stringify(this.maps[0]));
 		
 		//Cycle in order of file order
-		/*
 		for(var i=0;i<this.maps.length;i++){
 			if(this.currentMap != this.maps[i]){
-				this.currentMap = this.maps[i];
+				this.currentMap = JSON.parse(JSON.stringify(this.maps[i]));
 			}
 		}
-		*/
+
 		//TODO Fix Random Map
 		/*
 		if(this.maps.length == this.mapsPlayed.length){
@@ -772,9 +780,6 @@ class Player extends Circle {
 			return;
 		}
 		if(object.isMapCell){
-			//TODO why is this showing multiple hits
-			//console.log("Player is running on a " + object.id + " cell");
-
 			//Slow
 			if(object.id == 0){
 				this.acel = object.acel;
