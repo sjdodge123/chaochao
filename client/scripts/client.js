@@ -126,6 +126,10 @@ function clientConnect() {
 		decodedColorName = Colors.decode(playerList[player].color);
 		currentState = config.stateMap.gameOver;
 	});
+	server.on("startCollapse",function(){
+		currentState = config.stateMap.collapsing;
+	});
+	
 
 	server.on("resetPlayers",function(){
 		resetPlayers();

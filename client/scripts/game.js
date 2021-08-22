@@ -41,7 +41,7 @@ function setupPage(){
         window.location = '/create.html';
         return false;
     });
-
+    window.addEventListener('blur', haltInput);
     window.addEventListener('resize', resize, false);
     window.requestAnimFrame = (function(){
         return  window.requestAnimationFrame       ||

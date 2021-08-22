@@ -5,6 +5,7 @@
     "punchRadius": 12,
     "worldWidth":1366,
     "worldHeight":768,
+    "worldCollapseSpeed":3,
     "minPlayersToStart": 2,
     "maxPlayersInRoom" : 15,
     "forceConstant" :10000,
@@ -62,7 +63,8 @@
         "overview":2,
         "gated": 3,
         "racing": 4,
-        "gameOver": 5
+        "collapsing":5,
+        "gameOver": 6
     },
     "playerNotchesToWin": 6,
     "playerDragCoeff": 0.15,

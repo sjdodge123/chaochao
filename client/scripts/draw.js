@@ -15,7 +15,8 @@ function drawObjects(dt){
         drawLobbyStartButton();
     }
     if(currentState == config.stateMap.gated ||
-       currentState == config.stateMap.racing){
+       currentState == config.stateMap.racing ||
+       currentState == config.stateMap.collapsing){
         drawGate();
         drawMap();
     }

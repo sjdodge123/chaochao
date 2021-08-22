@@ -118,22 +118,19 @@ class Game {
 		if(this.currentState == this.stateMap.lobby){
 			this.checkGatedStart();
 		}
-		
 		//In Gated State
 		if(this.currentState == this.stateMap.gated){
 			this.checkRacingStart();
 		}
-		//In Racing State
-		if(this.currentState == this.stateMap.racing){
+		//In Racing State or Collapse State
+		if(this.currentState == this.stateMap.racing || this.currentState == this.stateMap.collapsing){
 			this.checkForWinners();
-			if(this.collapsing == true){
-				this.gameBoard.collapseMap();
-			}
-		}
+		}		
 		//In Overview State
 		if(this.currentState == this.stateMap.overview){
 			this.checkNewRaceTimer();
 		}
+		
 		//In Gameover state
 		if(this.currentState == this.stateMap.gameOver){
 			this.checkGameOverTimer();
@@ -227,7 +224,7 @@ class Game {
 					this.firstPlaceSig = player;
 					this.playerList[player].addNotch();
 					this.playerList[player].addNotch();
-					this.startCollapse();
+					this.startCollapse(this.playerList[player].x,this.playerList[player].y);
 					messenger.messageRoomBySig(this.roomSig,"firstPlaceWinner",player);
 					continue;
 				}
@@ -240,7 +237,6 @@ class Game {
 			}
 		}
 		if(playersConcluded == this.playerCount){
-			this.collapsing = false;
 			this.startOverview();
 		}
 	}
@@ -264,7 +260,7 @@ class Game {
 		messenger.messageRoomBySig(this.roomSig,"startGated",null);
 	}
 	startRace(){
-		console.log("Start race");
+		console.log("Start Race");
 		this.currentState = this.stateMap.racing;
 		messenger.messageRoomBySig(this.roomSig,"startRace",null);
 	}
@@ -273,8 +269,11 @@ class Game {
 		this.currentState = this.stateMap.overview;
 		messenger.messageRoomBySig(this.roomSig,'startOverview',compressor.sendNotchUpdates(this.playerList));
 	}
-	startCollapse(){
-		this.collapsing = true;
+	startCollapse(xloc,yloc){
+		console.log("Start Collapse");
+		this.currentState = this.stateMap.collapsing;
+		this.gameBoard.startCollapse({x:xloc,y:yloc});
+		messenger.messageRoomBySig(this.roomSig,"startCollapse",null);
 	}
 	resetLobbyTimer(){
 		this.lobbyTimer = null;
@@ -288,7 +287,6 @@ class Game {
 	}
 	resetGame(){
 		this.locked = false;
-		this.collapsing = false;
 		this.gameBoard.resetGame();
 		messenger.messageRoomBySig(this.roomSig,"resetGame",null);
 	}
@@ -326,9 +324,12 @@ class GameBoard {
 		this.maps = utils.loadMaps();
 		this.mapsPlayed = [];
 		this.currentMap = {};
+		this.collapseLoc = {};
+		this.collapseLine = this.world.height;
 	}
 	update(currentState,dt){
 		this.engine.update(dt);
+		this.collapseMap(currentState);
 		this.checkCollisions(currentState);
 		this.updatePlayers(currentState,dt);
 	}
@@ -366,10 +367,18 @@ class GameBoard {
 				objectArray.push(this.punchList[punchId]);
 			}
 		}
-		if(currentState == this.stateMap.racing){
+		if(currentState == this.stateMap.racing || currentState == this.stateMap.collapsing){
 			for(var player in this.playerList){
 				if(!this.playerList[player].alive){
 					continue;
+				}
+				if(currentState == this.stateMap.collapsing){
+					objectArray.push(this.startingGate);
+					/*
+					if(this.startingGate.pointInRect(this.playerList[player].x,this.playerList[player].y)){
+						console.log("Player in gate");
+					}
+					*/
 				}
 				_engine.preventEscape(this.playerList[player],this.world);
 				_engine.checkCollideCells(this.playerList[player],this.currentMap);
@@ -379,6 +388,7 @@ class GameBoard {
 				objectArray.push(this.punchList[punchId]);
 			}
 		}
+		
 		this.engine.broadBase(objectArray);
 	}
 	updatePlayers(active,dt){
@@ -410,14 +420,24 @@ class GameBoard {
 		this.startingGate = new Gate(0,0,75,this.world.height);
 		this.gatePlayers();
 	}
-	collapseMap(){
+	startCollapse(loc){
+		this.collapseLoc = loc;
+	}
+	collapseMap(currentState){
+		if(currentState != c.stateMap.collapsing){
+			return;
+		}
+		this.collapseLine -= c.worldCollapseSpeed;
 		var collapsedCells = [];
 		var cells = this.currentMap.cells;
 		for(var i=0;i<cells.length;i++){
-			if(cells[i].id != 3){
+			if(cells[i].id == 6 || cells[i].id == 3){
+				continue;
+			}
+			var distance = utils.getMag(this.collapseLoc.x - cells[i].site.x, this.collapseLoc.y - cells[i].site.y);
+			if(this.collapseLine < distance){
 				cells[i].id = 3;
-				collapsedCells.push(cells[i].site.voronoiId);
-				break;
+				collapsedCells.push(cells[i].site.voronoiId);	
 			}
 		}
 		messenger.messageRoomBySig(this.roomSig,'collapsedCells',collapsedCells);
@@ -447,39 +467,43 @@ class GameBoard {
 	}
 	clean(){
 		this.lobbyStartButton = null;
+		this.collapseLoc = {};
+		this.collapseLine = this.world.height;
 	}
 	loadNextMap(){
-		//Specify a particular map for testing
 		this.currentMap = {};
+
+		//Specify a particular map for testing
 		//this.currentMap = JSON.parse(JSON.stringify(this.maps[0]));
 		
 		//Cycle in order of file order
+		/*
 		for(var i=0;i<this.maps.length;i++){
 			if(this.currentMap != this.maps[i]){
 				this.currentMap = JSON.parse(JSON.stringify(this.maps[i]));
 			}
 		}
-
-		//TODO Fix Random Map
-		/*
+		*/
+		
 		if(this.maps.length == this.mapsPlayed.length){
 			this.mapsPlayed = [];
 		}
-		this.currentMap = this.maps[this.getRandomMapR()];
-		this.mapsPlayed.push(this.currentMap);
-		*/
+		var nextMapId = this.getRandomMapR();
+		this.currentMap = JSON.parse(JSON.stringify(this.maps[nextMapId]));
+		this.mapsPlayed.push(this.currentMap.id);
 
 		messenger.messageRoomBySig(this.roomSig,"newMap",this.currentMap.id);
 		
 	}
 	getRandomMapR(){
-		var nextMap = utils.getRandomInt(0,this.maps.length-1);
+		var randomIndex = utils.getRandomInt(0,this.maps.length-1);
+		var nextMap = this.maps[randomIndex];
 		for(var i=0;i<this.mapsPlayed.length;i++){
-			if(nextMap == this.mapsPlayed[i]){
+			if(nextMap.id == this.mapsPlayed[i]){
 				return this.getRandomMapR();
 			}
 		}
-		return nextMap;
+		return randomIndex;
 	}
 }
 
@@ -507,41 +531,29 @@ class Rect extends Shape{
 		this.height = height;
 		this.angle = angle;
 		this.vertices = this.getVertices();
-
 	}
-
 	getVertices(){
 		var vertices = [];
-		var a = {x:-this.width/2, y: -this.height/2},
-	        b = {x:this.width/2, y: -this.height/2},
-	        c = {x:this.width/2, y: this.height/2},
-	        d = {x:-this.width/2, y: this.height/2};
+		var a = {x:this.x, y: this.y},
+	        b = {x:this.width, y: this.y},
+	        c = {x:this.width, y: this.height},
+	        d = {x:this.x, y: this.height};
+			
 		vertices.push(a, b, c, d);
-
-		var cos = Math.cos(this.angle * Math.PI/180);
-	    var sin = Math.sin(this.angle * Math.PI/180);
-
-		var tempX, tempY;
-	    for (var i = 0; i < vertices.length; i++){
-	        var vert = vertices[i];
-	        tempX = vert.x * cos - vert.y * sin;
-	        tempY = vert.x * sin + vert.y * cos;
-	        vert.x = this.x + tempX;
-	        vert.y = this.y + tempY;
-	    }
 		return vertices;
 	}
-	pointInRect(x, y){
-	    var ap = {x:x-this.vertices[0].x, y:y-this.vertices[0].y};
-	    var ab = {x:this.vertices[1].x - this.vertices[0].x, y:this.vertices[1].y - this.vertices[0].y};
-	    var ad = {x:this.vertices[3].x - this.vertices[0].x, y:this.vertices[3].y - this.vertices[0].y};
+	pointInRect(objX, objY){
+	    var a = this.areaTriangle(this.vertices[0].x,this.vertices[0].y,this.vertices[1].x,this.vertices[1].y,this.vertices[2].x,this.vertices[2].y) +
+				this.areaTriangle(this.vertices[0].x,this.vertices[0].y,this.vertices[3].x,this.vertices[3].y,this.vertices[2].x,this.vertices[2].y);			
+		var a1 = this.areaTriangle(objX,objY,this.vertices[0].x,this.vertices[0].y,this.vertices[1].x,this.vertices[1].y);
+		var a2 = this.areaTriangle(objX,objY,this.vertices[1].x,this.vertices[1].y,this.vertices[2].x,this.vertices[2].y);
+		var a3 = this.areaTriangle(objX,objY,this.vertices[2].x,this.vertices[2].y,this.vertices[3].x,this.vertices[3].y);
+		var a4 = this.areaTriangle(objX,objY,this.vertices[0].x,this.vertices[0].y,this.vertices[3].x,this.vertices[3].y);
+		return (a == a1+a2+a3+a4);
+	}
 
-		var dotW = utils.dotProduct(ap, ab);
-		var dotH = utils.dotProduct(ap, ad);
-		if ((0 <= dotW) && (dotW <= utils.dotProduct(ab, ab)) && (0 <= dotH) && (dotH <= utils.dotProduct(ad, ad))){
-			return true;
-		}
-	    return false;
+	areaTriangle(x1,y1,x2,y2,x3,y3){
+		return Math.abs((x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2)) / 2.0);
 	}
 
 	getExtents(){
@@ -579,11 +591,6 @@ class Rect extends Shape{
 	}
 	findFreeLoc(obj){
 		var loc = this.getSafeLoc(obj.width || obj.radius);
-        /*
-		if(this.engine.checkCollideAll(loc)){
-			return this.findFreeLoc(obj);
-		}
-        */
 		return loc;
 	}
     getSafeLoc(size){
@@ -596,6 +603,10 @@ class Rect extends Shape{
 class Gate extends Rect {
 	constructor (x,y,width,height) {
 		super(x,y,width,height,0,"grey");
+		this.isGate = true;
+	}
+	handleHit(){
+
 	}
 }
 
@@ -674,7 +685,6 @@ class Circle extends Shape{
 	        }
 	    }
 		return false;
-
 	}
 	lineIntersectCircle(a, b){
 	    var ap, ab, dirAB, magAB, projMag, perp, perpMag;
@@ -779,6 +789,10 @@ class Player extends Circle {
 			_engine.punchPlayer(this,object);
 			return;
 		}
+		if(object.isGate){
+			this.killPlayer();
+			return;
+		}
 		if(object.isMapCell){
 			//Slow
 			if(object.id == 0){
@@ -800,11 +814,7 @@ class Player extends Circle {
 			}
 			//Lava
 			if(object.id == 3){
-				this.alive = false;
-				if(this.notches > 0){
-					this.notches -= 1;
-				}
-				messenger.messageRoomBySig(this.roomSig,"playerDied",this.id);
+				this.killPlayer();
 				return;
 			}
 			//Ice
@@ -830,6 +840,13 @@ class Player extends Circle {
 			return;
 		}
 		this.notches += 1;
+	}
+	killPlayer(){
+		this.alive = false;
+		if(this.notches > 0){
+			this.notches -= 1;
+		}
+		messenger.messageRoomBySig(this.roomSig,"playerDied",this.id);
 	}
 	reset(){
 		this.alive = true;

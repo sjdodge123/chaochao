@@ -128,24 +128,15 @@ class Engine {
 		}
 	}
 	narrowBase(obj1, collisionList) {
-		var dyingBulletList = [];
 		for (var i = 0; i < collisionList.length; i++) {
 			var obj2 = collisionList[i];
 			if (obj1 == obj2) {
 				continue;
 			}
 			if (obj1.inBounds(obj2)) {
-				if (obj1.handleHit(obj2)) {
-					dyingBulletList.push(obj1);
-				}
-				if (obj2.handleHit(obj1)) {
-					dyingBulletList.push(obj2);
-				}
+				obj1.handleHit(obj2);
+				obj2.handleHit(obj1);
 			}
-		}
-
-		for (var j = 0; j < dyingBulletList.length; j++) {
-			dyingBulletList[j].killSelf();
 		}
 	}
 	checkCollideAll(loc) {

@@ -60,3 +60,11 @@ function keyUp(evt){
     }
     server.emit('movement',{turnLeft:turnLeft,moveForward:moveForward,turnRight:turnRight,moveBackward:moveBackward,attack:attack});
 }
+function haltInput(evt){
+    turnLeft = false;
+    moveForward = false;
+    turnRight = false;
+    moveBackward = false;
+    attack = false;
+    server.emit('movement',{turnLeft:turnLeft,moveForward:moveForward,turnRight:turnRight,moveBackward:moveBackward,attack:attack});
+}
