@@ -47,12 +47,9 @@ canvas {
 }
 #createWindow{
     background: white;
-	position: relative;
-	overflow: none;
+	overflow: hidden;
 	display: none;
-	height: 100%;
 }
-
 #game-title{
     font-family: "San Francisco";
     font-size: 72px;

@@ -374,11 +374,6 @@ class GameBoard {
 				}
 				if(currentState == this.stateMap.collapsing){
 					objectArray.push(this.startingGate);
-					/*
-					if(this.startingGate.pointInRect(this.playerList[player].x,this.playerList[player].y)){
-						console.log("Player in gate");
-					}
-					*/
 				}
 				_engine.preventEscape(this.playerList[player],this.world);
 				_engine.checkCollideCells(this.playerList[player],this.currentMap);
@@ -840,6 +835,7 @@ class Player extends Circle {
 				this.alive = false;
 				this.reachedGoal = true;
 				this.timeReached = Date.now();
+				messenger.messageRoomBySig(this.roomSig,"playerConcluded",this.id);
 				return;
 			}
 			

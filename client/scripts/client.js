@@ -89,10 +89,13 @@ function clientConnect() {
 	});
 	server.on("firstPlaceWinner",function(id){
 		//createFirstRankSymbol();
-		playerList[id].alive = false;
+		//playerList[id].alive = false;
 	});
 	server.on("secondPlaceWinner",function(id){
 		//createSecondRankSymbol();
+		//playerList[id].alive = false;
+	});
+	server.on("playerConcluded",function(id){
 		playerList[id].alive = false;
 	});
 	server.on("playerDied",function(id){
