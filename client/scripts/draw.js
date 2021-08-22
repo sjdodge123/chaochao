@@ -19,6 +19,7 @@ function drawObjects(dt){
        currentState == config.stateMap.collapsing){
         drawGate();
         drawMap();
+        drawMapTitle();
     }
     drawPlayers(dt);
     drawPunches();
@@ -61,6 +62,17 @@ function drawPunch(punch){
     gameContext.arc(punch.x, punch.y, config.punchRadius, 0, 2 * Math.PI);
     gameContext.stroke();
     gameContext.restore();
+}
+
+function drawMapTitle(){
+    if(currentMap != null){
+        gameContext.save();
+        gameContext.fillStyle = "black";
+        gameContext.font = '14px serif';
+        gameContext.fillText('"'+currentMap.name+'"', 5, gameCanvas.height-25);
+        gameContext.fillText('~'+currentMap.author, 5, gameCanvas.height-10);
+        gameContext.restore();
+    }
 }
 
 function drawPlayers(dt){
