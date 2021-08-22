@@ -18,7 +18,7 @@ class Room {
         this.clientCount = 0;
         this.alive = true;
 		this.engine = _engine.getEngine(this.playerList);
-        this.world = new World(0,0,c.worldWidth,c.worldHeight,this.engine,this.sig);
+        this.world = new World(0,0,c.worldWidth,c.worldHeight,this.engine,this.playerList,this.sig);
         this.game = new Game(this.clientList,this.playerList,this.world,this.engine,this.sig);
     }
     join(clientID){
@@ -611,9 +611,10 @@ class Gate extends Rect {
 }
 
 class World extends Rect{
-    constructor(x,y,width,height,engine,roomSig){
+    constructor(x,y,width,height,engine,playerList,roomSig){
         super(x,y,width,height, 0, "white");
 		this.engine = engine;
+		this.playerList = playerList;
         this.roomSig = roomSig;
 		this.center = {x:width/2,y:height/2};
     }
@@ -621,13 +622,23 @@ class World extends Rect{
 		
 	}
     spawnNewPlayer(id){
-        var player = new Player(0,0, 90, utils.getColor(), id,this.roomSig);
+		var color = this.getUniqueColorR();
+        var player = new Player(0,0, 90, color, id,this.roomSig);
 		var loc = this.findFreeLoc(player);
 		player.initialLoc = loc;
 		player.x = loc.x;
 		player.y = loc.y;
 		return player;
     }
+	getUniqueColorR(){
+		var color = utils.getColor();
+		for(var player in this.playerList){
+			if(this.playerList[player].color ==  color){
+				return this.getUniqueColorR();
+			}
+		}
+		return color;
+	}
 	resize(){
 		this.width = c.worldWidth;
 		this.height = c.worldHeight;

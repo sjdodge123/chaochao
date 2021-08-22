@@ -52,9 +52,11 @@ Colors.names = {
 Colors.random = function() {
     var result;
     var count = 0;
-    for (var prop in this.names)
-        if (Math.random() < 1/++count)
-           result = this.names[prop];
+    for (var prop in this.names){
+        if (Math.random() < 1/++count){
+            result = this.names[prop];
+        }
+    }
     return result;
 };
 Colors.decode = function(input){
@@ -65,7 +67,6 @@ Colors.decode = function(input){
         }
     }
 }
-
 
 function getColor(){
     return 'hsl(' + Math.floor(Math.random() * 360) + ', 100%, 50%)';
