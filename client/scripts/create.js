@@ -71,6 +71,8 @@ function clientConnect(){
                     for(var j=0;j<maps.length;j++){
                         if(maps[j].id == this.id){
                             vMap = JSON.parse(JSON.stringify(maps[j]));
+                            $('#author').val(vMap.author);
+                            $('#name').val(vMap.name);
                             $('#createWindow').show()
                             $('#loadWindow').hide();
                             return;
@@ -87,6 +89,8 @@ function clientConnect(){
 function setupPage(){
     $("#rebuildButton").on("click", function () {
         vMap = generateVMap();
+        $('#author').val("");
+        $('#name').val("");
         return false;
     });
     $("#slowTileButton").on("click", function () {
