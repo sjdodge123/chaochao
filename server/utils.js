@@ -6,6 +6,8 @@ var mapListing = [];
 var c = require('./config.json');
 c.port =  process.env.PORT || c.port;
 
+loadMaps();
+
 Colors = {};
 Colors.names = {
     aqua: "#00ffff",
@@ -95,15 +97,16 @@ exports.loadConfig = function(){
     return c;
 }
 exports.loadMaps = function(){
-    maps = [];
+    return maps;
+}
+exports.getMapListings = function(){
+    return mapListing;
+}
+
+function loadMaps(){
     var normalizedPath = require("path").join(__dirname, "../client/maps");
     fs.readdirSync(normalizedPath).forEach(function(file){
         mapListing.push(file);
         maps.push(require("../client/maps/" + file));
     });
-    return maps;
-    
-}
-exports.getMapListings = function(){
-    return mapListing;
 }

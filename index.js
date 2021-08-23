@@ -63,6 +63,7 @@ function update(){
   hostess.updateRooms(dt);
   if(pendingReboot == false){
       //25000000
+      /*
       var heapUsed = process.memoryUsage().heapUsed;
       if(heapUsed > 40000000){
           console.log("Performing Emergency reboot Memory Critical " + heapUsed);
@@ -71,6 +72,7 @@ function update(){
           console.log("Pending reboot.. Memory currently at " + heapUsed);
           pendingReboot = true;
       }
+      */
   }
 }
 

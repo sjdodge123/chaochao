@@ -50,6 +50,20 @@ canvas {
 	overflow: hidden;
 	display: none;
 }
+
+div.map-image{
+    margin: 5px;
+    float: left;
+    width: 256px;
+}
+div.map-image img{
+    width: 100%;
+    height: auto;
+}
+div.desc {
+    padding: 15px;
+    text-align: center;
+  }
 #game-title{
     font-family: "San Francisco";
     font-size: 72px;

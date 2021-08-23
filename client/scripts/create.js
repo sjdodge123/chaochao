@@ -1,4 +1,5 @@
 var server,
+    maps = [],
     createCanvas,
     voronoi = new Voronoi(),
     vMap,
@@ -50,9 +51,36 @@ var then = Date.now(),
     dt;
 
 window.onload = function() {
-    //server = clientConnect();
+    server = clientConnect();
     setupPage();
     enter();
+}
+
+function clientConnect(){
+    var server = io();
+
+    server.on("maplisting",function(mapnames){
+        if(maps.length > 0){
+            return;
+        }
+        for(var i=0;i<mapnames.length;i++){
+            $.getJSON("../maps/" + mapnames[i],function(data){
+                var index = maps.push(data);
+                $("#loadWindow").append('<div class="map-image"><button id="' + data.id +  '"><img src="' + data.thumbnail +'"><div class="desc">' + data.name + ' | ' +data.author +'</div></button></div>');
+                $("#"+data.id).on("click",function(){
+                    for(var j=0;j<maps.length;j++){
+                        if(maps[j].id == this.id){
+                            vMap = JSON.parse(JSON.stringify(maps[j]));
+                            $('#createWindow').show()
+                            $('#loadWindow').hide();
+                            return;
+                        }
+                    }
+                })
+            });
+        }
+    });
+    return server;
 }
 
 
@@ -98,6 +126,12 @@ function setupPage(){
     });
     $("#exportButton").on("click", function () {
         exportToJSON();
+        return false;
+    });
+    $("#loadButton").on("click", function () {
+        $('#createWindow').hide();
+        server.emit("getMaps");
+        $('#loadWindow').show();
         return false;
     });
 
@@ -211,11 +245,6 @@ function drawMap(){
         createContext.restore();
     }
 }
-function clientConnect(){
-    var server = io();
-    return server;
-}
-
 function handleClick(event){
     switch(event.which){
         case 1:{
@@ -367,9 +396,11 @@ function exportToJSON(){
     if(name == ""){
         name="unknown";
     }
+    vMap.thumbnail = createCanvas.toDataURL("image/jpeg",0.1);
     vMap.id = makeid(32);
-    vMap.author = author;
-    vMap.name = name;
+    vMap.author = author.substring(0,15);
+    vMap.name = name.substring(0,15);
+    
     var jsonData = JSON.stringify(vMap);
     navigator.clipboard.writeText(jsonData).then(function() {
         alert("Copied to Clipboard!");
