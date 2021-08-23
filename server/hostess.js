@@ -40,6 +40,8 @@ exports.updateRooms = function(dt){
 			delete roomList[sig];
 			continue;
 		}
+		room.update(dt);
+		/*
 		if(!room.game.gameEnded){
 			room.update(dt);
 		} else if(room.alive){
@@ -47,6 +49,7 @@ exports.updateRooms = function(dt){
 			messenger.messageRoomBySig(room.sig,"gameOver",room.game.winner);
 			reclaimRoom(room.sig); //setTimeout(reclaimRoom,roomKickTimeout*1000,room.sig);
 		}
+		*/
 	}
 }
 exports.getRoomBySig = function(sig){

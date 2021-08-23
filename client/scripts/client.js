@@ -1,4 +1,9 @@
 var config,
+	timeSinceLastCom = 0,
+	ping = 0,
+	pingTimeout = null,
+	lastTime = null,
+	serverTimeoutWait = 5,
 	playerWon = null;
 
 function clientConnect() {
@@ -8,13 +13,16 @@ function clientConnect() {
 		myID = id;
 	});
 
-	server.on("maplisting",function(mapnames){
-		for(var i=0;i<mapnames.length;i++){
-			$.getJSON("../maps/" + mapnames[i],function(data){
-				maps.push(data);
-			});
-		}
+	server.on("drop",function(){
+		calcPing();
 	});
+
+	server.on("serverKick",function(){
+		alert("You have been kicked from the game due to inactivity.");
+		server.disconnect();
+		window.parent.location.reload();
+	});
+
 
 	server.on("gameState", function(gameState){
 		config = gameState.config;
@@ -87,6 +95,15 @@ function clientConnect() {
 	server.on("newMap",function(newMapID){
 		loadNewMap(newMapID);
 	});
+
+	server.on("maplisting",function(mapnames){
+		for(var i=0;i<mapnames.length;i++){
+			$.getJSON("../maps/" + mapnames[i],function(data){
+				maps.push(data);
+			});
+		}
+	});
+
 	server.on("firstPlaceWinner",function(id){
 		//createFirstRankSymbol();
 		//playerList[id].alive = false;
@@ -101,6 +118,12 @@ function clientConnect() {
 	server.on("playerDied",function(id){
 		//playLavaNoise();
 		playerList[id].alive = false;
+	});
+	server.on('playerSleeping',function(id){
+		playerList[id].awake = false;
+	});
+	server.on('playerAwake',function(id){
+		playerList[id].awake = true;
 	});
 
 	//Game State Map changes
@@ -155,5 +178,25 @@ function clientConnect() {
 
 function clientSendStart(){
 	server.emit('enterGame');
+}
+
+function pingServer(){
+	clearTimeout(pingTimeout);
+	lastTime = new Date();
+	server.emit('drip');
+}
+
+function calcPing(){
+	ping = new Date() - lastTime;
+	pingTimeout = setTimeout(pingServer,1000);
+	timeSinceLastCom = 0;
+}
+
+function checkForTimeout(){
+	timeSinceLastCom++;
+	if(timeSinceLastCom > serverTimeoutWait){
+		server.disconnect();
+		window.parent.location.reload();
+	}
 }
 

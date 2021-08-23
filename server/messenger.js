@@ -28,6 +28,9 @@ exports.getClient = function(id){
 exports.messageRoomBySig = function(sig,header,payload){
 	messageRoomBySig(sig,header,payload);
 }
+exports.messageClientBySig = function(sig,header,payload){
+	messageClientBySig(sig,header,payload);
+}
 exports.getTotalPlayers = function(){
 	var count = 0;
 	for(var box in mailBoxList){
@@ -78,6 +81,10 @@ function checkForMail(client){
 		hostess.kickFromRoom(client.id);
 	});
 
+	client.on('drip',function(){
+		client.emit('drop');
+	});
+
 	client.on('movement',function(packet){
 		var room = hostess.getRoomBySig(roomMailList[client.id]);
 		if(room == undefined){
@@ -85,6 +92,7 @@ function checkForMail(client){
 		}
 		var player = room.playerList[client.id];
 		if(player != null){
+			player.wakeUp();
 			if(player.enabled){
 				player.moveForward = packet.moveForward;
 				player.moveBackward = packet.moveBackward;
@@ -101,4 +109,7 @@ function checkForMail(client){
 
 function messageRoomBySig(sig,header,payload){
 	io.to(String(sig)).emit(header,payload);
+}
+function messageClientBySig(sig,header,payload){
+	mailBoxList[sig].emit(header,payload);
 }

@@ -29,16 +29,16 @@ class Room {
     }
     leave(clientID){
         messenger.messageRoomBySig(this.sig,'playerLeft',clientID);
-        var client = messenger.getClient(clientID);
-		client.leave(String(this.sig));
         messenger.removeRoomMailBox(clientID);
+		var client = messenger.getClient(clientID);
+		client.leave(String(this.sig));
 		delete this.clientList[clientID];
 		delete this.playerList[clientID];
 		this.clientCount--;
     }
     update(dt){
+		this.checkAFK();
 		this.game.update(dt);
-		//this.checkForDeaths();
 		this.sendUpdates();
 	}
     sendUpdates(){
@@ -58,6 +58,15 @@ class Room {
 			}
 		}
 		return false;
+	}
+	checkAFK(){
+		for(var id in this.playerList){
+			if(this.playerList[id].kick){
+				console.log("Kicking " + id);
+				messenger.messageClientBySig(id,"serverKick",null);
+				this.leave(id);
+			}
+		}
 	}
     hasSpace(){
 		if(this.clientCount < this.size){
@@ -736,6 +745,17 @@ class Player extends Circle {
         this.id = id;
         this.roomSig = roomSig;
 
+		//Sleep Variables
+		this.awake = true;
+		this.kick = false;
+		this.sleepWaitTime = c.playerStartSleepTime;
+		this.sleepTimer = null;
+		this.sleepTimeLeft = this.sleepWaitTime;
+
+		this.kickWaitTime = c.playerAFKKickTime;
+		this.kickTimer = null;
+		this.kickTimeLeft = this.kickWaitTime;
+
 		//Game Variables
 		this.hittingLobbyButton = false;
 		this.reachedGoal = false;
@@ -763,6 +783,7 @@ class Player extends Circle {
 		this.currentSpeedBonus = 0;
     }
 	update(dt){
+		this.checkForSleep();
 		if(!this.alive){
 			return;
 		}
@@ -779,6 +800,41 @@ class Player extends Circle {
 	}
 	getSpeedBonus(){
 		return this.currentSpeedBonus;
+	}
+	wakeUp(){
+		this.sleepTimer = null;
+		this.kickTimer = null;
+		if(this.awake == false){
+			this.awake = true;
+			messenger.messageRoomBySig(this.roomSig,"playerAwake",this.id);
+		}
+	}
+	checkForSleep(){
+		if(this.sleepTimer != null){
+			this.sleepTimeLeft = ((this.sleepWaitTime*1000 - (Date.now() - this.sleepTimer))/(1000)).toFixed(1);
+			if(this.sleepTimeLeft > 0){
+				return;
+			}
+			this.checkAFK();
+			return;
+		}
+		this.sleepTimer = Date.now();
+	}
+	checkAFK(){
+		if(this.awake == true){
+			this.awake = false;
+			messenger.messageRoomBySig(this.roomSig,"playerSleeping",this.id);
+		}
+		if(this.kickTimer != null){
+			this.kickTimeLeft = ((this.kickWaitTime*1000 - (Date.now() - this.kickTimer))/(1000)).toFixed(1);
+			if(this.kickTimeLeft > 0){
+				return;
+			}
+			this.kick = true;
+			return;
+		}
+		this.kickTimer = Date.now();
+		
 	}
 	handleHit(object){
 		/*

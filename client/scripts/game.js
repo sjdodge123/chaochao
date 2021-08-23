@@ -10,6 +10,7 @@ var server = null,
     newHeight = 0,
     maps = [],
     oldNotches = {},
+    timeOutChecker = null;
     currentState = null;
     gameRunning = null;
 
@@ -63,6 +64,7 @@ function enterLobby(){
     clientSendStart();
 }
 function init(){
+    timeOutChecker = setInterval(checkForTimeout,1000);
     animloop();
     window.addEventListener("mousemove", calcMousePos, false);
     window.addEventListener("mousedown", handleClick, false);

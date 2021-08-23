@@ -29,7 +29,7 @@ function drawObjects(dt){
 }
 
 function drawBackground() {
-	gameContext.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
+    gameContext.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
 }
 function drawGameOverScreen(){
     if(playerWon == null){
@@ -58,7 +58,15 @@ function drawPunches(){
 function drawPunch(punch){
     gameContext.save();
     gameContext.beginPath();
-    gameContext.strokeStyle = punch.color;
+    gameContext.fillStyle = punch.color;
+    gameContext.arc(punch.x, punch.y, config.punchRadius, 0, 2 * Math.PI);
+    gameContext.fill();
+    gameContext.restore();
+
+    gameContext.save();
+    gameContext.beginPath();
+    gameContext.lineWidth = 1;
+    gameContext.strokeStyle = "black";
     gameContext.arc(punch.x, punch.y, config.punchRadius, 0, 2 * Math.PI);
     gameContext.stroke();
     gameContext.restore();
@@ -78,17 +86,24 @@ function drawMapTitle(){
 function drawPlayers(dt){
     for(var id in playerList){
         var player = playerList[id];
-        if(player == null){
+        if(id == myID){
             continue;
         }
-        if(currentState == config.stateMap.racing){
-            drawTrail(player);
-        }
-        if(player.alive == false){
-            continue;
-        }
-        drawPlayer(player);
+        checkDrawPlayer(player);
     }
+    checkDrawPlayer(playerList[myID]);
+}
+function checkDrawPlayer(player){
+    if(player == null){
+        return;
+    }
+    if(currentState == config.stateMap.racing || currentState == config.stateMap.collapsing){
+        drawTrail(player);
+    }
+    if(player.alive == false){
+        return;
+    }
+    drawPlayer(player);
 }
 function drawPlayer(player){
     gameContext.save();
@@ -98,10 +113,17 @@ function drawPlayer(player){
     gameContext.arc(player.x, player.y, player.radius, 0, 2 * Math.PI);
     gameContext.fillStyle = player.color;
     gameContext.fill();
-    
     gameContext.strokeStyle = "black";
     gameContext.stroke();
     gameContext.restore();
+
+    if(player.awake == false){
+        gameContext.save();
+        gameContext.fillStyle = "black";
+        gameContext.font = '10px serif';
+        gameContext.fillText("zzZZ..", player.x+5, player.y-10);
+        gameContext.restore();
+    }
 }
 function drawTrail(player){
     gameContext.save();
@@ -120,13 +142,20 @@ function drawTrail(player){
 
 function drawWorld(){
 	if(world != null){
+        gameContext.save();
+		gameContext.beginPath();
+        gameContext.fillStyle = "#F0F0F0";
+        gameContext.rect(world.x,world.y,world.width,world.height);
+        gameContext.fill();
+        gameContext.restore();
+
 		gameContext.save();
 		gameContext.beginPath();
-        gameContext.lineWidth = 3;
-        gameContext.strokeStyle = "grey";
+        gameContext.lineWidth = 4;
+        gameContext.strokeStyle = "black";
         gameContext.rect(world.x,world.y,world.width,world.height);
         gameContext.stroke();
-        gameContext.restore();
+        gameContext.restore();   
 	}
 }
 

@@ -61,6 +61,7 @@ function createPlayer(dataArray,isAI){
 	playerList[index].color = dataArray[3];
 	playerList[index].alive = true;
 	playerList[index].notches = 0;
+	playerList[index].awake = true;
 	playerList[index].trail = new Trail({x:dataArray[1],y:dataArray[2]});
     /*
 	playerList[index].weapon = {}
