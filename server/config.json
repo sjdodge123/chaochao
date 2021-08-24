@@ -5,7 +5,7 @@
     "punchRadius": 11,
     "worldWidth":1366,
     "worldHeight":768,
-    "worldCollapseSpeed":4,
+    "worldCollapseSpeed":5,
     "minPlayersToStart": 3,
     "maxPlayersInRoom" : 15,
     "forceConstant" :5000,

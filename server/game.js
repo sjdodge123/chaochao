@@ -472,7 +472,7 @@ class GameBoard {
 	clean(){
 		this.lobbyStartButton = null;
 		this.collapseLoc = {};
-		this.collapseLine = this.world.height;
+		this.collapseLine = this.world.height + 400;
 	}
 	loadNextMap(){
 		this.currentMap = {};
