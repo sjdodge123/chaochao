@@ -3,6 +3,7 @@ var server,
     createCanvas,
     voronoi = new Voronoi(),
     vMap,
+    mapReady = false,
     mousex = 0,
     mousey = 0,
     lastCell,
@@ -52,8 +53,13 @@ var then = Date.now(),
 
 window.onload = function() {
     server = clientConnect();
+    server.emit("getMaps");
+    gameRunning = true;
     setupPage();
-    enter();
+    rebuild();
+    $('#loadWindow').show();
+    $('#createWindow').hide();
+    init();
 }
 
 function clientConnect(){
@@ -65,7 +71,7 @@ function clientConnect(){
         }
         for(var i=0;i<mapnames.length;i++){
             $.getJSON("../maps/" + mapnames[i],function(data){
-                var index = maps.push(data);
+                maps.push(data);
                 $("#loadWindow").append('<div class="map-image"><button id="' + data.id +  '"><img src="' + data.thumbnail +'"><div class="desc">' + data.name + ' | ' +data.author +'</div></button></div>');
                 $("#"+data.id).on("click",function(){
                     for(var j=0;j<maps.length;j++){
@@ -73,7 +79,7 @@ function clientConnect(){
                             vMap = JSON.parse(JSON.stringify(maps[j]));
                             $('#author').val(vMap.author);
                             $('#name').val(vMap.name);
-                            $('#createWindow').show()
+                            $('#createWindow').show();
                             $('#loadWindow').hide();
                             return;
                         }
@@ -87,10 +93,13 @@ function clientConnect(){
 
 
 function setupPage(){
+    
+    $("#createNew").on("click",function(){
+        $('#loadWindow').hide();
+        $('#createWindow').show();
+    });
     $("#rebuildButton").on("click", function () {
-        vMap = generateVMap();
-        $('#author').val("");
-        $('#name').val("");
+        rebuild();
         return false;
     });
     $("#slowTileButton").on("click", function () {
@@ -133,8 +142,8 @@ function setupPage(){
         return false;
     });
     $("#loadButton").on("click", function () {
+        $("#createNewImage").attr("src",createCanvas.toDataURL("image/jpeg",0.1));
         $('#createWindow').hide();
-        server.emit("getMaps");
         $('#loadWindow').show();
         return false;
     });
@@ -151,14 +160,15 @@ function setupPage(){
 
     createCanvas = document.getElementById('createCanvas');
     createContext = createCanvas.getContext('2d');
+    
+}
+function rebuild(){
+    vMap = generateVMap();
+    $('#author').val("");
+    $('#name').val("");
+    $("#createNewImage").attr("src",createCanvas.toDataURL("image/jpeg",0.1));
 }
 
-function enter(){
-    vMap = generateVMap();
-    $('#createWindow').show();
-    gameRunning = true;
-    init();
-}
 function init(){
     animloop();
     window.addEventListener("mousemove", cellUnderMouse, false);
@@ -183,6 +193,10 @@ function animloop(){
 function gameLoop(dt){
     currentCell = cellIdFromPoint(mousex,mousey);
     drawEditor(dt);
+    if(mapReady == false){
+        mapReady = true;
+        rebuild();
+    }
 }
 
 function resize(){
