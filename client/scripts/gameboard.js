@@ -18,7 +18,7 @@ function resetGameboard(){
 	currentMap = {};
 }
 function updateGameboard(dt){
-	if(currentState == config.stateMap.racing){
+	if(currentState == config.stateMap.racing || currentState == config.stateMap.collapsing){
 		updateTrails();
 	}
 }
