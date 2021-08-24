@@ -15,6 +15,7 @@ var server,
     world = {x:0,y:0,width:1366,height:768},
     gate = {x:0,y:0,width:75,height:world.height},
     map = {x:75,y:0,width:world.width,height:world.height},
+    createWindow = document.getElementById("createWindow"),
     createContext;
 
 var tileTypes = {
@@ -79,8 +80,10 @@ function clientConnect(){
                             vMap = JSON.parse(JSON.stringify(maps[j]));
                             $('#author').val(vMap.author);
                             $('#name').val(vMap.name);
-                            $('#createWindow').show();
                             $('#loadWindow').hide();
+                            $('#createWindow').show();
+                            resize();
+                            addListeners();
                             return;
                         }
                     }
@@ -93,10 +96,11 @@ function clientConnect(){
 
 
 function setupPage(){
-    
     $("#createNew").on("click",function(){
         $('#loadWindow').hide();
         $('#createWindow').show();
+        resize();
+        addListeners();
     });
     $("#rebuildButton").on("click", function () {
         rebuild();
@@ -145,6 +149,13 @@ function setupPage(){
         $("#createNewImage").attr("src",createCanvas.toDataURL("image/jpeg",0.1));
         $('#createWindow').hide();
         $('#loadWindow').show();
+
+        window.removeEventListener("mousemove", cellUnderMouse, false);
+        window.removeEventListener("mousedown", handleClick, false);
+        window.removeEventListener("mouseup", handleUnClick, false);
+        window.removeEventListener('contextmenu', function(ev) {
+            return false;
+        }, false);
         return false;
     });
 
@@ -162,23 +173,25 @@ function setupPage(){
     createContext = createCanvas.getContext('2d');
     
 }
+
+function addListeners(){
+    window.addEventListener("mousemove", cellUnderMouse, false);
+    window.addEventListener("mousedown", handleClick, false);
+    window.addEventListener("mouseup", handleUnClick, false);
+    window.addEventListener('contextmenu', function(ev) {
+        return false;
+    }, false);
+}
 function rebuild(){
     vMap = generateVMap();
     $('#author').val("");
     $('#name').val("");
     $("#createNewImage").attr("src",createCanvas.toDataURL("image/jpeg",0.1));
+    resize();
 }
 
 function init(){
     animloop();
-    window.addEventListener("mousemove", cellUnderMouse, false);
-    window.addEventListener("mousedown", handleClick, false);
-    window.addEventListener("mouseup", handleUnClick, false);
-    //window.addEventListener("keydown", keyDown, false);
-    //window.addEventListener("keyup", keyUp, false);
-    window.addEventListener('contextmenu', function(ev) {
-        return false;
-    }, false);
 }
 
 function animloop(){
@@ -200,7 +213,8 @@ function gameLoop(dt){
 }
 
 function resize(){
-    var viewport = {width:window.innerWidth,height:window.innerHeight};
+    var rect = createWindow.getBoundingClientRect();
+    var viewport = {width:rect.width,height:rect.height};
     var scaleToFitX = viewport.width / createCanvas.width;
     var scaleToFitY = viewport.height / createCanvas.height;
     var currentScreenRatio = viewport.width/viewport.height;
@@ -213,7 +227,8 @@ function resize(){
         newWidth = createCanvas.width * optimalRatio;
         newHeight = createCanvas.height * optimalRatio;
     }
-
+    //createCanvas.style.left = createWindow.left;
+    //createCanvas.style.top = createWindow.top;
     createCanvas.style.width = newWidth + "px";
     createCanvas.style.height = newHeight + "px";
 }

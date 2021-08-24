@@ -39,16 +39,16 @@ canvas {
 
 #gameWindow{
 	background: white;
-	position: absolute;
 	overflow: none;
 	display: none;
-	width: 100%;
-	height: 100%;
+    height: 900px;
 }
 #createWindow{
+    margin-top: 1%;
     background: white;
 	overflow: hidden;
 	display: none;
+    height: 768px;
 }
 
 div.map-image{
