@@ -2,12 +2,13 @@
     font-family: "San Francisco";
     font-weight: 400;
     src: url("https://applesocial.s3.amazonaws.com/assets/styles/fonts/sanfrancisco/sanfranciscodisplay-regular-webfont.woff");
-  }
-
-html{
-    overflow: none;
 }
-
+@font-face {
+    font-family: 'FontAwesome';
+    src: url('./webfonts/fa-regular-400.ttf');
+    font-weight: normal;
+    font-style: normal;
+}
 body {
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
 }
@@ -15,6 +16,8 @@ button {
 	margin-top: 10px;
 }
 canvas {
+    position: relative;
+    font-weight: 600;
 	padding-left: 0;
     padding-right: 0;
     margin-left: auto;
@@ -39,8 +42,8 @@ canvas {
 
 #gameWindow{
 	background: white;
-	overflow: none;
 	display: none;
+    overflow: hidden;
     height: 900px;
 }
 #createWindow{
@@ -48,7 +51,24 @@ canvas {
     background: white;
 	overflow: hidden;
 	display: none;
+    height: 968px;
+    
+}
+#canvasWindow{
+    display: block;
+    position: relative;
     height: 768px;
+}
+
+#loadWindow{
+    float:left;
+    display: block;
+    padding-bottom: 100px;
+}
+#controlPanel{
+    display: block;
+    position: relative;
+    height: 200px;
 }
 
 div.map-image{

@@ -11,7 +11,21 @@
     <body>
         <!-- Game enclosed here -->
         <div id="createWindow">
-            <canvas id="createCanvas" width="1366" height="768"></canvas>
+            <div id="canvasWindow"><canvas id="createCanvas" width="1366" height="768"></canvas></div>
+            <div id="controlPanel" class="mx-auto">
+                <button id="loadButton" class="btn" >Load Map</button>
+                <button id="rebuildButton" class="btn" >Randomize</button>
+                <button id="slowTileButton" class="btn" >Slow Tile</button>
+                <button id="normalTileButton" class="btn" >Normal Tile</button>
+                <button id="fastTileButton" class="btn" >Fast Tile</button>
+                <button id="lavaTileButton" class="btn" >Lava Tile</button>
+                <button id="iceTileButton" class="btn" >Ice Tile</button>
+                <button id="abilityTileButton" class="btn" >Ability Tile</button>
+                <button id="goalTileButton" class="btn" >Goal</button>
+                <input type="text" id="author" name="author" placeholder="author" maxlength="15"></input>
+                <input type="text" id="name" name="name" placeholder="map name" maxlength="15"></input>
+                <button id="exportButton" class="btn" >Export</button>
+            </div>
         </div>
         <div id="loadWindow">
             <div class="map-image">
@@ -20,27 +34,8 @@
                 </button>
             </div>
         </div>
-        <nav class="navbar fixed-bottom navbar-expand-sm navbar-dark bg-dark">
-            <a class="navbar-brand" href="/">ChaoChao</a>
-            <div class="collapse navbar-collapse" id="navbarCollapse">
-                <ul class="navbar-nav mr-auto">
-                    <li class="nav-item active"><button id="rebuildButton" class="btn" >Rebuild</button></li>
-                    <li class="nav-item"><button id="slowTileButton" class="btn" >Slow Tile</button></li>
-                    <li class="nav-item"><button id="normalTileButton" class="btn" >Normal Tile</button></li>
-                    <li class="nav-item"><button id="fastTileButton" class="btn" >Fast Tile</button></li>
-                    <li class="nav-item"><button id="lavaTileButton" class="btn" >Lava Tile</button></li>
-                    <li class="nav-item"><button id="iceTileButton" class="btn" >Ice Tile</button></li>
-                    <li class="nav-item"><button id="abilityTileButton" class="btn" >Ability Tile</button></li>
-                    <li class="nav-item"><button id="goalTileButton" class="btn" >Goal</button></li>
-                    <li class="nav-item"><button id="exportButton" class="btn" >Export</button></li>
-                    <li class="nav-item"><button id="loadButton" class="btn" >Load Map</button></li>
-                </ul>
-                <input type="text" id="author" name="author" placeholder="author" maxlength="15"></input>
-                <input type="text" id="name" name="name" placeholder="map name" maxlength="15"></input>
-              </div>
-        </nav>
-        
-        
+
+            
 
         <!-- Load bootstrap -->
         <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.3/umd/popper.min.js" integrity="sha384-ZMP7rVo3mIykV+2+9J3UJ46jBk0WLaUAdn689aCwoqbBJiSnjAK/l8WvCWPIPm49" crossorigin="anonymous"></script>

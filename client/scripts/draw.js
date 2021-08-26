@@ -23,6 +23,7 @@ function drawObjects(dt){
     }
     drawPlayers(dt);
     drawPunches();
+    drawAbilties();
     if(currentState == config.stateMap.gameOver){
         drawGameOverScreen();
     }
@@ -70,6 +71,17 @@ function drawPunch(punch){
     gameContext.arc(punch.x, punch.y, config.punchRadius, 0, 2 * Math.PI);
     gameContext.stroke();
     gameContext.restore();
+}
+
+function drawAbilties(){
+    if(blindfold.color != null){
+        gameContext.save();
+		gameContext.beginPath();
+        gameContext.fillStyle = blindfold.color;
+        gameContext.rect(world.x,world.y,world.width,world.height);
+        gameContext.fill();
+        gameContext.restore();
+    }
 }
 
 function drawMapTitle(){
@@ -217,10 +229,22 @@ function drawMap(){
             }
             var color = locateColor(cell.id);
             gameContext.lineWidth = 0.5;
+            gameContext.shadowBlur = null;
+            gameContext.shadowColor = null;
             gameContext.fillStyle = color;
             gameContext.strokeStyle = '#adadad';
             gameContext.fill();
             gameContext.stroke();
+
+            if(cell.id > 99){
+                var box = getBbox(cell);
+                var font = "100 32px 'FontAwesome'"
+                gameContext.fillStyle = "purple";
+                gameContext.shadowBlur = 5;
+                gameContext.shadowColor = "black";
+                gameContext.font = font;
+                gameContext.fillText(locateSymbol(cell.id), (box.x + box.width/2),(box.y +box.height/2));      
+            }
         }
         gameContext.restore();
     }
@@ -228,11 +252,22 @@ function drawMap(){
 
 function locateColor(id){
     if(id == null){
-        return "red";
+        return "purple";
+    }
+    if(id > 99){
+        return config.tileMap.ability.color;
     }
     for(var type in config.tileMap){
         if(id == config.tileMap[type].id){
             return config.tileMap[type].color;
+        }
+    }
+    
+}
+function locateSymbol(id){
+    for(var type in config.tileMap.abilities){
+        if(id == config.tileMap.abilities[type].id){
+            return config.tileMap.abilities[type].symbol;
         }
     }
 }
@@ -360,5 +395,30 @@ function calculateNotchMoveAmt(){
         playerList[id].distanceToMove = playerList[id].deltaNotches*notchDistanceApart;
     }
 }
+
+function getBbox(cell) {
+    var halfedges = cell.halfedges,
+        iHalfedge = halfedges.length,
+        xmin = Infinity,
+        ymin = Infinity,
+        xmax = -Infinity,
+        ymax = -Infinity,
+        v, vx, vy;
+    while (iHalfedge--) {
+        v = getStartpoint(halfedges[iHalfedge]);
+        vx = v.x;
+        vy = v.y;
+        if (vx < xmin) {xmin = vx;}
+        if (vy < ymin) {ymin = vy;}
+        if (vx > xmax) {xmax = vx;}
+        if (vy > ymax) {ymax = vy;}
+    }
+    return {
+        x: xmin,
+        y: ymin,
+        width: xmax-xmin,
+        height: ymax-ymin
+    };
+};
 
 

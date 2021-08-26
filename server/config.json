@@ -6,7 +6,7 @@
     "worldWidth":1366,
     "worldHeight":768,
     "worldCollapseSpeed":7,
-    "minPlayersToStart": 3,
+    "minPlayersToStart": 1,
     "maxPlayersInRoom" : 15,
     "forceConstant" :5000,
 
@@ -45,13 +45,28 @@
         },
         "ability":{
             "id": 5,
-            "color": "#696969"
+            "color": "#F0F0F0"
         },
         "goal":{
             "id": 6,
             "color": "#FFD700"
+        },
+        "bumper":{
+            "id":7,
+            "color":"yellow"
+        },
+        "abilities":{
+            "blindfold": {
+                "id":100,
+                "symbol":"\uf070",
+                "duration":4
+            }
         }
     },
+
+
+    
+
     "lobbyWaitTime": 5,
     "gatedWaitTime": 9,
     "newRaceWaitTime": 10,

@@ -7,6 +7,7 @@ var mousex,
 	currentMap,
 	punchList,
 	playerList,
+	blindfold,
 	clientList;
 
 resetGameboard();
@@ -15,6 +16,7 @@ function resetGameboard(){
 	playerList = {};
 	clientList = {};
 	punchList = {};
+	blindfold = {};
 	currentMap = {};
 }
 function updateGameboard(dt){
@@ -62,6 +64,7 @@ function createPlayer(dataArray,isAI){
 	playerList[index].alive = true;
 	playerList[index].notches = 0;
 	playerList[index].awake = true;
+	playerList[index].ability = null;
 	playerList[index].trail = new Trail({x:dataArray[1],y:dataArray[2]});
     /*
 	playerList[index].weapon = {}
@@ -158,6 +161,17 @@ function loadNewMap(id){
 		}
 	}
 }
+function applyAbilites(abilities){
+	if(abilities.length == 0){
+		return;
+	}
+	for(var i=0;i<currentMap.cells.length;i++){
+		if(currentMap.cells[i].id == config.tileMap.ability.id){
+			currentMap.cells[i].id = abilities[currentMap.cells[i].site.voronoiId];
+		}
+	}
+	
+}
 
 function spawnLobbyStartButton(payload){
 	if(payload == null){
@@ -203,6 +217,7 @@ function fullReset(){
 	for(var id in playerList){
 		var player = playerList[id];
 		player.alive = true;
+		player.ability = null;
 		player.trail = new Trail({x:player.x,y:player.y});
 		player.notches = 0;
 		oldNotches[id] = player.notches;
@@ -221,6 +236,24 @@ function collapseCells(cells){
 		}
 	}
 	
+}
+
+function playerPickedUpAbility(payload){
+	playerList[payload.owner].ability = payload.ability;
+	for(var i=0;i<currentMap.cells.length;i++){
+		var cell = currentMap.cells[i];
+		if(cell.site.voronoiId == payload.voronoiId){
+			cell.id = config.tileMap.normal.id;
+			return;
+		}
+	}
+}
+function createBlindFold(owner){
+	blindfold.color = this.playerList[owner].color;
+	var int = setInterval(function(){
+		clearInterval(int);
+		blindfold.color = null;
+	},config.tileMap.abilities.blindfold.duration*1000);
 }
 
 class Trail {
@@ -244,5 +277,3 @@ class Trail {
 		}
 	}
 }
-
-

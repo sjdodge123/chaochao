@@ -15,7 +15,7 @@ var server,
     world = {x:0,y:0,width:1366,height:768},
     gate = {x:0,y:0,width:75,height:world.height},
     map = {x:75,y:0,width:world.width,height:world.height},
-    createWindow = document.getElementById("createWindow"),
+    canvasWindow = document.getElementById("canvasWindow"),
     createContext;
 
 var tileTypes = {
@@ -213,7 +213,7 @@ function gameLoop(dt){
 }
 
 function resize(){
-    var rect = createWindow.getBoundingClientRect();
+    var rect = canvasWindow.getBoundingClientRect();
     var viewport = {width:rect.width,height:rect.height};
     var scaleToFitX = viewport.width / createCanvas.width;
     var scaleToFitY = viewport.height / createCanvas.height;
@@ -227,8 +227,8 @@ function resize(){
         newWidth = createCanvas.width * optimalRatio;
         newHeight = createCanvas.height * optimalRatio;
     }
-    //createCanvas.style.left = createWindow.left;
-    //createCanvas.style.top = createWindow.top;
+    var controlPanel = document.getElementById("controlPanel");
+    controlPanel.style.width = newWidth + "px";
     createCanvas.style.width = newWidth + "px";
     createCanvas.style.height = newHeight + "px";
 }

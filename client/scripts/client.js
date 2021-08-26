@@ -92,8 +92,9 @@ function clientConnect() {
 		*/
 	});
 	
-	server.on("newMap",function(newMapID){
-		loadNewMap(newMapID);
+	server.on("newMap",function(payload){
+		loadNewMap(payload.id);
+		applyAbilites(payload.abilities);
 	});
 
 	server.on("maplisting",function(mapnames){
@@ -171,6 +172,12 @@ function clientConnect() {
 	});
 	server.on('collapsedCells',function(cells){
 		collapseCells(cells);
+	});
+	server.on("abilityAcquired",function(payload){
+		playerPickedUpAbility(payload);
+	});
+	server.on("blindfoldUsed",function(owner){
+		createBlindFold(owner);
 	});
 
     return server;

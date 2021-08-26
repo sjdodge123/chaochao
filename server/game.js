@@ -324,6 +324,7 @@ class GameBoard {
 	constructor(world,playerList,engine,roomSig){
 		this.world = world;
 		this.playerList = playerList;
+		this.abilityList = {};
 		this.punchList = {};
 		this.engine = engine;
 		this.roomSig = roomSig;
@@ -333,6 +334,8 @@ class GameBoard {
 		this.maps = utils.loadMaps();
 		this.mapsPlayed = [];
 		this.currentMap = {};
+
+		this.allAbilityIDs = this.indexAbilities();
 		this.collapseLoc = {};
 		this.collapseLine = this.world.height;
 	}
@@ -341,6 +344,7 @@ class GameBoard {
 		this.collapseMap(currentState);
 		this.checkCollisions(currentState);
 		this.updatePlayers(currentState,dt);
+		this.checkCleanUp(currentState);
 	}
 	checkCollisions(currentState){
 		var objectArray = [];
@@ -395,9 +399,22 @@ class GameBoard {
 		
 		this.engine.broadBase(objectArray);
 	}
+	checkCleanUp(currentState){
+		for(var id in this.abilityList){
+			if(this.abilityList[id].alive == false){
+				this.playerList[this.abilityList[id].ownerId].ability = null;
+				delete this.abilityList[id];
+			}
+		}
+	}
 	updatePlayers(active,dt){
 		for(var playerID in this.playerList){
 			var player = this.playerList[playerID];
+			if(player.acquiredAbility != null){
+				this.abilityList[playerID] = player.ability;
+				this.changeTile(player.acquiredAbility,c.tileMap.normal.id);
+				player.acquiredAbility = null;
+			}
 			player.update(dt);
 			if(player.punch != null){
 				this.punchList[player.id] = player.punch;
@@ -435,16 +452,24 @@ class GameBoard {
 		var collapsedCells = [];
 		var cells = this.currentMap.cells;
 		for(var i=0;i<cells.length;i++){
-			if(cells[i].id == 6 || cells[i].id == 3){
+			if(cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.normal.id){
 				continue;
 			}
 			var distance = utils.getMag(this.collapseLoc.x - cells[i].site.x, this.collapseLoc.y - cells[i].site.y);
 			if(this.collapseLine < distance){
-				cells[i].id = 3;
+				cells[i].id = c.tileMap.normal.id;
 				collapsedCells.push(cells[i].site.voronoiId);	
 			}
 		}
 		messenger.messageRoomBySig(this.roomSig,'collapsedCells',collapsedCells);
+	}
+	changeTile(voronoiId,newId){
+		for(var i=0;i<this.currentMap.cells.length;i++){
+			if(this.currentMap.cells[i].site.voronoiId == voronoiId){
+				this.currentMap.cells[i].id = newId;
+				return;
+			}
+		}
 	}
 	resetGame(){
 		this.mapsPlayed = [];
@@ -495,9 +520,7 @@ class GameBoard {
 		var nextMapId = this.getRandomMapR();
 		this.currentMap = JSON.parse(JSON.stringify(this.maps[nextMapId]));
 		this.mapsPlayed.push(this.currentMap.id);
-
-		messenger.messageRoomBySig(this.roomSig,"newMap",this.currentMap.id);
-		
+		messenger.messageRoomBySig(this.roomSig,"newMap",{id:this.currentMap.id,abilities:this.generateAbilities()});
 	}
 	getRandomMapR(){
 		var randomIndex = utils.getRandomInt(0,this.maps.length-1);
@@ -508,6 +531,43 @@ class GameBoard {
 			}
 		}
 		return randomIndex;
+	}
+	generateAbilities(){
+		var abilityTilesAvaliable = [];
+		var abilities = [];
+		var indexMap = {};
+		for(var i=0;i<this.currentMap.cells.length;i++){
+			if(this.currentMap.cells[i].id == c.tileMap.ability.id){
+				abilityTilesAvaliable.push(i);
+			}
+		}
+		if(abilityTilesAvaliable.length == 0){
+			return indexMap;
+		}
+		var numAbilitiesToSpawn = utils.getRandomInt(0,abilityTilesAvaliable.length-1);
+		for(var j=0;j<numAbilitiesToSpawn;j++){
+			abilities.push(this.spawnNewAbility());
+		}
+		for(var p=0;p<abilityTilesAvaliable.length;p++){
+			if(p >= numAbilitiesToSpawn){
+				indexMap[this.currentMap.cells[abilityTilesAvaliable[p]].site.voronoiId] = c.tileMap.normal.id;
+				this.currentMap.cells[abilityTilesAvaliable[p]].id = c.tileMap.normal.id;
+				continue;
+			}
+			indexMap[this.currentMap.cells[abilityTilesAvaliable[p]].site.voronoiId] = abilities[p];
+			this.currentMap.cells[abilityTilesAvaliable[p]].id = abilities[p];
+		}
+		return indexMap;
+	}
+	spawnNewAbility(){
+		return this.allAbilityIDs[utils.getRandomInt(0,this.allAbilityIDs.length-1)];
+	}
+	indexAbilities(){
+		var abilities = [];
+		for(var ability in c.tileMap.abilities){
+			abilities.push(c.tileMap.abilities[ability].id);
+		}
+		return abilities;
 	}
 }
 
@@ -768,6 +828,11 @@ class Player extends Circle {
 		this.turnLeft = false;
 		this.turnRight = false;
 		this.attack = false;
+		
+
+		//Attack
+		this.acquiredAbility = null;
+		this.ability = null;
 		this.punch = null;
 
 		//Engine Variables
@@ -789,14 +854,24 @@ class Player extends Circle {
 		}
 		this.dt = dt;
 		this.move();
-		if(this.attack){
-			this.punch = new Punch(this.x,this.y,c.punchRadius,this.color,this.id,this.roomSig);
-			messenger.messageRoomBySig(this.roomSig,"punch",compressor.sendPunch(this.punch));
-		}
+		this.checkAttack();
 	}
 	move(){
 		this.x = this.newX;
 		this.y = this.newY;
+	}
+	checkAttack(){
+		if(this.attack){
+			if(this.ability != null){
+				this.ability.use();
+				return;
+			}
+			if(this.punch != null){
+				return;
+			}
+			this.punch = new Punch(this.x,this.y,c.punchRadius,this.color,this.id,this.roomSig);
+			messenger.messageRoomBySig(this.roomSig,"punch",compressor.sendPunch(this.punch));
+		}
 	}
 	getSpeedBonus(){
 		return this.currentSpeedBonus;
@@ -855,43 +930,50 @@ class Player extends Circle {
 			this.killPlayer();
 			return;
 		}
+
 		if(object.isMapCell){
-			//Slow
-			if(object.id == 0){
-				this.acel = object.acel;
-				this.dragCoeff = object.dragCoeff;
-				this.brakeCoeff = object.brakeCoeff;
-			}
-			//Normal
-			if(object.id == 1){
+			if(object.id == c.tileMap.normal.id){
 				this.acel = object.acel;
 				this.brakeCoeff = object.brakeCoeff;
 				this.dragCoeff = object.dragCoeff;
+				return;
 			}
-			//Fast
-			if(object.id == 2){
+			if(object.id == c.tileMap.slow.id){
 				this.acel = object.acel;
 				this.dragCoeff = object.dragCoeff;
 				this.brakeCoeff = object.brakeCoeff;
+				return;
+			}	
+			if(object.id == c.tileMap.fast.id){
+				this.acel = object.acel;
+				this.dragCoeff = object.dragCoeff;
+				this.brakeCoeff = object.brakeCoeff;
+				return;
 			}
-			//Lava
-			if(object.id == 3){
+			if(object.id == c.tileMap.lava.id){
 				this.killPlayer();
 				return;
 			}
-			//Ice
-			if(object.id == 4){
+			if(object.id == c.tileMap.ice.id){
 				this.acel = object.acel;
 				this.brakeCoeff = object.brakeCoeff;
 				this.dragCoeff = object.dragCoeff;
+				return;
 			}
-
-			//Goal
-			if(object.id == 6){
+			if(object.id == c.tileMap.goal.id){
 				this.alive = false;
 				this.reachedGoal = true;
 				this.timeReached = Date.now();
 				messenger.messageRoomBySig(this.roomSig,"playerConcluded",this.id);
+				return;
+			}
+			if(object.id == c.tileMap.abilities.blindfold.id){
+				if(this.ability != null){
+					return;
+				}
+				this.ability = new Blindfold(this.id,this.roomSig);
+				this.acquiredAbility = object.voronoiId;
+				messenger.messageRoomBySig(this.roomSig,"abilityAcquired",{owner:this.id,ability:object.id,voronoiId:object.voronoiId});
 				return;
 			}
 			
@@ -932,6 +1014,8 @@ class Player extends Circle {
 		this.reachedGoal = false;
 		this.timeReached = null;
 		this.punch = null;
+		this.ability = null;
+		this.acquiredAbility = null;
 	}
 }
 
@@ -944,6 +1028,31 @@ class Punch extends Circle{
 	}
 	handleHit(object){
 
+	}
+}
+class Ability {
+	constructor(owner,roomSig){
+		this.roomSig = roomSig;
+		this.ownerId = owner;
+		this.alive = true;
+	}
+	update(){
+
+	}
+	use(){
+		console.log("unimplemented");
+	}
+}
+class Blindfold extends Ability{
+	constructor(owner,roomSig){
+		super(owner,roomSig);
+	}
+	use(){
+		if(this.alive == false){
+			return;
+		}
+		this.alive = false;
+		messenger.messageRoomBySig(this.roomSig,"blindfoldUsed",this.ownerId);
 	}
 }
 

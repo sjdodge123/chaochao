@@ -348,6 +348,7 @@ function checkCollideCells(player, map) {
 		cell = cells[iCell];
 		if (pointIntersection(player.x, player.y, cells[iCell]) > 0) {
 			var mapCell = locateCell(cell.id);
+			mapCell.voronoiId = cell.site.voronoiId;
 			mapCell.isMapCell = true;
 			player.handleHit(mapCell);
 		}
@@ -399,9 +400,14 @@ function compareSite(siteA,siteB){
     return true;
 }
 function locateCell(id){
+	if(id > 99){
+		for(var type in c.tileMap.abilities){
+			return c.tileMap.abilities[type];
+		}
+	}
     for(var type in c.tileMap){
         if(id == c.tileMap[type].id){
             return c.tileMap[type];
         }
-    }
+	}
 }
