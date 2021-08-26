@@ -8,6 +8,7 @@ var mousex,
 	punchList,
 	playerList,
 	blindfold,
+	pingCircles = [],
 	clientList;
 
 resetGameboard();
@@ -155,11 +156,35 @@ function checkGameState(payload){
 
 function loadNewMap(id){
 	currentMap = {};
+	pingCircles = [];
 	for(var i=0;i<maps.length;i++){
 		if(id == maps[i].id){
 			currentMap = JSON.parse(JSON.stringify(maps[i]));
+			break;
 		}
 	}
+	for(var j=0;j<currentMap.cells.length;j++){
+		if(currentMap.cells[j].id == config.tileMap.goal.id){
+			var pingCircle = {x:currentMap.cells[j].site.x,y:currentMap.cells[j].site.y,radius:0,pass:0};
+			pingCircles.push(pingCircle);
+			var interval = setInterval(function(ping){
+				if(ping.pass == 2){
+					var index = pingCircles.indexOf(ping);
+					pingCircles.splice(index,1);
+					clearInterval(interval);
+				}
+				if(ping.radius > 500){
+					ping.radius = 0;
+					ping.pass++;
+				} else{
+					ping.radius+=10;
+				}
+				
+			},50,pingCircle);
+		}
+	}
+	
+	
 }
 function applyAbilites(abilities){
 	if(abilities.length == 0){

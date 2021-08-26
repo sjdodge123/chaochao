@@ -19,6 +19,7 @@ function drawObjects(dt){
        currentState == config.stateMap.collapsing){
         drawGate();
         drawMap();
+        drawPingCircles();
         drawMapTitle();
     }
     drawPlayers(dt);
@@ -206,6 +207,22 @@ function drawGate(){
         gameContext.fill();
         gameContext.restore();
     }
+}
+function drawPingCircles(){
+    if(pingCircles.length == 0){
+        return;
+    }
+    gameContext.save();
+    gameContext.lineWidth = 3;
+    gameContext.strokeStyle = config.tileMap.goal.color;
+    gameContext.shadowBlur = 3;
+    gameContext.shadowColor = "black";
+    for(var i=0;i<pingCircles.length;i++){
+        gameContext.beginPath();
+        gameContext.arc(pingCircles[i].x, pingCircles[i].y, pingCircles[i].radius, 0, 2 * Math.PI);
+        gameContext.stroke();
+    }
+    gameContext.restore();
 }
 function drawMap(){
     if(currentMap != null){
