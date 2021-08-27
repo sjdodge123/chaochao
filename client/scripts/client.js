@@ -33,37 +33,13 @@ function clientConnect() {
 		interval = config.serverTickSpeed;
 		gameRunning = true;
 		init();
-		//Testing overview state
-		/*
-		currentState = config.stateMap.overview;
-		
-		for(var i=0;i<10;i++){
-			playerList[i] = {};
-			playerList[i].id = i;
-			playerList[i].color = getColor();
-		}
-		for(var player in playerList){
-			oldNotches[player] = getRandomInt(0,config.playerNotchesToWin-1);
-			playerList[player].notches = oldNotches[player] + getRandomInt(-1,2);
-		}
-		calculateNotchMoveAmt();
-		*/
-		/*
-		for(var id in clientList){
-			eventLog.addEvent(clientList[id] + " has joined the battle");
-		}
-		*/
+		loadPatterns();
 		if(gameState.myID != null){
 			myID = gameState.myID;
 		}
 		if(playerList[myID] != null){
 			myPlayer = playerList[myID];
 		}
-		/*
-		if(config){
-			applyConfigs();
-		}
-		*/
 	});
 
 	server.on("playerJoin", function(appendPlayerList){
@@ -178,6 +154,9 @@ function clientConnect() {
 	});
 	server.on("blindfoldUsed",function(owner){
 		createBlindFold(owner);
+	});
+	server.on("swapUsed",function(owner){
+		
 	});
 
     return server;

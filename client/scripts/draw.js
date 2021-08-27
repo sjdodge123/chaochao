@@ -1,3 +1,28 @@
+
+var scale = 0.05;
+var patterns = {};
+var blindfoldIcon = new Image(576,512);
+blindfoldIcon.src = "../assets/img/low-vision.svg";
+var transferIcon = new Image(576,512);
+transferIcon.src = "../assets/img/random.svg";
+
+function loadPatterns(){
+    patterns[config.tileMap.abilities.blindfold.id] = makePattern(blindfoldIcon);
+    patterns[config.tileMap.abilities.swap.id] = makePattern(transferIcon);
+}
+function makePattern(image){
+    var canvasPadding = 1;
+    const canvasPattern = document.createElement("canvas");
+    const ctxPattern = canvasPattern.getContext("2d");
+    var iconWidth = image.width*scale;
+    var iconHeight = image.height*scale;
+    canvasPattern.width = iconWidth + canvasPadding;
+    canvasPattern.height = iconHeight + canvasPadding;
+    ctxPattern.drawImage(image,canvasPadding/2,canvasPadding/2,iconWidth,iconHeight);
+    //document.body.appendChild(canvasPattern);
+    return gameContext.createPattern(canvasPattern, 'repeat');
+}
+
 var notchDistanceApart = 0,
     decodedColorName = '';
 
@@ -244,7 +269,13 @@ function drawMap(){
                 v = getEndpoint(halfedges[i]);
                 gameContext.lineTo(v.x,v.y);
             }
-            var color = locateColor(cell.id);
+            var color = null;
+            if(cell.id > 99){
+                color = patterns[cell.id];
+            } else{
+                color = locateColor(cell.id);
+            }
+           
             gameContext.lineWidth = 0.5;
             gameContext.shadowBlur = null;
             gameContext.shadowColor = null;
@@ -252,16 +283,6 @@ function drawMap(){
             gameContext.strokeStyle = '#adadad';
             gameContext.fill();
             gameContext.stroke();
-
-            if(cell.id > 99){
-                var box = getBbox(cell);
-                var font = "100 32px 'FontAwesome'"
-                gameContext.fillStyle = "purple";
-                gameContext.shadowBlur = 5;
-                gameContext.shadowColor = "black";
-                gameContext.font = font;
-                gameContext.fillText(locateSymbol(cell.id), (box.x + box.width/2),(box.y +box.height/2));      
-            }
         }
         gameContext.restore();
     }

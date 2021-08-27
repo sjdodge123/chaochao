@@ -58,15 +58,13 @@
         "abilities":{
             "blindfold": {
                 "id":100,
-                "symbol":"\uf070",
                 "duration":4
+            },
+            "swap": {
+                "id":101
             }
         }
     },
-
-
-    
-
     "lobbyWaitTime": 5,
     "gatedWaitTime": 9,
     "newRaceWaitTime": 10,
@@ -83,9 +81,11 @@
     },
     "playerNotchesToWin": 6,
     "playerDragCoeff": 0.15,
+    "playerBrakeCoeff": 0.235,
     "playerStartSleepTime": 60,
     "playerAFKKickTime": 240,
-    "playerBrakeCoeff": 0.235,
+    "playerPunchSlowAmt":0.5,
+    "playerPunchCooldown":300,
     "playerMaxSpeed":500,
     "playerMaxSpeed_prod":50,
     "playerMaxSpeed_test":350,

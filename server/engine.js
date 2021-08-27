@@ -81,7 +81,7 @@ class Engine {
 			}
 			var punchingSlowDown = 1;
 			if(player.attack){
-				punchingSlowDown = 0.01;
+				punchingSlowDown = c.playerPunchSlowAmt;
 			}
 
 			var newVelX, newVelY, newVel, newDirX, newDirY;
@@ -401,8 +401,10 @@ function compareSite(siteA,siteB){
 }
 function locateCell(id){
 	if(id > 99){
-		for(var type in c.tileMap.abilities){
-			return c.tileMap.abilities[type];
+		for(var ability in c.tileMap.abilities){
+			if(id == c.tileMap.abilities[ability].id){
+				return c.tileMap.abilities[ability];
+			}
 		}
 	}
     for(var type in c.tileMap){

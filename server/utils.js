@@ -102,6 +102,10 @@ exports.loadMaps = function(){
 exports.getMapListings = function(){
     return mapListing;
 }
+exports.getRandomProperty = function(obj){
+    var keys = Object.keys(obj);
+    return obj[keys[ keys.length * Math.random() << 0]];
+}
 
 function loadMaps(){
     var normalizedPath = require("path").join(__dirname, "../client/maps");

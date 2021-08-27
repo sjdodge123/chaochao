@@ -2,6 +2,7 @@
 var utils = require('./utils.js');
 var c = utils.loadConfig();
 var messenger = require('./messenger.js');
+var hostess = require('./hostess.js');
 var _engine = require('./engine.js');
 var compressor = require('./compressor.js');
 
@@ -62,9 +63,8 @@ class Room {
 	checkAFK(){
 		for(var id in this.playerList){
 			if(this.playerList[id].kick){
-				console.log("Kicking " + id);
 				messenger.messageClientBySig(id,"serverKick",null);
-				this.leave(id);
+				hostess.kickFromRoom(id);
 			}
 		}
 	}
@@ -344,7 +344,7 @@ class GameBoard {
 		this.collapseMap(currentState);
 		this.checkCollisions(currentState);
 		this.updatePlayers(currentState,dt);
-		this.checkCleanUp(currentState);
+		this.checkAbilities(currentState);
 	}
 	checkCollisions(currentState){
 		var objectArray = [];
@@ -399,8 +399,12 @@ class GameBoard {
 		
 		this.engine.broadBase(objectArray);
 	}
-	checkCleanUp(currentState){
+	checkAbilities(currentState){
 		for(var id in this.abilityList){
+			if(this.abilityList[id].swap){
+				this.swapOwnerWithRandomPlayer(this.abilityList[id].ownerId);
+				this.abilityList[id].swap = false;
+			}
 			if(this.abilityList[id].alive == false){
 				this.playerList[this.abilityList[id].ownerId].ability = null;
 				delete this.abilityList[id];
@@ -424,11 +428,24 @@ class GameBoard {
 		}
 	}
 	terminatePunch(packet){
-		if(packet.punchList[packet.id] != undefined){
-			messenger.messageRoomBySig(packet.roomSig,"terminatePunch",packet.id);
-			delete packet.punchList[packet.id];
-		}
+		messenger.messageRoomBySig(packet.roomSig,"terminatePunch",packet.id);
+		delete packet.punchList[packet.id];
 		
+	}
+	swapOwnerWithRandomPlayer(owner){
+		if(Object.keys(this.playerList).length == 1){
+			return;
+		}
+		var randomPlayer = utils.getRandomProperty(this.playerList);
+		if(randomPlayer.id == owner){
+			return this.swapOwnerWithRandomPlayer(owner);
+		}
+		var ownerPlayer = this.playerList[owner];
+		var tempVars = {x:randomPlayer.x,y:randomPlayer.y,newX:randomPlayer.newX,newY: randomPlayer.newY,velX: randomPlayer.velX,velY:randomPlayer.velY,dragCoeff:randomPlayer.dragCoeff,brakeCoeff:randomPlayer.brakeCoeff,acel:randomPlayer.acel};
+		for(var prop in tempVars){
+			randomPlayer[prop] = ownerPlayer[prop];
+			ownerPlayer[prop] = tempVars[prop];
+		}
 	}
 	startLobby(){
 		this.lobbyStartButton = new LobbyStartButton(this.world.center.x,this.world.center.y,0,"red");
@@ -452,12 +469,12 @@ class GameBoard {
 		var collapsedCells = [];
 		var cells = this.currentMap.cells;
 		for(var i=0;i<cells.length;i++){
-			if(cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.normal.id){
+			if(cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.lava.id){
 				continue;
 			}
 			var distance = utils.getMag(this.collapseLoc.x - cells[i].site.x, this.collapseLoc.y - cells[i].site.y);
 			if(this.collapseLine < distance){
-				cells[i].id = c.tileMap.normal.id;
+				cells[i].id = c.tileMap.lava.id;
 				collapsedCells.push(cells[i].site.voronoiId);	
 			}
 		}
@@ -835,6 +852,10 @@ class Player extends Circle {
 		this.ability = null;
 		this.punch = null;
 
+		this.punchWaitTime = c.playerPunchCooldown;
+		this.punchedTimer = null;
+		this.punchTimeLeft = this.punchWaitTime;
+
 		//Engine Variables
 		this.newX = this.x;
 		this.newY = this.y;
@@ -863,14 +884,25 @@ class Player extends Circle {
 	checkAttack(){
 		if(this.attack){
 			if(this.ability != null){
+				this.punchedTimer = Date.now();
 				this.ability.use();
 				return;
 			}
-			if(this.punch != null){
+			if(this.checkPunchCoolDown()){
 				return;
 			}
+			this.punchedTimer = Date.now();
 			this.punch = new Punch(this.x,this.y,c.punchRadius,this.color,this.id,this.roomSig);
 			messenger.messageRoomBySig(this.roomSig,"punch",compressor.sendPunch(this.punch));
+		}
+	}
+	checkPunchCoolDown(){
+		if(this.punchedTimer != null){
+			this.punchTimeLeft = (this.punchWaitTime - (Date.now() - this.punchedTimer));
+			if(this.punchTimeLeft > 0){
+				return true;
+			}
+			return false;
 		}
 	}
 	getSpeedBonus(){
@@ -976,6 +1008,15 @@ class Player extends Circle {
 				messenger.messageRoomBySig(this.roomSig,"abilityAcquired",{owner:this.id,ability:object.id,voronoiId:object.voronoiId});
 				return;
 			}
+			if(object.id == c.tileMap.abilities.swap.id){
+				if(this.ability != null){
+					return;
+				}
+				this.ability = new Swap(this.id,this.roomSig);
+				this.acquiredAbility = object.voronoiId;
+				messenger.messageRoomBySig(this.roomSig,"abilityAcquired",{owner:this.id,ability:object.id,voronoiId:object.voronoiId});
+				return;
+			}
 			
 		}
 	}
@@ -988,6 +1029,7 @@ class Player extends Circle {
 	}
 	killPlayer(){
 		this.alive = false;
+		this.ability = null;
 		if(this.notches > 0){
 			this.notches -= 1;
 		}
@@ -1014,7 +1056,6 @@ class Player extends Circle {
 		this.reachedGoal = false;
 		this.timeReached = null;
 		this.punch = null;
-		this.ability = null;
 		this.acquiredAbility = null;
 	}
 }
@@ -1053,6 +1094,20 @@ class Blindfold extends Ability{
 		}
 		this.alive = false;
 		messenger.messageRoomBySig(this.roomSig,"blindfoldUsed",this.ownerId);
+	}
+}
+class Swap extends Ability{
+	constructor(owner,roomSig){
+		super(owner,roomSig);
+		this.swap = false;
+	}
+	use(){
+		if(this.alive == false){
+			return;
+		}
+		this.swap = true;
+		this.alive = false;
+		messenger.messageRoomBySig(this.roomSig,"swapUsed",this.ownerId);
 	}
 }
 
