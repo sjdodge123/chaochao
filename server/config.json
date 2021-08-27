@@ -6,7 +6,7 @@
     "worldWidth":1366,
     "worldHeight":768,
     "worldCollapseSpeed":7,
-    "minPlayersToStart": 1,
+    "minPlayersToStart": 3,
     "maxPlayersInRoom" : 15,
     "forceConstant" :5000,
 

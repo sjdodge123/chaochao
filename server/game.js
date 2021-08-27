@@ -411,7 +411,7 @@ class GameBoard {
 			}
 		}
 	}
-	updatePlayers(active,dt){
+	updatePlayers(currentState,dt){
 		for(var playerID in this.playerList){
 			var player = this.playerList[playerID];
 			if(player.acquiredAbility != null){
@@ -419,7 +419,7 @@ class GameBoard {
 				this.changeTile(player.acquiredAbility,c.tileMap.normal.id);
 				player.acquiredAbility = null;
 			}
-			player.update(dt);
+			player.update(currentState,dt);
 			if(player.punch != null){
 				this.punchList[player.id] = player.punch;
 				setTimeout(this.terminatePunch,100,{id:player.id,punchList:this.punchList,roomSig:this.roomSig});
@@ -868,22 +868,22 @@ class Player extends Circle {
 		
 		this.currentSpeedBonus = 0;
     }
-	update(dt){
+	update(currentState,dt){
 		this.checkForSleep();
 		if(!this.alive){
 			return;
 		}
 		this.dt = dt;
 		this.move();
-		this.checkAttack();
+		this.checkAttack(currentState);
 	}
 	move(){
 		this.x = this.newX;
 		this.y = this.newY;
 	}
-	checkAttack(){
+	checkAttack(currentState){
 		if(this.attack){
-			if(this.ability != null){
+			if((currentState == c.stateMap.racing || currentState == c.stateMap.collapsing) && this.ability != null){
 				this.punchedTimer = Date.now();
 				this.ability.use();
 				return;
