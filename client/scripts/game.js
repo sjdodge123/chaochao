@@ -14,6 +14,8 @@ var server = null,
     currentState = null;
     gameRunning = null;
 
+    var gameWindow = document.getElementById("gameWindow");
+
     //Input Vars
     var attack = false,
     moveForward = false,
@@ -55,12 +57,13 @@ function setupPage(){
 
     gameCanvas = document.getElementById('gameCanvas');
     gameContext = gameCanvas.getContext('2d');
-    resize();
+    
 }
 
 function enterLobby(){
     $('#main').hide();
     $('#gameWindow').show();
+    resize();
     clientSendStart();
 }
 function init(){
@@ -93,7 +96,8 @@ function gameLoop(dt){
 }
 
 function resize(){
-    var viewport = {width:window.innerWidth,height:window.innerHeight};
+    var rect = gameWindow.getBoundingClientRect();
+    var viewport = {width:rect.width,height:rect.height};
     var scaleToFitX = viewport.width / gameCanvas.width;
     var scaleToFitY = viewport.height / gameCanvas.height;
     var currentScreenRatio = viewport.width/viewport.height;
@@ -109,10 +113,6 @@ function resize(){
 
     gameCanvas.style.width = newWidth + "px";
     gameCanvas.style.height = newHeight + "px";
-    //backgroundImage.style.width = newWidth + "px";
-    //backgroundImage.style.height = newHeight + "px";
-    //hud.style.width = newWidth + "px";
-    //hud.style.height = newHeight + "px";
 }
 
 
