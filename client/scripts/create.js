@@ -145,6 +145,10 @@ function setupPage(){
         exportToJSON();
         return false;
     });
+    $("#submitToGame").on("click", function () {
+        submitToGithub();
+        return false;
+    });
     $("#loadButton").on("click", function () {
         $("#createNewImage").attr("src",createCanvas.toDataURL("image/jpeg",0.1));
         $('#createWindow').hide();
@@ -421,6 +425,23 @@ function compareSite(siteA,siteB){
     return true;
 }
 function exportToJSON(){
+    var jsonData = basicSanitize();
+    navigator.clipboard.writeText(jsonData).then(function() {
+        alert("Copied to Clipboard!");
+    }, function(err) {
+        console.log(err);
+        alert("Export failed");
+    });
+}
+
+function submitToGithub(){
+    console.log("submit");
+    var jsonData = basicSanitize();
+    $.post("https://staticman-chaochao.herokuapp.com/v2/entry/sjdodge123/chaochao/master/maps",jsonData,function(data){
+        console.log(data);
+    });
+}
+function basicSanitize(){
     var author = $("#author").val();
     if(author == ""){
         author = "anonymous";
@@ -433,14 +454,8 @@ function exportToJSON(){
     vMap.id = makeid(32);
     vMap.author = author.substring(0,15);
     vMap.name = name.substring(0,15);
-    
     var jsonData = JSON.stringify(vMap);
-    navigator.clipboard.writeText(jsonData).then(function() {
-        alert("Copied to Clipboard!");
-    }, function(err) {
-        console.log(err);
-        alert("Export failed");
-    });
+    return jsonData;
 }
 
 function makeid(length) {
