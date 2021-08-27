@@ -41,10 +41,11 @@ canvas {
 }
 
 #gameWindow{
-	background: white;
+	margin-top: 1%;
+    background: white;
+	overflow: hidden;
 	display: none;
-    overflow: hidden;
-    height: 900px;
+    height: 768px;
 }
 #createWindow{
     margin-top: 1%;
