@@ -530,7 +530,6 @@ class GameBoard {
 			}
 		}
 		*/
-		
 		if(this.maps.length == this.mapsPlayed.length){
 			this.mapsPlayed = [];
 		}
@@ -997,6 +996,10 @@ class Player extends Circle {
 				this.reachedGoal = true;
 				this.timeReached = Date.now();
 				messenger.messageRoomBySig(this.roomSig,"playerConcluded",this.id);
+				return;
+			}
+			if(object.id == c.tileMap.bumper.id){
+				_engine.bumpPlayer(this,object);
 				return;
 			}
 			if(object.id == c.tileMap.abilities.blindfold.id){

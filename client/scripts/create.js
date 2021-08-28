@@ -1,6 +1,7 @@
 var server,
     maps = [],
     createCanvas,
+    gameRunning = false,
     voronoi = new Voronoi(),
     vMap,
     mapReady = false,
@@ -8,6 +9,7 @@ var server,
     mousey = 0,
     lastCell,
     brushID,
+    config,
     brushColor = "black",
     currentCell = null,
     newWidth = 0,
@@ -18,53 +20,27 @@ var server,
     canvasWindow = document.getElementById("canvasWindow"),
     createContext;
 
-var tileTypes = {
-    "slow":{
-        "id": 0,
-        "color": "black"
-    },
-    "normal":{
-        "id": 1,
-        "color": "#F0F0F0"
-    },
-    "fast":{
-        "id": 2,
-        "color": "#90ee90"
-    },
-    "lava":{
-        "id": 3,
-        "color": "#cf1020"
-    },
-    "ice":{
-        "id": 4,
-        "color": "#A5F2F3"
-    },
-    "ability":{
-        "id": 5,
-        "color": "#696969"
-    },
-    "goal":{
-        "id": 6,
-        "color": "#FFD700"
-    }
-}
-
 var then = Date.now(),
     dt;
 
 window.onload = function() {
     server = clientConnect();
     server.emit("getMaps");
-    gameRunning = true;
+    server.emit("getConfig");
     setupPage();
     rebuild();
     $('#loadWindow').show();
     $('#createWindow').hide();
-    init();
 }
 
 function clientConnect(){
     var server = io();
+
+    server.on("config",function(c){
+        config = c;
+        gameRunning = true;
+        init();
+    });
 
     server.on("maplisting",function(mapnames){
         if(maps.length > 0){
@@ -107,48 +83,55 @@ function setupPage(){
         return false;
     });
     $("#slowTileButton").on("click", function () {
-        brushID = tileTypes.slow.id;
-        brushColor = tileTypes.slow.color;
+        brushID = config.tileMap.slow.id;
+        brushColor = config.tileMap.slow.color;
         return false;
     });
     $("#normalTileButton").on("click", function () {
-        brushID = tileTypes.normal.id;
-        brushColor = tileTypes.normal.color;
+        brushID = config.tileMap.normal.id;
+        brushColor = config.tileMap.normal.color;
         return false;
     });
     $("#fastTileButton").on("click", function () {
-        brushID = tileTypes.fast.id;
-        brushColor = tileTypes.fast.color;
+        brushID = config.tileMap.fast.id;
+        brushColor = config.tileMap.fast.color;
         return false;
     });
     $("#lavaTileButton").on("click", function () {
-        brushID = tileTypes.lava.id;
-        brushColor = tileTypes.lava.color;
+        brushID = config.tileMap.lava.id;
+        brushColor = config.tileMap.lava.color;
         return false;
     });
     $("#iceTileButton").on("click", function () {
-        brushID = tileTypes.ice.id;
-        brushColor = tileTypes.ice.color;
+        brushID = config.tileMap.ice.id;
+        brushColor = config.tileMap.ice.color;
         return false;
     });
     $("#abilityTileButton").on("click", function () {
-        brushID = tileTypes.ability.id;
-        brushColor = tileTypes.ability.color;
+        brushID = config.tileMap.ability.id;
+        brushColor = config.tileMap.ability.color;
         return false;
     });
     $("#goalTileButton").on("click", function () {
-        brushID = tileTypes.goal.id;
-        brushColor = tileTypes.goal.color;
+        brushID = config.tileMap.goal.id;
+        brushColor = config.tileMap.goal.color;
+        return false;
+    });
+    $("#bumperTileButton").on("click", function () {
+        brushID = config.tileMap.bumper.id;
+        brushColor = config.tileMap.bumper.color;
         return false;
     });
     $("#exportButton").on("click", function () {
         exportToJSON();
         return false;
     });
+    /*
     $("#submitToGame").on("click", function () {
         submitToGithub();
         return false;
     });
+    */
     $("#loadButton").on("click", function () {
         $("#createNewImage").attr("src",createCanvas.toDataURL("image/jpeg",0.1));
         $('#createWindow').hide();
@@ -470,16 +453,16 @@ function makeid(length) {
 }
 
 function locateColor(id){
-    for(var type in tileTypes){
-        if(id == tileTypes[type].id){
-            return tileTypes[type].color;
+    for(var type in config.tileMap){
+        if(id == config.tileMap[type].id){
+            return config.tileMap[type].color;
         }
     }
 }
 function locateId(color){
-    for(var type in tileTypes){
-        if(color == tileTypes[type].color){
-            return tileTypes[type].id;
+    for(var type in config.tileMap){
+        if(color == config.tileMap[type].color){
+            return config.tileMap[type].id;
         }
     }
 }

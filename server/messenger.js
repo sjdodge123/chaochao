@@ -46,6 +46,10 @@ function checkForMail(client){
 		client.emit("maplisting", utils.getMapListings());
 	});
 
+	client.on("getConfig",function(){
+		client.emit("config", c);
+	});
+
     client.on('enterGame', function(){
         var roomSig = hostess.findARoom(client.id);
 		var room = hostess.joinARoom(roomSig,client.id);

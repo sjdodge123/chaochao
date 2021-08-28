@@ -53,7 +53,7 @@
         },
         "bumper":{
             "id":7,
-            "color":"yellow"
+            "color":"#FF7900"
         },
         "abilities":{
             "blindfold": {

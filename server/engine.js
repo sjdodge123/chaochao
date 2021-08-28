@@ -18,6 +18,9 @@ exports.checkCollideCells = function (player, map) {
 exports.punchPlayer = function(player,punch){
 	punchPlayer(player,punch);
 }
+exports.bumpPlayer = function(player,bumper){
+	bumpPlayer(player,bumper);
+}
 
 class Engine {
 	constructor(playerList) {
@@ -333,6 +336,14 @@ function punchPlayer(player,punch){
 	player.velX += velCont.velContX;
 	player.velY += velCont.velContY;
 }
+function bumpPlayer(player,bumper){
+	//TODO this isnt right
+	var simDist = {x:player.newX,y:player.newY};
+	var distance = utils.getMag(simDist.x - player.x,player.y - simDist.y);
+	var velCont = _calcVelCont(distance,player,simDist.x,simDist.y);
+	player.velX += velCont.velContX*-0.3;
+	player.velY += velCont.velContY*0.3;
+}
 function _calcVelCont(distance,object,x,y){
 	var velCont = {velContX:0,velContY:0};
 	velCont.velContX = (forceConstant/Math.pow(distance,2))*(object.x - x)/distance;
@@ -365,6 +376,7 @@ function pointIntersection(x, y, cell) {
 			p0 = getStartpoint(halfedge);
 			p1 = getEndpoint(halfedge);
 			r = (y - p0.y) * (p1.x - p0.x) - (x - p0.x) * (p1.y - p0.y);
+		
 			if (!r) {
 				return 0;
 			}
