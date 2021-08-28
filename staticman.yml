@@ -7,7 +7,7 @@ comments:
   #
   # Names of the fields the form is allowed to submit. If a field that is
   # not here is part of the request, an error will be thrown.
-  allowedFields: ["name", "author", "id", "thumbnail"]
+  allowedFields: ["name", "email", "url", "message", "replying_to_uid"]
 
   # (*) REQUIRED
   #
@@ -16,12 +16,12 @@ comments:
   branch: main
 
   # Text to use as the commit message or pull request title. Accepts placeholders.
-  commitMessage: "New Map from {fields.author}"
+  commitMessage: "Comment from {fields.name}"
 
   # (*) REQUIRED
   #
   # Destination path (filename) for the data files. Accepts placeholders.
-  filename: "{fields.name}"
+  filename: "entry{@timestamp}"
 
   # The format of the generated data files. Accepted values are "json", "yaml"
   # or "frontmatter"
@@ -43,7 +43,7 @@ comments:
   moderation: true
 
   # Name of the site. Used in notification emails.
-  name: "Chao Chao Game"
+  name: "ChaoChao Game"
 
   # Notification settings. When enabled, users can choose to receive notifications
   # via email when someone adds a reply or a new comment. This requires an account
@@ -66,19 +66,17 @@ comments:
   #
   # Destination path (directory) for the data files. Accepts placeholders.
   path: "client/maps/{fields.name}"
-  
+
   # Names of required fields. If any of these isn't in the request or is empty,
   # an error will be thrown.
-  requiredFields: ["name", "author", "thumbnail"]
+  requiredFields: ["name", "message"]
 
   # List of transformations to apply to any of the fields supplied. Keys are
   # the name of the field and values are possible transformation types.
   transforms:
     email: md5
-    
+
   reCaptcha:
     enabled: false
-    # the siteKey is used as-is (no encryption)
-    siteKey: 6LdCVyscAAAAANqeAdBsnEboGfK6kdzhm1b3sFNE
-    # the secret is the encrypted blob you got back from the encrypt call
-    secret: YXB2Ab7qh27YpMKfoUOluQ0MHF3jvU20WSy7TOaKHqafCzQI4r2fr0qJQ76jDDJaXlFd4FqLtp39yiSdr2ZiibXx/pQdo1SRHIlivxKiqSG4G43kNjj7Hmp5yXdp3aJW3rFLEYXfe85hFNLV0u3zwOPDEivGqIESo0gybY6mnHY=
+    siteKey: 6LcWstQUAAAAALoGBcmKsgCFbMQqkiGiEt361nK1
+    secret: eteZTgxDkxg3sbrLwAPwiaAcdUh/zFRQQzjlmxdurvWvGqaFLOOBwFWUsA6NcMyoeAB1z0kl93Pdno4v0RelTKFXiwrcLAdQaOpR1Ckz7mim/9p8/Jvu7I00d0/OO3ZUPpDw5NGP6f7SKafKCT53dAzWyiWvpt7JfbnUMUubfA0rUTMGCToBIya/IrMVOPkjc1N25k0fz3uigElI6n1R2MwVOxmrpWyl99r8fpx8evKL7R4ycUkaL+CyUL4fCrfaAvOfyGnNG5eJQhv188OXpRuaxut2sXs273WH5BaDoU0vEGSMo9RrQwYl3oNTgb9aFTOhd5Npz+EpZuul+jwuCnZwDXQ2uc7i8+hDacSJy43IrTxrWkxANik3BvUIZHCKbrpKFUxQfjYCX8J6pjIt5uSpqxRfYDQwo8mKAHX9Fhg/r5a+e2NPG5HWZy6LEkAS4ny3l5lKGmM3EuJWzSOpYTpCXAbVTKfkjvd0gACJnbBhNR21xKfHfWhmH9bJE8/QqKrajqO3Myg+JHhMwRp/r7tNkuGWUhN3UBvYZRSpiSi53/fQvrYDhOQSPKSoMlbKO0AilrQj7mUxwBrpYAm0GP/5ptUIMDbUedXIDWEPyxLYSnNXrTJ/A71w8u1Fw3mURquylVUUP4si172SBOMZl/0auV6geG5UqXqvPxRxgFQ=
