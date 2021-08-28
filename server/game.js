@@ -264,8 +264,8 @@ class Game {
 		console.log("Start Gated");
 		this.locked = true;
 		this.resetForRace();
-		this.gameBoard.setupMap();
 		this.currentState = this.stateMap.gated;
+		this.gameBoard.setupMap(this.currentState);
 		messenger.messageRoomBySig(this.roomSig,"startGated",null);
 	}
 	startRace(){
@@ -296,7 +296,7 @@ class Game {
 	}
 	resetGame(){
 		this.locked = false;
-		this.gameBoard.resetGame();
+		this.gameBoard.resetGame(this.currentState);
 		messenger.messageRoomBySig(this.roomSig,"resetGame",null);
 	}
 	getPlayerCount(){
@@ -451,9 +451,9 @@ class GameBoard {
 		this.lobbyStartButton = new LobbyStartButton(this.world.center.x,this.world.center.y,0,"red");
 		messenger.messageRoomBySig(this.roomSig,"startLobby",compressor.sendLobbyStart(this.lobbyStartButton));
 	}
-	setupMap(){
+	setupMap(currentState){
 		this.clean();
-		this.resetPlayers();
+		this.resetPlayers(currentState);
 		this.loadNextMap();
 		this.startingGate = new Gate(0,0,75,this.world.height);
 		this.gatePlayers();
@@ -488,9 +488,9 @@ class GameBoard {
 			}
 		}
 	}
-	resetGame(){
+	resetGame(currentState){
 		this.mapsPlayed = [];
-		this.resetPlayers();
+		this.resetPlayers(currentState);
 		for(var playerID in this.playerList){
 			var player = this.playerList[playerID];
 			player.notches = 0;
@@ -504,11 +504,11 @@ class GameBoard {
 			player.y = loc.y;
 		}
 	}
-	resetPlayers(){
+	resetPlayers(currentState){
 		messenger.messageRoomBySig(this.roomSig,"resetPlayers",null);
 		for(var playerID in this.playerList){
 			var player = this.playerList[playerID];
-			player.reset();
+			player.reset(currentState);
 		}
 	}
 	clean(){
@@ -1038,7 +1038,7 @@ class Player extends Circle {
 		}
 		messenger.messageRoomBySig(this.roomSig,"playerDied",this.id);
 	}
-	reset(){
+	reset(currentState){
 		this.alive = true;
 		this.enabled = true;
 		this.x = this.initialLoc.x;
@@ -1060,6 +1060,9 @@ class Player extends Circle {
 		this.timeReached = null;
 		this.punch = null;
 		this.acquiredAbility = null;
+		if(currentState == c.stateMap.gameOver){
+			this.ability = null;
+		}
 	}
 }
 
