@@ -95,6 +95,7 @@ function clientConnect() {
 	});
 	server.on("playerDied",function(id){
 		//playLavaNoise();
+		playerAbilityUsed(id);
 		playerList[id].alive = false;
 	});
 	server.on('playerSleeping',function(id){

@@ -201,6 +201,14 @@ function drawAbilityAimer(player){
             gameContext.restore();
             break;
         }
+        case config.tileMap.abilities.swap.id:{
+            gameContext.save();
+            gameContext.beginPath();
+            gameContext.setLineDash([15, 3, 3, 3]);
+            gameContext.arc(player.x, player.y, 10, 0, 2 * Math.PI);
+            gameContext.stroke();
+            gameContext.restore();
+        }
         default: {
             gameContext.save();
             gameContext.beginPath();
@@ -219,10 +227,14 @@ function drawTrail(player){
     gameContext.moveTo(player.trail.vertices[0].x,player.trail.vertices[0].y);
     var len = player.trail.vertices.length;
     for (var i = 0; i < len; i++){
-        var point = player.trail.vertices[i];
-        gameContext.lineWidth = 3;
-        gameContext.strokeStyle = player.color;
+        var point = player.trail.vertices[i];    
         gameContext.lineTo(point.x, point.y);
+    }
+    gameContext.lineWidth = 3;
+    gameContext.strokeStyle = player.color;
+    if(player.notches == config.playerNotchesToWin){
+        gameContext.lineWidth = 5;
+        gameContext.setLineDash([20, 3, 3, 3, 3, 3, 3, 3]);
     }
     gameContext.stroke();
     gameContext.restore();

@@ -66,8 +66,8 @@
             "bomb":{
                 "id":102,
                 "lifetime": 4,
-                "speed":200,
-                "explosionRadius": 150
+                "speed":250,
+                "explosionRadius": 120
             }
         }
     },

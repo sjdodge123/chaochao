@@ -93,6 +93,7 @@ class Game {
 
 		//Game stats
 		this.playerCount = 0;
+		this.alivePlayerCount = 0;
 		this.lobbyButtonPressedCount = 0;
 		this.firstPlaceSig = null;
 		this.secondPlaceSig = null;
@@ -248,6 +249,7 @@ class Game {
 				}
 			}
 		}
+		this.alivePlayerCount = playersConcluded;
 		if(playersConcluded == this.playerCount){
 			this.startOverview();
 		}
@@ -476,10 +478,15 @@ class GameBoard {
 	}
 	swapOwnerWithRandomPlayer(owner){
 		if(Object.keys(this.playerList).length == 1){
+			//TODO play fizzle sound to client
+			return;
+		}
+		if(this.alivePlayerCount == 1){
+			//TODO play fizzle sound to client
 			return;
 		}
 		var randomPlayer = utils.getRandomProperty(this.playerList);
-		if(randomPlayer.id == owner){
+		if(randomPlayer.id == owner || randomPlayer.alive == false){
 			return this.swapOwnerWithRandomPlayer(owner);
 		}
 		var ownerPlayer = this.playerList[owner];
