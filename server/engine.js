@@ -3,8 +3,8 @@ var utils = require('./utils.js');
 var c = utils.loadConfig();
 var forceConstant = c.forceConstant;
 
-exports.getEngine = function (playerList) {
-	return new Engine(playerList);
+exports.getEngine = function (playerList,projectileList) {
+	return new Engine(playerList,projectileList);
 }
 exports.checkDistance = function (obj1, obj2) {
 	return checkDistance(obj1, obj2);
@@ -23,8 +23,9 @@ exports.bumpPlayer = function(player,bumper){
 }
 
 class Engine {
-	constructor(playerList) {
+	constructor(playerList,projectileList) {
 		this.playerList = playerList;
+		this.projectileList = projectileList;
 		this.dt = 0;
 		this.quadTree = null;
 		this.worldWidth = 0;
@@ -32,6 +33,7 @@ class Engine {
 	}
 	update(dt) {
 		this.dt = dt;
+		this.updateProjectiles();
 		this.updatePlayers();
 	}
 	updatePlayers() {
@@ -116,6 +118,25 @@ class Engine {
 			player.newY += player.velY * this.dt;
 		}
 	}
+	updateProjectiles(){
+		for (var id in this.projectileList){
+			var proj = this.projectileList[id];
+			var newVelX = 0;
+			var newVelY = 0;
+			newVelX = Math.cos((proj.angle+90)*(Math.PI/180))*proj.speed;
+			newVelY = Math.sin((proj.angle+90)*(Math.PI/180))*proj.speed;
+			//TODO drag not working
+			newVelX -= c.playerDragCoeff * proj.velX;
+			newVelY -= c.playerDragCoeff * proj.velY;
+
+			
+			proj.velX = newVelX;
+			proj.velY = newVelY;
+			proj.newX += proj.velX * this.dt;
+			proj.newY += proj.velY * this.dt;
+		}
+	}
+
 	broadBase(objectArray) {
 		this.quadTree.clear();
 		var collidingBeams = [];

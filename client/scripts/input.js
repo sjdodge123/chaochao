@@ -2,8 +2,8 @@ function calcMousePos(evt){
     evt.preventDefault();
     var rect = gameCanvas.getBoundingClientRect();
     if(myPlayer != null){
-        mouseX = (((evt.pageX - rect.left)/newWidth)*gameCanvas.width)+ myPlayer.x;
-        mouseY = (((evt.pageY - rect.top )/newHeight)*gameCanvas.height) + myPlayer.y;
+        mouseX = (((evt.pageX - rect.left)/newWidth)*gameCanvas.width);
+        mouseY = (((evt.pageY - rect.top )/newHeight)*gameCanvas.height);
         server.emit('mousemove',{x:mouseX,y:mouseY});
         setMousePos(mouseX,mouseY);
     }
@@ -17,7 +17,8 @@ function setMousePos(x,y){
 function handleClick(event){
     switch(event.which){
         case 1:{
-            //iAmFiring = true;
+            attack = true;
+            server.emit('movement',{turnLeft:turnLeft,moveForward:moveForward,turnRight:turnRight,moveBackward:moveBackward,attack:attack});
             break;
         }
     }
@@ -26,8 +27,8 @@ function handleClick(event){
 function handleUnClick(event){
     switch(event.which){
         case 1:{
-            //iAmFiring = false;
-            //server.emit("stopFire");
+            attack = false;
+            server.emit('movement',{turnLeft:turnLeft,moveForward:moveForward,turnRight:turnRight,moveBackward:moveBackward,attack:attack});
             break;
         }
     }

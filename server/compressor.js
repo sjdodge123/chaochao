@@ -4,6 +4,7 @@ var c = utils.loadConfig();
 
 var listItem = null;
 var player = null;
+var proj = null;
 var prop = null;
 
 exports.sendPlayerUpdates = function(playerList){
@@ -14,9 +15,27 @@ exports.sendPlayerUpdates = function(playerList){
 			player.id,
 			player.x,
 			player.y,
-			//player.weapon.angle,
 			player.velX,
 			player.velY,
+			player.mouseX,
+			player.mouseY
+		];
+		packet.push(listItem);
+	}
+	packet = JSON.stringify(packet);
+	player = null;
+	listItem = null;
+	prop = null;
+	return packet;
+}
+exports.sendProjUpdates = function(projectileList){
+	var packet = [];
+	for(prop in projectileList){
+		proj = projectileList[prop];
+		listItem = [
+			proj.ownerId,
+			proj.x,
+			proj.y
 		];
 		packet.push(listItem);
 	}

@@ -57,6 +57,7 @@ function clientConnect() {
 
 	server.on("gameUpdates",function(updatePacket){
 		updatePlayerList(updatePacket.playerList);
+		updateProjecileList(updatePacket.projList);
 		checkGameState(updatePacket.state);
 		totalPlayers = updatePacket.totalPlayers;
 		timeSinceLastCom = 0;
@@ -143,20 +144,33 @@ function clientConnect() {
 	server.on("punch",function(packet){
 		spawnPunch(packet);
 	});
+	server.on("spawnBomb",function(owner){
+		spawnBomb(owner);
+	});
 	server.on("terminatePunch",function(id){
 		terminatePunch(id);
 	});
+	server.on("terminateBomb",function(id){
+		terminateBomb(id);
+	});
 	server.on('collapsedCells',function(cells){
 		collapseCells(cells);
+	});
+	server.on('explodedCells',function(cells){
+		explodedCells(cells);
 	});
 	server.on("abilityAcquired",function(payload){
 		playerPickedUpAbility(payload);
 	});
 	server.on("blindfoldUsed",function(owner){
 		createBlindFold(owner);
+		playerAbilityUsed(owner);
 	});
 	server.on("swapUsed",function(owner){
-		
+		playerAbilityUsed(owner);
+	});
+	server.on("bombUsed",function(owner){
+		playerAbilityUsed(owner);
 	});
 
     return server;

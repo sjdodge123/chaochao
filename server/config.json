@@ -45,7 +45,7 @@
         },
         "ability":{
             "id": 5,
-            "color": "#F0F0F0"
+            "color": "#C8C8C8"
         },
         "goal":{
             "id": 6,
@@ -62,6 +62,12 @@
             },
             "swap": {
                 "id":101
+            },
+            "bomb":{
+                "id":102,
+                "lifetime": 4,
+                "speed":200,
+                "explosionRadius": 150
             }
         }
     },

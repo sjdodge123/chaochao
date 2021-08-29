@@ -71,3 +71,7 @@ Colors.decode = function(input){
 function getColor(){
     return 'hsl(' + Math.floor(Math.random() * 360) + ', 100%, 50%)';
 };
+
+function getMagSq(x1, y1, x2, y2){
+	return Math.pow(x2-x1,2) + Math.pow(y2-y1, 2);
+}

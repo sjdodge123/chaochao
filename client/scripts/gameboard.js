@@ -6,6 +6,7 @@ var mousex,
 	mapID,
 	currentMap,
 	punchList,
+	projectileList,
 	playerList,
 	blindfold,
 	pingCircles = [],
@@ -19,6 +20,7 @@ function resetGameboard(){
 	punchList = {};
 	blindfold = {};
 	currentMap = {};
+	projectileList = {};
 }
 function updateGameboard(dt){
 	if(currentState == config.stateMap.racing || currentState == config.stateMap.collapsing){
@@ -66,6 +68,8 @@ function createPlayer(dataArray,isAI){
 	playerList[index].notches = 0;
 	playerList[index].awake = true;
 	playerList[index].ability = null;
+	playerList[index].mouseX = 0;
+	playerList[index].mouseY = 0;
 	playerList[index].trail = new Trail({x:dataArray[1],y:dataArray[2]});
     /*
 	playerList[index].weapon = {}
@@ -89,9 +93,24 @@ function updatePlayerList(packet){
 			playerList[player[0]].id = player[0];
 			playerList[player[0]].x = player[1];
 			playerList[player[0]].y = player[2];
-			//playerList[player[0]].weapon.angle = player[3];
 			playerList[player[0]].velX = player[3];
 			playerList[player[0]].velY = player[4];
+			playerList[player[0]].mouseX =player[5];
+			playerList[player[0]].mouseY =player[6];
+		}
+	}
+}
+function updateProjecileList(packet){
+	if(packet == null){
+		return;
+	}
+	packet = JSON.parse(packet);
+	for(var i=0;i<packet.length;i++){
+		var proj = packet[i];
+		if(projectileList[proj[0]] != null){
+			projectileList[proj[0]].ownerId = proj[0];
+			projectileList[proj[0]].x = proj[1];
+			projectileList[proj[0]].y = proj[2];
 		}
 	}
 }
@@ -221,9 +240,23 @@ function spawnPunch(payload){
 	punch.color = payload[3];
 	punchList[punch.ownerId] = punch;
 }
+function spawnBomb(owner){
+	var bomb = {};
+	bomb.ownerId = owner;
+	bomb.x = playerList[owner].x;
+	bomb.y = playerList[owner].y;
+	bomb.radius = 10;
+	bomb.color = "black";
+	projectileList[owner] = bomb;
+}
 function terminatePunch(id){
 	if(punchList[id] != null){
 		delete punchList[id];
+	}
+}
+function terminateBomb(id){
+	if(projectileList[id] != null){
+		delete projectileList[id];
 	}
 }
 
@@ -262,6 +295,18 @@ function collapseCells(cells){
 	}
 	
 }
+function explodedCells(cells){
+	for(var i=0;i<currentMap.cells.length;i++){
+		var cell = currentMap.cells[i];
+		for(var j=0;j<cells.length;j++){
+			if(cells[j] == cell.site.voronoiId){
+				cell.id = config.tileMap.slow.id;
+				cell.color = config.tileMap.slow.color;
+			}
+		}
+	}
+	
+}
 
 function playerPickedUpAbility(payload){
 	playerList[payload.owner].ability = payload.ability;
@@ -272,6 +317,9 @@ function playerPickedUpAbility(payload){
 			return;
 		}
 	}
+}
+function playerAbilityUsed(owner){
+	playerList[owner].ability = null;
 }
 function createBlindFold(owner){
 	blindfold.color = this.playerList[owner].color;

@@ -16,11 +16,12 @@ class Room {
         this.size = size;
         this.clientList = {};
         this.playerList = {};
+		this.projectileList = {};
         this.clientCount = 0;
         this.alive = true;
-		this.engine = _engine.getEngine(this.playerList);
+		this.engine = _engine.getEngine(this.playerList,this.projectileList);
         this.world = new World(0,0,c.worldWidth,c.worldHeight,this.engine,this.playerList,this.sig);
-        this.game = new Game(this.clientList,this.playerList,this.world,this.engine,this.sig);
+        this.game = new Game(this.clientList,this.playerList,this.projectileList,this.world,this.engine,this.sig);
     }
     join(clientID){
         var client = messenger.getClient(clientID);
@@ -44,12 +45,13 @@ class Room {
 	}
     sendUpdates(){
 		var playerData = compressor.sendPlayerUpdates(this.playerList);
+		var projData = compressor.sendProjUpdates(this.projectileList);
 		var gameStateData = compressor.gameState(this.game);
 		messenger.messageRoomBySig(this.sig,"gameUpdates",{
 			playerList:playerData,
+			projList:projData,
 			state:gameStateData,
 			totalPlayers:messenger.getTotalPlayers()
-			//shrinkTimeLeft:this.game.timeLeftUntilShrink
 		});
 	}
     checkRoom(clientID){
@@ -79,9 +81,10 @@ class Room {
 }
 
 class Game {
-    constructor(clientList,playerList,world,engine,roomSig){
+    constructor(clientList,playerList,projectileList,world,engine,roomSig){
         this.clientList = clientList;
         this.playerList = playerList;
+		this.projectileList = projectileList;
         this.roomSig = roomSig 
         this.world = world;
 		this.engine = engine;
@@ -114,7 +117,7 @@ class Game {
 		//State mgmt
 		this.stateMap = c.stateMap;
 		this.currentState = this.stateMap.waiting;
-		this.gameBoard = new GameBoard(world,playerList,engine,roomSig);
+		this.gameBoard = new GameBoard(world,playerList,projectileList,engine,roomSig);
     }
 
 	update(dt){
@@ -321,9 +324,10 @@ class Game {
 }
 
 class GameBoard {
-	constructor(world,playerList,engine,roomSig){
+	constructor(world,playerList,projectileList,engine,roomSig){
 		this.world = world;
 		this.playerList = playerList;
+		this.projectileList = projectileList;
 		this.abilityList = {};
 		this.punchList = {};
 		this.engine = engine;
@@ -344,6 +348,7 @@ class GameBoard {
 		this.collapseMap(currentState);
 		this.checkCollisions(currentState);
 		this.updatePlayers(currentState,dt);
+		this.updateProjectiles(currentState);
 		this.checkAbilities(currentState);
 	}
 	checkCollisions(currentState){
@@ -392,6 +397,10 @@ class GameBoard {
 				_engine.checkCollideCells(this.playerList[player],this.currentMap);
 				objectArray.push(this.playerList[player]);
 			}
+			for(var projID in this.projectileList){
+				_engine.preventEscape(this.projectileList[projID],this.world);
+				objectArray.push(this.projectileList[projID]);
+			}
 			for(var punchId in this.punchList){
 				objectArray.push(this.punchList[punchId]);
 			}
@@ -404,6 +413,17 @@ class GameBoard {
 			if(this.abilityList[id].swap){
 				this.swapOwnerWithRandomPlayer(this.abilityList[id].ownerId);
 				this.abilityList[id].swap = false;
+			}
+			if(this.abilityList[id].spawnBomb){
+				this.abilityList[id].spawnBomb = false;
+				this.spawnBomb(this.abilityList[id].ownerId);
+				setTimeout(this.acquireBombTrigger,100,{id:this.abilityList[id].ownerId,abilityList:this.abilityList,playerList:this.playerList,roomSig:this.roomSig});
+				//delete this.abilityList[id];
+				//continue;
+			}
+			if(this.abilityList[id].explodeBomb){
+				this.abilityList[id].explodeBomb = false;
+				this.projectileList[this.abilityList[id].ownerId].explodeBomb();
 			}
 			if(this.abilityList[id].alive == false){
 				this.playerList[this.abilityList[id].ownerId].ability = null;
@@ -427,10 +447,32 @@ class GameBoard {
 			}
 		}
 	}
+	updateProjectiles(currentState){
+		for(var id in this.projectileList){
+
+			if(this.projectileList[id].explode == true){
+				this.explodeBomb(id);
+			}
+
+			if(this.projectileList[id].alive == false){
+				messenger.messageRoomBySig(this.roomSig,"terminateBomb",id);
+				delete this.projectileList[id];
+				continue;
+			}
+			this.projectileList[id].update();
+		}
+	}
 	terminatePunch(packet){
 		messenger.messageRoomBySig(packet.roomSig,"terminatePunch",packet.id);
 		delete packet.punchList[packet.id];
 		
+	}
+	acquireBombTrigger(packet){
+		var player = packet.playerList[packet.id];
+		player.ability = new BombTrigger(packet.id,packet.id.roomSig);
+		packet.abilityList[player.id] = player.ability;
+		//TODO make the bomb trigger have a HUD
+		//messenger.messageRoomBySig(this.roomSig,"abilityAcquired",{owner:player.id,ability:object.id,voronoiId:object.voronoiId});
 	}
 	swapOwnerWithRandomPlayer(owner){
 		if(Object.keys(this.playerList).length == 1){
@@ -446,6 +488,28 @@ class GameBoard {
 			randomPlayer[prop] = ownerPlayer[prop];
 			ownerPlayer[prop] = tempVars[prop];
 		}
+	}
+	spawnBomb(owner){
+		var player = this.playerList[owner];
+		var bomb = new BombProj(player.x,player.y,10,"black",owner,this.roomSig,(180/Math.PI)*Math.atan2(player.mouseY-player.y,player.mouseX-player.x)-90);
+		this.projectileList[owner] = bomb;
+		messenger.messageRoomBySig(this.roomSig,"spawnBomb",owner);
+	}
+	explodeBomb(owner){
+		var explodedCells = [];
+		var explodeLoc = {x:this.projectileList[owner].x,y:this.projectileList[owner].y};
+		var cells = this.currentMap.cells;
+		for(var i=0;i<cells.length;i++){
+			if(cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.lava.id){
+				continue;
+			}
+			var distance = utils.getMag(explodeLoc.x - cells[i].site.x, explodeLoc.y - cells[i].site.y);
+			if(c.tileMap.abilities.bomb.explosionRadius > distance){
+				cells[i].id = c.tileMap.slow.id;
+				explodedCells.push(cells[i].site.voronoiId);	
+			}
+		}
+		messenger.messageRoomBySig(this.roomSig,'explodedCells',explodedCells);
 	}
 	startLobby(){
 		this.lobbyStartButton = new LobbyStartButton(this.world.center.x,this.world.center.y,0,"red");
@@ -530,12 +594,14 @@ class GameBoard {
 			}
 		}
 		*/
+		
 		if(this.maps.length == this.mapsPlayed.length){
 			this.mapsPlayed = [];
 		}
 		var nextMapId = this.getRandomMapR();
 		this.currentMap = JSON.parse(JSON.stringify(this.maps[nextMapId]));
 		this.mapsPlayed.push(this.currentMap.id);
+		
 		messenger.messageRoomBySig(this.roomSig,"newMap",{id:this.currentMap.id,abilities:this.generateAbilities()});
 	}
 	getRandomMapR(){
@@ -844,6 +910,8 @@ class Player extends Circle {
 		this.turnLeft = false;
 		this.turnRight = false;
 		this.attack = false;
+		this.mouseX = 0;
+		this.mouseY = 0;
 		
 
 		//Attack
@@ -1020,6 +1088,15 @@ class Player extends Circle {
 				messenger.messageRoomBySig(this.roomSig,"abilityAcquired",{owner:this.id,ability:object.id,voronoiId:object.voronoiId});
 				return;
 			}
+			if(object.id == c.tileMap.abilities.bomb.id){
+				if(this.ability != null){
+					return;
+				}
+				this.ability = new Bomb(this.id,this.roomSig);
+				this.acquiredAbility = object.voronoiId;
+				messenger.messageRoomBySig(this.roomSig,"abilityAcquired",{owner:this.id,ability:object.id,voronoiId:object.voronoiId});
+				return;
+			}
 			
 		}
 	}
@@ -1060,6 +1137,8 @@ class Player extends Circle {
 		this.timeReached = null;
 		this.punch = null;
 		this.acquiredAbility = null;
+		this.mouseX = 0;
+		this.mouseY = 0;
 		if(currentState == c.stateMap.gameOver){
 			this.ability = null;
 		}
@@ -1075,6 +1154,53 @@ class Punch extends Circle{
 	}
 	handleHit(object){
 
+	}
+}
+class BombProj extends Circle{
+	constructor(x,y,radius,color,ownerId,roomSig,angle){
+		super(x,y,radius,color);
+		this.alive = true;
+		this.ownerId = ownerId;
+		this.roomSig = roomSig;
+		this.lifeTime = c.tileMap.abilities.bomb.lifetime;
+		this.explosionRadius = c.tileMap.abilities.bomb.explosionRadius;
+		this.speed = c.tileMap.abilities.bomb.speed;
+		this.angle = angle;
+		this.velX = 0;
+		this.velY = 0;
+		this.newX = this.x;
+		this.newY = this.y;
+		this.explode = false;
+
+		this.explodeWaitTime = c.tileMap.abilities.bomb.lifetime;
+		this.explodeTimer = null;
+		this.explodeTimeLeft = this.explodeWaitTime;
+	}
+	update(){
+		this.checkExplodeTimer();
+		this.move();
+	}
+	checkExplodeTimer(){
+		if(this.explodeTimer != null){
+			this.explodeTimeLeft = ((this.explodeWaitTime*1000 - (Date.now() - this.explodeTimer))/(1000)).toFixed(1);
+			if(this.explodeTimeLeft > 0){
+				return;
+			}
+			this.explodeBomb();
+			return;
+		}
+		this.explodeTimer = Date.now();
+	}
+	explodeBomb(){
+		this.explode = true;
+		this.alive = false;
+	}
+	move(){
+		this.x = this.newX;
+		this.y = this.newY;
+	}
+	handleHit(object){
+		
 	}
 }
 class Ability {
@@ -1116,5 +1242,34 @@ class Swap extends Ability{
 		messenger.messageRoomBySig(this.roomSig,"swapUsed",this.ownerId);
 	}
 }
+class Bomb extends Ability{
+	constructor(owner,roomSig){
+		super(owner,roomSig);
+		this.spawnBomb = false;
+	}
+	use(){
+		if(this.alive == false){
+			return;
+		}
+		this.spawnBomb = true;
+		this.alive = false;
+		messenger.messageRoomBySig(this.roomSig,"bombUsed",this.ownerId);
+	}
+}
+class BombTrigger extends Ability{
+	constructor(owner,roomSig){
+		super(owner,roomSig);
+		this.explodeBomb = false;
+	}
+	use(){
+		if(this.alive == false){
+			return;
+		}
+		this.explodeBomb = true;
+		this.alive = false;
+		messenger.messageRoomBySig(this.roomSig,"bombTriggered",this.ownerId);
+	}
+}
+
 
 

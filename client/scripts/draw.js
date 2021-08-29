@@ -5,10 +5,13 @@ var blindfoldIcon = new Image(576,512);
 blindfoldIcon.src = "../assets/img/low-vision.svg";
 var transferIcon = new Image(576,512);
 transferIcon.src = "../assets/img/random.svg";
+var bombIcon = new Image(576,512);
+bombIcon.src = "../assets/img/bomb.svg";
 
 function loadPatterns(){
     patterns[config.tileMap.abilities.blindfold.id] = makePattern(blindfoldIcon);
     patterns[config.tileMap.abilities.swap.id] = makePattern(transferIcon);
+    patterns[config.tileMap.abilities.bomb.id] = makePattern(bombIcon);
 }
 function makePattern(image){
     var canvasPadding = 1;
@@ -49,6 +52,7 @@ function drawObjects(dt){
     }
     drawPlayers(dt);
     drawPunches();
+    drawProjectiles();
     drawAbilties();
     if(currentState == config.stateMap.gameOver){
         drawGameOverScreen();
@@ -155,6 +159,11 @@ function drawPlayer(player){
     gameContext.stroke();
     gameContext.restore();
 
+    ;
+    if(player.ability != null){
+        drawAbilityAimer(player)
+    }
+
     if(player.awake == false){
         gameContext.save();
         gameContext.fillStyle = "black";
@@ -163,6 +172,47 @@ function drawPlayer(player){
         gameContext.restore();
     }
 }
+
+function drawProjectiles(){
+    for(var proj in projectileList){
+        gameContext.save();
+        gameContext.beginPath();
+        gameContext.arc(projectileList[proj].x, projectileList[proj].y, projectileList[proj].radius, 0, 2 * Math.PI);
+        gameContext.fillStyle = projectileList[proj].color;
+        gameContext.fill();
+        gameContext.restore();
+    }
+}
+function drawAbilityAimer(player){
+    switch(player.ability){
+        case config.tileMap.abilities.bomb.id:{
+            gameContext.save();
+            gameContext.beginPath();
+            
+            gameContext.setLineDash([5, 5]);
+            gameContext.moveTo(player.x,player.y);
+            
+            var length = 50;
+            var mag = Math.sqrt(getMagSq(player.mouseX,player.mouseY,player.x,player.y));
+            var pointX = player.x + (length/mag)*(player.mouseX-player.x);
+            var pointY = player.y + (length/mag)*(player.mouseY-player.y);
+            gameContext.lineTo(pointX,pointY);
+            gameContext.stroke();
+            gameContext.restore();
+            break;
+        }
+        default: {
+            gameContext.save();
+            gameContext.beginPath();
+            gameContext.setLineDash([2, 2]);
+            gameContext.arc(player.x, player.y, 10, 0, 2 * Math.PI);
+            gameContext.stroke();
+            gameContext.restore();
+        }
+    }
+    
+}
+
 function drawTrail(player){
     gameContext.save();
     gameContext.beginPath();
