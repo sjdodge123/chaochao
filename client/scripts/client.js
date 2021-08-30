@@ -40,6 +40,7 @@ function clientConnect() {
 		if(playerList[myID] != null){
 			myPlayer = playerList[myID];
 		}
+		setupEmojiWheel();
 	});
 
 	server.on("playerJoin", function(appendPlayerList){
@@ -97,6 +98,12 @@ function clientConnect() {
 		//playLavaNoise();
 		playerAbilityUsed(id);
 		playerList[id].alive = false;
+	});
+	server.on("broadCastEmoji",function(payload){
+		playerList[payload.ownerId].chatMessage = payload.emoji;
+		setTimeout(function(owner){
+			playerList[owner].chatMessage = null;
+		},4000,payload.ownerId);
 	});
 	server.on('playerSleeping',function(id){
 		playerList[id].awake = false;
@@ -185,6 +192,9 @@ function pingServer(){
 	clearTimeout(pingTimeout);
 	lastTime = new Date();
 	server.emit('drip');
+}
+function sendEmoji(emoji){
+	server.emit('sendEmoji',emoji);
 }
 
 function calcPing(){

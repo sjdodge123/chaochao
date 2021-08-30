@@ -1,12 +1,15 @@
 
 var scale = 0.05;
 var patterns = {};
+var commentIcon = new Image(576,512);
+commentIcon.src ="../assets/img/comment-alt.svg";
 var blindfoldIcon = new Image(576,512);
 blindfoldIcon.src = "../assets/img/low-vision.svg";
 var transferIcon = new Image(576,512);
 transferIcon.src = "../assets/img/random.svg";
 var bombIcon = new Image(576,512);
 bombIcon.src = "../assets/img/bomb.svg";
+
 
 function loadPatterns(){
     patterns[config.tileMap.abilities.blindfold.id] = makePattern(blindfoldIcon);
@@ -54,6 +57,7 @@ function drawObjects(dt){
     drawPunches();
     drawProjectiles();
     drawAbilties();
+    
     if(currentState == config.stateMap.gameOver){
         drawGameOverScreen();
     }
@@ -164,11 +168,19 @@ function drawPlayer(player){
         drawAbilityAimer(player)
     }
 
+    if(player.chatMessage != null){
+        gameContext.save();
+        gameContext.drawImage(commentIcon,player.x, player.y - 40,commentIcon.width*0.07,commentIcon.height*0.07);
+        gameContext.font = '20px Times New Roman';
+        gameContext.fillText(player.chatMessage, player.x+8, player.y-17);
+        gameContext.restore();
+    }
+
     if(player.awake == false){
         gameContext.save();
-        gameContext.fillStyle = "black";
-        gameContext.font = '10px serif';
-        gameContext.fillText("zzZZ..", player.x+5, player.y-10);
+        gameContext.drawImage(commentIcon,player.x, player.y - 40,commentIcon.width*0.07,commentIcon.height*0.07);
+        gameContext.font = '20px Times New Roman';
+        gameContext.fillText("😴", player.x+8, player.y-17);
         gameContext.restore();
     }
 }
@@ -230,10 +242,12 @@ function drawTrail(player){
         var point = player.trail.vertices[i];    
         gameContext.lineTo(point.x, point.y);
     }
-    gameContext.lineWidth = 3;
+    gameContext.lineWidth = 5;
+    gameContext.shadowBlur = 3;
+    gameContext.shadowColor = "black";
     gameContext.strokeStyle = player.color;
     if(player.notches == config.playerNotchesToWin){
-        gameContext.lineWidth = 5;
+        gameContext.lineWidth = 6;
         gameContext.setLineDash([20, 3, 3, 3, 3, 3, 3, 3]);
     }
     gameContext.stroke();

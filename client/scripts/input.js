@@ -1,3 +1,6 @@
+var angleFromPlayer = 0;
+var menuOpen = false;
+
 function calcMousePos(evt){
     evt.preventDefault();
     var rect = gameCanvas.getBoundingClientRect();
@@ -12,13 +15,28 @@ function calcMousePos(evt){
 function setMousePos(x,y){
 	mousex = x;
 	mousey = y;
+    if(playerList[myID] != null){
+        angleFromPlayer = Math.abs((180/Math.PI)*Math.atan2(mousey-playerList[myID].y,mousex-playerList[myID].x) - 90);
+    }
+    
 }
 
 function handleClick(event){
     switch(event.which){
         case 1:{
-            attack = true;
-            server.emit('movement',{turnLeft:turnLeft,moveForward:moveForward,turnRight:turnRight,moveBackward:moveBackward,attack:attack});
+            if(menuOpen == false){
+                attack = true;
+                server.emit('movement',{turnLeft:turnLeft,moveForward:moveForward,turnRight:turnRight,moveBackward:moveBackward,attack:attack});
+            }
+            break;
+        }
+        case 3:{
+            if(menuOpen){
+                closeEmojiWindow();
+            } else{
+                openEmojiWindow();
+            }
+            
             break;
         }
     }
@@ -29,6 +47,9 @@ function handleUnClick(event){
         case 1:{
             attack = false;
             server.emit('movement',{turnLeft:turnLeft,moveForward:moveForward,turnRight:turnRight,moveBackward:moveBackward,attack:attack});
+            break;
+        }
+        case 3:{
             break;
         }
     }
@@ -68,4 +89,23 @@ function haltInput(evt){
     moveBackward = false;
     attack = false;
     server.emit('movement',{turnLeft:turnLeft,moveForward:moveForward,turnRight:turnRight,moveBackward:moveBackward,attack:attack});
+}
+
+function openEmojiWindow(){
+    if(menuOpen == false){
+        emojiMenu.style.transform="scale(2)";
+        menuOpen = true;
+    }
+    
+}
+function closeEmojiWindow(source) {
+    if(menuOpen){
+        emojiMenu.style.transform="scale(0)"; 
+        menuOpen = false;
+    }
+    if(source == "cancel"){
+        return;
+    }
+    var emoji = String(source).trim();
+    sendEmoji(emoji);
 }

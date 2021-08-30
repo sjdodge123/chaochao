@@ -92,6 +92,18 @@ function checkForMail(client){
 	client.on('drip',function(){
 		client.emit('drop');
 	});
+	client.on('sendEmoji',function(emoji) {
+		if(c.emojis.indexOf(emoji) == -1){
+			return;
+		}
+		var room = hostess.getRoomBySig(roomMailList[client.id]);
+		var player = room.playerList[client.id];
+		if(player.chatCoolDownTimer != null){
+			return;
+		}
+		player.chatCoolDownTimer = Date.now();
+		messageRoomBySig(room.sig,"broadCastEmoji",{emoji:emoji,ownerId:client.id});
+	});
 
 	client.on('movement',function(packet){
 		var room = hostess.getRoomBySig(roomMailList[client.id]);

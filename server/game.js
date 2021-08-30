@@ -905,6 +905,10 @@ class Player extends Circle {
 		this.kickTimer = null;
 		this.kickTimeLeft = this.kickWaitTime;
 
+		this.chatCoolDownWaitTime = 10;
+		this.chatCoolDownTimer = null;
+		this.chatCoolDownTimeLeft = this.chatCoolDownWaitTime;
+
 		//Game Variables
 		this.hittingLobbyButton = false;
 		this.reachedGoal = false;
@@ -950,6 +954,7 @@ class Player extends Circle {
 		this.dt = dt;
 		this.move();
 		this.checkAttack(currentState);
+		this.checkChatCoolDownTimer();
 	}
 	move(){
 		this.x = this.newX;
@@ -977,6 +982,15 @@ class Player extends Circle {
 				return true;
 			}
 			return false;
+		}
+	}
+	checkChatCoolDownTimer(){
+		if(this.chatCoolDownTimer != null){
+			this.chatCoolDownTimeLeft = ((this.chatCoolDownWaitTime*1000 - (Date.now() - this.chatCoolDownTimer))/(1000)).toFixed(1);
+			if(this.chatCoolDownTimeLeft > 0){
+				return;
+			}
+			this.chatCoolDownTimer = null;
 		}
 	}
 	getSpeedBonus(){

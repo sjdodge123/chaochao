@@ -85,6 +85,20 @@
         "collapsing":5,
         "gameOver": 6
     },
+
+    "emojis":[
+        "😄",
+        "😈",
+        "🤔",
+        "😎",
+        "😨",
+        "😤",
+        "😳",
+        "🥱",
+        "💀",
+        "👋",
+        "💪"
+    ],
     "playerNotchesToWin": 6,
     "playerDragCoeff": 0.15,
     "playerBrakeCoeff": 0.235,

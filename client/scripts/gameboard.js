@@ -66,6 +66,7 @@ function createPlayer(dataArray,isAI){
 	playerList[index].color = dataArray[3];
 	playerList[index].alive = true;
 	playerList[index].notches = 0;
+	playerList[index].chatMessage = null;
 	playerList[index].awake = true;
 	playerList[index].ability = null;
 	playerList[index].mouseX = 0;
@@ -327,6 +328,14 @@ function createBlindFold(owner){
 		clearInterval(int);
 		blindfold.color = null;
 	},config.tileMap.abilities.blindfold.duration*1000);
+}
+
+function setupEmojiWheel(){
+	var menu = $("#emojiMenu");
+	for(var i=0;i<config.emojis.length;i++){
+		menu.append('<a onclick="closeEmojiWindow(this.innerHTML)" href="#">'+ config.emojis[i] +'</a>');
+	}
+	emojiMenu.style.borderColor = playerList[myID].color;
 }
 
 class Trail {

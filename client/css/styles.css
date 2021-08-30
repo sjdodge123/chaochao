@@ -3,22 +3,26 @@
     font-weight: 400;
     src: url("https://applesocial.s3.amazonaws.com/assets/styles/fonts/sanfrancisco/sanfranciscodisplay-regular-webfont.woff");
 }
+
 @font-face {
     font-family: 'FontAwesome';
     src: url('./webfonts/fa-regular-400.ttf');
     font-weight: normal;
     font-style: normal;
 }
+
 body {
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
 }
+
 button {
-	margin-top: 10px;
+    margin-top: 10px;
 }
+
 canvas {
     position: relative;
     font-weight: 600;
-	padding-left: 0;
+    padding-left: 0;
     padding-right: 0;
     margin-left: auto;
     margin-right: auto;
@@ -26,66 +30,72 @@ canvas {
 }
 
 .nav-item {
-	margin-right: 5px;
+    margin-right: 5px;
 }
 
-#main{
-	background: #F0F0F0;
-	position: absolute;
-	overflow: none;
-	left: 0;
-	right: 0;
-	bottom: 0;
-	top: 0;
-	margin-top: -10%;
+#main {
+    background: #F0F0F0;
+    position: absolute;
+    overflow: none;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: 0;
+    margin-top: -10%;
 }
 
-#gameWindow{
-	margin-top: 1%;
-    background: white;
-	overflow: hidden;
-	display: none;
-    height: 768px;
-}
-#createWindow{
+#gameWindow {
     margin-top: 1%;
     background: white;
-	overflow: hidden;
-	display: none;
-    height: 968px;
-    
+    overflow: hidden;
+    display: none;
+    height: 768px;
 }
-#canvasWindow{
+
+#createWindow {
+    margin-top: 1%;
+    background: white;
+    overflow: hidden;
+    display: none;
+    height: 968px;
+
+}
+
+#canvasWindow {
     display: block;
     position: relative;
     height: 768px;
 }
 
-#loadWindow{
-    float:left;
+#loadWindow {
+    float: left;
     display: block;
     padding-bottom: 100px;
 }
-#controlPanel{
+
+#controlPanel {
     display: block;
     position: relative;
     height: 200px;
 }
 
-div.map-image{
+div.map-image {
     margin: 5px;
     float: left;
     width: 256px;
 }
-div.map-image img{
+
+div.map-image img {
     width: 100%;
     height: auto;
 }
+
 div.desc {
     padding: 15px;
     text-align: center;
-  }
-#game-title{
+}
+
+#game-title {
     font-family: "San Francisco";
     font-size: 72px;
 }
@@ -93,16 +103,99 @@ div.desc {
 .play-container {
     background-color: white;
     height: 250px;
-    width:  50%;
+    width: 50%;
     padding: 10px;
     border-radius: 5px;
     box-shadow: 0px 0px 6px #B2B2B2;
 }
-.create-container{
+
+.create-container {
     background-color: white;
     height: 100px;
-    width:  50%;
+    width: 50%;
     padding: 10px;
     border-radius: 5px;
     box-shadow: 0px 0px 6px #B2B2B2;
+}
+
+.emojiMenu {
+    background-color: white;
+    height: 100px;
+    width: 100px;
+    transform: scale(0);
+    border-radius: 50%;
+    border-style: solid;
+    position: absolute;
+    top: 0px;
+    bottom: 0px;
+    left: 0px;
+    right: 0px;
+    z-index: 99;
+    transition: 0.3s;
+}
+
+#emojiMenu a {
+    text-decoration: none;
+    display: inline-block;
+    position: absolute;
+    font-size: 12px;
+    color: #BBBBBB;
+}
+
+#emojiMenu a:nth-child(1) {
+    top: 0px;
+    left: 41px;
+}
+
+#emojiMenu a:nth-child(2) {
+    top: 5px;
+    left: 60px;
+}
+
+#emojiMenu a:nth-child(3) {
+    top: 20px;
+    left: 72px;
+}
+
+#emojiMenu a:nth-child(4) {
+    top: 38px;
+    left: 80px;
+}
+
+#emojiMenu a:nth-child(5) {
+    top: 56px;
+    left: 72px;
+}
+
+#emojiMenu a:nth-child(6) {
+    top: 74px;
+    left: 60px;
+}
+#emojiMenu a:nth-child(7) {
+    top: 78px;
+    left: 41px;
+}
+#emojiMenu a:nth-child(8) {
+    top: 74px;
+    left: 22px;
+}
+#emojiMenu a:nth-child(9) {
+    top: 56px;
+    left: 10px;
+}
+#emojiMenu a:nth-child(10) {
+    top: 38px;
+    left: 2px;
+}
+#emojiMenu a:nth-child(11) {
+    top: 20px;
+    left: 10px;
+}
+#emojiMenu a:nth-child(12) {
+    top: 5px;
+    left: 22px;
+}
+
+#emojiMenu a:hover {
+    color: #c87f8a;
 }

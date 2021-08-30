@@ -10,10 +10,11 @@ var server = null,
     newHeight = 0,
     maps = [],
     oldNotches = {},
-    timeOutChecker = null;
-    currentState = null;
+    timeOutChecker = null,
+    currentState = null,
     gameRunning = null;
 
+    var emojiMenu = document.getElementById("emojiMenu");
     var gameWindow = document.getElementById("gameWindow");
 
     //Input Vars
@@ -22,6 +23,7 @@ var server = null,
     moveBackward = false,
     turnLeft = false,
     turnRight = false,
+    drawChatWheel = false,
     mousex = null,
 	mousey = null;
 
@@ -92,12 +94,13 @@ function gameLoop(dt){
     drawObjects(dt);
     updateGameboard(dt);
     //drawBackground();
-    //drawHUD();
+    //updateHUD();
 }
 
+
 function resize(){
-    var rect = gameWindow.getBoundingClientRect();
-    var viewport = {width:rect.width,height:rect.height};
+    var gameWindowRect = gameWindow.getBoundingClientRect();
+    var viewport = {width:gameWindowRect.width,height:gameWindowRect.height};
     var scaleToFitX = viewport.width / gameCanvas.width;
     var scaleToFitY = viewport.height / gameCanvas.height;
     var currentScreenRatio = viewport.width/viewport.height;
@@ -110,9 +113,12 @@ function resize(){
         newWidth = gameCanvas.width * optimalRatio;
         newHeight = gameCanvas.height * optimalRatio;
     }
-
     gameCanvas.style.width = newWidth + "px";
     gameCanvas.style.height = newHeight + "px";
+    var canvasRect = gameCanvas.getBoundingClientRect();
+    var emojiMenuRect = emojiMenu.getBoundingClientRect();
+    emojiMenu.style.left = canvasRect.x + newWidth/2 +"px";
+    emojiMenu.style.top = canvasRect.y + newHeight - 175 +"px";
 }
 
 
