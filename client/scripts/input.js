@@ -18,7 +18,9 @@ function setMousePos(x,y){
     if(playerList[myID] != null){
         angleFromPlayer = Math.abs((180/Math.PI)*Math.atan2(mousey-playerList[myID].y,mousex-playerList[myID].x) - 90);
     }
-    
+    if(menuOpen == false){
+        moveEmojiMenu(x,y); 
+    }
 }
 
 function handleClick(event){
@@ -108,4 +110,9 @@ function closeEmojiWindow(source) {
     }
     var emoji = String(source).trim();
     sendEmoji(emoji);
+}
+
+function moveEmojiMenu(x,y){
+    emojiMenu.style.left = x + "px";
+    emojiMenu.style.top = y + "px";
 }

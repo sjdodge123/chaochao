@@ -148,7 +148,7 @@ class Game {
 		if(this.currentState == this.stateMap.gameOver){
 			this.checkGameOverTimer();
 		}
-		this.gameBoard.update(this.currentState,dt);
+		this.gameBoard.update(this.currentState,this.alivePlayerCount,dt);
 		this.world.update(dt);
 	}
 	checkLobbyStart(){
@@ -249,7 +249,7 @@ class Game {
 				}
 			}
 		}
-		this.alivePlayerCount = playersConcluded;
+		this.alivePlayerCount = this.playerCount - playersConcluded;
 		if(playersConcluded == this.playerCount){
 			this.startOverview();
 		}
@@ -336,6 +336,7 @@ class GameBoard {
 		this.roomSig = roomSig;
 		this.stateMap = c.stateMap;
 		this.lobbyStartButton;
+		this.alivePlayerCount = 0;
 		this.startingGate = null;
 		this.maps = utils.loadMaps();
 		this.mapsPlayed = [];
@@ -345,7 +346,8 @@ class GameBoard {
 		this.collapseLoc = {};
 		this.collapseLine = this.world.height;
 	}
-	update(currentState,dt){
+	update(currentState,playerAliveCount,dt){
+		this.alivePlayerCount = playerAliveCount;
 		this.engine.update(dt);
 		this.collapseMap(currentState);
 		this.checkCollisions(currentState);

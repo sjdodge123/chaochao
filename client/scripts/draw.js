@@ -167,10 +167,16 @@ function drawPlayer(player){
     if(player.ability != null){
         drawAbilityAimer(player)
     }
-
+    var iconWidth, iconHeight;
     if(player.chatMessage != null){
         gameContext.save();
+        iconwidth = commentIcon.width*0.07;
+        iconHeight = commentIcon.height*0.07;
+
         gameContext.drawImage(commentIcon,player.x, player.y - 40,commentIcon.width*0.07,commentIcon.height*0.07);
+        //gameContext.fillStyle = "white";
+        //gameContext.rect(player.x+3,player.y-37,35,22);
+        //gameContext.fill();
         gameContext.font = '20px Times New Roman';
         gameContext.fillText(player.chatMessage, player.x+8, player.y-17);
         gameContext.restore();

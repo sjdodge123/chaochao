@@ -115,10 +115,12 @@ function resize(){
     }
     gameCanvas.style.width = newWidth + "px";
     gameCanvas.style.height = newHeight + "px";
+    /*
     var canvasRect = gameCanvas.getBoundingClientRect();
     var emojiMenuRect = emojiMenu.getBoundingClientRect();
     emojiMenu.style.left = canvasRect.x + newWidth/2 +"px";
     emojiMenu.style.top = canvasRect.y + newHeight - 175 +"px";
+    */
 }
 
 
