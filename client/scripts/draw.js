@@ -57,7 +57,7 @@ function drawObjects(dt){
     drawPunches();
     drawProjectiles();
     drawAbilties();
-    
+    drawHUD();
     if(currentState == config.stateMap.gameOver){
         drawGameOverScreen();
     }
@@ -174,9 +174,6 @@ function drawPlayer(player){
         iconHeight = commentIcon.height*0.07;
 
         gameContext.drawImage(commentIcon,player.x, player.y - 40,commentIcon.width*0.07,commentIcon.height*0.07);
-        //gameContext.fillStyle = "white";
-        //gameContext.rect(player.x+3,player.y-37,35,22);
-        //gameContext.fill();
         gameContext.font = '20px Times New Roman';
         gameContext.fillText(player.chatMessage, player.x+8, player.y-17);
         gameContext.restore();
@@ -416,6 +413,79 @@ function compareSite(siteA,siteB){
         return false;
     }
     return true;
+}
+
+function drawHUD(){
+    drawTouchControls();
+}
+
+function drawTouchControls(){
+	if(joysticksFaded){
+		return;
+	}
+	var currentTime = Date.now();
+	var timeLeft = currentTime - joystickLastTouch;
+	if(jotstickFadeDuration - timeLeft <= 0){
+		joysticksFaded = true;
+		return;
+	}
+	if(isTouchScreen == true && joystickMovement != null && joystickMovement.pressed == true){
+		gameContext.save();
+		gameContext.beginPath();
+        gameContext.lineWidth = 3;
+        gameContext.strokeStyle = "black ";
+		gameContext.arc(joystickMovement.baseX,joystickMovement.baseY,joystickMovement.baseRadius,0,Math.PI*2,true);
+        gameContext.stroke();
+		
+		
+		gameContext.beginPath();
+		gameContext.arc(joystickMovement.stickX,joystickMovement.stickY,joystickMovement.stickRadius,0,Math.PI*2,true);
+        gameContext.fillStyle = "rgba(191, 191, 191, 1)";
+        gameContext.fill();
+        gameContext.stroke();
+		gameContext.restore();
+	}
+
+    if(isTouchScreen && gamePadA != null){
+        gameContext.beginPath();
+		gameContext.arc(gamePadA.x,gamePadA.y,gamePadA.radius,0,Math.PI*2,true);
+        gameContext.strokeStyle = "black ";
+        gameContext.fillStyle = "rgba(191, 191, 191, 0.2)";
+        gameContext.fill();
+        gameContext.stroke();
+		gameContext.restore();
+    }
+
+	if(isTouchScreen && joystickCamera != null){
+		gameContext.save();
+		gameContext.beginPath();
+		gameContext.strokeStyle = "black";
+		gameContext.arc(joystickCamera.baseX,joystickCamera.baseY,joystickCamera.baseRadius,0,Math.PI*2,true);
+		gameContext.stroke();
+
+		/* TODO: Fix touch cooldown display
+		if( 1 - (cooldownRemaining/currentWeaponCooldown) >= 1){
+			gameContext.strokeStyle = "red";
+			gameContext.beginPath();
+			gameContext.arc(joystickCamera.baseX,joystickCamera.baseY,joystickCamera.fireradius,0,Math.PI*2,true);
+			gameContext.stroke();
+		}
+		*/
+		
+		gameContext.beginPath();
+        gameContext.fillStyle = "rgba(189, 195, 199, 1)";
+		gameContext.arc(joystickCamera.stickX,joystickCamera.stickY,joystickCamera.stickRadius,0,Math.PI*2,true);
+		gameContext.fill();
+
+        
+		gameContext.beginPath();
+		gameContext.moveTo(gameCanvas.width/2,gameCanvas.height/2);
+		gameContext.lineTo(gameCanvas.width/2+joystickCamera.dx*500,gameCanvas.height/2+joystickCamera.dy*500);
+		gameContext.stroke();
+        
+
+		gameContext.restore();
+	}
 }
 
 function drawOverviewBoard(){

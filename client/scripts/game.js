@@ -46,7 +46,7 @@ function setupPage(){
         window.location = '/create.html';
         return false;
     });
-    window.addEventListener('blur', haltInput);
+    window.addEventListener('blur', cancelMovement);
     window.addEventListener('resize', resize, false);
     window.requestAnimFrame = (function(){
         return  window.requestAnimationFrame       ||
@@ -71,15 +71,7 @@ function enterLobby(){
 function init(){
     timeOutChecker = setInterval(checkForTimeout,1000);
     animloop();
-    window.addEventListener("mousemove", calcMousePos, false);
-    window.addEventListener("mousedown", handleClick, false);
-    window.addEventListener("mouseup", handleUnClick, false);
-    window.addEventListener("keydown", keyDown, false);
-    window.addEventListener("keyup", keyUp, false);
-    window.addEventListener('contextmenu', function(ev) {
-        ev.preventDefault();
-        return false;
-    }, false);
+    initEventHandlers();
 }
 function animloop(){
     if(gameRunning){
@@ -93,8 +85,6 @@ function animloop(){
 function gameLoop(dt){
     drawObjects(dt);
     updateGameboard(dt);
-    //drawBackground();
-    //updateHUD();
 }
 
 
@@ -120,6 +110,22 @@ function resize(){
     var emojiMenuRect = emojiMenu.getBoundingClientRect();
     emojiMenu.style.left = canvasRect.x + newWidth/2 +"px";
     emojiMenu.style.top = canvasRect.y + newHeight - 175 +"px";
+    */
+}
+
+function goFullScreen(){
+    if (gameCanvas.fullscreenElement) {
+        gameCanvas.exitFullscreen();
+      } else {
+        gameCanvas.requestFullscreen();
+      }
+      /*
+    if(gameCanvas.requestFullScreen)
+        gameCanvas.requestFullScreen();
+    else if(gameCanvas.webkitRequestFullScreen)
+        gameCanvas.webkitRequestFullScreen();
+    else if(gameCanvas.mozRequestFullScreen)
+        gameCanvas.mozRequestFullScreen();
     */
 }
 

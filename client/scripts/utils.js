@@ -75,3 +75,6 @@ function getColor(){
 function getMagSq(x1, y1, x2, y2){
 	return Math.pow(x2-x1,2) + Math.pow(y2-y1, 2);
 }
+function getMagSquared(x,y){
+	return Math.pow(x, 2) + Math.pow(y, 2);
+}
