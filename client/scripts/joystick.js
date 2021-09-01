@@ -1,20 +1,22 @@
 "use strict";
 
 class Joystick {
-	constructor(x,y){
+	constructor(x,y,staticBase){
 		this.baseX = x;
 		this.baseY = y;
 		this.stickX = x;
 		this.stickY = y;
-		this.staticBase = false;
+		this.tempX = x;
+		this.tempY = y;
+		this.staticBase = staticBase;
 		this.baseRadius = 50;
+		this.width = this.baseRadius;
+		this.height = this.baseRadius;
 		this.stickRadius = 30; 
 		this.maxPullRadius = 25;
 		this.dx = 0;
 		this.dy = 0;
 		this.deadzone = 10;
-		this.fireradius = 125;
-		this.fireradius2 = this.fireradius*this.fireradius;
 		this.distanceSquared  = 0;
 		this.touchIdx = null;
 		this.pressed = false;
@@ -100,10 +102,10 @@ class Joystick {
 			this.stickX = this.baseX;
 			this.stickY = this.baseY;
 		} else{
-			this.baseX = 0;
-			this.baseY = 0;
-			this.stickX = 0;
-			this.stickY = 0;
+			this.baseX = this.tempX;
+			this.baseY = this.tempY;
+			this.stickX = this.tempX;
+			this.stickY = this.tempY;
 		}
 		this.dx = 0;
 		this.dy = 0;
@@ -111,26 +113,81 @@ class Joystick {
 
 	onMove(x,y){
 		if(this.pressed = true){
-			this.dx = x - this.baseX;
-			this.dy = y - this.baseY;
-            this.distanceSquared = getMagSquared(this.dx,this.dy);
-			if(this.distanceSquared < this.maxPullRadius*this.maxPullRadius){
-				this.stickX = x;
-				this.stickY = y;
-			} else{
-                var mag = Math.sqrt(getMagSq(x,y,this.baseX,this.baseY));
-                this.stickX = this.baseX + (this.maxPullRadius/mag)*(x-this.baseX);
-                this.stickY = this.baseY + (this.maxPullRadius/mag)*(y-this.baseY);
-            }   
+			this.calcStick(x,y);
 		}
 	}
 	onDown(x,y){
 		this.pressed = true;
 		if(!this.staticBase){
+			this.tempX = x;
+			this.tempY = y;
 			this.baseX = x;
 			this.baseY = y;
 		}
-		this.stickX = x;
-		this.stickY = y;
+		this.calcStick(x,y);
 	}
+	calcStick(x,y){
+		this.dx = x - this.baseX;
+		this.dy = y - this.baseY;
+		this.distanceSquared = getMagSquared(this.dx,this.dy);
+		if(this.distanceSquared < this.maxPullRadius*this.maxPullRadius){
+			this.stickX = x;
+			this.stickY = y;
+		} else{
+			var mag = Math.sqrt(getMagSq(x,y,this.baseX,this.baseY));
+			this.stickX = this.baseX + (this.maxPullRadius/mag)*(x-this.baseX);
+			this.stickY = this.baseY + (this.maxPullRadius/mag)*(y-this.baseY);
+		}   
+	}
+}
+
+class VirtualButton{
+    constructor(x,y,width,height,render){
+        this.x = x;
+        this.y = y;
+		this.width = width;
+		this.height = height;
+
+		this.top = this.y;
+		this.left = this.x;
+		this.bottom = this.y + this.height;
+        this.right = this.x + this.width;
+        this.render = render;
+    }
+    pointInRect(x,y){
+        if(x > this.left && x < this.right && y > this.top && y < this.bottom){
+            return true;
+        }
+        return false;
+    }
+
+}
+class Button {
+    constructor(x,y,width,height,radius){
+        this.baseX = x;
+        this.baseY = y;
+
+		this.top = this.baseY;
+		this.left = this.baseX;
+		this.bottom = this.baseY + this.height;
+        this.right = this.baseX + this.width;
+
+        this.width = width;
+        this.height = height;
+        this.radius = radius;
+        this.pressed = false;
+        this.touchIdx = null;
+    }
+	pointInRect(x,y){
+        if(x > this.left && x < this.right && y > this.top && y < this.bottom){
+            return true;
+        }
+        return false;
+    }
+    onDown(x,y){
+        this.pressed = true;
+    }
+    onUp(){
+        this.pressed = false;
+    }
 }

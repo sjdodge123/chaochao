@@ -16,6 +16,7 @@ var server = null,
 
     var emojiMenu = document.getElementById("emojiMenu");
     var gameWindow = document.getElementById("gameWindow");
+    var exitIcon = document.getElementById("exitIcon");
 
     //Input Vars
     var attack = false,
@@ -105,7 +106,11 @@ function resize(){
     }
     gameCanvas.style.width = newWidth + "px";
     gameCanvas.style.height = newHeight + "px";
+
     /*
+    var canvasRect = gameCanvas.getBoundingClientRect();
+    exitIcon.style.left = canvasRect.x + newWidth - 40 +"px";
+    exitIcon.style.top = canvasRect.y +"px";
     var canvasRect = gameCanvas.getBoundingClientRect();
     var emojiMenuRect = emojiMenu.getBoundingClientRect();
     emojiMenu.style.left = canvasRect.x + newWidth/2 +"px";
@@ -116,17 +121,9 @@ function resize(){
 function goFullScreen(){
     if (gameCanvas.fullscreenElement) {
         gameCanvas.exitFullscreen();
-      } else {
+    } else {
         gameCanvas.requestFullscreen();
-      }
-      /*
-    if(gameCanvas.requestFullScreen)
-        gameCanvas.requestFullScreen();
-    else if(gameCanvas.webkitRequestFullScreen)
-        gameCanvas.webkitRequestFullScreen();
-    else if(gameCanvas.mozRequestFullScreen)
-        gameCanvas.mozRequestFullScreen();
-    */
+    }
 }
 
 

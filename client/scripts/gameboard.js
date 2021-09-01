@@ -71,6 +71,7 @@ function createPlayer(dataArray,isAI){
 	playerList[index].ability = null;
 	playerList[index].mouseX = 0;
 	playerList[index].mouseY = 0;
+	playerList[index].deathMessage = null;
 	playerList[index].trail = new Trail({x:dataArray[1],y:dataArray[2]});
     /*
 	playerList[index].weapon = {}
@@ -265,6 +266,7 @@ function resetPlayers(){
 	for(var id in playerList){
 		var player = playerList[id];
 		player.alive = true;
+		player.deathMessage = null;
 		player.trail = new Trail({x:player.x,y:player.y});
 	}
 }
@@ -277,6 +279,7 @@ function fullReset(){
 		var player = playerList[id];
 		player.alive = true;
 		player.ability = null;
+		player.deathMessage = null;
 		player.trail = new Trail({x:player.x,y:player.y});
 		player.notches = 0;
 		oldNotches[id] = player.notches;

@@ -147,6 +147,7 @@ function checkDrawPlayer(player){
         drawTrail(player);
     }
     if(player.alive == false){
+        drawDeathMessage(player);
         return;
     }
     drawPlayer(player);
@@ -167,12 +168,8 @@ function drawPlayer(player){
     if(player.ability != null){
         drawAbilityAimer(player)
     }
-    var iconWidth, iconHeight;
     if(player.chatMessage != null){
         gameContext.save();
-        iconwidth = commentIcon.width*0.07;
-        iconHeight = commentIcon.height*0.07;
-
         gameContext.drawImage(commentIcon,player.x, player.y - 40,commentIcon.width*0.07,commentIcon.height*0.07);
         gameContext.font = '20px Times New Roman';
         gameContext.fillText(player.chatMessage, player.x+8, player.y-17);
@@ -184,6 +181,16 @@ function drawPlayer(player){
         gameContext.drawImage(commentIcon,player.x, player.y - 40,commentIcon.width*0.07,commentIcon.height*0.07);
         gameContext.font = '20px Times New Roman';
         gameContext.fillText("😴", player.x+8, player.y-17);
+        gameContext.restore();
+    }
+}
+
+function drawDeathMessage(player){
+    if(player.deathMessage != null){
+        gameContext.save();
+        gameContext.drawImage(commentIcon,player.x, player.y - 40,commentIcon.width*0.07,commentIcon.height*0.07);
+        gameContext.font = '20px Times New Roman';
+        gameContext.fillText(player.deathMessage, player.x+8, player.y-17);
         gameContext.restore();
     }
 }
@@ -416,10 +423,31 @@ function compareSite(siteA,siteB){
 }
 
 function drawHUD(){
+    drawVirtualButtons();
     drawTouchControls();
 }
 
+function drawVirtualButtons(){
+    if(virtualButtonList == null){
+        return;
+    }
+    for(var i=0;i<virtualButtonList.length;i++){
+        var bound = virtualButtonList[i].bound;
+        if(bound.render == true){
+            gameContext.save();
+            gameContext.beginPath();
+            gameContext.strokeStyle = "rgba(255, 0, 0, 0.3)";
+            gameContext.rect(bound.x,bound.y,bound.width,bound.height);
+            gameContext.stroke();
+            gameContext.restore();
+        }
+    }
+}
+
 function drawTouchControls(){
+    if(isTouchScreen == false){
+        return;
+    }
 	if(joysticksFaded){
 		return;
 	}
@@ -429,63 +457,55 @@ function drawTouchControls(){
 		joysticksFaded = true;
 		return;
 	}
-	if(isTouchScreen == true && joystickMovement != null && joystickMovement.pressed == true){
+	if(joystickMovement != null){
 		gameContext.save();
 		gameContext.beginPath();
         gameContext.lineWidth = 3;
         gameContext.strokeStyle = "black ";
-		gameContext.arc(joystickMovement.baseX,joystickMovement.baseY,joystickMovement.baseRadius,0,Math.PI*2,true);
+		gameContext.arc(joystickMovement.baseX,joystickMovement.baseY,joystickMovement.baseRadius,0,Math.PI*2,false);
+        gameContext.stroke();
+        gameContext.beginPath();
+        gameContext.arc(joystickMovement.baseX,joystickMovement.baseY,joystickMovement.stickRadius,0,Math.PI*2,false);
         gameContext.stroke();
 		
 		
 		gameContext.beginPath();
 		gameContext.arc(joystickMovement.stickX,joystickMovement.stickY,joystickMovement.stickRadius,0,Math.PI*2,true);
-        gameContext.fillStyle = "rgba(191, 191, 191, 1)";
+        gameContext.fillStyle = "rgba(191, 191, 191, 0.5)";
         gameContext.fill();
         gameContext.stroke();
 		gameContext.restore();
 	}
+	if(joystickCamera != null){
+        gameContext.save();
 
-    if(isTouchScreen && gamePadA != null){
         gameContext.beginPath();
-		gameContext.arc(gamePadA.x,gamePadA.y,gamePadA.radius,0,Math.PI*2,true);
+        gameContext.lineWidth = 3;
         gameContext.strokeStyle = "black ";
-        gameContext.fillStyle = "rgba(191, 191, 191, 0.2)";
-        gameContext.fill();
+		gameContext.arc(joystickCamera.baseX,joystickCamera.baseY,joystickCamera.baseRadius,0,Math.PI*2,false);
         gameContext.stroke();
-		gameContext.restore();
-    }
-
-	if(isTouchScreen && joystickCamera != null){
-		gameContext.save();
+        gameContext.beginPath();
+        gameContext.arc(joystickCamera.baseX,joystickCamera.baseY,joystickCamera.stickRadius,0,Math.PI*2,false);
+        gameContext.stroke();
+        	
 		gameContext.beginPath();
-		gameContext.strokeStyle = "black";
-		gameContext.arc(joystickCamera.baseX,joystickCamera.baseY,joystickCamera.baseRadius,0,Math.PI*2,true);
-		gameContext.stroke();
-
-		/* TODO: Fix touch cooldown display
-		if( 1 - (cooldownRemaining/currentWeaponCooldown) >= 1){
-			gameContext.strokeStyle = "red";
-			gameContext.beginPath();
-			gameContext.arc(joystickCamera.baseX,joystickCamera.baseY,joystickCamera.fireradius,0,Math.PI*2,true);
-			gameContext.stroke();
-		}
-		*/
-		
-		gameContext.beginPath();
-        gameContext.fillStyle = "rgba(189, 195, 199, 1)";
+        gameContext.fillStyle = "rgba(189, 195, 199, 0.5)";
 		gameContext.arc(joystickCamera.stickX,joystickCamera.stickY,joystickCamera.stickRadius,0,Math.PI*2,true);
 		gameContext.fill();
-
-        
-		gameContext.beginPath();
-		gameContext.moveTo(gameCanvas.width/2,gameCanvas.height/2);
-		gameContext.lineTo(gameCanvas.width/2+joystickCamera.dx*500,gameCanvas.height/2+joystickCamera.dy*500);
-		gameContext.stroke();
-        
-
-		gameContext.restore();
+        gameContext.stroke();
+        gameContext.restore();
 	}
+    if(squareButton != null){
+        gameContext.save();
+        gameContext.beginPath();
+        gameContext.lineWidth = 3;
+        gameContext.strokeStyle = "black ";
+        gameContext.fillStyle = "rgba(189, 195, 199, 0.5)";
+        gameContext.rect(squareButton.baseX,squareButton.baseY,squareButton.width,squareButton.height);
+        gameContext.fill();
+        gameContext.stroke();
+        gameContext.restore();
+    }
 }
 
 function drawOverviewBoard(){

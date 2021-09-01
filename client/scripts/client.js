@@ -62,12 +62,6 @@ function clientConnect() {
 		checkGameState(updatePacket.state);
 		totalPlayers = updatePacket.totalPlayers;
 		timeSinceLastCom = 0;
-
-		/*
-		if(myShip != null && myShip.weapon != null){
-			currentWeaponCooldown = myShip.weapon.cooldown*1000;
-		}
-		*/
 	});
 	
 	server.on("newMap",function(payload){
@@ -98,6 +92,7 @@ function clientConnect() {
 		//playLavaNoise();
 		playerAbilityUsed(id);
 		playerList[id].alive = false;
+		playerList[id].deathMessage = '💀';
 	});
 	server.on("broadCastEmoji",function(payload){
 		playerList[payload.ownerId].chatMessage = payload.emoji;

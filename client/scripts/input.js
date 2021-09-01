@@ -4,8 +4,10 @@ var menuOpen = false;
 var gamePadA = null;
 
 var isTouchScreen = false,
+    virtualButtonList = null,
     joystickMovement = null,
     joystickCamera = null,
+    squareButton = null,
     jotstickFadeDuration = 5000,
     joysticksFaded = true,
     joystickLastTouch = Date.now();
@@ -27,12 +29,12 @@ function initEventHandlers(){
         return false;
     }, false);
 
-    //gamePadA = {enabled:true,x:gameCanvas.width-250,y:gameCanvas.height-250,radius:50};
-    //joystickCamera = new Joystick(gameCanvas.width-250,gameCanvas.height-250);
     isTouchScreen = isTouchDevice();
     if(isTouchScreen){
+        setupVirtualbuttons();
         goFullScreen();
     }
+    
 }
 
 function calcMousePos(evt){
@@ -119,90 +121,91 @@ function keyUp(evt){
     server.emit('movement',{turnLeft:turnLeft,moveForward:moveForward,turnRight:turnRight,moveBackward:moveBackward,attack:attack});
 }
 
+function setupVirtualbuttons(){
+    virtualButtonList = [];
+    joystickMovement = new Joystick(0,0,false);
+    joystickCamera = new Joystick(0,0,false);
+    squareButton = new Button(0,0,100,200,0);
 
-var attackTouchIdx = null;
+    //var rect = gameCanvas.getBoundingClientRect();
+    var leftRect = new VirtualButton(0,50,world.width/4,world.height,false);
+    //var rightRect = new VirtualButton(0 + rect.width - (rect.width/4),50,rect.width/4,rect.height,true);
+    var topRightRect = new VirtualButton(0 + world.width - (world.width/4),50,world.width/4,world.height/2,false);
+    var bottomRightRect = new VirtualButton(0 + world.width - (world.width/4),topRightRect.bottom,world.width/4,world.height/2,false);
+    //var bottomCenterRect = new VirtualButton(leftRect.right,rect.height - (rect.height/4),rightRect.left-leftRect.right,200,true);
+
+    virtualButtonList.push({button:joystickMovement,bound:leftRect});
+    virtualButtonList.push({button:joystickCamera,bound:bottomRightRect});
+    virtualButtonList.push({button:squareButton,bound:topRightRect});
+
+
+    for(var i=0;i<virtualButtonList.length;i++){
+        virtualButtonList[i].button.baseX = virtualButtonList[i].bound.x + virtualButtonList[i].bound.width/2 - virtualButtonList[i].button.width/2;
+        virtualButtonList[i].button.stickX = virtualButtonList[i].bound.x + virtualButtonList[i].bound.width/2 - virtualButtonList[i].button.width/2;
+        virtualButtonList[i].button.baseY = virtualButtonList[i].bound.y +virtualButtonList[i].bound.height/2 - virtualButtonList[i].button.height/2;
+        virtualButtonList[i].button.stickY = virtualButtonList[i].bound.y +virtualButtonList[i].bound.height/2 - virtualButtonList[i].button.height/2;
+    }
+}
+
 
 function onTouchStart(evt){
     joysticksFaded = false;
     joystickLastTouch = Date.now();
-    evt.preventDefault();
     var rect = gameCanvas.getBoundingClientRect();
     var touch = evt.changedTouches[0];
     var touchX = (((touch.pageX - rect.left)/newWidth)*gameCanvas.width);
     var touchY = (((touch.pageY - rect.top )/newHeight)*gameCanvas.height);
-    
-    if(touchX <= gameCanvas.width/2){
-        joystickMovement = new Joystick(touchX,touchY);
-        if(joystickMovement.touchIdx == null){
-            joystickMovement.touchIdx = touch.identifier;
-            joystickMovement.onDown(touchX,touchY);
+
+    for(var i=0;i<virtualButtonList.length;i++){
+        if(virtualButtonList[i].bound.pointInRect(touchX,touchY)){
+            var button = virtualButtonList[i].button;
+            if(button.touchIdx == null){
+                button.touchIdx = touch.identifier;
+                button.onDown(touchX,touchY);
+
+                if(button == squareButton){
+                    attack = true;
+                    server.emit('movement',{turnLeft:turnLeft,moveForward:moveForward,turnRight:turnRight,moveBackward:moveBackward,attack:attack});
+                }
+            }
         }
-    }
-    
-    if(touchX >= gameCanvas.width/2) {
-        attack = true;
-        attackTouchIdx = touch.identifier;
-        server.emit('movement',{turnLeft:turnLeft,moveForward:moveForward,turnRight:turnRight,moveBackward:moveBackward,attack:attack});
-        /*
-        if(joystickCamera.touchIdx == null){
-            joystickCamera.touchIdx = touch.identifier;
-            joystickCamera.onDown(touchX,touchY);
-            server.emit('mousemove',{x:touchX,y:touchY});
-        }
-        */
+
     }
 }
 function onTouchEnd(evt){
     var touchList = evt.changedTouches;
     for(var i=0;i<touchList.length;i++){
-        if(touchList[i].identifier == joystickMovement.touchIdx){
-            joystickMovement.touchIdx = null;
-            cancelMovement();
-            joystickMovement.onUp();
-            return;
+        for(var j=0;j<virtualButtonList.length;j++){
+            var button = virtualButtonList[j].button;
+            if(touchList[i].identifier == button.touchIdx){
+                if(button == joystickMovement){
+                    cancelMovement();
+                }
+                if(button == squareButton){
+                    attack = false;
+                    server.emit('movement',{turnLeft:turnLeft,moveForward:moveForward,turnRight:turnRight,moveBackward:moveBackward,attack:attack});
+                }
+                button.touchIdx = null;
+                button.onUp();
+            }
         }
-
-        if(touchList[i].identifier == attackTouchIdx){
-            attack = false;
-            attackTouchIdx = null;
-            server.emit('movement',{turnLeft:turnLeft,moveForward:moveForward,turnRight:turnRight,moveBackward:moveBackward,attack:attack});
-        }
-
-        /*
-        if(touchList[i].identifier == joystickCamera.touchIdx){
-            joystickCamera.touchIdx = null;
-            joystickCamera.onUp();
-            return;
-        }
-        */
     }
 }
 function onTouchMove(evt){
     joystickLastTouch = Date.now();
     joysticksFaded = false;
-    evt.preventDefault();
     var touchList = evt.changedTouches;
     var rect = gameCanvas.getBoundingClientRect();
     var touch, touchX,touchY;    
     for(var i=0;i<touchList.length;i++){
-        /*
+
         if(touchList[i].identifier  == joystickCamera.touchIdx){
             touch = touchList[i];
             touchX = (((touch.pageX - rect.left)/newWidth)*gameCanvas.width);
             touchY = (((touch.pageY - rect.top )/newHeight)*gameCanvas.height);
             joystickCamera.onMove(touchX,touchY);
-
-            if(joystickCamera.checkForAttack()){
-                //fireGun(joystickCamera.stickX + myShip.x - camera.xOffset,joystickCamera.stickY+ myShip.y - camera.yOffset);
-            }
-            server.emit('touchaim',{
-                x1:joystickCamera.baseX,
-                y1:joystickCamera.baseY,
-                x2:joystickCamera.stickX,
-                y2:joystickCamera.stickY
-            });
+            server.emit('mousemove',{x:touchX,y:touchY});
         }
-        */
         if(touchList[i].identifier  == joystickMovement.touchIdx){
             touch = touchList[i];
             touchX = (((touch.pageX - rect.left)/newWidth)*gameCanvas.width);
@@ -222,7 +225,7 @@ function touchMovement(){
     moveBackward = joystickMovement.down();
     turnRight = joystickMovement.right();
     turnLeft = joystickMovement.left();
-    server.emit('movement',{turnLeft:turnLeft,moveForward:moveForward,turnRight:turnRight,moveBackward:moveBackward});
+    server.emit('movement',{turnLeft:turnLeft,moveForward:moveForward,turnRight:turnRight,moveBackward:moveBackward,attack:attack});
 }
 
 function cancelMovement(evt){
