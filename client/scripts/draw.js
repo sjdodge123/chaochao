@@ -448,16 +448,7 @@ function drawTouchControls(){
     if(isTouchScreen == false){
         return;
     }
-	if(joysticksFaded){
-		return;
-	}
-	var currentTime = Date.now();
-	var timeLeft = currentTime - joystickLastTouch;
-	if(jotstickFadeDuration - timeLeft <= 0){
-		joysticksFaded = true;
-		return;
-	}
-	if(joystickMovement != null){
+	if(joystickMovement != null && joystickMovement.isVisible()){
 		gameContext.save();
 		gameContext.beginPath();
         gameContext.lineWidth = 3;
@@ -471,12 +462,12 @@ function drawTouchControls(){
 		
 		gameContext.beginPath();
 		gameContext.arc(joystickMovement.stickX,joystickMovement.stickY,joystickMovement.stickRadius,0,Math.PI*2,true);
-        gameContext.fillStyle = "rgba(191, 191, 191, 0.5)";
+        gameContext.fillStyle = "rgba(255, 0, 0, 0.2)";
         gameContext.fill();
         gameContext.stroke();
 		gameContext.restore();
 	}
-	if(joystickCamera != null){
+	if(joystickCamera != null && joystickCamera.isVisible()){
         gameContext.save();
 
         gameContext.beginPath();
@@ -489,19 +480,21 @@ function drawTouchControls(){
         gameContext.stroke();
         	
 		gameContext.beginPath();
-        gameContext.fillStyle = "rgba(189, 195, 199, 0.5)";
+        gameContext.fillStyle = "rgba(0, 255, 0, 0.2)";
 		gameContext.arc(joystickCamera.stickX,joystickCamera.stickY,joystickCamera.stickRadius,0,Math.PI*2,true);
 		gameContext.fill();
         gameContext.stroke();
         gameContext.restore();
 	}
-    if(squareButton != null){
+    if(attackButton != null && attackButton.isVisible()){
         gameContext.save();
         gameContext.beginPath();
         gameContext.lineWidth = 3;
         gameContext.strokeStyle = "black ";
-        gameContext.fillStyle = "rgba(189, 195, 199, 0.5)";
-        gameContext.rect(squareButton.baseX,squareButton.baseY,squareButton.width,squareButton.height);
+        gameContext.fillStyle = "rgba(0, 0, 255, 0.2)";
+        
+        //gameContext.rect(attackButton.baseX,attackButton.baseY,attackButton.width,attackButton.height);
+        gameContext.arc(attackButton.baseX,attackButton.baseY,attackButton.radius,0,Math.PI*2,true);
         gameContext.fill();
         gameContext.stroke();
         gameContext.restore();

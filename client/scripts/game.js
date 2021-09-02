@@ -122,8 +122,11 @@ function goFullScreen(){
     if (gameCanvas.fullscreenElement) {
         gameCanvas.exitFullscreen();
     } else {
-        gameCanvas.requestFullscreen();
+        gameCanvas.requestFullscreen().then(function() {
+            resize();
+        });
     }
+    
 }
 
 

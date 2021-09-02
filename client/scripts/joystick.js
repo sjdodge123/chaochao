@@ -20,6 +20,18 @@ class Joystick {
 		this.distanceSquared  = 0;
 		this.touchIdx = null;
 		this.pressed = false;
+
+		
+		this.fadeDuration = 5*1000;
+		this.lastTouch = Date.now();
+		this.timeUntilVisible = Date.now();
+	}
+	isVisible(){
+		this.timeUntilVisible = Date.now() - this.lastTouch;
+		if(this.fadeDuration - this.timeUntilVisible <= 0){
+			return false;
+		}
+		return true;
 	}
 
 	touchScreenAvailable(){
@@ -113,11 +125,13 @@ class Joystick {
 
 	onMove(x,y){
 		if(this.pressed = true){
+			this.lastTouch = Date.now();
 			this.calcStick(x,y);
 		}
 	}
 	onDown(x,y){
 		this.pressed = true;
+		this.lastTouch = Date.now();
 		if(!this.staticBase){
 			this.tempX = x;
 			this.tempY = y;
@@ -177,15 +191,36 @@ class Button {
         this.radius = radius;
         this.pressed = false;
         this.touchIdx = null;
+
+		this.fadeDuration = 5*1000;
+		this.lastTouch = Date.now();
+		this.timeUntilVisible = Date.now();
     }
 	pointInRect(x,y){
+		if(this.width == 0){
+			return this.pointInCircle(x,y);
+		}
         if(x > this.left && x < this.right && y > this.top && y < this.bottom){
             return true;
         }
         return false;
     }
+	pointInCircle(x,y){
+		var dist = getMagSq(this.baseX,this.baseY,x,y);
+		return (dist <= this.radius*this.radius);
+	}
+	isVisible(){
+		this.timeUntilVisible = Date.now() - this.lastTouch;
+		if(this.fadeDuration - this.timeUntilVisible <= 0){
+			return false;
+		}
+		return true;
+	}
     onDown(x,y){
-        this.pressed = true;
+		this.lastTouch = Date.now();
+		if(this.pointInRect(x,y)){
+        	this.pressed = true;
+		}
     }
     onUp(){
         this.pressed = false;
