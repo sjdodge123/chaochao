@@ -1,6 +1,10 @@
 
 var scale = 0.05;
 var patterns = {};
+var exitIcon = new Image(576,512);
+exitIcon.src ="../assets/img/times-circle.svg";
+var fullscreenIcon = new Image(576,512);
+fullscreenIcon.src ="../assets/img/expand-alt.svg";
 var commentIcon = new Image(576,512);
 commentIcon.src ="../assets/img/comment-alt.svg";
 var blindfoldIcon = new Image(576,512);
@@ -215,10 +219,13 @@ function drawAbilityAimer(player){
             gameContext.moveTo(player.x,player.y);
             
             var length = 50;
+            /*
             var mag = Math.sqrt(getMagSq(player.mouseX,player.mouseY,player.x,player.y));
             var pointX = player.x + (length/mag)*(player.mouseX-player.x);
             var pointY = player.y + (length/mag)*(player.mouseY-player.y);
-            gameContext.lineTo(pointX,pointY);
+            */
+            var point = pos({x:player.x,y:player.y},length,player.angle);
+            gameContext.lineTo(point.x,point.y);
             gameContext.stroke();
             gameContext.restore();
             break;
@@ -436,7 +443,7 @@ function drawVirtualButtons(){
         if(bound.render == true){
             gameContext.save();
             gameContext.beginPath();
-            gameContext.strokeStyle = "rgba(255, 0, 0, 0.3)";
+            gameContext.strokeStyle = "rgba(255, 0, 0, 1)";
             gameContext.rect(bound.x,bound.y,bound.width,bound.height);
             gameContext.stroke();
             gameContext.restore();
@@ -497,6 +504,28 @@ function drawTouchControls(){
         gameContext.arc(attackButton.baseX,attackButton.baseY,attackButton.radius,0,Math.PI*2,true);
         gameContext.fill();
         gameContext.stroke();
+        gameContext.restore();
+    }
+    if(exitButton != null && exitButton.isVisible()){
+        if(window.document.fullscreenElement){
+            gameContext.save();
+            var iconWidth = exitIcon.width*0.1;
+            var iconHeight = exitIcon.height*0.1;
+            gameContext.drawImage(exitIcon,exitButton.baseX-iconWidth/2,exitButton.baseY-iconHeight/2,iconWidth,iconHeight);
+            gameContext.restore();
+        } else{
+            gameContext.save();
+            var iconWidth = fullscreenIcon.width*0.1;
+            var iconHeight = fullscreenIcon.height*0.1;
+            gameContext.drawImage(fullscreenIcon,exitButton.baseX-iconWidth/2,exitButton.baseY-iconHeight/2,iconWidth,iconHeight);
+            gameContext.restore();
+        }
+    }
+    if(chatButton != null && chatButton.isVisible()){
+        gameContext.save();
+        var iconWidth = commentIcon.width*0.1;
+        var iconHeight = commentIcon.height*0.1;
+        gameContext.drawImage(commentIcon,chatButton.baseX-iconWidth/2,chatButton.baseY-iconHeight/2,iconWidth,iconHeight);
         gameContext.restore();
     }
 }

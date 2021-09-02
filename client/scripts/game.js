@@ -119,11 +119,15 @@ function resize(){
 }
 
 function goFullScreen(){
-    if (gameCanvas.fullscreenElement) {
-        gameCanvas.exitFullscreen();
-    } else {
-        gameCanvas.requestFullscreen().then(function() {
+    if (window.document.fullscreenElement) {
+        window.document.exitFullscreen().then(function(){
             resize();
+        });
+    } else {
+        gameWindow.requestFullscreen().then(function() {
+            resize();
+        }).catch(function(e){
+            console.log(e);
         });
     }
     

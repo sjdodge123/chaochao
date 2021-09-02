@@ -123,7 +123,7 @@ function checkForMail(client){
 		}
 	});
 
-	client.on('mousemove',function(loc){
+	client.on('mousemove',function(angle){
 		var room = hostess.getRoomBySig(roomMailList[client.id]);
 		if(room == undefined){
 			return;
@@ -131,8 +131,7 @@ function checkForMail(client){
 		var player = room.playerList[client.id];
 		if(player != null && player != undefined){
 			if(player.enabled){
-				player.mouseX = loc.x;
-				player.mouseY = loc.y;
+				player.angle = angle;
 			}
 		}
 	});

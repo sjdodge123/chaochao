@@ -78,3 +78,18 @@ function getMagSq(x1, y1, x2, y2){
 function getMagSquared(x,y){
 	return Math.pow(x, 2) + Math.pow(y, 2);
 }
+
+function angle(originX, originY, targetX, targetY) {
+    var dx = originX - targetX;
+    var dy = originY - targetY;
+    var theta = Math.atan2(-dy, -dx);
+    theta *= 180 / Math.PI;           
+    if (theta < 0) theta += 360;      
+    return theta;
+}
+function pos(point, length, angle) {
+    var a = angle * Math.PI / 180;
+    var x = point.x + length * Math.cos(a);
+    var y = point.y + length * Math.sin(a);
+    return {x, y};
+}

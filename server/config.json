@@ -10,6 +10,8 @@
     "maxPlayersInRoom" : 15,
     "forceConstant" :5000,
 
+    "TESTSingleMap":false,
+
     "tileMap":{
         "slow":{
             "id": 0,

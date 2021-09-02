@@ -177,9 +177,11 @@ class VirtualButton{
 
 }
 class Button {
-    constructor(x,y,width,height,radius){
+    constructor(x,y,width,height,radius,autoHide){
         this.baseX = x;
         this.baseY = y;
+
+		this.autoHide = autoHide;
 
 		this.top = this.baseY;
 		this.left = this.baseX;
@@ -210,6 +212,9 @@ class Button {
 		return (dist <= this.radius*this.radius);
 	}
 	isVisible(){
+		if(!this.autoHide){
+			return true;
+		}
 		this.timeUntilVisible = Date.now() - this.lastTouch;
 		if(this.fadeDuration - this.timeUntilVisible <= 0){
 			return false;
@@ -222,6 +227,11 @@ class Button {
         	this.pressed = true;
 		}
     }
+	onMove(x,y){
+		if(this.pressed = true){
+			this.lastTouch = Date.now();
+		}
+	}
     onUp(){
         this.pressed = false;
     }

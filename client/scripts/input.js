@@ -7,6 +7,8 @@ var isTouchScreen = false,
     virtualButtonList = null,
     joystickMovement = null,
     joystickCamera = null,
+    exitButton = null,
+    chatButton = null,
     attackButton = null;
 
 function initEventHandlers() {
@@ -38,9 +40,8 @@ function calcMousePos(evt) {
     evt.preventDefault();
     if (myPlayer != null) {
         var rect = gameCanvas.getBoundingClientRect();
-        mouseX = (((evt.pageX - rect.left) / newWidth) * gameCanvas.width);
-        mouseY = (((evt.pageY - rect.top) / newHeight) * gameCanvas.height);
-        server.emit('mousemove', { x: mouseX, y: mouseY });
+        var mouseX = (((evt.pageX - rect.left) / newWidth) * gameCanvas.width);
+        var mouseY = (((evt.pageY - rect.top) / newHeight) * gameCanvas.height);
         setMousePos(mouseX, mouseY);
     }
 }
@@ -49,10 +50,8 @@ function setMousePos(x, y) {
     mousex = x;
     mousey = y;
     if (playerList[myID] != null) {
-        angleFromPlayer = Math.abs((180 / Math.PI) * Math.atan2(mousey - playerList[myID].y, mousex - playerList[myID].x) - 90);
-    }
-    if (menuOpen == false) {
-        moveEmojiMenu(x, y);
+        playerList[myID].angle = angle(playerList[myID].x,playerList[myID].y,x,y);
+        server.emit('mousemove', playerList[myID].angle);
     }
 }
 
@@ -69,7 +68,7 @@ function handleClick(event) {
             if (menuOpen) {
                 closeEmojiWindow();
             } else {
-                openEmojiWindow();
+                openEmojiWindow(mouseX,mouseY);
             }
 
             break;
@@ -122,18 +121,24 @@ function setupVirtualbuttons() {
     virtualButtonList = [];
     joystickMovement = new Joystick(0, 0, false);
     joystickCamera = new Joystick(0, 0, false);
-    attackButton = new Button(0, 0, 0, 0, 50);
+    attackButton = new Button(0, 0, 0, 0, 50,true);
+    exitButton = new Button(world.width - 50, 0, 0, 0, 12.5,false);
+    chatButton = new Button(50, 0, 0, 0, 12.5,false);
 
     //var rect = gameCanvas.getBoundingClientRect();
-    var leftRect = new VirtualButton(0, 50, world.width / 4, world.height, false);
+    var leftRect = new VirtualButton(0, 85, world.width / 4, world.height, false);
     //var rightRect = new VirtualButton(0 + world.width - (world.width/4),50,world.width/4,world.height,false);
-    var topRightRect = new VirtualButton(0 + world.width - (world.width / 4), 50, world.width / 4, world.height / 2, false);
+    var upperLeftRect = new VirtualButton(0,10, world.width / 16, 50, false);
+    var upperRightRect = new VirtualButton(0 + world.width - (world.width / 16),10, world.width / 16, 50, false);
+    var topRightRect = new VirtualButton(0 + world.width - (world.width / 4), 85, world.width / 4, world.height / 2, false);
     var bottomRightRect = new VirtualButton(0 + world.width - (world.width / 4), topRightRect.bottom, world.width / 4, world.height / 2, false);
     //var bottomCenterRect = new VirtualButton(leftRect.right,world.height - (world.height/4)-100,rightRect.left-leftRect.right,200,false);
 
     virtualButtonList.push({ button: joystickMovement, bound: leftRect });
     virtualButtonList.push({ button: joystickCamera, bound: topRightRect });
     virtualButtonList.push({ button: attackButton, bound: bottomRightRect });
+    virtualButtonList.push({ button: exitButton, bound:upperRightRect});
+    virtualButtonList.push({ button: chatButton, bound:upperLeftRect});
 
 
     for (var i = 0; i < virtualButtonList.length; i++) {
@@ -161,6 +166,16 @@ function onTouchStart(evt) {
                     if(button.pressed){
                         attack = true;
                         server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
+                    }
+                }
+                if (button == exitButton) {
+                    goFullScreen();
+                }
+                if (button == chatButton) {
+                    if (menuOpen) {
+                        closeEmojiWindow();
+                    } else {
+                        openEmojiWindow(rect.width/2-50,rect.height/2-50);
                     }
                 }
             }
@@ -192,19 +207,27 @@ function onTouchMove(evt) {
     var touchList = evt.changedTouches;
     var touch, touchX, touchY;
     for (var i = 0; i < touchList.length; i++) {
-       
         touch = touchList[i];
         var touchX = (((touch.pageX - rect.left) / newWidth) * gameCanvas.width);
         var touchY = (((touch.pageY - rect.top) / newHeight) * gameCanvas.height);
+        for (var j = 0; j < virtualButtonList.length; j++) {
+            var button = virtualButtonList[j].button;
+            if (touch.identifier == button.touchIdx) {
+                button.onMove(touchX,touchY);
+                if(button == joystickCamera){
+                    if(playerList[myID] != null){
+                        playerList[myID].angle = angle(joystickCamera.baseX,joystickCamera.baseY,joystickCamera.stickX,joystickCamera.stickY);
+                        server.emit('mousemove', playerList[myID].angle);
+                    }
+                    continue;
+                }
+                if(button == joystickMovement){
+                    touchMovement();
+                    continue;
+                }
+            }
+        }
         
-        if (touchList[i].identifier == joystickCamera.touchIdx) {
-            joystickCamera.onMove(touchX, touchY);
-            server.emit('mousemove', { x: touchX, y: touchY });
-        }
-        if (touchList[i].identifier == joystickMovement.touchIdx) {
-            joystickMovement.onMove(touchX, touchY);
-            touchMovement();
-        }
     }
 }
 
@@ -229,10 +252,11 @@ function cancelMovement(evt) {
     server.emit('movement', { turnLeft: false, moveForward: false, turnRight: false, moveBackward: false, attack: false });
 }
 
-function openEmojiWindow() {
+function openEmojiWindow(x,y) {
     if (menuOpen == false) {
         emojiMenu.style.transform = "scale(2)";
         menuOpen = true;
+        moveEmojiMenu(x, y);
     }
 
 }

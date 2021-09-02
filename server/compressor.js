@@ -17,8 +17,7 @@ exports.sendPlayerUpdates = function(playerList){
 			player.y,
 			player.velX,
 			player.velY,
-			player.mouseX,
-			player.mouseY
+			player.angle
 		];
 		packet.push(listItem);
 	}

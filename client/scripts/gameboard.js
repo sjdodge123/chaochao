@@ -69,8 +69,7 @@ function createPlayer(dataArray,isAI){
 	playerList[index].chatMessage = null;
 	playerList[index].awake = true;
 	playerList[index].ability = null;
-	playerList[index].mouseX = 0;
-	playerList[index].mouseY = 0;
+	playerList[index].angle = 0;
 	playerList[index].deathMessage = null;
 	playerList[index].trail = new Trail({x:dataArray[1],y:dataArray[2]});
     /*
@@ -97,8 +96,7 @@ function updatePlayerList(packet){
 			playerList[player[0]].y = player[2];
 			playerList[player[0]].velX = player[3];
 			playerList[player[0]].velY = player[4];
-			playerList[player[0]].mouseX =player[5];
-			playerList[player[0]].mouseY =player[6];
+			playerList[player[0]].angle =player[5];
 		}
 	}
 }

@@ -500,7 +500,7 @@ class GameBoard {
 	}
 	spawnBomb(owner){
 		var player = this.playerList[owner];
-		var bomb = new BombProj(player.x,player.y,10,"black",owner,this.roomSig,(180/Math.PI)*Math.atan2(player.mouseY-player.y,player.mouseX-player.x)-90);
+		var bomb = new BombProj(player.x,player.y,10,"black",owner,this.roomSig,player.angle);
 		this.projectileList[owner] = bomb;
 		messenger.messageRoomBySig(this.roomSig,"spawnBomb",owner);
 	}
@@ -591,26 +591,16 @@ class GameBoard {
 	}
 	loadNextMap(){
 		this.currentMap = {};
-
-		//Specify a particular map for testing
-		//this.currentMap = JSON.parse(JSON.stringify(this.maps[0]));
-		
-		//Cycle in order of file order
-		/*
-		for(var i=0;i<this.maps.length;i++){
-			if(this.currentMap != this.maps[i]){
-				this.currentMap = JSON.parse(JSON.stringify(this.maps[i]));
+		if(c.TESTSingleMap){
+			this.currentMap = JSON.parse(JSON.stringify(this.maps[0]));
+		} else{
+			if(this.maps.length == this.mapsPlayed.length){
+				this.mapsPlayed = [];
 			}
+			var nextMapId = this.getRandomMapR();
+			this.currentMap = JSON.parse(JSON.stringify(this.maps[nextMapId]));
+			this.mapsPlayed.push(this.currentMap.id);
 		}
-		*/
-		
-		if(this.maps.length == this.mapsPlayed.length){
-			this.mapsPlayed = [];
-		}
-		var nextMapId = this.getRandomMapR();
-		this.currentMap = JSON.parse(JSON.stringify(this.maps[nextMapId]));
-		this.mapsPlayed.push(this.currentMap.id);
-		
 		messenger.messageRoomBySig(this.roomSig,"newMap",{id:this.currentMap.id,abilities:this.generateAbilities()});
 	}
 	getRandomMapR(){
@@ -923,8 +913,7 @@ class Player extends Circle {
 		this.turnLeft = false;
 		this.turnRight = false;
 		this.attack = false;
-		this.mouseX = 0;
-		this.mouseY = 0;
+		this.angle = 0;
 		
 
 		//Attack
@@ -1160,8 +1149,7 @@ class Player extends Circle {
 		this.timeReached = null;
 		this.punch = null;
 		this.acquiredAbility = null;
-		this.mouseX = 0;
-		this.mouseY = 0;
+		this.angle = 0;
 		if(currentState == c.stateMap.gameOver){
 			this.ability = null;
 		}

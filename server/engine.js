@@ -123,8 +123,8 @@ class Engine {
 			var proj = this.projectileList[id];
 			var newVelX = 0;
 			var newVelY = 0;
-			newVelX = Math.cos((proj.angle+90)*(Math.PI/180))*proj.speed;
-			newVelY = Math.sin((proj.angle+90)*(Math.PI/180))*proj.speed;
+			newVelX = Math.cos((proj.angle)*(Math.PI/180))*proj.speed;
+			newVelY = Math.sin((proj.angle)*(Math.PI/180))*proj.speed;
 			//TODO drag not working
 			newVelX -= c.playerDragCoeff * proj.velX;
 			newVelY -= c.playerDragCoeff * proj.velY;
