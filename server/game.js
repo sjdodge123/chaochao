@@ -421,9 +421,7 @@ class GameBoard {
 			if(this.abilityList[id].spawnBomb){
 				this.abilityList[id].spawnBomb = false;
 				this.spawnBomb(this.abilityList[id].ownerId);
-				setTimeout(this.acquireBombTrigger,100,{id:this.abilityList[id].ownerId,abilityList:this.abilityList,playerList:this.playerList,roomSig:this.roomSig});
-				//delete this.abilityList[id];
-				//continue;
+				setTimeout(this.acquireBombTrigger,200,{id:this.abilityList[id].ownerId,abilityList:this.abilityList,playerList:this.playerList,roomSig:this.roomSig});
 			}
 			if(this.abilityList[id].explodeBomb){
 				this.abilityList[id].explodeBomb = false;
@@ -517,6 +515,9 @@ class GameBoard {
 				cells[i].id = c.tileMap.slow.id;
 				explodedCells.push(cells[i].site.voronoiId);	
 			}
+		}
+		if(this.abilityList[owner] != null){
+			this.abilityList[owner].alive = false;
 		}
 		messenger.messageRoomBySig(this.roomSig,'explodedCells',explodedCells);
 	}
