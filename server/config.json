@@ -59,17 +59,25 @@
         },
         "abilities":{
             "blindfold": {
+                "spawnable":true,
                 "id":100,
                 "duration":4
             },
             "swap": {
+                "spawnable":true,
                 "id":101
             },
             "bomb":{
+                "spawnable":true,
                 "id":102,
+                "aimerLength":50,
                 "lifetime": 4,
                 "speed":250,
                 "explosionRadius": 120
+            },
+            "bombTrigger":{
+                "spawnable":false,
+                "id":103
             }
         }
     },

@@ -217,14 +217,7 @@ function drawAbilityAimer(player){
             
             gameContext.setLineDash([5, 5]);
             gameContext.moveTo(player.x,player.y);
-            
-            var length = 50;
-            /*
-            var mag = Math.sqrt(getMagSq(player.mouseX,player.mouseY,player.x,player.y));
-            var pointX = player.x + (length/mag)*(player.mouseX-player.x);
-            var pointY = player.y + (length/mag)*(player.mouseY-player.y);
-            */
-            var point = pos({x:player.x,y:player.y},length,player.angle);
+            var point = pos({x:player.x,y:player.y},config.tileMap.abilities.bomb.aimerLength,player.angle);
             gameContext.lineTo(point.x,point.y);
             gameContext.stroke();
             gameContext.restore();
@@ -233,6 +226,15 @@ function drawAbilityAimer(player){
         case config.tileMap.abilities.swap.id:{
             gameContext.save();
             gameContext.beginPath();
+            gameContext.setLineDash([15, 3, 3, 3]);
+            gameContext.arc(player.x, player.y, 10, 0, 2 * Math.PI);
+            gameContext.stroke();
+            gameContext.restore();
+        }
+        case config.tileMap.abilities.bombTrigger.id:{
+            gameContext.save();
+            gameContext.beginPath();
+            gameContext.lineWidth = 2;
             gameContext.setLineDash([15, 3, 3, 3]);
             gameContext.arc(player.x, player.y, 10, 0, 2 * Math.PI);
             gameContext.stroke();

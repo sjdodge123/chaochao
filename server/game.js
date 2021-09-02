@@ -473,8 +473,7 @@ class GameBoard {
 		var player = packet.playerList[packet.id];
 		player.ability = new BombTrigger(packet.id,packet.id.roomSig);
 		packet.abilityList[player.id] = player.ability;
-		//TODO make the bomb trigger have a HUD
-		//messenger.messageRoomBySig(this.roomSig,"abilityAcquired",{owner:player.id,ability:object.id,voronoiId:object.voronoiId});
+		messenger.messageRoomBySig(packet.roomSig,"abilityAcquired",{owner:player.id,ability:c.tileMap.abilities.bombTrigger.id,voronoiId:null});
 	}
 	swapOwnerWithRandomPlayer(owner){
 		if(Object.keys(this.playerList).length == 1){
@@ -519,6 +518,7 @@ class GameBoard {
 		if(this.abilityList[owner] != null){
 			this.abilityList[owner].alive = false;
 		}
+		messenger.messageRoomBySig(this.roomSig,'triggerUsed',owner);
 		messenger.messageRoomBySig(this.roomSig,'explodedCells',explodedCells);
 	}
 	startLobby(){
@@ -647,7 +647,9 @@ class GameBoard {
 	indexAbilities(){
 		var abilities = [];
 		for(var ability in c.tileMap.abilities){
-			abilities.push(c.tileMap.abilities[ability].id);
+			if(c.tileMap.abilities[ability].spawnable){
+				abilities.push(c.tileMap.abilities[ability].id);
+			}
 		}
 		return abilities;
 	}

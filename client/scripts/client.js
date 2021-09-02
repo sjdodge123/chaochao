@@ -175,6 +175,9 @@ function clientConnect() {
 	server.on("bombUsed",function(owner){
 		playerAbilityUsed(owner);
 	});
+	server.on("triggerUsed",function(owner){
+		playerAbilityUsed(owner);
+	});
 
     return server;
 }

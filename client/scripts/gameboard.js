@@ -312,6 +312,9 @@ function explodedCells(cells){
 
 function playerPickedUpAbility(payload){
 	playerList[payload.owner].ability = payload.ability;
+	if(payload.voronoiId == null){
+		return;
+	}
 	for(var i=0;i<currentMap.cells.length;i++){
 		var cell = currentMap.cells[i];
 		if(cell.site.voronoiId == payload.voronoiId){
