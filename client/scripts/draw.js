@@ -235,7 +235,7 @@ function drawAbilityAimer(player){
             gameContext.save();
             gameContext.beginPath();
             gameContext.lineWidth = 2;
-            gameContext.setLineDash([15, 3, 3, 3]);
+            gameContext.setLineDash([7, 2, 2]);
             gameContext.arc(player.x, player.y, 10, 0, 2 * Math.PI);
             gameContext.stroke();
             gameContext.restore();

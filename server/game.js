@@ -616,8 +616,9 @@ class GameBoard {
 	}
 	generateAbilities(){
 		var abilityTilesAvaliable = [];
-		var abilities = [];
 		var indexMap = {};
+
+		//Gather Map tiles to spawn
 		for(var i=0;i<this.currentMap.cells.length;i++){
 			if(this.currentMap.cells[i].id == c.tileMap.ability.id){
 				abilityTilesAvaliable.push(i);
@@ -626,18 +627,22 @@ class GameBoard {
 		if(abilityTilesAvaliable.length == 0){
 			return indexMap;
 		}
-		var numAbilitiesToSpawn = utils.getRandomInt(0,abilityTilesAvaliable.length-1);
-		for(var j=0;j<numAbilitiesToSpawn;j++){
-			abilities.push(this.spawnNewAbility());
-		}
+		var tilesRemaining = [];
+		//Fill in normal tiles if chance to spawn is too low
 		for(var p=0;p<abilityTilesAvaliable.length;p++){
-			if(p >= numAbilitiesToSpawn){
+			var spawnChance = utils.getRandomInt(1,100);
+			if(spawnChance >= c.chanceToSpawnAbility){
 				indexMap[this.currentMap.cells[abilityTilesAvaliable[p]].site.voronoiId] = c.tileMap.normal.id;
 				this.currentMap.cells[abilityTilesAvaliable[p]].id = c.tileMap.normal.id;
 				continue;
 			}
-			indexMap[this.currentMap.cells[abilityTilesAvaliable[p]].site.voronoiId] = abilities[p];
-			this.currentMap.cells[abilityTilesAvaliable[p]].id = abilities[p];
+			tilesRemaining.push(abilityTilesAvaliable[p]);
+		}
+		//Fill in remaining tiles with abilities
+		for(var j=0;j<tilesRemaining.length;j++){
+			var ability = this.spawnNewAbility();
+			indexMap[this.currentMap.cells[tilesRemaining[j]].site.voronoiId] = ability;
+			this.currentMap.cells[tilesRemaining[j]].id = ability;
 		}
 		return indexMap;
 	}
