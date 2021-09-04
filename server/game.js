@@ -950,7 +950,7 @@ class Player extends Circle {
 		this.currentSpeedBonus = 0;
     }
 	update(currentState,dt){
-		this.checkForSleep();
+		this.checkForSleep(currentState);
 		if(!this.alive){
 			return;
 		}
@@ -1007,19 +1007,23 @@ class Player extends Circle {
 			messenger.messageRoomBySig(this.roomSig,"playerAwake",this.id);
 		}
 	}
-	checkForSleep(){
+	checkForSleep(currentState){
 		if(this.sleepTimer != null){
 			this.sleepTimeLeft = ((this.sleepWaitTime*1000 - (Date.now() - this.sleepTimer))/(1000)).toFixed(1);
 			if(this.sleepTimeLeft > 0){
 				return;
 			}
-			this.checkAFK();
+			this.checkAFK(currentState);
 			return;
 		}
 		this.sleepTimer = Date.now();
 	}
-	checkAFK(){
+	checkAFK(currentState){
 		if(this.awake == true){
+			if(currentState == c.stateMap.waiting || currentState == c.stateMap.lobby){
+				this.kick = true;
+				return;
+			}
 			this.awake = false;
 			messenger.messageRoomBySig(this.roomSig,"playerSleeping",this.id);
 		}
