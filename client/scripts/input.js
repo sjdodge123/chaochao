@@ -68,7 +68,7 @@ function handleClick(event) {
             if (menuOpen) {
                 closeEmojiWindow();
             } else {
-                openEmojiWindow(mouseX,mouseY);
+                openEmojiWindow(mousex,mousey);
             }
 
             break;
