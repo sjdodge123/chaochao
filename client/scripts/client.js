@@ -18,7 +18,6 @@ function clientConnect() {
 	});
 
 	server.on("serverKick",function(){
-		alert("You have been kicked from the game due to inactivity.");
 		server.disconnect();
 		window.parent.location.reload();
 	});

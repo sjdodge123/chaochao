@@ -94,6 +94,7 @@ class Game {
 		//Game stats
 		this.playerCount = 0;
 		this.alivePlayerCount = 0;
+		this.sleepingPlayerCount = 0;
 		this.lobbyButtonPressedCount = 0;
 		this.firstPlaceSig = null;
 		this.secondPlaceSig = null;
@@ -148,7 +149,7 @@ class Game {
 		if(this.currentState == this.stateMap.gameOver){
 			this.checkGameOverTimer();
 		}
-		this.gameBoard.update(this.currentState,this.alivePlayerCount,dt);
+		this.gameBoard.update(this.currentState,this.alivePlayerCount,this.sleepingPlayerCount,dt);
 		this.world.update(dt);
 	}
 	checkLobbyStart(){
@@ -306,16 +307,21 @@ class Game {
 	}
 	getPlayerCount(){
 		var playerCount = 0;
+		var sleepingPlayerCount = 0;
 		var lobbyButtonPressedCount = 0;
 		for(var playerID in this.playerList){
 			if(this.playerList[playerID].hittingLobbyButton){
 				this.playerList[playerID].hittingLobbyButton = false;
 				lobbyButtonPressedCount++;
 			}
+			if(!this.playerList[playerID].awake){
+				sleepingPlayerCount++;
+			}
 			playerCount++;
 		}
 		this.lobbyButtonPressedCount = lobbyButtonPressedCount;
 		this.playerCount = playerCount;
+		this.sleepingPlayerCount = sleepingPlayerCount;
 		return playerCount;
 	}
 	gameOver(player){
@@ -337,6 +343,7 @@ class GameBoard {
 		this.stateMap = c.stateMap;
 		this.lobbyStartButton;
 		this.alivePlayerCount = 0;
+		this.sleepingPlayerCount = 0;
 		this.startingGate = null;
 		this.maps = utils.loadMaps();
 		this.mapsPlayed = [];
@@ -346,8 +353,9 @@ class GameBoard {
 		this.collapseLoc = {};
 		this.collapseLine = this.world.height;
 	}
-	update(currentState,playerAliveCount,dt){
+	update(currentState,playerAliveCount,sleepingPlayerCount,dt){
 		this.alivePlayerCount = playerAliveCount;
+		this.sleepingPlayerCount = sleepingPlayerCount;
 		this.engine.update(dt);
 		this.collapseMap(currentState);
 		this.checkCollisions(currentState);
@@ -476,16 +484,12 @@ class GameBoard {
 		messenger.messageRoomBySig(packet.roomSig,"abilityAcquired",{owner:player.id,ability:c.tileMap.abilities.bombTrigger.id,voronoiId:null});
 	}
 	swapOwnerWithRandomPlayer(owner){
-		if(Object.keys(this.playerList).length == 1){
-			//TODO play fizzle sound to client
-			return;
-		}
-		if(this.alivePlayerCount == 1){
+		if(Object.keys(this.playerList).length == 1 || this.alivePlayerCount == 1 || this.alivePlayerCount-this.sleepingPlayerCount == 1){
 			//TODO play fizzle sound to client
 			return;
 		}
 		var randomPlayer = utils.getRandomProperty(this.playerList);
-		if(randomPlayer.id == owner || randomPlayer.alive == false){
+		if(randomPlayer.id == owner || randomPlayer.alive == false || randomPlayer.awake == false){
 			return this.swapOwnerWithRandomPlayer(owner);
 		}
 		var ownerPlayer = this.playerList[owner];
