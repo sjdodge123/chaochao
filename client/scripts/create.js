@@ -4,6 +4,7 @@ var server,
     gameRunning = false,
     voronoi = new Voronoi(),
     vMap,
+    brushing = false,
     mapReady = false,
     mousex = 0,
     mousey = 0,
@@ -197,6 +198,9 @@ function gameLoop(dt){
         mapReady = true;
         rebuild();
     }
+    if(brushing){
+        paintTile();
+    }
 }
 
 function resize(){
@@ -268,19 +272,14 @@ function drawMap(){
 function handleClick(event){
     switch(event.which){
         case 1:{
-            var newId = locateId(brushColor);
-            var cells = vMap.cells;
-            for(var i=0;i<cells.length;i++){
-                if(currentCell == cells[i].site.voronoiId){
-                    cells[i].id = newId;
-                }
-            }
+            brushing = true;
         }
     }
 }
 function handleUnClick(event){
     switch(event.which){
         case 1:{
+            brushing = false;
             break;
         }
     }
@@ -289,6 +288,16 @@ function handleUnClick(event){
 function setMousePos(x,y){
 	mousex = x;
 	mousey = y;
+}
+
+function paintTile(){
+    var newId = locateId(brushColor);
+        var cells = vMap.cells;
+        for(var i=0;i<cells.length;i++){
+            if(currentCell == cells[i].site.voronoiId){
+                cells[i].id = newId;
+            }
+        }
 }
 
 
@@ -408,8 +417,8 @@ function compareSite(siteA,siteB){
     return true;
 }
 function exportToJSON(){
-    var jsonData = basicSanitize();
-    navigator.clipboard.writeText(jsonData).then(function() {
+    basicSanitize();
+    navigator.clipboard.writeText(JSON.stringify(vMap)).then(function() {
         alert("Copied to Clipboard!");
     }, function(err) {
         console.log(err);
@@ -418,10 +427,20 @@ function exportToJSON(){
 }
 
 function submitToGithub(){
-    console.log("submit");
-    var jsonData = basicSanitize();
-    $.post("https://staticman-chaochao.herokuapp.com/v2/entry/sjdodge123/chaochao/master/maps",jsonData,function(data){
-        console.log(data);
+    basicSanitize();
+    $.ajax
+    ({
+        data: JSON.stringify(vMap),
+        contentType: 'application/json',
+        type: "POST",
+        
+        url: 'https://staticman-chaochao.herokuapp.com/v2/entry/sjdodge123/chaochao/master/maps',
+        
+        //json object to sent to the authentication url
+        
+        success: function () {
+            alert("Thanks!"); 
+        }
     });
 }
 function basicSanitize(){
@@ -437,8 +456,6 @@ function basicSanitize(){
     vMap.id = makeid(32);
     vMap.author = author.substring(0,15);
     vMap.name = name.substring(0,15);
-    var jsonData = JSON.stringify(vMap);
-    return jsonData;
 }
 
 function makeid(length) {
