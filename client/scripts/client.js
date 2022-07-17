@@ -31,6 +31,7 @@ function clientConnect() {
 		worldResize(gameState.world);
 		interval = config.serverTickSpeed;
 		gameRunning = true;
+		playSoundAfterFinish(lobbyMusic);
 		init();
 		loadPatterns();
 		if(gameState.myID != null){
@@ -45,6 +46,7 @@ function clientConnect() {
 	server.on("playerJoin", function(appendPlayerList){
 		clientList[appendPlayerList.id] = appendPlayerList.id;
 		appendNewPlayer(appendPlayerList.player);
+		playSound(playerJoinSound);
 	});
 	server.on("playerLeft", function(id){
 		var name = clientList[id];
@@ -86,9 +88,10 @@ function clientConnect() {
 	});
 	server.on("playerConcluded",function(id){
 		playerList[id].alive = false;
+		playSound(playerFinished);
 	});
 	server.on("playerDied",function(id){
-		//playLavaNoise();
+		playSound(playerDiedSound);
 		playerAbilityUsed(id);
 		playerList[id].alive = false;
 		playerList[id].deathMessage = '💀';
@@ -109,34 +112,47 @@ function clientConnect() {
 	//Game State Map changes
 	server.on("startWaiting",function(packet){
 		currentState = config.stateMap.waiting;
+		playSoundAfterFinish(lobbyMusic);
 	});
 	server.on("startLobby",function(packet){
 		spawnLobbyStartButton(packet);
+		playSoundAfterFinish(lobbyMusic);
 		currentState = config.stateMap.lobby;
 	});
 	server.on("startGated",function(packet){
+		stopSound(lobbyMusic);
+		playSound(gameStart);
 		currentState = config.stateMap.gated;
 	});
 	server.on("startRace",function(packet){
+		playSound(countDownB);
+		playBackgroundSound();
 		oldNotches = {};
 		resetTrails();
 		currentState = config.stateMap.racing;
+		for(var i=0;i<pingIntervals.length;i++){
+			clearInterval(pingIntervals[i]);
+		}
+		
 	});
 	server.on("startOverview",function(packet){
+		stopSound(lavaCollapse);
 		updatePlayerNotches(packet);
 		calculateNotchMoveAmt();
 		currentState = config.stateMap.overview;
 	});
 	server.on("startGameover",function(player){
 		playerWon = player;
+		stopAllSounds();
+		playSound(gameOverSound);
 		decodedColorName = Colors.decode(playerList[player].color);
 		currentState = config.stateMap.gameOver;
 	});
 	server.on("startCollapse",function(){
 		currentState = config.stateMap.collapsing;
+		playSound(lavaCollapse);
 	});
 	
-
 	server.on("resetPlayers",function(){
 		resetPlayers();
 	});
@@ -145,9 +161,14 @@ function clientConnect() {
 	});
 	server.on("punch",function(packet){
 		spawnPunch(packet);
+		playSound(meleeSound);
 	});
 	server.on("spawnBomb",function(owner){
 		spawnBomb(owner);
+		playSound(bombShot);
+	});
+	server.on("playerPunched",function(id){
+		playSound(meleeHitSound);
 	});
 	server.on("terminatePunch",function(id){
 		terminatePunch(id);
@@ -160,16 +181,20 @@ function clientConnect() {
 	});
 	server.on('explodedCells',function(cells){
 		explodedCells(cells);
+		playSound(bombExplosion);
 	});
 	server.on("abilityAcquired",function(payload){
 		playerPickedUpAbility(payload);
+		playSound(collectItem);
 	});
 	server.on("blindfoldUsed",function(owner){
 		createBlindFold(owner);
 		playerAbilityUsed(owner);
+		playSound(blindSound);
 	});
 	server.on("swapUsed",function(owner){
 		playerAbilityUsed(owner);
+		playSound(teleportSound);
 	});
 	server.on("bombUsed",function(owner){
 		playerAbilityUsed(owner);

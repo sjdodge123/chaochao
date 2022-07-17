@@ -6,12 +6,12 @@
     "worldWidth":1366,
     "worldHeight":768,
     "worldCollapseSpeed":7,
-    "minPlayersToStart": 3,
+    "minPlayersToStart": 1,
     "maxPlayersInRoom" : 15,
     "forceConstant" :5000,
     "chanceToSpawnAbility":50,
 
-    "TESTSingleMap":false,
+    "TESTSingleMap":true,
 
     "tileMap":{
         "slow":{

@@ -85,7 +85,7 @@ class Game {
         this.clientList = clientList;
         this.playerList = playerList;
 		this.projectileList = projectileList;
-        this.roomSig = roomSig 
+        this.roomSig = roomSig;
         this.world = world;
 		this.engine = engine;
         this.gameEnded = false;
@@ -256,7 +256,6 @@ class Game {
 		}
 	}
 	startWaiting(){
-		console.log("Start Waiting");
 		messenger.messageRoomBySig(this.roomSig,"startWaiting",null);
 		this.currentState = this.stateMap.waiting;
 	}
@@ -1051,6 +1050,7 @@ class Player extends Circle {
 		}
 		if(object.isPunch && object.ownerId != this.id){
 			_engine.punchPlayer(this,object);
+			messenger.messageRoomBySig(this.roomSig,"playerPunched",this.id);
 			return;
 		}
 		if(object.isGate){

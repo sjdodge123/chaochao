@@ -595,7 +595,7 @@ function drawNotches(distanceApart){
 function drawGoalPost(player,distanceApart){
     gameContext.beginPath();
     gameContext.rect(-15 + (config.playerNotchesToWin+1)*distanceApart,-15,30,30);
-    
+
     //If the animation is complete
     if(player.distanceToMove == 0){
         if(player.notches == config.playerNotchesToWin){
@@ -603,7 +603,18 @@ function drawGoalPost(player,distanceApart){
             gameContext.shadowBlur = 10;
             gameContext.fillStyle = "white"
             gameContext.fill();
+            if(player.nearVictory == false){
+                player.nearVictory = true;
+                playSound(nearVictorySound);
+            }
+            
         } else{
+            if(oldNotches[player.id] == config.playerNotchesToWin && player.notches != config.playerNotchesToWin){
+                if(player.nearVictory == true){
+                    player.nearVictory = false;
+                    playSound(fallFromVictorySound);
+                }
+            }
             gameContext.shadowColor = "grey";
             gameContext.strokeStyle = "grey";
             gameContext.stroke();

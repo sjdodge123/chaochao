@@ -9,7 +9,9 @@ var mousex,
 	projectileList,
 	playerList,
 	blindfold,
+	playersNearVictory = [],
 	pingCircles = [],
+	pingIntervals = [],
 	clientList;
 
 resetGameboard();
@@ -66,6 +68,7 @@ function createPlayer(dataArray,isAI){
 	playerList[index].color = dataArray[3];
 	playerList[index].alive = true;
 	playerList[index].notches = 0;
+	playerList[index].nearVictory = false;
 	playerList[index].chatMessage = null;
 	playerList[index].awake = true;
 	playerList[index].ability = null;
@@ -184,22 +187,23 @@ function loadNewMap(id){
 	}
 	for(var j=0;j<currentMap.cells.length;j++){
 		if(currentMap.cells[j].id == config.tileMap.goal.id){
+			playSound(countDownA);
 			var pingCircle = {x:currentMap.cells[j].site.x,y:currentMap.cells[j].site.y,radius:0,pass:0};
 			pingCircles.push(pingCircle);
-			var interval = setInterval(function(ping){
+			pingIntervals.push(setInterval(function(ping){
 				if(ping.pass == 2){
 					var index = pingCircles.indexOf(ping);
 					pingCircles.splice(index,1);
-					clearInterval(interval);
 				}
 				if(ping.radius > 500){
 					ping.radius = 0;
+					playSound(countDownA);
 					ping.pass++;
 				} else{
 					ping.radius+=10;
 				}
 				
-			},50,pingCircle);
+			},50,pingCircle));
 		}
 	}
 	
@@ -273,9 +277,11 @@ function fullReset(){
 	playerWon = null;
 	decodedColorName = '';
 	oldNotches = {};
+	playersNearVictory = [];
 	for(var id in playerList){
 		var player = playerList[id];
 		player.alive = true;
+		player.nearVictory = false;
 		player.ability = null;
 		player.deathMessage = null;
 		player.trail = new Trail({x:player.x,y:player.y});
