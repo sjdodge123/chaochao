@@ -72,7 +72,6 @@ function checkForMail(client){
 			game:gameData,
 			config:c,
 			myID:client.id,
-			gameID:roomSig,
 			world:worldData
 		};
 		client.emit("gameState" , gameState);

@@ -8,6 +8,8 @@ var calmBackgroundMusicList = [];
 var excitingBackgroundMusicList = [];
 var currentBackgroundMusic = null;
 var backgroundBuildTimer = null;
+var nearVictoryLastCount = 0;
+
 
 var playerJoinSound = new Audio("./assets/sounds/pleasing-bell.mp3");
 var playerDiedSound = new Audio("./assets/sounds/TailWhip.mp3");
@@ -109,6 +111,8 @@ function stopAllSounds(){
 	}
 }
 
+
+
 function playBackgroundSound(){
     //Count all players near victory
     for(var id in playerList){
@@ -124,7 +128,7 @@ function playBackgroundSound(){
         return;
     }
     //If match point, change to exciting music
-    if(playersNearVictory.length > 0){
+    if(playersNearVictory.length > nearVictoryLastCount){
         changeBackgroundMusic(excitingBackgroundMusicList);
         return;
     }
@@ -142,27 +146,31 @@ function playSoundAfterFinish(sound){
 	}
 }
 
+
 function changeBackgroundMusic(musicList){
+    var sound = lookupCurrentBackgroundSound();
     //No existing background sounds, set musiclist provided
-    if(currentBackgroundMusic == null || currentBackgroundMusic.ended){
-        currentBackgroundMusic = musicList[getRandomInt(0,musicList.length-1)];
-        fadeSoundIn(currentBackgroundMusic);
-        playSound(currentBackgroundMusic);
+    if(sound == null){
+        currentBackgroundMusic = getRandomInt(0,musicList.length-1);
+        sound = musicList[currentBackgroundMusic];
+        fadeSoundIn(sound);
+        playSound(sound);
         return;
     }
+    var indexInTargetList = musicList.indexOf(sound);
     //Existing background music playing from provided musiclist, continue
-    if(musicList === calmBackgroundMusicList && isCalmingPlaylist(currentBackgroundMusic)){
-        return;
-    }
-    
-    if(musicList === excitingBackgroundMusicList && !isCalmingPlaylist(currentBackgroundMusic)){
+    if(indexInTargetList != -1){
         return;
     }
     //Existing background music does not match playlist, fade out and change playlist
-    fadeSoundOut(currentBackgroundMusic);
-    currentBackgroundMusic = musicList[getRandomInt(0,musicList.length-1)];
-    fadeSoundIn(currentBackgroundMusic);
-    playSound(currentBackgroundMusic);
+    if(indexInTargetList == -1){
+        fadeSoundOut(sound);
+        currentBackgroundMusic = getRandomInt(0,musicList.length-1);
+        sound = musicList[currentBackgroundMusic];
+        fadeSoundIn(sound);
+        playSound(sound);
+        return;
+    } 
 }
 
 function fadeSoundIn(sound){
@@ -191,14 +199,10 @@ function fadeSoundOut(sound){
 }
 
 function lookupCurrentBackgroundSound(){
-    
-}
-
-function isCalmingPlaylist(sound){
-    for(var i=0;i<calmBackgroundMusicList.length;i++){
-        if(sound === calmBackgroundMusicList[i]){
-            return true;
-        }
+    var sound = null;
+    sound = calmBackgroundMusicList[currentBackgroundMusic];
+    if(sound == null){
+        sound = excitingBackgroundMusicList[currentBackgroundMusic];
     }
-    return false;
+    return sound;
 }

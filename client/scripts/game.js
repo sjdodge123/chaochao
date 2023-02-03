@@ -1,6 +1,5 @@
 var server = null,
     interval = null,
-    gameLength = null,
     clientList = null,
     playerList = null,
     myPlayer = null,
