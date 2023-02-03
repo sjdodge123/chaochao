@@ -3,82 +3,81 @@
     "serverTickSpeed": 33.33,
     "playerBaseRadius": 7.5,
     "punchRadius": 11,
-    "worldWidth":1366,
-    "worldHeight":768,
-    "worldCollapseSpeed":7,
+    "worldWidth": 1366,
+    "worldHeight": 768,
+    "worldCollapseSpeed": 7,
     "minPlayersToStart": 3,
-    "maxPlayersInRoom" : 15,
-    "forceConstant" :5000,
-    "chanceToSpawnAbility":50,
-
-    "TESTSingleMap":false,
-
-    "tileMap":{
-        "slow":{
+    "maxPlayersInRoom": 15,
+    "forceConstant": 5000,
+    "chanceToSpawnAbility": 50,
+    "TESTSingleMap": false,
+    "submitViaMail": "chaochaothegame@gmail.com",
+    "tileMap": {
+        "slow": {
             "id": 0,
             "brakeCoeff": 0.235,
             "dragCoeff": 0.45,
             "acel": 300,
             "color": "black"
         },
-        "normal":{
+        "normal": {
             "id": 1,
             "brakeCoeff": 0.235,
             "dragCoeff": 0.25,
             "acel": 300,
             "color": "#F0F0F0"
         },
-        "fast":{
+        "fast": {
             "id": 2,
             "brakeCoeff": 0.235,
             "dragCoeff": 0.15,
-            "acel":300,
+            "acel": 300,
             "color": "#90ee90"
         },
-        "lava":{
+        "lava": {
             "id": 3,
             "color": "#cf1020"
         },
-        "ice":{
+        "ice": {
             "id": 4,
             "brakeCoeff": 0.0001,
             "dragCoeff": 0.0075,
             "acel": 15,
             "color": "#A5F2F3"
         },
-        "ability":{
+        "ability": {
             "id": 5,
             "color": "#C8C8C8"
         },
-        "goal":{
+        "goal": {
             "id": 6,
             "color": "#FFD700"
         },
-        "bumper":{
-            "id":7,
-            "color":"#FF7900"
+        "bumper": {
+            "id": 7,
+            "color": "#FF7900"
         },
-        "abilities":{
+        "abilities": {
             "blindfold": {
-                "spawnable":true,
-                "id":100,
-                "duration":4
+                "spawnable": true,
+                "id": 100,
+                "duration": 4
             },
             "swap": {
-                "spawnable":true,
-                "id":101
+                "spawnable": true,
+                "id": 101
             },
-            "bomb":{
-                "spawnable":true,
-                "id":102,
-                "aimerLength":50,
+            "bomb": {
+                "spawnable": true,
+                "id": 102,
+                "aimerLength": 50,
                 "lifetime": 4,
-                "speed":250,
+                "speed": 250,
                 "explosionRadius": 120
             },
-            "bombTrigger":{
-                "spawnable":false,
-                "id":103
+            "bombTrigger": {
+                "spawnable": false,
+                "id": 103
             }
         }
     },
@@ -86,18 +85,16 @@
     "gatedWaitTime": 9,
     "newRaceWaitTime": 10,
     "gameOverTime": 10,
-
     "stateMap": {
         "waiting": 0,
-		"lobby": 1,
-        "overview":2,
+        "lobby": 1,
+        "overview": 2,
         "gated": 3,
         "racing": 4,
-        "collapsing":5,
+        "collapsing": 5,
         "gameOver": 6
     },
-
-    "emojis":[
+    "emojis": [
         "😄",
         "😈",
         "🤔",
@@ -115,10 +112,10 @@
     "playerBrakeCoeff": 0.235,
     "playerStartSleepTime": 60,
     "playerAFKKickTime": 240,
-    "playerPunchSlowAmt":0.5,
-    "playerPunchCooldown":300,
-    "playerMaxSpeed":500,
-    "playerMaxSpeed_prod":50,
-    "playerMaxSpeed_test":350,
-    "playerBaseAcel":375
+    "playerPunchSlowAmt": 0.5,
+    "playerPunchCooldown": 300,
+    "playerMaxSpeed": 500,
+    "playerMaxSpeed_prod": 50,
+    "playerMaxSpeed_test": 350,
+    "playerBaseAcel": 375
 }

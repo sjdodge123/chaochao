@@ -76,7 +76,10 @@ canvas {
 #controlPanel {
     display: block;
     position: relative;
-    height: 200px;
+    height: 50px;
+}
+.btn {
+    font-size: 0.95rem;
 }
 
 div.map-image {
@@ -91,7 +94,7 @@ div.map-image img {
 }
 
 div.desc {
-    padding: 15px;
+    padding: 7px;
     text-align: center;
 }
 
