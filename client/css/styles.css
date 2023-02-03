@@ -94,6 +94,7 @@ div.map-image img {
 }
 
 div.desc {
+    font-size: 12px;
     padding: 7px;
     text-align: center;
 }
