@@ -327,13 +327,20 @@ class Game {
 		return playerCount;
 	}
 	checkForDynamicGameLength(){
-		var dynamicGameLengthModifier = 5;
+		//For every dynamicGameLengthModifier players the number of notches to win decreases by 1
+		var dynamicGameLengthModifier = 4;
+
 		if(this.playerCount < dynamicGameLengthModifier){
 			console.log("Standard Gamelength: " + this.notchesToWin);
 			return;
 		}
 		var notchesToRemove = Math.ceil(this.playerCount / dynamicGameLengthModifier);
-		this.notchesToWin = this.notchesToWin - notchesToRemove;
+		var minimumNotches = 3;
+		if(this.notchesToWin - notchesToRemove <=  minimumNotches){
+			this.notchesToWin = minimumNotches;
+		} else{
+			this.notchesToWin = this.notchesToWin - notchesToRemove;
+		}
 		messenger.messageRoomBySig(this.roomSig,'gameLength',this.notchesToWin);
 	}
 	gameOver(player){
