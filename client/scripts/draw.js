@@ -57,11 +57,11 @@ function drawObjects(dt){
         drawPingCircles();
         drawMapTitle();
     }
+    drawHUD();
     drawPlayers(dt);
     drawPunches();
     drawProjectiles();
     drawAbilties();
-    drawHUD();
     if(currentState == config.stateMap.gameOver){
         drawGameOverScreen();
     }
@@ -125,8 +125,12 @@ function drawAbilties(){
 function drawMapTitle(){
     if(currentMap != null){
         gameContext.save();
+        gameContext.strokeStyle = "white";
+        gameContext.lineWidth = 4;
         gameContext.fillStyle = "black";
-        gameContext.font = '14px serif';
+        gameContext.font = "14px Arial";
+        gameContext.strokeText('"'+currentMap.name+'"', 5, gameCanvas.height-25);
+        gameContext.strokeText('~'+currentMap.author, 5, gameCanvas.height-10);
         gameContext.fillText('"'+currentMap.name+'"', 5, gameCanvas.height-25);
         gameContext.fillText('~'+currentMap.author, 5, gameCanvas.height-10);
         gameContext.restore();
@@ -432,15 +436,21 @@ function compareSite(siteA,siteB){
 }
 
 function drawHUD(){
-    drawPlayerCount();
+    drawGameInfo();
     drawVirtualButtons();
     drawTouchControls();
 }
 
-function drawPlayerCount(){
+function drawGameInfo(){
     gameContext.save();
     gameContext.font = "14px Arial";
-    gameContext.fillText("Players: " + totalPlayers, 10, 20);
+    gameContext.strokeStyle = "white";
+    gameContext.lineWidth = 4;
+    gameContext.fillStyle = "black";
+    gameContext.strokeText("GameID: " + gameID, 10, 20);
+    gameContext.strokeText("Players: " + totalPlayers, 100, 20);
+    gameContext.fillText("GameID: " + gameID, 10, 20);
+    gameContext.fillText("Players: " + totalPlayers, 100, 20);
     gameContext.restore();
 }
 

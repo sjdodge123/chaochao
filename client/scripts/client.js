@@ -27,6 +27,7 @@ function clientConnect() {
 	server.on("gameState", function(gameState){
 		config = gameState.config;
 		clientList = gameState.clientList;
+		gameID = gameState.gameID;
 		checkGameState(gameState.game);
 		connectSpawnPlayers(gameState.playerList);
 		worldResize(gameState.world);
