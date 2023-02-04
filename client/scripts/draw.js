@@ -432,8 +432,16 @@ function compareSite(siteA,siteB){
 }
 
 function drawHUD(){
+    drawPlayerCount();
     drawVirtualButtons();
     drawTouchControls();
+}
+
+function drawPlayerCount(){
+    gameContext.save();
+    gameContext.font = "14px Arial";
+    gameContext.fillText("Players: " + totalPlayers, 10, 20);
+    gameContext.restore();
 }
 
 function drawVirtualButtons(){

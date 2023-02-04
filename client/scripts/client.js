@@ -3,6 +3,7 @@ var config,
 	ping = 0,
 	pingTimeout = null,
 	lastTime = null,
+	totalPlayers = 0,
 	serverTimeoutWait = 5,
 	playerWon = null;
 
