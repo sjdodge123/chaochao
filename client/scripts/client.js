@@ -26,6 +26,7 @@ function clientConnect() {
 
 	server.on("gameState", function(gameState){
 		config = gameState.config;
+		gameLength = config.playerNotchesToWin;
 		clientList = gameState.clientList;
 		gameID = gameState.gameID;
 		checkGameState(gameState.game);
@@ -161,6 +162,10 @@ function clientConnect() {
 	server.on("resetGame",function(){
 		fullReset();
 	});
+	server.on("gameLength",function(length){
+		gameLength = length;
+	});
+
 	server.on("punch",function(packet){
 		spawnPunch(packet);
 		playSound(meleeSound);

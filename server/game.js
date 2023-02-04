@@ -51,7 +51,7 @@ class Room {
 			playerList:playerData,
 			projList:projData,
 			state:gameStateData,
-			totalPlayers:messenger.getTotalPlayers()
+			totalPlayers:this.game.playerCount
 		});
 	}
     checkRoom(clientID){
@@ -96,6 +96,7 @@ class Game {
 		this.alivePlayerCount = 0;
 		this.sleepingPlayerCount = 0;
 		this.lobbyButtonPressedCount = 0;
+		this.notchesToWin = c.playerNotchesToWin;
 		this.firstPlaceSig = null;
 		this.secondPlaceSig = null;
 
@@ -213,6 +214,7 @@ class Game {
 			if(this.lobbyTimeLeft > 0){
 				return;
 			}
+			this.checkForDynamicGameLength();
 			this.resetLobbyTimer();
 			this.startGated();
 			return;
@@ -230,7 +232,7 @@ class Game {
 			if(this.playerList[player].reachedGoal == true){
 				playersConcluded++;
 				if(this.firstPlaceSig == null){
-					if(this.playerList[player].notches == c.playerNotchesToWin){
+					if(this.playerList[player].notches == this.notchesToWin){
 						//Game over player wins
 						this.gameOver(player);
 						return;
@@ -301,6 +303,7 @@ class Game {
 	}
 	resetGame(){
 		this.locked = false;
+		this.notchesToWin = c.playerNotchesToWin;
 		this.gameBoard.resetGame(this.currentState);
 		messenger.messageRoomBySig(this.roomSig,"resetGame",null);
 	}
@@ -322,6 +325,16 @@ class Game {
 		this.playerCount = playerCount;
 		this.sleepingPlayerCount = sleepingPlayerCount;
 		return playerCount;
+	}
+	checkForDynamicGameLength(){
+		var dynamicGameLengthModifier = 5;
+		if(this.playerCount < dynamicGameLengthModifier){
+			console.log("Standard Gamelength: " + this.notchesToWin);
+			return;
+		}
+		var notchesToRemove = Math.ceil(this.playerCount / dynamicGameLengthModifier);
+		this.notchesToWin = this.notchesToWin - notchesToRemove;
+		messenger.messageRoomBySig(this.roomSig,'gameLength',this.notchesToWin);
 	}
 	gameOver(player){
 		console.log("Game Over");
@@ -1129,8 +1142,8 @@ class Player extends Circle {
 		}
 	}
 	addNotch(){
-		if(this.notches+1 >= c.playerNotchesToWin){
-			this.notches = c.playerNotchesToWin;
+		if(this.notches+1 >= this.notchesToWin){
+			this.notches = this.notchesToWin;
 			return;
 		}
 		this.notches += 1;
