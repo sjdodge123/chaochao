@@ -51,7 +51,7 @@ class Room {
 			playerList:playerData,
 			projList:projData,
 			state:gameStateData,
-			totalPlayers:messenger.getTotalPlayers()
+			totalPlayers:this.game.playerCount
 		});
 	}
     checkRoom(clientID){
@@ -96,6 +96,7 @@ class Game {
 		this.alivePlayerCount = 0;
 		this.sleepingPlayerCount = 0;
 		this.lobbyButtonPressedCount = 0;
+		this.notchesToWin = c.playerNotchesToWin;
 		this.firstPlaceSig = null;
 		this.secondPlaceSig = null;
 
@@ -213,6 +214,7 @@ class Game {
 			if(this.lobbyTimeLeft > 0){
 				return;
 			}
+			this.checkForDynamicGameLength();
 			this.resetLobbyTimer();
 			this.startGated();
 			return;
@@ -230,7 +232,7 @@ class Game {
 			if(this.playerList[player].reachedGoal == true){
 				playersConcluded++;
 				if(this.firstPlaceSig == null){
-					if(this.playerList[player].notches == c.playerNotchesToWin){
+					if(this.playerList[player].notches == this.notchesToWin){
 						//Game over player wins
 						this.gameOver(player);
 						return;
@@ -301,6 +303,7 @@ class Game {
 	}
 	resetGame(){
 		this.locked = false;
+		this.notchesToWin = c.playerNotchesToWin;
 		this.gameBoard.resetGame(this.currentState);
 		messenger.messageRoomBySig(this.roomSig,"resetGame",null);
 	}
@@ -323,6 +326,22 @@ class Game {
 		this.sleepingPlayerCount = sleepingPlayerCount;
 		return playerCount;
 	}
+	checkForDynamicGameLength(){
+		//For every dynamicGameLengthModifier players the number of notches to win decreases by 1
+		var dynamicGameLengthModifier = 4;
+
+		if(this.playerCount < dynamicGameLengthModifier){
+			return;
+		}
+		var notchesToRemove = Math.ceil(this.playerCount / dynamicGameLengthModifier);
+		var minimumNotches = 3;
+		if(this.notchesToWin - notchesToRemove <=  minimumNotches){
+			this.notchesToWin = minimumNotches;
+		} else{
+			this.notchesToWin = this.notchesToWin - notchesToRemove;
+		}
+		messenger.messageRoomBySig(this.roomSig,'gameLength',this.notchesToWin);
+	}
 	gameOver(player){
 		console.log("Game Over");
 		this.currentState = this.stateMap.gameOver;
@@ -340,6 +359,10 @@ class GameBoard {
 		this.engine = engine;
 		this.roomSig = roomSig;
 		this.stateMap = c.stateMap;
+
+		this.chanceToSpawnAbility = c.chanceToSpawnAbility;
+
+
 		this.lobbyStartButton;
 		this.alivePlayerCount = 0;
 		this.sleepingPlayerCount = 0;
@@ -567,6 +590,7 @@ class GameBoard {
 	}
 	resetGame(currentState){
 		this.mapsPlayed = [];
+		this.chanceToSpawnAbility = c.chanceToSpawnAbility();
 		this.resetPlayers(currentState);
 		for(var playerID in this.playerList){
 			var player = this.playerList[playerID];
@@ -595,6 +619,7 @@ class GameBoard {
 	}
 	loadNextMap(){
 		this.currentMap = {};
+		this.checkForDynamicDifficultyIncrease();
 		if(c.TESTSingleMap){
 			this.currentMap = JSON.parse(JSON.stringify(this.maps[0]));
 		} else{
@@ -606,6 +631,14 @@ class GameBoard {
 			this.mapsPlayed.push(this.currentMap.id);
 		}
 		messenger.messageRoomBySig(this.roomSig,"newMap",{id:this.currentMap.id,abilities:this.generateAbilities()});
+	}
+	checkForDynamicDifficultyIncrease(){
+		if(this.mapsPlayed.length == 0){
+			return;
+		}
+		if(this.mapsPlayed.length % 5 == 0){
+			this.chanceToSpawnAbility = this.chanceToSpawnAbility + 5;
+		}
 	}
 	getRandomMapR(){
 		var randomIndex = utils.getRandomInt(0,this.maps.length-1);
@@ -634,7 +667,7 @@ class GameBoard {
 		//Fill in normal tiles if chance to spawn is too low
 		for(var p=0;p<abilityTilesAvaliable.length;p++){
 			var spawnChance = utils.getRandomInt(1,100);
-			if(spawnChance >= c.chanceToSpawnAbility){
+			if(spawnChance >= this.chanceToSpawnAbility){
 				indexMap[this.currentMap.cells[abilityTilesAvaliable[p]].site.voronoiId] = c.tileMap.normal.id;
 				this.currentMap.cells[abilityTilesAvaliable[p]].id = c.tileMap.normal.id;
 				continue;
@@ -1129,8 +1162,8 @@ class Player extends Circle {
 		}
 	}
 	addNotch(){
-		if(this.notches+1 >= c.playerNotchesToWin){
-			this.notches = c.playerNotchesToWin;
+		if(this.notches+1 >= this.notchesToWin){
+			this.notches = this.notchesToWin;
 			return;
 		}
 		this.notches += 1;

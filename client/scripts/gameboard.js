@@ -4,6 +4,7 @@ var mousex,
 	gate,
 	world,
 	mapID,
+	gameID,
 	currentMap,
 	punchList,
 	projectileList,
@@ -23,6 +24,7 @@ function resetGameboard(){
 	blindfold = {};
 	currentMap = {};
 	projectileList = {};
+	gameID = null;
 }
 function updateGameboard(dt){
 	if(currentState == config.stateMap.racing || currentState == config.stateMap.collapsing){
@@ -274,6 +276,7 @@ function resetPlayers(){
 }
 
 function fullReset(){
+	gameLength = config.playerNotchesToWin;
 	playerWon = null;
 	decodedColorName = '';
 	oldNotches = {};
