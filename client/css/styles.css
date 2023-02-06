@@ -78,7 +78,11 @@ canvas {
     position: relative;
     height: 50px;
 }
-
+#version{
+    font-size: 12px;
+    text-align: right;
+    float: right;
+}
 .patch-notes {
     margin-top: 5px;
     text-align: center;
