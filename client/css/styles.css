@@ -34,7 +34,7 @@ canvas {
 }
 
 #main {
-    background: #F0F0F0;
+    background-color: #ffffff;
     position: absolute;
     overflow: none;
     left: 0;
@@ -77,6 +77,11 @@ canvas {
     display: block;
     position: relative;
     height: 50px;
+}
+
+.patch-notes {
+    margin-top: 5px;
+    text-align: center;
 }
 .btn {
     font-size: 0.95rem;
