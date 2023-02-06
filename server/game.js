@@ -459,7 +459,9 @@ class GameBoard {
 				this.projectileList[this.abilityList[id].ownerId].explodeBomb();
 			}
 			if (this.abilityList[id].alive == false) {
-				this.playerList[this.abilityList[id].ownerId].ability = null;
+				if (this.playerList[this.abilityList[id].ownerId] != undefined) {
+					this.playerList[this.abilityList[id].ownerId].ability = null;
+				}
 				delete this.abilityList[id];
 			}
 		}

@@ -47,7 +47,7 @@ excitingBackgroundMusicList.push(therush);
 excitingBackgroundMusicList.push(beastv2);
 excitingBackgroundMusicList.push(heavyfabric);
 
-abilityFizzle.volume = 1 * masterVolume;
+abilityFizzle.volume = .85 * masterVolume;
 teleportWarnSound.volume = .025 * masterVolume;
 countDownA.volume = .05 * masterVolume;
 countDownB.volume = .05 * masterVolume;
