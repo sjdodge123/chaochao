@@ -17,7 +17,7 @@ var mousex,
 
 resetGameboard();
 
-function resetGameboard(){
+function resetGameboard() {
 	playerList = {};
 	clientList = {};
 	punchList = {};
@@ -26,41 +26,41 @@ function resetGameboard(){
 	projectileList = {};
 	gameID = null;
 }
-function updateGameboard(dt){
-	if(currentState == config.stateMap.racing || currentState == config.stateMap.collapsing){
+function updateGameboard(dt) {
+	if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
 		updateTrails();
 	}
 }
-function resetTrails(){
-	for(var id in playerList){
+function resetTrails() {
+	for (var id in playerList) {
 		var player = playerList[id];
 		player.trail.reset(player);
 	}
 }
 
-function updateTrails(){
-	for(var id in playerList){
+function updateTrails() {
+	for (var id in playerList) {
 		var player = playerList[id];
-		player.trail.update({x:player.x, y:player.y});
+		player.trail.update({ x: player.x, y: player.y });
 	}
 }
 
 
-function connectSpawnPlayers(packet){
-	if(packet == null){
+function connectSpawnPlayers(packet) {
+	if (packet == null) {
 		return;
 	}
 	packet = JSON.parse(packet);
-	for(var i=0;i<packet.length;i++){
+	for (var i = 0; i < packet.length; i++) {
 		var player = packet[i];
-		if(playerList[player[0]] == null){
-			 createPlayer(player);
+		if (playerList[player[0]] == null) {
+			createPlayer(player);
 		}
 	}
 
 }
 
-function createPlayer(dataArray,isAI){
+function createPlayer(dataArray, isAI) {
 	var index = dataArray[0];
 	playerList[index] = {};
 	playerList[index].radius = config.playerBaseRadius;
@@ -76,8 +76,13 @@ function createPlayer(dataArray,isAI){
 	playerList[index].ability = null;
 	playerList[index].angle = 0;
 	playerList[index].deathMessage = null;
-	playerList[index].trail = new Trail({x:dataArray[1],y:dataArray[2]});
-    /*
+	playerList[index].trail = new Trail({ x: dataArray[1], y: dataArray[2] });
+	playerList[index].fizzle = function () {
+		if (playerList[index].startSwapCountDown) {
+			playerList[index].startSwapCountDown = false;
+		}
+	};
+	/*
 	playerList[index].weapon = {}
 	playerList[index].weapon.angle = dataArray[4];
 	playerList[index].weapon.name = dataArray[5];
@@ -85,55 +90,55 @@ function createPlayer(dataArray,isAI){
 		playerList[index].AIName = dataArray[8]
 	}
 	playerList[index].trail = new Trail({x:shipX, y:shipY}, 10, 20, shipColor, 0.25, 'circle');
-    */
+	*/
 }
 
-function updatePlayerList(packet){
-	if(packet == null){
+function updatePlayerList(packet) {
+	if (packet == null) {
 		return;
 	}
 	packet = JSON.parse(packet);
-	for(var i=0;i<packet.length;i++){
+	for (var i = 0; i < packet.length; i++) {
 		var player = packet[i];
-		if(playerList[player[0]] != null){
+		if (playerList[player[0]] != null) {
 			playerList[player[0]].id = player[0];
 			playerList[player[0]].x = player[1];
 			playerList[player[0]].y = player[2];
 			playerList[player[0]].velX = player[3];
 			playerList[player[0]].velY = player[4];
-			playerList[player[0]].angle =player[5];
+			playerList[player[0]].angle = player[5];
 		}
 	}
 }
-function updateProjecileList(packet){
-	if(packet == null){
+function updateProjecileList(packet) {
+	if (packet == null) {
 		return;
 	}
 	packet = JSON.parse(packet);
-	for(var i=0;i<packet.length;i++){
+	for (var i = 0; i < packet.length; i++) {
 		var proj = packet[i];
-		if(projectileList[proj[0]] != null){
+		if (projectileList[proj[0]] != null) {
 			projectileList[proj[0]].ownerId = proj[0];
 			projectileList[proj[0]].x = proj[1];
 			projectileList[proj[0]].y = proj[2];
 		}
 	}
 }
-function updatePlayerNotches(packet){
-	if(packet == null){
+function updatePlayerNotches(packet) {
+	if (packet == null) {
 		return;
 	}
 	packet = JSON.parse(packet);
-	for(var i=0;i<packet.length;i++){
+	for (var i = 0; i < packet.length; i++) {
 		var player = packet[i];
-		if(playerList[player[0]] != null){
+		if (playerList[player[0]] != null) {
 			oldNotches[player[0]] = playerList[player[0]].notches;
 			playerList[player[0]].notches = player[1];
 		}
 	}
-	
+
 }
-function worldResize(payload){
+function worldResize(payload) {
 	payload = JSON.parse(payload);
 	world = {};
 	world.x = payload[0];
@@ -141,34 +146,34 @@ function worldResize(payload){
 	world.width = payload[2];
 	world.height = payload[3];
 }
-function appendNewPlayer(packet){
-	if(packet == null){
+function appendNewPlayer(packet) {
+	if (packet == null) {
 		return;
 	}
 	packet = JSON.parse(packet);
 	var player = packet;
-	if(playerList[player[0]] == null){
+	if (playerList[player[0]] == null) {
 		createPlayer(player);
 	}
 }
 
-function checkGameState(payload){
-	if(payload == null){
+function checkGameState(payload) {
+	if (payload == null) {
 		return;
 	}
 	payload = JSON.parse(payload);
 	currentState = payload[0];
-	if(currentState == config.stateMap.waiting){
+	if (currentState == config.stateMap.waiting) {
 		lobbyStartButton = null;
 	}
-	if(currentState == config.stateMap.lobby){
+	if (currentState == config.stateMap.lobby) {
 		lobbyStartButton = {};
 		lobbyStartButton.x = payload[1];
 		lobbyStartButton.y = payload[2];
 		lobbyStartButton.radius = payload[3];
 		lobbyStartButton.color = payload[4];
 	}
-	if(currentState == config.stateMap.gated){
+	if (currentState == config.stateMap.gated) {
 		lobbyStartButton = null;
 		gate = {};
 		gate.x = payload[1];
@@ -178,53 +183,53 @@ function checkGameState(payload){
 	}
 }
 
-function loadNewMap(id){
+function loadNewMap(id) {
 	currentMap = {};
 	pingCircles = [];
-	for(var i=0;i<maps.length;i++){
-		if(id == maps[i].id){
+	for (var i = 0; i < maps.length; i++) {
+		if (id == maps[i].id) {
 			currentMap = JSON.parse(JSON.stringify(maps[i]));
 			break;
 		}
 	}
-	for(var j=0;j<currentMap.cells.length;j++){
-		if(currentMap.cells[j].id == config.tileMap.goal.id){
+	for (var j = 0; j < currentMap.cells.length; j++) {
+		if (currentMap.cells[j].id == config.tileMap.goal.id) {
 			playSound(countDownA);
-			var pingCircle = {x:currentMap.cells[j].site.x,y:currentMap.cells[j].site.y,radius:0,pass:0};
+			var pingCircle = { x: currentMap.cells[j].site.x, y: currentMap.cells[j].site.y, radius: 0, pass: 0 };
 			pingCircles.push(pingCircle);
-			pingIntervals.push(setInterval(function(ping){
-				if(ping.pass == 2){
+			pingIntervals.push(setInterval(function (ping) {
+				if (ping.pass == 2) {
 					var index = pingCircles.indexOf(ping);
-					pingCircles.splice(index,1);
+					pingCircles.splice(index, 1);
 				}
-				if(ping.radius > 500){
+				if (ping.radius > 500) {
 					ping.radius = 0;
 					playSound(countDownA);
 					ping.pass++;
-				} else{
-					ping.radius+=10;
+				} else {
+					ping.radius += 10;
 				}
-				
-			},50,pingCircle));
+
+			}, 50, pingCircle));
 		}
 	}
-	
-	
+
+
 }
-function applyAbilites(abilities){
-	if(abilities.length == 0){
+function applyAbilites(abilities) {
+	if (abilities.length == 0) {
 		return;
 	}
-	for(var i=0;i<currentMap.cells.length;i++){
-		if(currentMap.cells[i].id == config.tileMap.ability.id){
+	for (var i = 0; i < currentMap.cells.length; i++) {
+		if (currentMap.cells[i].id == config.tileMap.ability.id) {
 			currentMap.cells[i].id = abilities[currentMap.cells[i].site.voronoiId];
 		}
 	}
-	
+
 }
 
-function spawnLobbyStartButton(payload){
-	if(payload == null){
+function spawnLobbyStartButton(payload) {
+	if (payload == null) {
 		return;
 	}
 	payload = JSON.parse(payload);
@@ -234,8 +239,8 @@ function spawnLobbyStartButton(payload){
 	lobbyStartButton.radius = payload[2];
 	lobbyStartButton.color = payload[3];
 }
-function spawnPunch(payload){
-	if(payload == null){
+function spawnPunch(payload) {
+	if (payload == null) {
 		return;
 	}
 	payload = JSON.parse(payload);
@@ -246,7 +251,7 @@ function spawnPunch(payload){
 	punch.color = payload[3];
 	punchList[punch.ownerId] = punch;
 }
-function spawnBomb(owner){
+function spawnBomb(owner) {
 	var bomb = {};
 	bomb.ownerId = owner;
 	bomb.x = playerList[owner].x;
@@ -255,120 +260,121 @@ function spawnBomb(owner){
 	bomb.color = "black";
 	projectileList[owner] = bomb;
 }
-function terminatePunch(id){
-	if(punchList[id] != null){
+function terminatePunch(id) {
+	if (punchList[id] != null) {
 		delete punchList[id];
 	}
 }
-function terminateBomb(id){
-	if(projectileList[id] != null){
+function terminateBomb(id) {
+	if (projectileList[id] != null) {
 		delete projectileList[id];
 	}
 }
 
-function resetPlayers(){
-	for(var id in playerList){
+function resetPlayers() {
+	for (var id in playerList) {
 		var player = playerList[id];
 		player.alive = true;
 		player.deathMessage = null;
-		player.trail = new Trail({x:player.x,y:player.y});
+		player.trail = new Trail({ x: player.x, y: player.y });
 	}
 }
 
-function fullReset(){
+function fullReset() {
 	gameLength = config.playerNotchesToWin;
 	playerWon = null;
 	decodedColorName = '';
 	oldNotches = {};
 	playersNearVictory = [];
-	for(var id in playerList){
+	for (var id in playerList) {
 		var player = playerList[id];
 		player.alive = true;
 		player.nearVictory = false;
 		player.ability = null;
 		player.deathMessage = null;
-		player.trail = new Trail({x:player.x,y:player.y});
+		player.trail = new Trail({ x: player.x, y: player.y });
 		player.notches = 0;
 		oldNotches[id] = player.notches;
 	}
-	
+
 }
 
-function collapseCells(cells){
-	for(var i=0;i<currentMap.cells.length;i++){
+function collapseCells(cells) {
+	for (var i = 0; i < currentMap.cells.length; i++) {
 		var cell = currentMap.cells[i];
-		for(var j=0;j<cells.length;j++){
-			if(cells[j] == cell.site.voronoiId){
+		for (var j = 0; j < cells.length; j++) {
+			if (cells[j] == cell.site.voronoiId) {
 				cell.id = config.tileMap.lava.id;
 				cell.color = config.tileMap.lava.color;
 			}
 		}
 	}
-	
+
 }
-function explodedCells(cells){
-	for(var i=0;i<currentMap.cells.length;i++){
+function explodedCells(cells) {
+	for (var i = 0; i < currentMap.cells.length; i++) {
 		var cell = currentMap.cells[i];
-		for(var j=0;j<cells.length;j++){
-			if(cells[j] == cell.site.voronoiId){
+		for (var j = 0; j < cells.length; j++) {
+			if (cells[j] == cell.site.voronoiId) {
 				cell.id = config.tileMap.slow.id;
 				cell.color = config.tileMap.slow.color;
 			}
 		}
 	}
-	
+
 }
 
-function playerPickedUpAbility(payload){
+function playerPickedUpAbility(payload) {
 	playerList[payload.owner].ability = payload.ability;
-	if(payload.voronoiId == null){
+	if (payload.voronoiId == null) {
 		return;
 	}
-	for(var i=0;i<currentMap.cells.length;i++){
+	for (var i = 0; i < currentMap.cells.length; i++) {
 		var cell = currentMap.cells[i];
-		if(cell.site.voronoiId == payload.voronoiId){
+		if (cell.site.voronoiId == payload.voronoiId) {
 			cell.id = config.tileMap.normal.id;
 			return;
 		}
 	}
 }
-function playerAbilityUsed(owner){
+function playerAbilityUsed(owner) {
 	playerList[owner].ability = null;
 }
-function createBlindFold(owner){
+
+function createBlindFold(owner) {
 	blindfold.color = this.playerList[owner].color;
-	var int = setInterval(function(){
+	var int = setInterval(function () {
 		clearInterval(int);
 		blindfold.color = null;
-	},config.tileMap.abilities.blindfold.duration*1000);
+	}, config.tileMap.abilities.blindfold.duration * 1000);
 }
 
-function setupEmojiWheel(){
+function setupEmojiWheel() {
 	var menu = $("#emojiMenu");
-	for(var i=0;i<config.emojis.length;i++){
-		menu.append('<a onclick="closeEmojiWindow(this.innerHTML)" href="#">'+ config.emojis[i] +'</a>');
+	for (var i = 0; i < config.emojis.length; i++) {
+		menu.append('<a onclick="closeEmojiWindow(this.innerHTML)" href="#">' + config.emojis[i] + '</a>');
 	}
 	emojiMenu.style.borderColor = playerList[myID].color;
 }
 
 class Trail {
-	constructor(initialPosition){
+	constructor(initialPosition) {
 		this.vertices = [];
 		this.maxLength = 3000;
-		for (var i = 0; i < this.maxLength; i++){
+		for (var i = 0; i < this.maxLength; i++) {
 			this.vertices.push(initialPosition);
 		}
 	}
-	update(currentPosition){
-		for (var i = this.maxLength - 1; i > 0; i--){
-			this.vertices[i] = this.vertices[i-1];
+	update(currentPosition) {
+		for (var i = this.maxLength - 1; i > 0; i--) {
+			this.vertices[i] = this.vertices[i - 1];
 		}
 		this.vertices[0] = currentPosition;
 	}
-	reset(player){
+	reset(player) {
 		this.vertices = [];
-		for (var i = 0; i < this.maxLength; i++){
-			this.vertices.push({x:player.x,y:player.y});
+		for (var i = 0; i < this.maxLength; i++) {
+			this.vertices.push({ x: player.x, y: player.y });
 		}
 	}
 }

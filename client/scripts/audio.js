@@ -22,7 +22,9 @@ var playerFinished = new Audio("./assets/sounds/playerfinished.mp3");
 var bombShot = new Audio("./assets/sounds/bomb-shot.mp3");
 var bombExplosion = new Audio("./assets/sounds/bomb-explosion.mp3");
 var blindSound = new Audio("./assets/sounds/blind.mp3");
+var abilityFizzle = new Audio("./assets/sounds/fizzle.mp3");
 var teleportSound = new Audio("./assets/sounds/teleport.mp3");
+var teleportWarnSound = new Audio("./assets/sounds/teleport_warn.mp3");
 
 
 var nearVictorySound = new Audio("./assets/sounds/rise.mp3");
@@ -45,7 +47,8 @@ excitingBackgroundMusicList.push(therush);
 excitingBackgroundMusicList.push(beastv2);
 excitingBackgroundMusicList.push(heavyfabric);
 
-
+abilityFizzle.volume = 1 * masterVolume;
+teleportWarnSound.volume = .025 * masterVolume;
 countDownA.volume = .05 * masterVolume;
 countDownB.volume = .05 * masterVolume;
 lavaCollapse.volume = .1 * masterVolume;
@@ -80,123 +83,123 @@ therush.targetVolume = therush.volume;
 beastv2.volume = .035 * masterVolume * musicVolume;
 beastv2.targetVolume = beastv2.volume;
 
-function playSound (sound) {
-	playingSounds.push(sound);
-	if(!gameMuted){
-		if(sound.currentTime > 0){
-			sound.currentTime = 0;
-		}
-		sound.play();
-	}
+function playSound(sound) {
+    playingSounds.push(sound);
+    if (!gameMuted) {
+        if (sound.currentTime > 0) {
+            sound.currentTime = 0;
+        }
+        sound.play();
+    }
 }
 
-function stopSound(sound){
-	var index = playingSounds.indexOf(sound);
-	if(index != -1){
-		playingSounds.splice(index,1);
-	}
-	if(!gameMuted){
-		sound.pause();
-		if(sound.currentTime > 0){
-			sound.currentTime = 0;
-		}
-	}
+function stopSound(sound) {
+    var index = playingSounds.indexOf(sound);
+    if (index != -1) {
+        playingSounds.splice(index, 1);
+    }
+    if (!gameMuted) {
+        sound.pause();
+        if (sound.currentTime > 0) {
+            sound.currentTime = 0;
+        }
+    }
 }
 
-function stopAllSounds(){
-	for(var i=0;i<playingSounds.length;i++){
-		playingSounds[i].pause();
-	}
+function stopAllSounds() {
+    for (var i = 0; i < playingSounds.length; i++) {
+        playingSounds[i].pause();
+    }
 }
 
-function playBackgroundSound(){
+function playBackgroundSound() {
     //Count all players near victory
-    for(var id in playerList){
-        if(playerList[id].nearVictory == true){
+    for (var id in playerList) {
+        if (playerList[id].nearVictory == true) {
             playersNearVictory.push(id);
-        } else{
-            playersNearVictory.splice(playersNearVictory.indexOf(id),1);
+        } else {
+            playersNearVictory.splice(playersNearVictory.indexOf(id), 1);
         }
     }
     //Not a match point, change to calming music
-    if(playersNearVictory.length < 1){
+    if (playersNearVictory.length < 1) {
         changeBackgroundMusic(calmBackgroundMusicList);
         return;
     }
     //If match point, change to exciting music
-    if(playersNearVictory.length > 0){
+    if (playersNearVictory.length > 0) {
         changeBackgroundMusic(excitingBackgroundMusicList);
         return;
     }
 }
 
-function playSoundAfterFinish(sound){
-	playingSounds.push(sound);
-	if(!gameMuted){
-		if(sound.currentTime > 0 && !sound.ended){
-			return;
-		}else{
-			sound.currentTime = 0;
-		}
-		sound.play();
-	}
+function playSoundAfterFinish(sound) {
+    playingSounds.push(sound);
+    if (!gameMuted) {
+        if (sound.currentTime > 0 && !sound.ended) {
+            return;
+        } else {
+            sound.currentTime = 0;
+        }
+        sound.play();
+    }
 }
 
-function changeBackgroundMusic(musicList){
+function changeBackgroundMusic(musicList) {
     //No existing background sounds, set musiclist provided
-    if(currentBackgroundMusic == null || currentBackgroundMusic.ended){
-        currentBackgroundMusic = musicList[getRandomInt(0,musicList.length-1)];
+    if (currentBackgroundMusic == null || currentBackgroundMusic.ended) {
+        currentBackgroundMusic = musicList[getRandomInt(0, musicList.length - 1)];
         fadeSoundIn(currentBackgroundMusic);
         playSound(currentBackgroundMusic);
         return;
     }
     //Existing background music playing from provided musiclist, continue
-    if(musicList === calmBackgroundMusicList && isCalmingPlaylist(currentBackgroundMusic)){
+    if (musicList === calmBackgroundMusicList && isCalmingPlaylist(currentBackgroundMusic)) {
         return;
     }
-    
-    if(musicList === excitingBackgroundMusicList && !isCalmingPlaylist(currentBackgroundMusic)){
+
+    if (musicList === excitingBackgroundMusicList && !isCalmingPlaylist(currentBackgroundMusic)) {
         return;
     }
     //Existing background music does not match playlist, fade out and change playlist
     fadeSoundOut(currentBackgroundMusic);
-    currentBackgroundMusic = musicList[getRandomInt(0,musicList.length-1)];
+    currentBackgroundMusic = musicList[getRandomInt(0, musicList.length - 1)];
     fadeSoundIn(currentBackgroundMusic);
     playSound(currentBackgroundMusic);
 }
 
-function fadeSoundIn(sound){
+function fadeSoundIn(sound) {
     sound.volume = .001 * masterVolume;
-    var backgroundBuildTimer = setInterval(function(){
-        if(sound.volume < sound.targetVolume){
+    var backgroundBuildTimer = setInterval(function () {
+        if (sound.volume < sound.targetVolume) {
             sound.volume = sound.volume * 1.2 * masterVolume * musicVolume;
-        } else{
+        } else {
             sound.volume = sound.targetVolume;
             clearInterval(backgroundBuildTimer);
         }
-    },500);
+    }, 500);
 }
 
-function fadeSoundOut(sound){
-    if(sound != null){
-        var backGroundFadeTimer = setInterval(function(){
-            if(sound.volume > 0.0025){
+function fadeSoundOut(sound) {
+    if (sound != null) {
+        var backGroundFadeTimer = setInterval(function () {
+            if (sound.volume > 0.0025) {
                 sound.volume *= .95;
-            } else{
+            } else {
                 stopSound(sound);
                 clearInterval(backGroundFadeTimer);
             }
-        },500);
+        }, 500);
     }
 }
 
-function lookupCurrentBackgroundSound(){
-    
+function lookupCurrentBackgroundSound() {
+
 }
 
-function isCalmingPlaylist(sound){
-    for(var i=0;i<calmBackgroundMusicList.length;i++){
-        if(sound === calmBackgroundMusicList[i]){
+function isCalmingPlaylist(sound) {
+    for (var i = 0; i < calmBackgroundMusicList.length; i++) {
+        if (sound === calmBackgroundMusicList[i]) {
             return true;
         }
     }

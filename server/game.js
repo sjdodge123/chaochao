@@ -445,8 +445,9 @@ class GameBoard {
 	checkAbilities(currentState) {
 		for (var id in this.abilityList) {
 			if (this.abilityList[id].swap) {
-				this.swapOwnerWithRandomPlayer(this.abilityList[id].ownerId);
 				this.abilityList[id].swap = false;
+				var packet = { owner: this.abilityList[id].ownerId, context: this };
+				setTimeout(this.swapOwnerWithRandomPlayer, c.tileMap.abilities.swap.warnTime + utils.getRandomInt(1000, 4000), packet);
 			}
 			if (this.abilityList[id].spawnBomb) {
 				this.abilityList[id].spawnBomb = false;
@@ -505,21 +506,32 @@ class GameBoard {
 		packet.abilityList[player.id] = player.ability;
 		messenger.messageRoomBySig(packet.roomSig, "abilityAcquired", { owner: player.id, ability: c.tileMap.abilities.bombTrigger.id, voronoiId: null });
 	}
-	swapOwnerWithRandomPlayer(owner) {
-		if (Object.keys(this.playerList).length == 1 || this.alivePlayerCount == 1 || this.alivePlayerCount - this.sleepingPlayerCount == 1) {
-			//TODO play fizzle sound to client
+
+	swapOwnerWithRandomPlayer(packet) {
+		var gameBoard = packet.context;
+		var randomPlayer = utils.getRandomProperty(gameBoard.playerList);
+		var count = 0;
+		while (randomPlayer.id == packet.owner ||
+			randomPlayer.alive == false ||
+			randomPlayer.awake == false) {
+			if (count > 100 || Object.keys(gameBoard.playerList).length == 1 || gameBoard.alivePlayerCount == 1 || gameBoard.alivePlayerCount - gameBoard.sleepingPlayerCount == 1 || gameBoard.playerList[packet.owner] == undefined) {
+				messenger.messageRoomBySig(gameBoard.roomSig, "fizzle", packet.owner);
+				return;
+			}
+			randomPlayer = utils.getRandomProperty(gameBoard.playerList)
+			count++;
+		}
+		var ownerPlayer = gameBoard.playerList[packet.owner];
+		if (ownerPlayer == undefined) {
+			messenger.messageRoomBySig(gameBoard.roomSig, "fizzle", packet.owner);
 			return;
 		}
-		var randomPlayer = utils.getRandomProperty(this.playerList);
-		if (randomPlayer.id == owner || randomPlayer.alive == false || randomPlayer.awake == false) {
-			return this.swapOwnerWithRandomPlayer(owner);
-		}
-		var ownerPlayer = this.playerList[owner];
 		var tempVars = { x: randomPlayer.x, y: randomPlayer.y, newX: randomPlayer.newX, newY: randomPlayer.newY, velX: randomPlayer.velX, velY: randomPlayer.velY, dragCoeff: randomPlayer.dragCoeff, brakeCoeff: randomPlayer.brakeCoeff, acel: randomPlayer.acel };
 		for (var prop in tempVars) {
 			randomPlayer[prop] = ownerPlayer[prop];
 			ownerPlayer[prop] = tempVars[prop];
 		}
+		messenger.messageRoomBySig(gameBoard.roomSig, "playerSwapped", packet.owner);
 	}
 	spawnBomb(owner) {
 		var player = this.playerList[owner];

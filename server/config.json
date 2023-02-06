@@ -9,7 +9,7 @@
     "minPlayersToStart": 3,
     "maxPlayersInRoom": 15,
     "forceConstant": 5000,
-    "chanceToSpawnAbility": 35,
+    "chanceToSpawnAbility": 50,
     "TESTSingleMap": false,
     "submitViaMail": "chaochaothegame@gmail.com",
     "tileMap": {
@@ -65,6 +65,7 @@
             },
             "swap": {
                 "spawnable": true,
+                "warnTime": 3000,
                 "id": 101
             },
             "bomb": {
