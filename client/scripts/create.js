@@ -433,7 +433,7 @@ function exportToJSON() {
 function submitViaEmail() {
     basicSanitize();
     var mailLink = "mailto:" + config.submitViaMail + "?subject=New map submission - " + vMap.name + " : " + vMap.author + "&body=" + JSON.stringify(vMap);
-    window.location.href = mailLink;
+    window.open(mailLink, '_blank');
 }
 
 function submitToGithub() {
