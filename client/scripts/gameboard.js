@@ -119,8 +119,9 @@ function updateProjecileList(packet) {
 		var proj = packet[i];
 		if (projectileList[proj[0]] != null) {
 			projectileList[proj[0]].ownerId = proj[0];
-			projectileList[proj[0]].x = proj[1];
-			projectileList[proj[0]].y = proj[2];
+			projectileList[proj[0]].type = proj[1];
+			projectileList[proj[0]].x = proj[2];
+			projectileList[proj[0]].y = proj[3];
 		}
 	}
 }
@@ -257,6 +258,7 @@ function spawnBomb(owner) {
 	bomb.x = playerList[owner].x;
 	bomb.y = playerList[owner].y;
 	bomb.radius = 10;
+	bomb.rotation = 0;
 	bomb.color = "black";
 	projectileList[owner] = bomb;
 }

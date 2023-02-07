@@ -21,6 +21,7 @@ var collectItem = new Audio("./assets/sounds/collectitem.mp3");
 var playerFinished = new Audio("./assets/sounds/playerfinished.mp3");
 var bombShot = new Audio("./assets/sounds/bomb-shot.mp3");
 var bombExplosion = new Audio("./assets/sounds/bomb-explosion.mp3");
+var bombBounce = new Audio("./assets/sounds/bomb-bounce.mp3");
 var blindSound = new Audio("./assets/sounds/blind.mp3");
 var abilityFizzle = new Audio("./assets/sounds/fizzle.mp3");
 var teleportSound = new Audio("./assets/sounds/teleport.mp3");
@@ -47,6 +48,7 @@ excitingBackgroundMusicList.push(therush);
 excitingBackgroundMusicList.push(beastv2);
 excitingBackgroundMusicList.push(heavyfabric);
 
+bombBounce.volume = 0.75 * masterVolume;
 abilityFizzle.volume = .85 * masterVolume;
 teleportWarnSound.volume = .025 * masterVolume;
 countDownA.volume = .05 * masterVolume;

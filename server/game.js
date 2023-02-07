@@ -432,7 +432,7 @@ class GameBoard {
 				objectArray.push(this.playerList[player]);
 			}
 			for (var projID in this.projectileList) {
-				_engine.preventEscape(this.projectileList[projID], this.world);
+				_engine.bounceOffBoundry(this.projectileList[projID], this.world);
 				objectArray.push(this.projectileList[projID]);
 			}
 			for (var punchId in this.punchList) {
@@ -537,9 +537,22 @@ class GameBoard {
 	}
 	spawnBomb(owner) {
 		var player = this.playerList[owner];
-		var bomb = new BombProj(player.x, player.y, 10, "black", owner, this.roomSig, player.angle);
+		var bomb = new BombProj(player.x, player.y, 10, "black", owner, this.roomSig, this.clampBombAngle(player.angle));
 		this.projectileList[owner] = bomb;
 		messenger.messageRoomBySig(this.roomSig, "spawnBomb", owner);
+	}
+	clampBombAngle(angle) {
+		const maxAim = c.tileMap.abilities.bomb.maxAngle;
+		const minAim = c.tileMap.abilities.bomb.minAngle;
+		if ((angle <= maxAim || angle >= minAim)) {
+			return angle;
+		}
+		if (angle > maxAim && angle < 180) {
+			return maxAim;
+		}
+		if (angle < minAim && angle > 180) {
+			return minAim;
+		}
 	}
 	explodeBomb(owner) {
 		var explodedCells = [];
@@ -1234,6 +1247,7 @@ class BombProj extends Circle {
 	constructor(x, y, radius, color, ownerId, roomSig, angle) {
 		super(x, y, radius, color);
 		this.alive = true;
+		this.bounced = false;
 		this.ownerId = ownerId;
 		this.roomSig = roomSig;
 		this.lifeTime = c.tileMap.abilities.bomb.lifetime;
@@ -1245,14 +1259,22 @@ class BombProj extends Circle {
 		this.newX = this.x;
 		this.newY = this.y;
 		this.explode = false;
+		this.type = "bomb";
 
 		this.explodeWaitTime = c.tileMap.abilities.bomb.lifetime;
 		this.explodeTimer = null;
 		this.explodeTimeLeft = this.explodeWaitTime;
 	}
 	update() {
+		this.checkForBounce();
 		this.checkExplodeTimer();
 		this.move();
+	}
+	checkForBounce() {
+		if (this.bounced) {
+			this.bounced = false;
+			messenger.messageRoomBySig(this.roomSig, "bombBounce");
+		}
 	}
 	checkExplodeTimer() {
 		if (this.explodeTimer != null) {

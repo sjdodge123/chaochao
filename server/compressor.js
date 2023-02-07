@@ -7,9 +7,9 @@ var player = null;
 var proj = null;
 var prop = null;
 
-exports.sendPlayerUpdates = function(playerList){
+exports.sendPlayerUpdates = function (playerList) {
 	var packet = [];
-	for(prop in playerList){
+	for (prop in playerList) {
 		player = playerList[prop];
 		listItem = [
 			player.id,
@@ -27,12 +27,13 @@ exports.sendPlayerUpdates = function(playerList){
 	prop = null;
 	return packet;
 }
-exports.sendProjUpdates = function(projectileList){
+exports.sendProjUpdates = function (projectileList) {
 	var packet = [];
-	for(prop in projectileList){
+	for (prop in projectileList) {
 		proj = projectileList[prop];
 		listItem = [
 			proj.ownerId,
+			proj.type,
 			proj.x,
 			proj.y
 		];
@@ -44,9 +45,9 @@ exports.sendProjUpdates = function(projectileList){
 	prop = null;
 	return packet;
 }
-exports.sendNotchUpdates = function(playerList){
+exports.sendNotchUpdates = function (playerList) {
 	var packet = [];
-	for(prop in playerList){
+	for (prop in playerList) {
 		player = playerList[prop];
 		listItem = [
 			player.id,
@@ -60,7 +61,7 @@ exports.sendNotchUpdates = function(playerList){
 	prop = null;
 	return packet;
 }
-exports.worldResize = function(world){
+exports.worldResize = function (world) {
 	var packet = [];
 	packet[0] = world.x;
 	packet[1] = world.y;
@@ -70,26 +71,26 @@ exports.worldResize = function(world){
 	packet = JSON.stringify(packet);
 	return packet;
 }
-exports.sendLobbyStart = function(lobbyStartButton){
+exports.sendLobbyStart = function (lobbyStartButton) {
 	var packet = [];
 	packet[0] = lobbyStartButton.x;
 	packet[1] = lobbyStartButton.y;
 	packet[2] = lobbyStartButton.radius;
-	packet[3] = lobbyStartButton.color;	
+	packet[3] = lobbyStartButton.color;
 
 	packet = JSON.stringify(packet);
 	return packet;
 }
-exports.gameState = function(game){
+exports.gameState = function (game) {
 	var packet = [];
 	packet[0] = game.currentState;
-	if(game.currentState == game.stateMap.lobby){
+	if (game.currentState == game.stateMap.lobby) {
 		packet[1] = game.gameBoard.lobbyStartButton.x;
 		packet[2] = game.gameBoard.lobbyStartButton.y;
 		packet[3] = game.gameBoard.lobbyStartButton.radius;
-		packet[4] = game.gameBoard.lobbyStartButton.color;	
+		packet[4] = game.gameBoard.lobbyStartButton.color;
 	}
-	if(game.currentState == game.stateMap.gated){
+	if (game.currentState == game.stateMap.gated) {
 		packet[1] = game.gameBoard.startingGate.x;
 		packet[2] = game.gameBoard.startingGate.y;
 		packet[3] = game.gameBoard.startingGate.width;
@@ -99,9 +100,9 @@ exports.gameState = function(game){
 	return packet;
 }
 
-exports.playerSpawns = function(playerList){
+exports.playerSpawns = function (playerList) {
 	var packet = [];
-	for(prop in playerList){
+	for (prop in playerList) {
 		player = playerList[prop];
 		listItem = [
 			player.id,
@@ -119,7 +120,7 @@ exports.playerSpawns = function(playerList){
 	prop = null;
 	return packet;
 }
-exports.appendPlayer = function(player){
+exports.appendPlayer = function (player) {
 	var packet = [];
 	packet[0] = player.id;
 	packet[1] = player.x;
@@ -136,7 +137,7 @@ exports.appendPlayer = function(player){
 	return packet;
 }
 
-exports.sendPunch = function(punch){
+exports.sendPunch = function (punch) {
 	var packet = [];
 	packet[0] = punch.ownerId;
 	packet[1] = punch.x;

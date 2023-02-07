@@ -3,8 +3,8 @@ var utils = require('./utils.js');
 var c = utils.loadConfig();
 var forceConstant = c.forceConstant;
 
-exports.getEngine = function (playerList,projectileList) {
-	return new Engine(playerList,projectileList);
+exports.getEngine = function (playerList, projectileList) {
+	return new Engine(playerList, projectileList);
 }
 exports.checkDistance = function (obj1, obj2) {
 	return checkDistance(obj1, obj2);
@@ -12,18 +12,21 @@ exports.checkDistance = function (obj1, obj2) {
 exports.preventEscape = function (obj, bound) {
 	preventEscape(obj, bound);
 }
+exports.bounceOffBoundry = function (obj, bound) {
+	bounceOffBoundry(obj, bound);
+}
 exports.checkCollideCells = function (player, map) {
 	checkCollideCells(player, map);
 }
-exports.punchPlayer = function(player,punch){
-	punchPlayer(player,punch);
+exports.punchPlayer = function (player, punch) {
+	punchPlayer(player, punch);
 }
-exports.bumpPlayer = function(player,bumper){
-	bumpPlayer(player,bumper);
+exports.bumpPlayer = function (player, bumper) {
+	bumpPlayer(player, bumper);
 }
 
 class Engine {
-	constructor(playerList,projectileList) {
+	constructor(playerList, projectileList) {
 		this.playerList = playerList;
 		this.projectileList = projectileList;
 		this.dt = 0;
@@ -85,13 +88,13 @@ class Engine {
 				}
 			}
 			var punchingSlowDown = 1;
-			if(player.attack){
+			if (player.attack) {
 				punchingSlowDown = c.playerPunchSlowAmt;
 			}
 
 			var newVelX, newVelY, newVel, newDirX, newDirY;
-			newVelX = punchingSlowDown*player.velX + (player.acel + player.getSpeedBonus()) * dirX * this.dt;
-			newVelY = punchingSlowDown*player.velY + (player.acel + player.getSpeedBonus()) * dirY * this.dt;
+			newVelX = punchingSlowDown * player.velX + (player.acel + player.getSpeedBonus()) * dirX * this.dt;
+			newVelY = punchingSlowDown * player.velY + (player.acel + player.getSpeedBonus()) * dirY * this.dt;
 
 			if (braking) {
 				newVelX -= player.brakeCoeff * player.velX;
@@ -118,18 +121,17 @@ class Engine {
 			player.newY += player.velY * this.dt;
 		}
 	}
-	updateProjectiles(){
-		for (var id in this.projectileList){
+	updateProjectiles() {
+		for (var id in this.projectileList) {
 			var proj = this.projectileList[id];
 			var newVelX = 0;
 			var newVelY = 0;
-			newVelX = Math.cos((proj.angle)*(Math.PI/180))*proj.speed;
-			newVelY = Math.sin((proj.angle)*(Math.PI/180))*proj.speed;
-			//TODO drag not working
-			newVelX -= c.playerDragCoeff * proj.velX;
-			newVelY -= c.playerDragCoeff * proj.velY;
+			newVelX = Math.cos((proj.angle) * (Math.PI / 180)) * proj.speed * this.dt;
+			newVelY = Math.sin((proj.angle) * (Math.PI / 180)) * proj.speed * this.dt;
 
-			
+			newVelX -= 0.25 * proj.velX;
+			newVelY -= 0.25 * proj.velY;
+
 			proj.velX = newVelX;
 			proj.velY = newVelY;
 			proj.newX += proj.velX * this.dt;
@@ -350,25 +352,55 @@ function preventEscape(obj, bound) {
 		obj.velY = -obj.velY * 0.25;
 	}
 }
+function bounceOffBoundry(obj, bound) {
+	if (obj.newX - obj.radius < bound.x) {
+		obj.newX = obj.x;
+		obj.angle = 180 - obj.angle;
+		obj.speed *= 1.2;
+		obj.velX *= -3;
+		obj.bounced = true;
+	}
+	if (obj.newX + obj.radius > bound.x + bound.width) {
+		obj.newX = obj.x;
+		obj.angle = 180 - obj.angle;
+		obj.speed *= 1.2;
+		obj.velX *= -3;
+		obj.bounced = true;
+	}
+	if (obj.newY - obj.radius < bound.y) {
+		obj.newY = obj.y;
+		obj.angle *= -1;
+		obj.speed *= 1.2;
+		obj.velY *= -3;
+		obj.bounced = true;
+	}
+	if (obj.newY + obj.radius > bound.y + bound.height) {
+		obj.newY = obj.y;
+		obj.angle *= -1;
+		obj.speed *= 1.2;
+		obj.velY *= -3;
+		obj.bounced = true;
+	}
+}
 
-function punchPlayer(player,punch){
-	var distance = utils.getMag(punch.x - player.x,punch.y - player.y);
-	var velCont = _calcVelCont(distance,player,punch.x,punch.y);
+function punchPlayer(player, punch) {
+	var distance = utils.getMag(punch.x - player.x, punch.y - player.y);
+	var velCont = _calcVelCont(distance, player, punch.x, punch.y);
 	player.velX += velCont.velContX;
 	player.velY += velCont.velContY;
 }
-function bumpPlayer(player,bumper){
+function bumpPlayer(player, bumper) {
 	//TODO this isnt right
-	var simDist = {x:player.newX,y:player.newY};
-	var distance = utils.getMag(simDist.x - player.x,player.y - simDist.y);
-	var velCont = _calcVelCont(distance,player,simDist.x,simDist.y);
-	player.velX += velCont.velContX*-0.3;
-	player.velY += velCont.velContY*0.3;
+	var simDist = { x: player.newX, y: player.newY };
+	var distance = utils.getMag(simDist.x - player.x, player.y - simDist.y);
+	var velCont = _calcVelCont(distance, player, simDist.x, simDist.y);
+	player.velX += velCont.velContX * -0.3;
+	player.velY += velCont.velContY * 0.3;
 }
-function _calcVelCont(distance,object,x,y){
-	var velCont = {velContX:0,velContY:0};
-	velCont.velContX = (forceConstant/Math.pow(distance,2))*(object.x - x)/distance;
-	velCont.velContY = (forceConstant/Math.pow(distance,2))*(object.y - y)/distance;
+function _calcVelCont(distance, object, x, y) {
+	var velCont = { velContX: 0, velContY: 0 };
+	velCont.velContX = (forceConstant / Math.pow(distance, 2)) * (object.x - x) / distance;
+	velCont.velContY = (forceConstant / Math.pow(distance, 2)) * (object.y - y) / distance;
 	return velCont;
 }
 
@@ -397,7 +429,7 @@ function pointIntersection(x, y, cell) {
 			p0 = getStartpoint(halfedge);
 			p1 = getEndpoint(halfedge);
 			r = (y - p0.y) * (p1.x - p0.x) - (x - p0.x) * (p1.y - p0.y);
-		
+
 			if (!r) {
 				return 0;
 			}
@@ -408,41 +440,41 @@ function pointIntersection(x, y, cell) {
 		return 1;
 	};
 }
-function getStartpoint(halfedge){
-    if(compareSite(halfedge.edge.lSite,halfedge.site)){
-        return halfedge.edge.va;
-    }
-    return halfedge.edge.vb;
+function getStartpoint(halfedge) {
+	if (compareSite(halfedge.edge.lSite, halfedge.site)) {
+		return halfedge.edge.va;
+	}
+	return halfedge.edge.vb;
 }
-function getEndpoint(halfedge){
-    if(compareSite(halfedge.edge.lSite,halfedge.site)){
-        return halfedge.edge.vb;
-    }
-    return halfedge.edge.va;
+function getEndpoint(halfedge) {
+	if (compareSite(halfedge.edge.lSite, halfedge.site)) {
+		return halfedge.edge.vb;
+	}
+	return halfedge.edge.va;
 }
-function compareSite(siteA,siteB){
-    if(siteA.voronoiId != siteB.voronoiId){
-        return false;
-    }
-    if(siteA.x != siteB.x){
-        return false;
-    }
-    if(siteA.y != siteB.y){
-        return false;
-    }
-    return true;
+function compareSite(siteA, siteB) {
+	if (siteA.voronoiId != siteB.voronoiId) {
+		return false;
+	}
+	if (siteA.x != siteB.x) {
+		return false;
+	}
+	if (siteA.y != siteB.y) {
+		return false;
+	}
+	return true;
 }
-function locateCell(id){
-	if(id > 99){
-		for(var ability in c.tileMap.abilities){
-			if(id == c.tileMap.abilities[ability].id){
+function locateCell(id) {
+	if (id > 99) {
+		for (var ability in c.tileMap.abilities) {
+			if (id == c.tileMap.abilities[ability].id) {
 				return c.tileMap.abilities[ability];
 			}
 		}
 	}
-    for(var type in c.tileMap){
-        if(id == c.tileMap[type].id){
-            return c.tileMap[type];
-        }
+	for (var type in c.tileMap) {
+		if (id == c.tileMap[type].id) {
+			return c.tileMap[type];
+		}
 	}
 }

@@ -200,6 +200,9 @@ function clientConnect() {
 		playerPickedUpAbility(payload);
 		playSound(collectItem);
 	});
+	server.on("bombBounce", function () {
+		playSound(bombBounce);
+	});
 	server.on("blindfoldUsed", function (owner) {
 		createBlindFold(owner);
 		playerAbilityUsed(owner);

@@ -15,6 +15,11 @@ var bombIcon = new Image(576, 512);
 bombIcon.src = "../assets/img/bomb.svg";
 
 
+var bombScale = 0.025;
+var bombImage = new Image();
+bombImage.src = "../assets/img/bomb.svg";
+
+
 function loadPatterns() {
     patterns[config.tileMap.abilities.blindfold.id] = makePattern(blindfoldIcon);
     patterns[config.tileMap.abilities.swap.id] = makePattern(transferIcon);
@@ -229,27 +234,45 @@ function drawDeathMessage(player) {
 
 function drawProjectiles() {
     for (var proj in projectileList) {
+
+        if (projectileList[proj].type == 'bomb') {
+            projectileList[proj].rotation += 5;
+            const centerX = bombImage.width * 2;
+            const centerY = bombImage.height * 2;
+            gameContext.save();
+            gameContext.translate(projectileList[proj].x, projectileList[proj].y);
+            gameContext.rotate(projectileList[proj].rotation * (Math.PI / 180));
+            gameContext.scale(bombScale, bombScale);
+            gameContext.drawImage(bombImage, -centerX, -centerY);
+            gameContext.restore();
+        }
+        /*
         gameContext.save();
         gameContext.beginPath();
         gameContext.arc(projectileList[proj].x, projectileList[proj].y, projectileList[proj].radius, 0, 2 * Math.PI);
         gameContext.fillStyle = projectileList[proj].color;
         gameContext.fill();
         gameContext.restore();
+        */
     }
 }
 function drawAbilityAimer(player) {
     switch (player.ability) {
         case config.tileMap.abilities.bomb.id: {
-            gameContext.save();
-            gameContext.beginPath();
-
-            gameContext.setLineDash([5, 5]);
-            gameContext.moveTo(player.x, player.y);
-            var point = pos({ x: player.x, y: player.y }, config.tileMap.abilities.bomb.aimerLength, player.angle);
-            gameContext.lineTo(point.x, point.y);
-            gameContext.stroke();
-            gameContext.restore();
-            break;
+            const maxAim = config.tileMap.abilities.bomb.maxAngle;
+            const minAim = config.tileMap.abilities.bomb.minAngle;
+            if ((player.angle <= maxAim || player.angle >= minAim)) {
+                drawBombAimer(player, player.angle);
+                break;
+            }
+            if ((player.angle > maxAim && player.angle < 180)) {
+                drawBombAimer(player, maxAim);
+                break;
+            }
+            if ((player.angle < minAim && player.angle > 180)) {
+                drawBombAimer(player, minAim);
+                break;
+            }
         }
         case config.tileMap.abilities.swap.id: {
             gameContext.save();
@@ -278,6 +301,16 @@ function drawAbilityAimer(player) {
         }
     }
 
+}
+function drawBombAimer(player, angle) {
+    gameContext.save();
+    gameContext.beginPath();
+    gameContext.setLineDash([5, 5]);
+    gameContext.moveTo(player.x, player.y);
+    var point = pos({ x: player.x, y: player.y }, config.tileMap.abilities.bomb.aimerLength, angle);
+    gameContext.lineTo(point.x, point.y);
+    gameContext.stroke();
+    gameContext.restore();
 }
 
 function drawTrail(player) {

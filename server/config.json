@@ -6,7 +6,7 @@
     "worldWidth": 1366,
     "worldHeight": 768,
     "worldCollapseSpeed": 7,
-    "minPlayersToStart": 3,
+    "minPlayersToStart": 2,
     "maxPlayersInRoom": 15,
     "forceConstant": 5000,
     "chanceToSpawnAbility": 50,
@@ -71,9 +71,11 @@
             "bomb": {
                 "spawnable": true,
                 "id": 102,
+                "maxAngle": 45,
+                "minAngle": 315,
                 "aimerLength": 50,
-                "lifetime": 4,
-                "speed": 250,
+                "lifetime": 3,
+                "speed": 11000,
                 "explosionRadius": 120
             },
             "bombTrigger": {
