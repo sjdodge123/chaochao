@@ -664,6 +664,9 @@ class GameBoard {
 			return;
 		}
 		if (this.mapsPlayed.length % 5 == 0) {
+			if (this.chanceToSpawnAbility + 5 > 100) {
+				return;
+			}
 			this.chanceToSpawnAbility = this.chanceToSpawnAbility + 5;
 		}
 	}
