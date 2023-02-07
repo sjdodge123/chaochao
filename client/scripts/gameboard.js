@@ -25,6 +25,7 @@ function resetGameboard() {
 	punchList = {};
 	blindfold = {};
 	currentMap = {};
+	round = 0;
 	brutalRound = false;
 	brutalRoundConfig = null;
 	projectileList = {};
