@@ -10,6 +10,7 @@
     "maxPlayersInRoom": 15,
     "forceConstant": 5000,
     "chanceToSpawnAbility": 50,
+    "chanceOfBrutalRound": 0,
     "TESTSingleMap": false,
     "submitViaMail": "chaochaothegame@gmail.com",
     "tileMap": {
@@ -82,6 +83,33 @@
                 "spawnable": false,
                 "id": 103
             }
+        }
+    },
+    "brutalRounds": {
+        "ability": {
+            "id": 1000,
+            "active": false,
+            "title": "Ability"
+        },
+        "gravity": {
+            "id": 1001,
+            "active": false,
+            "title": "Gravity"
+        },
+        "cloudy": {
+            "id": 1002,
+            "active": false,
+            "title": "Cloudy"
+        },
+        "bomb": {
+            "id": 1003,
+            "active": false,
+            "title": "Bombard"
+        },
+        "lightning": {
+            "id": 1004,
+            "active": false,
+            "title": "Lightning"
         }
     },
     "lobbyWaitTime": 5,

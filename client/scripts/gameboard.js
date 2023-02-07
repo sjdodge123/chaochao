@@ -13,6 +13,8 @@ var mousex,
 	playersNearVictory = [],
 	pingCircles = [],
 	pingIntervals = [],
+	brutalRound = false,
+	brutalRoundConfig = null,
 	clientList;
 
 resetGameboard();
@@ -23,6 +25,8 @@ function resetGameboard() {
 	punchList = {};
 	blindfold = {};
 	currentMap = {};
+	brutalRound = false;
+	brutalRoundConfig = null;
 	projectileList = {};
 	gameID = null;
 }
@@ -226,7 +230,16 @@ function applyAbilites(abilities) {
 			currentMap.cells[i].id = abilities[currentMap.cells[i].site.voronoiId];
 		}
 	}
-
+}
+function applyBrutalMap(brconfig) {
+	if (brconfig.brutal == false) {
+		brutalRound = false;
+		brutalRoundConfig = null;
+		return;
+	}
+	brutalRound = true;
+	brutalRoundConfig = brconfig;
+	playSound(brutalRoundSound);
 }
 
 function spawnLobbyStartButton(payload) {

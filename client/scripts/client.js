@@ -69,8 +69,10 @@ function clientConnect() {
 	});
 
 	server.on("newMap", function (payload) {
+		round++;
 		loadNewMap(payload.id);
 		applyAbilites(payload.abilities);
+		applyBrutalMap(payload.brutalRoundConfig);
 	});
 
 	server.on("maplisting", function (mapnames) {

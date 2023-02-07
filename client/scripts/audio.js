@@ -6,6 +6,7 @@ var masterVolume = 1,
 
 var calmBackgroundMusicList = [];
 var excitingBackgroundMusicList = [];
+var brutalBackgroundMusicList = [];
 var currentBackgroundMusic = null;
 var backgroundBuildTimer = null;
 
@@ -26,6 +27,7 @@ var blindSound = new Audio("./assets/sounds/blind.mp3");
 var abilityFizzle = new Audio("./assets/sounds/fizzle.mp3");
 var teleportSound = new Audio("./assets/sounds/teleport.mp3");
 var teleportWarnSound = new Audio("./assets/sounds/teleport_warn.mp3");
+var brutalRoundSound = new Audio("./assets/sounds/brutalround.mp3");
 
 
 var nearVictorySound = new Audio("./assets/sounds/rise.mp3");
@@ -37,19 +39,28 @@ var gameStart = new Audio("./assets/sounds/gamestart.mp3");
 
 var slowstride = new Audio("./assets/sounds/slowstride.mp3");
 var slowpipes = new Audio("./assets/sounds/slow-pipes.mp3");
-var heavyfabric = new Audio("./assets/sounds/heavyfabric.mp3");
+
 calmBackgroundMusicList.push(slowstride);
 calmBackgroundMusicList.push(slowpipes);
 
 
 var therush = new Audio("./assets/sounds/the-rush.mp3");
 var beastv2 = new Audio("./assets/sounds/beastv2.mp3");
+var mindInMotion = new Audio("./assets/sounds/mind_in_motion.mp3");
+excitingBackgroundMusicList.push(mindInMotion);
 excitingBackgroundMusicList.push(therush);
 excitingBackgroundMusicList.push(beastv2);
-excitingBackgroundMusicList.push(heavyfabric);
 
+var heavyfabric = new Audio("./assets/sounds/heavyfabric.mp3");
+var desperationSetsIn = new Audio("./assets/sounds/DesperationSetsIn.mp3");
+var horrorLoop = new Audio("./assets/sounds/HorrorLoop.mp3");
+brutalBackgroundMusicList.push(horrorLoop);
+brutalBackgroundMusicList.push(desperationSetsIn);
+brutalBackgroundMusicList.push(heavyfabric);
+
+brutalRoundSound.volume = 0.35 * masterVolume;
 bombBounce.volume = 0.75 * masterVolume;
-abilityFizzle.volume = .85 * masterVolume;
+abilityFizzle.volume = .65 * masterVolume;
 teleportWarnSound.volume = .025 * masterVolume;
 countDownA.volume = .05 * masterVolume;
 countDownB.volume = .05 * masterVolume;
@@ -84,6 +95,15 @@ therush.targetVolume = therush.volume;
 
 beastv2.volume = .035 * masterVolume * musicVolume;
 beastv2.targetVolume = beastv2.volume;
+
+mindInMotion.volume = .035 * masterVolume * musicVolume
+mindInMotion.targetVolume = mindInMotion.volume;
+
+desperationSetsIn.volume = .015 * masterVolume * musicVolume
+desperationSetsIn.targetVolume = desperationSetsIn.volume;
+
+horrorLoop.volume = .015 * masterVolume * musicVolume
+horrorLoop.targetVolume = horrorLoop.volume;
 
 function playSound(sound) {
     playingSounds.push(sound);
@@ -125,7 +145,11 @@ function playBackgroundSound() {
     }
     //Not a match point, change to calming music
     if (playersNearVictory.length < 1) {
-        changeBackgroundMusic(calmBackgroundMusicList);
+        if (brutalRound == false) {
+            changeBackgroundMusic(calmBackgroundMusicList);
+        } else {
+            changeBackgroundMusic(brutalBackgroundMusicList);
+        }
         return;
     }
     //If match point, change to exciting music
@@ -156,11 +180,13 @@ function changeBackgroundMusic(musicList) {
         return;
     }
     //Existing background music playing from provided musiclist, continue
+    if (musicList === brutalBackgroundMusicList && isBrutalPlaylist(currentBackgroundMusic)) {
+        return;
+    }
     if (musicList === calmBackgroundMusicList && isCalmingPlaylist(currentBackgroundMusic)) {
         return;
     }
-
-    if (musicList === excitingBackgroundMusicList && !isCalmingPlaylist(currentBackgroundMusic)) {
+    if (musicList === excitingBackgroundMusicList && isExcitingPlaylist(currentBackgroundMusic)) {
         return;
     }
     //Existing background music does not match playlist, fade out and change playlist
@@ -197,6 +223,24 @@ function fadeSoundOut(sound) {
 
 function lookupCurrentBackgroundSound() {
 
+}
+
+function isExcitingPlaylist(sound) {
+    for (var i = 0; i < excitingBackgroundMusicList.length; i++) {
+        if (sound === excitingBackgroundMusicList[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function isBrutalPlaylist(sound) {
+    for (var i = 0; i < brutalBackgroundMusicList.length; i++) {
+        if (sound === brutalBackgroundMusicList[i]) {
+            return true;
+        }
+    }
+    return false;
 }
 
 function isCalmingPlaylist(sound) {

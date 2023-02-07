@@ -1,6 +1,9 @@
 
 var scale = 0.05;
+var bombScale = 0.025;
+
 var patterns = {};
+var brutalRoundImages = {};
 var exitIcon = new Image(576, 512);
 exitIcon.src = "../assets/img/times-circle.svg";
 var fullscreenIcon = new Image(576, 512);
@@ -13,9 +16,9 @@ var transferIcon = new Image(576, 512);
 transferIcon.src = "../assets/img/random.svg";
 var bombIcon = new Image(576, 512);
 bombIcon.src = "../assets/img/bomb.svg";
+var lightning = new Image(576, 512);
+lightning.src = "../assets/img/bolt-solid.svg";
 
-
-var bombScale = 0.025;
 var bombImage = new Image();
 bombImage.src = "../assets/img/bomb.svg";
 
@@ -24,9 +27,13 @@ function loadPatterns() {
     patterns[config.tileMap.abilities.blindfold.id] = makePattern(blindfoldIcon);
     patterns[config.tileMap.abilities.swap.id] = makePattern(transferIcon);
     patterns[config.tileMap.abilities.bomb.id] = makePattern(bombIcon);
+
+    //Asociate images with their brutal round config id
+    brutalRoundImages[config.brutalRounds.bomb.id] = bombIcon;
+    brutalRoundImages[config.brutalRounds.lightning.id] = lightning;
 }
 function makePattern(image) {
-    var canvasPadding = 1;
+    const canvasPadding = 1;
     const canvasPattern = document.createElement("canvas");
     const ctxPattern = canvasPattern.getContext("2d");
     var iconWidth = image.width * scale;
@@ -34,8 +41,41 @@ function makePattern(image) {
     canvasPattern.width = iconWidth + canvasPadding;
     canvasPattern.height = iconHeight + canvasPadding;
     ctxPattern.drawImage(image, canvasPadding / 2, canvasPadding / 2, iconWidth, iconHeight);
-    //document.body.appendChild(canvasPattern);
     return gameContext.createPattern(canvasPattern, 'repeat');
+}
+function makeComplexPattern(ids) {
+    var images = [];
+    //Lookup associated images
+    for (var i = 0; i < ids.length; i++) {
+        var image = brutalRoundImages[ids[i]];
+        if (image != null) {
+            images.push(image);
+            continue;
+        }
+        console.log("ERROR: Server provided brutalRound id (" + ids[i] + ") that is not referenced in LoadPatterns()");
+    }
+
+    const canvasPadding = 1;
+    const canvasPattern = document.createElement("canvas");
+    const ctxPattern = canvasPattern.getContext("2d");
+
+    var iconWidth = images[0].width * scale;
+    var iconHeight = images[0].height * scale;
+    canvasPattern.width = iconWidth + canvasPadding;
+    canvasPattern.height = (iconHeight * images.length) + canvasPadding;
+
+    ctxPattern.globalAlpha = 0.1;
+    //ctxPattern.filter = "opacity(30%) drop-shadow(-10px 0px 0px #880808)";
+    /*
+    ctxPattern.globalCompositeOperation = 'source-atop';
+
+    ctxPattern.globalCompositeOperation = 'destination-over';
+    */
+    for (var j = 0; j < images.length; j++) {
+        ctxPattern.drawImage(images[j], canvasPadding / 2, canvasPadding + (j * iconHeight), iconWidth, iconHeight);
+    }
+    return gameContext.createPattern(canvasPattern, 'repeat');
+
 }
 
 var notchDistanceApart = 0,
@@ -384,7 +424,15 @@ function drawGate() {
         gameContext.beginPath();
         gameContext.lineWidth = 5;
         gameContext.rect(gate.x, gate.y, gate.width, gate.height);
-        gameContext.fillStyle = "grey";
+        if (brutalRound == false) {
+            gameContext.fillStyle = "grey";
+        } else {
+            if (patterns[brutalRoundConfig.brutalTypes.toString()] == null) {
+                patterns[brutalRoundConfig.brutalTypes.toString()] = makeComplexPattern(brutalRoundConfig.brutalTypes);
+            } else {
+                gameContext.fillStyle = patterns[brutalRoundConfig.brutalTypes.toString()];
+            }
+        }
         gameContext.fill();
         gameContext.restore();
     }
@@ -496,6 +544,7 @@ function drawHUD() {
     drawGameInfo();
     drawVirtualButtons();
     drawTouchControls();
+    drawTitle();
 }
 
 function drawGameInfo() {
@@ -505,9 +554,11 @@ function drawGameInfo() {
     gameContext.lineWidth = 4;
     gameContext.fillStyle = "black";
     gameContext.strokeText("GameID: " + gameID, 10, 20);
-    gameContext.strokeText("Players: " + totalPlayers, 100, 20);
     gameContext.fillText("GameID: " + gameID, 10, 20);
+    gameContext.strokeText("Players: " + totalPlayers, 100, 20);
     gameContext.fillText("Players: " + totalPlayers, 100, 20);
+    gameContext.strokeText("Round: " + round, 190, 20);
+    gameContext.fillText("Round: " + round, 190, 20);
     gameContext.restore();
 }
 
@@ -605,6 +656,40 @@ function drawTouchControls() {
         gameContext.drawImage(commentIcon, chatButton.baseX - iconWidth / 2, chatButton.baseY - iconHeight / 2, iconWidth, iconHeight);
         gameContext.restore();
     }
+}
+
+function drawTitle() {
+    if (brutalRound == true) {
+        if (brutalRoundConfig.drawTitleAlpha == null) {
+            brutalRoundConfig.drawTitleAlpha = 1.0;
+        }
+        if (brutalRoundConfig.drawTitleAlpha < 0) {
+            return;
+        }
+        gameContext.save();
+        gameContext.strokeStyle = "rgba(255, 255, 255, " + brutalRoundConfig.drawTitleAlpha + ")";;
+        gameContext.lineWidth = 10;
+        gameContext.fillStyle = "rgba(255, 0, 0, " + brutalRoundConfig.drawTitleAlpha + ")";
+        gameContext.font = "50px Arial";
+        gameContext.strokeText('Brutal Round', (gameCanvas.width / 2) - 120, (gameCanvas.height / 2) - 25);
+        gameContext.fillText('Brutal Round', (gameCanvas.width / 2) - 120, (gameCanvas.height / 2) - 25);
+        var titles = [];
+        for (var i = 0; i < brutalRoundConfig.brutalTypes.length; i++) {
+            for (var prop in config.brutalRounds) {
+                if (config.brutalRounds[prop].id == brutalRoundConfig.brutalTypes[i]) {
+                    titles.push(config.brutalRounds[prop].title);
+                }
+            }
+        }
+        gameContext.font = "30px Arial";
+        for (var j = 0; j < titles.length; j++) {
+            gameContext.strokeText(titles[j], (gameCanvas.width / 2) - 120, (gameCanvas.height / 2) + 15 + (35 * j));
+            gameContext.fillText(titles[j], (gameCanvas.width / 2) - 120, (gameCanvas.height / 2) + 15 + (35 * j));
+        }
+        gameContext.restore();
+        brutalRoundConfig.drawTitleAlpha -= .0025;
+    }
+
 }
 
 function drawOverviewBoard() {
@@ -715,7 +800,6 @@ function calculateNotchMoveAmt() {
         playerList[id].distanceToMove = playerList[id].deltaNotches * notchDistanceApart;
     }
 }
-
 function getBbox(cell) {
     var halfedges = cell.halfedges,
         iHalfedge = halfedges.length,

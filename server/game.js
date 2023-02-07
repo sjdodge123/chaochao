@@ -361,7 +361,9 @@ class GameBoard {
 		this.stateMap = c.stateMap;
 
 		this.chanceToSpawnAbility = c.chanceToSpawnAbility;
-
+		this.chanceOfBrutalRound = c.chanceOfBrutalRound;
+		this.round = 0;
+		this.brutalRound = false;
 
 		this.lobbyStartButton;
 		this.alivePlayerCount = 0;
@@ -618,6 +620,9 @@ class GameBoard {
 	resetGame(currentState) {
 		this.mapsPlayed = [];
 		this.chanceToSpawnAbility = c.chanceToSpawnAbility;
+		this.chanceOfBrutalRound = c.chanceOfBrutalRound;
+		this.brutalRound = false;
+		this.round = 0;
 		this.resetPlayers(currentState);
 		for (var playerID in this.playerList) {
 			var player = this.playerList[playerID];
@@ -646,6 +651,7 @@ class GameBoard {
 	}
 	loadNextMap() {
 		this.currentMap = {};
+		this.round++;
 		this.checkForDynamicDifficultyIncrease();
 		if (c.TESTSingleMap) {
 			this.currentMap = JSON.parse(JSON.stringify(this.maps[0]));
@@ -657,18 +663,32 @@ class GameBoard {
 			this.currentMap = JSON.parse(JSON.stringify(this.maps[nextMapId]));
 			this.mapsPlayed.push(this.currentMap.id);
 		}
-		messenger.messageRoomBySig(this.roomSig, "newMap", { id: this.currentMap.id, abilities: this.generateAbilities() });
+		console.log("Round: " + this.round);
+		messenger.messageRoomBySig(this.roomSig, "newMap", { id: this.currentMap.id, abilities: this.generateAbilities(), brutalRoundConfig: this.checkForBrutalRound() });
 	}
 	checkForDynamicDifficultyIncrease() {
-		if (this.mapsPlayed.length == 0) {
+		if (this.round == 1) {
 			return;
 		}
-		if (this.mapsPlayed.length % 5 == 0) {
-			if (this.chanceToSpawnAbility + 5 > 100) {
-				return;
-			}
-			this.chanceToSpawnAbility = this.chanceToSpawnAbility + 5;
+		if (this.round % 5 == 0) {
+			this.increaseChanceOfAbilities();
+			this.increaseChanceOfBrutalRound();
 		}
+	}
+	increaseChanceOfBrutalRound() {
+		const increment = 5;
+		if (this.chanceOfBrutalRound + increment >= 100) {
+			return;
+		}
+		console.log("Increasing Brutal round chance");
+		this.chanceOfBrutalRound = this.chanceOfBrutalRound + increment;
+	}
+	increaseChanceOfAbilities() {
+		const increment = 5;
+		if (this.chanceToSpawnAbility + increment >= 100) {
+			return;
+		}
+		this.chanceToSpawnAbility = this.chanceToSpawnAbility + increment;
 	}
 	getRandomMapR() {
 		var randomIndex = utils.getRandomInt(0, this.maps.length - 1);
@@ -679,6 +699,38 @@ class GameBoard {
 			}
 		}
 		return randomIndex;
+	}
+	checkForBrutalRound() {
+		var brutalRoundConfig = { brutal: false };
+		this.brutalRound = false;
+		var brutalChance = utils.getRandomInt(1, 100);
+		if (brutalChance > this.chanceOfBrutalRound) {
+			return brutalRoundConfig;
+		}
+		this.brutalRound = true;
+		brutalRoundConfig.brutal = true;
+
+		//Determine Number of Brutal types to apply
+
+		//Find only active brutal types
+		var activeBrutalTypes = [];
+
+		for (var prop in c.brutalRounds) {
+			if (c.brutalRounds[prop].active == true) {
+				activeBrutalTypes.push(c.brutalRounds[prop].id);
+			}
+		}
+		if (activeBrutalTypes.length == 0) {
+			console.log("Brutal round was engaged, however no brutal types are active in the config file");
+			this.brutalRound = false;
+			brutalRoundConfig = { brutal: false };
+			return brutalRoundConfig;
+		}
+		if (activeBrutalTypes.length == 1) {
+			brutalRoundConfig.brutalTypes = [activeBrutalTypes[0]];
+		}
+		console.log("Brutal round engaged");
+		return brutalRoundConfig;
 	}
 	generateAbilities() {
 		var abilityTilesAvaliable = [];

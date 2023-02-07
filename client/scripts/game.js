@@ -11,34 +11,35 @@ var server = null,
     newHeight = 0,
     maps = [],
     oldNotches = {},
+    round = 0,
     timeOutChecker = null,
     currentState = null,
     gameRunning = null;
 
-    var emojiMenu = document.getElementById("emojiMenu");
-    var gameWindow = document.getElementById("gameWindow");
-    var exitIcon = document.getElementById("exitIcon");
+var emojiMenu = document.getElementById("emojiMenu");
+var gameWindow = document.getElementById("gameWindow");
+var exitIcon = document.getElementById("exitIcon");
 
-    //Input Vars
-    var attack = false,
+//Input Vars
+var attack = false,
     moveForward = false,
     moveBackward = false,
     turnLeft = false,
     turnRight = false,
     drawChatWheel = false,
     mousex = null,
-	mousey = null;
+    mousey = null;
 
 var then = Date.now(),
     dt;
 
-$(function(){
+$(function () {
     server = clientConnect();
     setupPage();
 });
 
-function setupPage(){
-    
+function setupPage() {
+
     $("#guestPlay").on("submit", function () {
         enterLobby();
         return false;
@@ -50,58 +51,58 @@ function setupPage(){
     });
     window.addEventListener('blur', cancelMovement);
     window.addEventListener('resize', resize, false);
-    window.requestAnimFrame = (function(){
-        return  window.requestAnimationFrame       ||
-                window.webkitRequestAnimationFrame ||
-                window.mozRequestAnimationFrame    ||
-                function( callback ){
-                  window.setTimeout(callback, 1000 / 30);
-                };
-      })();
+    window.requestAnimFrame = (function () {
+        return window.requestAnimationFrame ||
+            window.webkitRequestAnimationFrame ||
+            window.mozRequestAnimationFrame ||
+            function (callback) {
+                window.setTimeout(callback, 1000 / 30);
+            };
+    })();
 
     gameCanvas = document.getElementById('gameCanvas');
     gameContext = gameCanvas.getContext('2d');
-    
+
 }
 
-function enterLobby(){
+function enterLobby() {
     $('#main').hide();
     $('#gameWindow').show();
     resize();
     clientSendStart();
 }
-function init(){
-    timeOutChecker = setInterval(checkForTimeout,1000);
+function init() {
+    timeOutChecker = setInterval(checkForTimeout, 1000);
     animloop();
     initEventHandlers();
 }
-function animloop(){
-    if(gameRunning){
+function animloop() {
+    if (gameRunning) {
         var now = Date.now();
-    	dt = now - then;
+        dt = now - then;
         gameLoop(dt);
-    	then = now;
-    	requestAnimFrame(animloop);
+        then = now;
+        requestAnimFrame(animloop);
     }
 }
-function gameLoop(dt){
+function gameLoop(dt) {
     drawObjects(dt);
     updateGameboard(dt);
 }
 
 
-function resize(){
+function resize() {
     var gameWindowRect = gameWindow.getBoundingClientRect();
-    var viewport = {width:gameWindowRect.width,height:gameWindowRect.height};
+    var viewport = { width: gameWindowRect.width, height: gameWindowRect.height };
     var scaleToFitX = viewport.width / gameCanvas.width;
     var scaleToFitY = viewport.height / gameCanvas.height;
-    var currentScreenRatio = viewport.width/viewport.height;
-    var optimalRatio = Math.min(scaleToFitX,scaleToFitY);
+    var currentScreenRatio = viewport.width / viewport.height;
+    var optimalRatio = Math.min(scaleToFitX, scaleToFitY);
 
-    if(currentScreenRatio >= 1.77 && currentScreenRatio <= 1.79){
+    if (currentScreenRatio >= 1.77 && currentScreenRatio <= 1.79) {
         newWidth = viewport.width;
         newHeight = viewport.height;
-    } else{
+    } else {
         newWidth = gameCanvas.width * optimalRatio;
         newHeight = gameCanvas.height * optimalRatio;
     }
@@ -119,19 +120,19 @@ function resize(){
     */
 }
 
-function goFullScreen(){
+function goFullScreen() {
     if (window.document.fullscreenElement) {
-        window.document.exitFullscreen().then(function(){
+        window.document.exitFullscreen().then(function () {
             resize();
         });
     } else {
-        gameWindow.requestFullscreen().then(function() {
+        gameWindow.requestFullscreen().then(function () {
             resize();
-        }).catch(function(e){
+        }).catch(function (e) {
             console.log(e);
         });
     }
-    
+
 }
 
 
