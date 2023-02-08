@@ -174,11 +174,17 @@ function checkGameState(payload) {
 		lobbyStartButton = null;
 	}
 	if (currentState == config.stateMap.lobby) {
-		lobbyStartButton = {};
-		lobbyStartButton.x = payload[1];
-		lobbyStartButton.y = payload[2];
-		lobbyStartButton.radius = payload[3];
-		lobbyStartButton.color = payload[4];
+		if (lobbyStartButton == null) {
+			lobbyStartButton = {};
+			lobbyStartButton.x = payload[1];
+			lobbyStartButton.y = payload[2];
+			lobbyStartButton.radius = payload[3];
+			lobbyStartButton.color = payload[4];
+			lobbyStartButton.angle = 0;
+			lobbyStartButton.maxVelocity = 60;
+			lobbyStartButton.velocity = 0;
+			lobbyStartButton.startSpin = false;
+		}
 	}
 	if (currentState == config.stateMap.gated) {
 		lobbyStartButton = null;
@@ -254,6 +260,10 @@ function spawnLobbyStartButton(payload) {
 	lobbyStartButton.y = payload[1];
 	lobbyStartButton.radius = payload[2];
 	lobbyStartButton.color = payload[3];
+	lobbyStartButton.angle = 0;
+	lobbyStartButton.velocity = 0;
+	lobbyStartButton.maxVelocity = 60;
+	lobbyStartButton.startSpin = false;
 }
 function spawnPunch(payload) {
 	if (payload == null) {

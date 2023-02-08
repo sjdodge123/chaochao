@@ -104,17 +104,14 @@ function drawObjects(dt) {
     if (config == null) {
         return;
     }
-    if (screenShake == true) {
-        gameContext.save();
-        var dx = Math.random() * 15;
-        var dy = Math.random() * 15;
-        gameContext.translate(dx, dy);
-    }
+
     drawBackground(dt);
     if (currentState == config.stateMap.overview) {
+        screenShake = false;
         drawOverviewBoard();
         return;
     }
+    preShake();
     drawWorld(dt);
     if (currentState == config.stateMap.lobby) {
         drawLobbyStartButton();
@@ -133,9 +130,7 @@ function drawObjects(dt) {
     drawProjectiles();
     drawAbilties();
 
-    if (screenShake == true) {
-        gameContext.restore();
-    }
+    postShake();
 
     if (currentState == config.stateMap.gameOver) {
         drawGameOverScreen();
@@ -162,6 +157,25 @@ function drawGameOverScreen() {
     var winString = decodedColorName + " won the game.";
     gameContext.fillText(winString, gameCanvas.width / 2 - 400, (gameCanvas.height + 48) / 2);
     gameContext.restore();
+}
+function preShake() {
+    if (currentState == config.stateMap.gameOver || currentState == config.stateMap.overview) {
+        return;
+    }
+    if (screenShake == true) {
+        gameContext.save();
+        var dx = Math.random() * 15;
+        var dy = Math.random() * 15;
+        gameContext.translate(dx, dy);
+    }
+}
+function postShake() {
+    if (currentState == config.stateMap.gameOver || currentState == config.stateMap.overview) {
+        return;
+    }
+    if (screenShake == true) {
+        gameContext.restore();
+    }
 }
 
 function drawPunches() {
@@ -425,29 +439,46 @@ function drawWorld() {
 }
 
 function drawLobbyStartButton() {
-    gameContext.save();
     if (lobbyStartButton != null) {
+        gameContext.save();
+        if (lobbyStartButton.startSpin == true) {
+            if (lobbyStartButton.velocity < lobbyStartButton.maxVelocity) {
+                lobbyStartButton.velocity += 0.1;
+            }
 
+        } else {
+            if (lobbyStartButton.velocity != 0) {
+                lobbyStartButton.velocity -= 0.25;
+            }
+            if (lobbyStartButton.velocity < 0) {
+                lobbyStartButton.velocity = 0;
+            }
+        }
+        lobbyStartButton.angle += lobbyStartButton.velocity;
+        gameContext.translate(lobbyStartButton.x, lobbyStartButton.y);
+        gameContext.rotate(lobbyStartButton.angle * (Math.PI / 180));
         gameContext.beginPath();
-        gameContext.arc(lobbyStartButton.x, lobbyStartButton.y, lobbyStartButton.radius, 0, 2 * Math.PI);
-        gameContext.lineWidth = 3;
+        gameContext.arc(0, 0, lobbyStartButton.radius, 0, 2 * Math.PI);
+        gameContext.lineWidth = 5;
         gameContext.stroke();
 
         gameContext.beginPath();
-        gameContext.arc(lobbyStartButton.x, lobbyStartButton.y, lobbyStartButton.radius, 0, 2 * Math.PI);
+        gameContext.arc(0, 0, lobbyStartButton.radius, 0, 2 * Math.PI);
         gameContext.clip();
+
+        gameContext.moveTo(0, 0);
         for (i = 0; i < 360; i++) {
             var angle = 0.1 * i;
-            var x = lobbyStartButton.x + (4 + 2 * angle) * Math.cos(angle);
-            var y = lobbyStartButton.y + (4 + 2 * angle) * Math.sin(angle);
+            var x = 0 + (4 + 2 * angle) * Math.cos(angle);
+            var y = 0 + (4 + 2 * angle) * Math.sin(angle);
             gameContext.lineTo(x, y);
         }
-        gameContext.lineWidth = 2;
+        gameContext.lineWidth = 3;
         gameContext.strokeStyle = lobbyStartButton.color;
         gameContext.stroke();
+        gameContext.restore();
 
     }
-    gameContext.restore();
 }
 function drawGate() {
     if (gate != null) {
@@ -690,6 +721,7 @@ function drawTouchControls() {
 }
 
 function drawTitle() {
+
     if (brutalRound == true) {
         if (brutalRoundConfig.drawTitleAlpha == null) {
             brutalRoundConfig.drawTitleAlpha = 1.0;
@@ -720,7 +752,14 @@ function drawTitle() {
         gameContext.restore();
         brutalRoundConfig.drawTitleAlpha -= .0025;
     }
-
+    if (currentState == config.stateMap.waiting && lobbyStartButton == null) {
+        gameContext.save();
+        gameContext.fillStyle = "black";;
+        gameContext.lineWidth = 3;
+        gameContext.font = "30px Arial";
+        gameContext.fillText('Waiting for more players..', (gameCanvas.width / 2) - 200, (gameCanvas.height / 2) - 25);
+        gameContext.restore();
+    }
 }
 
 function drawOverviewBoard() {
@@ -758,15 +797,20 @@ function drawPlayerIcon(player, notchDistanceApart) {
     gameContext.beginPath();
     gameContext.shadowColor = player.color;
     gameContext.shadowBlur = 10;
+    var notchX = 0;
     var moveAmt = 0;
     if (player.distanceToMove > 0) {
         moveAmt = 0.5;
         player.distanceToMove -= moveAmt;
-        gameContext.arc(oldNotches[player.id] * notchDistanceApart, 0, config.playerBaseRadius * 2, 0, 2 * Math.PI);
+        player.distanceTraveled += moveAmt;
+        notchX = player.distanceTraveled + (oldNotches[player.id] * notchDistanceApart);
+        gameContext.arc(notchX, 0, config.playerBaseRadius * 2, 0, 2 * Math.PI);
     } else if (player.distanceToMove < 0) {
         moveAmt = -0.5;
         player.distanceToMove -= moveAmt;
-        gameContext.arc(oldNotches[player.id] * notchDistanceApart, 0, config.playerBaseRadius * 2, 0, 2 * Math.PI);
+        player.distanceTraveled += moveAmt;
+        notchX = player.distanceTraveled + (oldNotches[player.id] * notchDistanceApart);
+        gameContext.arc(notchX, 0, config.playerBaseRadius * 2, 0, 2 * Math.PI);
     } else {
         gameContext.arc(player.notches * notchDistanceApart, 0, config.playerBaseRadius * 2, 0, 2 * Math.PI);
     }
@@ -785,11 +829,29 @@ function drawNotches(distanceApart) {
 }
 function drawGoalPost(player, distanceApart) {
     gameContext.beginPath();
-    gameContext.rect(-15 + (gameLength + 1) * distanceApart, -15, 30, 30);
 
+    gameContext.rect(-15 + (gameLength + 1) * distanceApart, -15, 30, 30);
+    gameContext.shadowColor = "gold";
+    gameContext.fillStyle = "gold";;
+    gameContext.lineWidth = 1;
+    gameContext.font = "40px Arial";
+    if (player.firstPlace == true) {
+        gameContext.fillText("🥇", 30 + (gameLength + 1) * distanceApart, 12.5);
+    }
+    gameContext.shadowColor = "silver";
+    gameContext.fillStyle = "silver";;
+    if (player.secondPlace == true) {
+        gameContext.fillText("🥈", 30 + (gameLength + 1) * distanceApart, 12.5);
+    }
+    gameContext.shadowColor = "red";
+    gameContext.fillStyle = "red";;
+    if (player.downRank == true) {
+        gameContext.fillText("💀", 30 + (gameLength + 1) * distanceApart, 12.5);
+    }
     //If the animation is complete
     if (player.distanceToMove == 0) {
         if (player.notches == gameLength) {
+            console.log("player near victory");
             gameContext.shadowColor = "white";
             gameContext.shadowBlur = 10;
             gameContext.fillStyle = "white"
@@ -798,7 +860,6 @@ function drawGoalPost(player, distanceApart) {
                 player.nearVictory = true;
                 playSound(nearVictorySound);
             }
-
         } else {
             if (oldNotches[player.id] == gameLength && player.notches != gameLength) {
                 if (player.nearVictory == true) {
@@ -810,6 +871,7 @@ function drawGoalPost(player, distanceApart) {
             gameContext.strokeStyle = "grey";
             gameContext.stroke();
         }
+
         return;
     }
     //Animation hasnt occurred yet
@@ -824,11 +886,45 @@ function drawGoalPost(player, distanceApart) {
         gameContext.stroke();
     }
 }
+
+function createFirstRankSymbol(playerid) {
+    var player = playerList[playerid];
+    player.firstPlace = true;
+    for (var prop in playerList) {
+        if (playerid == prop) {
+            continue;
+        }
+        playerList[prop].firstPlace = false;
+    }
+}
+function createSecondRankSymbol(playerid) {
+    var player = playerList[playerid];
+    player.secondPlace = true;
+    for (var prop in playerList) {
+        if (playerid == prop) {
+            continue;
+        }
+        playerList[prop].secondPlace = false;
+    }
+}
+function createDownRankSymbol(playerid) {
+    var player = playerList[playerid];
+    player.downRank = true;
+}
+
+function resetPlayerRanks() {
+    for (var prop in playerList) {
+        playerList[prop].downRank = false;
+        playerList[prop].secondPlace = false;
+        playerList[prop].firstPlace = false;
+    }
+}
 function calculateNotchMoveAmt() {
-    notchDistanceApart = gameLength * 20;
+    notchDistanceApart = 75;//gameLength * 20;
     for (var id in playerList) {
         playerList[id].deltaNotches = playerList[id].notches - oldNotches[id];
         playerList[id].distanceToMove = playerList[id].deltaNotches * notchDistanceApart;
+        playerList[id].distanceTraveled = 0;
     }
 }
 function getBbox(cell) {

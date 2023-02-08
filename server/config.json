@@ -156,7 +156,7 @@
         "👋",
         "💪"
     ],
-    "playerNotchesToWin": 2,
+    "playerNotchesToWin": 5,
     "playerDragCoeff": 0.15,
     "playerBrakeCoeff": 0.235,
     "playerStartSleepTime": 60,

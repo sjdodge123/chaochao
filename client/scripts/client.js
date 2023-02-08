@@ -84,12 +84,10 @@ function clientConnect() {
 	});
 
 	server.on("firstPlaceWinner", function (id) {
-		//createFirstRankSymbol();
-		//playerList[id].alive = false;
+		createFirstRankSymbol(id);
 	});
 	server.on("secondPlaceWinner", function (id) {
-		//createSecondRankSymbol();
-		//playerList[id].alive = false;
+		createSecondRankSymbol(id);
 	});
 	server.on("playerConcluded", function (id) {
 		playerList[id].alive = false;
@@ -100,6 +98,7 @@ function clientConnect() {
 		playerAbilityUsed(id);
 		playerList[id].alive = false;
 		playerList[id].deathMessage = '💀';
+		createDownRankSymbol(id);
 	});
 	server.on("broadCastEmoji", function (payload) {
 		playerList[payload.ownerId].chatMessage = payload.emoji;
@@ -134,6 +133,7 @@ function clientConnect() {
 		playBackgroundSound();
 		oldNotches = {};
 		resetTrails();
+		resetPlayerRanks();
 		currentState = config.stateMap.racing;
 		for (var i = 0; i < pingIntervals.length; i++) {
 			clearInterval(pingIntervals[i]);
@@ -243,6 +243,16 @@ function clientConnect() {
 	});
 	server.on("triggerUsed", function (owner) {
 		playerAbilityUsed(owner);
+	});
+	server.on("startLobbyTimer", function () {
+		if (lobbyStartButton != null) {
+			lobbyStartButton.startSpin = true;
+		}
+	});
+	server.on("resetLobbyTimer", function () {
+		if (lobbyStartButton != null) {
+			lobbyStartButton.startSpin = false;
+		}
 	});
 
 	return server;

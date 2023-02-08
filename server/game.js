@@ -220,6 +220,7 @@ class Game {
 			return;
 		}
 		this.lobbyTimer = Date.now();
+		messenger.messageRoomBySig(this.roomSig, "startLobbyTimer");
 	}
 	checkForWinners() {
 		var playersConcluded = 0;
@@ -288,7 +289,10 @@ class Game {
 		}
 		if (this.gameBoard.checkForActiveBrutal(c.brutalRounds.volcano.id)) {
 			var eruptionDelay = utils.getRandomInt(8, 15);
-			setTimeout(this.gameBoard.warnOfPendingVolcano, (eruptionDelay - 2) * 1000, this.roomSig);
+			if (this.gameBoard.checkForActiveBrutal(c.brutalRounds.lightning.id)) {
+				eruptionDelay = utils.getRandomInt(1, 4);
+			}
+			setTimeout(this.gameBoard.warnOfPendingVolcano, (eruptionDelay - 2) * 1000, { context: this });
 			setTimeout(this.gameBoard.applyBrutalVolcanoRound, eruptionDelay * 1000, { context: this });
 		}
 
@@ -308,6 +312,7 @@ class Game {
 	}
 	resetLobbyTimer() {
 		this.lobbyTimer = null;
+		messenger.messageRoomBySig(this.roomSig, "resetLobbyTimer");
 	}
 	resetGatedTimer() {
 		this.gatedTimer = null;
@@ -615,11 +620,19 @@ class GameBoard {
 		if (currentState != c.stateMap.collapsing) {
 			return;
 		}
+		//Calcuate collapse speed
+		var collapseSpeed = 0;
 		if (this.checkForActiveBrutal(c.brutalRounds.volcano.id) && this.firstPlaceSig == null) {
-			this.collapseLine -= c.brutalRounds.volcano.collapseSpeed;
+			if (this.checkForActiveBrutal(c.brutalRounds.lightning.id)) {
+				collapseSpeed = 4;
+			} else {
+				collapseSpeed = c.brutalRounds.volcano.collapseSpeed;
+			}
 		} else {
-			this.collapseLine -= c.worldCollapseSpeed;
+			collapseSpeed = c.worldCollapseSpeed;
 		}
+		this.collapseLine -= collapseSpeed;
+
 		var collapsedCells = [];
 		var cells = this.currentMap.cells;
 		for (var i = 0; i < cells.length; i++) {
@@ -729,12 +742,6 @@ class GameBoard {
 					this.applyBrutalLightningRound();
 					break;
 				}
-				/*
-				case c.brutalRounds.volcano.id: {
-					this.applyBrutalVolcanoRound();
-					break;
-				}
-				*/
 
 			}
 		}
@@ -790,12 +797,18 @@ class GameBoard {
 	}
 	applyBrutalVolcanoRound(packet) {
 		var context = packet.context;
-		//Find gold tile location to collapse on
-		var loc = context.gameBoard.findRandomGoalTile();
-		context.startCollapse(loc.x, loc.y);
+		if (context.currentState == c.stateMap.racing || context.currentState == c.stateMap.collapsing) {
+			//Find gold tile location to collapse on
+			var loc = context.gameBoard.findRandomGoalTile();
+			context.startCollapse(loc.x, loc.y);
+		}
+
 	}
-	warnOfPendingVolcano(roomSig) {
-		messenger.messageRoomBySig(roomSig, 'volcanoEruption');
+	warnOfPendingVolcano(packet) {
+		var context = packet.context;
+		if (context.currentState == c.stateMap.racing || context.currentState == c.stateMap.collapsing) {
+			messenger.messageRoomBySig(context.roomSig, 'volcanoEruption');
+		}
 	}
 
 	checkForDynamicDifficultyIncrease() {
@@ -809,7 +822,7 @@ class GameBoard {
 	}
 	increaseChanceOfBrutalRound() {
 		const increment = c.chanceOfBrutalRoundIncrement;
-		if (this.chanceOfBrutalRound + increment >= 100) {
+		if (this.chanceOfBrutalRound + increment >= 90) {
 			return;
 		}
 		console.log("Increasing Brutal round chance");
@@ -854,7 +867,7 @@ class GameBoard {
 		if (activeBrutalTypes.length == 0) {
 			console.log("Brutal round was engaged, however no brutal types are active in the config file");
 			this.brutalRound = false;
-			brutalRoundConfig = { brutal: false };
+			brutalRoundConfig = { brutal: false, brutalTypes: [] };
 			return brutalRoundConfig;
 		}
 		brutalRoundConfig.brutalTypes.push(activeBrutalTypes[0]);
