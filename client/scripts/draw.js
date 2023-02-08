@@ -28,6 +28,8 @@ var toolBoxIcon = new Image(576, 512);
 toolBoxIcon.src = "../assets/img/toolbox-solid.svg";
 var moneyIcon = new Image(576, 512);
 moneyIcon.src = "../assets/img/sack-dollar-solid.svg";
+var volcanoIcon = new Image(576, 512);
+volcanoIcon.src = "../assets/img/volcano-solid.svg";
 
 var bombImage = new Image();
 bombImage.src = "../assets/img/bomb.svg";
@@ -47,6 +49,7 @@ function loadPatterns() {
     brutalRoundImages[config.brutalRounds.gravity.id] = infinityIcon;
     brutalRoundImages[config.brutalRounds.fiesta.id] = fiestaIcon;
     brutalRoundImages[config.brutalRounds.golden.id] = moneyIcon;
+    brutalRoundImages[config.brutalRounds.volcano.id] = volcanoIcon;
 }
 function makePattern(image) {
     const canvasPadding = 1;
@@ -101,6 +104,12 @@ function drawObjects(dt) {
     if (config == null) {
         return;
     }
+    if (screenShake == true) {
+        gameContext.save();
+        var dx = Math.random() * 15;
+        var dy = Math.random() * 15;
+        gameContext.translate(dx, dy);
+    }
     drawBackground(dt);
     if (currentState == config.stateMap.overview) {
         drawOverviewBoard();
@@ -123,9 +132,15 @@ function drawObjects(dt) {
     drawPunches();
     drawProjectiles();
     drawAbilties();
+
+    if (screenShake == true) {
+        gameContext.restore();
+    }
+
     if (currentState == config.stateMap.gameOver) {
         drawGameOverScreen();
     }
+
 }
 
 function drawBackground() {

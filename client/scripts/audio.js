@@ -28,7 +28,7 @@ var abilityFizzle = new Audio("./assets/sounds/fizzle.mp3");
 var teleportSound = new Audio("./assets/sounds/teleport.mp3");
 var teleportWarnSound = new Audio("./assets/sounds/teleport_warn.mp3");
 var brutalRoundSound = new Audio("./assets/sounds/brutalround.mp3");
-
+var volcanoErupt = new Audio("./assets/sounds/volcano-erupt.mp3");
 
 var nearVictorySound = new Audio("./assets/sounds/rise.mp3");
 var fallFromVictorySound = new Audio("./assets/sounds/reverserise.mp3");
@@ -58,6 +58,7 @@ brutalBackgroundMusicList.push(horrorLoop);
 brutalBackgroundMusicList.push(desperationSetsIn);
 brutalBackgroundMusicList.push(heavyfabric);
 
+volcanoErupt.volume = 0.05 * masterVolume;
 brutalRoundSound.volume = 0.35 * masterVolume;
 bombBounce.volume = 0.75 * masterVolume;
 abilityFizzle.volume = .65 * masterVolume;

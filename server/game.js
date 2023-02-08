@@ -240,6 +240,7 @@ class Game {
 					this.firstPlaceSig = player;
 					this.playerList[player].addNotch(this.notchesToWin);
 					this.playerList[player].addNotch(this.notchesToWin);
+					this.gameBoard.firstPlaceSig = player;
 					this.startCollapse(this.playerList[player].x, this.playerList[player].y);
 					messenger.messageRoomBySig(this.roomSig, "firstPlaceWinner", player);
 					continue;
@@ -278,8 +279,22 @@ class Game {
 	startRace() {
 		console.log("Start Race");
 		this.currentState = this.stateMap.racing;
+
+
+		if (!this.gameBoard.checkForActiveBrutal(c.brutalRounds.lightning.id)) {
+			for (var id in this.playerList) {
+				this.playerList[id].setSpeedBonus(0);
+			}
+		}
+		if (this.gameBoard.checkForActiveBrutal(c.brutalRounds.volcano.id)) {
+			var eruptionDelay = utils.getRandomInt(8, 15);
+			setTimeout(this.gameBoard.warnOfPendingVolcano, (eruptionDelay - 2) * 1000, this.roomSig);
+			setTimeout(this.gameBoard.applyBrutalVolcanoRound, eruptionDelay * 1000, { context: this });
+		}
+
 		messenger.messageRoomBySig(this.roomSig, "startRace", null);
 	}
+
 	startOverview() {
 		console.log("Start Overview");
 		this.currentState = this.stateMap.overview;
@@ -300,6 +315,7 @@ class Game {
 	resetForRace() {
 		this.firstPlaceSig = null;
 		this.secondPlaceSig = null;
+		this.gameBoard.firstPlaceSig = null;
 	}
 	resetGame() {
 		this.locked = false;
@@ -377,6 +393,7 @@ class GameBoard {
 		this.allAbilityIDs = this.indexAbilities();
 		this.collapseLoc = {};
 		this.collapseLine = this.world.height;
+		this.firstPlaceSig = null;
 	}
 	update(currentState, playerAliveCount, sleepingPlayerCount, dt) {
 		this.alivePlayerCount = playerAliveCount;
@@ -598,7 +615,11 @@ class GameBoard {
 		if (currentState != c.stateMap.collapsing) {
 			return;
 		}
-		this.collapseLine -= c.worldCollapseSpeed;
+		if (this.checkForActiveBrutal(c.brutalRounds.volcano.id) && this.firstPlaceSig == null) {
+			this.collapseLine -= c.brutalRounds.volcano.collapseSpeed;
+		} else {
+			this.collapseLine -= c.worldCollapseSpeed;
+		}
 		var collapsedCells = [];
 		var cells = this.currentMap.cells;
 		for (var i = 0; i < cells.length; i++) {
@@ -612,6 +633,18 @@ class GameBoard {
 			}
 		}
 		messenger.messageRoomBySig(this.roomSig, 'collapsedCells', collapsedCells);
+	}
+	findRandomGoalTile() {
+		var goalTiles = [];
+		var cells = this.currentMap.cells;
+		for (var i = 0; i < cells.length; i++) {
+			if (cells[i].id == c.tileMap.goal.id) {
+				goalTiles.push({ x: cells[i].site.x, y: cells[i].site.y });
+			}
+		}
+		console.log("Found " + goalTiles.length + " goal tiles");
+		return goalTiles[utils.getRandomInt(0, goalTiles.length - 1)];
+
 	}
 	changeTile(voronoiId, newId) {
 		for (var i = 0; i < this.currentMap.cells.length; i++) {
@@ -640,8 +673,12 @@ class GameBoard {
 			var loc = this.startingGate.findFreeLoc(player);
 			player.x = loc.x;
 			player.y = loc.y;
+			if (!this.checkForActiveBrutal(c.brutalRounds.lightning.id)) {
+				player.setSpeedBonus(500);
+			}
 		}
 	}
+
 	resetPlayers(currentState) {
 		messenger.messageRoomBySig(this.roomSig, "resetPlayers", null);
 		for (var playerID in this.playerList) {
@@ -653,6 +690,12 @@ class GameBoard {
 		this.lobbyStartButton = null;
 		this.collapseLoc = {};
 		this.collapseLine = this.world.height + 400;
+	}
+	checkForActiveBrutal(id) {
+		if (this.brutalRound == true && this.brutalConfig.brutalTypes.indexOf(id) != -1) {
+			return true;
+		}
+		return false;
 	}
 	loadNextMap() {
 		this.currentMap = {};
@@ -682,6 +725,16 @@ class GameBoard {
 					this.applyBrutalAbilityRound();
 					break;
 				}
+				case c.brutalRounds.lightning.id: {
+					this.applyBrutalLightningRound();
+					break;
+				}
+				/*
+				case c.brutalRounds.volcano.id: {
+					this.applyBrutalVolcanoRound();
+					break;
+				}
+				*/
 
 			}
 		}
@@ -727,6 +780,22 @@ class GameBoard {
 			}
 			messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: player.id, ability: abilityID, voronoiId: null });
 		}
+	}
+	applyBrutalLightningRound() {
+		//Give every player a speed bonus
+		for (var id in this.playerList) {
+			var player = this.playerList[id];
+			player.setSpeedBonus(800);
+		}
+	}
+	applyBrutalVolcanoRound(packet) {
+		var context = packet.context;
+		//Find gold tile location to collapse on
+		var loc = context.gameBoard.findRandomGoalTile();
+		context.startCollapse(loc.x, loc.y);
+	}
+	warnOfPendingVolcano(roomSig) {
+		messenger.messageRoomBySig(roomSig, 'volcanoEruption');
 	}
 
 	checkForDynamicDifficultyIncrease() {
@@ -1180,6 +1249,12 @@ class Player extends Circle {
 			}
 			this.chatCoolDownTimer = null;
 		}
+	}
+	setSpeedBonus(newValue) {
+		if (newValue > c.playerMaxSpeedBonus) {
+			return;
+		}
+		this.currentSpeedBonus = newValue;
 	}
 	getSpeedBonus() {
 		return this.currentSpeedBonus;

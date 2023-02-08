@@ -234,6 +234,13 @@ function clientConnect() {
 	server.on("bombUsed", function (owner) {
 		playerAbilityUsed(owner);
 	});
+	server.on("volcanoEruption", function () {
+		playSound(volcanoErupt);
+		screenShake = true;
+		setTimeout(function () {
+			screenShake = false;
+		}, 2500);
+	});
 	server.on("triggerUsed", function (owner) {
 		playerAbilityUsed(owner);
 	});

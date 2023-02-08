@@ -5,7 +5,7 @@
     "punchRadius": 11,
     "worldWidth": 1366,
     "worldHeight": 768,
-    "worldCollapseSpeed": 7,
+    "worldCollapseSpeed": 6,
     "minPlayersToStart": 2,
     "maxPlayersInRoom": 15,
     "forceConstant": 5000,
@@ -120,8 +120,14 @@
         },
         "lightning": {
             "id": 1006,
-            "active": false,
+            "active": true,
             "title": "Lightning"
+        },
+        "volcano": {
+            "id": 1007,
+            "collapseSpeed": 1,
+            "active": true,
+            "title": "Volcano"
         }
     },
     "lobbyWaitTime": 5,
@@ -158,6 +164,7 @@
     "playerPunchSlowAmt": 0.5,
     "playerPunchCooldown": 300,
     "playerMaxSpeed": 500,
+    "playerMaxSpeedBonus": 800,
     "playerMaxSpeed_prod": 50,
     "playerMaxSpeed_test": 350,
     "playerBaseAcel": 375
