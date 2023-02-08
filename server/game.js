@@ -364,6 +364,7 @@ class GameBoard {
 		this.chanceOfBrutalRound = c.chanceOfBrutalRound;
 		this.round = 0;
 		this.brutalRound = false;
+		this.brutalConfig = null;
 
 		this.lobbyStartButton;
 		this.alivePlayerCount = 0;
@@ -473,7 +474,9 @@ class GameBoard {
 			var player = this.playerList[playerID];
 			if (player.acquiredAbility != null) {
 				this.abilityList[playerID] = player.ability;
-				this.changeTile(player.acquiredAbility, c.tileMap.normal.id);
+				if (player.acquiredAbility.mapID != null) {
+					this.changeTile(player.acquiredAbility.mapID, c.tileMap.normal.id);
+				}
 				player.acquiredAbility = null;
 			}
 			player.update(currentState, dt);
@@ -584,6 +587,7 @@ class GameBoard {
 		this.clean();
 		this.resetPlayers(currentState);
 		this.loadNextMap();
+		this.checkApplyBrutalConfig();
 		this.startingGate = new Gate(0, 0, 75, this.world.height);
 		this.gatePlayers();
 	}
@@ -622,6 +626,7 @@ class GameBoard {
 		this.chanceToSpawnAbility = c.chanceToSpawnAbility;
 		this.chanceOfBrutalRound = c.chanceOfBrutalRound;
 		this.brutalRound = false;
+		this.brutalConfig = null;
 		this.round = 0;
 		this.resetPlayers(currentState);
 		for (var playerID in this.playerList) {
@@ -664,8 +669,66 @@ class GameBoard {
 			this.mapsPlayed.push(this.currentMap.id);
 		}
 		console.log("Round: " + this.round);
-		messenger.messageRoomBySig(this.roomSig, "newMap", { id: this.currentMap.id, abilities: this.generateAbilities(), brutalRoundConfig: this.checkForBrutalRound() });
+		this.brutalConfig = this.checkForBrutalRound();
+		messenger.messageRoomBySig(this.roomSig, "newMap", { id: this.currentMap.id, abilities: this.generateAbilities(), brutalRoundConfig: this.brutalConfig });
 	}
+	checkApplyBrutalConfig() {
+		if (this.brutalRound == false || this.brutalConfig == null) {
+			return;
+		}
+		for (var i = 0; i < this.brutalConfig.brutalTypes.length; i++) {
+			switch (this.brutalConfig.brutalTypes[i]) {
+				case c.brutalRounds.ability.id: {
+					this.applyBrutalAbilityRound();
+					break;
+				}
+
+			}
+		}
+
+	}
+	applyBrutalAbilityRound() {
+		//Count number of aquireable abilities
+		var abilitiesToGet = [];
+		for (var prop in c.tileMap.abilities) {
+			if (c.tileMap.abilities[prop].spawnable == true) {
+				abilitiesToGet.push(c.tileMap.abilities[prop].id);
+			}
+		}
+		//Every player gets an ability on round start
+		for (var playerID in this.playerList) {
+			var player = this.playerList[playerID];
+			if (player.ability != null) {
+				continue;
+			}
+			var abilityID = abilitiesToGet[utils.getRandomInt(0, abilitiesToGet.length - 1)];
+			switch (abilityID) {
+				case c.tileMap.abilities.blindfold.id: {
+					player.ability = new Blindfold(player.id, this.roomSig);
+					player.acquiredAbility = { mapID: null };
+					break;
+				}
+				case c.tileMap.abilities.bomb.id: {
+					player.ability = new Bomb(player.id, this.roomSig);
+					player.acquiredAbility = { mapID: null };
+					break;
+				}
+				case c.tileMap.abilities.swap.id: {
+					player.ability = new Swap(player.id, this.roomSig);
+					player.acquiredAbility = { mapID: null };
+					break;
+				}
+				default: {
+					console.log("applyBrutalAbilityRound() in game.js chose abilityID:" + abilityID + " which is not implemented as an option. Please update this function");
+					player.ability = new Bomb(player.id, this.roomSig);
+					player.acquiredAbility = { mapID: null };
+					break;
+				}
+			}
+			messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: player.id, ability: abilityID, voronoiId: null });
+		}
+	}
+
 	checkForDynamicDifficultyIncrease() {
 		if (this.round == 1) {
 			return;
@@ -676,7 +739,7 @@ class GameBoard {
 		}
 	}
 	increaseChanceOfBrutalRound() {
-		const increment = 5;
+		const increment = c.chanceOfBrutalRoundIncrement;
 		if (this.chanceOfBrutalRound + increment >= 100) {
 			return;
 		}
@@ -684,7 +747,7 @@ class GameBoard {
 		this.chanceOfBrutalRound = this.chanceOfBrutalRound + increment;
 	}
 	increaseChanceOfAbilities() {
-		const increment = 5;
+		const increment = c.chanceToSpawnAbilityIncrement;
 		if (this.chanceToSpawnAbility + increment >= 100) {
 			return;
 		}
@@ -1226,7 +1289,7 @@ class Player extends Circle {
 					return;
 				}
 				this.ability = new Blindfold(this.id, this.roomSig);
-				this.acquiredAbility = object.voronoiId;
+				this.acquiredAbility = { mapID: object.voronoiId };
 				messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: this.id, ability: object.id, voronoiId: object.voronoiId });
 				return;
 			}
@@ -1235,7 +1298,7 @@ class Player extends Circle {
 					return;
 				}
 				this.ability = new Swap(this.id, this.roomSig);
-				this.acquiredAbility = object.voronoiId;
+				this.acquiredAbility = { mapID: object.voronoiId };
 				messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: this.id, ability: object.id, voronoiId: object.voronoiId });
 				return;
 			}
@@ -1244,7 +1307,7 @@ class Player extends Circle {
 					return;
 				}
 				this.ability = new Bomb(this.id, this.roomSig);
-				this.acquiredAbility = object.voronoiId;
+				this.acquiredAbility = { mapID: object.voronoiId };
 				messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: this.id, ability: object.id, voronoiId: object.voronoiId });
 				return;
 			}

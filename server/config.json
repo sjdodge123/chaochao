@@ -10,7 +10,9 @@
     "maxPlayersInRoom": 15,
     "forceConstant": 5000,
     "chanceToSpawnAbility": 50,
+    "chanceToSpawnAbilityIncrement": 10,
     "chanceOfBrutalRound": 0,
+    "chanceOfBrutalRoundIncrement": 25,
     "TESTSingleMap": false,
     "submitViaMail": "chaochaothegame@gmail.com",
     "tileMap": {
@@ -88,7 +90,7 @@
     "brutalRounds": {
         "ability": {
             "id": 1000,
-            "active": false,
+            "active": true,
             "title": "Ability"
         },
         "gravity": {
