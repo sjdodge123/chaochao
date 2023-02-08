@@ -302,6 +302,9 @@ function fullReset() {
 	decodedColorName = '';
 	oldNotches = {};
 	playersNearVictory = [];
+	round = 0;
+	brutalRound = false;
+	brutalRoundConfig = null;
 	for (var id in playerList) {
 		var player = playerList[id];
 		player.alive = true;

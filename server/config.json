@@ -106,8 +106,18 @@
             "active": false,
             "title": "Bombard"
         },
-        "lightning": {
+        "fiesta": {
             "id": 1004,
+            "active": false,
+            "title": "Fiesta"
+        },
+        "golden": {
+            "id": 1005,
+            "active": false,
+            "title": "Golden"
+        },
+        "lightning": {
+            "id": 1006,
             "active": false,
             "title": "Lightning"
         }
@@ -138,7 +148,7 @@
         "👋",
         "💪"
     ],
-    "playerNotchesToWin": 5,
+    "playerNotchesToWin": 2,
     "playerDragCoeff": 0.15,
     "playerBrakeCoeff": 0.235,
     "playerStartSleepTime": 60,

@@ -16,11 +16,22 @@ var transferIcon = new Image(576, 512);
 transferIcon.src = "../assets/img/random.svg";
 var bombIcon = new Image(576, 512);
 bombIcon.src = "../assets/img/bomb.svg";
-var lightning = new Image(576, 512);
-lightning.src = "../assets/img/bolt-solid.svg";
+var lightningIcon = new Image(576, 512);
+lightningIcon.src = "../assets/img/bolt-solid.svg";
+var cloudyIcon = new Image(576, 512);
+cloudyIcon.src = "../assets/img/cloud-solid.svg";
+var infinityIcon = new Image(576, 512);
+infinityIcon.src = "../assets/img/infinity-solid.svg";
+var fiestaIcon = new Image(576, 512);
+fiestaIcon.src = "../assets/img/cake-candles-solid.svg";
+var toolBoxIcon = new Image(576, 512);
+toolBoxIcon.src = "../assets/img/toolbox-solid.svg";
+var moneyIcon = new Image(576, 512);
+moneyIcon.src = "../assets/img/sack-dollar-solid.svg";
 
 var bombImage = new Image();
 bombImage.src = "../assets/img/bomb.svg";
+
 
 
 function loadPatterns() {
@@ -30,7 +41,12 @@ function loadPatterns() {
 
     //Asociate images with their brutal round config id
     brutalRoundImages[config.brutalRounds.bomb.id] = bombIcon;
-    brutalRoundImages[config.brutalRounds.lightning.id] = lightning;
+    brutalRoundImages[config.brutalRounds.lightning.id] = lightningIcon;
+    brutalRoundImages[config.brutalRounds.cloudy.id] = cloudyIcon;
+    brutalRoundImages[config.brutalRounds.ability.id] = toolBoxIcon;
+    brutalRoundImages[config.brutalRounds.gravity.id] = infinityIcon;
+    brutalRoundImages[config.brutalRounds.fiesta.id] = fiestaIcon;
+    brutalRoundImages[config.brutalRounds.golden.id] = moneyIcon;
 }
 function makePattern(image) {
     const canvasPadding = 1;

@@ -701,7 +701,7 @@ class GameBoard {
 		return randomIndex;
 	}
 	checkForBrutalRound() {
-		var brutalRoundConfig = { brutal: false };
+		var brutalRoundConfig = { brutal: false, brutalTypes: [] };
 		this.brutalRound = false;
 		var brutalChance = utils.getRandomInt(1, 100);
 		if (brutalChance > this.chanceOfBrutalRound) {
@@ -709,8 +709,6 @@ class GameBoard {
 		}
 		this.brutalRound = true;
 		brutalRoundConfig.brutal = true;
-
-		//Determine Number of Brutal types to apply
 
 		//Find only active brutal types
 		var activeBrutalTypes = [];
@@ -720,16 +718,26 @@ class GameBoard {
 				activeBrutalTypes.push(c.brutalRounds[prop].id);
 			}
 		}
+
 		if (activeBrutalTypes.length == 0) {
 			console.log("Brutal round was engaged, however no brutal types are active in the config file");
 			this.brutalRound = false;
 			brutalRoundConfig = { brutal: false };
 			return brutalRoundConfig;
 		}
+		brutalRoundConfig.brutalTypes.push(activeBrutalTypes[0]);
 		if (activeBrutalTypes.length == 1) {
-			brutalRoundConfig.brutalTypes = [activeBrutalTypes[0]];
+			return brutalRoundConfig;
 		}
-		console.log("Brutal round engaged");
+		activeBrutalTypes.splice(0, 1);
+		for (var i = 0; i < activeBrutalTypes.length; i++) {
+			//Roll for next Brutal
+			var nextBrutalChance = utils.getRandomInt(1, 100);
+			if (nextBrutalChance > this.chanceOfBrutalRound) {
+				return brutalRoundConfig;
+			}
+			brutalRoundConfig.brutalTypes.push(activeBrutalTypes[i]);
+		}
 		return brutalRoundConfig;
 	}
 	generateAbilities() {
