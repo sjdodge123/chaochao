@@ -483,6 +483,14 @@ class GameBoard {
 				this.abilityList[id].explodeBomb = false;
 				this.projectileList[this.abilityList[id].ownerId].explodeBomb();
 			}
+			if (this.abilityList[id].applyBuff) {
+				this.abilityList[id].applyBuff = false;
+				setTimeout(this.removeSpeedBuff, c.tileMap.abilities.speedBuff.duration, { id: this.abilityList[id].ownerId, playerList: this.playerList, delta: this.applySpeedBuff(this.abilityList[id].ownerId) });
+			}
+			if (this.abilityList[id].applyDebuff) {
+				this.abilityList[id].applyDebuff = false;
+				setTimeout(this.removeSpeedDebuff, c.tileMap.abilities.speedDebuff.duration, { id: this.abilityList[id].ownerId, playerList: this.playerList, deltaList: this.applySpeedDebuff(this.abilityList[id].ownerId) });
+			}
 			if (this.abilityList[id].alive == false) {
 				if (this.playerList[this.abilityList[id].ownerId] != undefined) {
 					this.playerList[this.abilityList[id].ownerId].ability = null;
@@ -601,6 +609,31 @@ class GameBoard {
 		messenger.messageRoomBySig(this.roomSig, 'triggerUsed', owner);
 		messenger.messageRoomBySig(this.roomSig, 'explodedCells', explodedCells);
 	}
+	applySpeedBuff(owner) {
+		return this.playerList[owner].addSpeed(c.tileMap.abilities.speedBuff.value);
+	}
+	removeSpeedBuff(packet) {
+		packet.playerList[packet.id].removeSpeed(packet.delta);
+	}
+	applySpeedDebuff(owner) {
+		var deltaList = {};
+		for (var id in this.playerList) {
+			if (id == owner) {
+				continue;
+			}
+			deltaList[id] = this.playerList[id].removeSpeed(c.tileMap.abilities.speedDebuff.value);
+		}
+		return deltaList;
+	}
+	removeSpeedDebuff(packet) {
+		for (var id in packet.deltaList) {
+			if (packet.playerList[id] != null) {
+				packet.playerList[id].addSpeed(packet.deltaList[id]);
+			}
+		}
+	}
+
+
 	startLobby() {
 		this.lobbyStartButton = new LobbyStartButton(this.world.center.x, this.world.center.y, 0, "red");
 		messenger.messageRoomBySig(this.roomSig, "startLobby", compressor.sendLobbyStart(this.lobbyStartButton));
@@ -726,7 +759,8 @@ class GameBoard {
 		}
 		console.log("Round: " + this.round);
 		this.brutalConfig = this.checkForBrutalRound();
-		messenger.messageRoomBySig(this.roomSig, "newMap", { id: this.currentMap.id, abilities: this.generateAbilities(), brutalRoundConfig: this.brutalConfig });
+		var randomGen = this.generateRandomTiles();
+		messenger.messageRoomBySig(this.roomSig, "newMap", { id: this.currentMap.id, abilities: this.generateAbilities(), randomTiles: randomGen, brutalRoundConfig: this.brutalConfig });
 	}
 	checkApplyBrutalConfig() {
 		if (this.brutalRound == false || this.brutalConfig == null) {
@@ -914,6 +948,36 @@ class GameBoard {
 			var ability = this.spawnNewAbility();
 			indexMap[this.currentMap.cells[tilesRemaining[j]].site.voronoiId] = ability;
 			this.currentMap.cells[tilesRemaining[j]].id = ability;
+		}
+		return indexMap;
+	}
+	generateRandomTiles() {
+		var randomTilesAvaliable = [];
+		var indexMap = {};
+		//Gather Map tiles to spawn
+		for (var i = 0; i < this.currentMap.cells.length; i++) {
+			if (this.currentMap.cells[i].id == c.tileMap.random.id) {
+				randomTilesAvaliable.push(i);
+			}
+		}
+		if (randomTilesAvaliable.length == 0) {
+			return indexMap;
+		}
+
+		//Count all types that can be randomed
+		var possibleTiles = [];
+		for (var prop in c.tileMap) {
+			if (c.tileMap[prop].canBeRandomed == false) {
+				continue;
+			}
+			possibleTiles.push(c.tileMap[prop].id);
+		}
+
+		//Fill in tiles with random types
+		for (var j = 0; j < randomTilesAvaliable.length; j++) {
+			var tileID = possibleTiles[utils.getRandomInt(0, possibleTiles.length - 1)];
+			indexMap[this.currentMap.cells[randomTilesAvaliable[j]].site.voronoiId] = tileID;
+			this.currentMap.cells[randomTilesAvaliable[j]].id = tileID;
 		}
 		return indexMap;
 	}
@@ -1263,6 +1327,23 @@ class Player extends Circle {
 			this.chatCoolDownTimer = null;
 		}
 	}
+	addSpeed(newValue) {
+		//New speed cant go above max speed
+		var delta = 0;
+		if (newValue + this.currentSpeedBonus > c.playerMaxSpeedBonus) {
+			delta = c.playerMaxSpeedBonus - this.currentSpeedBonus;
+			this.currentSpeedBonus = c.playerMaxSpeedBonus;
+			return delta;
+		}
+		delta = newValue;
+		this.currentSpeedBonus += newValue;
+		return delta;
+	}
+	removeSpeed(newValue) {
+		//New speed CAN go below 0
+		this.currentSpeedBonus -= newValue;
+		return newValue;
+	}
 	setSpeedBonus(newValue) {
 		if (newValue > c.playerMaxSpeedBonus) {
 			return;
@@ -1399,10 +1480,28 @@ class Player extends Circle {
 				messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: this.id, ability: object.id, voronoiId: object.voronoiId });
 				return;
 			}
+			if (object.id == c.tileMap.abilities.speedBuff.id) {
+				if (this.ability != null) {
+					return;
+				}
+				this.ability = new SpeedBuff(this.id, this.roomSig);
+				this.acquiredAbility = { mapID: object.voronoiId };
+				messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: this.id, ability: object.id, voronoiId: object.voronoiId });
+				return;
+			}
+			if (object.id == c.tileMap.abilities.speedDebuff.id) {
+				if (this.ability != null) {
+					return;
+				}
+				this.ability = new SpeedDebuff(this.id, this.roomSig);
+				this.acquiredAbility = { mapID: object.voronoiId };
+				messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: this.id, ability: object.id, voronoiId: object.voronoiId });
+				return;
+			}
+
 		}
 	}
 	addNotch(notchesToWin) {
-
 		if (this.notches + 1 >= notchesToWin) {
 			this.notches = notchesToWin;
 			return;
@@ -1566,6 +1665,37 @@ class Bomb extends Ability {
 		messenger.messageRoomBySig(this.roomSig, "bombUsed", this.ownerId);
 	}
 }
+class SpeedBuff extends Ability {
+	constructor(owner, roomSig) {
+		super(owner, roomSig);
+		this.applyBuff = false;
+	}
+	use() {
+		if (this.alive == false) {
+			return;
+		}
+		this.alive = false;
+		this.applyBuff = true;
+		messenger.messageRoomBySig(this.roomSig, "speedBuff", this.ownerId);
+	}
+}
+
+class SpeedDebuff extends Ability {
+	constructor(owner, roomSig) {
+		super(owner, roomSig);
+		this.applyDebuff = false;
+	}
+	use() {
+		if (this.alive == false) {
+			return;
+		}
+		this.alive = false;
+		this.applyDebuff = true;
+		messenger.messageRoomBySig(this.roomSig, "speedDebuff", this.ownerId);
+	}
+}
+
+
 class BombTrigger extends Ability {
 	constructor(owner, roomSig) {
 		super(owner, roomSig);

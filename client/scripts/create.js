@@ -80,7 +80,9 @@ function setupPage() {
         addListeners();
     });
     $("#rebuildButton").on("click", function () {
-        rebuild();
+        if (validateWithUser()) {
+            rebuild();
+        };
         return false;
     });
     $("#slowTileButton").on("click", function () {
@@ -111,6 +113,11 @@ function setupPage() {
     $("#abilityTileButton").on("click", function () {
         brushID = config.tileMap.ability.id;
         brushColor = config.tileMap.ability.color;
+        return false;
+    });
+    $("#randomTileButton").on("click", function () {
+        brushID = config.tileMap.random.id;
+        brushColor = config.tileMap.random.color;
         return false;
     });
     $("#goalTileButton").on("click", function () {
@@ -174,6 +181,17 @@ function addListeners() {
         return false;
     }, false);
 }
+
+function validateWithUser() {
+    var cells = vMap.cells;
+    for (var i = 0; i < cells.length; i++) {
+        if (cells[i].id != config.tileMap.normal.id) {
+            return confirm("Are you sure you want to delete this map?");
+        }
+    }
+    return true;
+}
+
 function rebuild() {
     vMap = generateVMap();
     $('#author').val("");

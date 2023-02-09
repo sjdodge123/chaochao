@@ -71,6 +71,7 @@ function clientConnect() {
 	server.on("newMap", function (payload) {
 		round++;
 		loadNewMap(payload.id);
+		applyRandomTiles(payload.randomTiles);
 		applyAbilites(payload.abilities);
 		applyBrutalMap(payload.brutalRoundConfig);
 	});
@@ -240,6 +241,16 @@ function clientConnect() {
 		setTimeout(function () {
 			screenShake = false;
 		}, 2500);
+	});
+
+	server.on("speedBuff", function (owner) {
+		playSound(speedBuff);
+		playerAbilityUsed(owner);
+	});
+
+	server.on("speedDebuff", function (owner) {
+		playSound(speedDebuff);
+		playerAbilityUsed(owner);
 	});
 	server.on("triggerUsed", function (owner) {
 		playerAbilityUsed(owner);

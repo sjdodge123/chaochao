@@ -1,5 +1,5 @@
 
-var scale = 0.05;
+var scale = 0.035;
 var bombScale = 0.025;
 
 var patterns = {};
@@ -16,6 +16,12 @@ var transferIcon = new Image(576, 512);
 transferIcon.src = "../assets/img/random.svg";
 var bombIcon = new Image(576, 512);
 bombIcon.src = "../assets/img/bomb.svg";
+
+var windIcon = new Image(576, 512);
+windIcon.src = "../assets/img/wind-solid.svg";
+var hourglassIcon = new Image(576, 512);
+hourglassIcon.src = "../assets/img/hourglass-start-solid.svg";
+
 var lightningIcon = new Image(576, 512);
 lightningIcon.src = "../assets/img/bolt-solid.svg";
 var cloudyIcon = new Image(576, 512);
@@ -40,6 +46,8 @@ function loadPatterns() {
     patterns[config.tileMap.abilities.blindfold.id] = makePattern(blindfoldIcon);
     patterns[config.tileMap.abilities.swap.id] = makePattern(transferIcon);
     patterns[config.tileMap.abilities.bomb.id] = makePattern(bombIcon);
+    patterns[config.tileMap.abilities.speedBuff.id] = makePattern(windIcon);
+    patterns[config.tileMap.abilities.speedDebuff.id] = makePattern(hourglassIcon);
 
     //Asociate images with their brutal round config id
     brutalRoundImages[config.brutalRounds.bomb.id] = bombIcon;
@@ -52,7 +60,7 @@ function loadPatterns() {
     brutalRoundImages[config.brutalRounds.volcano.id] = volcanoIcon;
 }
 function makePattern(image) {
-    const canvasPadding = 1;
+    const canvasPadding = 3;
     const canvasPattern = document.createElement("canvas");
     const ctxPattern = canvasPattern.getContext("2d");
     var iconWidth = image.width * scale;
@@ -537,16 +545,19 @@ function drawMap() {
             }
             var color = null;
             if (cell.id > 99) {
+                gameContext.setLineDash([2, 2]);
+                gameContext.lineWidth = 3;
+                gameContext.strokeStyle = '#2E2E2E';
                 color = patterns[cell.id];
             } else {
                 color = locateColor(cell.id);
+                gameContext.setLineDash([]);
+                gameContext.lineWidth = 0.5;
+                gameContext.strokeStyle = '#adadad';
             }
-
-            gameContext.lineWidth = 0.5;
             gameContext.shadowBlur = null;
             gameContext.shadowColor = null;
             gameContext.fillStyle = color;
-            gameContext.strokeStyle = '#adadad';
             gameContext.fill();
             gameContext.stroke();
         }
@@ -566,7 +577,6 @@ function locateColor(id) {
             return config.tileMap[type].color;
         }
     }
-
 }
 function locateSymbol(id) {
     for (var type in config.tileMap.abilities) {

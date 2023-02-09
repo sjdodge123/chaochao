@@ -21,6 +21,7 @@
             "brakeCoeff": 0.235,
             "dragCoeff": 0.45,
             "acel": 300,
+            "canBeRandomed": true,
             "color": "black"
         },
         "normal": {
@@ -28,6 +29,7 @@
             "brakeCoeff": 0.235,
             "dragCoeff": 0.25,
             "acel": 300,
+            "canBeRandomed": true,
             "color": "#F0F0F0"
         },
         "fast": {
@@ -35,10 +37,12 @@
             "brakeCoeff": 0.235,
             "dragCoeff": 0.15,
             "acel": 300,
+            "canBeRandomed": true,
             "color": "#90ee90"
         },
         "lava": {
             "id": 3,
+            "canBeRandomed": true,
             "color": "#cf1020"
         },
         "ice": {
@@ -46,21 +50,31 @@
             "brakeCoeff": 0.0001,
             "dragCoeff": 0.0075,
             "acel": 15,
+            "canBeRandomed": true,
             "color": "#A5F2F3"
         },
         "ability": {
             "id": 5,
+            "canBeRandomed": true,
             "color": "#C8C8C8"
         },
         "goal": {
             "id": 6,
+            "canBeRandomed": false,
             "color": "#FFD700"
         },
         "bumper": {
             "id": 7,
+            "canBeRandomed": false,
             "color": "#FF7900"
         },
+        "random": {
+            "id": 8,
+            "canBeRandomed": false,
+            "color": "#020DFE"
+        },
         "abilities": {
+            "canBeRandomed": false,
             "blindfold": {
                 "spawnable": true,
                 "id": 100,
@@ -84,6 +98,18 @@
             "bombTrigger": {
                 "spawnable": false,
                 "id": 103
+            },
+            "speedBuff": {
+                "spawnable": true,
+                "value": 400,
+                "duration": 3000,
+                "id": 104
+            },
+            "speedDebuff": {
+                "spawnable": true,
+                "value": 100,
+                "duration": 4000,
+                "id": 105
             }
         }
     },

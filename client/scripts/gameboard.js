@@ -239,6 +239,16 @@ function applyAbilites(abilities) {
 		}
 	}
 }
+function applyRandomTiles(randomTiles) {
+	if (randomTiles.length == 0) {
+		return;
+	}
+	for (var i = 0; i < currentMap.cells.length; i++) {
+		if (currentMap.cells[i].id == config.tileMap.random.id) {
+			currentMap.cells[i].id = randomTiles[currentMap.cells[i].site.voronoiId];
+		}
+	}
+}
 function applyBrutalMap(brconfig) {
 	if (brconfig.brutal == false) {
 		brutalRound = false;
