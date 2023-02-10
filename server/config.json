@@ -103,13 +103,13 @@
             },
             "speedBuff": {
                 "spawnable": true,
-                "value": 300,
+                "value": 2,
                 "duration": 3000,
                 "id": 104
             },
             "speedDebuff": {
                 "spawnable": true,
-                "value": 1.2,
+                "value": 2,
                 "duration": 4000,
                 "id": 105
             }
