@@ -318,7 +318,7 @@ function resetPlayers() {
 }
 
 function fullReset() {
-	gameLength = config.playerNotchesToWin;
+	gameLength = config.baseNotchesToWin;
 	playerWon = null;
 	decodedColorName = '';
 	oldNotches = {};

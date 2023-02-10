@@ -26,7 +26,7 @@ function clientConnect() {
 
 	server.on("gameState", function (gameState) {
 		config = gameState.config;
-		gameLength = config.playerNotchesToWin;
+		gameLength = config.baseNotchesToWin;
 		clientList = gameState.clientList;
 		gameID = gameState.gameID;
 		checkGameState(gameState.game);

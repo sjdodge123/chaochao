@@ -96,7 +96,7 @@ class Game {
 		this.alivePlayerCount = 0;
 		this.sleepingPlayerCount = 0;
 		this.lobbyButtonPressedCount = 0;
-		this.notchesToWin = c.playerNotchesToWin;
+		this.notchesToWin = c.baseNotchesToWin;
 		this.firstPlaceSig = null;
 		this.secondPlaceSig = null;
 
@@ -324,7 +324,7 @@ class Game {
 	}
 	resetGame() {
 		this.locked = false;
-		this.notchesToWin = c.playerNotchesToWin;
+		this.notchesToWin = c.baseNotchesToWin;
 		this.gameBoard.resetGame(this.currentState);
 		messenger.messageRoomBySig(this.roomSig, "resetGame", null);
 	}
@@ -355,7 +355,7 @@ class Game {
 			return;
 		}
 		var notchesToRemove = Math.ceil(this.playerCount / dynamicGameLengthModifier);
-		var minimumNotches = 3;
+		var minimumNotches = c.minimumNotchesToWin;
 		if (this.notchesToWin - notchesToRemove <= minimumNotches) {
 			this.notchesToWin = minimumNotches;
 		} else {
@@ -633,7 +633,7 @@ class GameBoard {
 			if (packet.playerList[id] != null) {
 				//TODO remove this debuff it adds 2 speed player must get the update still
 				packet.playerList[id].addSpeed(packet.deltaList[id]);
-				packet.playerList[id].decreaseDragMultiplier(2);
+				packet.playerList[id].decreaseDragMultiplier(c.tileMap.abilities.speedDebuff.value);
 			}
 		}
 	}

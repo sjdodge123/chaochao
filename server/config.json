@@ -10,6 +10,8 @@
     "maxPlayersInRoom": 15,
     "forceConstant": 5000,
     "chanceToSpawnAbility": 50,
+    "baseNotchesToWin": 5,
+    "minimumNotchesToWin": 3,
     "chanceToSpawnAbilityIncrement": 10,
     "chanceOfBrutalRound": 0,
     "chanceOfBrutalRoundIncrement": 15,
@@ -182,7 +184,6 @@
         "👋",
         "💪"
     ],
-    "playerNotchesToWin": 5,
     "playerDragCoeff": 0.15,
     "playerBrakeCoeff": 0.235,
     "playerStartSleepTime": 60,
