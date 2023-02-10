@@ -621,14 +621,19 @@ class GameBoard {
 			if (id == owner) {
 				continue;
 			}
+
+			//TODO remove this debuff it adds 2 speed player must get the update still
 			deltaList[id] = this.playerList[id].removeSpeed(c.tileMap.abilities.speedDebuff.value);
+			this.playerList[id].increaseDragMultiplier(c.tileMap.abilities.speedDebuff.value);
 		}
 		return deltaList;
 	}
 	removeSpeedDebuff(packet) {
 		for (var id in packet.deltaList) {
 			if (packet.playerList[id] != null) {
+				//TODO remove this debuff it adds 2 speed player must get the update still
 				packet.playerList[id].addSpeed(packet.deltaList[id]);
+				packet.playerList[id].decreaseDragMultiplier(2);
 			}
 		}
 	}
@@ -809,6 +814,16 @@ class GameBoard {
 				}
 				case c.tileMap.abilities.swap.id: {
 					player.ability = new Swap(player.id, this.roomSig);
+					player.acquiredAbility = { mapID: null };
+					break;
+				}
+				case c.tileMap.abilities.speedBuff.id: {
+					player.ability = new SpeedBuff(player.id, this.roomSig);
+					player.acquiredAbility = { mapID: null };
+					break;
+				}
+				case c.tileMap.abilities.speedDebuff.id: {
+					player.ability = new SpeedDebuff(player.id, this.roomSig);
 					player.acquiredAbility = { mapID: null };
 					break;
 				}
@@ -1273,6 +1288,7 @@ class Player extends Circle {
 		this.newY = this.y;
 		this.velX = 0;
 		this.velY = 0;
+		this.dragMultiplier = 1;
 		this.dragCoeff = c.playerDragCoeff;
 		this.brakeCoeff = c.playerBrakeCoeff;
 		this.maxVelocity = c.playerMaxSpeed;
@@ -1340,7 +1356,15 @@ class Player extends Circle {
 		return delta;
 	}
 	removeSpeed(newValue) {
-		//New speed CAN go below 0
+
+
+		//Subtract from Speedbonus cant go below 0
+		var delta = 0;
+		if (this.currentSpeedBonus - newValue < 0) {
+			delta = this.currentSpeedBonus;
+			this.currentSpeedBonus = 0;
+			return delta;
+		}
 		this.currentSpeedBonus -= newValue;
 		return newValue;
 	}
@@ -1352,6 +1376,15 @@ class Player extends Circle {
 	}
 	getSpeedBonus() {
 		return this.currentSpeedBonus;
+	}
+	increaseDragMultiplier(newValue) {
+		this.dragMultiplier *= newValue;
+	}
+	decreaseDragMultiplier(newValue) {
+		this.dragMultiplier = this.dragMultiplier / newValue;
+	}
+	getDragBonus() {
+		return this.dragMultiplier;
 	}
 	wakeUp() {
 		this.sleepTimer = null;
@@ -1440,6 +1473,14 @@ class Player extends Circle {
 				this.acel = object.acel;
 				this.brakeCoeff = object.brakeCoeff;
 				this.dragCoeff = object.dragCoeff;
+
+				/*
+				if (this.getSpeedBonus() < 0) {
+					this.acel = 1;
+					console.log(this.currentSpeedBonus, this.acel, this.brakeCoeff, this.dragCoeff);
+				}
+				*/
+
 				return;
 			}
 			if (object.id == c.tileMap.goal.id) {
@@ -1525,6 +1566,7 @@ class Player extends Circle {
 		this.newY = this.y;
 		this.velX = 0;
 		this.velY = 0;
+		this.dragMultiplier = 1;
 		this.dragCoeff = c.playerDragCoeff;
 		this.brakeCoeff = c.playerBrakeCoeff;
 		this.maxVelocity = c.playerMaxSpeed;
