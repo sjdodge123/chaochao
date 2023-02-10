@@ -7,7 +7,7 @@
     "worldHeight": 768,
     "worldCollapseSpeed": 6,
     "minPlayersToStart": 2,
-    "maxPlayersInRoom": 15,
+    "maxPlayersInRoom": 25,
     "forceConstant": 5000,
     "chanceToSpawnAbility": 50,
     "baseNotchesToWin": 5,

@@ -101,8 +101,8 @@ class Engine {
 				newVelY -= player.brakeCoeff * player.velY;
 			}
 			else {
-				newVelX -= player.dragCoeff * player.velX;
-				newVelY -= player.dragCoeff * player.velY;
+				newVelX -= player.dragCoeff * player.getDragBonus() * player.velX;
+				newVelY -= player.dragCoeff * player.getDragBonus() * player.velY;
 			}
 
 			newVel = utils.getMag(newVelX, newVelY);
