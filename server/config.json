@@ -58,7 +58,7 @@
         },
         "ability": {
             "id": 5,
-            "canBeRandomed": true,
+            "canBeRandomed": false,
             "color": "#C8C8C8"
         },
         "goal": {
