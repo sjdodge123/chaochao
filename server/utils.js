@@ -87,6 +87,16 @@ exports.getRandomProperty = function (obj) {
     return obj[keys[keys.length * Math.random() << 0]];
 }
 
+exports.shuffleArray = function (array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const temp = array[i];
+        array[i] = array[j];
+        array[j] = temp;
+    }
+    return array;
+}
+
 function loadMaps() {
     var normalizedPath = require("path").join(__dirname, "../client/maps");
     fs.readdirSync(normalizedPath).forEach(function (file) {

@@ -637,8 +637,6 @@ class GameBoard {
 			}
 		}
 	}
-
-
 	startLobby() {
 		this.lobbyStartButton = new LobbyStartButton(this.world.center.x, this.world.center.y, 0, "red");
 		messenger.messageRoomBySig(this.roomSig, "startLobby", compressor.sendLobbyStart(this.lobbyStartButton));
@@ -919,6 +917,7 @@ class GameBoard {
 			brutalRoundConfig = { brutal: false, brutalTypes: [] };
 			return brutalRoundConfig;
 		}
+		activeBrutalTypes = utils.shuffleArray(activeBrutalTypes);
 		brutalRoundConfig.brutalTypes.push(activeBrutalTypes[0]);
 		if (activeBrutalTypes.length == 1) {
 			return brutalRoundConfig;
@@ -927,7 +926,7 @@ class GameBoard {
 		for (var i = 0; i < activeBrutalTypes.length; i++) {
 			//Roll for next Brutal
 			var nextBrutalChance = utils.getRandomInt(1, 100);
-			if (nextBrutalChance > this.chanceOfBrutalRound) {
+			if (nextBrutalChance > c.changeForAdditionalBrutal) {
 				return brutalRoundConfig;
 			}
 			brutalRoundConfig.brutalTypes.push(activeBrutalTypes[i]);
