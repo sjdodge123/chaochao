@@ -6,6 +6,11 @@ var mapListing = [];
 var c = require('./config.json');
 c.port = process.env.PORT || c.port;
 
+
+const { Octokit } = require("@octokit/core");
+const octokit = new Octokit({
+    auth: 'EMPTY'
+});
 loadMaps();
 
 Colors = {};
@@ -43,6 +48,65 @@ Colors.random = function () {
     }
     return result;
 };
+async function submitPR() {
+    var owner = 'sjdodge123',
+        repo = 'chaochao',
+        title = 'test pr',
+        body = 'testing new change',
+        head = 'mapeditor:new-map',
+        base = 'master';
+
+
+    const response = await octokit.request(
+        'POST /repos/{owner}/{repo}/pulls', { owner, repo, title, body, head, base }
+    );
+}
+async function getPRs() {
+    var owner = 'sjdodge123',
+        repo = 'chaochao';
+
+    var response = await octokit.request('GET /repos/{owner}/{repo}/pulls', {
+        owner,
+        repo
+    })
+    console.log(response);
+}
+
+async function getBranch() {
+    var result = await octokit.request('GET /repos/{owner}/{repo}/branches/{branch}', {
+        owner: 'sjdodge123',
+        repo: 'chaochao',
+        branch: 'map-submission'
+    })
+    console.log(result);
+}
+
+getBranch();
+
+exports.submitPullRequest = async function (map) {
+
+
+
+    /*
+    for (var map in mapListing) {
+        console.log(mapListing[map]);
+    }
+    */
+    //if (map.title)
+
+    /*
+    const owner = 'sjdodge123';
+    const repo = 'chaochao';
+
+    await octokit.request('GET /repos/{owner}/{repo}/pulls', {
+        owner: 'sjdodge123',
+        repo: 'chaochao',
+        titlle: '',
+    });
+    */
+
+}
+
 exports.getRandomInt = function (min, max) {
     min = Math.ceil(min);
     max = Math.floor(max);

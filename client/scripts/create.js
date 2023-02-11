@@ -135,7 +135,7 @@ function setupPage() {
         return false;
     });
     $("#submitButton").on("click", function () {
-        submitViaEmail();
+        submitToGithub();
         return false;
     });
     /*
@@ -456,6 +456,8 @@ function submitViaEmail() {
 
 function submitToGithub() {
     basicSanitize();
+    server.emit('submitNewMap', JSON.stringify(vMap));
+    /*
     $.ajax
         ({
             data: JSON.stringify(vMap),
@@ -470,6 +472,7 @@ function submitToGithub() {
                 alert("Thanks!");
             }
         });
+        */
 }
 function basicSanitize() {
     var author = $("#author").val();
