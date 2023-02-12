@@ -58,7 +58,16 @@ function checkForMail(client) {
 			vMap.name == null) {
 			return;
 		}
-		utils.submitPullRequest(vMap);
+
+		(async (id) => {
+			var returnToClient = await utils.submitPullRequest(vMap);
+			if (returnToClient.status == false) {
+				client.emit("githubFailure", returnToClient.message);
+				return;
+			}
+			client.emit("githubSuccess", returnToClient.message);
+		})(client.id)
+
 	});
 
 	client.on('enterGame', function () {

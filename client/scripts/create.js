@@ -43,6 +43,21 @@ function clientConnect() {
         init();
     });
 
+    server.on('githubFailure', function (error) {
+        var submitStatus = $("#submitStatus");
+        submitStatus.css("color", "white");
+        submitStatus.css("background-color", "red");
+        console.log(error);
+        submitStatus.text("Failed");
+    });
+    server.on('githubSuccess', function (url) {
+        console.log(url);
+        var submitStatus = $("#submitStatus");
+        submitStatus.css("color", "white");
+        submitStatus.css("background-color", "green");
+        submitStatus.text("Sucesss");
+    });
+
     server.on("maplisting", function (mapnames) {
         if (maps.length > 0) {
             return;
@@ -57,6 +72,7 @@ function clientConnect() {
                             vMap = JSON.parse(JSON.stringify(maps[j]));
                             $('#author').val(vMap.author);
                             $('#name').val(vMap.name);
+                            $('#email').val(vMap.email);
                             $('#loadWindow').hide();
                             $('#createWindow').show();
                             resize();
@@ -74,6 +90,7 @@ function clientConnect() {
 
 function setupPage() {
     $("#createNew").on("click", function () {
+        $("#submitStatus").hide();
         $('#loadWindow').hide();
         $('#createWindow').show();
         resize();
@@ -138,16 +155,12 @@ function setupPage() {
         submitToGithub();
         return false;
     });
-    /*
-    $("#submitToGame").on("click", function () {
-        submitToGithub();
-        return false;
-    });
-    */
+
     $("#loadButton").on("click", function () {
         $("#createNewImage").attr("src", createCanvas.toDataURL("image/jpeg", 0.1));
         $('#createWindow').hide();
         $('#loadWindow').show();
+        $("#submitStatus").hide();
 
         window.removeEventListener("mousemove", cellUnderMouse, false);
         window.removeEventListener("mousedown", handleClick, false);
@@ -182,6 +195,13 @@ function addListeners() {
     }, false);
 }
 
+function validateEmail(mail) {
+    if (/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/.test(mail)) {
+        return (true)
+    }
+    return (false)
+}
+
 function validateWithUser() {
     var cells = vMap.cells;
     for (var i = 0; i < cells.length; i++) {
@@ -193,6 +213,7 @@ function validateWithUser() {
 }
 
 function rebuild() {
+    $("#submitStatus").hide();
     vMap = generateVMap();
     $('#author').val("");
     $('#name').val("");
@@ -233,6 +254,7 @@ function resize() {
     var currentScreenRatio = viewport.width / viewport.height;
     var optimalRatio = Math.min(scaleToFitX, scaleToFitY);
 
+
     if (currentScreenRatio >= 1.77 && currentScreenRatio <= 1.79) {
         newWidth = viewport.width;
         newHeight = viewport.height;
@@ -241,7 +263,7 @@ function resize() {
         newHeight = createCanvas.height * optimalRatio;
     }
     var controlPanel = document.getElementById("controlPanel");
-    controlPanel.style.width = newWidth + "px";
+    controlPanel.style.height = newHeight + "px";
     createCanvas.style.width = newWidth + "px";
     createCanvas.style.height = newHeight + "px";
 }
@@ -405,14 +427,6 @@ function renderCell(cell) {
     createContext.strokeStyle = '#adadad';
     createContext.fill();
     createContext.stroke();
-
-    /*
-    v = cell.site;
-    createContext.fillStyle = '#44f';
-    createContext.beginPath();
-    createContext.rect(v.x-2/3,v.y-2/3,2,2);
-    createContext.fill();
-    */
 }
 function getStartpoint(halfedge) {
     if (compareSite(halfedge.edge.lSite, halfedge.site)) {
@@ -455,24 +469,19 @@ function submitViaEmail() {
 }
 
 function submitToGithub() {
+    var email = $("#email").val();
+    if (!validateEmail(email)) {
+        alert("You must enter a valid email address to submit to GitHub");
+        return false;
+    }
     basicSanitize();
+    vMap.email = email;
+    var submitStatus = $("#submitStatus");
+    submitStatus.show();
+    submitStatus.css("color", "black");
+    submitStatus.css("background-color", "#ADD8E6");
+    submitStatus.text("Submitting..");
     server.emit('submitNewMap', JSON.stringify(vMap));
-    /*
-    $.ajax
-        ({
-            data: JSON.stringify(vMap),
-            contentType: 'application/json',
-            type: "POST",
-
-            url: 'https://staticman-chaochao.herokuapp.com/v2/entry/sjdodge123/chaochao/master/maps',
-
-            //json object to sent to the authentication url
-
-            success: function () {
-                alert("Thanks!");
-            }
-        });
-        */
 }
 function basicSanitize() {
     var author = $("#author").val();

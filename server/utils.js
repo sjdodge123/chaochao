@@ -6,10 +6,9 @@ var mapListing = [];
 var c = require('./config.json');
 c.port = process.env.PORT || c.port;
 
-
 const { Octokit } = require("@octokit/core");
 const octokit = new Octokit({
-    auth: 'EMPTY'
+    auth: process.env.GITHUB_AUTH
 });
 loadMaps();
 
@@ -48,62 +47,86 @@ Colors.random = function () {
     }
     return result;
 };
-async function submitPR() {
-    var owner = 'sjdodge123',
-        repo = 'chaochao',
-        title = 'test pr',
-        body = 'testing new change',
-        head = 'mapeditor:new-map',
-        base = 'master';
-
-
-    const response = await octokit.request(
-        'POST /repos/{owner}/{repo}/pulls', { owner, repo, title, body, head, base }
-    );
-}
-async function getPRs() {
-    var owner = 'sjdodge123',
-        repo = 'chaochao';
-
-    var response = await octokit.request('GET /repos/{owner}/{repo}/pulls', {
-        owner,
-        repo
-    })
-    console.log(response);
-}
-
-async function getBranch() {
-    var result = await octokit.request('GET /repos/{owner}/{repo}/branches/{branch}', {
-        owner: 'sjdodge123',
-        repo: 'chaochao',
-        branch: 'map-submission'
-    })
-    console.log(result);
-}
-
-getBranch();
-
 exports.submitPullRequest = async function (map) {
-
-
-
-    /*
-    for (var map in mapListing) {
-        console.log(mapListing[map]);
+    var returnToClient = { status: false, message: "" };
+    if (process.env.GITHUB_AUTH == null) {
+        console.log("github auth env variable not set");
+        returnToClient.status = false;
+        return returnToClient;
     }
-    */
-    //if (map.title)
 
-    /*
+
     const owner = 'sjdodge123';
     const repo = 'chaochao';
+    var author = String(map.author).replace(/ /g, '');
+    var mapName = String(map.name).replace(/ /g, '');
+    var email = String(map.email).replace(/ /g, '');
+    if (author == '' || email == '' || mapName == '') {
+        console.log("Can't submit to github; required info missing:" + author + ":" + email + ":" + mapName);
+        returnToClient.status = false;
+        return returnToClient;
+    }
+    var branchName = "mapchange-" + mapName.toLowerCase() + "-" + email.toLowerCase();
+    try {
+        var result = await octokit.request('GET /repos/{owner}/{repo}/git/refs/heads', {
+            owner,
+            repo
+        })
+        var head = null;
+        for (var i = 0; i < result.data.length; i++) {
+            if (result.data[i].ref != 'refs/heads/main') {
+                continue;
+            }
+            head = result.data[i];
+        }
+        if (head == null) {
+            returnToClient.status = false;
+            return returnToClient;
+        }
 
-    await octokit.request('GET /repos/{owner}/{repo}/pulls', {
-        owner: 'sjdodge123',
-        repo: 'chaochao',
-        titlle: '',
-    });
-    */
+        var response = await octokit.request('POST /repos/{owner}/{repo}/git/refs', {
+            owner,
+            repo,
+            ref: "refs/heads/" + branchName,
+            sha: head.object.sha,
+        })
+
+        var bufferObj = Buffer.from(JSON.stringify(map), 'utf8');
+        var base64String = bufferObj.toString("base64");
+        var title = 'Submission of update/insert of ' + map.name + "/" + map.author + " from " + email;
+        var answer = await octokit.request('PUT /repos/{owner}/{repo}/contents/{path}', {
+            owner,
+            repo,
+            path: 'client/maps/' + mapName + '.json',
+            message: title,
+            committer: {
+                name: map.author,
+                email: email,
+            },
+            branch: branchName,
+            sha: head.object.sha,
+            content: base64String,
+        })
+        var pr = await octokit.request('POST /repos/{owner}/{repo}/pulls', {
+            owner,
+            repo,
+            title,
+            body: title,
+            head: branchName,
+            base: 'main'
+        })
+        if (pr.status == 201) {
+            returnToClient.status = true;
+            returnToClient.message = pr.data.html_url;
+            return returnToClient;
+        }
+        returnToClient.status = false;
+        return returnToClient;
+    } catch (e) {
+        returnToClient.status = false;
+        returnToClient.message = e.response.data.message;
+        return returnToClient;
+    }
 
 }
 
@@ -115,9 +138,6 @@ exports.getRandomInt = function (min, max) {
 
 exports.getColor = function () {
     return Colors.random();
-    /*
-    return 'hsl(' + Math.floor(Math.random() * 360) + ', 100%, 50%)';
-    */
 };
 
 exports.getDT = function () {

@@ -10,9 +10,10 @@
     font-weight: normal;
     font-style: normal;
 }
-
-body {
+html,body {
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    height:100%;
+    width: 100%;
 }
 
 button {
@@ -24,9 +25,7 @@ canvas {
     font-weight: 600;
     padding-left: 0;
     padding-right: 0;
-    margin-left: auto;
-    margin-right: auto;
-    display: block;
+    display: inline-block;
 }
 
 .nav-item {
@@ -53,18 +52,48 @@ canvas {
 }
 
 #createWindow {
-    margin-top: 1%;
+    margin-top: 10px;
     background: white;
     overflow: hidden;
     display: none;
-    height: 968px;
+    height: 100%;
 
+}
+#mapEditor{
+    height: 80%;
+    width: 100%;
+    display: inline-block;
+    position: relative;
+    margin-left: 5%;
+    margin-right: 5%;
+}
+#controlPanel {
+    border-radius: 20px;
+    border-style: solid;
+    background-color: none;
+    position: relative;
+    height: 90%;
+    width: 9%;
+    margin-right: 5px;
+    float: left;
+}
+#inputBar {
+    display: inline-block;
+    position: relative;
+    height: 10%;
+    width: 100%;
+}
+#pallete {
+    display: inline-block;
+    height: 80%;
+    width: 100%;
 }
 
 #canvasWindow {
-    display: block;
-    position: relative;
-    height: 768px;
+    position:relative;
+    display: inline-block;
+    width: 90%;
+    height: 90%;
 }
 
 #loadWindow {
@@ -73,19 +102,44 @@ canvas {
     padding-bottom: 100px;
 }
 
-#controlPanel {
-    display: block;
-    position: relative;
-    height: 50px;
-}
+
 #version{
     font-size: 12px;
     text-align: right;
     float: right;
 }
+.editor-inputs{
+    margin: 5px;
+}
 .patch-notes {
     margin-top: 5px;
     text-align: center;
+}
+.mapEditorBtn{
+    border-radius: 20px;
+    background-color: inherit;
+    width: 50%;
+    font-size: 24px;
+    position: relative;
+    border: none;
+    float: left;
+    margin-top: 5px;
+    margin-bottom: 5px;
+}
+.mapEditorTile{
+    border-radius: 5%;
+    float: left;
+    width: 90%;
+    margin: 0px;
+    margin-left: 5%;
+    margin-right: 5%;
+    margin-bottom: 2px;
+    height: 30px;
+    text-align: left;
+}
+.mapEditorTile span{
+    color:white;
+    mix-blend-mode: difference
 }
 .btn {
     font-size: 0.95rem;

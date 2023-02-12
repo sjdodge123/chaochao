@@ -6,29 +6,41 @@
         <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
         <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css" integrity="sha384-MCw98/SFnGE8fJT3GXwEOngsV7Zt27NXFoaoApmYm81iuXoPkFOJwJ8ERdknLPMO" crossorigin="anonymous">
         <link rel="stylesheet" type="text/css" href="css/styles.css">
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
         <title>Chao Chao Map Edit</title>
     </head>
     <body>
         <!-- Game enclosed here -->
         <div id="createWindow">
-            <div id="canvasWindow"><canvas id="createCanvas" width="1366" height="768"></canvas></div>
-            <div id="controlPanel" class="mx-auto">
+            <div id="mapEditor">
+                <div id="controlPanel">
+                    <button id="loadButton" class="mapEditorBtn" ><i class="fa fa-arrow-left" aria-hidden="true"></i></button>
+                    <button id="rebuildButton" class="mapEditorBtn" ><i class="fa fa-refresh" aria-hidden="true"></i></button>
+                    <div id="pallete">
+                        <button id="slowTileButton" style="background-color: black;" title="Tar" class="mapEditorTile" ><span>Tar</span></button>
+                        <button id="normalTileButton" style="background-color: #F0F0F0" title="Dirt" class="mapEditorTile" ><span>Dirt</span></button>
+                        <button id="fastTileButton" style="background-color: #90ee90" title="Grass" class="mapEditorTile" ><span>Grass</span></button>
+                        <button id="lavaTileButton" style="background-color: #cf1020" title="Lava" class="mapEditorTile" ><span>Lava</span></button>
+                        <button id="iceTileButton" style="background-color: #A5F2F3" title="Ice" class="mapEditorTile" ><span>Ice</span></button>
+                        <button id="abilityTileButton" style="background-color: #C8C8C8" title="Ability" class="mapEditorTile" ><span>Ability</span></button>
+                        <button id="randomTileButton" style="background-color: #020DFE" title="Random" class="mapEditorTile" ><span>Random</span></button>
+                        <button id="goalTileButton" style="background-color: #FFD700" title="Goal" class="mapEditorTile" ><span>Goal</span></button>
+                        <button id="submitStatus" style="position: absolute; bottom: 10%; left: 0;"disabled class="mapEditorTile"><span>Submitting..</span></button>
+                    </div>
+                    <button id="exportButton" class="mapEditorBtn" ><i class="fa fa-clipboard" aria-hidden="true"></i></button>
+                    <button id="submitButton" class="mapEditorBtn" ><i class="fa fa-cloud-upload"></i></button>
 
-                <button id="loadButton" class="btn" >Back</button>
-                <button id="rebuildButton" class="btn" >Randomize map</button>
-                <button id="slowTileButton" class="btn" >Slow Tile</button>
-                <button id="normalTileButton" class="btn" >Normal Tile</button>
-                <button id="fastTileButton" class="btn" >Fast Tile</button>
-                <button id="lavaTileButton" class="btn" >Lava Tile</button>
-                <button id="iceTileButton" class="btn" >Ice Tile</button>
-                <button id="abilityTileButton" class="btn" >Ability Tile</button>
-                <button id="randomTileButton" class="btn" >Random Tile</button>
-                <button id="goalTileButton" class="btn" >Goal</button>
-                <!-- <button id="bumperTileButton" class="btn" >Bumper</button> -->
-                <input type="text" id="author" name="author" placeholder="author" maxlength="15"></input>
-                <input type="text" id="name" name="name" placeholder="map name" maxlength="15"></input>
-                <button id="exportButton" class="btn" >Export</button>
-                <button id="submitButton" class="btn" >Submit</button>
+                </div>
+                <div id="canvasWindow"><canvas id="createCanvas"  width="1366" height="768"></canvas></div>
+                <div id="inputBar" class="row">
+                    <div class="w-50 mx-auto">
+                        <div class="row">
+                            <input class="editor-inputs col-3" type="text" id="author" name="author" placeholder="author" maxlength="15"></input>
+                            <input class="editor-inputs col-3" type="text" id="name" name="name" placeholder="map name" maxlength="15"></input>
+                            <input class="editor-inputs col-3" type="text" id="email" name="email" placeholder="email" maxlength="50"></input>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
         <div id="loadWindow">
