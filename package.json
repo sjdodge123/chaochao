@@ -3,6 +3,7 @@
     "version": "0.0.1",
     "description": "Multiplayer web based slow paced racing game",
     "dependencies": {
+        "@octokit/core": "^4.2.0",
         "express": "^4.17.1",
         "jquery": "^3.6.0",
         "socket.io": "^4.1.3"
