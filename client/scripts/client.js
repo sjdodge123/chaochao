@@ -143,6 +143,7 @@ function clientConnect() {
 	});
 	server.on("startOverview", function (packet) {
 		stopSound(lavaCollapse);
+		resetTrails();
 		updatePlayerNotches(packet);
 		calculateNotchMoveAmt();
 		currentState = config.stateMap.overview;

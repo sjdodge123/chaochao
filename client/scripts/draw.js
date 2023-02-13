@@ -1,5 +1,5 @@
-
 var scale = 0.035;
+var spreadScale = 0.15;
 var bombScale = 0.025;
 
 var patterns = {};
@@ -36,18 +36,42 @@ var moneyIcon = new Image(576, 512);
 moneyIcon.src = "../assets/img/sack-dollar-solid.svg";
 var volcanoIcon = new Image(576, 512);
 volcanoIcon.src = "../assets/img/volcano-solid.svg";
-
 var bombImage = new Image();
 bombImage.src = "../assets/img/bomb.svg";
+
+//TileTextures
+var lava = new Image(256, 256);
+lava.src = "../assets/img/lava.png";
+var grass = new Image(256, 256);
+grass.src = "../assets/img/grass.png";
+grass.scale = 0.5;
+var dirt = new Image(256, 256);
+dirt.src = "../assets/img/dirt.png";
+dirt.scale = 0.25;
+var ice = new Image(256, 256);
+ice.src = "../assets/img/ice.png";
+ice.scale = 0.75;
+var sand = new Image(256, 256)
+sand.src = "../assets/img/sand.png";
+sand.scale = 0.25;
+
 
 
 
 function loadPatterns() {
+    //Abilities
     patterns[config.tileMap.abilities.blindfold.id] = makePattern(blindfoldIcon);
     patterns[config.tileMap.abilities.swap.id] = makePattern(transferIcon);
     patterns[config.tileMap.abilities.bomb.id] = makePattern(bombIcon);
     patterns[config.tileMap.abilities.speedBuff.id] = makePattern(windIcon);
     patterns[config.tileMap.abilities.speedDebuff.id] = makePattern(hourglassIcon);
+
+    //Tiles
+    patterns[config.tileMap.lava.id] = makeSeamlessPattern(lava);
+    patterns[config.tileMap.ice.id] = makeSeamlessPattern(ice);
+    patterns[config.tileMap.fast.id] = makeSeamlessPattern(grass);
+    patterns[config.tileMap.normal.id] = makeSeamlessPattern(dirt);
+    patterns[config.tileMap.slow.id] = makeSeamlessPattern(sand);
 
     //Asociate images with their brutal round config id
     brutalRoundImages[config.brutalRounds.bomb.id] = bombIcon;
@@ -59,14 +83,51 @@ function loadPatterns() {
     brutalRoundImages[config.brutalRounds.golden.id] = moneyIcon;
     brutalRoundImages[config.brutalRounds.volcano.id] = volcanoIcon;
 }
+
+function makeSeamlessPattern(image) {
+
+    const canvasPattern = document.createElement("canvas");
+    const ctxPattern = canvasPattern.getContext("2d");
+
+    var iconWidth = image.width;
+    var iconHeight = image.height;
+    if (image.scale != null) {
+        iconWidth = image.width * image.scale;
+        iconHeight = image.height * image.scale;
+    }
+    canvasPattern.width = iconWidth;
+    canvasPattern.height = iconHeight;
+    ctxPattern.drawImage(image, 0, 0, iconWidth, iconHeight);
+    return gameContext.createPattern(canvasPattern, 'repeat');
+}
+
+function makeSpreadPattern(image) {
+    const canvasPadding = 300;
+    const canvasPattern = document.createElement("canvas");
+    const ctxPattern = canvasPattern.getContext("2d");
+    var iconWidth = image.width * spreadScale;
+    var iconHeight = image.height * spreadScale;
+    canvasPattern.width = iconWidth + canvasPadding;
+    canvasPattern.height = iconHeight + canvasPadding;
+    ctxPattern.drawImage(image, canvasPadding / 2, canvasPadding / 2, iconWidth, iconHeight);
+    return gameContext.createPattern(canvasPattern, 'repeat');
+}
+
 function makePattern(image) {
     const canvasPadding = 3;
     const canvasPattern = document.createElement("canvas");
     const ctxPattern = canvasPattern.getContext("2d");
+
     var iconWidth = image.width * scale;
     var iconHeight = image.height * scale;
     canvasPattern.width = iconWidth + canvasPadding;
     canvasPattern.height = iconHeight + canvasPadding;
+    var underPattern = makeSeamlessPattern(dirt);
+    ctxPattern.beginPath();
+    ctxPattern.fillStyle = underPattern;
+    ctxPattern.rect(0, 0, canvasPattern.width, canvasPattern.height);
+    ctxPattern.fill();
+
     ctxPattern.drawImage(image, canvasPadding / 2, canvasPadding / 2, iconWidth, iconHeight);
     return gameContext.createPattern(canvasPattern, 'repeat');
 }
@@ -92,12 +153,6 @@ function makeComplexPattern(ids) {
     canvasPattern.height = (iconHeight * images.length) + canvasPadding;
 
     ctxPattern.globalAlpha = 0.1;
-    //ctxPattern.filter = "opacity(30%) drop-shadow(-10px 0px 0px #880808)";
-    /*
-    ctxPattern.globalCompositeOperation = 'source-atop';
-
-    ctxPattern.globalCompositeOperation = 'destination-over';
-    */
     for (var j = 0; j < images.length; j++) {
         ctxPattern.drawImage(images[j], canvasPadding / 2, canvasPadding + (j * iconHeight), iconWidth, iconHeight);
     }
@@ -131,6 +186,9 @@ function drawObjects(dt) {
         drawMap();
         drawPingCircles();
         drawMapTitle();
+    }
+    if (currentState == config.stateMap.gated) {
+        drawGateLine();
     }
     drawHUD();
     drawPlayers(dt);
@@ -270,7 +328,7 @@ function drawPlayer(player) {
             gameContext.lineWidth = 5;
             gameContext.strokeStyle = "red";
         } else {
-            gameContext.lineWidth = 1;
+            gameContext.lineWidth = 3;
             gameContext.strokeStyle = "black";
         }
 
@@ -407,24 +465,27 @@ function drawBombAimer(player, angle) {
 }
 
 function drawTrail(player) {
-    gameContext.save();
-    gameContext.beginPath();
-    gameContext.moveTo(player.trail.vertices[0].x, player.trail.vertices[0].y);
-    var len = player.trail.vertices.length;
-    for (var i = 0; i < len; i++) {
-        var point = player.trail.vertices[i];
-        gameContext.lineTo(point.x, point.y);
+    if (player.trail.vertices[0] != null) {
+        gameContext.save();
+        gameContext.beginPath();
+        gameContext.moveTo(player.trail.vertices[0].x, player.trail.vertices[0].y);
+        var len = player.trail.vertices.length;
+        for (var i = 0; i < len; i++) {
+            var point = player.trail.vertices[i];
+            gameContext.lineTo(point.x, point.y);
+        }
+        gameContext.lineWidth = 5;
+        gameContext.shadowBlur = 3;
+        gameContext.shadowColor = "black";
+        gameContext.strokeStyle = player.color;
+        if (player.notches == gameLength) {
+            gameContext.lineWidth = 6;
+            gameContext.setLineDash([20, 3, 3, 3, 3, 3, 3, 3]);
+        }
+        gameContext.stroke();
+        gameContext.restore();
     }
-    gameContext.lineWidth = 5;
-    gameContext.shadowBlur = 3;
-    gameContext.shadowColor = "black";
-    gameContext.strokeStyle = player.color;
-    if (player.notches == gameLength) {
-        gameContext.lineWidth = 6;
-        gameContext.setLineDash([20, 3, 3, 3, 3, 3, 3, 3]);
-    }
-    gameContext.stroke();
-    gameContext.restore();
+
 }
 
 function drawWorld() {
@@ -507,6 +568,17 @@ function drawGate() {
         gameContext.restore();
     }
 }
+
+function drawGateLine() {
+    gameContext.save();
+    gameContext.beginPath();
+    gameContext.moveTo(gate.x + gate.width, gate.y);
+    gameContext.lineTo(gate.x + gate.width, gate.y + gate.height);
+    gameContext.lineWidth = 5;
+    gameContext.strokeStyle = "red";
+    gameContext.stroke();
+    gameContext.restore();
+}
 function drawPingCircles() {
     if (pingCircles.length == 0) {
         return;
@@ -544,16 +616,26 @@ function drawMap() {
                 gameContext.lineTo(v.x, v.y);
             }
             var color = null;
+
+
             if (cell.id > 99) {
+                //Ability Tiles
                 gameContext.setLineDash([2, 2]);
-                gameContext.lineWidth = 3;
-                gameContext.strokeStyle = '#2E2E2E';
+                gameContext.lineWidth = 5;
+                gameContext.strokeStyle = '#FFFF00';
                 color = patterns[cell.id];
+            } else if (patterns[cell.id] != null) {
+                // Textured Tiles
+                color = patterns[cell.id];
+                gameContext.setLineDash([]);
+                gameContext.lineWidth = 1;
+                gameContext.strokeStyle = patterns[cell.id];
             } else {
+                //Regular colors
                 color = locateColor(cell.id);
                 gameContext.setLineDash([]);
-                gameContext.lineWidth = 0.5;
-                gameContext.strokeStyle = '#adadad';
+                gameContext.lineWidth = 3;
+                gameContext.strokeStyle = color;
             }
             gameContext.shadowBlur = null;
             gameContext.shadowColor = null;
@@ -798,6 +880,7 @@ function drawOldNotches() {
     for (var player in playerList) {
         drawNotches(notchDistanceApart);
         drawPlayerIcon(playerList[player], notchDistanceApart);
+        drawScoreBoardTrail(playerList[player]);
         drawGoalPost(playerList[player], notchDistanceApart);
         gameContext.translate(0, config.playerBaseRadius * distanceApart);
     }
@@ -810,23 +893,25 @@ function drawPlayerIcon(player, notchDistanceApart) {
     var notchX = 0;
     var moveAmt = 0;
     if (player.distanceToMove > 0) {
-        moveAmt = 0.5;
+        moveAmt = 3;
         player.distanceToMove -= moveAmt;
         player.distanceTraveled += moveAmt;
         notchX = player.distanceTraveled + (oldNotches[player.id] * notchDistanceApart);
         gameContext.arc(notchX, 0, config.playerBaseRadius * 2, 0, 2 * Math.PI);
     } else if (player.distanceToMove < 0) {
-        moveAmt = -0.5;
+        moveAmt = -3;
         player.distanceToMove -= moveAmt;
         player.distanceTraveled += moveAmt;
         notchX = player.distanceTraveled + (oldNotches[player.id] * notchDistanceApart);
         gameContext.arc(notchX, 0, config.playerBaseRadius * 2, 0, 2 * Math.PI);
     } else {
-        gameContext.arc(player.notches * notchDistanceApart, 0, config.playerBaseRadius * 2, 0, 2 * Math.PI);
+        notchX = player.notches * notchDistanceApart;
+        gameContext.arc(notchX, 0, config.playerBaseRadius * 2, 0, 2 * Math.PI);
     }
+    player.x = notchX;
+    player.y = 0;
     gameContext.fillStyle = player.color;
     gameContext.fill();
-
 }
 
 function drawNotches(distanceApart) {
@@ -837,24 +922,49 @@ function drawNotches(distanceApart) {
     gameContext.fillStyle = "grey";
     gameContext.fill();
 }
+
+function drawScoreBoardTrail(player) {
+    /*
+    if (player.trail.vertices.length == 0) {
+        return;
+    }
+    */
+
+    gameContext.beginPath();
+    gameContext.moveTo(0, 0);
+    gameContext.lineTo(player.x, player.y);
+    gameContext.lineWidth = 10;
+    gameContext.shadowBlur = 3;
+    gameContext.shadowColor = player.color;
+    gameContext.strokeStyle = player.color;
+    if (player.notches == gameLength) {
+        gameContext.lineWidth = 10;
+        gameContext.setLineDash([20, 3, 3, 3, 3, 3, 3, 3]);
+    }
+    gameContext.stroke();
+    gameContext.beginPath();
+    gameContext.arc(0, 0, 8, 0, 2 * Math.PI);
+    gameContext.fillStyle = player.color;
+    gameContext.fill();
+}
 function drawGoalPost(player, distanceApart) {
     gameContext.beginPath();
 
     gameContext.rect(-15 + (gameLength + 1) * distanceApart, -15, 30, 30);
     gameContext.shadowColor = "gold";
-    gameContext.fillStyle = "gold";;
+    gameContext.fillStyle = "gold";
     gameContext.lineWidth = 1;
     gameContext.font = "40px Arial";
     if (player.firstPlace == true) {
         gameContext.fillText("🥇", 30 + (gameLength + 1) * distanceApart, 12.5);
     }
     gameContext.shadowColor = "silver";
-    gameContext.fillStyle = "silver";;
+    gameContext.fillStyle = "silver";
     if (player.secondPlace == true) {
         gameContext.fillText("🥈", 30 + (gameLength + 1) * distanceApart, 12.5);
     }
     gameContext.shadowColor = "red";
-    gameContext.fillStyle = "red";;
+    gameContext.fillStyle = "red";
     if (player.downRank == true) {
         gameContext.fillText("💀", 30 + (gameLength + 1) * distanceApart, 12.5);
     }
@@ -862,9 +972,9 @@ function drawGoalPost(player, distanceApart) {
     if (player.distanceToMove == 0) {
         if (player.notches == gameLength) {
             console.log("player near victory");
-            gameContext.shadowColor = "white";
+            gameContext.shadowColor = "gold";
             gameContext.shadowBlur = 10;
-            gameContext.fillStyle = "white"
+            gameContext.fillStyle = "gold";
             gameContext.fill();
             if (player.nearVictory == false) {
                 player.nearVictory = true;

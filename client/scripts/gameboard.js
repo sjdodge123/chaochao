@@ -33,7 +33,7 @@ function resetGameboard() {
 	gameID = null;
 }
 function updateGameboard(dt) {
-	if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
+	if (currentState == config.stateMap.racing || currentState == config.stateMap.overview || currentState == config.stateMap.collapsing) {
 		updateTrails();
 	}
 }
@@ -397,24 +397,25 @@ function setupEmojiWheel() {
 	emojiMenu.style.borderColor = playerList[myID].color;
 }
 
+
 class Trail {
 	constructor(initialPosition) {
 		this.vertices = [];
-		this.maxLength = 3000;
-		for (var i = 0; i < this.maxLength; i++) {
-			this.vertices.push(initialPosition);
-		}
+		this.maxLength = 5000;
 	}
 	update(currentPosition) {
-		for (var i = this.maxLength - 1; i > 0; i--) {
-			this.vertices[i] = this.vertices[i - 1];
+		console.log(this.vertices.length);
+		if (this.vertices.length > 0 &&
+			currentPosition.x == this.vertices[this.vertices.length - 1].x &&
+			currentPosition.y == this.vertices[this.vertices.length - 1].y) {
+			return;
 		}
-		this.vertices[0] = currentPosition;
+		if (this.vertices.length > this.maxLength) {
+			this.vertices.shift();
+		}
+		this.vertices.push(currentPosition);
 	}
 	reset(player) {
 		this.vertices = [];
-		for (var i = 0; i < this.maxLength; i++) {
-			this.vertices.push({ x: player.x, y: player.y });
-		}
 	}
 }

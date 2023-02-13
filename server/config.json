@@ -6,7 +6,7 @@
     "worldWidth": 1366,
     "worldHeight": 768,
     "worldCollapseSpeed": 6,
-    "minPlayersToStart": 2,
+    "minPlayersToStart": 1,
     "maxPlayersInRoom": 25,
     "forceConstant": 5000,
     "chanceToSpawnAbility": 50,
@@ -22,8 +22,8 @@
         "slow": {
             "id": 0,
             "brakeCoeff": 0.235,
-            "dragCoeff": 0.45,
-            "acel": 300,
+            "dragCoeff": 0.40,
+            "acel": 250,
             "canBeRandomed": true,
             "color": "black"
         },
@@ -39,7 +39,7 @@
             "id": 2,
             "brakeCoeff": 0.235,
             "dragCoeff": 0.15,
-            "acel": 300,
+            "acel": 350,
             "canBeRandomed": true,
             "color": "#90ee90"
         },

@@ -610,9 +610,11 @@ class GameBoard {
 		messenger.messageRoomBySig(this.roomSig, 'explodedCells', explodedCells);
 	}
 	applySpeedBuff(owner) {
+		this.playerList[owner].addSpeed(100);
 		return this.playerList[owner].decreaseDragMultiplier(c.tileMap.abilities.speedBuff.value);
 	}
 	removeSpeedBuff(packet) {
+		packet.playerList[packet.id].removeSpeed(100);
 		packet.playerList[packet.id].increaseDragMultiplier(c.tileMap.abilities.speedBuff.value);
 	}
 	applySpeedDebuff(owner) {
