@@ -17,7 +17,7 @@ var server = null,
     gameRunning = null;
 
 var emojiMenu = document.getElementById("emojiMenu");
-var gameWindow = document.getElementById("gameWindow");
+var canvasWindow = document.getElementById("mapContainer");
 var exitIcon = document.getElementById("exitIcon");
 
 //Input Vars
@@ -92,7 +92,7 @@ function gameLoop(dt) {
 
 
 function resize() {
-    var gameWindowRect = gameWindow.getBoundingClientRect();
+    var gameWindowRect = canvasWindow.getBoundingClientRect();
     var viewport = { width: gameWindowRect.width, height: gameWindowRect.height };
     var scaleToFitX = viewport.width / gameCanvas.width;
     var scaleToFitY = viewport.height / gameCanvas.height;
