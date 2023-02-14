@@ -353,11 +353,7 @@ function drawPlayer(player) {
     if (player.ability != null) {
         drawAbilityAimer(player)
     }
-
-    if (player.chatMessage != null) {
-        drawEmoji(player);
-    }
-
+    drawEmoji(player);
     if (player.awake == false) {
         gameContext.save();
         gameContext.drawImage(commentIcon, player.x, player.y - 40, commentIcon.width * 0.07, commentIcon.height * 0.07);
@@ -367,23 +363,16 @@ function drawPlayer(player) {
     }
 }
 
-function drawAllEmojis() {
-    for (var id in playerList) {
-        if (playerList[id].chatMessage != null) {
-            drawEmoji(playerList[id]);
-        }
-
-    }
-}
 
 function drawEmoji(player) {
-    console.log(player.x, player.y);
-    gameContext.save();
-    gameContext.drawImage(commentIcon, player.x, player.y - 40, commentIcon.width * 0.07, commentIcon.height * 0.07);
-    gameContext.font = '20px Times New Roman';
-    gameContext.fillStyle = "white";
-    gameContext.fillText(player.chatMessage, player.x + 8, player.y - 17);
-    gameContext.restore();
+    if (player.chatMessage != null) {
+        gameContext.save();
+        gameContext.drawImage(commentIcon, player.x, player.y - 40, commentIcon.width * 0.07, commentIcon.height * 0.07);
+        gameContext.font = '20px Times New Roman';
+        gameContext.fillStyle = "white";
+        gameContext.fillText(player.chatMessage, player.x + 8, player.y - 17);
+        gameContext.restore();
+    }
 }
 
 function drawDeathMessage(player) {
@@ -862,7 +851,6 @@ function drawTitle() {
 function drawOverviewBoard() {
     drawBlackBackground();
     drawOldNotches();
-    drawAllEmojis();
     drawNextMap();
 }
 
@@ -907,11 +895,11 @@ function drawOldNotches() {
         if (playerAnimating == null) {
             playerAnimating = player;
         }
-
         drawNotches(notchDistanceApart);
         drawPlayerIcon(playerList[player], notchDistanceApart);
         drawScoreBoardTrail(playerList[player]);
         drawGoalPost(playerList[player], notchDistanceApart);
+        drawEmoji(playerList[player]);
         gameContext.translate(0, config.playerBaseRadius * distanceApart);
     }
     gameContext.restore();
