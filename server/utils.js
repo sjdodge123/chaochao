@@ -66,7 +66,7 @@ exports.submitPullRequest = async function (map) {
         returnToClient.status = false;
         return returnToClient;
     }
-    var branchName = "mapchange-" + mapName.toLowerCase() + "-" + email.toLowerCase();
+    var branchName = "mapchange-" + mapName.toLowerCase() + "-" + getRandomBranchCode();
     try {
         var result = await octokit.request('GET /repos/{owner}/{repo}/git/refs/heads', {
             owner,
@@ -130,10 +130,23 @@ exports.submitPullRequest = async function (map) {
 
 }
 
-exports.getRandomInt = function (min, max) {
+function getRandomBranchCode() {
+    const codeLength = 6;
+    var code = [];
+    for (var i = 0; i < codeLength; i++) {
+        code.push(getRandomInt(0, 9));
+    }
+    return code.join('');
+}
+
+function getRandomInt(min, max) {
     min = Math.ceil(min);
     max = Math.floor(max);
     return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+exports.getRandomInt = function (min, max) {
+    return getRandomInt(min, max);
 };
 
 exports.getColor = function () {
