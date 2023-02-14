@@ -90,21 +90,27 @@ exports.submitPullRequest = async function (map) {
             ref: "refs/heads/" + branchName,
             sha: head.object.sha,
         })
+        var path = 'client/maps/' + mapName + '.json';
+        var shaOfFileAnswer = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}', {
+            owner,
+            repo,
+            path
+        });
 
-        var bufferObj = Buffer.from(JSON.stringify(map), 'utf8');
+        var bufferObj = Buffer.from(JSON.stringify(map, null, 2), 'utf8');
         var base64String = bufferObj.toString("base64");
         var title = 'Submission of update/insert of ' + map.name + "/" + map.author + " from " + email;
         var answer = await octokit.request('PUT /repos/{owner}/{repo}/contents/{path}', {
             owner,
             repo,
-            path: 'client/maps/' + mapName + '.json',
+            path,
             message: title,
             committer: {
                 name: map.author,
                 email: email,
             },
             branch: branchName,
-            sha: head.object.sha,
+            sha: shaOfFileAnswer.data.sha,
             content: base64String,
         })
         var pr = await octokit.request('POST /repos/{owner}/{repo}/pulls', {
@@ -123,6 +129,7 @@ exports.submitPullRequest = async function (map) {
         returnToClient.status = false;
         return returnToClient;
     } catch (e) {
+        console.log(e);
         returnToClient.status = false;
         returnToClient.message = e.response.data.message;
         return returnToClient;

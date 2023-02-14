@@ -72,7 +72,6 @@ function clientConnect() {
                             vMap = JSON.parse(JSON.stringify(maps[j]));
                             $('#author').val(vMap.author);
                             $('#name').val(vMap.name);
-                            $('#email').val(vMap.email);
                             $('#loadWindow').hide();
                             $('#createWindow').show();
                             resize();
