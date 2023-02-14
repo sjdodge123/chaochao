@@ -226,8 +226,17 @@ function loadNewMap(id) {
 			}, 50, pingCircle));
 		}
 	}
+}
+function loadMapPreview(id) {
 
-
+	for (var i = 0; i < maps.length; i++) {
+		if (id == maps[i].id) {
+			nextMapPreview = JSON.parse(JSON.stringify(maps[i]));
+			break;
+		}
+	}
+	nextMapThumbnail = new Image();
+	nextMapThumbnail.src = nextMapPreview.thumbnail;
 }
 function applyAbilites(abilities) {
 	if (abilities.length == 0) {
@@ -324,6 +333,8 @@ function fullReset() {
 	oldNotches = {};
 	playersNearVictory = [];
 	round = 0;
+	nextMapPreview = null;
+	nextMapThumbnail = null;
 	brutalRound = false;
 	brutalRoundConfig = null;
 	for (var id in playerList) {
@@ -401,10 +412,9 @@ function setupEmojiWheel() {
 class Trail {
 	constructor(initialPosition) {
 		this.vertices = [];
-		this.maxLength = 5000;
+		this.maxLength = 10000;
 	}
 	update(currentPosition) {
-		console.log(this.vertices.length);
 		if (this.vertices.length > 0 &&
 			currentPosition.x == this.vertices[this.vertices.length - 1].x &&
 			currentPosition.y == this.vertices[this.vertices.length - 1].y) {

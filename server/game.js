@@ -302,7 +302,8 @@ class Game {
 	startOverview() {
 		console.log("Start Overview");
 		this.currentState = this.stateMap.overview;
-		messenger.messageRoomBySig(this.roomSig, 'startOverview', compressor.sendNotchUpdates(this.playerList));
+		var nextMapID = this.gameBoard.determineNextMap();
+		messenger.messageRoomBySig(this.roomSig, 'startOverview', { notchUpdates: compressor.sendNotchUpdates(this.playerList), nextMapID: nextMapID });
 	}
 	startCollapse(xloc, yloc) {
 		console.log("Start Collapse");
@@ -394,6 +395,7 @@ class GameBoard {
 		this.maps = utils.loadMaps();
 		this.mapsPlayed = [];
 		this.currentMap = {};
+		this.nextMap = {};
 
 		this.allAbilityIDs = this.indexAbilities();
 		this.collapseLoc = {};
@@ -712,6 +714,8 @@ class GameBoard {
 		this.brutalRound = false;
 		this.brutalConfig = null;
 		this.round = 0;
+		this.currentMap = {};
+		this.nextMap = {};
 		this.resetPlayers(currentState);
 		for (var playerID in this.playerList) {
 			var player = this.playerList[playerID];
@@ -748,20 +752,27 @@ class GameBoard {
 		}
 		return false;
 	}
+	determineNextMap() {
+		if (c.TESTSingleMap) {
+			this.nextMap = JSON.parse(JSON.stringify(this.maps[0]));
+			return this.nextMap.id;
+		}
+		if (this.maps.length == this.mapsPlayed.length) {
+			this.mapsPlayed = [];
+		}
+		var nextMapId = this.getRandomMapR();
+		this.nextMap = JSON.parse(JSON.stringify(this.maps[nextMapId]));
+		return this.nextMap.id;
+	}
+
 	loadNextMap() {
-		this.currentMap = {};
+		if (Object.keys(this.nextMap) == 0) {
+			this.determineNextMap();
+		}
+		this.currentMap = this.nextMap;
 		this.round++;
 		this.checkForDynamicDifficultyIncrease();
-		if (c.TESTSingleMap) {
-			this.currentMap = JSON.parse(JSON.stringify(this.maps[0]));
-		} else {
-			if (this.maps.length == this.mapsPlayed.length) {
-				this.mapsPlayed = [];
-			}
-			var nextMapId = this.getRandomMapR();
-			this.currentMap = JSON.parse(JSON.stringify(this.maps[nextMapId]));
-			this.mapsPlayed.push(this.currentMap.id);
-		}
+		this.mapsPlayed.push(this.currentMap.id);
 		console.log("Round: " + this.round);
 		this.brutalConfig = this.checkForBrutalRound();
 		var randomGen = this.generateRandomTiles();

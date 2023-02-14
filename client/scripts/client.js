@@ -144,8 +144,9 @@ function clientConnect() {
 	server.on("startOverview", function (packet) {
 		stopSound(lavaCollapse);
 		resetTrails();
-		updatePlayerNotches(packet);
+		updatePlayerNotches(packet.notchUpdates);
 		calculateNotchMoveAmt();
+		loadMapPreview(packet.nextMapID);
 		currentState = config.stateMap.overview;
 	});
 	server.on("startGameover", function (player) {

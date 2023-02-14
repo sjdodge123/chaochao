@@ -55,7 +55,7 @@ var sand = new Image(256, 256)
 sand.src = "../assets/img/sand.png";
 sand.scale = 0.25;
 
-
+var playerAnimating = null;
 
 
 function loadPatterns() {
@@ -354,14 +354,8 @@ function drawPlayer(player) {
         drawAbilityAimer(player)
     }
 
-
-
     if (player.chatMessage != null) {
-        gameContext.save();
-        gameContext.drawImage(commentIcon, player.x, player.y - 40, commentIcon.width * 0.07, commentIcon.height * 0.07);
-        gameContext.font = '20px Times New Roman';
-        gameContext.fillText(player.chatMessage, player.x + 8, player.y - 17);
-        gameContext.restore();
+        drawEmoji(player);
     }
 
     if (player.awake == false) {
@@ -371,6 +365,25 @@ function drawPlayer(player) {
         gameContext.fillText("😴", player.x + 8, player.y - 17);
         gameContext.restore();
     }
+}
+
+function drawAllEmojis() {
+    for (var id in playerList) {
+        if (playerList[id].chatMessage != null) {
+            drawEmoji(playerList[id]);
+        }
+
+    }
+}
+
+function drawEmoji(player) {
+    console.log(player.x, player.y);
+    gameContext.save();
+    gameContext.drawImage(commentIcon, player.x, player.y - 40, commentIcon.width * 0.07, commentIcon.height * 0.07);
+    gameContext.font = '20px Times New Roman';
+    gameContext.fillStyle = "white";
+    gameContext.fillText(player.chatMessage, player.x + 8, player.y - 17);
+    gameContext.restore();
 }
 
 function drawDeathMessage(player) {
@@ -397,14 +410,6 @@ function drawProjectiles() {
             gameContext.drawImage(bombImage, -centerX, -centerY);
             gameContext.restore();
         }
-        /*
-        gameContext.save();
-        gameContext.beginPath();
-        gameContext.arc(projectileList[proj].x, projectileList[proj].y, projectileList[proj].radius, 0, 2 * Math.PI);
-        gameContext.fillStyle = projectileList[proj].color;
-        gameContext.fill();
-        gameContext.restore();
-        */
     }
 }
 function drawAbilityAimer(player) {
@@ -857,6 +862,27 @@ function drawTitle() {
 function drawOverviewBoard() {
     drawBlackBackground();
     drawOldNotches();
+    drawAllEmojis();
+    drawNextMap();
+}
+
+function drawNextMap() {
+    if (nextMapPreview != null) {
+        var previewWindow = { x: gameCanvas.width / 2 + 100, y: (gameCanvas.height / 2 - (world.height / 10)) - 100 };
+        gameContext.save();
+        gameContext.beginPath();
+        gameContext.fillStyle = "white";
+        gameContext.lineWidth = 1;
+        gameContext.font = "32px Arial";
+        gameContext.fillText("Next map", previewWindow.x, previewWindow.y - 35);
+        gameContext.font = "20px Arial";
+        gameContext.fillText(nextMapPreview.name, previewWindow.x, previewWindow.y - 5);
+        gameContext.fillText(nextMapPreview.author, previewWindow.x + 100, previewWindow.y - 5);
+        gameContext.drawImage(nextMapThumbnail, previewWindow.x, previewWindow.y, world.width / 3, world.height / 3);
+        gameContext.fill();
+        gameContext.restore();
+    }
+
 }
 function drawBlackBackground() {
     gameContext.save();
@@ -874,10 +900,14 @@ function drawOldNotches() {
     }
     var distanceApart = 7;
 
-    var offSetX = gameCanvas.width / 2 - gameLength * notchDistanceApart * .5;
+    var offSetX = 80;
     var offSetY = gameCanvas.height / 2 - (count * config.playerBaseRadius * distanceApart * .5);
     gameContext.translate(offSetX, offSetY);
     for (var player in playerList) {
+        if (playerAnimating == null) {
+            playerAnimating = player;
+        }
+
         drawNotches(notchDistanceApart);
         drawPlayerIcon(playerList[player], notchDistanceApart);
         drawScoreBoardTrail(playerList[player]);
@@ -893,21 +923,24 @@ function drawPlayerIcon(player, notchDistanceApart) {
     var notchX = 0;
     var moveAmt = 0;
     if (player.distanceToMove > 0) {
-        moveAmt = 3;
-        player.distanceToMove -= moveAmt;
-        player.distanceTraveled += moveAmt;
+        moveAmt = 1;
         notchX = player.distanceTraveled + (oldNotches[player.id] * notchDistanceApart);
         gameContext.arc(notchX, 0, config.playerBaseRadius * 2, 0, 2 * Math.PI);
     } else if (player.distanceToMove < 0) {
-        moveAmt = -3;
-        player.distanceToMove -= moveAmt;
-        player.distanceTraveled += moveAmt;
+        moveAmt = -1;
         notchX = player.distanceTraveled + (oldNotches[player.id] * notchDistanceApart);
         gameContext.arc(notchX, 0, config.playerBaseRadius * 2, 0, 2 * Math.PI);
     } else {
         notchX = player.notches * notchDistanceApart;
         gameContext.arc(notchX, 0, config.playerBaseRadius * 2, 0, 2 * Math.PI);
+        playerAnimating = null;
     }
+
+    if (playerAnimating === player.id) {
+        player.distanceToMove -= moveAmt;
+        player.distanceTraveled += moveAmt;
+    }
+
     player.x = notchX;
     player.y = 0;
     gameContext.fillStyle = player.color;
@@ -924,12 +957,6 @@ function drawNotches(distanceApart) {
 }
 
 function drawScoreBoardTrail(player) {
-    /*
-    if (player.trail.vertices.length == 0) {
-        return;
-    }
-    */
-
     gameContext.beginPath();
     gameContext.moveTo(0, 0);
     gameContext.lineTo(player.x, player.y);
@@ -937,7 +964,7 @@ function drawScoreBoardTrail(player) {
     gameContext.shadowBlur = 3;
     gameContext.shadowColor = player.color;
     gameContext.strokeStyle = player.color;
-    if (player.notches == gameLength) {
+    if (player.nearVictory == true) {
         gameContext.lineWidth = 10;
         gameContext.setLineDash([20, 3, 3, 3, 3, 3, 3, 3]);
     }
@@ -971,7 +998,6 @@ function drawGoalPost(player, distanceApart) {
     //If the animation is complete
     if (player.distanceToMove == 0) {
         if (player.notches == gameLength) {
-            console.log("player near victory");
             gameContext.shadowColor = "gold";
             gameContext.shadowBlur = 10;
             gameContext.fillStyle = "gold";
