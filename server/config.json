@@ -14,8 +14,9 @@
     "minimumNotchesToWin": 3,
     "chanceToSpawnAbilityIncrement": 10,
     "chanceOfBrutalRound": 0,
-    "changeForAdditionalBrutal": 35,
+    "chanceForAdditionalBrutal": 15,
     "chanceOfBrutalRoundIncrement": 25,
+    "nearVictoryBrutalRoundBoost": 25,
     "TESTSingleMap": false,
     "submitViaMail": "chaochaothegame@gmail.com",
     "tileMap": {

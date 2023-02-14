@@ -384,6 +384,7 @@ class GameBoard {
 
 		this.chanceToSpawnAbility = c.chanceToSpawnAbility;
 		this.chanceOfBrutalRound = c.chanceOfBrutalRound;
+		this.chanceForAdditionalBrutal = c.chanceForAdditionalBrutal;
 		this.round = 0;
 		this.brutalRound = false;
 		this.brutalConfig = null;
@@ -711,6 +712,7 @@ class GameBoard {
 		this.mapsPlayed = [];
 		this.chanceToSpawnAbility = c.chanceToSpawnAbility;
 		this.chanceOfBrutalRound = c.chanceOfBrutalRound;
+		this.chanceForAdditionalBrutal = c.chanceForAdditionalBrutal;
 		this.brutalRound = false;
 		this.brutalConfig = null;
 		this.round = 0;
@@ -878,15 +880,8 @@ class GameBoard {
 		if (this.round % 5 == 0) {
 			this.increaseChanceOfAbilities();
 			this.increaseChanceOfBrutalRound();
+			this.increaseChanceOfAdditionalBrutal();
 		}
-	}
-	increaseChanceOfBrutalRound() {
-		const increment = c.chanceOfBrutalRoundIncrement;
-		if (this.chanceOfBrutalRound + increment >= 90) {
-			return;
-		}
-		console.log("Increasing Brutal round chance");
-		this.chanceOfBrutalRound = this.chanceOfBrutalRound + increment;
 	}
 	increaseChanceOfAbilities() {
 		const increment = c.chanceToSpawnAbilityIncrement;
@@ -894,6 +889,20 @@ class GameBoard {
 			return;
 		}
 		this.chanceToSpawnAbility = this.chanceToSpawnAbility + increment;
+	}
+	increaseChanceOfBrutalRound() {
+		const increment = c.chanceOfBrutalRoundIncrement;
+		if (this.chanceOfBrutalRound + increment >= 90) {
+			return;
+		}
+		this.chanceOfBrutalRound = this.chanceOfBrutalRound + increment;
+	}
+	increaseChanceOfAdditionalBrutal() {
+		const increment = 5;
+		if (this.chanceForAdditionalBrutal + increment >= 50) {
+			return;
+		}
+		this.chanceForAdditionalBrutal = this.chanceForAdditionalBrutal + increment;
 	}
 	getRandomMapR() {
 		var randomIndex = utils.getRandomInt(0, this.maps.length - 1);
@@ -909,12 +918,29 @@ class GameBoard {
 		var brutalRoundConfig = { brutal: false, brutalTypes: [] };
 		this.brutalRound = false;
 		var brutalChance = utils.getRandomInt(1, 100);
+
+		//console.log("Initial roll: " + brutalChance);
+		//Check for temp boost
+		for (var id in this.playerList) {
+			if (this.playerList[id].nearVictory == true) {
+				if (brutalChance - c.nearVictoryBrutalRoundBoost >= 0) {
+					//console.log("Roll mod: " + brutalChance + " -(" + c.nearVictoryBrutalRoundBoost + ")");
+					brutalChance -= c.nearVictoryBrutalRoundBoost;
+				}
+
+				break;
+			}
+		}
+		//console.log("Current roll: " + brutalChance);
+		//console.log("Chance for brutal round: " + this.chanceOfBrutalRound);
+		//No brutal round
 		if (brutalChance > this.chanceOfBrutalRound) {
 			return brutalRoundConfig;
 		}
+
+
 		this.brutalRound = true;
 		brutalRoundConfig.brutal = true;
-
 		//Find only active brutal types
 		var activeBrutalTypes = [];
 
@@ -925,7 +951,7 @@ class GameBoard {
 		}
 
 		if (activeBrutalTypes.length == 0) {
-			console.log("Brutal round was engaged, however no brutal types are active in the config file");
+			//console.log("Brutal round was engaged, however no brutal types are active in the config file");
 			this.brutalRound = false;
 			brutalRoundConfig = { brutal: false, brutalTypes: [] };
 			return brutalRoundConfig;
@@ -939,7 +965,9 @@ class GameBoard {
 		for (var i = 0; i < activeBrutalTypes.length; i++) {
 			//Roll for next Brutal
 			var nextBrutalChance = utils.getRandomInt(1, 100);
-			if (nextBrutalChance > c.changeForAdditionalBrutal) {
+			//console.log("Roll for additional brutal: " + nextBrutalChance);
+			//console.log("Chance for " + this.chanceForAdditionalBrutal);
+			if (nextBrutalChance > this.chanceForAdditionalBrutal) {
 				return brutalRoundConfig;
 			}
 			brutalRoundConfig.brutalTypes.push(activeBrutalTypes[i]);
@@ -1276,6 +1304,7 @@ class Player extends Circle {
 		this.reachedGoal = false;
 		this.timeReached = null;
 		this.notches = 0;
+		this.nearVictory = false;
 
 		//Movement
 		this.moveForward = false;
@@ -1485,14 +1514,6 @@ class Player extends Circle {
 				this.acel = object.acel;
 				this.brakeCoeff = object.brakeCoeff;
 				this.dragCoeff = object.dragCoeff;
-
-				/*
-				if (this.getSpeedBonus() < 0) {
-					this.acel = 1;
-					console.log(this.currentSpeedBonus, this.acel, this.brakeCoeff, this.dragCoeff);
-				}
-				*/
-
 				return;
 			}
 			if (object.id == c.tileMap.goal.id) {
@@ -1557,6 +1578,7 @@ class Player extends Circle {
 	addNotch(notchesToWin) {
 		if (this.notches + 1 >= notchesToWin) {
 			this.notches = notchesToWin;
+			this.nearVictory = true;
 			return;
 		}
 		this.notches += 1;
@@ -1565,10 +1587,12 @@ class Player extends Circle {
 		this.alive = false;
 		this.ability = null;
 		if (this.notches > 0) {
+			this.nearVictory = false;
 			this.notches -= 1;
 		}
 		messenger.messageRoomBySig(this.roomSig, "playerDied", this.id);
 	}
+	//Every round reset
 	reset(currentState) {
 		this.alive = true;
 		this.enabled = true;
