@@ -84,22 +84,38 @@ exports.submitPullRequest = async function (map) {
             return returnToClient;
         }
 
+        var path = 'client/maps/' + mapName + '.json';
+        var shaOfFileAnswer = null;
+        var insertion = false;
+        try {
+            var shaOfFileAnswer = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}', {
+                owner,
+                repo,
+                path
+            });
+        } catch (e) {
+            if (e.message == 'Not Found') {
+                insertion = true;
+            }
+        }
+
+        var shaToUse = head.object.sha;
+        if (shaOfFileAnswer != null && insertion == false) {
+            shaToUse = shaOfFileAnswer.data.sha
+        }
         var response = await octokit.request('POST /repos/{owner}/{repo}/git/refs', {
             owner,
             repo,
             ref: "refs/heads/" + branchName,
             sha: head.object.sha,
         })
-        var path = 'client/maps/' + mapName + '.json';
-        var shaOfFileAnswer = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}', {
-            owner,
-            repo,
-            path
-        });
 
         var bufferObj = Buffer.from(JSON.stringify(map, null, 2), 'utf8');
         var base64String = bufferObj.toString("base64");
-        var title = 'Submission of update/insert of ' + map.name + "/" + map.author + " from " + email;
+        var title = 'INSERT - ' + map.name + "/" + map.author + " from " + email;
+        if (insertion == false) {
+            title = 'UPDATE - ' + map.name + "/" + map.author + " from " + email;
+        }
         var answer = await octokit.request('PUT /repos/{owner}/{repo}/contents/{path}', {
             owner,
             repo,
@@ -110,7 +126,7 @@ exports.submitPullRequest = async function (map) {
                 email: email,
             },
             branch: branchName,
-            sha: shaOfFileAnswer.data.sha,
+            sha: shaToUse,
             content: base64String,
         })
         var pr = await octokit.request('POST /repos/{owner}/{repo}/pulls', {
