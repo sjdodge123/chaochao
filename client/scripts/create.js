@@ -12,6 +12,7 @@ var server,
     brushID,
     config,
     brushColor = "black",
+    patterns = {},
     currentCell = null,
     newWidth = 0,
     newHeight = 0,
@@ -20,6 +21,27 @@ var server,
     map = { x: 75, y: 0, width: world.width, height: world.height },
     canvasWindow = document.getElementById("canvasWindow"),
     createContext;
+
+var scale = 0.035;
+//TileTextures
+var lava = new Image(256, 256);
+lava.src = "../assets/img/lava.png";
+var grass = new Image(256, 256);
+grass.src = "../assets/img/grass.png";
+grass.scale = 0.5;
+var dirt = new Image(256, 256);
+dirt.src = "../assets/img/dirt.png";
+dirt.scale = 0.25;
+var ice = new Image(256, 256);
+ice.src = "../assets/img/ice.png";
+ice.scale = 0.75;
+var sand = new Image(256, 256)
+sand.src = "../assets/img/sand.png";
+sand.scale = 0.25;
+var random = new Image(576, 512);
+random.src = "../assets/img/question-solid.svg";
+var bombIcon = new Image(576, 512);
+bombIcon.src = "../assets/img/bomb.svg";
 
 var then = Date.now(),
     dt;
@@ -40,6 +62,7 @@ function clientConnect() {
     server.on("config", function (c) {
         config = c;
         gameRunning = true;
+        loadPatterns();
         init();
     });
 
@@ -86,6 +109,52 @@ function clientConnect() {
     return server;
 }
 
+function loadPatterns() {
+
+    //Tiles
+    patterns[config.tileMap.lava.id] = makeSeamlessPattern(lava);
+    patterns[config.tileMap.ice.id] = makeSeamlessPattern(ice);
+    patterns[config.tileMap.fast.id] = makeSeamlessPattern(grass);
+    patterns[config.tileMap.normal.id] = makeSeamlessPattern(dirt);
+    patterns[config.tileMap.slow.id] = makeSeamlessPattern(sand);
+    patterns[config.tileMap.random.id] = makePattern(random, config.tileMap.random.color);
+    patterns[config.tileMap.ability.id] = makePattern(bombIcon, makeSeamlessPattern(dirt));
+
+    brushColor = patterns[config.tileMap.normal.id];
+}
+function makePattern(image, color) {
+    const canvasPadding = 3;
+    const canvasPattern = document.createElement("canvas");
+    const ctxPattern = canvasPattern.getContext("2d");
+
+    var iconWidth = image.width * scale;
+    var iconHeight = image.height * scale;
+    canvasPattern.width = iconWidth + canvasPadding;
+    canvasPattern.height = iconHeight + canvasPadding;
+    ctxPattern.beginPath();
+    ctxPattern.fillStyle = color;
+    ctxPattern.rect(0, 0, canvasPattern.width, canvasPattern.height);
+    ctxPattern.fill();
+
+    ctxPattern.drawImage(image, canvasPadding / 2, canvasPadding / 2, iconWidth, iconHeight);
+    return createContext.createPattern(canvasPattern, 'repeat');
+}
+function makeSeamlessPattern(image) {
+    const canvasPattern = document.createElement("canvas");
+    const ctxPattern = canvasPattern.getContext("2d");
+
+    var iconWidth = image.width;
+    var iconHeight = image.height;
+    if (image.scale != null) {
+        iconWidth = image.width * image.scale;
+        iconHeight = image.height * image.scale;
+    }
+    canvasPattern.width = iconWidth;
+    canvasPattern.height = iconHeight;
+    ctxPattern.drawImage(image, 0, 0, iconWidth, iconHeight);
+    return createContext.createPattern(canvasPattern, 'repeat');
+}
+
 
 function setupPage() {
     $("#createNew").on("click", function () {
@@ -103,37 +172,37 @@ function setupPage() {
     });
     $("#slowTileButton").on("click", function () {
         brushID = config.tileMap.slow.id;
-        brushColor = config.tileMap.slow.color;
+        brushColor = patterns[config.tileMap.slow.id];
         return false;
     });
     $("#normalTileButton").on("click", function () {
         brushID = config.tileMap.normal.id;
-        brushColor = config.tileMap.normal.color;
+        brushColor = patterns[config.tileMap.normal.id];
         return false;
     });
     $("#fastTileButton").on("click", function () {
         brushID = config.tileMap.fast.id;
-        brushColor = config.tileMap.fast.color;
+        brushColor = patterns[config.tileMap.fast.id];
         return false;
     });
     $("#lavaTileButton").on("click", function () {
         brushID = config.tileMap.lava.id;
-        brushColor = config.tileMap.lava.color;
+        brushColor = patterns[config.tileMap.lava.id];
         return false;
     });
     $("#iceTileButton").on("click", function () {
         brushID = config.tileMap.ice.id;
-        brushColor = config.tileMap.ice.color;
+        brushColor = patterns[config.tileMap.ice.id];
         return false;
     });
     $("#abilityTileButton").on("click", function () {
         brushID = config.tileMap.ability.id;
-        brushColor = config.tileMap.ability.color;
+        brushColor = patterns[config.tileMap.ability.id];
         return false;
     });
     $("#randomTileButton").on("click", function () {
         brushID = config.tileMap.random.id;
-        brushColor = config.tileMap.random.color;
+        brushColor = patterns[config.tileMap.random.id];
         return false;
     });
     $("#goalTileButton").on("click", function () {
@@ -416,6 +485,10 @@ function renderCell(cell) {
         createContext.lineTo(v.x, v.y);
     }
     var color = locateColor(cell.id);
+    if (patterns[cell.id] != null) {
+        color = patterns[cell.id];
+    }
+
 
     if (cell.site.voronoiId == currentCell) {
         createContext.fillStyle = brushColor;
@@ -517,7 +590,7 @@ function locateColor(id) {
 }
 function locateId(color) {
     for (var type in config.tileMap) {
-        if (color == config.tileMap[type].color) {
+        if (color == config.tileMap[type].color || color == patterns[config.tileMap[type].id]) {
             return config.tileMap[type].id;
         }
     }

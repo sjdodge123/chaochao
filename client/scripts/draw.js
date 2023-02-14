@@ -85,7 +85,6 @@ function loadPatterns() {
 }
 
 function makeSeamlessPattern(image) {
-
     const canvasPattern = document.createElement("canvas");
     const ctxPattern = canvasPattern.getContext("2d");
 
