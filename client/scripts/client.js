@@ -74,6 +74,7 @@ function clientConnect() {
 		applyRandomTiles(payload.randomTiles);
 		applyAbilites(payload.abilities);
 		applyBrutalMap(payload.brutalRoundConfig);
+		clearInfection();
 	});
 
 	server.on("maplisting", function (mapnames) {
@@ -100,6 +101,12 @@ function clientConnect() {
 		playerList[id].alive = false;
 		playerList[id].deathMessage = '💀';
 		createDownRankSymbol(id);
+	});
+	server.on("playerInfected", function (id) {
+		playerList[id].alive = true;
+		playerList[id].deathMessage = null;
+		playerList[id].infected = true;
+		playSound(newZombie);
 	});
 	server.on("broadCastEmoji", function (payload) {
 		playerList[payload.ownerId].chatMessage = payload.emoji;
@@ -172,15 +179,26 @@ function clientConnect() {
 	});
 
 	server.on("punch", function (packet) {
-		spawnPunch(packet);
-		playSound(meleeSound);
+		var punch = spawnPunch(packet);
+		if (playerList[punch.ownerId].infected) {
+			playSound(zombieSwing);
+		}
+		else {
+			playSound(meleeSound);
+		}
+
 	});
 	server.on("spawnBomb", function (owner) {
 		spawnBomb(owner);
 		playSound(bombShot);
 	});
-	server.on("playerPunched", function (id) {
-		playSound(meleeHitSound);
+	server.on("playerPunched", function (owner) {
+		if (playerList[owner].infected) {
+			playSound(zombieHit);
+		}
+		else {
+			playSound(meleeHitSound);
+		}
 	});
 	server.on("terminatePunch", function (id) {
 		terminatePunch(id);

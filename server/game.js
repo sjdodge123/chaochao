@@ -228,6 +228,13 @@ class Game {
 		for (var player in this.playerList) {
 			if (!this.playerList[player].alive && !this.playerList[player].reachedGoal) {
 				playersConcluded++;
+				if (this.gameBoard.checkForActiveBrutal(c.brutalRounds.infection.id)) {
+					this.playerList[player].infect();
+				}
+				continue;
+			}
+			if (this.playerList[player].infected) {
+				playersConcluded++;
 				continue;
 			}
 			if (this.playerList[player].reachedGoal == true) {
@@ -642,6 +649,7 @@ class GameBoard {
 			}
 		}
 	}
+
 	startLobby() {
 		this.lobbyStartButton = new LobbyStartButton(this.world.center.x, this.world.center.y, 0, "red");
 		messenger.messageRoomBySig(this.roomSig, "startLobby", compressor.sendLobbyStart(this.lobbyStartButton));
@@ -794,7 +802,6 @@ class GameBoard {
 					this.applyBrutalLightningRound();
 					break;
 				}
-
 			}
 		}
 
@@ -1305,6 +1312,7 @@ class Player extends Circle {
 		this.timeReached = null;
 		this.notches = 0;
 		this.nearVictory = false;
+		this.infected = false;
 
 		//Movement
 		this.moveForward = false;
@@ -1339,7 +1347,7 @@ class Player extends Circle {
 	}
 	update(currentState, dt) {
 		this.checkForSleep(currentState);
-		if (!this.alive) {
+		if (this.alive == false) {
 			return;
 		}
 		this.dt = dt;
@@ -1362,7 +1370,11 @@ class Player extends Circle {
 				return;
 			}
 			this.punchedTimer = Date.now();
-			this.punch = new Punch(this.x, this.y, c.punchRadius, this.color, this.id, this.roomSig);
+			var punchRadius = c.punchRadius;
+			if (this.infected == true) {
+				punchRadius = c.brutalRounds.infection.punchRadius;
+			}
+			this.punch = new Punch(this.x, this.y, punchRadius, this.color, this.id, this.roomSig, this.infected);
 			messenger.messageRoomBySig(this.roomSig, "punch", compressor.sendPunch(this.punch));
 		}
 	}
@@ -1397,8 +1409,6 @@ class Player extends Circle {
 		return delta;
 	}
 	removeSpeed(newValue) {
-
-
 		//Subtract from Speedbonus cant go below 0
 		var delta = 0;
 		if (this.currentSpeedBonus - newValue < 0) {
@@ -1466,20 +1476,38 @@ class Player extends Circle {
 		this.kickTimer = Date.now();
 
 	}
-	handleHit(object) {
-		/*
-		if(object.isWall){
-			messenger.messageUser(this.id,"collideWithObject");
-			_engine.preventMovement(this,object,this.dt);
+	resurrect(packet) {
+		packet.enabled = true;
+		packet.alive = true;
+		messenger.messageRoomBySig(packet.roomSig, "playerInfected", packet.id);
+	}
+	infect() {
+		if (this.infected == true) {
+			return;
 		}
-		*/
+		this.infected = true;
+		var infectTimer = utils.getRandomInt(1000, 4000);
+		if (this.alive == true) {
+			setTimeout(this.killPlayer, infectTimer, this);
+		}
+		setTimeout(this.resurrect, infectTimer + 1500, this);
+	}
+	applyInfectedMods(object) {
+		this.acel = object.acel * c.brutalRounds.infection.acelModifer;
+		this.dragCoeff = object.dragCoeff * c.brutalRounds.infection.dragModifer;
+		this.brakeCoeff = object.brakeCoeff;
+	}
+	handleHit(object) {
 		if (object.isLobbyStart) {
 			this.hittingLobbyButton = true;
 			return;
 		}
 		if (object.isPunch && object.ownerId != this.id) {
+			if (object.ownerInfected) {
+				this.infect();
+			}
 			_engine.punchPlayer(this, object);
-			messenger.messageRoomBySig(this.roomSig, "playerPunched", this.id);
+			messenger.messageRoomBySig(this.roomSig, "playerPunched", object.ownerId);
 			return;
 		}
 		if (object.isGate) {
@@ -1489,24 +1517,42 @@ class Player extends Circle {
 
 		if (object.isMapCell) {
 			if (object.id == c.tileMap.normal.id) {
+				if (this.infected == true) {
+					this.applyInfectedMods(object);
+					return;
+				}
 				this.acel = object.acel;
 				this.brakeCoeff = object.brakeCoeff;
 				this.dragCoeff = object.dragCoeff;
 				return;
 			}
 			if (object.id == c.tileMap.slow.id) {
+				if (this.infected == true) {
+					this.applyInfectedMods(object);
+					return;
+				}
 				this.acel = object.acel;
 				this.dragCoeff = object.dragCoeff;
 				this.brakeCoeff = object.brakeCoeff;
 				return;
 			}
 			if (object.id == c.tileMap.fast.id) {
+				if (this.infected == true) {
+					this.applyInfectedMods(object);
+					return;
+				}
 				this.acel = object.acel;
 				this.dragCoeff = object.dragCoeff;
 				this.brakeCoeff = object.brakeCoeff;
 				return;
 			}
 			if (object.id == c.tileMap.lava.id) {
+				if (this.infected == true) {
+					this.acel = object.acel;
+					this.dragCoeff = object.dragCoeff;
+					this.brakeCoeff = object.brakeCoeff;
+					return;
+				}
 				this.killPlayer();
 				return;
 			}
@@ -1517,6 +1563,12 @@ class Player extends Circle {
 				return;
 			}
 			if (object.id == c.tileMap.goal.id) {
+				if (this.infected == true) {
+					this.acel = object.acel;
+					this.brakeCoeff = object.brakeCoeff;
+					this.dragCoeff = object.dragCoeff;
+					return;
+				}
 				this.alive = false;
 				this.reachedGoal = true;
 				this.timeReached = Date.now();
@@ -1528,7 +1580,7 @@ class Player extends Circle {
 				return;
 			}
 			if (object.id == c.tileMap.abilities.blindfold.id) {
-				if (this.ability != null) {
+				if (this.ability != null || this.infected) {
 					return;
 				}
 				this.ability = new Blindfold(this.id, this.roomSig);
@@ -1537,7 +1589,7 @@ class Player extends Circle {
 				return;
 			}
 			if (object.id == c.tileMap.abilities.swap.id) {
-				if (this.ability != null) {
+				if (this.ability != null || this.infected) {
 					return;
 				}
 				this.ability = new Swap(this.id, this.roomSig);
@@ -1546,7 +1598,7 @@ class Player extends Circle {
 				return;
 			}
 			if (object.id == c.tileMap.abilities.bomb.id) {
-				if (this.ability != null) {
+				if (this.ability != null || this.infected) {
 					return;
 				}
 				this.ability = new Bomb(this.id, this.roomSig);
@@ -1555,7 +1607,7 @@ class Player extends Circle {
 				return;
 			}
 			if (object.id == c.tileMap.abilities.speedBuff.id) {
-				if (this.ability != null) {
+				if (this.ability != null || this.infected) {
 					return;
 				}
 				this.ability = new SpeedBuff(this.id, this.roomSig);
@@ -1564,7 +1616,7 @@ class Player extends Circle {
 				return;
 			}
 			if (object.id == c.tileMap.abilities.speedDebuff.id) {
-				if (this.ability != null) {
+				if (this.ability != null || this.infected) {
 					return;
 				}
 				this.ability = new SpeedDebuff(this.id, this.roomSig);
@@ -1583,19 +1635,37 @@ class Player extends Circle {
 		}
 		this.notches += 1;
 	}
-	killPlayer() {
-		this.alive = false;
-		this.ability = null;
-		if (this.notches > 0) {
-			this.nearVictory = false;
-			this.notches -= 1;
+	killPlayer(packet) {
+		if (packet != null) {
+			packet.kill(packet);
+			return;
 		}
-		messenger.messageRoomBySig(this.roomSig, "playerDied", this.id);
+		this.kill(this);
+	}
+	kill(object) {
+		if (object.notches > 0) {
+			object.nearVictory = false;
+			object.notches -= 1;
+		}
+		object.enabled = false;
+		object.alive = false;
+		object.ability = null;
+		object.newX = this.x;
+		object.newY = this.y;
+		object.velX = 0;
+		object.velY = 0;
+		object.moveForward = false;
+		object.moveBackward = false;
+		object.turnLeft = false;
+		object.turnRight = false;
+		object.attack = false;
+		messenger.messageRoomBySig(object.roomSig, "playerDied", object.id);
 	}
 	//Every round reset
 	reset(currentState) {
 		this.alive = true;
 		this.enabled = true;
+		this.infected = false;
 		this.x = this.initialLoc.x;
 		this.y = this.initialLoc.y;
 		this.newX = this.x;
@@ -1624,11 +1694,12 @@ class Player extends Circle {
 }
 
 class Punch extends Circle {
-	constructor(x, y, radius, color, ownerId, roomSig) {
+	constructor(x, y, radius, color, ownerId, roomSig, infected) {
 		super(x, y, radius, color);
 		this.ownerId = ownerId;
 		this.roomSig = roomSig;
 		this.isPunch = true;
+		this.ownerInfected = infected;
 	}
 	handleHit(object) {
 

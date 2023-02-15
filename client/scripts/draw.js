@@ -3,6 +3,7 @@ var spreadScale = 0.15;
 var bombScale = 0.025;
 
 var patterns = {};
+var brutalPatterns = {};
 var brutalRoundImages = {};
 var exitIcon = new Image(576, 512);
 exitIcon.src = "../assets/img/times-circle.svg";
@@ -38,10 +39,15 @@ var volcanoIcon = new Image(576, 512);
 volcanoIcon.src = "../assets/img/volcano-solid.svg";
 var bombImage = new Image();
 bombImage.src = "../assets/img/bomb.svg";
+var infectionIcon = new Image(576, 512);
+infectionIcon.src = "../assets/img/skull-crossbones-solid.svg";
 
 //TileTextures
 var lava = new Image(256, 256);
 lava.src = "../assets/img/lava.png";
+var poison = new Image(128, 128);
+poison.src = "../assets/img/poison.jpg";
+poison.scale = 0.5;
 var grass = new Image(256, 256);
 grass.src = "../assets/img/grass.png";
 grass.scale = 0.5;
@@ -60,18 +66,25 @@ var playerAnimating = null;
 
 function loadPatterns() {
     //Abilities
-    patterns[config.tileMap.abilities.blindfold.id] = makePattern(blindfoldIcon);
-    patterns[config.tileMap.abilities.swap.id] = makePattern(transferIcon);
-    patterns[config.tileMap.abilities.bomb.id] = makePattern(bombIcon);
-    patterns[config.tileMap.abilities.speedBuff.id] = makePattern(windIcon);
-    patterns[config.tileMap.abilities.speedDebuff.id] = makePattern(hourglassIcon);
+    patterns[config.tileMap.abilities.blindfold.id] = makePattern(blindfoldIcon, makeSeamlessPattern(dirt));
+    patterns[config.tileMap.abilities.swap.id] = makePattern(transferIcon, makeSeamlessPattern(dirt));
+    patterns[config.tileMap.abilities.bomb.id] = makePattern(bombIcon, makeSeamlessPattern(dirt));
+    patterns[config.tileMap.abilities.speedBuff.id] = makePattern(windIcon, makeSeamlessPattern(dirt));
+    patterns[config.tileMap.abilities.speedDebuff.id] = makePattern(hourglassIcon, makeSeamlessPattern(dirt));
+    patterns[config.brutalRounds.infection.id] = makePattern(infectionIcon, "green");
 
     //Tiles
-    patterns[config.tileMap.lava.id] = makeSeamlessPattern(lava);
+    if (infection == true) {
+        patterns[config.tileMap.lava.id] = makeSeamlessPattern(poison);
+    } else {
+        patterns[config.tileMap.lava.id] = makeSeamlessPattern(lava);
+    }
     patterns[config.tileMap.ice.id] = makeSeamlessPattern(ice);
     patterns[config.tileMap.fast.id] = makeSeamlessPattern(grass);
     patterns[config.tileMap.normal.id] = makeSeamlessPattern(dirt);
     patterns[config.tileMap.slow.id] = makeSeamlessPattern(sand);
+
+
 
     //Asociate images with their brutal round config id
     brutalRoundImages[config.brutalRounds.bomb.id] = bombIcon;
@@ -82,6 +95,11 @@ function loadPatterns() {
     brutalRoundImages[config.brutalRounds.fiesta.id] = fiestaIcon;
     brutalRoundImages[config.brutalRounds.golden.id] = moneyIcon;
     brutalRoundImages[config.brutalRounds.volcano.id] = volcanoIcon;
+    brutalRoundImages[config.brutalRounds.infection.id] = infectionIcon;
+
+    if (brutalRoundConfig != null && brutalPatterns[brutalRoundConfig.brutalTypes.toString()] == null) {
+        brutalPatterns[brutalRoundConfig.brutalTypes.toString()] = makeComplexPattern(brutalRoundConfig.brutalTypes);
+    }
 }
 
 function makeSeamlessPattern(image) {
@@ -112,7 +130,7 @@ function makeSpreadPattern(image) {
     return gameContext.createPattern(canvasPattern, 'repeat');
 }
 
-function makePattern(image) {
+function makePattern(image, underPattern) {
     const canvasPadding = 3;
     const canvasPattern = document.createElement("canvas");
     const ctxPattern = canvasPattern.getContext("2d");
@@ -121,7 +139,6 @@ function makePattern(image) {
     var iconHeight = image.height * scale;
     canvasPattern.width = iconWidth + canvasPadding;
     canvasPattern.height = iconHeight + canvasPadding;
-    var underPattern = makeSeamlessPattern(dirt);
     ctxPattern.beginPath();
     ctxPattern.fillStyle = underPattern;
     ctxPattern.rect(0, 0, canvasPattern.width, canvasPattern.height);
@@ -250,10 +267,15 @@ function drawPunches() {
 }
 
 function drawPunch(punch) {
+    var punchSize = config.punchRadius;
+    var player = playerList[punch.ownerId];
+    if (player.infected == true) {
+        punchSize = config.brutalRounds.infection.punchRadius;
+    }
     gameContext.save();
     gameContext.beginPath();
     gameContext.fillStyle = punch.color;
-    gameContext.arc(punch.x, punch.y, config.punchRadius, 0, 2 * Math.PI);
+    gameContext.arc(punch.x, punch.y, punchSize, 0, 2 * Math.PI);
     gameContext.fill();
     gameContext.restore();
 
@@ -261,7 +283,7 @@ function drawPunch(punch) {
     gameContext.beginPath();
     gameContext.lineWidth = 1;
     gameContext.strokeStyle = "black";
-    gameContext.arc(punch.x, punch.y, config.punchRadius, 0, 2 * Math.PI);
+    gameContext.arc(punch.x, punch.y, punchSize, 0, 2 * Math.PI);
     gameContext.stroke();
     gameContext.restore();
 }
@@ -330,8 +352,19 @@ function drawPlayer(player) {
             gameContext.lineWidth = 3;
             gameContext.strokeStyle = "black";
         }
-
         gameContext.fill();
+        gameContext.stroke();
+        gameContext.restore();
+    }
+
+    if (player.infected == true) {
+        gameContext.save();
+        gameContext.beginPath();
+        gameContext.lineWidth = 1;
+        gameContext.arc(player.x, player.y, config.brutalRounds.infection.radius, 0, 2 * Math.PI);
+        gameContext.fillStyle = patterns[config.brutalRounds.infection.id];
+        gameContext.fill();
+        gameContext.strokeStyle = "green";
         gameContext.stroke();
         gameContext.restore();
     }
@@ -348,7 +381,8 @@ function drawPlayer(player) {
     gameContext.stroke();
     gameContext.restore();
 
-    ;
+
+
     if (player.ability != null) {
         drawAbilityAimer(player)
     }
@@ -471,6 +505,7 @@ function drawTrail(player) {
         gameContext.shadowBlur = 3;
         gameContext.shadowColor = "black";
         gameContext.strokeStyle = player.color;
+
         if (player.notches == gameLength) {
             gameContext.lineWidth = 6;
             gameContext.setLineDash([20, 3, 3, 3, 3, 3, 3, 3]);
@@ -551,11 +586,7 @@ function drawGate() {
         if (brutalRound == false) {
             gameContext.fillStyle = "grey";
         } else {
-            if (patterns[brutalRoundConfig.brutalTypes.toString()] == null) {
-                patterns[brutalRoundConfig.brutalTypes.toString()] = makeComplexPattern(brutalRoundConfig.brutalTypes);
-            } else {
-                gameContext.fillStyle = patterns[brutalRoundConfig.brutalTypes.toString()];
-            }
+            gameContext.fillStyle = brutalPatterns[brutalRoundConfig.brutalTypes.toString()];
         }
         gameContext.fill();
         gameContext.restore();
@@ -864,7 +895,7 @@ function drawNextMap() {
         gameContext.fillText("Next map", previewWindow.x, previewWindow.y - 35);
         gameContext.font = "20px Arial";
         gameContext.fillText(nextMapPreview.name, previewWindow.x, previewWindow.y - 5);
-        gameContext.fillText(nextMapPreview.author, previewWindow.x + 100, previewWindow.y - 5);
+        gameContext.fillText(nextMapPreview.author, previewWindow.x + 300, previewWindow.y - 5);
         gameContext.drawImage(nextMapThumbnail, previewWindow.x, previewWindow.y, world.width / 3, world.height / 3);
         gameContext.fill();
         gameContext.restore();

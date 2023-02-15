@@ -32,6 +32,10 @@ var volcanoErupt = new Audio("./assets/sounds/volcano-erupt.mp3");
 var speedBuff = new Audio("./assets/sounds/hard_wind.mp3");
 var speedDebuff = new Audio("./assets/sounds/speed_downgrade.mp3");
 
+var newZombie = new Audio("./assets/sounds/newzombie.mp3");
+var zombieHit = new Audio("./assets/sounds/zombiehit.mp3");
+var zombieSwing = new Audio("./assets/sounds/zombieswing.mp3");
+
 var nearVictorySound = new Audio("./assets/sounds/rise.mp3");
 var fallFromVictorySound = new Audio("./assets/sounds/reverserise.mp3");
 
@@ -81,6 +85,9 @@ bombExplosion.volume = .2 * masterVolume;
 playerFinished.volume = .3 * masterVolume;
 blindSound.volume = .4 * masterVolume;
 teleportSound.volume = .05 * masterVolume;
+newZombie.volume = .55 * masterVolume;
+zombieHit.volume = .25 * masterVolume;
+zombieSwing.volume = .35 * masterVolume;
 
 lobbyMusic.volume = .05 * masterVolume * musicVolume;
 lobbyMusic.loop = true;

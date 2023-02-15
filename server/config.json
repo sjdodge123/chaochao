@@ -46,6 +46,9 @@
         },
         "lava": {
             "id": 3,
+            "brakeCoeff": 0.235,
+            "dragCoeff": 0.15,
+            "acel": 350,
             "canBeRandomed": true,
             "color": "#cf1020"
         },
@@ -64,6 +67,9 @@
         },
         "goal": {
             "id": 6,
+            "brakeCoeff": 0.235,
+            "dragCoeff": 0.10,
+            "acel": 450,
             "canBeRandomed": false,
             "color": "#FFD700"
         },
@@ -158,6 +164,15 @@
             "collapseSpeed": 1,
             "active": true,
             "title": "Volcano"
+        },
+        "infection": {
+            "id": 1008,
+            "radius": 15,
+            "dragModifer": 1.3,
+            "punchRadius": 14,
+            "acelModifer": 1.1,
+            "active": true,
+            "title": "Infection"
         }
     },
     "lobbyWaitTime": 5,

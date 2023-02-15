@@ -7,6 +7,7 @@ var mousex,
 	gameID,
 	currentMap,
 	punchList,
+	infection = false,
 	projectileList,
 	playerList,
 	blindfold,
@@ -47,6 +48,9 @@ function resetTrails() {
 function updateTrails() {
 	for (var id in playerList) {
 		var player = playerList[id];
+		if (player.alive == false || player.infected == true) {
+			continue;
+		}
 		player.trail.update({ x: player.x, y: player.y });
 	}
 }
@@ -258,8 +262,17 @@ function applyRandomTiles(randomTiles) {
 		}
 	}
 }
+function clearInfection() {
+	for (var id in playerList) {
+		if (playerList[id].infected) {
+			playerList[id].infected = false;
+		}
+	}
+}
+
 function applyBrutalMap(brconfig) {
 	if (brconfig.brutal == false) {
+		infection = false;
 		brutalRound = false;
 		brutalRoundConfig = null;
 		return;
@@ -267,6 +280,12 @@ function applyBrutalMap(brconfig) {
 	brutalRound = true;
 	brutalRoundConfig = brconfig;
 	playSound(brutalRoundSound);
+	if (brutalRoundConfig.brutalTypes.indexOf(config.brutalRounds.infection.id) != -1) {
+		infection = true;
+	} else {
+		infection = false;
+	}
+	loadPatterns();
 }
 
 function spawnLobbyStartButton(payload) {
@@ -295,6 +314,7 @@ function spawnPunch(payload) {
 	punch.y = payload[2];
 	punch.color = payload[3];
 	punchList[punch.ownerId] = punch;
+	return punch;
 }
 function spawnBomb(owner) {
 	var bomb = {};
@@ -336,6 +356,7 @@ function fullReset() {
 	nextMapPreview = null;
 	nextMapThumbnail = null;
 	brutalRound = false;
+	infection = false;
 	brutalRoundConfig = null;
 	for (var id in playerList) {
 		var player = playerList[id];

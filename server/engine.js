@@ -42,6 +42,9 @@ class Engine {
 	updatePlayers() {
 		for (var playerSig in this.playerList) {
 			var player = this.playerList[playerSig];
+			if (player.alive == false) {
+				continue;
+			}
 			var dirX = 0;
 			var dirY = 0;
 			var braking = false;
