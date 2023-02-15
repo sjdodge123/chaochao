@@ -1290,6 +1290,7 @@ class Player extends Circle {
 		this.color = color;
 		this.id = id;
 		this.roomSig = roomSig;
+		this.currentState = null;
 
 		//Sleep Variables
 		this.awake = true;
@@ -1346,6 +1347,7 @@ class Player extends Circle {
 		this.currentSpeedBonus = 0;
 	}
 	update(currentState, dt) {
+		this.currentState = currentState;
 		this.checkForSleep(currentState);
 		if (this.alive == false) {
 			return;
@@ -1477,6 +1479,10 @@ class Player extends Circle {
 
 	}
 	resurrect(packet) {
+		if (packet.currentState != c.stateMap.racing &&
+			packet.currentState != c.stateMap.collapsing) {
+			return;
+		}
 		packet.enabled = true;
 		packet.alive = true;
 		messenger.messageRoomBySig(packet.roomSig, "playerInfected", packet.id);
@@ -1511,7 +1517,7 @@ class Player extends Circle {
 			return;
 		}
 		if (object.isGate) {
-			this.killPlayer();
+			this.killSelf();
 			return;
 		}
 
@@ -1553,7 +1559,7 @@ class Player extends Circle {
 					this.brakeCoeff = object.brakeCoeff;
 					return;
 				}
-				this.killPlayer();
+				this.killSelf();
 				return;
 			}
 			if (object.id == c.tileMap.ice.id) {
@@ -1635,31 +1641,37 @@ class Player extends Circle {
 		}
 		this.notches += 1;
 	}
+	removeNotch() {
+		if (this.notches > 0) {
+			this.nearVictory = false;
+			this.notches -= 1;
+		}
+	}
 	killPlayer(packet) {
-		if (packet != null) {
-			packet.kill(packet);
+		if (packet.currentState != c.stateMap.racing &&
+			packet.currentState != c.stateMap.collapsing) {
 			return;
 		}
-		this.kill(this);
-	}
-	kill(object) {
-		if (object.notches > 0) {
-			object.nearVictory = false;
-			object.notches -= 1;
+		if (packet.alive == false) {
+			return;
 		}
-		object.enabled = false;
-		object.alive = false;
-		object.ability = null;
-		object.newX = this.x;
-		object.newY = this.y;
-		object.velX = 0;
-		object.velY = 0;
-		object.moveForward = false;
-		object.moveBackward = false;
-		object.turnLeft = false;
-		object.turnRight = false;
-		object.attack = false;
-		messenger.messageRoomBySig(object.roomSig, "playerDied", object.id);
+		packet.removeNotch();
+		packet.enabled = false;
+		packet.alive = false;
+		packet.ability = null;
+		packet.newX = this.x;
+		packet.newY = this.y;
+		packet.velX = 0;
+		packet.velY = 0;
+		packet.moveForward = false;
+		packet.moveBackward = false;
+		packet.turnLeft = false;
+		packet.turnRight = false;
+		packet.attack = false;
+		messenger.messageRoomBySig(packet.roomSig, "playerDied", packet.id);
+	}
+	killSelf() {
+		this.killPlayer(this);
 	}
 	//Every round reset
 	reset(currentState) {
