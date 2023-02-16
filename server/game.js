@@ -233,7 +233,7 @@ class Game {
 				}
 				continue;
 			}
-			if (this.playerList[player].infected) {
+			if (this.playerList[player].isZombie) {
 				playersConcluded++;
 				continue;
 			}
@@ -1314,6 +1314,7 @@ class Player extends Circle {
 		this.notches = 0;
 		this.nearVictory = false;
 		this.infected = false;
+		this.isZombie = false;
 
 		//Movement
 		this.moveForward = false;
@@ -1373,10 +1374,10 @@ class Player extends Circle {
 			}
 			this.punchedTimer = Date.now();
 			var punchRadius = c.punchRadius;
-			if (this.infected == true) {
+			if (this.isZombie == true) {
 				punchRadius = c.brutalRounds.infection.punchRadius;
 			}
-			this.punch = new Punch(this.x, this.y, punchRadius, this.color, this.id, this.roomSig, this.infected);
+			this.punch = new Punch(this.x, this.y, punchRadius, this.color, this.id, this.roomSig, this.isZombie);
 			messenger.messageRoomBySig(this.roomSig, "punch", compressor.sendPunch(this.punch));
 		}
 	}
@@ -1483,6 +1484,7 @@ class Player extends Circle {
 			packet.currentState != c.stateMap.collapsing) {
 			return;
 		}
+		packet.isZombie = true;
 		packet.enabled = true;
 		packet.alive = true;
 		messenger.messageRoomBySig(packet.roomSig, "playerInfected", packet.id);
@@ -1523,7 +1525,7 @@ class Player extends Circle {
 
 		if (object.isMapCell) {
 			if (object.id == c.tileMap.normal.id) {
-				if (this.infected == true) {
+				if (this.isZombie == true) {
 					this.applyInfectedMods(object);
 					return;
 				}
@@ -1533,7 +1535,7 @@ class Player extends Circle {
 				return;
 			}
 			if (object.id == c.tileMap.slow.id) {
-				if (this.infected == true) {
+				if (this.isZombie == true) {
 					this.applyInfectedMods(object);
 					return;
 				}
@@ -1543,7 +1545,7 @@ class Player extends Circle {
 				return;
 			}
 			if (object.id == c.tileMap.fast.id) {
-				if (this.infected == true) {
+				if (this.isZombie == true) {
 					this.applyInfectedMods(object);
 					return;
 				}
@@ -1553,7 +1555,7 @@ class Player extends Circle {
 				return;
 			}
 			if (object.id == c.tileMap.lava.id) {
-				if (this.infected == true) {
+				if (this.isZombie == true) {
 					this.acel = object.acel;
 					this.dragCoeff = object.dragCoeff;
 					this.brakeCoeff = object.brakeCoeff;
@@ -1569,7 +1571,7 @@ class Player extends Circle {
 				return;
 			}
 			if (object.id == c.tileMap.goal.id) {
-				if (this.infected == true) {
+				if (this.isZombie == true) {
 					this.acel = object.acel;
 					this.brakeCoeff = object.brakeCoeff;
 					this.dragCoeff = object.dragCoeff;
@@ -1586,7 +1588,7 @@ class Player extends Circle {
 				return;
 			}
 			if (object.id == c.tileMap.abilities.blindfold.id) {
-				if (this.ability != null || this.infected) {
+				if (this.ability != null || this.isZombie) {
 					return;
 				}
 				this.ability = new Blindfold(this.id, this.roomSig);
@@ -1595,7 +1597,7 @@ class Player extends Circle {
 				return;
 			}
 			if (object.id == c.tileMap.abilities.swap.id) {
-				if (this.ability != null || this.infected) {
+				if (this.ability != null || this.isZombie) {
 					return;
 				}
 				this.ability = new Swap(this.id, this.roomSig);
@@ -1604,7 +1606,7 @@ class Player extends Circle {
 				return;
 			}
 			if (object.id == c.tileMap.abilities.bomb.id) {
-				if (this.ability != null || this.infected) {
+				if (this.ability != null || this.isZombie) {
 					return;
 				}
 				this.ability = new Bomb(this.id, this.roomSig);
@@ -1613,7 +1615,7 @@ class Player extends Circle {
 				return;
 			}
 			if (object.id == c.tileMap.abilities.speedBuff.id) {
-				if (this.ability != null || this.infected) {
+				if (this.ability != null || this.isZombie) {
 					return;
 				}
 				this.ability = new SpeedBuff(this.id, this.roomSig);
@@ -1622,7 +1624,7 @@ class Player extends Circle {
 				return;
 			}
 			if (object.id == c.tileMap.abilities.speedDebuff.id) {
-				if (this.ability != null || this.infected) {
+				if (this.ability != null || this.isZombie) {
 					return;
 				}
 				this.ability = new SpeedDebuff(this.id, this.roomSig);
@@ -1659,8 +1661,8 @@ class Player extends Circle {
 		packet.enabled = false;
 		packet.alive = false;
 		packet.ability = null;
-		packet.newX = this.x;
-		packet.newY = this.y;
+		packet.newX = packet.x;
+		packet.newY = packet.y;
 		packet.velX = 0;
 		packet.velY = 0;
 		packet.moveForward = false;
@@ -1678,6 +1680,7 @@ class Player extends Circle {
 		this.alive = true;
 		this.enabled = true;
 		this.infected = false;
+		this.isZombie = false;
 		this.x = this.initialLoc.x;
 		this.y = this.initialLoc.y;
 		this.newX = this.x;
