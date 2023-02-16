@@ -50,7 +50,7 @@ function setMousePos(x, y) {
     mousex = x;
     mousey = y;
     if (playerList[myID] != null) {
-        playerList[myID].angle = angle(playerList[myID].x,playerList[myID].y,x,y);
+        playerList[myID].angle = angle(playerList[myID].x, playerList[myID].y, x, y);
         server.emit('mousemove', playerList[myID].angle);
     }
 }
@@ -68,7 +68,7 @@ function handleClick(event) {
             if (menuOpen) {
                 closeEmojiWindow();
             } else {
-                openEmojiWindow(mousex,mousey);
+                openEmojiWindow(mousex, mousey);
             }
 
             break;
@@ -121,15 +121,15 @@ function setupVirtualbuttons() {
     virtualButtonList = [];
     joystickMovement = new Joystick(0, 0, false);
     joystickCamera = new Joystick(0, 0, false);
-    attackButton = new Button(0, 0, 0, 0, 50,true);
-    exitButton = new Button(world.width - 50, 0, 0, 0, 12.5,false);
-    chatButton = new Button(50, 0, 0, 0, 12.5,false);
+    attackButton = new Button(0, 0, 0, 0, 50, true);
+    exitButton = new Button(world.width - 50, 0, 0, 0, 12.5, false);
+    chatButton = new Button(50, 0, 0, 0, 12.5, false);
 
     //var rect = gameCanvas.getBoundingClientRect();
     var leftRect = new VirtualButton(0, 85, world.width / 4, world.height, false);
     //var rightRect = new VirtualButton(0 + world.width - (world.width/4),50,world.width/4,world.height,false);
-    var upperLeftRect = new VirtualButton(0,10, world.width / 16, 50, false);
-    var upperRightRect = new VirtualButton(0 + world.width - (world.width / 16),10, world.width / 16, 50, false);
+    var upperLeftRect = new VirtualButton(0, 10, world.width / 16, 50, false);
+    var upperRightRect = new VirtualButton(0 + world.width - (world.width / 16), 10, world.width / 16, 50, false);
     var topRightRect = new VirtualButton(0 + world.width - (world.width / 4), 85, world.width / 4, world.height / 2, false);
     var bottomRightRect = new VirtualButton(0 + world.width - (world.width / 4), topRightRect.bottom, world.width / 4, world.height / 2, false);
     //var bottomCenterRect = new VirtualButton(leftRect.right,world.height - (world.height/4)-100,rightRect.left-leftRect.right,200,false);
@@ -137,8 +137,8 @@ function setupVirtualbuttons() {
     virtualButtonList.push({ button: joystickMovement, bound: leftRect });
     virtualButtonList.push({ button: joystickCamera, bound: topRightRect });
     virtualButtonList.push({ button: attackButton, bound: bottomRightRect });
-    virtualButtonList.push({ button: exitButton, bound:upperRightRect});
-    virtualButtonList.push({ button: chatButton, bound:upperLeftRect});
+    virtualButtonList.push({ button: exitButton, bound: upperRightRect });
+    virtualButtonList.push({ button: chatButton, bound: upperLeftRect });
 
 
     for (var i = 0; i < virtualButtonList.length; i++) {
@@ -163,7 +163,7 @@ function onTouchStart(evt) {
                 button.onDown(touchX, touchY);
 
                 if (button == attackButton) {
-                    if(button.pressed){
+                    if (button.pressed) {
                         attack = true;
                         server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
                     }
@@ -175,7 +175,7 @@ function onTouchStart(evt) {
                     if (menuOpen) {
                         closeEmojiWindow();
                     } else {
-                        openEmojiWindow(rect.width/2-50,rect.height/2-50);
+                        openEmojiWindow(rect.width / 2 - 50, rect.height / 2 - 50);
                     }
                 }
             }
@@ -213,26 +213,26 @@ function onTouchMove(evt) {
         for (var j = 0; j < virtualButtonList.length; j++) {
             var button = virtualButtonList[j].button;
             if (touch.identifier == button.touchIdx) {
-                button.onMove(touchX,touchY);
-                if(button == joystickCamera){
-                    if(playerList[myID] != null){
-                        playerList[myID].angle = angle(joystickCamera.baseX,joystickCamera.baseY,joystickCamera.stickX,joystickCamera.stickY);
+                button.onMove(touchX, touchY);
+                if (button == joystickCamera) {
+                    if (playerList[myID] != null) {
+                        playerList[myID].angle = angle(joystickCamera.baseX, joystickCamera.baseY, joystickCamera.stickX, joystickCamera.stickY);
                         server.emit('mousemove', playerList[myID].angle);
                     }
                     continue;
                 }
-                if(button == joystickMovement){
+                if (button == joystickMovement) {
                     touchMovement();
                     continue;
                 }
             }
         }
-        
+
     }
 }
 
 const isTouchDevice = () => {
-    return window.matchMedia("(pointer: coarse)").matches
+    return window.matchMedia('(hover: none)').matches
 }
 
 function touchMovement() {
@@ -252,7 +252,7 @@ function cancelMovement(evt) {
     server.emit('movement', { turnLeft: false, moveForward: false, turnRight: false, moveBackward: false, attack: false });
 }
 
-function openEmojiWindow(x,y) {
+function openEmojiWindow(x, y) {
     if (menuOpen == false) {
         emojiMenu.style.transform = "scale(2)";
         menuOpen = true;
@@ -277,16 +277,16 @@ function moveEmojiMenu(x, y) {
     emojiMenu.style.top = y + "px";
 }
 
-var recursiveOffsetLeftAndTop = function(element) {
+var recursiveOffsetLeftAndTop = function (element) {
     var offsetLeft = 0;
     var offsetTop = 0;
-  while (element) {
-      offsetLeft += element.offsetLeft;
-      offsetTop += element.offsetTop;
-      element = element.offsetParent;
-  }
-  return {
-      offsetLeft: offsetLeft,
-      offsetTop: offsetTop
-  };
+    while (element) {
+        offsetLeft += element.offsetLeft;
+        offsetTop += element.offsetTop;
+        element = element.offsetParent;
+    }
+    return {
+        offsetLeft: offsetLeft,
+        offsetTop: offsetTop
+    };
 };

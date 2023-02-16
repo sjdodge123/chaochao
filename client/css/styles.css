@@ -40,7 +40,6 @@ canvas {
     right: 0;
     bottom: 0;
     top: 0;
-    margin-top: -10%;
 }
 
 #gameWindow {
@@ -179,7 +178,7 @@ div.desc {
 
 .play-container {
     background-color: white;
-    height: 250px;
+    height: 65vh;
     width: 50%;
     padding: 10px;
     border-radius: 5px;
