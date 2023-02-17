@@ -92,6 +92,8 @@
             },
             "swap": {
                 "spawnable": true,
+                "startSize": 15,
+                "endSize": 300,
                 "warnTime": 3000,
                 "id": 101
             },
@@ -111,7 +113,7 @@
             },
             "speedBuff": {
                 "spawnable": true,
-                "value": 2,
+                "value": 1.5,
                 "duration": 3000,
                 "id": 104
             },

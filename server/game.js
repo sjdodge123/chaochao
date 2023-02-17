@@ -16,12 +16,13 @@ class Room {
 		this.size = size;
 		this.clientList = {};
 		this.playerList = {};
+		this.aimerList = {};
 		this.projectileList = {};
 		this.clientCount = 0;
 		this.alive = true;
 		this.engine = _engine.getEngine(this.playerList, this.projectileList);
 		this.world = new World(0, 0, c.worldWidth, c.worldHeight, this.engine, this.playerList, this.sig);
-		this.game = new Game(this.clientList, this.playerList, this.projectileList, this.world, this.engine, this.sig);
+		this.game = new Game(this.clientList, this.playerList, this.projectileList, this.aimerList, this.world, this.engine, this.sig);
 	}
 	join(clientID) {
 		var client = messenger.getClient(clientID);
@@ -46,10 +47,12 @@ class Room {
 	sendUpdates() {
 		var playerData = compressor.sendPlayerUpdates(this.playerList);
 		var projData = compressor.sendProjUpdates(this.projectileList);
+		var aimerData = compressor.sendAimerUpdates(this.aimerList);
 		var gameStateData = compressor.gameState(this.game);
 		messenger.messageRoomBySig(this.sig, "gameUpdates", {
 			playerList: playerData,
 			projList: projData,
+			aimerList: aimerData,
 			state: gameStateData,
 			totalPlayers: this.game.playerCount
 		});
@@ -81,10 +84,11 @@ class Room {
 }
 
 class Game {
-	constructor(clientList, playerList, projectileList, world, engine, roomSig) {
+	constructor(clientList, playerList, projectileList, aimerList, world, engine, roomSig) {
 		this.clientList = clientList;
 		this.playerList = playerList;
 		this.projectileList = projectileList;
+		this.aimerList = aimerList;
 		this.roomSig = roomSig;
 		this.world = world;
 		this.engine = engine;
@@ -120,7 +124,7 @@ class Game {
 		//State mgmt
 		this.stateMap = c.stateMap;
 		this.currentState = this.stateMap.waiting;
-		this.gameBoard = new GameBoard(world, playerList, projectileList, engine, roomSig);
+		this.gameBoard = new GameBoard(world, playerList, projectileList, aimerList, engine, roomSig);
 	}
 
 	update(dt) {
@@ -287,8 +291,6 @@ class Game {
 	startRace() {
 		console.log("Start Race");
 		this.currentState = this.stateMap.racing;
-
-
 		if (!this.gameBoard.checkForActiveBrutal(c.brutalRounds.lightning.id)) {
 			for (var id in this.playerList) {
 				this.playerList[id].setSpeedBonus(0);
@@ -379,12 +381,13 @@ class Game {
 }
 
 class GameBoard {
-	constructor(world, playerList, projectileList, engine, roomSig) {
+	constructor(world, playerList, projectileList, aimerList, engine, roomSig) {
 		this.world = world;
 		this.playerList = playerList;
 		this.projectileList = projectileList;
 		this.abilityList = {};
 		this.punchList = {};
+		this.aimerList = aimerList;
 		this.engine = engine;
 		this.roomSig = roomSig;
 		this.stateMap = c.stateMap;
@@ -419,6 +422,7 @@ class GameBoard {
 		this.updatePlayers(currentState, dt);
 		this.updateProjectiles(currentState);
 		this.checkAbilities(currentState);
+		this.updateAimers(currentState);
 	}
 	checkCollisions(currentState) {
 		var objectArray = [];
@@ -473,6 +477,9 @@ class GameBoard {
 			for (var punchId in this.punchList) {
 				objectArray.push(this.punchList[punchId]);
 			}
+			for (var aimerId in this.aimerList) {
+				objectArray.push(this.aimerList[aimerId]);
+			}
 		}
 
 		this.engine.broadBase(objectArray);
@@ -481,7 +488,9 @@ class GameBoard {
 		for (var id in this.abilityList) {
 			if (this.abilityList[id].swap) {
 				this.abilityList[id].swap = false;
-				var packet = { owner: this.abilityList[id].ownerId, context: this };
+				var aimer = new SwapAimer(this.playerList[this.abilityList[id].ownerId].x, this.playerList[this.abilityList[id].ownerId].y, c.tileMap.abilities.swap.startSize, "red", this.abilityList[id].ownerId, this.roomSig);
+				this.aimerList[this.abilityList[id].ownerId] = aimer;
+				var packet = { owner: this.abilityList[id].ownerId, aimer: aimer, context: this };
 				setTimeout(this.swapOwnerWithRandomPlayer, c.tileMap.abilities.swap.warnTime + utils.getRandomInt(1000, 4000), packet);
 			}
 			if (this.abilityList[id].spawnBomb) {
@@ -542,6 +551,13 @@ class GameBoard {
 			this.projectileList[id].update();
 		}
 	}
+	updateAimers(currentState) {
+		for (var id in this.aimerList) {
+			if (this.playerList[id] != null) {
+				this.aimerList[id].update(this.playerList[id]);
+			}
+		}
+	}
 	terminatePunch(packet) {
 		messenger.messageRoomBySig(packet.roomSig, "terminatePunch", packet.id);
 		delete packet.punchList[packet.id];
@@ -556,8 +572,17 @@ class GameBoard {
 
 	swapOwnerWithRandomPlayer(packet) {
 		var gameBoard = packet.context;
-		var randomPlayer = utils.getRandomProperty(gameBoard.playerList);
+		var aimer = packet.aimer;
+		aimer.alive = false;
+		//Remove aimer
+		delete gameBoard.aimerList[aimer.id];
+
+		var randomPlayer = utils.getRandomProperty(aimer.targetList);
 		var count = 0;
+		if (randomPlayer == undefined) {
+			messenger.messageRoomBySig(gameBoard.roomSig, "fizzle", packet.owner);
+			return;
+		}
 		while (randomPlayer.id == packet.owner ||
 			randomPlayer.alive == false ||
 			randomPlayer.awake == false) {
@@ -565,7 +590,7 @@ class GameBoard {
 				messenger.messageRoomBySig(gameBoard.roomSig, "fizzle", packet.owner);
 				return;
 			}
-			randomPlayer = utils.getRandomProperty(gameBoard.playerList)
+			randomPlayer = utils.getRandomProperty(aimer.targetList);
 			count++;
 		}
 		var ownerPlayer = gameBoard.playerList[packet.owner];
@@ -749,6 +774,9 @@ class GameBoard {
 		for (var playerID in this.playerList) {
 			var player = this.playerList[playerID];
 			player.reset(currentState);
+		}
+		for (var aimerID in this.aimerList) {
+			delete this.aimerList[aimerID];
 		}
 	}
 	clean() {
@@ -1285,6 +1313,7 @@ class LobbyStartButton extends Circle {
 class Player extends Circle {
 	constructor(x, y, angle, color, id, roomSig) {
 		super(x, y, c.playerBaseRadius, color);
+		this.isPlayer = true;
 		this.enabled = true;
 		this.alive = true;
 		this.color = color;
@@ -1522,7 +1551,6 @@ class Player extends Circle {
 			this.killSelf();
 			return;
 		}
-
 		if (object.isMapCell) {
 			if (object.id == c.tileMap.normal.id) {
 				if (this.isZombie == true) {
@@ -1704,6 +1732,50 @@ class Player extends Circle {
 		this.angle = 0;
 		if (currentState == c.stateMap.gameOver) {
 			this.ability = null;
+		}
+	}
+}
+
+class SwapAimer extends Circle {
+	constructor(x, y, radius, color, ownerId, roomSig) {
+		super(x, y, radius, color);
+		this.ownerId = ownerId;
+		this.roomSig = roomSig;
+		this.isSwapAimer = true;
+		this.alive = true;
+		this.targetList = {};
+		this.targetListAry = [];
+		var index = setInterval(function (aimer) {
+			aimer.targetList = {};
+			aimer.targetListAry = [];
+		}, 300, this);
+		this.index = index;
+	}
+	update(owner) {
+		if (owner.alive == false || owner.isZombie) {
+			this.alive = false;
+			messenger.messageRoomBySig(this.roomSig, "terminateAimer", this.ownerId);
+			return;
+		}
+		if (this.radius < c.tileMap.abilities.swap.endSize) {
+			this.grow();
+		}
+		this.move(owner);
+	}
+	grow() {
+		this.radius += 2;
+	}
+	move(owner) {
+		this.x = owner.x;
+		this.y = owner.y;
+	}
+	handleHit(object) {
+		if (object.isPlayer && object.id != this.ownerId && this.alive) {
+			if (this.targetList[object.id] == null) {
+				this.targetList[object.id] = object;
+				this.targetListAry.push(object.id);
+			}
+			return;
 		}
 	}
 }

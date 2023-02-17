@@ -7,6 +7,7 @@ var mousex,
 	gameID,
 	currentMap,
 	punchList,
+	aimerList,
 	infection = false,
 	projectileList,
 	playerList,
@@ -27,12 +28,20 @@ function resetGameboard() {
 	punchList = {};
 	blindfold = {};
 	currentMap = {};
+	aimerList = {};
 	round = 0;
 	brutalRound = false;
 	brutalRoundConfig = null;
 	projectileList = {};
 	gameID = null;
 }
+
+function resetRound() {
+	for (var aimerID in this.aimerList) {
+		delete this.aimerList[aimerID];
+	}
+}
+
 function updateGameboard(dt) {
 	if (currentState == config.stateMap.racing || currentState == config.stateMap.overview || currentState == config.stateMap.collapsing) {
 		updateTrails();
@@ -88,8 +97,9 @@ function createPlayer(dataArray, isAI) {
 	playerList[index].deathMessage = null;
 	playerList[index].trail = new Trail({ x: dataArray[1], y: dataArray[2] });
 	playerList[index].fizzle = function () {
-		if (playerList[index].startSwapCountDown) {
-			playerList[index].startSwapCountDown = false;
+		if (aimerList[index] != null && aimerList[index].startSwapCountDown) {
+			aimerList[index].startSwapCountDown = false;
+			playSound(abilityFizzle);
 		}
 	};
 	/*
@@ -135,6 +145,25 @@ function updateProjecileList(packet) {
 		}
 	}
 }
+
+function updateAimerList(packet) {
+	if (packet == null) {
+		return;
+	}
+	packet = JSON.parse(packet);
+	for (var i = 0; i < packet.length; i++) {
+		var aimer = packet[i];
+		if (aimerList[aimer[0]] != null) {
+			aimerList[aimer[0]].ownerId = aimer[0];
+			aimerList[aimer[0]].targetList = aimer[1];
+			aimerList[aimer[0]].radius = aimer[2];
+			aimerList[aimer[0]].x = aimer[3];
+			aimerList[aimer[0]].y = aimer[4];
+		}
+	}
+}
+
+
 function updatePlayerNotches(packet) {
 	if (packet == null) {
 		return;
@@ -325,6 +354,18 @@ function spawnBomb(owner) {
 	bomb.color = "black";
 	projectileList[owner] = bomb;
 }
+function spawnAimer(owner) {
+	var aimer = {};
+	aimer.ownerId = owner;
+	aimer.x = playerList[owner].x;
+	aimer.y = playerList[owner].y;
+	aimer.targetList = '';
+	aimer.radius = config.tileMap.abilities.swap.startSize;
+	aimer.color = "red";
+	aimer.hide = false;
+	aimerList[owner] = aimer;
+	return aimer;
+}
 function terminatePunch(id) {
 	if (punchList[id] != null) {
 		delete punchList[id];
@@ -333,6 +374,11 @@ function terminatePunch(id) {
 function terminateBomb(id) {
 	if (projectileList[id] != null) {
 		delete projectileList[id];
+	}
+}
+function terminateAimer(id) {
+	if (aimerList[id] != null) {
+		delete aimerList[id];
 	}
 }
 
@@ -350,6 +396,7 @@ function fullReset() {
 	playerWon = null;
 	decodedColorName = '';
 	oldNotches = {};
+	aimerList = {};
 	playersNearVictory = [];
 	round = 0;
 	nextMapPreview = null;
@@ -413,7 +460,7 @@ function playerAbilityUsed(owner) {
 }
 
 function createBlindFold(owner) {
-	blindfold.color = this.playerList[owner].color;
+	blindfold.color = makePattern(blindfoldLargeIcon, this.playerList[owner].color);
 	var int = setInterval(function () {
 		clearInterval(int);
 		blindfold.color = null;

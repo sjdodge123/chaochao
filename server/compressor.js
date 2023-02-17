@@ -5,6 +5,7 @@ var c = utils.loadConfig();
 var listItem = null;
 var player = null;
 var proj = null;
+var aimer = null;
 var prop = null;
 
 exports.sendPlayerUpdates = function (playerList) {
@@ -40,11 +41,32 @@ exports.sendProjUpdates = function (projectileList) {
 		packet.push(listItem);
 	}
 	packet = JSON.stringify(packet);
-	player = null;
+	proj = null;
 	listItem = null;
 	prop = null;
 	return packet;
 }
+
+exports.sendAimerUpdates = function (aimerList) {
+	var packet = [];
+	for (prop in aimerList) {
+		aimer = aimerList[prop];
+		listItem = [
+			aimer.ownerId,
+			aimer.targetListAry.join(','),
+			aimer.radius,
+			aimer.x,
+			aimer.y
+		];
+		packet.push(listItem);
+	}
+	packet = JSON.stringify(packet);
+	aimer = null;
+	listItem = null;
+	prop = null;
+	return packet;
+}
+
 exports.sendNotchUpdates = function (playerList) {
 	var packet = [];
 	for (prop in playerList) {

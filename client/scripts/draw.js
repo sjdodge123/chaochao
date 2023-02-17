@@ -20,6 +20,10 @@ commentIconWhite.src = "../assets/img/white-chat.png";
 
 var blindfoldIcon = new Image(576, 512);
 blindfoldIcon.src = "../assets/img/low-vision.svg";
+var blindfoldLargeIcon = new Image(576, 512);
+blindfoldLargeIcon.src = "../assets/img/low-vision.svg";
+blindfoldLargeIcon.scale = .5;
+
 var transferIcon = new Image(576, 512);
 transferIcon.src = "../assets/img/random.svg";
 var bombIcon = new Image(576, 512);
@@ -142,8 +146,15 @@ function makePattern(image, underPattern) {
     const canvasPattern = document.createElement("canvas");
     const ctxPattern = canvasPattern.getContext("2d");
 
-    var iconWidth = image.width * scale;
-    var iconHeight = image.height * scale;
+    var iconWidth = image.width;
+    var iconHeight = image.height;
+    if (image.scale != null) {
+        iconWidth = image.width * image.scale;
+        iconHeight = image.height * image.scale;
+    } else {
+        iconWidth = image.width * scale;
+        iconHeight = image.height * scale;
+    }
     canvasPattern.width = iconWidth + canvasPadding;
     canvasPattern.height = iconHeight + canvasPadding;
     ctxPattern.beginPath();
@@ -296,12 +307,39 @@ function drawPunch(punch) {
 }
 
 function drawAbilties() {
+
+    if (Object.keys(aimerList).length > 0) {
+        for (var id in aimerList) {
+            drawAimer(aimerList[id]);
+        }
+    }
+
     if (blindfold.color != null) {
         gameContext.save();
         gameContext.beginPath();
         gameContext.fillStyle = blindfold.color;
         gameContext.rect(world.x, world.y, world.width, world.height);
         gameContext.fill();
+        gameContext.restore();
+    }
+}
+
+function drawAimer(aimer) {
+
+    if (aimer.startSwapCountDown && aimer.hide == false) {
+        gameContext.save();
+        gameContext.beginPath();
+        gameContext.arc(aimer.x, aimer.y, aimer.radius, 0, 2 * Math.PI);
+        gameContext.setLineDash([15, 3, 3, 3]);
+        if (aimer.swapCountDownPulse) {
+            aimer.swapCountDownPulse = false;
+            gameContext.lineWidth = 10;
+            gameContext.strokeStyle = "red";
+        } else {
+            gameContext.lineWidth = 3;
+            gameContext.strokeStyle = "black";
+        }
+        gameContext.stroke();
         gameContext.restore();
     }
 }
@@ -346,24 +384,6 @@ function checkDrawPlayer(player) {
 }
 function drawPlayer(player) {
 
-    if (player.startSwapCountDown) {
-        gameContext.save();
-        gameContext.beginPath();
-        gameContext.arc(player.x, player.y, player.radius * 2, 0, 2 * Math.PI);
-        gameContext.fillStyle = patterns[config.tileMap.abilities.swap.id];
-        if (player.swapCountDownPulse) {
-            player.swapCountDownPulse = false;
-            gameContext.lineWidth = 5;
-            gameContext.strokeStyle = "red";
-        } else {
-            gameContext.lineWidth = 3;
-            gameContext.strokeStyle = "black";
-        }
-        gameContext.fill();
-        gameContext.stroke();
-        gameContext.restore();
-    }
-
     if (player.infected == true) {
         gameContext.save();
         gameContext.beginPath();
@@ -376,7 +396,12 @@ function drawPlayer(player) {
         gameContext.restore();
     }
 
-
+    var playerStrokeColor = "black";
+    for (var aimerID in aimerList) {
+        if (aimerList[aimerID].targetList.indexOf(player.id) != -1) {
+            playerStrokeColor = "red"
+        }
+    }
     gameContext.save();
     gameContext.beginPath();
     gameContext.shadowColor = player.color;
@@ -384,7 +409,7 @@ function drawPlayer(player) {
     gameContext.arc(player.x, player.y, player.radius, 0, 2 * Math.PI);
     gameContext.fillStyle = player.color;
     gameContext.fill();
-    gameContext.strokeStyle = "black";
+    gameContext.strokeStyle = playerStrokeColor;
     gameContext.stroke();
     gameContext.restore();
 

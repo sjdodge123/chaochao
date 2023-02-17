@@ -63,6 +63,7 @@ function clientConnect() {
 	server.on("gameUpdates", function (updatePacket) {
 		updatePlayerList(updatePacket.playerList);
 		updateProjecileList(updatePacket.projList);
+		updateAimerList(updatePacket.aimerList);
 		checkGameState(updatePacket.state);
 		totalPlayers = updatePacket.totalPlayers;
 		timeSinceLastCom = 0;
@@ -150,6 +151,7 @@ function clientConnect() {
 
 	});
 	server.on("startOverview", function (packet) {
+		resetRound();
 		stopSound(lavaCollapse);
 		resetTrails();
 		updatePlayerNotches(packet.notchUpdates);
@@ -207,6 +209,9 @@ function clientConnect() {
 	server.on("terminateBomb", function (id) {
 		terminateBomb(id);
 	});
+	server.on("terminateAimer", function (id) {
+		terminateAimer(id);
+	});
 	server.on('collapsedCells', function (cells) {
 		collapseCells(cells);
 	});
@@ -215,9 +220,10 @@ function clientConnect() {
 		playSound(bombExplosion);
 	});
 	server.on("fizzle", function (owner) {
-		if (playerList[owner] != null) {
-			playerList[owner].fizzle();
-			playSound(abilityFizzle);
+		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
+			if (playerList[owner] != null) {
+				playerList[owner].fizzle();
+			}
 		}
 	});
 	server.on("abilityAcquired", function (payload) {
@@ -225,7 +231,9 @@ function clientConnect() {
 		playSound(collectItem);
 	});
 	server.on("bombBounce", function () {
-		playSound(bombBounce);
+		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
+			playSound(bombBounce);
+		}
 	});
 	server.on("blindfoldUsed", function (owner) {
 		createBlindFold(owner);
@@ -234,22 +242,28 @@ function clientConnect() {
 	});
 	server.on("swapUsed", function (owner) {
 		playerAbilityUsed(owner);
-		playerList[owner].startSwapCountDown = true;
+		var aimer = spawnAimer(owner);
+		aimerList[owner].startSwapCountDown = true;
 		var count = 0;
 		var int = setInterval(function () {
-			if (playerList[owner] != undefined) {
-				playSound(teleportWarnSound);
-				playerList[owner].swapCountDownPulse = true;
+			if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
+				if (aimerList[owner] != undefined) {
+					playSound(teleportWarnSound);
+					aimerList[owner].swapCountDownPulse = true;
+				}
 			}
 			count++;
 			if (count == (config.tileMap.abilities.swap.warnTime / 1000)) {
+				if (aimerList[owner] != undefined) {
+					aimerList[owner].hide = true;
+				}
 				clearInterval(int);
 			}
 		}, 1000);
 	});
 	server.on("playerSwapped", function (owner) {
-		if (playerList[owner].startSwapCountDown) {
-			playerList[owner].startSwapCountDown = false;
+		if (aimerList[owner].startSwapCountDown) {
+			aimerList[owner].startSwapCountDown = false;
 		}
 		playSound(teleportSound);
 	});
