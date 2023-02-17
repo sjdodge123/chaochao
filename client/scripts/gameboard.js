@@ -285,7 +285,6 @@ function applyBrutalMap(brconfig) {
 	} else {
 		infection = false;
 	}
-	loadPatterns();
 }
 
 function spawnLobbyStartButton(payload) {

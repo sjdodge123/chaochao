@@ -74,6 +74,7 @@ function clientConnect() {
 		applyRandomTiles(payload.randomTiles);
 		applyAbilites(payload.abilities);
 		applyBrutalMap(payload.brutalRoundConfig);
+		loadPatterns();
 		clearInfection();
 	});
 

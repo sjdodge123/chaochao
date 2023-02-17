@@ -173,17 +173,18 @@ div.desc {
 
 #game-title {
     font-family: "San Francisco";
-    font-size: 72px;
+    font-size: 4em;
 }
 
 .play-container {
     background-color: white;
-    height: 65vh;
+    height: 265px;
     width: 50%;
     padding: 10px;
     border-radius: 5px;
     box-shadow: 0px 0px 6px #B2B2B2;
 }
+
 
 .create-container {
     background-color: white;

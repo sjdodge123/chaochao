@@ -118,25 +118,27 @@ function keyUp(evt) {
 }
 
 function setupVirtualbuttons() {
-    virtualButtonList = [];
-    joystickMovement = new Joystick(0, 0, false);
-    joystickCamera = new Joystick(0, 0, false);
-    attackButton = new Button(0, 0, 0, 0, 50, true);
-    exitButton = new Button(world.width - 50, 0, 0, 0, 12.5, false);
-    chatButton = new Button(50, 0, 0, 0, 12.5, false);
+
 
     //var rect = gameCanvas.getBoundingClientRect();
     var leftRect = new VirtualButton(0, 85, world.width / 4, world.height, false);
-    //var rightRect = new VirtualButton(0 + world.width - (world.width/4),50,world.width/4,world.height,false);
+    var rightRect = new VirtualButton(0 + world.width - (world.width / 4), 50, world.width / 4, world.height, false);
     var upperLeftRect = new VirtualButton(0, 10, world.width / 16, 50, false);
     var upperRightRect = new VirtualButton(0 + world.width - (world.width / 16), 10, world.width / 16, 50, false);
     var topRightRect = new VirtualButton(0 + world.width - (world.width / 4), 85, world.width / 4, world.height / 2, false);
     var bottomRightRect = new VirtualButton(0 + world.width - (world.width / 4), topRightRect.bottom, world.width / 4, world.height / 2, false);
     //var bottomCenterRect = new VirtualButton(leftRect.right,world.height - (world.height/4)-100,rightRect.left-leftRect.right,200,false);
 
+    virtualButtonList = [];
+    joystickMovement = new Joystick(0, 0, false, false);
+    //joystickCamera = new Joystick(0, 0, false);
+    attackButton = new Button(0, 0, 0, 0, rightRect.width * 1.5, true, false);
+    exitButton = new Button(world.width - 50, 0, 0, 0, 12.5, false);
+    chatButton = new Button(50, 0, 0, 0, 12.5, false);
+
     virtualButtonList.push({ button: joystickMovement, bound: leftRect });
-    virtualButtonList.push({ button: joystickCamera, bound: topRightRect });
-    virtualButtonList.push({ button: attackButton, bound: bottomRightRect });
+    //virtualButtonList.push({ button: joystickCamera, bound: topRightRect });
+    virtualButtonList.push({ button: attackButton, bound: rightRect });
     virtualButtonList.push({ button: exitButton, bound: upperRightRect });
     virtualButtonList.push({ button: chatButton, bound: upperLeftRect });
 

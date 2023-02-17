@@ -9,8 +9,15 @@ var exitIcon = new Image(576, 512);
 exitIcon.src = "../assets/img/times-circle.svg";
 var fullscreenIcon = new Image(576, 512);
 fullscreenIcon.src = "../assets/img/expand-alt.svg";
-var commentIcon = new Image(576, 512);
-commentIcon.src = "../assets/img/comment-alt.svg";
+var commentIconSolid = new Image(576, 512);
+commentIconSolid.src = "../assets/img/comment-alt.svg";
+var exitIconWhite = new Image(576, 512);
+exitIconWhite.src = "../assets/img/white-esc.png";
+var fullscreenIconWhite = new Image(576, 512);
+fullscreenIconWhite.src = "../assets/img/white-expand.png";
+var commentIconWhite = new Image(576, 512);
+commentIconWhite.src = "../assets/img/white-chat.png";
+
 var blindfoldIcon = new Image(576, 512);
 blindfoldIcon.src = "../assets/img/low-vision.svg";
 var transferIcon = new Image(576, 512);
@@ -389,7 +396,7 @@ function drawPlayer(player) {
     drawEmoji(player);
     if (player.awake == false) {
         gameContext.save();
-        gameContext.drawImage(commentIcon, player.x, player.y - 40, commentIcon.width * 0.07, commentIcon.height * 0.07);
+        gameContext.drawImage(commentIconSolid, player.x, player.y - 40, commentIconSolid.width * 0.07, commentIconSolid.height * 0.07);
         gameContext.font = '20px Times New Roman';
         gameContext.fillText("😴", player.x + 8, player.y - 17);
         gameContext.restore();
@@ -400,10 +407,10 @@ function drawPlayer(player) {
 function drawEmoji(player) {
     if (player.chatMessage != null) {
         gameContext.save();
-        gameContext.drawImage(commentIcon, player.x, player.y - 40, commentIcon.width * 0.07, commentIcon.height * 0.07);
+        gameContext.drawImage(commentIconSolid, player.x, player.y - 40, commentIconSolid.width * 0.07, commentIconSolid.height * 0.07);
         gameContext.font = '20px Times New Roman';
         gameContext.fillStyle = "white";
-        gameContext.fillText(player.chatMessage, player.x + 8, player.y - 17);
+        gameContext.fillText(player.chatMessage, player.x + 8, player.y - 18);
         gameContext.restore();
     }
 }
@@ -411,7 +418,7 @@ function drawEmoji(player) {
 function drawDeathMessage(player) {
     if (player.deathMessage != null) {
         gameContext.save();
-        gameContext.drawImage(commentIcon, player.x, player.y - 40, commentIcon.width * 0.07, commentIcon.height * 0.07);
+        gameContext.drawImage(commentIconSolid, player.x, player.y - 40, commentIconSolid.width * 0.07, commentIconSolid.height * 0.07);
         gameContext.font = '20px Times New Roman';
         gameContext.fillText(player.deathMessage, player.x + 8, player.y - 17);
         gameContext.restore();
@@ -726,17 +733,18 @@ function drawHUD() {
 }
 
 function drawGameInfo() {
+    var startX = world.width / 2 - 125;
     gameContext.save();
     gameContext.font = "14px Arial";
     gameContext.strokeStyle = "white";
     gameContext.lineWidth = 4;
     gameContext.fillStyle = "black";
-    gameContext.strokeText("GameID: " + gameID, 10, 20);
-    gameContext.fillText("GameID: " + gameID, 10, 20);
-    gameContext.strokeText("Players: " + totalPlayers, 100, 20);
-    gameContext.fillText("Players: " + totalPlayers, 100, 20);
-    gameContext.strokeText("Round: " + round, 190, 20);
-    gameContext.fillText("Round: " + round, 190, 20);
+    gameContext.strokeText("GameID: " + gameID, startX + 10, 20);
+    gameContext.fillText("GameID: " + gameID, startX + 10, 20);
+    gameContext.strokeText("Players: " + totalPlayers, startX + 100, 20);
+    gameContext.fillText("Players: " + totalPlayers, startX + 100, 20);
+    gameContext.strokeText("Round: " + round, startX + 190, 20);
+    gameContext.fillText("Round: " + round, startX + 190, 20);
     gameContext.restore();
 }
 
@@ -761,6 +769,18 @@ function drawTouchControls() {
     if (isTouchScreen == false) {
         return;
     }
+
+    var exitToUse = exitIcon;
+    var fullScreenToUse = fullscreenIcon;
+    var chatToUse = commentIconSolid;
+
+    if (currentState == config.stateMap.overview) {
+        exitToUse = exitIconWhite;
+        fullScreenToUse = fullscreenIconWhite;
+        chatToUse = commentIconWhite;
+    }
+
+
     if (joystickMovement != null && joystickMovement.isVisible()) {
         gameContext.save();
         gameContext.beginPath();
@@ -802,11 +822,11 @@ function drawTouchControls() {
     if (attackButton != null && attackButton.isVisible()) {
         gameContext.save();
         gameContext.beginPath();
-        gameContext.lineWidth = 3;
-        gameContext.strokeStyle = "black ";
+        gameContext.lineWidth = 1;
+        gameContext.strokeStyle = "black";
         gameContext.fillStyle = "rgba(0, 0, 255, 0.2)";
 
-        //gameContext.rect(attackButton.baseX,attackButton.baseY,attackButton.width,attackButton.height);
+        //gameContext.rect(attackButton.baseX, attackButton.baseY, attackButton.width, attackButton.height);
         gameContext.arc(attackButton.baseX, attackButton.baseY, attackButton.radius, 0, Math.PI * 2, true);
         gameContext.fill();
         gameContext.stroke();
@@ -815,23 +835,23 @@ function drawTouchControls() {
     if (exitButton != null && exitButton.isVisible()) {
         if (window.document.fullscreenElement) {
             gameContext.save();
-            var iconWidth = exitIcon.width * 0.1;
-            var iconHeight = exitIcon.height * 0.1;
-            gameContext.drawImage(exitIcon, exitButton.baseX - iconWidth / 2, exitButton.baseY - iconHeight / 2, iconWidth, iconHeight);
+            var iconWidth = exitToUse.width * 0.1;
+            var iconHeight = exitToUse.height * 0.1;
+            gameContext.drawImage(exitToUse, exitButton.baseX - iconWidth / 2, exitButton.baseY - iconHeight / 2, iconWidth, iconHeight);
             gameContext.restore();
         } else {
             gameContext.save();
-            var iconWidth = fullscreenIcon.width * 0.1;
-            var iconHeight = fullscreenIcon.height * 0.1;
-            gameContext.drawImage(fullscreenIcon, exitButton.baseX - iconWidth / 2, exitButton.baseY - iconHeight / 2, iconWidth, iconHeight);
+            var iconWidth = fullScreenToUse.width * 0.1;
+            var iconHeight = fullScreenToUse.height * 0.1;
+            gameContext.drawImage(fullScreenToUse, exitButton.baseX - iconWidth / 2, exitButton.baseY - iconHeight / 2, iconWidth, iconHeight);
             gameContext.restore();
         }
     }
     if (chatButton != null && chatButton.isVisible()) {
         gameContext.save();
-        var iconWidth = commentIcon.width * 0.1;
-        var iconHeight = commentIcon.height * 0.1;
-        gameContext.drawImage(commentIcon, chatButton.baseX - iconWidth / 2, chatButton.baseY - iconHeight / 2, iconWidth, iconHeight);
+        var iconWidth = chatToUse.width * 0.1;
+        var iconHeight = chatToUse.height * 0.1;
+        gameContext.drawImage(chatToUse, chatButton.baseX - iconWidth / 2, chatButton.baseY - iconHeight / 2, iconWidth, iconHeight);
         gameContext.restore();
     }
 }
@@ -882,6 +902,7 @@ function drawOverviewBoard() {
     drawBlackBackground();
     drawOldNotches();
     drawNextMap();
+    drawHUD();
 }
 
 function drawNextMap() {
@@ -941,11 +962,11 @@ function drawPlayerIcon(player, notchDistanceApart) {
     var notchX = 0;
     var moveAmt = 0;
     if (player.distanceToMove > 0) {
-        moveAmt = 1;
+        moveAmt = 2;
         notchX = player.distanceTraveled + (oldNotches[player.id] * notchDistanceApart);
         gameContext.arc(notchX, 0, config.playerBaseRadius * 2, 0, 2 * Math.PI);
     } else if (player.distanceToMove < 0) {
-        moveAmt = -1;
+        moveAmt = -2;
         notchX = player.distanceTraveled + (oldNotches[player.id] * notchDistanceApart);
         gameContext.arc(notchX, 0, config.playerBaseRadius * 2, 0, 2 * Math.PI);
     } else {
@@ -955,8 +976,12 @@ function drawPlayerIcon(player, notchDistanceApart) {
     }
 
     if (playerAnimating === player.id) {
-        player.distanceToMove -= moveAmt;
-        player.distanceTraveled += moveAmt;
+        if (player.distanceToMove - moveAmt < 0 && player.distanceToMove + moveAmt > 0) {
+            player.distanceToMove = 0;
+        } else {
+            player.distanceToMove -= moveAmt;
+            player.distanceTraveled += moveAmt;
+        }
     }
 
     player.x = notchX;
@@ -983,9 +1008,11 @@ function drawScoreBoardTrail(player) {
     gameContext.shadowColor = player.color;
     gameContext.strokeStyle = player.color;
     if (player.nearVictory == true) {
-        gameContext.lineWidth = 10;
         gameContext.setLineDash([20, 3, 3, 3, 3, 3, 3, 3]);
+    } else {
+        gameContext.setLineDash([]);
     }
+
     gameContext.stroke();
     gameContext.beginPath();
     gameContext.arc(0, 0, 8, 0, 2 * Math.PI);
@@ -1013,42 +1040,49 @@ function drawGoalPost(player, distanceApart) {
     if (player.downRank == true) {
         gameContext.fillText("💀", 30 + (gameLength + 1) * distanceApart, 12.5);
     }
-    //If the animation is complete
-    if (player.distanceToMove == 0) {
+
+    gameContext.fillStyle = "black";
+
+    if (player.distanceToMove == 0 && playerAnimating !== player.id) {
+        //Animation complete
+
         if (player.notches == gameLength) {
-            gameContext.shadowColor = "gold";
-            gameContext.shadowBlur = 10;
-            gameContext.fillStyle = "gold";
-            gameContext.fill();
             if (player.nearVictory == false) {
                 player.nearVictory = true;
                 playSound(nearVictorySound);
             }
-        } else {
-            if (oldNotches[player.id] == gameLength && player.notches != gameLength) {
-                if (player.nearVictory == true) {
-                    player.nearVictory = false;
-                    playSound(fallFromVictorySound);
-                }
-            }
-            gameContext.shadowColor = "grey";
-            gameContext.strokeStyle = "grey";
-            gameContext.stroke();
         }
 
-        return;
+        if (player.nearVictory == true) {
+            gameContext.shadowColor = "gold";
+            gameContext.shadowBlur = 10;
+            gameContext.fillStyle = "gold";
+            gameContext.fill();
+        }
     }
-    //Animation hasnt occurred yet
-    if (oldNotches[player.id] == gameLength) {
-        gameContext.shadowColor = "white";
-        gameContext.shadowBlur = 10;
-        gameContext.fillStyle = "white"
-        gameContext.fill();
-    } else {
-        gameContext.shadowColor = "grey";
-        gameContext.strokeStyle = "grey";
-        gameContext.stroke();
+
+    if (player.distanceToMove != 0 && playerAnimating === player.id) {
+        //Animation occuring
+        if (oldNotches[player.id] == gameLength && player.notches != gameLength) {
+            if (player.nearVictory == true) {
+                player.nearVictory = false;
+                playSound(fallFromVictorySound);
+            }
+        }
     }
+    if (player.distanceToMove != 0 && playerAnimating !== player.id) {
+        //Animation pending
+        if (oldNotches[player.id] == gameLength) {
+            gameContext.shadowColor = "gold";
+            gameContext.shadowBlur = 10;
+            gameContext.fillStyle = "gold";
+            gameContext.fill();
+        }
+    }
+    gameContext.shadowColor = "grey";
+    gameContext.strokeStyle = "grey";
+    gameContext.fill();
+
 }
 
 function createFirstRankSymbol(playerid) {
