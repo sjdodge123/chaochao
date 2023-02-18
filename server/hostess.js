@@ -34,7 +34,7 @@ exports.findARoom = function (clientID) {
 		return sig;
 	}
 	for (var sig2 in roomList) {
-		if (roomList[sig2].hasSpace() && roomList[sig2].locked == false) {
+		if (roomList[sig2].hasSpace() && !roomList[sig2].isLocked()) {
 			return sig2;
 		}
 	}

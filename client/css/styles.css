@@ -57,6 +57,9 @@ canvas {
     margin-bottom: 10px;
 }
 .join-btn{
+    display: flex;
+    align-items: center;
+    justify-content: center;
     padding: 0px;
     height: 100%;
     float: right;

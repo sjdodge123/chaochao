@@ -22,7 +22,6 @@ function clientConnect() {
 
     server.on("roomListing", function (packet) {
         var rooms = JSON.parse(packet);
-        console.log(rooms);
         for (var id in rooms) {
             var room = rooms[id];
             var state = room.state;
@@ -41,7 +40,7 @@ function clientConnect() {
                 '<td>' + currentMap + "</td>" +
                 '<td>' + room.gameID + "</td>" +
                 '<td>' + room.players + "</td>" + '</tr></table></div>' +
-                '<button type="submit" formaction="./play.html?gameid=' + room.gameID + '" class="btn btn-outline-info w-25 join-btn">Join</button>'
+                '<a href="./play.html?gameid=' + room.gameID + '" class="btn btn-outline-info w-25 join-btn">Join</a>'
             );
         }
     });

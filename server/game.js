@@ -79,6 +79,9 @@ class Room {
 		}
 		return false;
 	}
+	isLocked() {
+		return this.game.locked;
+	}
 }
 
 class Game {
