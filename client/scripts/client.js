@@ -24,7 +24,7 @@ function clientConnect() {
 
 	server.on("serverKick", function () {
 		server.disconnect();
-		window.parent.location.reload();
+		window.parent.location.href = "./index.html";
 	});
 
 

@@ -75,9 +75,7 @@ class Room {
 	}
 	hasSpace() {
 		if (this.clientCount < this.size) {
-			if (!this.game.locked) {
-				return true;
-			}
+			return true;
 		}
 		return false;
 	}
@@ -159,6 +157,14 @@ class Game {
 	}
 	getState() {
 		return this.currentState;
+	}
+	getPlayerColors() {
+		var colors = [];
+		for (var id in this.playerList) {
+			var player = this.playerList[id];
+			colors.push(player.color);
+		}
+		return colors;
 	}
 	determineGameState(newPlayer) {
 		if (this.currentState == c.stateMap.waiting || this.currentState == c.stateMap.lobby || this.currentState == c.stateMap.gameOver) {

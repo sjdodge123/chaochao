@@ -6,6 +6,27 @@ var game = require('./game.js');
 var roomList = {},
 	maxPlayersInRoom = c.maxPlayersInRoom;
 
+
+exports.getRooms = function () {
+	var rooms = {};
+	if (getRoomCount() == 0) {
+		return rooms;
+	}
+	for (var sig in roomList) {
+		if (roomList[sig].hasSpace()) {
+			var room = roomList[sig];
+			rooms[sig] = {
+				state: room.game.currentState,
+				round: room.game.gameBoard.round,
+				currentMap: room.game.gameBoard.currentMap.name,
+				gameID: Number(sig),
+				players: room.game.playerCount,
+				playerColors: room.game.getPlayerColors(),
+			}
+		}
+	}
+	return rooms;
+}
 exports.findARoom = function (clientID) {
 	if (getRoomCount() == 0) {
 		var sig = generateNewRoom();
@@ -13,7 +34,7 @@ exports.findARoom = function (clientID) {
 		return sig;
 	}
 	for (var sig2 in roomList) {
-		if (roomList[sig2].hasSpace()) {
+		if (roomList[sig2].hasSpace() && roomList[sig2].locked == false) {
 			return sig2;
 		}
 	}

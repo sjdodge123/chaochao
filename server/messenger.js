@@ -46,6 +46,10 @@ function checkForMail(client) {
 		client.emit("maplisting", utils.getMapListings());
 	});
 
+	client.on("getRooms", function () {
+		client.emit("roomListing", JSON.stringify(hostess.getRooms()));
+	});
+
 	client.on("getConfig", function () {
 		client.emit("config", c);
 	});

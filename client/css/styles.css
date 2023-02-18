@@ -16,10 +16,6 @@ html,body {
     height: 100vh;
 }
 
-button {
-    margin-top: 10px;
-}
-
 canvas {
     position: relative;
     font-weight: 600;
@@ -38,6 +34,57 @@ canvas {
     right: 0;
     bottom: 0;
     top: 0;
+}
+
+#joinMenu{
+    width: 100%;
+    height: 400px;
+    margin: 50px;
+    border-radius: 5px;
+    box-shadow: 0px 0px 6px #B2B2B2;
+}
+#gameSelection{
+    width: 90%;
+    height: auto;
+    margin-top: 50px;
+}
+.gameCard{
+    width: 95%;
+    height: 100px;
+    border-radius: 3px;
+    background-color: #F6F6F6;
+    box-shadow: 0px 0px 3px #B2B2B2;
+    margin-bottom: 10px;
+}
+.join-btn{
+    padding: 0px;
+    height: 100%;
+    float: right;
+}
+.game-content{
+    width: 75%;
+    display: inline-block;
+    float: left;
+}
+.gameState{
+    display: inline-block;
+    height: 40px;
+    width: 100%;
+    text-align: center;
+    font-size: 32px;
+}
+.mapData {
+    width: 100%;
+    display: inline-block;
+    width: 100%;
+    margin: 5px;
+    height: 50px;
+    text-align: center;
+}
+th,
+td {
+  padding-left: 10px;
+  padding-top: 3px;
 }
 
 #gameWindow {
@@ -280,4 +327,7 @@ div.desc {
 
 #emojiMenu a:hover {
     color: #c87f8a;
+}
+.mt10{
+    margin-top: 10px;
 }
