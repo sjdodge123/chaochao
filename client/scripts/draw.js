@@ -652,7 +652,7 @@ function drawPingCircles() {
     gameContext.restore();
 }
 function drawMap() {
-    if (currentMap != null) {
+    if (Object.keys(currentMap).length > 0) {
         gameContext.save();
         var cells = currentMap.cells,
             iCell = cells.length;

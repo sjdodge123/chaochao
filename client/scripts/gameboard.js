@@ -219,7 +219,7 @@ function checkGameState(payload) {
 			lobbyStartButton.startSpin = false;
 		}
 	}
-	if (currentState == config.stateMap.gated) {
+	if (currentState == config.stateMap.gated || currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
 		lobbyStartButton = null;
 		gate = {};
 		gate.x = payload[1];
@@ -227,6 +227,7 @@ function checkGameState(payload) {
 		gate.width = payload[3];
 		gate.height = payload[4];
 	}
+
 }
 
 function loadNewMap(id) {
@@ -238,25 +239,27 @@ function loadNewMap(id) {
 			break;
 		}
 	}
-	for (var j = 0; j < currentMap.cells.length; j++) {
-		if (currentMap.cells[j].id == config.tileMap.goal.id) {
-			playSound(countDownA);
-			var pingCircle = { x: currentMap.cells[j].site.x, y: currentMap.cells[j].site.y, radius: 0, pass: 0 };
-			pingCircles.push(pingCircle);
-			pingIntervals.push(setInterval(function (ping) {
-				if (ping.pass == 2) {
-					var index = pingCircles.indexOf(ping);
-					pingCircles.splice(index, 1);
-				}
-				if (ping.radius > 500) {
-					ping.radius = 0;
-					playSound(countDownA);
-					ping.pass++;
-				} else {
-					ping.radius += 10;
-				}
+	if (currentState == config.stateMap.gated) {
+		for (var j = 0; j < currentMap.cells.length; j++) {
+			if (currentMap.cells[j].id == config.tileMap.goal.id) {
+				playSound(countDownA);
+				var pingCircle = { x: currentMap.cells[j].site.x, y: currentMap.cells[j].site.y, radius: 0, pass: 0 };
+				pingCircles.push(pingCircle);
+				pingIntervals.push(setInterval(function (ping) {
+					if (ping.pass == 2) {
+						var index = pingCircles.indexOf(ping);
+						pingCircles.splice(index, 1);
+					}
+					if (ping.radius > 500) {
+						ping.radius = 0;
+						playSound(countDownA);
+						ping.pass++;
+					} else {
+						ping.radius += 10;
+					}
 
-			}, 50, pingCircle));
+				}, 50, pingCircle));
+			}
 		}
 	}
 }
@@ -455,6 +458,22 @@ function playerPickedUpAbility(payload) {
 		}
 	}
 }
+
+function changeTilesBulk(tileChanges) {
+	for (var prop in tileChanges) {
+		for (var i = 0; i < currentMap.cells.length; i++) {
+			var cell = currentMap.cells[i];
+			if (cell.site.voronoiId == prop) {
+				cell.id = tileChanges[prop];
+				break;
+			}
+
+		}
+	}
+}
+
+
+
 function playerAbilityUsed(owner) {
 	playerList[owner].ability = null;
 }

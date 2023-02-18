@@ -70,17 +70,29 @@ function checkForMail(client) {
 
 	});
 
-	client.on('enterGame', function () {
-		var roomSig = hostess.findARoom(client.id);
+	client.on('enterGame', function (id) {
+
+		var roomSig = '';
+		if (id == -1) {
+			roomSig = hostess.findARoom(client.id);
+		} else {
+			roomSig = id;
+		}
 		var room = hostess.joinARoom(roomSig, client.id);
+		if (room == false) {
+			client.emit("roomNotFound");
+			return;
+		}
+		client.emit("maplisting", utils.getMapListings());
+
 
 		//Add this player to the list of current clients in the room
 		room.clientList[client.id] = client.id;
 
 		//Spawn a player for the new player
-		room.playerList[client.id] = room.world.spawnNewPlayer(client.id);
+		room.playerList[client.id] = room.world.createNewPlayer(client.id);
+		room.game.determineGameState(room.playerList[client.id]);
 
-		client.emit("maplisting", utils.getMapListings());
 		//Send the current gamestate to the new player
 		var worldData = compressor.worldResize(room.world);
 		var playerData = compressor.playerSpawns(room.playerList);
@@ -90,19 +102,20 @@ function checkForMail(client) {
 			clientList: room.clientList,
 			playerList: playerData,
 			game: gameData,
+			round: room.game.gameBoard.round,
 			config: c,
 			myID: client.id,
 			gameID: roomSig,
 			world: worldData
 		};
 		client.emit("gameState", gameState);
-
 		//Update all existing players with the new player's info
 		var appendPlayerData = compressor.appendPlayer(room.playerList[client.id]);
 		var appendPlayerList = {
 			id: client.id,
 			player: appendPlayerData
 		};
+		room.game.checkSendGameStateUpdates(client);
 		client.broadcast.to(String(roomSig)).emit("playerJoin", appendPlayerList);
 	});
 
@@ -159,8 +172,6 @@ function checkForMail(client) {
 
 
 }
-
-
 function messageRoomBySig(sig, header, payload) {
 	io.to(String(sig)).emit(header, payload);
 }

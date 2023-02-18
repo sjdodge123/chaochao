@@ -38,19 +38,9 @@ var then = Date.now(),
 $(function () {
     server = clientConnect();
     setupPage();
-});
+})
 
 function setupPage() {
-
-    $("#guestPlay").on("submit", function () {
-        enterLobby();
-        return false;
-    });
-
-    $("#createButton").on("click", function () {
-        window.location = '/create.html';
-        return false;
-    });
     window.addEventListener('blur', cancelMovement);
     window.addEventListener('resize', resize, false);
     window.requestAnimFrame = (function () {
@@ -64,6 +54,7 @@ function setupPage() {
 
     gameCanvas = document.getElementById('gameCanvas');
     gameContext = gameCanvas.getContext('2d');
+    enterLobby();
 
 }
 
@@ -71,7 +62,14 @@ function enterLobby() {
     $('#main').hide();
     $('#gameWindow').show();
     resize();
-    clientSendStart();
+    var playParams = new URLSearchParams(window.location.search);
+    if (playParams.has("gameid")) {
+        var paramGameID = playParams.get("gameid");
+        clientSendStart(paramGameID);
+    } else {
+        clientSendStart(-1);
+    }
+
 }
 function init() {
     timeOutChecker = setInterval(checkForTimeout, 1000);
@@ -110,16 +108,6 @@ function resize() {
     }
     gameCanvas.style.width = newWidth + "px";
     gameCanvas.style.height = newHeight + "px";
-
-    /*
-    var canvasRect = gameCanvas.getBoundingClientRect();
-    exitIcon.style.left = canvasRect.x + newWidth - 40 +"px";
-    exitIcon.style.top = canvasRect.y +"px";
-    var canvasRect = gameCanvas.getBoundingClientRect();
-    var emojiMenuRect = emojiMenu.getBoundingClientRect();
-    emojiMenu.style.left = canvasRect.x + newWidth/2 +"px";
-    emojiMenu.style.top = canvasRect.y + newHeight - 175 +"px";
-    */
 }
 
 function goFullScreen() {

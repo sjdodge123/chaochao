@@ -6,37 +6,40 @@ var game = require('./game.js');
 var roomList = {},
 	maxPlayersInRoom = c.maxPlayersInRoom;
 
-exports.findARoom = function(clientID){
-    if(getRoomCount() == 0){
+exports.findARoom = function (clientID) {
+	if (getRoomCount() == 0) {
 		var sig = generateNewRoom();
-        console.log("No rooms exist; Starting a new room:" + sig);
-        return sig;
-    }
-    for(var sig2 in roomList){
-        if(roomList[sig2].hasSpace()){
-            return sig2;
-        }
-    }
-    return generateNewRoom();
+		console.log("No rooms exist; Starting a new room:" + sig);
+		return sig;
+	}
+	for (var sig2 in roomList) {
+		if (roomList[sig2].hasSpace()) {
+			return sig2;
+		}
+	}
+	return generateNewRoom();
 }
-exports.kickFromRoom = function(clientID){
+exports.kickFromRoom = function (clientID) {
 	var room = searchForRoom(clientID);
-	if(room != undefined){
+	if (room != undefined) {
 		room.leave(clientID);
-		if(room.clientCount == 0){
+		if (room.clientCount == 0) {
 			console.log("Deleting room");
 			delete roomList[room.sig];
 		}
 	}
 }
-exports.joinARoom = function(sig,clientID){
+exports.joinARoom = function (sig, clientID) {
+	if (roomList[sig] == null) {
+		return false;
+	}
 	roomList[sig].join(clientID);
 	return roomList[sig];
 }
-exports.updateRooms = function(dt){
-	for(var sig in roomList){
+exports.updateRooms = function (dt) {
+	for (var sig in roomList) {
 		var room = roomList[sig];
-		if(room == null){
+		if (room == null) {
 			delete roomList[sig];
 			continue;
 		}
@@ -52,38 +55,37 @@ exports.updateRooms = function(dt){
 		*/
 	}
 }
-exports.getRoomBySig = function(sig){
+exports.getRoomBySig = function (sig) {
 	return roomList[sig];
 }
 
-function getRoomCount(){
+function getRoomCount() {
 	var count = 0;
-	for(var sig in roomList){
+	for (var sig in roomList) {
 		count++;
 	}
 	return count;
 }
-function searchForRoom(id){
+function searchForRoom(id) {
 	var room;
-	for(var sig in roomList){
-		if(roomList[sig].checkRoom(id)){
+	for (var sig in roomList) {
+		if (roomList[sig].checkRoom(id)) {
 			room = roomList[sig];
 		}
 	}
 	return room;
 }
 
-function generateRoomSig(){
-	var sig = utils.getRandomInt(0,99);
-	if(roomList[sig] == null || roomList[sig] == undefined){
+function generateRoomSig() {
+	var sig = utils.getRandomInt(0, 99);
+	if (roomList[sig] == null || roomList[sig] == undefined) {
 		return sig;
 	}
 	sig = generateRoomSig();
 }
 
-function generateNewRoom(){
+function generateNewRoom() {
 	var sig = generateRoomSig();
-	roomList[sig] = game.getRoom(sig,maxPlayersInRoom);
+	roomList[sig] = game.getRoom(sig, maxPlayersInRoom);
 	return sig;
 }
-    

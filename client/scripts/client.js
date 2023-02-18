@@ -1,6 +1,7 @@
 var config,
 	timeSinceLastCom = 0,
 	ping = 0,
+	promises = [],
 	pingTimeout = null,
 	lastTime = null,
 	totalPlayers = 0,
@@ -17,6 +18,9 @@ function clientConnect() {
 	server.on("drop", function () {
 		calcPing();
 	});
+	server.on("roomNotFound", function () {
+		alert("Game ID not found");
+	})
 
 	server.on("serverKick", function () {
 		server.disconnect();
@@ -26,6 +30,7 @@ function clientConnect() {
 
 	server.on("gameState", function (gameState) {
 		config = gameState.config;
+		round = gameState.round;
 		gameLength = config.baseNotchesToWin;
 		clientList = gameState.clientList;
 		gameID = gameState.gameID;
@@ -70,21 +75,28 @@ function clientConnect() {
 	});
 
 	server.on("newMap", function (payload) {
-		round++;
-		loadNewMap(payload.id);
-		applyRandomTiles(payload.randomTiles);
-		applyAbilites(payload.abilities);
-		applyBrutalMap(payload.brutalRoundConfig);
-		loadPatterns();
-		clearInfection();
+		$.when.apply($, promises).then(function () {
+			currentState = payload.currentState;
+			loadNewMap(payload.id);
+			round = payload.round;
+			applyRandomTiles(payload.randomTiles);
+			applyAbilites(payload.abilities);
+			applyBrutalMap(payload.brutalRoundConfig);
+			loadPatterns();
+			clearInfection();
+			stopSound(lobbyMusic);
+		});
+
 	});
 
 	server.on("maplisting", function (mapnames) {
 		for (var i = 0; i < mapnames.length; i++) {
-			$.getJSON("../maps/" + mapnames[i], function (data) {
+			promises.push($.getJSON("../maps/" + mapnames[i], function (data) {
 				maps.push(data);
-			});
+			}));
+
 		}
+
 	});
 
 	server.on("firstPlaceWinner", function (id) {
@@ -213,7 +225,9 @@ function clientConnect() {
 		terminateAimer(id);
 	});
 	server.on('collapsedCells', function (cells) {
-		collapseCells(cells);
+		$.when.apply($, promises).then(function () {
+			collapseCells(cells);
+		});
 	});
 	server.on('explodedCells', function (cells) {
 		explodedCells(cells);
@@ -230,6 +244,21 @@ function clientConnect() {
 		playerPickedUpAbility(payload);
 		playSound(collectItem);
 	});
+	server.on("allAbilityHoldings", function (payload) {
+		$.when.apply($, promises).then(function () {
+			var abilities = JSON.parse(payload);
+			for (var id in abilities) {
+				playerPickedUpAbility(abilities[id]);
+			}
+		});
+	});
+	server.on("tileChanges", function (payload) {
+		$.when.apply($, promises).then(function () {
+			var tileChanges = JSON.parse(payload);
+			changeTilesBulk(tileChanges);
+		});
+	});
+
 	server.on("bombBounce", function () {
 		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
 			playSound(bombBounce);
@@ -304,8 +333,10 @@ function clientConnect() {
 	return server;
 }
 
-function clientSendStart() {
-	server.emit('enterGame');
+function clientSendStart(id) {
+	if (id != null) {
+		server.emit('enterGame', id);
+	}
 }
 
 function pingServer() {

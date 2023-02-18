@@ -112,7 +112,7 @@ exports.gameState = function (game) {
 		packet[3] = game.gameBoard.lobbyStartButton.radius;
 		packet[4] = game.gameBoard.lobbyStartButton.color;
 	}
-	if (game.currentState == game.stateMap.gated) {
+	if (game.currentState == game.stateMap.gated || game.currentState == game.stateMap.racing || game.currentState == game.stateMap.collapsing) {
 		packet[1] = game.gameBoard.startingGate.x;
 		packet[2] = game.gameBoard.startingGate.y;
 		packet[3] = game.gameBoard.startingGate.width;

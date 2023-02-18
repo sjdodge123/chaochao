@@ -157,6 +157,34 @@ class Game {
 		this.gameBoard.update(this.currentState, this.alivePlayerCount, this.sleepingPlayerCount, dt);
 		this.world.update(dt);
 	}
+	getState() {
+		return this.currentState;
+	}
+	determineGameState(newPlayer) {
+		if (this.currentState == c.stateMap.waiting || this.currentState == c.stateMap.lobby || this.currentState == c.stateMap.gameOver) {
+			this.world.spawnPlayerRandomLoc(newPlayer);
+			return;
+		}
+		if (this.currentState == c.stateMap.gated) {
+			this.gameBoard.gatePlayer(newPlayer);
+		}
+		if (this.currentState == c.stateMap.racing || this.currentState == c.stateMap.collapsing) {
+			this.gameBoard.setTempSpectator(newPlayer);
+		}
+
+	}
+	checkSendGameStateUpdates(client) {
+		if (this.currentState == c.stateMap.waiting || this.currentState == c.stateMap.lobby || this.currentState == c.stateMap.gameOver) {
+			return;
+		}
+		//Send map configuration - Change current state so that its accurate
+		this.gameBoard.newMapPayload.currentState = this.currentState;
+		client.emit("newMap", this.gameBoard.newMapPayload);
+		//Send map tile changes
+		client.emit("tileChanges", JSON.stringify(this.gameBoard.gatherTileChanges()));
+		//Send current abilities
+		client.emit("allAbilityHoldings", JSON.stringify(this.gameBoard.gatherAbilities()));
+	}
 	checkLobbyStart() {
 		if (this.playerCount >= c.minPlayersToStart) {
 			this.startLobby();
@@ -235,6 +263,10 @@ class Game {
 				if (this.gameBoard.checkForActiveBrutal(c.brutalRounds.infection.id)) {
 					this.playerList[player].infect();
 				}
+				continue;
+			}
+			if (this.playerList[player].isSpectator) {
+				playersConcluded++
 				continue;
 			}
 			if (this.playerList[player].isZombie) {
@@ -386,11 +418,14 @@ class GameBoard {
 		this.playerList = playerList;
 		this.projectileList = projectileList;
 		this.abilityList = {};
+		this.tempSpectatorList = {};
+		this.tileChanges = {};
 		this.punchList = {};
 		this.aimerList = aimerList;
 		this.engine = engine;
 		this.roomSig = roomSig;
 		this.stateMap = c.stateMap;
+		this.newMapPayload = null;
 
 		this.chanceToSpawnAbility = c.chanceToSpawnAbility;
 		this.chanceOfBrutalRound = c.chanceOfBrutalRound;
@@ -558,6 +593,22 @@ class GameBoard {
 			}
 		}
 	}
+
+	gatherAbilities() {
+		var abilities = {};
+		for (var id in this.playerList) {
+			var player = this.playerList[id];
+			if (player.ability == null) {
+				continue;
+			}
+			abilities[player.id] = { owner: player.id, ability: player.ability.id, voronoiId: null };
+		}
+		return abilities;
+	}
+	gatherTileChanges() {
+		return this.tileChanges;
+	}
+
 	terminatePunch(packet) {
 		messenger.messageRoomBySig(packet.roomSig, "terminatePunch", packet.id);
 		delete packet.punchList[packet.id];
@@ -635,6 +686,7 @@ class GameBoard {
 			var distance = utils.getMag(explodeLoc.x - cells[i].site.x, explodeLoc.y - cells[i].site.y);
 			if (c.tileMap.abilities.bomb.explosionRadius > distance) {
 				cells[i].id = c.tileMap.slow.id;
+				this.tileChanges[cells[i].site.voronoiId] = cells[i].id;
 				explodedCells.push(cells[i].site.voronoiId);
 			}
 		}
@@ -682,7 +734,7 @@ class GameBoard {
 	setupMap(currentState) {
 		this.clean();
 		this.resetPlayers(currentState);
-		this.loadNextMap();
+		this.loadNextMap(currentState);
 		this.checkApplyBrutalConfig();
 		this.startingGate = new Gate(0, 0, 75, this.world.height);
 		this.gatePlayers();
@@ -716,6 +768,7 @@ class GameBoard {
 			var distance = utils.getMag(this.collapseLoc.x - cells[i].site.x, this.collapseLoc.y - cells[i].site.y);
 			if (this.collapseLine < distance) {
 				cells[i].id = c.tileMap.lava.id;
+				this.tileChanges[cells[i].site.voronoiId] = cells[i].id;
 				collapsedCells.push(cells[i].site.voronoiId);
 			}
 		}
@@ -736,6 +789,7 @@ class GameBoard {
 	changeTile(voronoiId, newId) {
 		for (var i = 0; i < this.currentMap.cells.length; i++) {
 			if (this.currentMap.cells[i].site.voronoiId == voronoiId) {
+				this.tileChanges[voronoiId] = newId;
 				this.currentMap.cells[i].id = newId;
 				return;
 			}
@@ -748,6 +802,7 @@ class GameBoard {
 		this.chanceForAdditionalBrutal = c.chanceForAdditionalBrutal;
 		this.brutalRound = false;
 		this.brutalConfig = null;
+		this.tileChanges = {};
 		this.round = 0;
 		this.currentMap = {};
 		this.nextMap = {};
@@ -759,14 +814,23 @@ class GameBoard {
 	}
 	gatePlayers() {
 		for (var playerID in this.playerList) {
-			var player = this.playerList[playerID];
-			var loc = this.startingGate.findFreeLoc(player);
-			player.x = loc.x;
-			player.y = loc.y;
-			if (!this.checkForActiveBrutal(c.brutalRounds.lightning.id)) {
-				player.setSpeedBonus(500);
-			}
+			this.gatePlayer(this.playerList[playerID]);
 		}
+	}
+	gatePlayer(player) {
+		var loc = this.startingGate.findFreeLoc(player);
+		player.x = loc.x;
+		player.y = loc.y;
+		if (!this.checkForActiveBrutal(c.brutalRounds.lightning.id)) {
+			player.setSpeedBonus(500);
+		}
+	}
+	setTempSpectator(player) {
+		player.isSpectator = true;
+		player.alive = false;
+		player.x = -100;
+		player.y = -100;
+		this.tempSpectatorList[player.id] = player;
 	}
 
 	resetPlayers(currentState) {
@@ -777,6 +841,9 @@ class GameBoard {
 		}
 		for (var aimerID in this.aimerList) {
 			delete this.aimerList[aimerID];
+		}
+		for (var specID in this.tempSpectatorList) {
+			this.tempSpectatorList[specID].isSpectator = false;
 		}
 	}
 	clean() {
@@ -803,7 +870,7 @@ class GameBoard {
 		return this.nextMap.id;
 	}
 
-	loadNextMap() {
+	loadNextMap(currentState) {
 		if (Object.keys(this.nextMap) == 0) {
 			this.determineNextMap();
 		}
@@ -814,7 +881,8 @@ class GameBoard {
 		console.log("Round: " + this.round);
 		this.brutalConfig = this.checkForBrutalRound();
 		var randomGen = this.generateRandomTiles();
-		messenger.messageRoomBySig(this.roomSig, "newMap", { id: this.currentMap.id, abilities: this.generateAbilities(), randomTiles: randomGen, brutalRoundConfig: this.brutalConfig });
+		this.newMapPayload = { id: this.currentMap.id, abilities: this.generateAbilities(), round: this.round, randomTiles: randomGen, brutalRoundConfig: this.brutalConfig, currentState: currentState };
+		messenger.messageRoomBySig(this.roomSig, "newMap", this.newMapPayload);
 	}
 	checkApplyBrutalConfig() {
 		if (this.brutalRound == false || this.brutalConfig == null) {
@@ -1199,14 +1267,16 @@ class World extends Rect {
 	update(dt) {
 
 	}
-	spawnNewPlayer(id) {
+	createNewPlayer(id) {
 		var color = this.getUniqueColorR();
 		var player = new Player(0, 0, 90, color, id, this.roomSig);
+		return player;
+	}
+	spawnPlayerRandomLoc(player) {
 		var loc = this.findFreeLoc(player);
 		player.initialLoc = loc;
 		player.x = loc.x;
 		player.y = loc.y;
-		return player;
 	}
 	getUniqueColorR() {
 		var color = utils.getColor();
@@ -1320,6 +1390,7 @@ class Player extends Circle {
 		this.id = id;
 		this.roomSig = roomSig;
 		this.currentState = null;
+		this.initialLoc = { x: 0, y: 0 };
 
 		//Sleep Variables
 		this.awake = true;
@@ -1850,6 +1921,7 @@ class BombProj extends Circle {
 }
 class Ability {
 	constructor(owner, roomSig) {
+		this.id = null;
 		this.roomSig = roomSig;
 		this.ownerId = owner;
 		this.alive = true;
@@ -1864,6 +1936,7 @@ class Ability {
 class Blindfold extends Ability {
 	constructor(owner, roomSig) {
 		super(owner, roomSig);
+		this.id = c.tileMap.abilities.blindfold.id;
 	}
 	use() {
 		if (this.alive == false) {
@@ -1877,6 +1950,7 @@ class Swap extends Ability {
 	constructor(owner, roomSig) {
 		super(owner, roomSig);
 		this.swap = false;
+		this.id = c.tileMap.abilities.swap.id;
 	}
 	use() {
 		if (this.alive == false) {
@@ -1891,6 +1965,7 @@ class Bomb extends Ability {
 	constructor(owner, roomSig) {
 		super(owner, roomSig);
 		this.spawnBomb = false;
+		this.id = c.tileMap.abilities.bomb.id;
 	}
 	use() {
 		if (this.alive == false) {
@@ -1905,6 +1980,7 @@ class SpeedBuff extends Ability {
 	constructor(owner, roomSig) {
 		super(owner, roomSig);
 		this.applyBuff = false;
+		this.id = c.tileMap.abilities.speedBuff.id;
 	}
 	use() {
 		if (this.alive == false) {
@@ -1920,6 +1996,7 @@ class SpeedDebuff extends Ability {
 	constructor(owner, roomSig) {
 		super(owner, roomSig);
 		this.applyDebuff = false;
+		this.id = c.tileMap.abilities.speedDebuff.id;
 	}
 	use() {
 		if (this.alive == false) {
@@ -1936,6 +2013,7 @@ class BombTrigger extends Ability {
 	constructor(owner, roomSig) {
 		super(owner, roomSig);
 		this.explodeBomb = false;
+		this.id = c.tileMap.abilities.bombTrigger.id;
 	}
 	use() {
 		if (this.alive == false) {

@@ -23,8 +23,6 @@ button {
 canvas {
     position: relative;
     font-weight: 600;
-    padding-left: 0;
-    padding-right: 0;
     display: inline-block;
 }
 
@@ -178,7 +176,7 @@ div.desc {
 
 .play-container {
     background-color: white;
-    height: 265px;
+    height: 285px;
     width: 50%;
     padding: 10px;
     border-radius: 5px;
