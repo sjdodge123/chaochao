@@ -672,16 +672,11 @@ class GameBoard {
 		messenger.messageRoomBySig(this.roomSig, "spawnBomb", owner);
 	}
 	clampBombAngle(angle) {
-		const maxAim = c.tileMap.abilities.bomb.maxAngle;
-		const minAim = c.tileMap.abilities.bomb.minAngle;
-		if ((angle <= maxAim || angle >= minAim)) {
+		if (angle % 90 == 0) {
 			return angle;
 		}
-		if (angle > maxAim && angle < 180) {
-			return maxAim;
-		}
-		if (angle < minAim && angle > 180) {
-			return minAim;
+		if ((angle + 45) % 90 == 0) {
+			return angle;
 		}
 	}
 	explodeBomb(owner) {
@@ -1431,7 +1426,7 @@ class Player extends Circle {
 		this.turnLeft = false;
 		this.turnRight = false;
 		this.attack = false;
-		this.angle = 0;
+		this.angle = 315;
 
 
 		//Attack
@@ -1809,7 +1804,7 @@ class Player extends Circle {
 		this.timeReached = null;
 		this.punch = null;
 		this.acquiredAbility = null;
-		this.angle = 0;
+		this.angle = 315;
 		if (currentState == c.stateMap.gameOver) {
 			this.ability = null;
 		}

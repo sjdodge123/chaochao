@@ -93,7 +93,7 @@ function createPlayer(dataArray, isAI) {
 	playerList[index].chatMessage = null;
 	playerList[index].awake = true;
 	playerList[index].ability = null;
-	playerList[index].angle = 0;
+	playerList[index].angle = 315;
 	playerList[index].deathMessage = null;
 	playerList[index].trail = new Trail({ x: dataArray[1], y: dataArray[2] });
 	playerList[index].fizzle = function () {

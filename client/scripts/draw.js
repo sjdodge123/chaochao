@@ -469,18 +469,12 @@ function drawProjectiles() {
 function drawAbilityAimer(player) {
     switch (player.ability) {
         case config.tileMap.abilities.bomb.id: {
-            const maxAim = config.tileMap.abilities.bomb.maxAngle;
-            const minAim = config.tileMap.abilities.bomb.minAngle;
-            if ((player.angle <= maxAim || player.angle >= minAim)) {
+            if (player.angle % 90 == 0) {
                 drawBombAimer(player, player.angle);
                 break;
             }
-            if ((player.angle > maxAim && player.angle < 180)) {
-                drawBombAimer(player, maxAim);
-                break;
-            }
-            if ((player.angle < minAim && player.angle > 180)) {
-                drawBombAimer(player, minAim);
+            if ((player.angle + 45) % 90 == 0) {
+                drawBombAimer(player, player.angle);
                 break;
             }
         }

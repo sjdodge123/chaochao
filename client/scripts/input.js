@@ -1,4 +1,3 @@
-var angleFromPlayer = 0;
 var menuOpen = false;
 
 var gamePadA = null;
@@ -47,12 +46,14 @@ function calcMousePos(evt) {
 }
 
 function setMousePos(x, y) {
+    /*
     mousex = x;
     mousey = y;
     if (playerList[myID] != null) {
         playerList[myID].angle = angle(playerList[myID].x, playerList[myID].y, x, y);
         server.emit('mousemove', playerList[myID].angle);
     }
+    */
 }
 
 function handleClick(event) {
@@ -99,6 +100,10 @@ function keyDown(evt) {
         case 83: { moveBackward = true; break; } //Down key
         case 40: { moveBackward = true; break; } //Down key
         case 32: { attack = true; break; } // Spacebar
+    }
+    if (playerList[myID] != null) {
+        calcAngleFromKeys(playerList[myID]);
+        server.emit('mousemove', playerList[myID].angle);
     }
     server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
 }
@@ -242,6 +247,10 @@ function touchMovement() {
     moveBackward = joystickMovement.down();
     turnRight = joystickMovement.right();
     turnLeft = joystickMovement.left();
+    if (playerList[myID] != null) {
+        calcAngleFromKeys(playerList[myID]);
+        server.emit('mousemove', playerList[myID].angle);
+    }
     server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
 }
 
@@ -252,6 +261,41 @@ function cancelMovement(evt) {
     moveBackward = false;
     attack = false;
     server.emit('movement', { turnLeft: false, moveForward: false, turnRight: false, moveBackward: false, attack: false });
+}
+
+function calcAngleFromKeys(player) {
+    if (turnLeft && moveForward) {
+        player.angle = 225;
+        return;
+    }
+    if (turnRight && moveForward) {
+        player.angle = 315;
+        return;
+    }
+    if (turnRight && moveBackward) {
+        player.angle = 45;
+        return;
+    }
+    if (turnLeft && moveBackward) {
+        player.angle = 135;
+        return;
+    }
+    if (moveForward) {
+        player.angle = 270;
+        return;
+    }
+    if (moveBackward) {
+        player.angle = 90;
+        return;
+    }
+    if (turnLeft) {
+        player.angle = 180;
+        return;
+    }
+    if (turnRight) {
+        player.angle = 0;
+        return;
+    }
 }
 
 function openEmojiWindow(x, y) {
