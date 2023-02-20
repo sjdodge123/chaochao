@@ -357,6 +357,16 @@ function spawnBomb(owner) {
 	bomb.color = "black";
 	projectileList[owner] = bomb;
 }
+function spawnPuck(owner) {
+	var puck = {};
+	puck.ownerId = owner;
+	puck.x = -100;
+	puck.y = -100;
+	puck.radius = config.brutalRounds.hockey.puckRadius;
+	puck.rotation = 0;
+	puck.color = "black";
+	projectileList[owner] = puck;
+}
 function spawnAimer(owner) {
 	var aimer = {};
 	aimer.ownerId = owner;
@@ -374,7 +384,7 @@ function terminatePunch(id) {
 		delete punchList[id];
 	}
 }
-function terminateBomb(id) {
+function terminateProj(id) {
 	if (projectileList[id] != null) {
 		delete projectileList[id];
 	}
@@ -391,6 +401,11 @@ function resetPlayers() {
 		player.alive = true;
 		player.deathMessage = null;
 		player.trail = new Trail({ x: player.x, y: player.y });
+	}
+}
+function resetProjectiles() {
+	for (var id in projectileList) {
+		delete projectileList[id];
 	}
 }
 

@@ -168,6 +168,19 @@ function getRandomInt(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+function angle(originX, originY, targetX, targetY) {
+    var dx = originX - targetX;
+    var dy = originY - targetY;
+    var theta = Math.atan2(-dy, -dx);
+    theta *= 180 / Math.PI;
+    if (theta < 0) theta += 360;
+    return theta;
+}
+
+exports.angle = function (originX, originY, targetX, targetY) {
+    return angle(originX, originY, targetX, targetY);
+}
+
 exports.getRandomInt = function (min, max) {
     return getRandomInt(min, max);
 };

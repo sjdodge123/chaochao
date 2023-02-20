@@ -175,6 +175,15 @@
             "acelModifer": 1.1,
             "active": true,
             "title": "Infection"
+        },
+        "hockey": {
+            "id": 1009,
+            "puckRadius": 25,
+            "baseSpeed": 20000,
+            "spikeSpeed": 1.25,
+            "puckHitStrength": 800,
+            "active": true,
+            "title": "Air Hockey"
         }
     },
     "lobbyWaitTime": 5,
@@ -207,7 +216,7 @@
     "playerBrakeCoeff": 0.235,
     "playerStartSleepTime": 60,
     "playerAFKKickTime": 240,
-    "playerPunchSlowAmt": 0.5,
+    "playerPunchSlowAmt": 0.35,
     "playerPunchCooldown": 300,
     "playerMaxSpeed": 500,
     "playerMaxSpeedBonus": 800,

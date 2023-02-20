@@ -52,6 +52,8 @@ var bombImage = new Image();
 bombImage.src = "../assets/img/bomb.svg";
 var infectionIcon = new Image(576, 512);
 infectionIcon.src = "../assets/img/skull-crossbones-solid.svg";
+var puckIcon = new Image(576, 512);
+puckIcon.src = "../assets/img/hockey-puck-solid.svg";
 
 //TileTextures
 var lava = new Image(256, 256);
@@ -107,6 +109,7 @@ function loadPatterns() {
     brutalRoundImages[config.brutalRounds.golden.id] = moneyIcon;
     brutalRoundImages[config.brutalRounds.volcano.id] = volcanoIcon;
     brutalRoundImages[config.brutalRounds.infection.id] = infectionIcon;
+    brutalRoundImages[config.brutalRounds.hockey.id] = puckIcon;
 
     if (brutalRoundConfig != null && brutalPatterns[brutalRoundConfig.brutalTypes.toString()] == null) {
         brutalPatterns[brutalRoundConfig.brutalTypes.toString()] = makeComplexPattern(brutalRoundConfig.brutalTypes);
@@ -462,6 +465,14 @@ function drawProjectiles() {
             gameContext.rotate(projectileList[proj].rotation * (Math.PI / 180));
             gameContext.scale(bombScale, bombScale);
             gameContext.drawImage(bombImage, -centerX, -centerY);
+            gameContext.restore();
+        }
+        if (projectileList[proj].type == 'puck') {
+            gameContext.save();
+            gameContext.beginPath();
+            gameContext.fillStyle = projectileList[proj].color;
+            gameContext.arc(projectileList[proj].x, projectileList[proj].y, projectileList[proj].radius, 0, 2 * Math.PI);
+            gameContext.fill();
             gameContext.restore();
         }
     }

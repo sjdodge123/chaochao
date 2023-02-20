@@ -186,6 +186,9 @@ function clientConnect() {
 	server.on("resetPlayers", function () {
 		resetPlayers();
 	});
+	server.on("resetProjectiles", function () {
+		resetProjectiles();
+	});
 	server.on("resetGame", function () {
 		fullReset();
 	});
@@ -207,19 +210,24 @@ function clientConnect() {
 		spawnBomb(owner);
 		playSound(bombShot);
 	});
+	server.on("spawnPuck", function (owner) {
+		spawnPuck(owner);
+		playSound(bombShot);
+	});
 	server.on("playerPunched", function (owner) {
+		if (playerList[owner] == null) {
+			playSound(meleeHitSound);
+			return;
+		}
 		if (playerList[owner].infected) {
 			playSound(zombieHit);
-		}
-		else {
-			playSound(meleeHitSound);
 		}
 	});
 	server.on("terminatePunch", function (id) {
 		terminatePunch(id);
 	});
-	server.on("terminateBomb", function (id) {
-		terminateBomb(id);
+	server.on("terminateProj", function (id) {
+		terminateProj(id);
 	});
 	server.on("terminateAimer", function (id) {
 		terminateAimer(id);
@@ -259,7 +267,7 @@ function clientConnect() {
 		});
 	});
 
-	server.on("bombBounce", function () {
+	server.on("projBounced", function () {
 		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
 			playSound(bombBounce);
 		}

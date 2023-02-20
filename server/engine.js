@@ -21,6 +21,12 @@ exports.checkCollideCells = function (player, map) {
 exports.punchPlayer = function (player, punch) {
 	punchPlayer(player, punch);
 }
+exports.puckPlayer = function (puck, player) {
+	puckPlayer(puck, player);
+}
+exports.punchPuck = function (puck, punch) {
+	punchPuck(puck, punch);
+}
 exports.bumpPlayer = function (player, bumper) {
 	bumpPlayer(player, bumper);
 }
@@ -359,28 +365,24 @@ function bounceOffBoundry(obj, bound) {
 	if (obj.newX - obj.radius < bound.x) {
 		obj.newX = obj.x;
 		obj.angle = 180 - obj.angle;
-		obj.speed *= 1.2;
 		obj.velX *= -3;
 		obj.bounced = true;
 	}
 	if (obj.newX + obj.radius > bound.x + bound.width) {
 		obj.newX = obj.x;
 		obj.angle = 180 - obj.angle;
-		obj.speed *= 1.2;
 		obj.velX *= -3;
 		obj.bounced = true;
 	}
 	if (obj.newY - obj.radius < bound.y) {
 		obj.newY = obj.y;
 		obj.angle *= -1;
-		obj.speed *= 1.2;
 		obj.velY *= -3;
 		obj.bounced = true;
 	}
 	if (obj.newY + obj.radius > bound.y + bound.height) {
 		obj.newY = obj.y;
 		obj.angle *= -1;
-		obj.speed *= 1.2;
 		obj.velY *= -3;
 		obj.bounced = true;
 	}
@@ -392,6 +394,19 @@ function punchPlayer(player, punch) {
 	player.velX += velCont.velContX;
 	player.velY += velCont.velContY;
 }
+function punchPuck(puck, punch) {
+	var angle = utils.angle(punch.x, punch.y, puck.x, puck.y);
+	puck.angle = angle;
+	puck.speed *= c.brutalRounds.hockey.spikeSpeed;
+}
+function puckPlayer(puck, player) {
+	var distance = utils.getMag(puck.x - player.x, puck.y - player.y);
+	var velCont = _calcVelCont(distance, player, puck.x, puck.y);
+	player.velX += velCont.velContX * c.brutalRounds.hockey.puckHitStrength;
+	player.velY += velCont.velContY * c.brutalRounds.hockey.puckHitStrength;
+}
+
+
 function bumpPlayer(player, bumper) {
 	//TODO this isnt right
 	var simDist = { x: player.newX, y: player.newY };

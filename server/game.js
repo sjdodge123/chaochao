@@ -332,19 +332,31 @@ class Game {
 	startRace() {
 		console.log("Start Race");
 		this.currentState = this.stateMap.racing;
-		if (!this.gameBoard.checkForActiveBrutal(c.brutalRounds.lightning.id)) {
+
+		var lightningRound = this.gameBoard.checkForActiveBrutal(c.brutalRounds.lightning.id);
+
+		if (!lightningRound) {
 			for (var id in this.playerList) {
 				this.playerList[id].setSpeedBonus(0);
 			}
 		}
 		if (this.gameBoard.checkForActiveBrutal(c.brutalRounds.volcano.id)) {
 			var eruptionDelay = utils.getRandomInt(8, 15);
-			if (this.gameBoard.checkForActiveBrutal(c.brutalRounds.lightning.id)) {
+			if (lightningRound) {
 				eruptionDelay = utils.getRandomInt(1, 4);
 			}
 			setTimeout(this.gameBoard.warnOfPendingVolcano, (eruptionDelay - 2) * 1000, { context: this });
 			setTimeout(this.gameBoard.applyBrutalVolcanoRound, eruptionDelay * 1000, { context: this });
 		}
+
+		if (this.gameBoard.checkForActiveBrutal(c.brutalRounds.hockey.id)) {
+			var puckSpawnDelay = utils.getRandomInt(3, 5);
+			if (lightningRound) {
+				puckSpawnDelay = utils.getRandomInt(1, 3);
+			}
+			setTimeout(this.gameBoard.applyBrutalHockeyRound, puckSpawnDelay * 1000, { context: this });
+		}
+
 
 		messenger.messageRoomBySig(this.roomSig, "startRace", null);
 	}
@@ -588,7 +600,7 @@ class GameBoard {
 			}
 
 			if (this.projectileList[id].alive == false) {
-				messenger.messageRoomBySig(this.roomSig, "terminateBomb", id);
+				messenger.messageRoomBySig(this.roomSig, "terminateProj", id);
 				delete this.projectileList[id];
 				continue;
 			}
@@ -836,7 +848,12 @@ class GameBoard {
 		player.y = -100;
 		this.tempSpectatorList[player.id] = player;
 	}
-
+	resetProjectiles() {
+		messenger.messageRoomBySig(this.roomSig, "resetProjectiles", null);
+		for (var id in this.projectileList) {
+			delete this.projectileList[id];
+		}
+	}
 	resetPlayers(currentState) {
 		messenger.messageRoomBySig(this.roomSig, "resetPlayers", null);
 		for (var playerID in this.playerList) {
@@ -854,6 +871,7 @@ class GameBoard {
 		this.lobbyStartButton = null;
 		this.collapseLoc = {};
 		this.collapseLine = this.world.height + 400;
+		this.resetProjectiles();
 	}
 	checkForActiveBrutal(id) {
 		if (this.brutalRound == true && this.brutalConfig.brutalTypes.indexOf(id) != -1) {
@@ -978,6 +996,13 @@ class GameBoard {
 		if (context.currentState == c.stateMap.racing || context.currentState == c.stateMap.collapsing) {
 			messenger.messageRoomBySig(context.roomSig, 'volcanoEruption');
 		}
+	}
+	applyBrutalHockeyRound(packet) {
+		var context = packet.context;
+		var loc = { x: context.world.width / 2, y: context.world.height / 2 };
+		var puck = new Puck(loc.x, loc.y, c.brutalRounds.hockey.puckRadius, "black", context.roomSig, context.roomSig, utils.getRandomInt(1, 360));
+		context.projectileList[context.roomSig] = puck;
+		messenger.messageRoomBySig(context.roomSig, "spawnPuck", context.roomSig);
 	}
 
 	checkForDynamicDifficultyIncrease() {
@@ -1622,6 +1647,11 @@ class Player extends Circle {
 			messenger.messageRoomBySig(this.roomSig, "playerPunched", object.ownerId);
 			return;
 		}
+		if (object.isPuck) {
+			_engine.puckPlayer(object, this);
+			messenger.messageRoomBySig(this.roomSig, "playerPunched", object.ownerId);
+			return;
+		}
 		if (object.isGate) {
 			this.killSelf();
 			return;
@@ -1867,21 +1897,49 @@ class Punch extends Circle {
 
 	}
 }
-class BombProj extends Circle {
+
+class Projectile extends Circle {
 	constructor(x, y, radius, color, ownerId, roomSig, angle) {
 		super(x, y, radius, color);
 		this.alive = true;
 		this.bounced = false;
 		this.ownerId = ownerId;
 		this.roomSig = roomSig;
-		this.lifeTime = c.tileMap.abilities.bomb.lifetime;
-		this.explosionRadius = c.tileMap.abilities.bomb.explosionRadius;
-		this.speed = c.tileMap.abilities.bomb.speed;
 		this.angle = angle;
+		this.speed = 0;
 		this.velX = 0;
 		this.velY = 0;
 		this.newX = this.x;
 		this.newY = this.y;
+		this.type = "";
+	}
+	update() {
+		if (!this.alive) {
+			return;
+		}
+		this.checkForBounce();
+		this.move();
+	}
+	move() {
+		this.x = this.newX;
+		this.y = this.newY;
+	}
+	checkForBounce() {
+		if (this.bounced) {
+			this.bounced = false;
+			messenger.messageRoomBySig(this.roomSig, "projBounced");
+		}
+	}
+	handleHit(object) {
+
+	}
+}
+class BombProj extends Projectile {
+	constructor(x, y, radius, color, ownerId, roomSig, angle) {
+		super(x, y, radius, color, ownerId, roomSig, angle);
+		this.lifeTime = c.tileMap.abilities.bomb.lifetime;
+		this.explosionRadius = c.tileMap.abilities.bomb.explosionRadius;
+		this.speed = c.tileMap.abilities.bomb.speed;
 		this.explode = false;
 		this.type = "bomb";
 
@@ -1890,15 +1948,8 @@ class BombProj extends Circle {
 		this.explodeTimeLeft = this.explodeWaitTime;
 	}
 	update() {
-		this.checkForBounce();
 		this.checkExplodeTimer();
-		this.move();
-	}
-	checkForBounce() {
-		if (this.bounced) {
-			this.bounced = false;
-			messenger.messageRoomBySig(this.roomSig, "bombBounce");
-		}
+		super.update();
 	}
 	checkExplodeTimer() {
 		if (this.explodeTimer != null) {
@@ -1915,14 +1966,24 @@ class BombProj extends Circle {
 		this.explode = true;
 		this.alive = false;
 	}
-	move() {
-		this.x = this.newX;
-		this.y = this.newY;
+}
+
+class Puck extends Projectile {
+	constructor(x, y, radius, color, ownerId, roomSig, angle) {
+		super(x, y, radius, color, ownerId, roomSig, angle);
+		this.type = "puck";
+		this.isPuck = true;
+		this.speed = c.brutalRounds.hockey.baseSpeed;
 	}
 	handleHit(object) {
-
+		if (object.isPunch && object.ownerId != this.id) {
+			_engine.punchPuck(this, object);
+			messenger.messageRoomBySig(this.roomSig, "playerPunched", object.ownerId);
+			return;
+		}
 	}
 }
+
 class Ability {
 	constructor(owner, roomSig) {
 		this.id = null;
