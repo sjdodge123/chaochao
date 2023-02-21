@@ -122,6 +122,10 @@
                 "value": 2,
                 "duration": 4000,
                 "id": 105
+            },
+            "tileSwap": {
+                "spawnable": true,
+                "id": 106
             }
         }
     },
