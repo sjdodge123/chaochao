@@ -26,6 +26,8 @@ blindfoldLargeIcon.scale = .5;
 
 var transferIcon = new Image(576, 512);
 transferIcon.src = "../assets/img/random.svg";
+var copyIcon = new Image(576, 512);
+copyIcon.src = "../assets/img/copy-regular.svg";
 var bombIcon = new Image(576, 512);
 bombIcon.src = "../assets/img/bomb.svg";
 
@@ -84,6 +86,7 @@ function loadPatterns() {
     patterns[config.tileMap.abilities.bomb.id] = makePattern(bombIcon, makeSeamlessPattern(dirt));
     patterns[config.tileMap.abilities.speedBuff.id] = makePattern(windIcon, makeSeamlessPattern(dirt));
     patterns[config.tileMap.abilities.speedDebuff.id] = makePattern(hourglassIcon, makeSeamlessPattern(dirt));
+    patterns[config.tileMap.abilities.tileSwap.id] = makePattern(copyIcon, makeSeamlessPattern(dirt));
     patterns[config.brutalRounds.infection.id] = makePattern(infectionIcon, "green");
 
     //Tiles

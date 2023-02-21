@@ -277,9 +277,13 @@ function clientConnect() {
 		playerAbilityUsed(owner);
 		playSound(blindSound);
 	});
+	server.on("tileSwap", function (owner) {
+		playerAbilityUsed(owner);
+		playSound(tileSwap);
+	});
 	server.on("swapUsed", function (owner) {
 		playerAbilityUsed(owner);
-		var aimer = spawnAimer(owner);
+		spawnAimer(owner);
 		aimerList[owner].startSwapCountDown = true;
 		var count = 0;
 		var int = setInterval(function () {

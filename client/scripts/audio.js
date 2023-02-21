@@ -31,6 +31,7 @@ var brutalRoundSound = new Audio("./assets/sounds/brutalround.mp3");
 var volcanoErupt = new Audio("./assets/sounds/volcano-erupt.mp3");
 var speedBuff = new Audio("./assets/sounds/hard_wind.mp3");
 var speedDebuff = new Audio("./assets/sounds/speed_downgrade.mp3");
+var tileSwap = new Audio("./assets/sounds/tileSwap.mp3");
 
 var newZombie = new Audio("./assets/sounds/newzombie.mp3");
 var zombieHit = new Audio("./assets/sounds/zombiehit.mp3");
@@ -64,6 +65,7 @@ brutalBackgroundMusicList.push(horrorLoop);
 brutalBackgroundMusicList.push(desperationSetsIn);
 brutalBackgroundMusicList.push(heavyfabric);
 
+tileSwap.volume = .5 * masterVolume;
 speedBuff.volume = 0.35 * masterVolume;
 speedDebuff.volume = 0.05 * masterVolume;
 volcanoErupt.volume = 0.05 * masterVolume;

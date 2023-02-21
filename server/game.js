@@ -566,6 +566,10 @@ class GameBoard {
 				this.abilityList[id].applyDebuff = false;
 				setTimeout(this.removeSpeedDebuff, c.tileMap.abilities.speedDebuff.duration, { id: this.abilityList[id].ownerId, playerList: this.playerList, deltaList: this.applySpeedDebuff(this.abilityList[id].ownerId) });
 			}
+			if (this.abilityList[id].tileSwap) {
+				this.abilityList[id].tileSwap = false;
+				this.swapTiles();
+			}
 			if (this.abilityList[id].alive == false) {
 				if (this.playerList[this.abilityList[id].ownerId] != undefined) {
 					this.playerList[this.abilityList[id].ownerId].ability = null;
@@ -628,6 +632,24 @@ class GameBoard {
 	}
 	gatherTileChanges() {
 		return this.tileChanges;
+	}
+
+	swapTiles() {
+		//Find all fast tiles, find all ice tiles, swap them
+		var cells = this.currentMap.cells;
+		for (var i = 0; i < cells.length; i++) {
+			if (cells[i].id == c.tileMap.fast.id) {
+				cells[i].id = c.tileMap.ice.id;
+				this.tileChanges[cells[i].site.voronoiId] = cells[i].id;
+				continue;
+			}
+			if (cells[i].id == c.tileMap.ice.id) {
+				cells[i].id = c.tileMap.fast.id;
+				this.tileChanges[cells[i].site.voronoiId] = cells[i].id;
+				continue;
+			}
+		}
+		messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(this.gatherTileChanges()));
 	}
 
 	terminatePunch(packet) {
@@ -962,6 +984,11 @@ class GameBoard {
 				}
 				case c.tileMap.abilities.speedDebuff.id: {
 					player.ability = new SpeedDebuff(player.id, this.roomSig);
+					player.acquiredAbility = { mapID: null };
+					break;
+				}
+				case c.tileMap.abilities.tileSwap.id: {
+					player.ability = new TileSwap(player.id, this.roomSig);
 					player.acquiredAbility = { mapID: null };
 					break;
 				}
@@ -1765,6 +1792,15 @@ class Player extends Circle {
 				messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: this.id, ability: object.id, voronoiId: object.voronoiId });
 				return;
 			}
+			if (object.id == c.tileMap.abilities.tileSwap.id) {
+				if (this.ability != null || this.isZombie) {
+					return;
+				}
+				this.ability = new TileSwap(this.id, this.roomSig);
+				this.acquiredAbility = { mapID: object.voronoiId };
+				messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: this.id, ability: object.id, voronoiId: object.voronoiId });
+				return;
+			}
 
 		}
 	}
@@ -2070,6 +2106,21 @@ class SpeedDebuff extends Ability {
 		this.alive = false;
 		this.applyDebuff = true;
 		messenger.messageRoomBySig(this.roomSig, "speedDebuff", this.ownerId);
+	}
+}
+class TileSwap extends Ability {
+	constructor(owner, roomSig) {
+		super(owner, roomSig);
+		this.tileSwap = false;
+		this.id = c.tileMap.abilities.tileSwap.id;
+	}
+	use() {
+		if (this.alive == false) {
+			return;
+		}
+		this.alive = false;
+		this.tileSwap = true;
+		messenger.messageRoomBySig(this.roomSig, "tileSwap", this.ownerId);
 	}
 }
 
