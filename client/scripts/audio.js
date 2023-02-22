@@ -69,65 +69,68 @@ brutalBackgroundMusicList.push(horrorLoop);
 brutalBackgroundMusicList.push(desperationSetsIn);
 brutalBackgroundMusicList.push(heavyfabric);
 
-lavaExplosion.volume = .75 * masterVolume;
-iceExplosion.volume = .25 * masterVolume;
-iceCannon.volume = .25 * masterVolume;
-tileSwap.volume = .5 * masterVolume;
-speedBuff.volume = 0.25 * masterVolume;
-speedDebuff.volume = 0.05 * masterVolume;
-volcanoErupt.volume = 0.05 * masterVolume;
-brutalRoundSound.volume = 0.35 * masterVolume;
-bombBounce.volume = 0.75 * masterVolume;
-abilityFizzle.volume = .65 * masterVolume;
-teleportWarnSound.volume = .025 * masterVolume;
-countDownA.volume = .05 * masterVolume;
-countDownB.volume = .05 * masterVolume;
-lavaCollapse.volume = .1 * masterVolume;
-meleeSound.volume = .05 * masterVolume;
-meleeHitSound.volume = .016 * masterVolume;
-gameOverSound.volume = .5 * masterVolume;
-nearVictorySound.volume = .3 * masterVolume;
-fallFromVictorySound.volume = .15 * masterVolume;
-collectItem.volume = .4 * masterVolume;
-bombShot.volume = .2 * masterVolume;
-bombExplosion.volume = .2 * masterVolume;
-playerFinished.volume = .3 * masterVolume;
-blindSound.volume = .4 * masterVolume;
-teleportSound.volume = .05 * masterVolume;
-newZombie.volume = .55 * masterVolume;
-zombieHit.volume = .25 * masterVolume;
-zombieSwing.volume = .35 * masterVolume;
+function volumeChange() {
+    lavaExplosion.volume = .75 * masterVolume;
+    iceExplosion.volume = .25 * masterVolume;
+    iceCannon.volume = .25 * masterVolume;
+    tileSwap.volume = .5 * masterVolume;
+    speedBuff.volume = 0.25 * masterVolume;
+    speedDebuff.volume = 0.05 * masterVolume;
+    volcanoErupt.volume = 0.05 * masterVolume;
+    brutalRoundSound.volume = 0.35 * masterVolume;
+    bombBounce.volume = 0.75 * masterVolume;
+    abilityFizzle.volume = .65 * masterVolume;
+    teleportWarnSound.volume = .025 * masterVolume;
+    countDownA.volume = .05 * masterVolume;
+    countDownB.volume = .05 * masterVolume;
+    lavaCollapse.volume = .1 * masterVolume;
+    meleeSound.volume = .05 * masterVolume;
+    meleeHitSound.volume = .016 * masterVolume;
+    gameOverSound.volume = .5 * masterVolume;
+    nearVictorySound.volume = .3 * masterVolume;
+    fallFromVictorySound.volume = .15 * masterVolume;
+    collectItem.volume = .4 * masterVolume;
+    bombShot.volume = .2 * masterVolume;
+    bombExplosion.volume = .2 * masterVolume;
+    playerFinished.volume = .3 * masterVolume;
+    blindSound.volume = .4 * masterVolume;
+    teleportSound.volume = .05 * masterVolume;
+    newZombie.volume = .55 * masterVolume;
+    zombieHit.volume = .25 * masterVolume;
+    zombieSwing.volume = .35 * masterVolume;
 
-lobbyMusic.volume = .05 * masterVolume * musicVolume;
-lobbyMusic.loop = true;
-gameStart.volume = .2 * masterVolume;
+    lobbyMusic.volume = .05 * masterVolume * musicVolume;
+    lobbyMusic.loop = true;
+    gameStart.volume = .2 * masterVolume;
 
-heavyfabric.volume = .030 * masterVolume * musicVolume;
-heavyfabric.targetVolume = heavyfabric.volume;
+    heavyfabric.volume = .030 * masterVolume * musicVolume;
+    heavyfabric.targetVolume = heavyfabric.volume;
 
-slowpipes.volume = .015 * masterVolume * musicVolume;
-slowpipes.targetVolume = slowpipes.volume;
+    slowpipes.volume = .015 * masterVolume * musicVolume;
+    slowpipes.targetVolume = slowpipes.volume;
 
-slowstride.volume = .05 * masterVolume * musicVolume;
-slowstride.targetVolume = slowstride.volume;
+    slowstride.volume = .05 * masterVolume * musicVolume;
+    slowstride.targetVolume = slowstride.volume;
 
-therush.volume = .025 * masterVolume * musicVolume;
-therush.targetVolume = therush.volume;
+    therush.volume = .025 * masterVolume * musicVolume;
+    therush.targetVolume = therush.volume;
 
-beastv2.volume = .035 * masterVolume * musicVolume;
-beastv2.targetVolume = beastv2.volume;
+    beastv2.volume = .035 * masterVolume * musicVolume;
+    beastv2.targetVolume = beastv2.volume;
 
-mindInMotion.volume = .035 * masterVolume * musicVolume
-mindInMotion.targetVolume = mindInMotion.volume;
+    mindInMotion.volume = .035 * masterVolume * musicVolume
+    mindInMotion.targetVolume = mindInMotion.volume;
 
-desperationSetsIn.volume = .015 * masterVolume * musicVolume
-desperationSetsIn.targetVolume = desperationSetsIn.volume;
+    desperationSetsIn.volume = .015 * masterVolume * musicVolume
+    desperationSetsIn.targetVolume = desperationSetsIn.volume;
 
-horrorLoop.volume = .015 * masterVolume * musicVolume
-horrorLoop.targetVolume = horrorLoop.volume;
+    horrorLoop.volume = .015 * masterVolume * musicVolume
+    horrorLoop.targetVolume = horrorLoop.volume;
 
-bumpinbits.volume = .05 * masterVolume * musicVolume
-bumpinbits.targetVolume = bumpinbits.volume;
+    bumpinbits.volume = .05 * masterVolume * musicVolume
+    bumpinbits.targetVolume = bumpinbits.volume;
+}
+
 
 function playSound(sound) {
     playingSounds.push(sound);
@@ -271,3 +274,5 @@ function isCalmingPlaylist(sound) {
     }
     return false;
 }
+
+volumeChange();

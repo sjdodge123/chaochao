@@ -220,6 +220,9 @@ td {
 .btn {
     font-size: 0.95rem;
 }
+.music-btn{
+    margin-left: 5px;
+}
 
 div.map-image {
     margin: 5px;

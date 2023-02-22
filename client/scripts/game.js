@@ -41,6 +41,7 @@ $(function () {
 })
 
 function setupPage() {
+
     window.addEventListener('blur', cancelMovement);
     window.addEventListener('resize', resize, false);
     window.requestAnimFrame = (function () {
@@ -51,6 +52,29 @@ function setupPage() {
                 window.setTimeout(callback, 1000 / 30);
             };
     })();
+
+    $('#musicControl').on("click", function () {
+        if (musicVolume > 0) {
+            musicVolume = 0;
+            volumeChange();
+            $("#musicControl").html('<i class="music-btn fas fa-music"></i>  [<i class="music-btn fa fa-ban" aria-hidden="true"></i>]');
+        } else {
+            musicVolume = 1;
+            volumeChange();
+            $("#musicControl").html('<i class="music-btn fas fa-music"></i>  [<i class="music-btn fa fa-volume-up" aria-hidden="true"></i>]');
+        }
+    });
+    $('#masterControl').on("click", function () {
+        if (masterVolume > 0) {
+            masterVolume = 0;
+            volumeChange();
+            $("#masterControl").html('<i class="music-btn fa fa-gamepad" aria-hidden="true"></i>  [<i class="music-btn fa fa-ban" aria-hidden="true"></i>]');
+        } else {
+            masterVolume = 1;
+            volumeChange();
+            $("#masterControl").html('<i class="music-btn fa fa-gamepad" aria-hidden="true"></i>  [<i class="music-btn fa fa-volume-up" aria-hidden="true"></i>]');
+        }
+    });
 
     gameCanvas = document.getElementById('gameCanvas');
     gameContext = gameCanvas.getContext('2d');
