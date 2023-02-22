@@ -99,13 +99,15 @@ function resize() {
     var currentScreenRatio = viewport.width / viewport.height;
     var optimalRatio = Math.min(scaleToFitX, scaleToFitY);
 
-    if (currentScreenRatio >= 1.77 && currentScreenRatio <= 1.79) {
+    if (window.document.fullscreenElement) {
         newWidth = viewport.width;
         newHeight = viewport.height;
     } else {
-        newWidth = gameCanvas.width * optimalRatio;
-        newHeight = gameCanvas.height * optimalRatio;
+        newWidth = gameCanvas.width * optimalRatio / 1.1;
+        newHeight = gameCanvas.height * optimalRatio / 1.1;
     }
+
+
     gameCanvas.style.width = newWidth + "px";
     gameCanvas.style.height = newHeight + "px";
 }

@@ -100,8 +100,6 @@
             "bomb": {
                 "spawnable": true,
                 "id": 102,
-                "maxAngle": 45,
-                "minAngle": 315,
                 "aimerLength": 50,
                 "lifetime": 3,
                 "speed": 11000,
@@ -126,6 +124,15 @@
             "tileSwap": {
                 "spawnable": true,
                 "id": 106
+            },
+            "iceCannon": {
+                "spawnable": true,
+                "id": 107,
+                "snowFlakeRadius": 70,
+                "aimerLength": 50,
+                "lifetime": 1.5,
+                "speed": 11000,
+                "explosionRadius": 110
             }
         }
     },
@@ -174,9 +181,9 @@
         "infection": {
             "id": 1008,
             "radius": 15,
-            "dragModifer": 1.3,
+            "dragModifer": 1.1,
             "punchRadius": 14,
-            "acelModifer": 1.1,
+            "acelModifer": 1.5,
             "active": true,
             "title": "Infection"
         },
@@ -188,6 +195,12 @@
             "puckHitStrength": 800,
             "active": true,
             "title": "Air Hockey"
+        },
+        "explosive": {
+            "id": 1010,
+            "radius": 100,
+            "active": true,
+            "title": "Explosive"
         }
     },
     "lobbyWaitTime": 5,

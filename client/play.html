@@ -10,17 +10,24 @@
         <link rel="stylesheet" type="text/css" href="assets/css/all.css">
         <title>Chao Chao</title>
     </head>
-    <body>
-
-        <!-- Game enclosed here -->
-        <div id="gameWindow" >
-        <div id="mapContainer"><canvas id="gameCanvas" width="1366" height="768"></canvas></div>
-        <div class="emojiMenu" id="emojiMenu">
-            <a onclick="closeEmojiWindow('cancel')" href="#">
-            <i class="fas fa-window-close"></i>
-            </a>
-        </div>
-        </div>
+    <body style="overflow: hidden;">
+        <nav class="d-flex align-items-center px-3">
+            <div class="navbar-brand">
+                <a style="text-decoration: inherit;
+                color: inherit;" href="./index.html">ChaoChao</a>
+              </div>
+          </nav>
+        <section>
+            <!-- Game enclosed here -->
+            <div id="gameWindow" >
+            <div id="mapContainer"><canvas id="gameCanvas" width="1366" height="768"></canvas></div>
+            <div class="emojiMenu" id="emojiMenu">
+                <a onclick="closeEmojiWindow('cancel')" href="#">
+                <i class="fas fa-window-close"></i>
+                </a>
+            </div>
+            </div>
+        </section>
         <!-- Load game files -->
         <script src='socket.io/socket.io.js'></script>
         <script src="scripts/game.js"></script>

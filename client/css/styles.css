@@ -10,11 +10,33 @@
     font-weight: normal;
     font-style: normal;
 }
+:root {
+    --navbar-height: 60px;
+}
 html,body {
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
     width: 100vw;
     height: 100vh;
 }
+
+nav {
+    height: var(--navbar-height);
+    width: 100%;
+    border-bottom: thin solid #e6e6e6;
+    box-shadow: 0px 8px 15px rgba(0, 0, 0, 0.1);
+    position: fixed;
+    z-index: 1005;
+    top: 0;
+    left: 0;
+    background: #000;
+    color: #fff;
+  }
+
+  section {
+    margin-top: var(--navbar-height);
+    height: 100vh;
+    position: relative;
+  }
 
 canvas {
     position: relative;
@@ -27,13 +49,10 @@ canvas {
 }
 
 #main {
-    background-color: #ffffff;
-    position: absolute;
-    overflow: none;
-    left: 0;
+    height: 100%;
+    width: calc(1366 - 200px);
+    position: relative;
     right: 0;
-    bottom: 0;
-    top: 0;
 }
 
 #joinMenu{
@@ -225,6 +244,7 @@ div.desc {
 }
 
 .play-container {
+    margin-top: 5%;
     background-color: white;
     height: 285px;
     width: 50%;

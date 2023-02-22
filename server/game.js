@@ -272,6 +272,12 @@ class Game {
 				if (this.gameBoard.checkForActiveBrutal(c.brutalRounds.infection.id)) {
 					this.playerList[player].infect();
 				}
+				if (this.gameBoard.checkForActiveBrutal(c.brutalRounds.explosive.id)) {
+					if (this.playerList[player].exploded == false) {
+						this.gameBoard.explodeLava({ x: this.playerList[player].x, y: this.playerList[player].y }, c.brutalRounds.explosive.radius);
+						this.playerList[player].exploded = true;
+					}
+				}
 				continue;
 			}
 			if (this.playerList[player].isSpectator) {
@@ -528,6 +534,9 @@ class GameBoard {
 			}
 			for (var projID in this.projectileList) {
 				_engine.bounceOffBoundry(this.projectileList[projID], this.world);
+				if (this.projectileList[projID].type == "snowFlake") {
+					_engine.checkCollideCells(this.projectileList[projID], this.currentMap);
+				}
 				objectArray.push(this.projectileList[projID]);
 			}
 			for (var punchId in this.punchList) {
@@ -553,6 +562,10 @@ class GameBoard {
 				this.abilityList[id].spawnBomb = false;
 				this.spawnBomb(this.abilityList[id].ownerId);
 				setTimeout(this.acquireBombTrigger, 200, { id: this.abilityList[id].ownerId, abilityList: this.abilityList, playerList: this.playerList, roomSig: this.roomSig });
+			}
+			if (this.abilityList[id].spawnSnowFlake) {
+				this.abilityList[id].spawnSnowFlake = false;
+				this.spawnSnowFlake(this.abilityList[id].ownerId);
 			}
 			if (this.abilityList[id].explodeBomb) {
 				this.abilityList[id].explodeBomb = false;
@@ -601,6 +614,15 @@ class GameBoard {
 
 			if (this.projectileList[id].explode == true) {
 				this.explodeBomb(id);
+			}
+			if (this.projectileList[id].explodeIce == true) {
+				this.explodeIce(id);
+			}
+			if (this.projectileList[id].tileChanges != null && Object.keys(this.projectileList[id].tileChanges).length > 0) {
+				for (var vid in this.projectileList[id].tileChanges) {
+					this.changeTile(vid, this.projectileList[id].tileChanges[vid]);
+				}
+				messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(this.gatherTileChanges()));
 			}
 
 			if (this.projectileList[id].alive == false) {
@@ -701,11 +723,17 @@ class GameBoard {
 	}
 	spawnBomb(owner) {
 		var player = this.playerList[owner];
-		var bomb = new BombProj(player.x, player.y, 10, "black", owner, this.roomSig, this.clampBombAngle(player.angle));
+		var bomb = new BombProj(player.x, player.y, 10, "black", owner, this.roomSig, this.clampPlayerAngle(player.angle));
 		this.projectileList[owner] = bomb;
 		messenger.messageRoomBySig(this.roomSig, "spawnBomb", owner);
 	}
-	clampBombAngle(angle) {
+	spawnSnowFlake(owner) {
+		var player = this.playerList[owner];
+		var snowFlake = new SnowFlakeProj(player.x, player.y, c.tileMap.abilities.iceCannon.snowFlakeRadius, "black", owner, this.roomSig, this.clampPlayerAngle(player.angle));
+		this.projectileList[owner] = snowFlake;
+		messenger.messageRoomBySig(this.roomSig, "spawnSnowFlake", owner);
+	}
+	clampPlayerAngle(angle) {
 		if (angle % 90 == 0) {
 			return angle;
 		}
@@ -734,18 +762,59 @@ class GameBoard {
 		messenger.messageRoomBySig(this.roomSig, 'triggerUsed', owner);
 		messenger.messageRoomBySig(this.roomSig, 'explodedCells', explodedCells);
 	}
+	explodeIce(owner) {
+		var explodeLoc = { x: this.projectileList[owner].x, y: this.projectileList[owner].y };
+		var cells = this.currentMap.cells;
+		for (var i = 0; i < cells.length; i++) {
+			if (cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.lava.id) {
+				continue;
+			}
+			var distance = utils.getMag(explodeLoc.x - cells[i].site.x, explodeLoc.y - cells[i].site.y);
+			if (c.tileMap.abilities.iceCannon.explosionRadius > distance) {
+				cells[i].id = c.tileMap.ice.id;
+				this.tileChanges[cells[i].site.voronoiId] = cells[i].id;
+			}
+		}
+		messenger.messageRoomBySig(this.roomSig, 'snowFlakeExploded', owner);
+		messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(this.gatherTileChanges()));
+	}
+	explodeLava(explodeLoc, radius) {
+		var cells = this.currentMap.cells;
+		for (var i = 0; i < cells.length; i++) {
+			if (cells[i].id == c.tileMap.goal.id) {
+				continue;
+			}
+			var distance = utils.getMag(explodeLoc.x - cells[i].site.x, explodeLoc.y - cells[i].site.y);
+			if (radius > distance) {
+				cells[i].id = c.tileMap.lava.id;
+				this.tileChanges[cells[i].site.voronoiId] = cells[i].id;
+			}
+		}
+		messenger.messageRoomBySig(this.roomSig, 'lavaExplosion');
+		messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(this.gatherTileChanges()));
+	}
 	applySpeedBuff(owner) {
-		this.playerList[owner].addSpeed(100);
-		return this.playerList[owner].decreaseDragMultiplier(c.tileMap.abilities.speedBuff.value);
+		for (var id in this.playerList) {
+			if (!this.playerList[id].alive || this.playerList[id].isZombie) {
+				continue;
+			}
+			this.playerList[id].addSpeed(100);
+			this.playerList[id].decreaseDragMultiplier(c.tileMap.abilities.speedBuff.value)
+		}
 	}
 	removeSpeedBuff(packet) {
-		packet.playerList[packet.id].removeSpeed(100);
-		packet.playerList[packet.id].increaseDragMultiplier(c.tileMap.abilities.speedBuff.value);
+		for (var id in packet.playerList) {
+			packet.playerList[id].removeSpeed(100);
+			packet.playerList[id].increaseDragMultiplier(c.tileMap.abilities.speedBuff.value);
+		}
 	}
 	applySpeedDebuff(owner) {
 		var deltaList = {};
 		for (var id in this.playerList) {
 			if (id == owner) {
+				continue;
+			}
+			if (!this.playerList[id].alive || this.playerList[id].isZombie) {
 				continue;
 			}
 
@@ -893,6 +962,7 @@ class GameBoard {
 		this.lobbyStartButton = null;
 		this.collapseLoc = {};
 		this.collapseLine = this.world.height + 400;
+		this.tileChanges = {};
 		this.resetProjectiles();
 	}
 	checkForActiveBrutal(id) {
@@ -989,6 +1059,11 @@ class GameBoard {
 				}
 				case c.tileMap.abilities.tileSwap.id: {
 					player.ability = new TileSwap(player.id, this.roomSig);
+					player.acquiredAbility = { mapID: null };
+					break;
+				}
+				case c.tileMap.abilities.iceCannon.id: {
+					player.ability = new IceCannon(player.id, this.roomSig);
 					player.acquiredAbility = { mapID: null };
 					break;
 				}
@@ -1122,6 +1197,10 @@ class GameBoard {
 		}
 		activeBrutalTypes.splice(0, 1);
 		for (var i = 0; i < activeBrutalTypes.length; i++) {
+
+			if (brutalRoundConfig.brutalTypes.length == c.maxTotalBrutals) {
+				return brutalRoundConfig;
+			}
 			//Roll for next Brutal
 			var nextBrutalChance = utils.getRandomInt(1, 100);
 			//console.log("Roll for additional brutal: " + nextBrutalChance);
@@ -1471,6 +1550,7 @@ class Player extends Circle {
 		this.nearVictory = false;
 		this.infected = false;
 		this.isZombie = false;
+		this.exploded = false;
 
 		//Movement
 		this.moveForward = false;
@@ -1801,6 +1881,15 @@ class Player extends Circle {
 				messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: this.id, ability: object.id, voronoiId: object.voronoiId });
 				return;
 			}
+			if (object.id == c.tileMap.abilities.iceCannon.id) {
+				if (this.ability != null || this.isZombie) {
+					return;
+				}
+				this.ability = new IceCannon(this.id, this.roomSig);
+				this.acquiredAbility = { mapID: object.voronoiId };
+				messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: this.id, ability: object.id, voronoiId: object.voronoiId });
+				return;
+			}
 
 		}
 	}
@@ -1850,6 +1939,7 @@ class Player extends Circle {
 		this.enabled = true;
 		this.infected = false;
 		this.isZombie = false;
+		this.exploded = false;
 		this.x = this.initialLoc.x;
 		this.y = this.initialLoc.y;
 		this.newX = this.x;
@@ -1861,6 +1951,7 @@ class Player extends Circle {
 		this.brakeCoeff = c.playerBrakeCoeff;
 		this.maxVelocity = c.playerMaxSpeed;
 		this.acel = c.playerBaseAcel;
+		this.currentSpeedBonus = 0;
 		this.moveForward = false;
 		this.moveBackward = false;
 		this.turnLeft = false;
@@ -1970,10 +2061,49 @@ class Projectile extends Circle {
 
 	}
 }
+class SnowFlakeProj extends Projectile {
+	constructor(x, y, radius, color, ownerId, roomSig, angle) {
+		super(x, y, radius, color, ownerId, roomSig, angle);
+		this.explosionRadius = c.tileMap.abilities.iceCannon.explosionRadius;
+		this.speed = c.tileMap.abilities.iceCannon.speed;
+		this.explodeIce = false;
+		this.type = "snowFlake";
+		this.tileChanges = {};
+
+		this.explodeWaitTime = c.tileMap.abilities.iceCannon.lifetime;
+		this.explodeTimer = null;
+		this.explodeTimeLeft = this.explodeWaitTime;
+	}
+	update() {
+		this.checkExplodeTimer();
+		super.update();
+	}
+	checkExplodeTimer() {
+		if (this.explodeTimer != null) {
+			this.explodeTimeLeft = ((this.explodeWaitTime * 1000 - (Date.now() - this.explodeTimer)) / (1000)).toFixed(1);
+			if (this.explodeTimeLeft > 0) {
+				return;
+			}
+			this.explodeFlake();
+			return;
+		}
+		this.explodeTimer = Date.now();
+	}
+	explodeFlake() {
+		this.explodeIce = true;
+		this.alive = false;
+	}
+	handleHit(object) {
+		if (object.isMapCell) {
+			if (object.id != c.tileMap.lava.id && object.id != c.tileMap.goal.id) {
+				this.tileChanges[object.voronoiId] = c.tileMap.ice.id;
+			}
+		}
+	}
+}
 class BombProj extends Projectile {
 	constructor(x, y, radius, color, ownerId, roomSig, angle) {
 		super(x, y, radius, color, ownerId, roomSig, angle);
-		this.lifeTime = c.tileMap.abilities.bomb.lifetime;
 		this.explosionRadius = c.tileMap.abilities.bomb.explosionRadius;
 		this.speed = c.tileMap.abilities.bomb.speed;
 		this.explode = false;
@@ -2062,6 +2192,22 @@ class Swap extends Ability {
 		messenger.messageRoomBySig(this.roomSig, "swapUsed", this.ownerId);
 	}
 }
+class IceCannon extends Ability {
+	constructor(owner, roomSig) {
+		super(owner, roomSig);
+		this.spawnSnowFlake = false;
+		this.id = c.tileMap.abilities.iceCannon.id;
+	}
+	use() {
+		if (this.alive == false) {
+			return;
+		}
+		this.spawnSnowFlake = true;
+		this.alive = false;
+		messenger.messageRoomBySig(this.roomSig, "iceCannon", this.ownerId);
+	}
+}
+
 class Bomb extends Ability {
 	constructor(owner, roomSig) {
 		super(owner, roomSig);

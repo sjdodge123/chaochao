@@ -1,6 +1,7 @@
 var scale = 0.035;
 var spreadScale = 0.15;
 var bombScale = 0.025;
+var complexPatternScale = 0.135;
 
 var patterns = {};
 var brutalPatterns = {};
@@ -30,6 +31,9 @@ var copyIcon = new Image(576, 512);
 copyIcon.src = "../assets/img/copy-regular.svg";
 var bombIcon = new Image(576, 512);
 bombIcon.src = "../assets/img/bomb.svg";
+var snowFlakeIcon = new Image(576, 512);
+snowFlakeIcon.src = "../assets/img/snowflake-solid.svg";
+
 
 var windIcon = new Image(576, 512);
 windIcon.src = "../assets/img/wind-solid.svg";
@@ -52,10 +56,15 @@ var volcanoIcon = new Image(576, 512);
 volcanoIcon.src = "../assets/img/volcano-solid.svg";
 var bombImage = new Image();
 bombImage.src = "../assets/img/bomb.svg";
+var snowFlakeImage = new Image();
+snowFlakeImage.src = "../assets/img/snowflake-solid.svg";
+snowFlakeImage.scale = 0.05;
 var infectionIcon = new Image(576, 512);
-infectionIcon.src = "../assets/img/skull-crossbones-solid.svg";
+infectionIcon.src = "../assets/img/biohazard-solid.svg";
 var puckIcon = new Image(576, 512);
 puckIcon.src = "../assets/img/hockey-puck-solid.svg";
+var explosionIcon = new Image(576, 512);
+explosionIcon.src = "../assets/img/explosion-solid.svg";
 
 //TileTextures
 var lava = new Image(256, 256);
@@ -87,6 +96,7 @@ function loadPatterns() {
     patterns[config.tileMap.abilities.speedBuff.id] = makePattern(windIcon, makeSeamlessPattern(dirt));
     patterns[config.tileMap.abilities.speedDebuff.id] = makePattern(hourglassIcon, makeSeamlessPattern(dirt));
     patterns[config.tileMap.abilities.tileSwap.id] = makePattern(copyIcon, makeSeamlessPattern(dirt));
+    patterns[config.tileMap.abilities.iceCannon.id] = makePattern(snowFlakeIcon, makeSeamlessPattern(dirt));
     patterns[config.brutalRounds.infection.id] = makePattern(infectionIcon, "green");
 
     //Tiles
@@ -113,6 +123,7 @@ function loadPatterns() {
     brutalRoundImages[config.brutalRounds.volcano.id] = volcanoIcon;
     brutalRoundImages[config.brutalRounds.infection.id] = infectionIcon;
     brutalRoundImages[config.brutalRounds.hockey.id] = puckIcon;
+    brutalRoundImages[config.brutalRounds.explosive.id] = explosionIcon;
 
     if (brutalRoundConfig != null && brutalPatterns[brutalRoundConfig.brutalTypes.toString()] == null) {
         brutalPatterns[brutalRoundConfig.brutalTypes.toString()] = makeComplexPattern(brutalRoundConfig.brutalTypes);
@@ -183,12 +194,12 @@ function makeComplexPattern(ids) {
         console.log("ERROR: Server provided brutalRound id (" + ids[i] + ") that is not referenced in LoadPatterns()");
     }
 
-    const canvasPadding = 1;
+    const canvasPadding = 3;
     const canvasPattern = document.createElement("canvas");
     const ctxPattern = canvasPattern.getContext("2d");
 
-    var iconWidth = images[0].width * scale;
-    var iconHeight = images[0].height * scale;
+    var iconWidth = images[0].width * complexPatternScale;
+    var iconHeight = images[0].height * complexPatternScale;
     canvasPattern.width = iconWidth + canvasPadding;
     canvasPattern.height = (iconHeight * images.length) + canvasPadding;
 
@@ -478,11 +489,32 @@ function drawProjectiles() {
             gameContext.fill();
             gameContext.restore();
         }
+        if (projectileList[proj].type == 'snowFlake') {
+            projectileList[proj].rotation += 5;
+            const centerX = snowFlakeImage.width * 2;
+            const centerY = snowFlakeImage.height * 2;
+            gameContext.save();
+            gameContext.translate(projectileList[proj].x, projectileList[proj].y);
+            gameContext.rotate(projectileList[proj].rotation * (Math.PI / 180));
+            gameContext.scale(snowFlakeImage.scale, snowFlakeImage.scale);
+            gameContext.drawImage(snowFlakeImage, -centerX, -centerY);
+            gameContext.restore();
+        }
     }
 }
 function drawAbilityAimer(player) {
     switch (player.ability) {
         case config.tileMap.abilities.bomb.id: {
+            if (player.angle % 90 == 0) {
+                drawBombAimer(player, player.angle);
+                break;
+            }
+            if ((player.angle + 45) % 90 == 0) {
+                drawBombAimer(player, player.angle);
+                break;
+            }
+        }
+        case config.tileMap.abilities.iceCannon.id: {
             if (player.angle % 90 == 0) {
                 drawBombAimer(player, player.angle);
                 break;

@@ -214,6 +214,10 @@ function clientConnect() {
 		spawnPuck(owner);
 		playSound(bombShot);
 	});
+	server.on("spawnSnowFlake", function (owner) {
+		spawnSnowFlake(owner);
+		playSound(bombShot);
+	});
 	server.on("playerPunched", function (owner) {
 		if (playerList[owner] == null) {
 			playSound(meleeHitSound);
@@ -240,6 +244,9 @@ function clientConnect() {
 	server.on('explodedCells', function (cells) {
 		explodedCells(cells);
 		playSound(bombExplosion);
+	});
+	server.on("snowFlakeExploded", function (owner) {
+		playSound(iceExplosion);
 	});
 	server.on("fizzle", function (owner) {
 		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
@@ -280,6 +287,15 @@ function clientConnect() {
 	server.on("tileSwap", function (owner) {
 		playerAbilityUsed(owner);
 		playSound(tileSwap);
+	});
+	server.on("iceCannon", function (owner) {
+		playerAbilityUsed(owner);
+		playSound(iceCannon);
+	});
+	server.on("lavaExplosion", function () {
+		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
+			playSound(lavaExplosion);
+		}
 	});
 	server.on("swapUsed", function (owner) {
 		playerAbilityUsed(owner);

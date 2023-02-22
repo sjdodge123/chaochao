@@ -29,9 +29,12 @@ var teleportSound = new Audio("./assets/sounds/teleport.mp3");
 var teleportWarnSound = new Audio("./assets/sounds/teleport_warn.mp3");
 var brutalRoundSound = new Audio("./assets/sounds/brutalround.mp3");
 var volcanoErupt = new Audio("./assets/sounds/volcano-erupt.mp3");
-var speedBuff = new Audio("./assets/sounds/hard_wind.mp3");
+var speedBuff = new Audio("./assets/sounds/speedBuff.mp3");
 var speedDebuff = new Audio("./assets/sounds/speed_downgrade.mp3");
 var tileSwap = new Audio("./assets/sounds/tileSwap.mp3");
+var iceCannon = new Audio("./assets/sounds/iceCannon.mp3");
+var iceExplosion = new Audio("./assets/sounds/iceExplosion.mp3");
+var lavaExplosion = new Audio("./assets/sounds/lavaExplosion.mp3");
 
 var newZombie = new Audio("./assets/sounds/newzombie.mp3");
 var zombieHit = new Audio("./assets/sounds/zombiehit.mp3");
@@ -65,8 +68,11 @@ brutalBackgroundMusicList.push(horrorLoop);
 brutalBackgroundMusicList.push(desperationSetsIn);
 brutalBackgroundMusicList.push(heavyfabric);
 
+lavaExplosion.volume = .75 * masterVolume;
+iceExplosion.volume = .25 * masterVolume;
+iceCannon.volume = .25 * masterVolume;
 tileSwap.volume = .5 * masterVolume;
-speedBuff.volume = 0.35 * masterVolume;
+speedBuff.volume = 0.25 * masterVolume;
 speedDebuff.volume = 0.05 * masterVolume;
 volcanoErupt.volume = 0.05 * masterVolume;
 brutalRoundSound.volume = 0.35 * masterVolume;

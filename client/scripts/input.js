@@ -26,7 +26,6 @@ function initEventHandlers() {
         ev.preventDefault();
         return false;
     }, false);
-
     isTouchScreen = isTouchDevice();
     if (isTouchScreen) {
         setupVirtualbuttons();

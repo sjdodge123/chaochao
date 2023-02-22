@@ -238,7 +238,6 @@ function setupPage() {
         }, false);
         return false;
     });
-
     window.addEventListener('resize', resize, false);
     window.requestAnimFrame = (function () {
         return window.requestAnimationFrame ||
@@ -323,13 +322,15 @@ function resize() {
     var optimalRatio = Math.min(scaleToFitX, scaleToFitY);
 
 
+    /*
     if (currentScreenRatio >= 1.77 && currentScreenRatio <= 1.79) {
-        newWidth = viewport.width;
+        newWidth = viewport.width ;
         newHeight = viewport.height;
     } else {
-        newWidth = createCanvas.width * optimalRatio;
-        newHeight = createCanvas.height * optimalRatio;
-    }
+        */
+    newWidth = createCanvas.width * optimalRatio / 1.2;
+    newHeight = createCanvas.height * optimalRatio / 1.2;
+    // }
     var controlPanel = document.getElementById("controlPanel");
     controlPanel.style.height = newHeight + "px";
     createCanvas.style.width = newWidth + "px";

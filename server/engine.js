@@ -97,7 +97,7 @@ class Engine {
 				}
 			}
 			var punchingSlowDown = 1;
-			if (player.attack) {
+			if (player.attack && player.ability == null) {
 				punchingSlowDown = c.playerPunchSlowAmt;
 			}
 

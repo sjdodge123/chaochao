@@ -367,6 +367,16 @@ function spawnPuck(owner) {
 	puck.color = "black";
 	projectileList[owner] = puck;
 }
+function spawnSnowFlake(owner) {
+	var snowFlake = {};
+	snowFlake.ownerId = owner;
+	snowFlake.x = playerList[owner].x;
+	snowFlake.y = playerList[owner].y;
+	snowFlake.radius = config.tileMap.abilities.iceCannon.snowFlakeRadius;
+	snowFlake.rotation = 15;
+	snowFlake.color = "black";
+	projectileList[owner] = snowFlake;
+}
 function spawnAimer(owner) {
 	var aimer = {};
 	aimer.ownerId = owner;
