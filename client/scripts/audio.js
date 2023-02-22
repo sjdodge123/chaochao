@@ -49,10 +49,11 @@ var gameStart = new Audio("./assets/sounds/gamestart.mp3");
 
 var slowstride = new Audio("./assets/sounds/slowstride.mp3");
 var slowpipes = new Audio("./assets/sounds/slow-pipes.mp3");
+var bumpinbits = new Audio("./assets/sounds/bumpinbits.mp3");
 
 calmBackgroundMusicList.push(slowstride);
 calmBackgroundMusicList.push(slowpipes);
-
+calmBackgroundMusicList.push(bumpinbits);
 
 var therush = new Audio("./assets/sounds/the-rush.mp3");
 var beastv2 = new Audio("./assets/sounds/beastv2.mp3");
@@ -124,6 +125,9 @@ desperationSetsIn.targetVolume = desperationSetsIn.volume;
 
 horrorLoop.volume = .015 * masterVolume * musicVolume
 horrorLoop.targetVolume = horrorLoop.volume;
+
+bumpinbits.volume = .05 * masterVolume * musicVolume
+bumpinbits.targetVolume = bumpinbits.volume;
 
 function playSound(sound) {
     playingSounds.push(sound);
@@ -239,10 +243,6 @@ function fadeSoundOut(sound) {
             }
         }, 500);
     }
-}
-
-function lookupCurrentBackgroundSound() {
-
 }
 
 function isExcitingPlaylist(sound) {
