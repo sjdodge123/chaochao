@@ -803,13 +803,17 @@ class GameBoard {
 			if (!this.playerList[id].alive || this.playerList[id].isZombie) {
 				continue;
 			}
-			this.playerList[id].addSpeed(100);
+			if (id == owner) {
+				this.playerList[id].addSpeed(100);
+			}
 			this.playerList[id].decreaseDragMultiplier(c.tileMap.abilities.speedBuff.value)
 		}
 	}
 	removeSpeedBuff(packet) {
 		for (var id in packet.playerList) {
-			packet.playerList[id].removeSpeed(100);
+			if (id == packet.id) {
+				packet.playerList[id].removeSpeed(100);
+			}
 			packet.playerList[id].increaseDragMultiplier(c.tileMap.abilities.speedBuff.value);
 		}
 	}
