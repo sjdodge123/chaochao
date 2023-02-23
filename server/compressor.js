@@ -171,3 +171,20 @@ exports.sendPunch = function (punch) {
 	prop = null;
 	return packet;
 }
+exports.sendClouds = function (clouds) {
+	var packet = [];
+	for (prop in clouds) {
+		proj = clouds[prop];
+		listItem = [
+			proj.ownerId,
+			proj.x,
+			proj.y
+		];
+		packet.push(listItem);
+	}
+	packet = JSON.stringify(packet);
+	proj = null;
+	listItem = null;
+	prop = null;
+	return packet;
+}

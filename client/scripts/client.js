@@ -218,6 +218,9 @@ function clientConnect() {
 		spawnSnowFlake(owner);
 		playSound(bombShot);
 	});
+	server.on("spawnClouds", function (packet) {
+		spawnClouds(packet);
+	});
 	server.on("playerPunched", function (owner) {
 		if (playerList[owner] == null) {
 			playSound(meleeHitSound);

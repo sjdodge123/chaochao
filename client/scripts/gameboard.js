@@ -1,3 +1,4 @@
+
 var mousex,
 	mousey,
 	lobbyStartButton,
@@ -347,6 +348,20 @@ function spawnPunch(payload) {
 	punchList[punch.ownerId] = punch;
 	return punch;
 }
+function spawnClouds(packet) {
+	var parsed = JSON.parse(packet);
+	console.log(parsed);
+	for (var i = 0; i < parsed.length; i++) {
+		var cloud = parsed[i];
+		var newCloudID = cloud[0];
+		projectileList[newCloudID] = {};
+		projectileList[newCloudID].ownerId = cloud[0];
+		projectileList[newCloudID].x = cloud[1];
+		projectileList[newCloudID].y = cloud[2];
+		projectileList[newCloudID].type = "cloud";
+		projectileList[newCloudID].rotation = getRandomInt(1, 360);
+	}
+}
 function spawnBomb(owner) {
 	var bomb = {};
 	bomb.ownerId = owner;
@@ -496,7 +511,6 @@ function changeTilesBulk(tileChanges) {
 		}
 	}
 }
-
 
 
 function playerAbilityUsed(owner) {

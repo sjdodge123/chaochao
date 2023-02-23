@@ -149,6 +149,9 @@
         },
         "cloudy": {
             "id": 1002,
+            "speed": 1500,
+            "density": 100,
+            "size": 50,
             "active": false,
             "title": "Cloudy"
         },

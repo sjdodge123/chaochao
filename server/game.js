@@ -533,6 +533,9 @@ class GameBoard {
 				objectArray.push(this.playerList[player]);
 			}
 			for (var projID in this.projectileList) {
+				if (this.projectileList[projID].type == "cloud") {
+					continue;
+				}
 				_engine.bounceOffBoundry(this.projectileList[projID], this.world);
 				if (this.projectileList[projID].type == "snowFlake") {
 					_engine.checkCollideCells(this.projectileList[projID], this.currentMap);
@@ -621,6 +624,7 @@ class GameBoard {
 			if (this.projectileList[id].tileChanges != null && Object.keys(this.projectileList[id].tileChanges).length > 0) {
 				for (var vid in this.projectileList[id].tileChanges) {
 					this.changeTile(vid, this.projectileList[id].tileChanges[vid]);
+					delete this.projectileList[id].tileChanges[vid];
 				}
 				messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(this.gatherTileChanges()));
 			}
@@ -632,6 +636,7 @@ class GameBoard {
 			}
 			this.projectileList[id].update();
 		}
+
 	}
 	updateAimers(currentState) {
 		for (var id in this.aimerList) {
@@ -1012,6 +1017,10 @@ class GameBoard {
 					this.applyBrutalLightningRound();
 					break;
 				}
+				case c.brutalRounds.cloudy.id: {
+					this.applyBrutalCloudyRound();
+					break;
+				}
 			}
 		}
 
@@ -1098,6 +1107,29 @@ class GameBoard {
 		if (context.currentState == c.stateMap.racing || context.currentState == c.stateMap.collapsing) {
 			messenger.messageRoomBySig(context.roomSig, 'volcanoEruption');
 		}
+	}
+	applyBrutalCloudyRound() {
+		var density = c.brutalRounds.cloudy.density;
+		var angle = 45;
+		var shiftX = 0;
+		var shiftY = 0;
+		var clouds = {};
+		while (density != 0) {
+			var hash = utils.generateHash(this.roomSig, density);
+
+			var loc = { x: utils.getRandomInt(0, this.world.width), y: utils.getRandomInt(0, this.world.height) };
+
+			var cloud = new CloudProj(loc.x + shiftX, loc.y + shiftY, c.brutalRounds.cloudy.size, "white", hash, this.roomSig, angle);
+
+			this.projectileList[hash] = cloud;
+			clouds[hash] = cloud;
+			density--;
+			if (density % 10 == 0) {
+				shiftX = -(this.world.width * density) / 10;
+				shiftY = -(this.world.height * density) / 10;
+			}
+		}
+		messenger.messageRoomBySig(this.roomSig, "spawnClouds", compressor.sendClouds(clouds));
 	}
 	applyBrutalHockeyRound(packet) {
 		var context = packet.context;
@@ -2059,6 +2091,19 @@ class Projectile extends Circle {
 	}
 	handleHit(object) {
 
+	}
+}
+class CloudProj extends Projectile {
+	constructor(x, y, radius, color, ownerId, roomSig, angle) {
+		super(x, y, radius, color, ownerId, roomSig, angle);
+		this.speed = c.brutalRounds.cloudy.speed;
+		this.type = "cloud";
+	}
+	update() {
+		if (!this.alive) {
+			return;
+		}
+		this.move();
 	}
 }
 class SnowFlakeProj extends Projectile {

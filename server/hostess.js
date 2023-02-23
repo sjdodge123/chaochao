@@ -98,7 +98,7 @@ function searchForRoom(id) {
 }
 
 function generateRoomSig() {
-	var sig = utils.getRandomInt(0, 99);
+	var sig = utils.getRandomInt(0, 999);
 	if (roomList[sig] == null || roomList[sig] == undefined) {
 		return sig;
 	}

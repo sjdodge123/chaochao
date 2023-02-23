@@ -1,7 +1,7 @@
 var scale = 0.035;
 var spreadScale = 0.15;
 var bombScale = 0.025;
-var complexPatternScale = 0.135;
+var complexPatternScale = 0.1;
 
 var patterns = {};
 var brutalPatterns = {};
@@ -59,6 +59,9 @@ bombImage.src = "../assets/img/bomb.svg";
 var snowFlakeImage = new Image();
 snowFlakeImage.src = "../assets/img/snowflake-solid.svg";
 snowFlakeImage.scale = 0.05;
+var cloudImage = new Image();
+cloudImage.src = "../assets/img/cloud.svg";
+cloudImage.scale = 2;
 var infectionIcon = new Image(576, 512);
 infectionIcon.src = "../assets/img/biohazard-solid.svg";
 var puckIcon = new Image(576, 512);
@@ -194,7 +197,7 @@ function makeComplexPattern(ids) {
         console.log("ERROR: Server provided brutalRound id (" + ids[i] + ") that is not referenced in LoadPatterns()");
     }
 
-    const canvasPadding = 3;
+    const canvasPadding = 15;
     const canvasPattern = document.createElement("canvas");
     const ctxPattern = canvasPattern.getContext("2d");
 
@@ -498,6 +501,16 @@ function drawProjectiles() {
             gameContext.rotate(projectileList[proj].rotation * (Math.PI / 180));
             gameContext.scale(snowFlakeImage.scale, snowFlakeImage.scale);
             gameContext.drawImage(snowFlakeImage, -centerX, -centerY);
+            gameContext.restore();
+        }
+        if (projectileList[proj].type == 'cloud') {
+            const centerX = cloudImage.width * 2;
+            const centerY = cloudImage.height * 2;
+            gameContext.save();
+            gameContext.translate(projectileList[proj].x, projectileList[proj].y);
+            gameContext.rotate(projectileList[proj].rotation * (Math.PI / 180));
+            gameContext.scale(cloudImage.scale, cloudImage.scale);
+            gameContext.drawImage(cloudImage, -centerX, -centerY);
             gameContext.restore();
         }
     }
