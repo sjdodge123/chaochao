@@ -3,6 +3,9 @@ var fs = require('fs');
 const { map } = require('jquery');
 var maps = [];
 var mapListing = [];
+var soundListing = [];
+var imgListing = [];
+
 var c = require('./config.json');
 c.port = process.env.PORT || c.port;
 
@@ -11,6 +14,8 @@ const octokit = new Octokit({
     auth: process.env.GITHUB_AUTH
 });
 loadMaps();
+loadSounds();
+loadImages();
 
 Colors = {};
 Colors.names = {
@@ -229,9 +234,19 @@ exports.loadConfig = function () {
 exports.loadMaps = function () {
     return maps;
 }
+exports.getContentCount = function () {
+    return mapListing.length + soundListing.length + imgListing.length;
+}
 exports.getMapListings = function () {
     return mapListing;
 }
+exports.getSoundListings = function () {
+    return soundListing;
+}
+exports.getImageListings = function () {
+    return imgListing;
+}
+
 exports.getRandomProperty = function (obj) {
     var keys = Object.keys(obj);
     return obj[keys[keys.length * Math.random() << 0]];
@@ -250,7 +265,25 @@ exports.shuffleArray = function (array) {
 function loadMaps() {
     var normalizedPath = require("path").join(__dirname, "../client/maps");
     fs.readdirSync(normalizedPath).forEach(function (file) {
-        mapListing.push(file);
-        maps.push(require("../client/maps/" + file));
+        if (file != ".DS_Store") {
+            mapListing.push(file);
+            maps.push(require("../client/maps/" + file));
+        }
+    });
+}
+function loadSounds() {
+    var normalizedPath = require("path").join(__dirname, "../client/assets/sounds");
+    fs.readdirSync(normalizedPath).forEach(function (file) {
+        if (file != ".DS_Store") {
+            soundListing.push(file);
+        }
+    });
+}
+function loadImages() {
+    var normalizedPath = require("path").join(__dirname, "../client/assets/img");
+    fs.readdirSync(normalizedPath).forEach(function (file) {
+        if (file != ".DS_Store") {
+            imgListing.push(file);
+        }
     });
 }

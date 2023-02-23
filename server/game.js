@@ -1144,9 +1144,9 @@ class GameBoard {
 		if (this.round == 1) {
 			return;
 		}
-		if(this.alivePlayerCount + this.sleepingPlayerCount %  playerCountMod == 0){
+		if (this.alivePlayerCount + this.sleepingPlayerCount % playerCountMod == 0) {
 			var inceasePerPlayer = 1;
-			this.increaseChanceOfAbilities(inceasePerPlayer*playerCountMod);
+			this.increaseChanceOfAbilities(inceasePerPlayer * playerCountMod);
 		}
 		if (this.round % 5 == 0) {
 			this.increaseChanceOfAbilities(0);
@@ -1155,7 +1155,7 @@ class GameBoard {
 		}
 	}
 	increaseChanceOfAbilities(bonus) {
-		if(bonus == null || bonus== undefined){
+		if (bonus == null || bonus == undefined) {
 			console.log("increaseChanceOfAbilities in GameBoard called without a valid bonus value");
 			bonus = 0;
 		}

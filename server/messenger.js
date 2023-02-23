@@ -41,6 +41,7 @@ exports.getTotalPlayers = function () {
 
 function checkForMail(client) {
 	client.emit("welcome", client.id);
+	client.emit("contentDelivery", JSON.stringify({ count: utils.getContentCount(), mapnames: utils.getMapListings(), soundnames: utils.getSoundListings(), imagenames: utils.getImageListings() }));
 
 	client.on("getMaps", function () {
 		client.emit("maplisting", utils.getMapListings());
@@ -87,8 +88,7 @@ function checkForMail(client) {
 			client.emit("roomNotFound");
 			return;
 		}
-		client.emit("maplisting", utils.getMapListings());
-
+		//client.emit("maplisting", utils.getMapListings());
 
 		//Add this player to the list of current clients in the room
 		room.clientList[client.id] = client.id;

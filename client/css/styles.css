@@ -141,6 +141,20 @@ td {
     margin-left: 5%;
     margin-right: 5%;
 }
+#progressContainer{
+    width: 50%;
+    border-style: solid;
+}
+#progressWindow {
+    width: 100%;
+    background-color: grey;
+}
+
+#progressBar {
+    width: 1%;
+    height: 30px;
+    background-color: green;
+}
 #controlPanel {
     border-radius: 20px;
     border-style: solid;

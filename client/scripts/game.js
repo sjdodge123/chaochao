@@ -16,11 +16,14 @@ var server = null,
     round = 0,
     timeOutChecker = null,
     currentState = null,
+    loading = true,
     gameRunning = null;
 
 
 var musicControl = $('#musicControl');
-var masterControl =  $('#masterControl');
+var masterControl = $('#masterControl');
+var progressContainer = $('#progressContainer');
+var progressBar = document.getElementById("progressBar");
 var emojiMenu = document.getElementById("emojiMenu");
 var canvasWindow = document.getElementById("mapContainer");
 var exitIconID = document.getElementById("exitIcon");
@@ -40,7 +43,6 @@ var then = Date.now(),
 
 $(function () {
     server = clientConnect();
-    setupPage();
 })
 
 function setupPage() {
@@ -81,11 +83,16 @@ function setupPage() {
     volumeChange();
     gameCanvas = document.getElementById('gameCanvas');
     gameContext = gameCanvas.getContext('2d');
-    enterLobby();
+    init();
+    $.when.apply($, promises).then(function () {
+        enterLobby();
+    });
 
 }
 
 function enterLobby() {
+    loading = false;
+    progressContainer.hide();
     $('#main').hide();
     $('#gameWindow').show();
     resize();
@@ -99,7 +106,9 @@ function enterLobby() {
 
 }
 function init() {
-    timeOutChecker = setInterval(checkForTimeout, 1000);
+    if (loading == false) {
+        timeOutChecker = setInterval(checkForTimeout, 1000);
+    }
     animloop();
     initEventHandlers();
 }
@@ -109,6 +118,23 @@ function animloop() {
         dt = now - then;
         gameLoop(dt);
         then = now;
+        requestAnimFrame(animloop);
+    }
+    if (loading == true) {
+        var contentLoaded = true;
+        var loadedCount = 0;
+        var totalToLoad = promises.length;
+        for (var i = 0; i < promises.length; i++) {
+            if (promises[i].status != 200) {
+                contentLoaded = false;
+                continue;
+            }
+            if (promises[i].status == 200) {
+                loadedCount++;
+            }
+        }
+        progressBar.style.width = ((loadedCount / totalToLoad) * 100 + "%");
+        //console.log("Loaded (" + loadedCount + " / " + totalToLoad + ")");
         requestAnimFrame(animloop);
     }
 }

@@ -94,9 +94,25 @@ function clientConnect() {
 			promises.push($.getJSON("../maps/" + mapnames[i], function (data) {
 				maps.push(data);
 			}));
-
 		}
-
+	});
+	server.on("contentDelivery", function (payload) {
+		var payload = JSON.parse(payload);
+		var mapnames = payload.mapnames;
+		var soundnames = payload.soundnames;
+		var imagenames = payload.imagenames;
+		for (var i = 0; i < imagenames.length; i++) {
+			promises.push($.get("../assets/img/" + imagenames[i]));
+		}
+		for (var i = 0; i < mapnames.length; i++) {
+			promises.push($.getJSON("../maps/" + mapnames[i], function (data) {
+				maps.push(data);
+			}));
+		}
+		for (var i = 0; i < soundnames.length; i++) {
+			promises.push($.get("../assets/sounds/" + soundnames[i]));
+		}
+		setupPage();
 	});
 
 	server.on("firstPlaceWinner", function (id) {
