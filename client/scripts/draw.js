@@ -739,6 +739,11 @@ function drawMap() {
                 gameContext.setLineDash([]);
                 gameContext.lineWidth = 1;
                 gameContext.strokeStyle = patterns[cell.id];
+            } else if (cell.id == config.tileMap.goal.id) {
+                gameContext.setLineDash([0, 0]);
+                gameContext.lineWidth = 5;
+                gameContext.strokeStyle = '#756300';
+                color = locateColor(cell.id);
             } else {
                 //Regular colors
                 color = locateColor(cell.id);
