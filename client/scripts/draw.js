@@ -504,8 +504,8 @@ function drawProjectiles() {
             gameContext.restore();
         }
         if (projectileList[proj].type == 'cloud') {
-            const centerX = cloudImage.width * 2;
-            const centerY = cloudImage.height * 2;
+            const centerX = cloudImage.width;
+            const centerY = cloudImage.height;
             gameContext.save();
             gameContext.translate(projectileList[proj].x, projectileList[proj].y);
             gameContext.rotate(projectileList[proj].rotation * (Math.PI / 180));

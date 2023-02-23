@@ -350,7 +350,6 @@ function spawnPunch(payload) {
 }
 function spawnClouds(packet) {
 	var parsed = JSON.parse(packet);
-	console.log(parsed);
 	for (var i = 0; i < parsed.length; i++) {
 		var cloud = parsed[i];
 		var newCloudID = cloud[0];

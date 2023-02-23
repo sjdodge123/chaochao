@@ -13,7 +13,7 @@
     "minimumNotchesToWin": 4,
     "chanceToSpawnAbility": 35,
     "chanceToSpawnAbilityIncrement": 10,
-    "chanceToSpawnAbilityPlayerCountMod":5,
+    "chanceToSpawnAbilityPlayerCountMod": 5,
     "chanceOfBrutalRound": 0,
     "chanceForAdditionalBrutal": 15,
     "chanceOfBrutalRoundIncrement": 25,
@@ -150,10 +150,10 @@
         },
         "cloudy": {
             "id": 1002,
-            "speed": 1500,
-            "density": 100,
+            "speed": 1000,
+            "density": 50,
             "size": 50,
-            "active": false,
+            "active": true,
             "title": "Cloudy"
         },
         "bomb": {
@@ -185,7 +185,7 @@
         "infection": {
             "id": 1008,
             "radius": 15,
-            "brakeModifer":0.075,
+            "brakeModifer": 0.075,
             "dragModifer": 0.65,
             "punchRadius": 14,
             "acelModifer": 0.75,
