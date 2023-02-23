@@ -31,7 +31,7 @@ var brutalRoundSound = new Audio("./assets/sounds/brutalround.mp3");
 var volcanoErupt = new Audio("./assets/sounds/volcano-erupt.mp3");
 var speedBuff = new Audio("./assets/sounds/speedBuff.mp3");
 var speedDebuff = new Audio("./assets/sounds/speed_downgrade.mp3");
-var tileSwap = new Audio("./assets/sounds/tileSwap.mp3");
+var tileSwap = new Audio("./assets/sounds/tileswap.mp3");
 var iceCannon = new Audio("./assets/sounds/iceCannon.mp3");
 var iceExplosion = new Audio("./assets/sounds/iceExplosion.mp3");
 var lavaExplosion = new Audio("./assets/sounds/lavaExplosion.mp3");
@@ -69,66 +69,6 @@ brutalBackgroundMusicList.push(horrorLoop);
 brutalBackgroundMusicList.push(desperationSetsIn);
 brutalBackgroundMusicList.push(heavyfabric);
 
-
-lavaExplosion.volume = .75 * masterVolume;
-    iceExplosion.volume = .25 * masterVolume;
-    iceCannon.volume = .25 * masterVolume;
-    tileSwap.volume = .5 * masterVolume;
-    speedBuff.volume = 0.25 * masterVolume;
-    speedDebuff.volume = 0.05 * masterVolume;
-    volcanoErupt.volume = 0.05 * masterVolume;
-    brutalRoundSound.volume = 0.35 * masterVolume;
-    bombBounce.volume = 0.75 * masterVolume;
-    abilityFizzle.volume = .65 * masterVolume;
-    teleportWarnSound.volume = .025 * masterVolume;
-    countDownA.volume = .05 * masterVolume;
-    countDownB.volume = .05 * masterVolume;
-    lavaCollapse.volume = .1 * masterVolume;
-    meleeSound.volume = .05 * masterVolume;
-    meleeHitSound.volume = .016 * masterVolume;
-    gameOverSound.volume = .5 * masterVolume;
-    nearVictorySound.volume = .3 * masterVolume;
-    fallFromVictorySound.volume = .15 * masterVolume;
-    collectItem.volume = .4 * masterVolume;
-    bombShot.volume = .2 * masterVolume;
-    bombExplosion.volume = .2 * masterVolume;
-    playerFinished.volume = .3 * masterVolume;
-    blindSound.volume = .4 * masterVolume;
-    teleportSound.volume = .05 * masterVolume;
-    newZombie.volume = .55 * masterVolume;
-    zombieHit.volume = .25 * masterVolume;
-    zombieSwing.volume = .35 * masterVolume;
-
-    lobbyMusic.volume = .05 * masterVolume * musicVolume;
-    lobbyMusic.loop = true;
-    gameStart.volume = .2 * masterVolume;
-
-    heavyfabric.volume = .030 * masterVolume * musicVolume;
-    heavyfabric.targetVolume = heavyfabric.volume;
-
-    slowpipes.volume = .015 * masterVolume * musicVolume;
-    slowpipes.targetVolume = slowpipes.volume;
-
-    slowstride.volume = .05 * masterVolume * musicVolume;
-    slowstride.targetVolume = slowstride.volume;
-
-    therush.volume = .025 * masterVolume * musicVolume;
-    therush.targetVolume = therush.volume;
-
-    beastv2.volume = .035 * masterVolume * musicVolume;
-    beastv2.targetVolume = beastv2.volume;
-
-    mindInMotion.volume = .035 * masterVolume * musicVolume
-    mindInMotion.targetVolume = mindInMotion.volume;
-
-    desperationSetsIn.volume = .015 * masterVolume * musicVolume
-    desperationSetsIn.targetVolume = desperationSetsIn.volume;
-
-    horrorLoop.volume = .015 * masterVolume * musicVolume
-    horrorLoop.targetVolume = horrorLoop.volume;
-
-    bumpinbits.volume = .05 * masterVolume * musicVolume
-    bumpinbits.targetVolume = bumpinbits.volume;
 
 function volumeChange() {
     lavaExplosion.volume = .75 * masterVolume;
