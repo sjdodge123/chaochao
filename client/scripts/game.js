@@ -18,9 +18,12 @@ var server = null,
     currentState = null,
     gameRunning = null;
 
+
+var musicControl = $('#musicControl');
+var masterControl =  $('#masterControl');
 var emojiMenu = document.getElementById("emojiMenu");
 var canvasWindow = document.getElementById("mapContainer");
-var exitIcon = document.getElementById("exitIcon");
+var exitIconID = document.getElementById("exitIcon");
 
 //Input Vars
 var attack = false,
@@ -53,7 +56,7 @@ function setupPage() {
             };
     })();
 
-    $('#musicControl').on("click", function () {
+    musicControl.on("click", function (e) {
         if (musicVolume > 0) {
             musicVolume = 0;
             volumeChange();
@@ -64,7 +67,7 @@ function setupPage() {
             $("#musicControl").html('<i class="music-btn fas fa-music"></i>  [<i class="music-btn fa fa-volume-up" aria-hidden="true"></i>]');
         }
     });
-    $('#masterControl').on("click", function () {
+    masterControl.on("click", function (e) {
         if (masterVolume > 0) {
             masterVolume = 0;
             volumeChange();

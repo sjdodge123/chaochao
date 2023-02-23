@@ -45,9 +45,9 @@ function calcMousePos(evt) {
 }
 
 function setMousePos(x, y) {
-    /*
     mousex = x;
     mousey = y;
+    /*
     if (playerList[myID] != null) {
         playerList[myID].angle = angle(playerList[myID].x, playerList[myID].y, x, y);
         server.emit('mousemove', playerList[myID].angle);
@@ -56,6 +56,7 @@ function setMousePos(x, y) {
 }
 
 function handleClick(event) {
+    
     switch (event.which) {
         case 1: {
             if (menuOpen == false) {

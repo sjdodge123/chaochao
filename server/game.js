@@ -1140,17 +1140,26 @@ class GameBoard {
 	}
 
 	checkForDynamicDifficultyIncrease() {
+		const playerCountMod = c.chanceToSpawnAbilityPlayerCountMod;
 		if (this.round == 1) {
 			return;
 		}
+		if(this.alivePlayerCount + this.sleepingPlayerCount %  playerCountMod == 0){
+			var inceasePerPlayer = 1;
+			this.increaseChanceOfAbilities(inceasePerPlayer*playerCountMod);
+		}
 		if (this.round % 5 == 0) {
-			this.increaseChanceOfAbilities();
+			this.increaseChanceOfAbilities(0);
 			this.increaseChanceOfBrutalRound();
 			this.increaseChanceOfAdditionalBrutal();
 		}
 	}
-	increaseChanceOfAbilities() {
-		const increment = c.chanceToSpawnAbilityIncrement;
+	increaseChanceOfAbilities(bonus) {
+		if(bonus == null || bonus== undefined){
+			console.log("increaseChanceOfAbilities in GameBoard called without a valid bonus value");
+			bonus = 0;
+		}
+		const increment = c.chanceToSpawnAbilityIncrement + bonus;
 		if (this.chanceToSpawnAbility + increment >= 100) {
 			return;
 		}
@@ -1771,7 +1780,7 @@ class Player extends Circle {
 	applyInfectedMods(object) {
 		this.acel = object.acel * c.brutalRounds.infection.acelModifer;
 		this.dragCoeff = object.dragCoeff * c.brutalRounds.infection.dragModifer;
-		this.brakeCoeff = object.brakeCoeff;
+		this.brakeCoeff = object.brakeCoeff * c.brutalRounds.infection.brakeModifer;
 	}
 	handleHit(object) {
 		if (object.isLobbyStart) {

@@ -53,7 +53,7 @@ var bumpinbits = new Audio("./assets/sounds/bumpinbits.mp3");
 
 calmBackgroundMusicList.push(slowstride);
 calmBackgroundMusicList.push(slowpipes);
-calmBackgroundMusicList.push(bumpinbits);
+
 
 var therush = new Audio("./assets/sounds/the-rush.mp3");
 var beastv2 = new Audio("./assets/sounds/beastv2.mp3");
@@ -61,10 +61,12 @@ var mindInMotion = new Audio("./assets/sounds/mind_in_motion.mp3");
 excitingBackgroundMusicList.push(mindInMotion);
 excitingBackgroundMusicList.push(therush);
 excitingBackgroundMusicList.push(beastv2);
+excitingBackgroundMusicList.push(bumpinbits);
 
 var heavyfabric = new Audio("./assets/sounds/heavyfabric.mp3");
 var desperationSetsIn = new Audio("./assets/sounds/DesperationSetsIn.mp3");
 var horrorLoop = new Audio("./assets/sounds/HorrorLoop.mp3");
+
 brutalBackgroundMusicList.push(horrorLoop);
 brutalBackgroundMusicList.push(desperationSetsIn);
 brutalBackgroundMusicList.push(heavyfabric);
