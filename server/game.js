@@ -180,7 +180,7 @@ class Game {
 		if (this.currentState == c.stateMap.racing || this.currentState == c.stateMap.collapsing) {
 			this.gameBoard.setTempSpectator(newPlayer);
 		}
-
+		this.world.setSpawnLocation(newPlayer);
 	}
 	checkSendGameStateUpdates(client) {
 		if (this.currentState == c.stateMap.waiting || this.currentState == c.stateMap.lobby || this.currentState == c.stateMap.gameOver) {
@@ -284,6 +284,10 @@ class Game {
 				playersConcluded++
 				continue;
 			}
+			if (this.playerList[player].awake == false) {
+				playersConcluded++
+				continue;
+			}
 			if (this.playerList[player].isZombie) {
 				playersConcluded++;
 				continue;
@@ -314,6 +318,7 @@ class Game {
 		}
 		this.alivePlayerCount = this.playerCount - playersConcluded;
 		if (playersConcluded == this.playerCount) {
+			this.gameBoard.killAFKPlayers();
 			this.startOverview();
 		}
 	}
@@ -911,6 +916,7 @@ class GameBoard {
 			}
 		}
 	}
+	//Occurs at gameover
 	resetGame(currentState) {
 		this.mapsPlayed = [];
 		this.chanceToSpawnAbility = c.chanceToSpawnAbility;
@@ -939,6 +945,13 @@ class GameBoard {
 		player.y = loc.y;
 		if (!this.checkForActiveBrutal(c.brutalRounds.lightning.id)) {
 			player.setSpeedBonus(500);
+		}
+	}
+	killAFKPlayers() {
+		for (var id in this.playerList) {
+			if (this.playerList[id].awake == false) {
+				this.playerList[id].killSelf();
+			}
 		}
 	}
 	setTempSpectator(player) {
@@ -1457,6 +1470,9 @@ class World extends Rect {
 		player.initialLoc = loc;
 		player.x = loc.x;
 		player.y = loc.y;
+	}
+	setSpawnLocation(player) {
+		player.initialLoc = this.findFreeLoc(player);
 	}
 	getUniqueColorR() {
 		var color = utils.getColor();

@@ -452,6 +452,7 @@ function fullReset() {
 		player.nearVictory = false;
 		player.ability = null;
 		player.deathMessage = null;
+		player.infected = false;
 		player.trail = new Trail({ x: player.x, y: player.y });
 		player.notches = 0;
 		oldNotches[id] = player.notches;
