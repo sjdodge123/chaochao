@@ -771,7 +771,7 @@ class GameBoard {
 		var explodeLoc = { x: this.projectileList[owner].x, y: this.projectileList[owner].y };
 		var cells = this.currentMap.cells;
 		for (var i = 0; i < cells.length; i++) {
-			if (cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.lava.id) {
+			if (cells[i].id == c.tileMap.goal.id) {
 				continue;
 			}
 			var distance = utils.getMag(explodeLoc.x - cells[i].site.x, explodeLoc.y - cells[i].site.y);
