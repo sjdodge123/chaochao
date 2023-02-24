@@ -14,7 +14,7 @@
     "chanceToSpawnAbility": 35,
     "chanceToSpawnAbilityIncrement": 10,
     "chanceToSpawnAbilityPlayerCountMod": 5,
-    "chanceOfBrutalRound": 100,
+    "chanceOfBrutalRound": 0,
     "chanceForAdditionalBrutal": 15,
     "chanceOfBrutalRoundIncrement": 25,
     "nearVictoryBrutalRoundBoost": 25,
@@ -140,7 +140,7 @@
     "brutalRounds": {
         "ability": {
             "id": 1000,
-            "active": false,
+            "active": true,
             "title": "Ability"
         },
         "gravity": {
@@ -153,7 +153,7 @@
             "speed": 1000,
             "density": 50,
             "size": 50,
-            "active": false,
+            "active": true,
             "title": "Cloudy"
         },
         "bomb": {
@@ -173,22 +173,22 @@
         },
         "lightning": {
             "id": 1006,
-            "active": false,
+            "active": true,
             "title": "Lightning"
         },
         "volcano": {
             "id": 1007,
             "collapseSpeed": 1,
-            "active": false,
+            "active": true,
             "title": "Volcano"
         },
         "infection": {
             "id": 1008,
             "radius": 15,
             "brakeModifer": 0.075,
-            "dragModifer": 0.75,
+            "dragModifer": 0.60,
             "punchRadius": 14,
-            "acelModifer": 0.75,
+            "acelModifer": 0.65,
             "active": true,
             "title": "Infection"
         },
@@ -198,13 +198,13 @@
             "baseSpeed": 20000,
             "spikeSpeed": 1.25,
             "puckHitStrength": 800,
-            "active": false,
+            "active": true,
             "title": "Air Hockey"
         },
         "explosive": {
             "id": 1010,
             "radius": 100,
-            "active": false,
+            "active": true,
             "title": "Explosive"
         }
     },
