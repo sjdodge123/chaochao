@@ -16,6 +16,7 @@ var server = null,
     round = 0,
     timeOutChecker = null,
     currentState = null,
+    inLobby = false,
     loading = true,
     gameRunning = null;
 
@@ -84,9 +85,16 @@ function setupPage() {
     gameCanvas = document.getElementById('gameCanvas');
     gameContext = gameCanvas.getContext('2d');
     init();
+    $.when.apply($, promises).then(function () {
+        enterLobby();
+    });
 }
 
 function enterLobby() {
+    if (inLobby == true) {
+        return;
+    }
+    inLobby = true;
     loading = false;
     progressContainer.hide();
     $('#main').hide();
