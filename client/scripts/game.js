@@ -121,20 +121,22 @@ function animloop() {
         requestAnimFrame(animloop);
     }
     if (loading == true) {
-        var contentLoaded = true;
         var loadedCount = 0;
         var totalToLoad = promises.length;
         for (var i = 0; i < promises.length; i++) {
             if (promises[i].status != 200) {
-                contentLoaded = false;
                 continue;
             }
             if (promises[i].status == 200) {
                 loadedCount++;
             }
         }
+        
         progressBar.style.width = ((loadedCount / totalToLoad) * 100 + "%");
         //console.log("Loaded (" + loadedCount + " / " + totalToLoad + ")");
+        if(loadedCount == totalToLoad){
+            enterLobby();
+        }
         requestAnimFrame(animloop);
     }
 }
