@@ -84,10 +84,6 @@ function setupPage() {
     gameCanvas = document.getElementById('gameCanvas');
     gameContext = gameCanvas.getContext('2d');
     init();
-    $.when.apply($, promises).then(function () {
-        enterLobby();
-    });
-
 }
 
 function enterLobby() {
@@ -131,10 +127,10 @@ function animloop() {
                 loadedCount++;
             }
         }
-        
+
         progressBar.style.width = ((loadedCount / totalToLoad) * 100 + "%");
         //console.log("Loaded (" + loadedCount + " / " + totalToLoad + ")");
-        if(loadedCount == totalToLoad){
+        if (loadedCount == totalToLoad) {
             enterLobby();
         }
         requestAnimFrame(animloop);
