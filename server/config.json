@@ -129,9 +129,9 @@
             "iceCannon": {
                 "spawnable": true,
                 "id": 107,
-                "snowFlakeRadius": 70,
+                "snowFlakeRadius": 50,
                 "aimerLength": 50,
-                "lifetime": 1.5,
+                "lifetime": 1,
                 "speed": 11000,
                 "explosionRadius": 110
             }

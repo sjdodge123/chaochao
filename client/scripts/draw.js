@@ -475,8 +475,8 @@ function drawProjectiles() {
 
         if (projectileList[proj].type == 'bomb') {
             projectileList[proj].rotation += 5;
-            const centerX = bombImage.width * 2;
-            const centerY = bombImage.height * 2;
+            const centerX = bombImage.width*2;
+            const centerY = bombImage.height* 2;
             gameContext.save();
             gameContext.translate(projectileList[proj].x, projectileList[proj].y);
             gameContext.rotate(projectileList[proj].rotation * (Math.PI / 180));
@@ -494,8 +494,8 @@ function drawProjectiles() {
         }
         if (projectileList[proj].type == 'snowFlake') {
             projectileList[proj].rotation += 5;
-            const centerX = snowFlakeImage.width * 2;
-            const centerY = snowFlakeImage.height * 2;
+            const centerX = snowFlakeImage.width;
+            const centerY = snowFlakeImage.height;
             gameContext.save();
             gameContext.translate(projectileList[proj].x, projectileList[proj].y);
             gameContext.rotate(projectileList[proj].rotation * (Math.PI / 180));

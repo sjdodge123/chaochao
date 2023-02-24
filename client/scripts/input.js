@@ -118,6 +118,10 @@ function keyUp(evt) {
         case 40: { moveBackward = false; break; } //Down key
         case 32: { attack = false; break; } // Spacebar
     }
+    if (playerList[myID] != null) {
+        calcAngleFromKeys(playerList[myID]);
+        server.emit('mousemove', playerList[myID].angle);
+    }
     server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
 }
 
