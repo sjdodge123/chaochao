@@ -423,7 +423,7 @@ class Game {
 	}
 	checkForDynamicGameLength() {
 		//For every dynamicGameLengthModifier players the number of notches to win decreases by 1
-		var dynamicGameLengthModifier = 4;
+		var dynamicGameLengthModifier = 6;
 
 		if (this.playerCount < dynamicGameLengthModifier) {
 			return;
@@ -1190,7 +1190,7 @@ class GameBoard {
 		this.chanceOfBrutalRound = this.chanceOfBrutalRound + increment;
 	}
 	increaseChanceOfAdditionalBrutal() {
-		const increment = 5;
+		const increment = 2;
 		if (this.chanceForAdditionalBrutal + increment >= 50) {
 			return;
 		}

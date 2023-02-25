@@ -431,6 +431,7 @@ function resetProjectiles() {
 	for (var id in projectileList) {
 		delete projectileList[id];
 	}
+	projectileList = {};
 }
 
 function fullReset() {
@@ -446,6 +447,7 @@ function fullReset() {
 	brutalRound = false;
 	infection = false;
 	brutalRoundConfig = null;
+	resetProjectiles();
 	for (var id in playerList) {
 		var player = playerList[id];
 		player.alive = true;
