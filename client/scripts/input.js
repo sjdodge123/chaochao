@@ -147,37 +147,37 @@ function determineMovement() {
         var backwardCone = (curAngle >= 60 && curAngle <= 120);
         var rbwdCone = (curAngle >= 30 && curAngle <= 60);
 
-        if (rfwdCone) {
-            moveForward = true;
-            turnRight = true;
-        }
-        if (rbwdCone) {
-            moveBackward = true;
-            turnRight = true;
-        }
-        if (lfwdCone) {
-            moveForward = true;
-            turnLeft = true;
-        }
-        if (lbwdCone) {
-            moveBackward = true;
-            turnLeft = true;
-        }
-        if (rightCone) {
-            turnRight = true;
-        }
-        if (forwardCone) {
-            moveForward = true;
-        }
-        if (leftCone) {
-            turnLeft = true;
-        }
-        if (backwardCone) {
-            moveBackward = true;
-        }
         calcAngleFromKeys(playerList[myID]);
         server.emit('mousemove', playerList[myID].angle);
         if (mouseClicked) {
+            if (rfwdCone) {
+                moveForward = true;
+                turnRight = true;
+            }
+            if (rbwdCone) {
+                moveBackward = true;
+                turnRight = true;
+            }
+            if (lfwdCone) {
+                moveForward = true;
+                turnLeft = true;
+            }
+            if (lbwdCone) {
+                moveBackward = true;
+                turnLeft = true;
+            }
+            if (rightCone) {
+                turnRight = true;
+            }
+            if (forwardCone) {
+                moveForward = true;
+            }
+            if (leftCone) {
+                turnLeft = true;
+            }
+            if (backwardCone) {
+                moveBackward = true;
+            }
             server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
         }
     }
