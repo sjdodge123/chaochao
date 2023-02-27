@@ -1,7 +1,7 @@
 var menuOpen = false;
 
 var gamePadA = null;
-
+var mouseClicked = false;
 var isTouchScreen = false,
     virtualButtonList = null,
     joystickMovement = null,
@@ -16,6 +16,7 @@ function initEventHandlers() {
     window.addEventListener("mouseup", handleUnClick, false);
     window.addEventListener("keydown", keyDown, false);
     window.addEventListener("keyup", keyUp, false);
+    window.addEventListener("dblclick", handleDblClick, false);
 
 
     window.addEventListener('touchstart', onTouchStart, { passive: false });
@@ -38,15 +39,14 @@ function calcMousePos(evt) {
     evt.preventDefault();
     if (myPlayer != null) {
         var rect = gameCanvas.getBoundingClientRect();
-        var mouseX = (((evt.pageX - rect.left) / newWidth) * gameCanvas.width);
-        var mouseY = (((evt.pageY - rect.top) / newHeight) * gameCanvas.height);
-        setMousePos(mouseX, mouseY);
+        setMousePos((((evt.pageX - rect.left) / newWidth) * gameCanvas.width), (((evt.pageY - rect.top) / newHeight) * gameCanvas.height));
     }
 }
 
 function setMousePos(x, y) {
     mousex = x;
     mousey = y;
+    determineMovement();
     /*
     if (playerList[myID] != null) {
         playerList[myID].angle = angle(playerList[myID].x, playerList[myID].y, x, y);
@@ -59,8 +59,7 @@ function handleClick(event) {
     switch (event.which) {
         case 1: {
             if (menuOpen == false) {
-                attack = true;
-                server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
+                mouseClicked = true;
             }
             break;
         }
@@ -79,14 +78,20 @@ function handleClick(event) {
 function handleUnClick(event) {
     switch (event.which) {
         case 1: {
-            attack = false;
-            server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
+            mouseClicked = false;
+            cancelMovement(event);
             break;
         }
         case 3: {
             break;
         }
     }
+}
+function handleDblClick(event) {
+    mouseClicked = false;
+    attack = true;
+    server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
+    attack = false;
 }
 function keyDown(evt) {
     switch (evt.keyCode) {
@@ -123,6 +128,59 @@ function keyUp(evt) {
         server.emit('mousemove', playerList[myID].angle);
     }
     server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
+}
+
+function determineMovement() {
+    if (playerList[myID] != null) {
+        moveForward = false;
+        moveBackward = false;
+        turnRight = false;
+        turnLeft = false;
+
+        var curAngle = angle(playerList[myID].x, playerList[myID].y, mousex, mousey);
+        var rightCone = (curAngle >= 330 || curAngle <= 30);
+        var rfwdCone = (curAngle >= 300 && curAngle <= 330);
+        var forwardCone = (curAngle >= 240 && curAngle <= 300);
+        var lfwdCone = (curAngle >= 210 && curAngle <= 240);
+        var leftCone = (curAngle >= 150 && curAngle <= 210);
+        var lbwdCone = (curAngle >= 120 && curAngle <= 150);
+        var backwardCone = (curAngle >= 60 && curAngle <= 120);
+        var rbwdCone = (curAngle >= 30 && curAngle <= 60);
+
+        if (rfwdCone) {
+            moveForward = true;
+            turnRight = true;
+        }
+        if (rbwdCone) {
+            moveBackward = true;
+            turnRight = true;
+        }
+        if (lfwdCone) {
+            moveForward = true;
+            turnLeft = true;
+        }
+        if (lbwdCone) {
+            moveBackward = true;
+            turnLeft = true;
+        }
+        if (rightCone) {
+            turnRight = true;
+        }
+        if (forwardCone) {
+            moveForward = true;
+        }
+        if (leftCone) {
+            turnLeft = true;
+        }
+        if (backwardCone) {
+            moveBackward = true;
+        }
+        calcAngleFromKeys(playerList[myID]);
+        server.emit('mousemove', playerList[myID].angle);
+        if (mouseClicked) {
+            server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
+        }
+    }
 }
 
 function setupVirtualbuttons() {
@@ -339,3 +397,4 @@ var recursiveOffsetLeftAndTop = function (element) {
         offsetTop: offsetTop
     };
 };
+

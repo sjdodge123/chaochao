@@ -1676,6 +1676,7 @@ class Player extends Circle {
 			}
 			this.punch = new Punch(this.x, this.y, punchRadius, this.color, this.id, this.roomSig, this.isZombie);
 			messenger.messageRoomBySig(this.roomSig, "punch", compressor.sendPunch(this.punch));
+			this.attack = false;
 		}
 	}
 	checkPunchCoolDown() {
