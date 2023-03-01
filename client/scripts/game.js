@@ -11,6 +11,7 @@ var server = null,
     newHeight = 0,
     maps = [],
     oldNotches = {},
+    camera,
     nextMapPreview = null,
     nextMapThumbnail = null,
     round = 0,
@@ -169,6 +170,104 @@ function resize() {
 
     gameCanvas.style.width = newWidth + "px";
     gameCanvas.style.height = newHeight + "px";
+    camera = {
+        active: false,
+        x: gameCanvas.width / 2,
+        y: gameCanvas.height / 2,
+        width: gameCanvas.width,
+        height: gameCanvas.height,
+        target: null,
+        color: 'yellow',
+        padding: 150,
+        left: 0,
+        right: 0,
+        top: 0,
+        bottom: 0,
+        xOffset: gameCanvas.width / 2,
+        yOffset: gameCanvas.height / 2,
+
+        centerOnObject: function (object) {
+            if (!this.active) {
+                return;
+            }
+            if (object == null) {
+                return;
+            }
+            this.target = object;
+        },
+
+        draw: function () {
+            if (!this.active) {
+                return;
+            }
+            gameContext.save();
+            gameContext.beginPath();
+            gameContext.strokeStyle = this.color;
+            gameContext.lineWidth = 5;
+            gameContext.rect(this.padding, this.padding, this.width - this.padding * 2, this.height - this.padding * 2);
+            gameContext.stroke();
+            gameContext.restore();
+        },
+
+        getCameraX() {
+            if (!this.active) {
+                return 0;
+            }
+            if (this.target == null) {
+                return this.xOffset;
+            }
+            return -this.target.x + this.xOffset;
+        },
+        getCameraY() {
+            if (!this.active) {
+                return 0;
+            }
+            if (this.target == null) {
+                return this.yOffset;
+            }
+            return -this.target.y + this.yOffset;
+        },
+
+        inBounds: function (object) {
+            if (!this.active) {
+                return true;
+            }
+            if (object == null || object == undefined || this.target == null || this.target == undefined) {
+                return false;
+            }
+            if (object.radius != null) {
+                var dx = Math.abs(object.x - this.target.x);
+                var dy = Math.abs(object.y - this.target.y);
+
+                if (dx > (this.xOffset - this.padding + object.radius)) { return false; }
+                if (dy > (this.yOffset - this.padding + object.radius)) { return false; }
+
+                if (dx <= (this.xOffset - this.padding)) {
+                    return true;
+                }
+                if (dy <= (this.yOffset - this.padding)) {
+                    return true;
+                }
+
+                var cornerDsq = Math.pow(dx - (this.xOffset - this.padding), 2) + Math.pow(dy - (this.yOffset - this.padding), 2);
+
+                return (cornerDsq <= Math.pow(object.radius, 2));
+            }
+            else {
+                var leftBound = object.x + object.width >= this.target.x - this.xOffset + this.padding;
+                var rightBound = object.x - object.width <= this.target.x - this.xOffset + this.width - this.padding;
+                var topBound = object.y + object.width >= this.target.y - this.yOffset + this.padding;
+                var bottomBound = object.y - object.width <= this.target.y - this.yOffset + this.height - this.padding;
+
+                if (leftBound && rightBound && topBound && bottomBound) {
+                    return true;
+                }
+                return false;
+            }
+
+
+        },
+    }
 }
 
 function goFullScreen() {

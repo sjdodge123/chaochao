@@ -230,6 +230,7 @@ function drawObjects(dt) {
     }
     preShake();
     drawWorld(dt);
+    cameraOnMyPlayer();
     if (currentState == config.stateMap.lobby) {
         drawLobbyStartButton();
     }
@@ -400,7 +401,9 @@ function checkDrawPlayer(player) {
         drawDeathMessage(player);
         return;
     }
-    drawPlayer(player);
+    if (camera.inBounds(player)) {
+        drawPlayer(player);
+    }
 }
 function drawPlayer(player) {
 
@@ -426,7 +429,7 @@ function drawPlayer(player) {
     gameContext.beginPath();
     gameContext.shadowColor = player.color;
     gameContext.shadowBlur = 3;
-    gameContext.arc(player.x, player.y, player.radius, 0, 2 * Math.PI);
+    gameContext.arc(player.x + camera.getCameraX(), player.y + camera.getCameraY(), player.radius, 0, 2 * Math.PI);
     gameContext.fillStyle = player.color;
     gameContext.fill();
     gameContext.strokeStyle = playerStrokeColor;
@@ -475,8 +478,8 @@ function drawProjectiles() {
 
         if (projectileList[proj].type == 'bomb') {
             projectileList[proj].rotation += 5;
-            const centerX = bombImage.width*2;
-            const centerY = bombImage.height* 2;
+            const centerX = bombImage.width * 2;
+            const centerY = bombImage.height * 2;
             gameContext.save();
             gameContext.translate(projectileList[proj].x, projectileList[proj].y);
             gameContext.rotate(projectileList[proj].rotation * (Math.PI / 180));
@@ -606,7 +609,7 @@ function drawWorld() {
         gameContext.save();
         gameContext.beginPath();
         gameContext.fillStyle = "#F0F0F0";
-        gameContext.rect(world.x, world.y, world.width, world.height);
+        gameContext.rect(world.x + camera.getCameraX(), world.y + camera.getCameraY(), world.width, world.height);
         gameContext.fill();
         gameContext.restore();
 
@@ -614,14 +617,14 @@ function drawWorld() {
         gameContext.beginPath();
         gameContext.lineWidth = 4;
         gameContext.strokeStyle = "black";
-        gameContext.rect(world.x, world.y, world.width, world.height);
+        gameContext.rect(world.x + camera.getCameraX(), world.y + camera.getCameraY(), world.width, world.height);
         gameContext.stroke();
         gameContext.restore();
     }
 }
 
 function drawLobbyStartButton() {
-    if (lobbyStartButton != null) {
+    if (lobbyStartButton != null && camera.inBounds(lobbyStartButton)) {
         gameContext.save();
         if (lobbyStartButton.startSpin == true) {
             if (lobbyStartButton.velocity < lobbyStartButton.maxVelocity) {
@@ -637,7 +640,7 @@ function drawLobbyStartButton() {
             }
         }
         lobbyStartButton.angle += lobbyStartButton.velocity;
-        gameContext.translate(lobbyStartButton.x, lobbyStartButton.y);
+        gameContext.translate(lobbyStartButton.x + camera.getCameraX(), lobbyStartButton.y + camera.getCameraY());
         gameContext.rotate(lobbyStartButton.angle * (Math.PI / 180));
         gameContext.beginPath();
         gameContext.arc(0, 0, lobbyStartButton.radius, 0, 2 * Math.PI);
@@ -1232,5 +1235,16 @@ function getBbox(cell) {
         height: ymax - ymin
     };
 };
+
+function cameraOnMyPlayer() {
+    if (myPlayer != null) {
+        recenterCamera(myPlayer);
+    }
+}
+
+function recenterCamera(object) {
+    camera.centerOnObject(object);
+    camera.draw();
+}
 
 
