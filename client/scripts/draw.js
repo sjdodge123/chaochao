@@ -90,6 +90,13 @@ sand.scale = 0.25;
 
 var playerAnimating = null;
 
+var redFire = new Image(32, 128);
+redFire.src = "../assets/img/redFire.png";
+var yellowFire = new Image(32, 128);
+yellowFire.src = "../assets/img/yellowFire.png";
+var blueFire = new Image(32, 128);
+blueFire.src = "../assets/img/blueFire.png";
+
 
 function loadPatterns() {
     //Abilities
@@ -386,11 +393,11 @@ function drawPlayers(dt) {
         if (id == myID) {
             continue;
         }
-        checkDrawPlayer(player);
+        checkDrawPlayer(player, dt);
     }
-    checkDrawPlayer(playerList[myID]);
+    checkDrawPlayer(playerList[myID], dt);
 }
-function checkDrawPlayer(player) {
+function checkDrawPlayer(player, dt) {
     if (player == null) {
         return;
     }
@@ -402,10 +409,10 @@ function checkDrawPlayer(player) {
         return;
     }
     if (camera.inBounds(player)) {
-        drawPlayer(player);
+        drawPlayer(player, dt);
     }
 }
-function drawPlayer(player) {
+function drawPlayer(player, dt) {
 
     if (player.infected == true) {
         gameContext.save();
@@ -419,22 +426,38 @@ function drawPlayer(player) {
         gameContext.restore();
     }
     if (player.onFire > 0) {
+        if (redFire.spriteSheet == null) {
+            redFire.spriteSheet = new SpriteSheet(redFire, 0, 0, 32, 32, 4, 1, true);
+        }
+        if (blueFire.spriteSheet == null) {
+            blueFire.spriteSheet = new SpriteSheet(blueFire, 0, 0, 32, 32, 4, 1, true);
+        }
+        if (yellowFire.spriteSheet == null) {
+            yellowFire.spriteSheet = new SpriteSheet(yellowFire, 0, 0, 32, 32, 4, 1, true);
+        }
         gameContext.save();
+        gameContext.translate(player.x - 5, player.y);
+        /*
+        if (player.angle > 180) {
+            gameContext.rotate(180 - player.angle * (Math.PI / 180));
+        } else {
+            gameContext.rotate(-1 * player.angle * (Math.PI / 180));
+        }
+        */
+        gameContext.rotate(-90 * (Math.PI / 180));
         gameContext.beginPath();
-        gameContext.lineWidth = 3;
-        gameContext.setLineDash([4, 2]);
         if (player.onFire <= config.playerFireProtectionTime) {
-            gameContext.strokeStyle = "red";
+            redFire.spriteSheet.update(dt);
+            redFire.spriteSheet.draw(48, 48);
         }
         if (player.onFire >= config.playerFireProtectionTime) {
-            gameContext.strokeStyle = "yellow";
+            yellowFire.spriteSheet.update(dt);
+            yellowFire.spriteSheet.draw(48, 48);
         }
         if (player.onFire >= 2 * config.playerFireProtectionTime) {
-            gameContext.strokeStyle = "blue";
+            blueFire.spriteSheet.update(dt);
+            blueFire.spriteSheet.draw(48, 48);
         }
-
-        gameContext.arc(player.x, player.y, config.playerBaseRadius + 5, 0, 2 * Math.PI);
-        gameContext.stroke();
         gameContext.restore();
     }
 
@@ -1265,5 +1288,61 @@ function recenterCamera(object) {
     camera.centerOnObject(object);
     camera.draw();
 }
+class SpriteSheet {
+    constructor(image, x, y, frameWidth, frameHeight, rows, columns, loopAnimation) {
+        this.image = image;
+        this.x = x;
+        this.y = y;
+        this.frameWidth = frameWidth;
+        this.frameHeight = frameHeight;
+        this.frameIndex = [[], []];
+        this.rows = rows;
+        this.columns = columns;
+
+        this.frameRate = 24;
+        this.ticksPerFrame = 1 / this.frameRate;
+        this.ticks = 0;
+        this.loopAnimation = loopAnimation;
+        this.animationComplete = false;
+
+        for (var i = 0; i < rows; i++) {
+            this.frameIndex[i] = [];
+            for (var j = 0; j < columns; j++) {
+                this.frameIndex[i][j] = { sx: j * frameWidth, sy: i * frameHeight };
+
+            }
+        }
+        this.XframeIndex = 0;
+        this.YframeIndex = 0;
+    }
+    move(x, y) {
+        this.x = x;
+        this.y = y;
+    }
+    changeFrame(x, y) {
+        this.XframeIndex = x;
+        this.YframeIndex = y;
+    }
+    update(dt) {
+        this.ticks += dt / 1000;
+        if (this.ticks > this.ticksPerFrame) {
+            this.ticks = 0;
+            if (this.XframeIndex < this.rows - 1) {
+                this.XframeIndex += 1;
+                return;
+            }
+            if (this.loopAnimation) {
+                this.XframeIndex = 0;
+            }
+            else {
+                this.animationComplete = true;
+            }
+        }
+    }
+    draw(width, height) {
+        gameContext.drawImage(this.image, this.frameIndex[this.XframeIndex][this.YframeIndex].sx, this.frameIndex[this.XframeIndex][this.YframeIndex].sy, this.frameWidth, this.frameHeight, this.x - (width / 2), this.y - (height / 2), width, height);
+    }
+}
+
 
 
