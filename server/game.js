@@ -269,6 +269,16 @@ class Game {
 		for (var player in this.playerList) {
 			if (!this.playerList[player].alive && !this.playerList[player].reachedGoal) {
 				playersConcluded++;
+
+				if (this.playerList[player].murderedBy != null) {
+					var killer = this.playerList[this.playerList[player].murderedBy];
+					if (killer != null) {
+						this.playerList[player].murderedBy = null;
+						killer.addKill(player);
+						this.gameBoard.checkForFirstBlood();
+					}
+				}
+
 				if (this.gameBoard.checkForActiveBrutal(c.brutalRounds.infection.id)) {
 					this.playerList[player].infect();
 				}
@@ -463,6 +473,7 @@ class GameBoard {
 		this.chanceOfBrutalRound = c.chanceOfBrutalRound;
 		this.chanceForAdditionalBrutal = c.chanceForAdditionalBrutal;
 		this.round = 0;
+		this.firstBlood = false;
 		this.brutalRound = false;
 		this.brutalConfig = null;
 
@@ -847,6 +858,13 @@ class GameBoard {
 			}
 		}
 	}
+	checkForFirstBlood() {
+		if (this.firstBlood == true) {
+			return;
+		}
+		this.firstBlood = true;
+		messenger.messageRoomBySig(this.roomSig, "firstBlood");
+	}
 
 	startLobby() {
 		this.lobbyStartButton = new LobbyStartButton(this.world.center.x, this.world.center.y, 0, "red");
@@ -926,12 +944,16 @@ class GameBoard {
 		this.brutalConfig = null;
 		this.tileChanges = {};
 		this.round = 0;
+		this.firstBlood = false;
 		this.currentMap = {};
 		this.nextMap = {};
 		this.resetPlayers(currentState);
 		for (var playerID in this.playerList) {
 			var player = this.playerList[playerID];
 			player.notches = 0;
+			player.totalKills = 0;
+			player.onFire = 0;
+			player.killedPlayerList = [];
 		}
 	}
 	gatePlayers() {
@@ -1626,10 +1648,23 @@ class Player extends Circle {
 		this.acquiredAbility = null;
 		this.ability = null;
 		this.punch = null;
+		this.punchedBy = null;
+		this.murderedBy = null;
+		this.totalKills = 0;
+		this.roundKills = 0;
+		this.multiKillCount = 0;
+		this.openMultiKillWindow = false;
+		this.killedPlayerList = [];
+
 
 		this.punchWaitTime = c.playerPunchCooldown;
 		this.punchedTimer = null;
 		this.punchTimeLeft = this.punchWaitTime;
+
+		//On Fire
+		this.onFire = 0;
+		this.fireTimer = null;
+		this.fireTimeLeft = 0;
 
 		//Engine Variables
 		this.newX = this.x;
@@ -1654,6 +1689,7 @@ class Player extends Circle {
 		this.move();
 		this.checkAttack(currentState);
 		this.checkChatCoolDownTimer();
+		this.checkFireTimer();
 	}
 	move() {
 		this.x = this.newX;
@@ -1696,6 +1732,62 @@ class Player extends Circle {
 			}
 			this.chatCoolDownTimer = null;
 		}
+	}
+	checkFireTimer() {
+		if (this.fireTimer != null) {
+			this.fireTimeLeft = ((this.onFire - (Date.now() - this.fireTimer)) / (1000)).toFixed(1);
+			messenger.messageRoomBySig(this.roomSig, "onFire", { owner: this.id, value: this.fireTimeLeft * 1000 });
+			if (this.fireTimeLeft > 0) {
+				return;
+			}
+			this.onFire = 0;
+			this.fireTimer = null;
+			messenger.messageRoomBySig(this.roomSig, "onFire", { owner: this.id, value: 0 });
+		}
+	}
+	setPunchedBy(owner) {
+		this.punchedBy = owner;
+		setTimeout(function (myself) {
+			if (myself.alive) {
+				myself.punchedBy = null;
+			}
+		}, c.playerKillWindow, this);
+	}
+	addKill(player) {
+		this.killedPlayerList.push(player);
+		clearTimeout(multiKillIndex);
+		this.roundKills += 1;
+		this.totalKills += 1;
+		this.addFire();
+		if (this.openMultiKillWindow == true) {
+			if (this.multiKillCount == 0) {
+				this.multiKillCount = 2;
+			} else {
+				this.multiKillCount++;
+			}
+			messenger.messageRoomBySig(this.roomSig, "multiKill", this.multiKillCount);
+		}
+		if (this.totalKills == 5) {
+			messenger.messageRoomBySig(this.roomSig, "killingSpree", this.id);
+		}
+		if (this.totalKills == 10) {
+			messenger.messageRoomBySig(this.roomSig, "rampage", this.id);
+		}
+		if (this.totalKills == 15) {
+			messenger.messageRoomBySig(this.roomSig, "godLike", this.id);
+		}
+		var multiKillIndex = setTimeout(function (myself) {
+			myself.openMultiKillWindow = false;
+			myself.multiKillCount = 0;
+		}, c.playerMultiKillWindow, this)
+		this.openMultiKillWindow = true;
+	}
+	addFire() {
+		if (this.isZombie) {
+			return;
+		}
+		this.onFire += c.playerFireProtectionTime;
+		messenger.messageRoomBySig(this.roomSig, "onFire", { owner: this.id, value: this.onFire });
 	}
 	addSpeed(newValue) {
 		//New speed cant go above max speed
@@ -1812,6 +1904,7 @@ class Player extends Circle {
 			if (object.ownerInfected) {
 				this.infect();
 			}
+			this.setPunchedBy(object.ownerId);
 			_engine.punchPlayer(this, object);
 			messenger.messageRoomBySig(this.roomSig, "playerPunched", object.ownerId);
 			return;
@@ -1861,6 +1954,13 @@ class Player extends Circle {
 					this.acel = object.acel;
 					this.dragCoeff = object.dragCoeff;
 					this.brakeCoeff = object.brakeCoeff;
+					return;
+				}
+				if (this.onFire > 0) {
+					if (this.fireTimer == null) {
+						this.fireTimer = Date.now();
+					}
+					this.checkFireTimer();
 					return;
 				}
 				this.killSelf();
@@ -1977,6 +2077,9 @@ class Player extends Circle {
 		if (packet.alive == false) {
 			return;
 		}
+		if (packet.punchedBy != null) {
+			packet.murderedBy = packet.punchedBy;
+		}
 		packet.removeNotch();
 		packet.enabled = false;
 		packet.alive = false;
@@ -1985,6 +2088,7 @@ class Player extends Circle {
 		packet.newY = packet.y;
 		packet.velX = 0;
 		packet.velY = 0;
+		packet.onFire = 0;
 		packet.moveForward = false;
 		packet.moveBackward = false;
 		packet.turnLeft = false;
@@ -2022,6 +2126,11 @@ class Player extends Circle {
 		this.reachedGoal = false;
 		this.timeReached = null;
 		this.punch = null;
+		this.punchedBy = null;
+		this.murderedBy = null;
+		this.roundKills = 0;
+		this.openMultiKillWindow = false;
+		this.multiKillCount = 0;
 		this.acquiredAbility = null;
 		this.angle = 315;
 		if (currentState == c.stateMap.gameOver) {

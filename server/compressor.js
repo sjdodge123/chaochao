@@ -130,9 +130,13 @@ exports.playerSpawns = function (playerList) {
 			player.id,
 			player.x,
 			player.y,
-			player.color
-			//player.weapon.angle,
-			//player.weapon.name,
+			player.color,
+			player.alive,
+			player.notches,
+			player.nearVictory,
+			player.awake,
+			player.onFire,
+			player.angle
 		];
 		packet.push(listItem);
 	}

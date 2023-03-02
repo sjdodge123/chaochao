@@ -44,6 +44,17 @@ var nearVictorySound = new Audio("./assets/sounds/rise.mp3");
 var fallFromVictorySound = new Audio("./assets/sounds/reverserise.mp3");
 
 
+//Anouncer
+var firstBlood = new Audio("./assets/sounds/firstBlood.mp3");
+var doubleKill = new Audio("./assets/sounds/doubleKill.mp3");
+var tripleKill = new Audio("./assets/sounds/tripleKill.mp3");
+var megaKill = new Audio("./assets/sounds/megaKill.mp3");
+var killingSpree = new Audio("./assets/sounds/killingSpree.mp3");
+var rampage = new Audio("./assets/sounds/rampage.mp3");
+var godLike = new Audio("./assets/sounds/godLike.mp3");
+
+
+
 var lobbyMusic = new Audio("./assets/sounds/lobbymusic.mp3");
 var gameStart = new Audio("./assets/sounds/gamestart.mp3");
 
@@ -73,6 +84,13 @@ brutalBackgroundMusicList.push(heavyfabric);
 
 
 function volumeChange() {
+    godLike.volume = .8 * masterVolume;
+    rampage.volume = .8 * masterVolume;
+    killingSpree.volume = .8 * masterVolume;
+    megaKill.volume = .8 * masterVolume;
+    tripleKill.volume = .8 * masterVolume;
+    doubleKill.volume = .8 * masterVolume;
+    firstBlood.volume = .8 * masterVolume;
     lavaExplosion.volume = .75 * masterVolume;
     iceExplosion.volume = .25 * masterVolume;
     iceCannon.volume = .25 * masterVolume;

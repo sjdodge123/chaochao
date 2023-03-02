@@ -1,7 +1,6 @@
 {
     "port": 3000,
     "serverTickSpeed": 33.33,
-    "playerBaseRadius": 7.5,
     "punchRadius": 11,
     "worldWidth": 1366,
     "worldHeight": 768,
@@ -153,7 +152,7 @@
             "speed": 1000,
             "density": 50,
             "size": 50,
-            "active": true,
+            "active": false,
             "title": "Cloudy"
         },
         "bomb": {
@@ -204,7 +203,7 @@
         "explosive": {
             "id": 1010,
             "radius": 100,
-            "active": true,
+            "active": false,
             "title": "Explosive"
         }
     },
@@ -234,11 +233,15 @@
         "👋",
         "💪"
     ],
+    "playerBaseRadius": 7.5,
+    "playerKillWindow": 3000,
+    "playerMultiKillWindow": 3000,
     "playerDragCoeff": 0.15,
     "playerBrakeCoeff": 0.235,
+    "playerFireProtectionTime": 1500,
     "playerStartSleepTime": 60,
     "playerAFKKickTime": 240,
-    "playerPunchSlowAmt": 0.35,
+    "playerPunchSlowAmt": 0.55,
     "playerPunchCooldown": 300,
     "playerMaxSpeed": 500,
     "playerMaxSpeedBonus": 800,

@@ -80,7 +80,7 @@ function connectSpawnPlayers(packet) {
 
 }
 
-function createPlayer(dataArray, isAI) {
+function createPlayer(dataArray) {
 	var index = dataArray[0];
 	playerList[index] = {};
 	playerList[index].radius = config.playerBaseRadius;
@@ -88,13 +88,14 @@ function createPlayer(dataArray, isAI) {
 	playerList[index].x = dataArray[1];
 	playerList[index].y = dataArray[2];
 	playerList[index].color = dataArray[3];
-	playerList[index].alive = true;
-	playerList[index].notches = 0;
-	playerList[index].nearVictory = false;
+	playerList[index].alive = dataArray[4];
+	playerList[index].notches = dataArray[5];
+	playerList[index].nearVictory = dataArray[6];
 	playerList[index].chatMessage = null;
-	playerList[index].awake = true;
+	playerList[index].awake = dataArray[7];
+	playerList[index].onFire = dataArray[8];
 	playerList[index].ability = null;
-	playerList[index].angle = 315;
+	playerList[index].angle = dataArray[9];
 	playerList[index].deathMessage = null;
 	playerList[index].trail = new Trail({ x: dataArray[1], y: dataArray[2] });
 	playerList[index].fizzle = function () {
@@ -103,15 +104,6 @@ function createPlayer(dataArray, isAI) {
 			playSound(abilityFizzle);
 		}
 	};
-	/*
-	playerList[index].weapon = {}
-	playerList[index].weapon.angle = dataArray[4];
-	playerList[index].weapon.name = dataArray[5];
-	if(isAI){
-		playerList[index].AIName = dataArray[8]
-	}
-	playerList[index].trail = new Trail({x:shipX, y:shipY}, 10, 20, shipColor, 0.25, 'circle');
-	*/
 }
 
 function updatePlayerList(packet) {
@@ -455,6 +447,7 @@ function fullReset() {
 		player.ability = null;
 		player.deathMessage = null;
 		player.infected = false;
+		player.onFire = 0;
 		player.trail = new Trail({ x: player.x, y: player.y });
 		player.notches = 0;
 		oldNotches[id] = player.notches;

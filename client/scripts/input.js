@@ -132,11 +132,6 @@ function keyUp(evt) {
 
 function determineMovement() {
     if (playerList[myID] != null) {
-        moveForward = false;
-        moveBackward = false;
-        turnRight = false;
-        turnLeft = false;
-
         var curAngle = angle(playerList[myID].x, playerList[myID].y, mousex, mousey);
         var rightCone = (curAngle >= 330 || curAngle <= 30);
         var rfwdCone = (curAngle >= 300 && curAngle <= 330);
@@ -150,6 +145,10 @@ function determineMovement() {
         calcAngleFromKeys(playerList[myID]);
         server.emit('mousemove', playerList[myID].angle);
         if (mouseClicked) {
+            moveForward = false;
+            moveBackward = false;
+            turnRight = false;
+            turnLeft = false;
             if (rfwdCone) {
                 moveForward = true;
                 turnRight = true;

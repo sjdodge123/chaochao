@@ -267,6 +267,37 @@ function clientConnect() {
 	server.on("snowFlakeExploded", function (owner) {
 		playSound(iceExplosion);
 	});
+	server.on("firstBlood", function () {
+		playSound(firstBlood);
+	});
+	server.on("onFire", function (packet) {
+		var owner = packet.owner;
+		var value = packet.value;
+		if (playerList[owner] != null) {
+			playerList[owner].onFire = value;
+		}
+	});
+	server.on("multiKill", function (count) {
+		console.log("multiKill: " + count);
+		if (count == 2) {
+			playSound(doubleKill);
+		}
+		if (count == 3) {
+			playSound(tripleKill);
+		}
+		if (count > 3) {
+			playSound(megaKill);
+		}
+	});
+	server.on("killingSpree", function (player) {
+		playSound(killingSpree);
+	});
+	server.on("rampage", function (player) {
+		playSound(rampage);
+	});
+	server.on("godLike", function (player) {
+		playSound(godLike);
+	});
 	server.on("fizzle", function (owner) {
 		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
 			if (playerList[owner] != null) {

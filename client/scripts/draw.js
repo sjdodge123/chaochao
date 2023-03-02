@@ -418,6 +418,25 @@ function drawPlayer(player) {
         gameContext.stroke();
         gameContext.restore();
     }
+    if (player.onFire > 0) {
+        gameContext.save();
+        gameContext.beginPath();
+        gameContext.lineWidth = 3;
+        gameContext.setLineDash([4, 2]);
+        if (player.onFire <= config.playerFireProtectionTime) {
+            gameContext.strokeStyle = "red";
+        }
+        if (player.onFire >= config.playerFireProtectionTime) {
+            gameContext.strokeStyle = "yellow";
+        }
+        if (player.onFire >= 2 * config.playerFireProtectionTime) {
+            gameContext.strokeStyle = "blue";
+        }
+
+        gameContext.arc(player.x, player.y, config.playerBaseRadius + 5, 0, 2 * Math.PI);
+        gameContext.stroke();
+        gameContext.restore();
+    }
 
     var playerStrokeColor = "black";
     for (var aimerID in aimerList) {
