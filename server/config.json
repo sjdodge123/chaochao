@@ -184,10 +184,10 @@
         "infection": {
             "id": 1008,
             "radius": 15,
-            "brakeModifer": 0.075,
-            "dragModifer": 0.60,
+            "brakeModifer": 0.025,
+            "dragModifer": 0.15,
             "punchRadius": 14,
-            "acelModifer": 0.65,
+            "acelModifer": 0.25,
             "active": true,
             "title": "Infection"
         },

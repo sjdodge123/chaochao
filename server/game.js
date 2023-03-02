@@ -1896,8 +1896,9 @@ class Player extends Circle {
 			return;
 		}
 		this.infected = true;
-		var infectTimer = utils.getRandomInt(1000, 4000);
+		var infectTimer = 0;
 		if (this.alive == true) {
+			infectTimer = utils.getRandomInt(1000, 4000);
 			setTimeout(this.killPlayer, infectTimer, this);
 		}
 		setTimeout(this.resurrect, infectTimer + 1500, this);
@@ -2189,7 +2190,7 @@ class SwapAimer extends Circle {
 		this.y = owner.y;
 	}
 	handleHit(object) {
-		if (object.isPlayer && object.id != this.ownerId && this.alive) {
+		if (object.isPlayer && object.id != this.ownerId && object.isZombie == false && this.alive) {
 			if (this.targetList[object.id] == null) {
 				this.targetList[object.id] = object;
 				this.targetListAry.push(object.id);

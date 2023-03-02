@@ -116,7 +116,7 @@ function volumeChange() {
     playerFinished.volume = .3 * masterVolume;
     blindSound.volume = .4 * masterVolume;
     teleportSound.volume = .05 * masterVolume;
-    newZombie.volume = .55 * masterVolume;
+    newZombie.volume = .65 * masterVolume;
     zombieHit.volume = .25 * masterVolume;
     zombieSwing.volume = .35 * masterVolume;
 

@@ -114,7 +114,7 @@ function loadPatterns() {
     patterns[config.tileMap.abilities.speedDebuff.id] = makePattern(hourglassIcon, makeSeamlessPattern(dirt));
     patterns[config.tileMap.abilities.tileSwap.id] = makePattern(copyIcon, makeSeamlessPattern(dirt));
     patterns[config.tileMap.abilities.iceCannon.id] = makePattern(snowFlakeIcon, makeSeamlessPattern(dirt));
-    patterns[config.brutalRounds.infection.id] = makePattern(infectionIcon, "green");
+    patterns[config.brutalRounds.infection.id] = makePattern(infectionIcon, "red");
 
     //Tiles
     if (infection == true) {
