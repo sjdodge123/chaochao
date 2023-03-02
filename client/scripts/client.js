@@ -129,6 +129,7 @@ function clientConnect() {
 		playSound(playerDiedSound);
 		playerAbilityUsed(id);
 		playerList[id].alive = false;
+		playerList[id].onFire = 0;
 		playerList[id].deathMessage = '💀';
 		createDownRankSymbol(id);
 	});

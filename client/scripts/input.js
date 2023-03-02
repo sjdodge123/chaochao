@@ -1,7 +1,7 @@
 var menuOpen = false;
 
 var gamePadA = null;
-var mouseClicked = false;
+var movingByMouse = false;
 var isTouchScreen = false,
     virtualButtonList = null,
     joystickMovement = null,
@@ -59,7 +59,8 @@ function handleClick(event) {
     switch (event.which) {
         case 1: {
             if (menuOpen == false) {
-                mouseClicked = true;
+                attack = true;
+                server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
             }
             break;
         }
@@ -78,8 +79,9 @@ function handleClick(event) {
 function handleUnClick(event) {
     switch (event.which) {
         case 1: {
-            mouseClicked = false;
-            cancelMovement(event);
+            if (menuOpen == false) {
+                cancelMovement(event);
+            }
             break;
         }
         case 3: {
@@ -88,12 +90,13 @@ function handleUnClick(event) {
     }
 }
 function handleDblClick(event) {
-    mouseClicked = false;
-    attack = true;
-    server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
-    attack = false;
+    movingByMouse = !movingByMouse;
 }
 function keyDown(evt) {
+    if (movingByMouse) {
+        movingByMouse = false;
+        cancelMovement(evt);
+    }
     switch (evt.keyCode) {
         case 65: { turnLeft = true; break; } //Left key
         case 37: { turnLeft = true; break; } //Left key
@@ -112,6 +115,11 @@ function keyDown(evt) {
     server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
 }
 function keyUp(evt) {
+    if (movingByMouse) {
+        movingByMouse = false;
+        cancelMovement(evt);
+    }
+
     switch (evt.keyCode) {
         case 65: { turnLeft = false; break; } //Left key
         case 37: { turnLeft = false; break; } //Left key
@@ -144,7 +152,7 @@ function determineMovement() {
 
         calcAngleFromKeys(playerList[myID]);
         server.emit('mousemove', playerList[myID].angle);
-        if (mouseClicked) {
+        if (movingByMouse) {
             moveForward = false;
             moveBackward = false;
             turnRight = false;

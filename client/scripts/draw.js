@@ -90,12 +90,19 @@ sand.scale = 0.25;
 
 var playerAnimating = null;
 
+//Flames
 var redFire = new Image(32, 128);
 redFire.src = "../assets/img/redFire.png";
+var orangeFire = new Image(32, 128);
+orangeFire.src = "../assets/img/orangeFire.png";
 var yellowFire = new Image(32, 128);
 yellowFire.src = "../assets/img/yellowFire.png";
+var greenFire = new Image(32, 128);
+greenFire.src = "../assets/img/greenFire.png";
 var blueFire = new Image(32, 128);
 blueFire.src = "../assets/img/blueFire.png";
+var purpleFire = new Image(32, 128);
+purpleFire.src = "../assets/img/purpleFire.png";
 
 
 function loadPatterns() {
@@ -137,6 +144,27 @@ function loadPatterns() {
 
     if (brutalRoundConfig != null && brutalPatterns[brutalRoundConfig.brutalTypes.toString()] == null) {
         brutalPatterns[brutalRoundConfig.brutalTypes.toString()] = makeComplexPattern(brutalRoundConfig.brutalTypes);
+    }
+}
+
+function loadSpriteSheets() {
+    if (redFire.spriteSheet == null) {
+        redFire.spriteSheet = new SpriteSheet(redFire, 0, 0, 32, 32, 4, 1, true);
+    }
+    if (orangeFire.spriteSheet == null) {
+        orangeFire.spriteSheet = new SpriteSheet(orangeFire, 0, 0, 32, 32, 4, 1, true);
+    }
+    if (yellowFire.spriteSheet == null) {
+        yellowFire.spriteSheet = new SpriteSheet(yellowFire, 0, 0, 32, 32, 4, 1, true);
+    }
+    if (greenFire.spriteSheet == null) {
+        greenFire.spriteSheet = new SpriteSheet(greenFire, 0, 0, 32, 32, 4, 1, true);
+    }
+    if (blueFire.spriteSheet == null) {
+        blueFire.spriteSheet = new SpriteSheet(blueFire, 0, 0, 32, 32, 4, 1, true);
+    }
+    if (purpleFire.spriteSheet == null) {
+        purpleFire.spriteSheet = new SpriteSheet(purpleFire, 0, 0, 32, 32, 4, 1, true);
     }
 }
 
@@ -426,39 +454,7 @@ function drawPlayer(player, dt) {
         gameContext.restore();
     }
     if (player.onFire > 0) {
-        if (redFire.spriteSheet == null) {
-            redFire.spriteSheet = new SpriteSheet(redFire, 0, 0, 32, 32, 4, 1, true);
-        }
-        if (blueFire.spriteSheet == null) {
-            blueFire.spriteSheet = new SpriteSheet(blueFire, 0, 0, 32, 32, 4, 1, true);
-        }
-        if (yellowFire.spriteSheet == null) {
-            yellowFire.spriteSheet = new SpriteSheet(yellowFire, 0, 0, 32, 32, 4, 1, true);
-        }
-        gameContext.save();
-        gameContext.translate(player.x - 5, player.y);
-        /*
-        if (player.angle > 180) {
-            gameContext.rotate(180 - player.angle * (Math.PI / 180));
-        } else {
-            gameContext.rotate(-1 * player.angle * (Math.PI / 180));
-        }
-        */
-        gameContext.rotate(-90 * (Math.PI / 180));
-        gameContext.beginPath();
-        if (player.onFire <= config.playerFireProtectionTime) {
-            redFire.spriteSheet.update(dt);
-            redFire.spriteSheet.draw(48, 48);
-        }
-        if (player.onFire >= config.playerFireProtectionTime) {
-            yellowFire.spriteSheet.update(dt);
-            yellowFire.spriteSheet.draw(48, 48);
-        }
-        if (player.onFire >= 2 * config.playerFireProtectionTime) {
-            blueFire.spriteSheet.update(dt);
-            blueFire.spriteSheet.draw(48, 48);
-        }
-        gameContext.restore();
+        drawFire(player);
     }
 
     var playerStrokeColor = "black";
@@ -481,7 +477,7 @@ function drawPlayer(player, dt) {
 
 
     if (player.ability != null) {
-        drawAbilityAimer(player)
+        drawAbilityIndicator(player.x, player.y, player);
     }
     drawEmoji(player);
     if (player.awake == false) {
@@ -514,6 +510,84 @@ function drawDeathMessage(player) {
         gameContext.restore();
     }
 }
+function drawFire(player) {
+    gameContext.save();
+    switch (player.angle) {
+        case 0: {
+            gameContext.translate(player.x - 5, player.y);
+            break;
+        }
+        case 45: {
+            gameContext.translate(player.x - 5, player.y - 5);
+            break;
+        }
+        case 90: {
+            gameContext.translate(player.x, player.y - 5);
+            break;
+        }
+        case 135: {
+            gameContext.translate(player.x + 5, player.y - 5);
+            break;
+        }
+        case 180: {
+            gameContext.translate(player.x + 5, player.y);
+            break;
+        }
+        case 225: {
+            gameContext.translate(player.x + 5, player.y + 5);
+            break;
+        }
+        case 270: {
+            gameContext.translate(player.x, player.y + 5);
+            break;
+        }
+        case 315: {
+            gameContext.translate(player.x - 5, player.y + 5);
+            break;
+        }
+    }
+
+    gameContext.rotate((player.angle - 90) * (Math.PI / 180));
+    gameContext.beginPath();
+    drawFlameColor(player, 55);
+    gameContext.restore();
+}
+
+function drawFlameColor(player, size) {
+    loadSpriteSheets();
+    if (player.onFire < 1000) {
+        redFire.spriteSheet.update(dt);
+        redFire.spriteSheet.draw(size, size);
+        return;
+    }
+    if (player.onFire >= 1000 && player.onFire < 2000) {
+        orangeFire.spriteSheet.update(dt);
+        orangeFire.spriteSheet.draw(size, size)
+        return;
+    }
+    if (player.onFire >= 2000 && player.onFire < 3000) {
+        yellowFire.spriteSheet.update(dt);
+        yellowFire.spriteSheet.draw(size, size);
+        return;
+    }
+    if (player.onFire >= 3000 && player.onFire < 4000) {
+        greenFire.spriteSheet.update(dt);
+        greenFire.spriteSheet.draw(size, size);
+        return;
+    }
+    if (player.onFire >= 4000 && player.onFire < 5000) {
+        blueFire.spriteSheet.update(dt);
+        blueFire.spriteSheet.draw(size, size);
+        return;
+    }
+    if (player.onFire >= 5000) {
+        purpleFire.spriteSheet.update(dt);
+        purpleFire.spriteSheet.draw(size, size);
+        return;
+    }
+}
+
+
 
 function drawProjectiles() {
     for (var proj in projectileList) {
@@ -560,25 +634,26 @@ function drawProjectiles() {
         }
     }
 }
-function drawAbilityAimer(player) {
+
+function drawAbilityIndicator(x, y, player) {
     switch (player.ability) {
         case config.tileMap.abilities.bomb.id: {
             if (player.angle % 90 == 0) {
-                drawBombAimer(player, player.angle);
+                drawBombAimer(x, y, player.angle);
                 break;
             }
             if ((player.angle + 45) % 90 == 0) {
-                drawBombAimer(player, player.angle);
+                drawBombAimer(x, y, player.angle);
                 break;
             }
         }
         case config.tileMap.abilities.iceCannon.id: {
             if (player.angle % 90 == 0) {
-                drawBombAimer(player, player.angle);
+                drawBombAimer(x, y, player.angle);
                 break;
             }
             if ((player.angle + 45) % 90 == 0) {
-                drawBombAimer(player, player.angle);
+                drawBombAimer(x, y, player.angle);
                 break;
             }
         }
@@ -586,7 +661,7 @@ function drawAbilityAimer(player) {
             gameContext.save();
             gameContext.beginPath();
             gameContext.setLineDash([15, 3, 3, 3]);
-            gameContext.arc(player.x, player.y, 10, 0, 2 * Math.PI);
+            gameContext.arc(x, y, 10, 0, 2 * Math.PI);
             gameContext.stroke();
             gameContext.restore();
         }
@@ -595,7 +670,7 @@ function drawAbilityAimer(player) {
             gameContext.beginPath();
             gameContext.lineWidth = 2;
             gameContext.setLineDash([7, 2, 2]);
-            gameContext.arc(player.x, player.y, 10, 0, 2 * Math.PI);
+            gameContext.arc(x, y, 10, 0, 2 * Math.PI);
             gameContext.stroke();
             gameContext.restore();
         }
@@ -603,19 +678,19 @@ function drawAbilityAimer(player) {
             gameContext.save();
             gameContext.beginPath();
             gameContext.setLineDash([2, 2]);
-            gameContext.arc(player.x, player.y, 10, 0, 2 * Math.PI);
+            gameContext.arc(x, y, 10, 0, 2 * Math.PI);
             gameContext.stroke();
             gameContext.restore();
         }
     }
-
 }
-function drawBombAimer(player, angle) {
+
+function drawBombAimer(x, y, angle) {
     gameContext.save();
     gameContext.beginPath();
     gameContext.setLineDash([5, 5]);
-    gameContext.moveTo(player.x, player.y);
-    var point = pos({ x: player.x, y: player.y }, config.tileMap.abilities.bomb.aimerLength, angle);
+    gameContext.moveTo(x, y);
+    var point = pos({ x: x, y: y }, config.tileMap.abilities.bomb.aimerLength, angle);
     gameContext.lineTo(point.x, point.y);
     gameContext.stroke();
     gameContext.restore();
@@ -1060,15 +1135,16 @@ function drawBlackBackground() {
     gameContext.restore();
 }
 function drawOldNotches() {
-    gameContext.save();
     var count = 0;
     for (var player in playerList) {
         count++;
     }
     var distanceApart = 7;
-
     var offSetX = 80;
     var offSetY = gameCanvas.height / 2 - (count * config.playerBaseRadius * distanceApart * .5);
+
+
+    gameContext.save();
     gameContext.translate(offSetX, offSetY);
     for (var player in playerList) {
         if (playerAnimating == null) {
@@ -1076,7 +1152,6 @@ function drawOldNotches() {
         }
         drawNotches(notchDistanceApart);
         drawPlayerIcon(playerList[player], notchDistanceApart);
-        drawScoreBoardTrail(playerList[player]);
         drawGoalPost(playerList[player], notchDistanceApart);
         drawEmoji(playerList[player]);
         gameContext.translate(0, config.playerBaseRadius * distanceApart);
@@ -1084,24 +1159,33 @@ function drawOldNotches() {
     gameContext.restore();
 }
 function drawPlayerIcon(player, notchDistanceApart) {
+    var notchX = 0;
+    var moveAmt = 0;
     gameContext.beginPath();
     gameContext.shadowColor = player.color;
     gameContext.shadowBlur = 10;
-    var notchX = 0;
-    var moveAmt = 0;
     if (player.distanceToMove > 0) {
         moveAmt = 2;
         notchX = player.distanceTraveled + (oldNotches[player.id] * notchDistanceApart);
-        gameContext.arc(notchX, 0, config.playerBaseRadius * 2, 0, 2 * Math.PI);
     } else if (player.distanceToMove < 0) {
         moveAmt = -2;
         notchX = player.distanceTraveled + (oldNotches[player.id] * notchDistanceApart);
-        gameContext.arc(notchX, 0, config.playerBaseRadius * 2, 0, 2 * Math.PI);
     } else {
         notchX = player.notches * notchDistanceApart;
-        gameContext.arc(notchX, 0, config.playerBaseRadius * 2, 0, 2 * Math.PI);
         playerAnimating = null;
     }
+    drawScoreBoardTrail(notchX, player);
+    drawFireOverview(notchX, player);
+    //drawAbiltiesOverview(notchX, player);
+    gameContext.arc(notchX, 0, config.playerBaseRadius * 2, 0, 2 * Math.PI);
+
+    gameContext.save();
+    gameContext.beginPath();
+    gameContext.lineWidth = 5;
+    gameContext.strokeStyle = "black";
+    gameContext.arc(notchX, 0, config.playerBaseRadius * 2, 0, 2 * Math.PI);
+    gameContext.stroke();
+    gameContext.restore();
 
     if (playerAnimating === player.id) {
         if (player.distanceToMove - moveAmt < 0 && player.distanceToMove + moveAmt > 0) {
@@ -1118,6 +1202,28 @@ function drawPlayerIcon(player, notchDistanceApart) {
     gameContext.fill();
 }
 
+function drawFireOverview(x, player) {
+    if (player.onFire > 0) {
+        gameContext.save();
+        gameContext.shadowColor = "rgba(0, 0, 0, 0)";
+        gameContext.translate(x - 5, 0);
+        gameContext.rotate(-90 * (Math.PI / 180));
+        drawFlameColor(player, 90);
+        gameContext.restore();
+    }
+}
+/*
+function drawAbiltiesOverview(notchX, player) {
+    if (player.ability == null) {
+        return;
+    }
+
+    gameContext.save();
+    drawAbilityIndicator(notchX, 0, player);
+    gameContext.restore();
+}
+*/
+
 function drawNotches(distanceApart) {
     gameContext.beginPath();
     for (var i = 0; i < gameLength + 1; i++) {
@@ -1127,10 +1233,11 @@ function drawNotches(distanceApart) {
     gameContext.fill();
 }
 
-function drawScoreBoardTrail(player) {
+function drawScoreBoardTrail(x, player) {
+    gameContext.save();
     gameContext.beginPath();
     gameContext.moveTo(0, 0);
-    gameContext.lineTo(player.x, player.y);
+    gameContext.lineTo(x, 0);
     gameContext.lineWidth = 10;
     gameContext.shadowBlur = 3;
     gameContext.shadowColor = player.color;
@@ -1142,10 +1249,10 @@ function drawScoreBoardTrail(player) {
     }
 
     gameContext.stroke();
-    gameContext.beginPath();
     gameContext.arc(0, 0, 8, 0, 2 * Math.PI);
     gameContext.fillStyle = player.color;
     gameContext.fill();
+    gameContext.restore();
 }
 function drawGoalPost(player, distanceApart) {
     gameContext.beginPath();

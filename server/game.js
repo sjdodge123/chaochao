@@ -274,7 +274,7 @@ class Game {
 					var killer = this.playerList[this.playerList[player].murderedBy];
 					if (killer != null) {
 						this.playerList[player].murderedBy = null;
-						killer.addKill(player);
+						killer.addKill(this.playerList[player]);
 						this.gameBoard.checkForFirstBlood();
 					}
 				}
@@ -863,6 +863,13 @@ class GameBoard {
 			return;
 		}
 		this.firstBlood = true;
+		//Apply bonus fire for player who got first blood
+		for (var id in this.playerList) {
+			if (this.playerList[id].totalKills > 0) {
+				this.playerList[id].addFire(c.playerFirstBloodFireBonus);
+				break;
+			}
+		}
 		messenger.messageRoomBySig(this.roomSig, "firstBlood");
 	}
 
@@ -1631,6 +1638,7 @@ class Player extends Circle {
 		this.timeReached = null;
 		this.notches = 0;
 		this.nearVictory = false;
+		this.fellFromVictory = false;
 		this.infected = false;
 		this.isZombie = false;
 		this.exploded = false;
@@ -1641,7 +1649,7 @@ class Player extends Circle {
 		this.turnLeft = false;
 		this.turnRight = false;
 		this.attack = false;
-		this.angle = 315;
+		this.angle = 0;
 
 
 		//Attack
@@ -1754,17 +1762,21 @@ class Player extends Circle {
 		}, c.playerKillWindow, this);
 	}
 	addKill(player) {
-		this.killedPlayerList.push(player);
+		this.killedPlayerList.push(player.id);
 		clearTimeout(multiKillIndex);
 		this.roundKills += 1;
 		this.totalKills += 1;
-		this.addFire();
+		this.addFire(c.playerKillFireBonus);
+		if (player.fellFromVictory) {
+			this.addFire(c.playerKilledNearVictoryBonus);
+		}
 		if (this.openMultiKillWindow == true) {
 			if (this.multiKillCount == 0) {
 				this.multiKillCount = 2;
 			} else {
 				this.multiKillCount++;
 			}
+			this.addFire(c.playerMultiKillFireBonus);
 			messenger.messageRoomBySig(this.roomSig, "multiKill", this.multiKillCount);
 		}
 		if (this.totalKills == 5) {
@@ -1782,11 +1794,11 @@ class Player extends Circle {
 		}, c.playerMultiKillWindow, this)
 		this.openMultiKillWindow = true;
 	}
-	addFire() {
+	addFire(value) {
 		if (this.isZombie) {
 			return;
 		}
-		this.onFire += c.playerFireProtectionTime;
+		this.onFire += value;
 		messenger.messageRoomBySig(this.roomSig, "onFire", { owner: this.id, value: this.onFire });
 	}
 	addSpeed(newValue) {
@@ -2065,6 +2077,9 @@ class Player extends Circle {
 	}
 	removeNotch() {
 		if (this.notches > 0) {
+			if (this.nearVictory == true) {
+				this.fellFromVictory = true;
+			}
 			this.nearVictory = false;
 			this.notches -= 1;
 		}
@@ -2129,6 +2144,7 @@ class Player extends Circle {
 		this.punchedBy = null;
 		this.murderedBy = null;
 		this.roundKills = 0;
+		this.fellFromVictory = false;
 		this.openMultiKillWindow = false;
 		this.multiKillCount = 0;
 		this.acquiredAbility = null;

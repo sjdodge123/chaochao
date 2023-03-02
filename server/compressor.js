@@ -125,20 +125,7 @@ exports.gameState = function (game) {
 exports.playerSpawns = function (playerList) {
 	var packet = [];
 	for (prop in playerList) {
-		player = playerList[prop];
-		listItem = [
-			player.id,
-			player.x,
-			player.y,
-			player.color,
-			player.alive,
-			player.notches,
-			player.nearVictory,
-			player.awake,
-			player.onFire,
-			player.angle
-		];
-		packet.push(listItem);
+		packet.push(newPlayerPacket(playerList[prop]));
 	}
 	packet = JSON.stringify(packet);
 	player = null;
@@ -147,19 +134,26 @@ exports.playerSpawns = function (playerList) {
 	return packet;
 }
 exports.appendPlayer = function (player) {
+	var packet = newPlayerPacket(player);
+	packet = JSON.stringify(packet);
+	player = null;
+	listItem = null;
+	prop = null;
+	return packet;
+}
+
+function newPlayerPacket(player) {
 	var packet = [];
 	packet[0] = player.id;
 	packet[1] = player.x;
 	packet[2] = player.y;
 	packet[3] = player.color;
-	//packet[4] = player.weapon.angle;
-	//packet[5] = player.weapon.name;
-	//packet[6] = player.weapon.level;
-	//packet[7] = player.weapon.powerCost;
-	packet = JSON.stringify(packet);
-	player = null;
-	listItem = null;
-	prop = null;
+	packet[4] = player.alive;
+	packet[5] = player.notches;
+	packet[6] = player.nearVictory;
+	packet[7] = player.awake;
+	packet[8] = player.onFire;
+	packet[9] = player.angle;
 	return packet;
 }
 
