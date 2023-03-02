@@ -750,6 +750,7 @@ class GameBoard {
 	}
 	spawnSnowFlake(owner) {
 		var player = this.playerList[owner];
+		player.addSpeed(100);
 		var snowFlake = new SnowFlakeProj(player.x, player.y, c.tileMap.abilities.iceCannon.snowFlakeRadius, "black", owner, this.roomSig, this.clampPlayerAngle(player.angle));
 		this.projectileList[owner] = snowFlake;
 		messenger.messageRoomBySig(this.roomSig, "spawnSnowFlake", owner);
@@ -784,6 +785,9 @@ class GameBoard {
 		messenger.messageRoomBySig(this.roomSig, 'explodedCells', explodedCells);
 	}
 	explodeIce(owner) {
+		if (this.playerList[owner] != null && this.playerList[owner].alive == true && !this.playerList[owner].isZombie) {
+			this.playerList[owner].removeSpeed(100);
+		}
 		var explodeLoc = { x: this.projectileList[owner].x, y: this.projectileList[owner].y };
 		var cells = this.currentMap.cells;
 		for (var i = 0; i < cells.length; i++) {
@@ -2296,7 +2300,7 @@ class SnowFlakeProj extends Projectile {
 	}
 	handleHit(object) {
 		if (object.isMapCell) {
-			if (object.id != c.tileMap.lava.id && object.id != c.tileMap.goal.id) {
+			if (object.id != c.tileMap.lava.id && object.id != c.tileMap.goal.id && object.id != c.tileMap.slow.id) {
 				this.tileChanges[object.voronoiId] = c.tileMap.ice.id;
 			}
 		}
