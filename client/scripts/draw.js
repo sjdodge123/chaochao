@@ -381,7 +381,6 @@ function drawAbilties() {
 }
 
 function drawAimer(aimer) {
-
     if (aimer.startSwapCountDown && aimer.hide == false) {
         gameContext.save();
         gameContext.beginPath();
@@ -396,6 +395,22 @@ function drawAimer(aimer) {
             gameContext.strokeStyle = "black";
         }
         gameContext.stroke();
+        gameContext.restore();
+    }
+    if (aimer.startExplosionCountDown && aimer.hide == false) {
+        gameContext.save();
+        gameContext.beginPath();
+        gameContext.arc(aimer.x, aimer.y, aimer.radius, 0, 2 * Math.PI);
+        if (aimer.explosionPulse) {
+            aimer.explosionPulse = false;
+            gameContext.fillStyle = aimer.color;
+            gameContext.fill();
+        } else {
+            gameContext.setLineDash([15, 3, 3, 3]);
+            gameContext.lineWidth = 3;
+            gameContext.strokeStyle = aimer.color;
+            gameContext.stroke();
+        }
         gameContext.restore();
     }
 }

@@ -279,7 +279,6 @@ function clientConnect() {
 		}
 	});
 	server.on("multiKill", function (count) {
-		console.log("multiKill: " + count);
 		if (count == 2) {
 			playSound(doubleKill);
 		}
@@ -348,10 +347,47 @@ function clientConnect() {
 			playSound(lavaExplosion);
 		}
 	});
+	server.on("spawnExplosionAimer", function (owner) {
+		spawnExplosionAimer(owner);
+		aimerList[owner].startExplosionCountDown = true;
+
+		for (var i = 1; i < config.explosionWarnTime + 1; i++) {
+			addTimer(function (params) {
+				if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
+					playSound(teleportWarnSound);
+					params.explosionPulse = true;
+				}
+			}, i * 1000, aimerList[owner]);
+			if (i == config.explosionWarnTime) {
+				addTimer(function (params) {
+					if (params != undefined) {
+						params.hide = true;
+					}
+				}, config.explosionWarnTime * 1000, aimerList[owner]);
+			}
+		}
+	});
 	server.on("swapUsed", function (owner) {
 		playerAbilityUsed(owner);
-		spawnAimer(owner);
+		spawnSwapAimer(owner);
 		aimerList[owner].startSwapCountDown = true;
+
+		for (var i = 1; i < (config.tileMap.abilities.swap.warnTime / 1000) + 1; i++) {
+			addTimer(function (params) {
+				if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
+					playSound(teleportWarnSound);
+					params.swapCountDownPulse = true;
+				}
+			}, i * 1000, aimerList[owner]);
+			if (i == (config.tileMap.abilities.swap.warnTime / 1000)) {
+				addTimer(function (params) {
+					if (params != undefined) {
+						params.hide = true;
+					}
+				}, config.tileMap.abilities.swap.warnTime, aimerList[owner]);
+			}
+		}
+		/*
 		var count = 0;
 		var int = setInterval(function () {
 			if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
@@ -368,6 +404,7 @@ function clientConnect() {
 				clearInterval(int);
 			}
 		}, 1000);
+		*/
 	});
 	server.on("playerSwapped", function (owner) {
 		if (aimerList[owner].startSwapCountDown) {

@@ -84,13 +84,13 @@ brutalBackgroundMusicList.push(heavyfabric);
 
 
 function volumeChange() {
-    godLike.volume = .8 * masterVolume;
-    rampage.volume = .8 * masterVolume;
-    killingSpree.volume = .8 * masterVolume;
-    megaKill.volume = .8 * masterVolume;
-    tripleKill.volume = .8 * masterVolume;
-    doubleKill.volume = .8 * masterVolume;
-    firstBlood.volume = .8 * masterVolume;
+    godLike.volume = .1 * masterVolume;
+    rampage.volume = .1 * masterVolume;
+    killingSpree.volume = .1 * masterVolume;
+    megaKill.volume = .1 * masterVolume;
+    tripleKill.volume = .1 * masterVolume;
+    doubleKill.volume = .1 * masterVolume;
+    firstBlood.volume = .1 * masterVolume;
     lavaExplosion.volume = .75 * masterVolume;
     iceExplosion.volume = .25 * masterVolume;
     iceCannon.volume = .25 * masterVolume;

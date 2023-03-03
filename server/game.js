@@ -284,7 +284,7 @@ class Game {
 				}
 				if (this.gameBoard.checkForActiveBrutal(c.brutalRounds.explosive.id)) {
 					if (this.playerList[player].exploded == false) {
-						this.gameBoard.explodeLava({ x: this.playerList[player].x, y: this.playerList[player].y }, c.brutalRounds.explosive.radius);
+						this.gameBoard.createExplosionAimer({ x: this.playerList[player].x, y: this.playerList[player].y }, 1, this.playerList[player].id);
 						this.playerList[player].exploded = true;
 					}
 				}
@@ -657,8 +657,16 @@ class GameBoard {
 	updateAimers(currentState) {
 		for (var id in this.aimerList) {
 			if (this.playerList[id] != null) {
-				this.aimerList[id].update(this.playerList[id]);
+				if (this.aimerList[id].alive) {
+					this.aimerList[id].update(this.playerList[id]);
+					if (this.aimerList[id].isExplosionAimer && this.aimerList[id].explode) {
+						this.explodeLava({ x: this.aimerList[id].x, y: this.aimerList[id].y }, this.aimerList[id].radius);
+						this.aimerList[id].killSelf();
+					}
+				}
+
 			}
+
 		}
 	}
 
@@ -817,6 +825,11 @@ class GameBoard {
 		}
 		messenger.messageRoomBySig(this.roomSig, 'lavaExplosion');
 		messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(this.gatherTileChanges()));
+	}
+	createExplosionAimer(loc, radius, owner) {
+		var aimer = new ExplosionAimer(loc.x, loc.y, radius, "red", owner, this.roomSig);
+		this.aimerList[owner] = aimer;
+		messenger.messageRoomBySig(this.roomSig, "spawnExplosionAimer", owner);
 	}
 	applySpeedBuff(owner) {
 		for (var id in this.playerList) {
@@ -2157,6 +2170,54 @@ class Player extends Circle {
 		if (currentState == c.stateMap.gameOver) {
 			this.ability = null;
 		}
+	}
+}
+
+class ExplosionAimer extends Circle {
+	constructor(x, y, radius, color, ownerId, roomSig) {
+		super(x, y, radius, color);
+		this.ownerId = ownerId;
+		this.roomSig = roomSig;
+		this.isExplosionAimer = true;
+		this.alive = true;
+		this.targetListAry = [];
+
+		this.explode = false;
+		this.explodeWaitTime = c.explosionWarnTime;
+		this.explodeTimer = null;
+		this.explodeTimeLeft = this.explodeWaitTime;
+	}
+	update() {
+		if (!this.alive) {
+			return;
+		}
+		if (this.radius < c.explosionRadius) {
+			this.grow();
+		}
+		this.checkExplodeTimer();
+
+	}
+	grow() {
+		this.radius += 2;
+	}
+	checkExplodeTimer() {
+		if (this.explodeTimer != null) {
+			this.explodeTimeLeft = ((this.explodeWaitTime * 1000 - (Date.now() - this.explodeTimer)) / (1000)).toFixed(1);
+			if (this.explodeTimeLeft > 0) {
+				return;
+			}
+			this.explodeTimer = null;
+			this.explode = true;
+			messenger.messageRoomBySig(this.roomSig, "terminateAimer", this.ownerId);
+			return;
+		}
+		this.explodeTimer = Date.now();
+	}
+	killSelf() {
+		this.alive = false;
+	}
+	handleHit() {
+
 	}
 }
 

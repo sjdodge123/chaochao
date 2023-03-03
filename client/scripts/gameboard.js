@@ -14,6 +14,7 @@ var mousex,
 	playerList,
 	blindfold,
 	screenShake = false,
+	timerList = [],
 	playersNearVictory = [],
 	pingCircles = [],
 	pingIntervals = [],
@@ -47,6 +48,7 @@ function updateGameboard(dt) {
 	if (currentState == config.stateMap.racing || currentState == config.stateMap.overview || currentState == config.stateMap.collapsing) {
 		updateTrails();
 	}
+	checkTimers(dt);
 }
 function resetTrails() {
 	for (var id in playerList) {
@@ -63,6 +65,29 @@ function updateTrails() {
 		}
 		player.trail.update({ x: player.x, y: player.y });
 	}
+}
+
+function checkTimers(dt) {
+	for (var i = 0; i < timerList.length; i++) {
+		var timer = timerList[i];
+		if (timer.elasped == true) {
+			continue;
+		}
+		timer.timeLeft -= dt;
+		if (timer.timeLeft <= 0) {
+			timer.elasped = true;
+			timer.callback(timer.params);
+		}
+	}
+}
+
+function addTimer(callback, timeout, params) {
+	var timer = {};
+	timer.callback = callback;
+	timer.elasped = false;
+	timer.timeLeft = timeout;
+	timer.params = params;
+	return timerList.push(timer);
 }
 
 
@@ -383,13 +408,25 @@ function spawnSnowFlake(owner) {
 	snowFlake.color = "black";
 	projectileList[owner] = snowFlake;
 }
-function spawnAimer(owner) {
+function spawnSwapAimer(owner) {
 	var aimer = {};
 	aimer.ownerId = owner;
 	aimer.x = playerList[owner].x;
 	aimer.y = playerList[owner].y;
 	aimer.targetList = '';
 	aimer.radius = config.tileMap.abilities.swap.startSize;
+	aimer.color = "red";
+	aimer.hide = false;
+	aimerList[owner] = aimer;
+	return aimer;
+}
+function spawnExplosionAimer(owner) {
+	var aimer = {};
+	aimer.ownerId = owner;
+	aimer.x = playerList[owner].x;
+	aimer.y = playerList[owner].y;
+	aimer.targetList = '';
+	aimer.radius = config.explosionRadius;
 	aimer.color = "red";
 	aimer.hide = false;
 	aimerList[owner] = aimer;
@@ -432,6 +469,7 @@ function fullReset() {
 	decodedColorName = '';
 	oldNotches = {};
 	aimerList = {};
+	timerList = [];
 	playersNearVictory = [];
 	round = 0;
 	nextMapPreview = null;

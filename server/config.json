@@ -8,6 +8,8 @@
     "minPlayersToStart": 1,
     "maxPlayersInRoom": 25,
     "forceConstant": 5000,
+    "explosionWarnTime": 2,
+    "explosionRadius": 100,
     "baseNotchesToWin": 5,
     "minimumNotchesToWin": 3,
     "chanceToSpawnAbility": 35,
@@ -202,8 +204,7 @@
         },
         "explosive": {
             "id": 1010,
-            "radius": 100,
-            "active": false,
+            "active": true,
             "title": "Explosive"
         }
     },
