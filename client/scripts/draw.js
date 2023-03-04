@@ -56,12 +56,12 @@ var volcanoIcon = new Image(576, 512);
 volcanoIcon.src = "../assets/img/volcano-solid.svg";
 var bombImage = new Image();
 bombImage.src = "../assets/img/bomb.svg";
-var snowFlakeImage = new Image();
+var snowFlakeImage = new Image(576, 512);
 snowFlakeImage.src = "../assets/img/snowflake-solid.svg";
 snowFlakeImage.scale = 0.05;
 var cloudImage = new Image();
 cloudImage.src = "../assets/img/cloud.svg";
-cloudImage.scale = 2;
+cloudImage.scale = 1;
 var infectionIcon = new Image(576, 512);
 infectionIcon.src = "../assets/img/biohazard-solid.svg";
 var puckIcon = new Image(576, 512);
@@ -628,8 +628,8 @@ function drawProjectiles() {
         }
         if (projectileList[proj].type == 'snowFlake') {
             projectileList[proj].rotation += 5;
-            const centerX = snowFlakeImage.width;
-            const centerY = snowFlakeImage.height;
+            const centerX = snowFlakeImage.width / 2;
+            const centerY = snowFlakeImage.height / 2;
             gameContext.save();
             gameContext.translate(projectileList[proj].x, projectileList[proj].y);
             gameContext.rotate(projectileList[proj].rotation * (Math.PI / 180));
@@ -638,8 +638,8 @@ function drawProjectiles() {
             gameContext.restore();
         }
         if (projectileList[proj].type == 'cloud') {
-            const centerX = cloudImage.width;
-            const centerY = cloudImage.height;
+            const centerX = cloudImage.width / 2;
+            const centerY = cloudImage.height / 2;
             gameContext.save();
             gameContext.translate(projectileList[proj].x, projectileList[proj].y);
             gameContext.rotate(projectileList[proj].rotation * (Math.PI / 180));

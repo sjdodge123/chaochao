@@ -550,6 +550,7 @@ class GameBoard {
 			}
 			for (var projID in this.projectileList) {
 				if (this.projectileList[projID].type == "cloud") {
+					_engine.checkFlipAroundWorld(this.projectileList[projID], this.world);
 					continue;
 				}
 				_engine.bounceOffBoundry(this.projectileList[projID], this.world);
@@ -1173,24 +1174,16 @@ class GameBoard {
 	}
 	applyBrutalCloudyRound() {
 		var density = c.brutalRounds.cloudy.density;
-		var angle = 45;
-		var shiftX = 0;
-		var shiftY = 0;
+		var angle = utils.getRandomInt(0, 359);
 		var clouds = {};
+		var padding = c.brutalRounds.cloudy.size + 50;
 		while (density != 0) {
 			var hash = utils.generateHash(this.roomSig, density);
-
-			var loc = { x: utils.getRandomInt(0, this.world.width), y: utils.getRandomInt(0, this.world.height) };
-
-			var cloud = new CloudProj(loc.x + shiftX, loc.y + shiftY, c.brutalRounds.cloudy.size, "white", hash, this.roomSig, angle);
-
+			var loc = { x: utils.getRandomInt(-padding, this.world.width + padding), y: utils.getRandomInt(-padding, this.world.height + padding) };
+			var cloud = new CloudProj(loc.x, loc.y, c.brutalRounds.cloudy.size, "white", hash, this.roomSig, angle);
 			this.projectileList[hash] = cloud;
 			clouds[hash] = cloud;
 			density--;
-			if (density % 10 == 0) {
-				shiftX = -(this.world.width * density) / 10;
-				shiftY = -(this.world.height * density) / 10;
-			}
 		}
 		messenger.messageRoomBySig(this.roomSig, "spawnClouds", compressor.sendClouds(clouds));
 	}

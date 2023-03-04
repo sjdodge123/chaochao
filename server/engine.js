@@ -30,6 +30,9 @@ exports.punchPuck = function (puck, punch) {
 exports.bumpPlayer = function (player, bumper) {
 	bumpPlayer(player, bumper);
 }
+exports.checkFlipAroundWorld = function (proj, world) {
+	checkFlipAroundWorld(proj, world);
+}
 
 class Engine {
 	constructor(playerList, projectileList) {
@@ -404,6 +407,21 @@ function puckPlayer(puck, player) {
 	var velCont = _calcVelCont(distance, player, puck.x, puck.y);
 	player.velX += velCont.velContX * c.brutalRounds.hockey.puckHitStrength;
 	player.velY += velCont.velContY * c.brutalRounds.hockey.puckHitStrength;
+}
+
+function checkFlipAroundWorld(proj, world) {
+	if (proj.x - proj.radius > world.width) {
+		proj.newX = world.x - proj.radius;
+	}
+	if (proj.y - proj.radius > world.height) {
+		proj.newY = world.y - proj.radius;
+	}
+	if (proj.x + proj.radius < world.x) {
+		proj.newX = world.width + proj.radius;
+	}
+	if (proj.y + proj.radius < world.y) {
+		proj.newY = world.height + proj.radius;
+	}
 }
 
 

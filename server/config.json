@@ -152,9 +152,9 @@
         "cloudy": {
             "id": 1002,
             "speed": 1000,
-            "density": 50,
-            "size": 50,
-            "active": false,
+            "density": 10,
+            "size": 225,
+            "active": true,
             "title": "Cloudy"
         },
         "bomb": {
@@ -245,7 +245,7 @@
     "playerKilledNearVictoryBonus": 500,
     "playerStartSleepTime": 60,
     "playerAFKKickTime": 240,
-    "playerPunchSlowAmt": 0.55,
+    "playerPunchSlowAmt": 0.35,
     "playerPunchCooldown": 300,
     "playerMaxSpeed": 500,
     "playerMaxSpeedBonus": 800,
