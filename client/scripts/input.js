@@ -80,7 +80,8 @@ function handleUnClick(event) {
     switch (event.which) {
         case 1: {
             if (menuOpen == false) {
-                cancelMovement(event);
+                attack = false;
+                server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
             }
             break;
         }
@@ -90,12 +91,14 @@ function handleUnClick(event) {
     }
 }
 function handleDblClick(event) {
+    if (movingByMouse) {
+        cancelMovement(event);
+    }
     movingByMouse = !movingByMouse;
 }
 function keyDown(evt) {
     if (movingByMouse) {
         movingByMouse = false;
-        cancelMovement(evt);
     }
     switch (evt.keyCode) {
         case 65: { turnLeft = true; break; } //Left key
@@ -117,7 +120,6 @@ function keyDown(evt) {
 function keyUp(evt) {
     if (movingByMouse) {
         movingByMouse = false;
-        cancelMovement(evt);
     }
 
     switch (evt.keyCode) {

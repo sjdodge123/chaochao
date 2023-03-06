@@ -15,7 +15,7 @@
     "chanceToSpawnAbility": 35,
     "chanceToSpawnAbilityIncrement": 10,
     "chanceToSpawnAbilityPlayerCountMod": 5,
-    "chanceOfBrutalRound": 100,
+    "chanceOfBrutalRound": 0,
     "chanceForAdditionalBrutal": 15,
     "chanceOfBrutalRoundIncrement": 25,
     "nearVictoryBrutalRoundBoost": 25,
