@@ -107,8 +107,9 @@
       <div id="mapEditor">
         <div id="controlPanel" class="bg-light">
           <div class="d-flex align-items-center justify-content-between mb-3">
-            <button id="loadButton" class="btn bg-light p-0"><i class="fa fa-arrow-left" aria-hidden="true"></i></button>
-            <button id="rebuildButton" class="btn bg-light p-0"><i class="fa fa-refresh" aria-hidden="true"></i></button>
+            <button id="loadButton" class="btn bg-light p-0"><i class="fa fa-arrow-left fa-2x" aria-hidden="true"></i></button>
+            <button id="rebuildButton" class="btn bg-light p-0"><i class="fa fa-trash fa-2x" aria-hidden="true"></i></button>
+            <button id="eraserButton" class="btn bg-light p-0"><i class="fa fa-mouse-pointer fa-2x" aria-hidden="true"></i></button>
           </div>
           <div id="inputBar" class="mb-3">
             <div class="h5">
@@ -133,7 +134,15 @@
               <button id="abilityTileButton" style="background-color: #C8C8C8" title="Ability" class="mapEditorTile"><span>Ability</span></button>
               <button id="randomTileButton" style="background-color: #020DFE" title="Random" class="mapEditorTile"><span>Random</span></button>
               <button id="goalTileButton" style="background-color: #FFD700" title="Goal" class="mapEditorTile"><span>Goal</span></button>
-
+            </div>
+          </div>
+          <div id="pallete" class="mb-3">
+            <div class="h5">
+              Hazards
+            </div>
+            <hr />
+            <div>
+              <button id="bumperButton" style="background-color: orange" title="Bumper" class="mapEditorTile"><span>Bumper</span></button>
             </div>
           </div>
           <div>
@@ -168,6 +177,7 @@
   <script src='socket.io/socket.io.js'></script>
   <script src="scripts/rhill-voronoi-core.js"></script>
   <script src="scripts/create.js"></script>
+  <script src="scripts/utils.js"></script>
 </body>
 
 </html>

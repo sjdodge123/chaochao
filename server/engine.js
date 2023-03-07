@@ -3,8 +3,8 @@ var utils = require('./utils.js');
 var c = utils.loadConfig();
 var forceConstant = c.forceConstant;
 
-exports.getEngine = function (playerList, projectileList) {
-	return new Engine(playerList, projectileList);
+exports.getEngine = function (playerList, projectileList, hazardList) {
+	return new Engine(playerList, projectileList, hazardList);
 }
 exports.checkDistance = function (obj1, obj2) {
 	return checkDistance(obj1, obj2);
@@ -27,9 +27,6 @@ exports.puckPlayer = function (puck, player) {
 exports.punchPuck = function (puck, punch) {
 	punchPuck(puck, punch);
 }
-exports.bumpPlayer = function (player, bumper) {
-	bumpPlayer(player, bumper);
-}
 exports.cutPlayer = function (player, cuttingPlayer, angle) {
 	cutPlayer(player, cuttingPlayer, angle);
 }
@@ -41,9 +38,10 @@ exports.explosion = function (player, location, distance) {
 }
 
 class Engine {
-	constructor(playerList, projectileList) {
+	constructor(playerList, projectileList, hazardList) {
 		this.playerList = playerList;
 		this.projectileList = projectileList;
+		this.hazardList = hazardList;
 		this.dt = 0;
 		this.quadTree = null;
 		this.worldWidth = 0;
@@ -400,8 +398,8 @@ function bounceOffBoundry(obj, bound) {
 function punchPlayer(player, punch) {
 	var distance = utils.getMag(punch.x - player.x, punch.y - player.y);
 	var velCont = _calcVelCont(distance, player, punch.x, punch.y);
-	player.velX += velCont.velContX;
-	player.velY += velCont.velContY;
+	player.velX += velCont.velContX * punch.getBonus();
+	player.velY += velCont.velContY * punch.getBonus();
 }
 function punchPuck(puck, punch) {
 	var angle = utils.angle(punch.x, punch.y, puck.x, puck.y);
@@ -458,15 +456,6 @@ function cutPlayer(p2, p1, angle) {
 	p2.velY += velCont.velContY;
 }
 
-
-function bumpPlayer(player, bumper) {
-	//TODO this isnt right
-	var simDist = { x: player.newX, y: player.newY };
-	var distance = utils.getMag(simDist.x - player.x, player.y - simDist.y);
-	var velCont = _calcVelCont(distance, player, simDist.x, simDist.y);
-	player.velX += velCont.velContX * -0.3;
-	player.velY += velCont.velContY * 0.3;
-}
 function _calcVelCont(distance, object, x, y) {
 	if (distance == 0) {
 		distance = 1;

@@ -163,6 +163,7 @@ exports.sendPunch = function (punch) {
 	packet[1] = punch.x;
 	packet[2] = punch.y;
 	packet[3] = punch.color;
+	packet[4] = punch.radius;
 	packet = JSON.stringify(packet);
 	player = null;
 	listItem = null;

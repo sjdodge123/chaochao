@@ -370,9 +370,9 @@ function drawPunches() {
 }
 
 function drawPunch(punch) {
-    var punchSize = config.punchRadius;
+    var punchSize = punch.radius;
     var player = playerList[punch.ownerId];
-    if (player.infected == true) {
+    if (player != null && player.infected == true) {
         punchSize = config.brutalRounds.infection.punchRadius;
     }
     gameContext.save();
@@ -956,7 +956,32 @@ function drawMap() {
             gameContext.stroke();
         }
         gameContext.restore();
+
+        if (currentMap.hazards != null) {
+            for (var i = 0; i < currentMap.hazards.length; i++) {
+                drawHazard(currentMap.hazards[i]);
+            }
+        }
     }
+}
+function drawHazard(hazard) {
+    if (hazard.id == config.hazards.bumper.id) {
+        drawBumper(hazard.x, hazard.y);
+    }
+}
+
+function drawBumper(x, y) {
+    gameContext.save();
+    gameContext.beginPath();
+    gameContext.strokeStyle = "red";
+    createContext.lineWidth = 3;
+    gameContext.arc(x, y, config.hazards.bumper.attackRadius, 0, 2 * Math.PI);
+    gameContext.stroke();
+    gameContext.beginPath();
+    gameContext.arc(x, y, config.hazards.bumper.radius, 0, 2 * Math.PI);
+    gameContext.fillStyle = config.hazards.bumper.color;
+    gameContext.fill();
+    gameContext.restore();
 }
 
 function locateColor(id) {

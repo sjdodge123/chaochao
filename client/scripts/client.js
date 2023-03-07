@@ -207,6 +207,9 @@ function clientConnect() {
 	server.on("resetProjectiles", function () {
 		resetProjectiles();
 	});
+	server.on("resetHazards", function () {
+		//console.log("reset hazards");
+	});
 	server.on("resetGame", function () {
 		fullReset();
 	});
@@ -216,13 +219,12 @@ function clientConnect() {
 
 	server.on("punch", function (packet) {
 		var punch = spawnPunch(packet);
-		if (playerList[punch.ownerId].infected) {
+		var owner = playerList[punch.ownerId];
+		if (owner != null && owner.infected) {
 			playSound(zombieSwing);
+			return;
 		}
-		else {
-			playSound(meleeSound);
-		}
-
+		playSound(meleeSound);
 	});
 	server.on("spawnBomb", function (owner) {
 		spawnBomb(owner);

@@ -363,6 +363,7 @@ function spawnPunch(payload) {
 	punch.x = payload[1];
 	punch.y = payload[2];
 	punch.color = payload[3];
+	punch.radius = payload[4];
 	punchList[punch.ownerId] = punch;
 	return punch;
 }

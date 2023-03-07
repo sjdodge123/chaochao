@@ -5,6 +5,9 @@ var server,
     voronoi = new Voronoi(),
     vMap,
     brushing = false,
+    drawBrushAimer = true,
+    drawObject = null,
+    selectedObject = null,
     mapReady = false,
     mousex = 0,
     mousey = 0,
@@ -170,49 +173,72 @@ function setupPage() {
         };
         return false;
     });
+
+    $("#eraserButton").on("click", function () {
+        drawBrushAimer = false;
+        drawObject = null;
+        return false;
+    });
+
     $("#slowTileButton").on("click", function () {
         brushID = config.tileMap.slow.id;
         brushColor = patterns[config.tileMap.slow.id];
+        drawBrushAimer = true;
+        drawObject = null;
         return false;
     });
     $("#normalTileButton").on("click", function () {
         brushID = config.tileMap.normal.id;
         brushColor = patterns[config.tileMap.normal.id];
+        drawBrushAimer = true;
+        drawObject = null;
         return false;
     });
     $("#fastTileButton").on("click", function () {
         brushID = config.tileMap.fast.id;
         brushColor = patterns[config.tileMap.fast.id];
+        drawBrushAimer = true;
+        drawObject = null;
         return false;
     });
     $("#lavaTileButton").on("click", function () {
         brushID = config.tileMap.lava.id;
         brushColor = patterns[config.tileMap.lava.id];
+        drawBrushAimer = true;
+        drawObject = null;
         return false;
     });
     $("#iceTileButton").on("click", function () {
         brushID = config.tileMap.ice.id;
         brushColor = patterns[config.tileMap.ice.id];
+        drawBrushAimer = true;
+        drawObject = null;
         return false;
     });
     $("#abilityTileButton").on("click", function () {
         brushID = config.tileMap.ability.id;
         brushColor = patterns[config.tileMap.ability.id];
+        drawBrushAimer = true;
+        drawObject = null;
         return false;
     });
     $("#randomTileButton").on("click", function () {
         brushID = config.tileMap.random.id;
         brushColor = patterns[config.tileMap.random.id];
+        drawBrushAimer = true;
+        drawObject = null;
         return false;
     });
     $("#goalTileButton").on("click", function () {
         brushID = config.tileMap.goal.id;
         brushColor = config.tileMap.goal.color;
+        drawBrushAimer = true;
+        drawObject = null;
         return false;
     });
-    $("#bumperTileButton").on("click", function () {
-        brushID = config.tileMap.bumper.id;
-        brushColor = config.tileMap.bumper.color;
+    $("#bumperButton").on("click", function () {
+        drawBrushAimer = false;
+        drawObject = config.hazards.bumper.id;
         return false;
     });
     $("#exportButton").on("click", function () {
@@ -270,11 +296,25 @@ function validateEmail(mail) {
 }
 
 function validateWithUser() {
+
+    if (selectedObject != null) {
+        removeSelectedObject();
+        return;
+    }
+
     var cells = vMap.cells;
+    var prompt = false;
     for (var i = 0; i < cells.length; i++) {
         if (cells[i].id != config.tileMap.normal.id) {
-            return confirm("Are you sure you want to delete this map?");
+            prompt = true;
+            break;
         }
+    }
+    if (prompt == false && vMap.hazards.length > 0) {
+        prompt = true;
+    }
+    if (prompt) {
+        return confirm("Are you sure you want to delete this map?");
     }
     return true;
 }
@@ -302,7 +342,9 @@ function animloop() {
     }
 }
 function gameLoop(dt) {
-    currentCell = cellIdFromPoint(mousex, mousey);
+    if (drawBrushAimer) {
+        currentCell = cellIdFromPoint(mousex, mousey);
+    }
     drawEditor(dt);
     if (mapReady == false) {
         mapReady = true;
@@ -341,10 +383,13 @@ function drawEditor(dt) {
     drawBackground(dt);
     drawWorld(dt);
     drawGate();
-    //drawMap();
     renderCells();
+    renderHazards();
+    drawSelectedObject();
     drawPointerCircle();
-    //drawPlayers(dt);
+    if (drawObject != null) {
+        drawMyObject(mousex, mousey, drawObject);
+    }
 }
 function drawBackground() {
     createContext.clearRect(0, 0, createCanvas.width, createCanvas.height);
@@ -382,18 +427,49 @@ function drawMap() {
         createContext.restore();
     }
 }
+function drawMyObject(x, y, myObject) {
+    for (var object in config.hazards) {
+        if (myObject == config.hazards[object].id) {
+            drawBumper(x, y);
+            break;
+        }
+    }
+}
+function drawBumper(x, y) {
+    createContext.save();
+    createContext.beginPath();
+    createContext.strokeStyle = "red";
+    createContext.lineWidth = 3;
+    createContext.arc(x, y, config.hazards.bumper.attackRadius, 0, 2 * Math.PI);
+    createContext.stroke();
+    createContext.beginPath();
+    createContext.arc(x, y, config.hazards.bumper.radius, 0, 2 * Math.PI);
+    createContext.fillStyle = config.hazards.bumper.color;
+    createContext.fill();
+    createContext.restore();
+}
 function handleClick(event) {
     switch (event.which) {
         case 1: {
-            brushing = true;
+            if (drawBrushAimer) {
+                brushing = true;
+                break;
+            }
+            if (drawObject != null) {
+                addObjectToMap(mousex, mousey, drawObject);
+                break;
+            }
+            locateObject(mousex, mousey);
         }
     }
 }
 function handleUnClick(event) {
     switch (event.which) {
         case 1: {
-            brushing = false;
-            break;
+            if (drawBrushAimer) {
+                brushing = false;
+                break;
+            }
         }
     }
 }
@@ -409,6 +485,55 @@ function paintTile() {
     for (var i = 0; i < cells.length; i++) {
         if (currentCell == cells[i].site.voronoiId) {
             cells[i].id = newId;
+        }
+    }
+}
+
+function addObjectToMap(x, y, obj) {
+    var radius = 0;
+    for (var hazard in config.hazards) {
+        if (obj == config.hazards[hazard].id) {
+            radius = config.hazards[hazard].attackRadius;
+        }
+    }
+    if (outsideMapBounds(x, y, radius)) {
+        return;
+    }
+    if (vMap.hazards == undefined) {
+        vMap.hazards = [];
+    }
+    vMap.hazards.push({ id: drawObject, x: x, y: y });
+}
+
+function locateObject(x, y) {
+    if (outsideMapBounds(x, y, 0)) {
+        return;
+    }
+    for (var hazard in vMap.hazards) {
+        var hazardObj = null;
+        for (var type in config.hazards) {
+            if (vMap.hazards[hazard].id == config.hazards[type].id) {
+                hazardObj = config.hazards[type];
+                break;
+            }
+        }
+        var distance = getMagSq(x, y, vMap.hazards[hazard].x, vMap.hazards[hazard].y);
+        if (distance < Math.pow(hazardObj.radius, 2)) {
+            selectedObject = { id: vMap.hazards[hazard].id, x: vMap.hazards[hazard].x, y: vMap.hazards[hazard].y, radius: hazardObj.radius };
+            return;
+        }
+    }
+    selectedObject = null;
+}
+
+function removeSelectedObject() {
+    for (var i = 0; i < vMap.hazards.length; i++) {
+        if (vMap.hazards[i].id == selectedObject.id) {
+            if (vMap.hazards[i].x == selectedObject.x && vMap.hazards[i].y == selectedObject.y) {
+                vMap.hazards.splice(i, 1);
+                selectedObject = null;
+                return;
+            }
         }
     }
 }
@@ -438,6 +563,7 @@ function generateVMap() {
     while (iCells--) {
         cells[iCells].id = 1;
     }
+    localMap.hazards = [];
     return localMap;
 }
 
@@ -467,6 +593,16 @@ function renderCells() {
 
     while (iCell--) {
         renderCell(cells[iCell]);
+    }
+}
+function renderHazards() {
+    if (vMap.hazards == undefined) {
+        return;
+    }
+    var hazards = vMap.hazards;
+    for (var i = 0; i < hazards.length; i++) {
+        var hazard = hazards[i];
+        drawMyObject(hazard.x, hazard.y, hazard.id);
     }
 }
 
@@ -597,13 +733,37 @@ function locateId(color) {
     }
 }
 
+function drawSelectedObject() {
+    if (selectedObject != null) {
+        createContext.save();
+        createContext.beginPath();
+        createContext.arc(selectedObject.x, selectedObject.y, selectedObject.radius + 10, 0, 2 * Math.PI);
+        createContext.lineWidth = 3;
+        createContext.setLineDash([5, 10]);
+        createContext.strokeStyle = "lime";
+        createContext.stroke();
+        createContext.restore();
+    }
+}
+
 function drawPointerCircle() {
-    createContext.beginPath();
-    createContext.arc(mousex, mousey, 5, 0, 2 * Math.PI);
-    createContext.fillStyle = brushColor;
-    createContext.strokeStyle = "black";
-    createContext.fill();
-    createContext.stroke();
+    if (drawBrushAimer) {
+        createContext.save();
+        createContext.beginPath();
+        createContext.arc(mousex, mousey, 5, 0, 2 * Math.PI);
+        createContext.fillStyle = brushColor;
+        createContext.strokeStyle = "black";
+        createContext.fill();
+        createContext.stroke();
+        createContext.restore();
+    }
+}
+
+function outsideMapBounds(x, y, radius) {
+    if (x - radius < map.x || x + radius > map.width || y - radius < map.y || y + radius > map.height) {
+        return true;
+    }
+    return false;
 }
 
 function pointIntersection(x, y, cell) {

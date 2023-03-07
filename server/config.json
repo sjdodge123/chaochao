@@ -217,6 +217,15 @@
             "title": "Explosive"
         }
     },
+    "hazards": {
+        "bumper": {
+            "id": 900,
+            "color": "orange",
+            "attackRadius": 15,
+            "radius": 10,
+            "punchBonus": 10
+        }
+    },
     "lobbyWaitTime": 5,
     "gatedWaitTime": 9,
     "newRaceWaitTime": 10,
