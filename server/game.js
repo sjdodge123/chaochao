@@ -2044,7 +2044,9 @@ class Player extends Circle {
 			if (object.ownerInfected) {
 				this.infect();
 			}
-			this.setPunchedBy(object.ownerId);
+			if (!object.mapOwned) {
+				this.setPunchedBy(object.ownerId);
+			}
 			_engine.punchPlayer(this, object);
 			messenger.messageRoomBySig(this.roomSig, "playerPunched", object.ownerId);
 			return;
@@ -2392,6 +2394,7 @@ class Punch extends Circle {
 		this.isPunch = true;
 		this.ownerInfected = infected;
 		this.punchBonus = punchBonus;
+		this.mapOwned = false;
 	}
 	handleHit(object) {
 
@@ -2426,6 +2429,7 @@ class Bumper extends Hazard {
 		}
 		if (this.punch == null) {
 			this.punch = new Punch(this.x, this.y, c.hazards.bumper.attackRadius, c.hazards.bumper.color, this.ownerId, this.roomSig, c.hazards.bumper.punchBonus, false);
+			this.punch.mapOwned = true;
 		}
 	}
 }

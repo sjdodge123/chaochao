@@ -738,9 +738,18 @@ function drawSelectedObject() {
         createContext.save();
         createContext.beginPath();
         createContext.arc(selectedObject.x, selectedObject.y, selectedObject.radius + 10, 0, 2 * Math.PI);
-        createContext.lineWidth = 3;
+        createContext.lineWidth = 5;
         createContext.setLineDash([5, 10]);
         createContext.strokeStyle = "lime";
+        createContext.stroke();
+        createContext.restore();
+
+        createContext.save();
+        createContext.beginPath();
+        createContext.arc(selectedObject.x, selectedObject.y, selectedObject.radius + 15, 0, 2 * Math.PI);
+        createContext.lineWidth = 2;
+        createContext.setLineDash([5, 10]);
+        createContext.strokeStyle = "black";
         createContext.stroke();
         createContext.restore();
     }
