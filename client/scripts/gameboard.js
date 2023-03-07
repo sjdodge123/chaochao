@@ -558,6 +558,13 @@ function createBlindFold(owner) {
 	}, config.tileMap.abilities.blindfold.duration * 1000);
 }
 
+function rumbleScreen(time) {
+	screenShake = true;
+	setTimeout(function () {
+		screenShake = false;
+	}, time);
+}
+
 function setupEmojiWheel() {
 	var menu = $("#emojiMenu");
 	for (var i = 0; i < config.emojis.length; i++) {

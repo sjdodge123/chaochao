@@ -68,6 +68,8 @@ var puckIcon = new Image(576, 512);
 puckIcon.src = "../assets/img/hockey-puck-solid.svg";
 var explosionIcon = new Image(576, 512);
 explosionIcon.src = "../assets/img/explosion-solid.svg";
+var scissorsIcon = new Image(576, 512);
+scissorsIcon.src = "../assets/img/scissors-solid.svg";
 
 //TileTextures
 var lava = new Image(256, 256);
@@ -114,6 +116,7 @@ function loadPatterns() {
     patterns[config.tileMap.abilities.speedDebuff.id] = makePattern(hourglassIcon, makeSeamlessPattern(dirt));
     patterns[config.tileMap.abilities.tileSwap.id] = makePattern(copyIcon, makeSeamlessPattern(dirt));
     patterns[config.tileMap.abilities.iceCannon.id] = makePattern(snowFlakeIcon, makeSeamlessPattern(dirt));
+    patterns[config.tileMap.abilities.cut.id] = makePattern(scissorsIcon, makeSeamlessPattern(dirt));
     patterns[config.brutalRounds.infection.id] = makePattern(infectionIcon, "red");
 
     //Tiles
@@ -672,6 +675,16 @@ function drawAbilityIndicator(x, y, player) {
                 break;
             }
         }
+        case config.tileMap.abilities.cut.id: {
+            if (player.angle % 90 == 0) {
+                drawCutAimer(x, y, player.angle, player.color);
+                break;
+            }
+            if ((player.angle + 45) % 90 == 0) {
+                drawCutAimer(x, y, player.angle, player.color);
+                break;
+            }
+        }
         case config.tileMap.abilities.swap.id: {
             gameContext.save();
             gameContext.beginPath();
@@ -707,6 +720,25 @@ function drawBombAimer(x, y, angle) {
     gameContext.moveTo(x, y);
     var point = pos({ x: x, y: y }, config.tileMap.abilities.bomb.aimerLength, angle);
     gameContext.lineTo(point.x, point.y);
+    gameContext.stroke();
+    gameContext.restore();
+}
+function drawCutAimer(x, y, angle, color) {
+    gameContext.save();
+    gameContext.beginPath();
+    gameContext.setLineDash([15, 10, 12, 0, 0, 2]);
+    gameContext.shadowColor = color;
+    gameContext.shadowBlur = 10;
+    gameContext.lineWidth = 2;
+    gameContext.strokeStyle = "black";
+    gameContext.moveTo(x, y);
+    var pointFWD = pos({ x: x, y: y }, config.worldWidth, angle);
+    gameContext.lineTo(pointFWD.x, pointFWD.y);
+
+    gameContext.moveTo(x, y);
+    var pointBWD = pos({ x: x, y: y }, config.worldWidth, angle - 180);
+    gameContext.lineTo(pointBWD.x, pointBWD.y);
+
     gameContext.stroke();
     gameContext.restore();
 }
@@ -808,20 +840,25 @@ function drawGate() {
         } else {
             gameContext.fillStyle = brutalPatterns[brutalRoundConfig.brutalTypes.toString()];
         }
+        if (currentState == config.stateMap.collapsing) {
+            gameContext.fillStyle = patterns[config.tileMap.lava.id];
+        }
         gameContext.fill();
         gameContext.restore();
     }
 }
 
 function drawGateLine() {
-    gameContext.save();
-    gameContext.beginPath();
-    gameContext.moveTo(gate.x + gate.width, gate.y);
-    gameContext.lineTo(gate.x + gate.width, gate.y + gate.height);
-    gameContext.lineWidth = 5;
-    gameContext.strokeStyle = "red";
-    gameContext.stroke();
-    gameContext.restore();
+    if (gate != null) {
+        gameContext.save();
+        gameContext.beginPath();
+        gameContext.moveTo(gate.x + gate.width, gate.y);
+        gameContext.lineTo(gate.x + gate.width, gate.y + gate.height);
+        gameContext.lineWidth = 5;
+        gameContext.strokeStyle = "red";
+        gameContext.stroke();
+        gameContext.restore();
+    }
 }
 function drawPingCircles() {
     if (pingCircles.length == 0) {

@@ -5,6 +5,7 @@
     "worldWidth": 1366,
     "worldHeight": 768,
     "worldCollapseSpeed": 6,
+    "lastPlayerCollapseSpeed": 0.75,
     "minPlayersToStart": 1,
     "maxPlayersInRoom": 25,
     "forceConstant": 5000,
@@ -19,6 +20,7 @@
     "chanceForAdditionalBrutal": 15,
     "chanceOfBrutalRoundIncrement": 25,
     "nearVictoryBrutalRoundBoost": 25,
+    "maxTotalBrutals": 3,
     "TESTSingleMap": false,
     "submitViaMail": "chaochaothegame@gmail.com",
     "tileMap": {
@@ -135,6 +137,11 @@
                 "lifetime": 1,
                 "speed": 11000,
                 "explosionRadius": 100
+            },
+            "cut": {
+                "spawnable": true,
+                "distance": 5,
+                "id": 108
             }
         }
     },
@@ -175,6 +182,7 @@
         "lightning": {
             "id": 1006,
             "active": true,
+            "volcanoCollapseSpeed": 4,
             "title": "Lightning"
         },
         "volcano": {

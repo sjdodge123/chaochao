@@ -30,6 +30,9 @@ exports.punchPuck = function (puck, punch) {
 exports.bumpPlayer = function (player, bumper) {
 	bumpPlayer(player, bumper);
 }
+exports.cutPlayer = function (player, cuttingPlayer, angle) {
+	cutPlayer(player, cuttingPlayer, angle);
+}
 exports.checkFlipAroundWorld = function (proj, world) {
 	checkFlipAroundWorld(proj, world);
 }
@@ -422,6 +425,29 @@ function checkFlipAroundWorld(proj, world) {
 	if (proj.y + proj.radius < world.y) {
 		proj.newY = world.height + proj.radius;
 	}
+}
+function cutPlayer(p2, p1, angle) {
+	var cut = {};
+	const distance = c.tileMap.abilities.cut.distance;
+	const aimVector = { x: Math.cos(angle * (Math.PI / 180)), y: Math.sin(angle * (Math.PI / 180)) };
+	const perpVector1 = { x: -aimVector.y, y: aimVector.x };
+	const perpVector2 = { x: aimVector.y, y: -aimVector.x };
+	const playerDifferenceVector = { x: p2.x - p1.x, y: p2.y - p1.y };
+	const dotProduct = utils.dotProduct(playerDifferenceVector, perpVector1);
+	if (dotProduct > 0) {
+		cut = {
+			x: p2.x + (distance * perpVector2.x),
+			y: p2.y + (distance * perpVector2.y)
+		};
+	} else {
+		cut = {
+			x: p2.x + (distance * perpVector1.x),
+			y: p2.y + (distance * perpVector1.y)
+		};
+	}
+	const velCont = _calcVelCont(distance, p2, cut.x, cut.y);
+	p2.velX += velCont.velContX;
+	p2.velY += velCont.velContY;
 }
 
 

@@ -35,6 +35,7 @@ var tileSwap = new Audio("./assets/sounds/tileswap.mp3");
 var iceCannon = new Audio("./assets/sounds/iceCannon.mp3");
 var iceExplosion = new Audio("./assets/sounds/iceExplosion.mp3");
 var lavaExplosion = new Audio("./assets/sounds/lavaExplosion.mp3");
+var cutSound = new Audio("./assets/sounds/thwack.mp3");
 
 var newZombie = new Audio("./assets/sounds/newzombie.mp3");
 var zombieHit = new Audio("./assets/sounds/zombiehit.mp3");
@@ -53,26 +54,32 @@ var killingSpree = new Audio("./assets/sounds/killingSpree.mp3");
 var rampage = new Audio("./assets/sounds/rampage.mp3");
 var godLike = new Audio("./assets/sounds/godLike.mp3");
 
-
-
 var lobbyMusic = new Audio("./assets/sounds/lobbymusic.mp3");
 var gameStart = new Audio("./assets/sounds/gamestart.mp3");
 
 var slowstride = new Audio("./assets/sounds/slowstride.mp3");
 var slowpipes = new Audio("./assets/sounds/slow-pipes.mp3");
-var bumpinbits = new Audio("./assets/sounds/bumpinbits.mp3");
 
 calmBackgroundMusicList.push(slowstride);
 calmBackgroundMusicList.push(slowpipes);
 
-
 var therush = new Audio("./assets/sounds/the-rush.mp3");
 var beastv2 = new Audio("./assets/sounds/beastv2.mp3");
 var mindInMotion = new Audio("./assets/sounds/mind_in_motion.mp3");
+var bumpinbits1 = new Audio("./assets/sounds/bumpinbits1.mp3");
+var bumpinbits2 = new Audio("./assets/sounds/bumpinbits2.mp3");
+var bumpinbits3 = new Audio("./assets/sounds/bumpinbits3.mp3");
+var bumpinbits4 = new Audio("./assets/sounds/bumpinbits4.mp3");
+var bumpinbits5 = new Audio("./assets/sounds/bumpinbits5.mp3");
+
 excitingBackgroundMusicList.push(mindInMotion);
 excitingBackgroundMusicList.push(therush);
 excitingBackgroundMusicList.push(beastv2);
-excitingBackgroundMusicList.push(bumpinbits);
+excitingBackgroundMusicList.push(bumpinbits1);
+excitingBackgroundMusicList.push(bumpinbits2);
+excitingBackgroundMusicList.push(bumpinbits3);
+excitingBackgroundMusicList.push(bumpinbits4);
+excitingBackgroundMusicList.push(bumpinbits5);
 
 var heavyfabric = new Audio("./assets/sounds/heavyfabric.mp3");
 var desperationSetsIn = new Audio("./assets/sounds/DesperationSetsIn.mp3");
@@ -84,6 +91,7 @@ brutalBackgroundMusicList.push(heavyfabric);
 
 
 function volumeChange() {
+    cutSound.volume = .15 * masterVolume;
     godLike.volume = .1 * masterVolume;
     rampage.volume = .1 * masterVolume;
     killingSpree.volume = .1 * masterVolume;
@@ -148,8 +156,20 @@ function volumeChange() {
     horrorLoop.volume = .015 * masterVolume * musicVolume
     horrorLoop.targetVolume = horrorLoop.volume;
 
-    bumpinbits.volume = .05 * masterVolume * musicVolume
-    bumpinbits.targetVolume = bumpinbits.volume;
+    bumpinbits1.volume = .05 * masterVolume * musicVolume
+    bumpinbits1.targetVolume = bumpinbits1.volume;
+
+    bumpinbits2.volume = .05 * masterVolume * musicVolume
+    bumpinbits2.targetVolume = bumpinbits2.volume;
+
+    bumpinbits3.volume = .05 * masterVolume * musicVolume
+    bumpinbits3.targetVolume = bumpinbits3.volume;
+
+    bumpinbits4.volume = .05 * masterVolume * musicVolume
+    bumpinbits4.targetVolume = bumpinbits4.volume;
+
+    bumpinbits5.volume = .05 * masterVolume * musicVolume
+    bumpinbits5.targetVolume = bumpinbits5.volume;
 }
 
 

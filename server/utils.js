@@ -181,6 +181,12 @@ function angle(originX, originY, targetX, targetY) {
     if (theta < 0) theta += 360;
     return theta;
 }
+function pos(point, length, angle) {
+    var a = angle * Math.PI / 180;
+    var x = point.x + length * Math.cos(a);
+    var y = point.y + length * Math.sin(a);
+    return { x, y };
+}
 
 function cyrb53(str, seed = 0) {
     let h1 = 0xdeadbeef ^ seed,
@@ -202,6 +208,9 @@ exports.generateHash = function (baseID, seed) {
 exports.angle = function (originX, originY, targetX, targetY) {
     return angle(originX, originY, targetX, targetY);
 }
+exports.pos = function (point, length, angle) {
+    return pos(point, length, angle);
+}
 
 exports.getRandomInt = function (min, max) {
     return getRandomInt(min, max);
@@ -219,6 +228,35 @@ exports.getDT = function () {
 }
 exports.getMagSq = function (x1, y1, x2, y2) {
     return Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2);
+}
+exports.normalizedVectorFromAngle = function (angle) {
+    // Calculate x and y components of vector
+    const x = Math.cos(angle);
+    const y = Math.sin(angle);
+
+    // Calculate magnitude of vector
+    const magnitude = Math.sqrt(x * x + y * y);
+
+    // Normalize vector by dividing each component by magnitude
+    return {
+        x: x / magnitude,
+        y: y / magnitude
+    };
+}
+exports.normalizedVectorFromPoint = function (point) {
+    /// Calculate magnitude of vector
+    const magnitude = Math.sqrt(point.x * point.x + point.y * point.y);
+    // Normalize vector by dividing each component by magnitude
+    return {
+        x: point.x / magnitude,
+        y: point.y / magnitude
+    };
+}
+
+exports.distanceBetweenPoints = function (point1, point2) {
+    const dx = point2.x - point1.x;
+    const dy = point2.y - point1.y;
+    return Math.sqrt(dx * dx + dy * dy);
 }
 
 exports.getMag = function (x, y) {
@@ -287,3 +325,4 @@ function loadImages() {
         }
     });
 }
+

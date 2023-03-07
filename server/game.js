@@ -101,6 +101,7 @@ class Game {
 		this.alivePlayerCount = 0;
 		this.sleepingPlayerCount = 0;
 		this.lobbyButtonPressedCount = 0;
+		this.collapseInitated = false;
 		this.notchesToWin = c.baseNotchesToWin;
 		this.firstPlaceSig = null;
 		this.secondPlaceSig = null;
@@ -327,9 +328,23 @@ class Game {
 			}
 		}
 		this.alivePlayerCount = this.playerCount - playersConcluded;
+
 		if (playersConcluded == this.playerCount) {
 			this.gameBoard.killAFKPlayers();
 			this.startOverview();
+		}
+
+		//Start slow collapse if last player alive
+		if (this.alivePlayerCount == 1) {
+			if (this.currentState != c.stateMap.collapsing && !this.collapseInitated) {
+				this.collapseInitated = true;
+				setTimeout(function (context) {
+					if (context.currentState == c.stateMap.racing || context.currentState == c.stateMap.collapsing) {
+						var goal = context.gameBoard.findRandomGoalTile();
+						context.startCollapse(goal.x, goal.y);
+					}
+				}, 5000, this);
+			}
 		}
 	}
 	startWaiting() {
@@ -386,6 +401,7 @@ class Game {
 		console.log("Start Overview");
 		this.currentState = this.stateMap.overview;
 		var nextMapID = this.gameBoard.determineNextMap();
+		this.collapseInitated = false;
 		messenger.messageRoomBySig(this.roomSig, 'startOverview', { notchUpdates: compressor.sendNotchUpdates(this.playerList), nextMapID: nextMapID });
 	}
 	startCollapse(xloc, yloc) {
@@ -408,6 +424,7 @@ class Game {
 	}
 	resetGame() {
 		this.locked = false;
+		this.collapseInitated = false;
 		this.notchesToWin = c.baseNotchesToWin;
 		this.gameBoard.resetGame(this.currentState);
 		messenger.messageRoomBySig(this.roomSig, "resetGame", null);
@@ -603,6 +620,10 @@ class GameBoard {
 				this.abilityList[id].tileSwap = false;
 				this.swapTiles();
 			}
+			if (this.abilityList[id].applyCut) {
+				this.abilityList[id].applyCut = false;
+				this.cutPlayers(id);
+			}
 			if (this.abilityList[id].alive == false) {
 				if (this.playerList[this.abilityList[id].ownerId] != undefined) {
 					this.playerList[this.abilityList[id].ownerId].ability = null;
@@ -702,6 +723,15 @@ class GameBoard {
 			}
 		}
 		messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(this.gatherTileChanges()));
+	}
+	cutPlayers(owner) {
+		for (var id in this.playerList) {
+			if (id == owner) {
+				continue;
+			}
+			_engine.cutPlayer(this.playerList[id], this.playerList[owner], this.playerList[owner].angle);
+			this.playerList[id].setPunchedBy(owner);
+		}
 	}
 
 	terminatePunch(packet) {
@@ -910,17 +940,24 @@ class GameBoard {
 		if (currentState != c.stateMap.collapsing) {
 			return;
 		}
-		//Calcuate collapse speed
-		var collapseSpeed = 0;
-		if (this.checkForActiveBrutal(c.brutalRounds.volcano.id) && this.firstPlaceSig == null) {
-			if (this.checkForActiveBrutal(c.brutalRounds.lightning.id)) {
-				collapseSpeed = 4;
-			} else {
-				collapseSpeed = c.brutalRounds.volcano.collapseSpeed;
+		//Calcuate collapse speed - Default collapse speed
+		var collapseSpeed = c.worldCollapseSpeed;
+
+		//Game isnt concluded
+		if (this.firstPlaceSig == null) {
+
+			collapseSpeed = c.lastPlayerCollapseSpeed;
+
+			//Brutal round is active
+			if (this.checkForActiveBrutal(c.brutalRounds.volcano.id)) {
+				if (this.checkForActiveBrutal(c.brutalRounds.lightning.id)) {
+					collapseSpeed = c.brutalRounds.lightning.volcanoCollapseSpeed;
+				} else {
+					collapseSpeed = c.brutalRounds.volcano.collapseSpeed;
+				}
 			}
-		} else {
-			collapseSpeed = c.worldCollapseSpeed;
 		}
+
 		this.collapseLine -= collapseSpeed;
 
 		var collapsedCells = [];
@@ -946,9 +983,7 @@ class GameBoard {
 				goalTiles.push({ x: cells[i].site.x, y: cells[i].site.y });
 			}
 		}
-		console.log("Found " + goalTiles.length + " goal tiles");
 		return goalTiles[utils.getRandomInt(0, goalTiles.length - 1)];
-
 	}
 	changeTile(voronoiId, newId) {
 		for (var i = 0; i < this.currentMap.cells.length; i++) {
@@ -1137,6 +1172,11 @@ class GameBoard {
 				}
 				case c.tileMap.abilities.iceCannon.id: {
 					player.ability = new IceCannon(player.id, this.roomSig);
+					player.acquiredAbility = { mapID: null };
+					break;
+				}
+				case c.tileMap.abilities.cut.id: {
+					player.ability = new Cut(player.id, this.roomSig);
 					player.acquiredAbility = { mapID: null };
 					break;
 				}
@@ -1772,6 +1812,9 @@ class Player extends Circle {
 		}, c.playerKillWindow, this);
 	}
 	addKill(player) {
+		if (this.alive == false || this.isZombie == true) {
+			return;
+		}
 		this.killedPlayerList.push(player.id);
 		clearTimeout(multiKillIndex);
 		this.roundKills += 1;
@@ -2071,6 +2114,15 @@ class Player extends Circle {
 					return;
 				}
 				this.ability = new IceCannon(this.id, this.roomSig);
+				this.acquiredAbility = { mapID: object.voronoiId };
+				messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: this.id, ability: object.id, voronoiId: object.voronoiId });
+				return;
+			}
+			if (object.id == c.tileMap.abilities.cut.id) {
+				if (this.ability != null || this.isZombie) {
+					return;
+				}
+				this.ability = new Cut(this.id, this.roomSig);
 				this.acquiredAbility = { mapID: object.voronoiId };
 				messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: this.id, ability: object.id, voronoiId: object.voronoiId });
 				return;
@@ -2526,6 +2578,22 @@ class TileSwap extends Ability {
 		this.alive = false;
 		this.tileSwap = true;
 		messenger.messageRoomBySig(this.roomSig, "tileSwap", this.ownerId);
+	}
+}
+
+class Cut extends Ability {
+	constructor(owner, roomSig) {
+		super(owner, roomSig);
+		this.applyCut = false;
+		this.id = c.tileMap.abilities.cut.id;
+	}
+	use() {
+		if (this.alive == false) {
+			return;
+		}
+		this.alive = false;
+		this.applyCut = true;
+		messenger.messageRoomBySig(this.roomSig, "cutUsed", this.ownerId);
 	}
 }
 

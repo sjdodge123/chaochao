@@ -262,11 +262,17 @@ function clientConnect() {
 		});
 	});
 	server.on('explodedCells', function (cells) {
-		explodedCells(cells);
-		playSound(bombExplosion);
+		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
+			explodedCells(cells);
+			playSound(bombExplosion);
+			rumbleScreen(100);
+		}
 	});
 	server.on("snowFlakeExploded", function (owner) {
-		playSound(iceExplosion);
+		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
+			playSound(iceExplosion);
+			rumbleScreen(100);
+		}
 	});
 	server.on("firstBlood", function () {
 		playSound(firstBlood);
@@ -334,6 +340,11 @@ function clientConnect() {
 		playerAbilityUsed(owner);
 		playSound(blindSound);
 	});
+	server.on("cutUsed", function (owner) {
+		playSound(cutSound);
+		playerAbilityUsed(owner);
+		rumbleScreen(100);
+	});
 	server.on("tileSwap", function (owner) {
 		playerAbilityUsed(owner);
 		playSound(tileSwap);
@@ -345,6 +356,7 @@ function clientConnect() {
 	server.on("lavaExplosion", function () {
 		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
 			playSound(lavaExplosion);
+			rumbleScreen(100);
 		}
 	});
 	server.on("spawnExplosionAimer", function (owner) {
@@ -387,24 +399,6 @@ function clientConnect() {
 				}, config.tileMap.abilities.swap.warnTime, aimerList[owner]);
 			}
 		}
-		/*
-		var count = 0;
-		var int = setInterval(function () {
-			if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
-				if (aimerList[owner] != undefined) {
-					playSound(teleportWarnSound);
-					aimerList[owner].swapCountDownPulse = true;
-				}
-			}
-			count++;
-			if (count == (config.tileMap.abilities.swap.warnTime / 1000)) {
-				if (aimerList[owner] != undefined) {
-					aimerList[owner].hide = true;
-				}
-				clearInterval(int);
-			}
-		}, 1000);
-		*/
 	});
 	server.on("playerSwapped", function (owner) {
 		if (aimerList[owner].startSwapCountDown) {
@@ -417,10 +411,7 @@ function clientConnect() {
 	});
 	server.on("volcanoEruption", function () {
 		playSound(volcanoErupt);
-		screenShake = true;
-		setTimeout(function () {
-			screenShake = false;
-		}, 2500);
+		rumbleScreen(2500);
 	});
 
 	server.on("speedBuff", function (owner) {
