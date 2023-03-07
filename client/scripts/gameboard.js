@@ -13,6 +13,7 @@ var mousex,
 	projectileList,
 	playerList,
 	blindfold,
+	achievements = null,
 	screenShake = false,
 	timerList = [],
 	playersNearVictory = [],
@@ -466,6 +467,7 @@ function resetProjectiles() {
 function fullReset() {
 	gameLength = config.baseNotchesToWin;
 	playerWon = null;
+	achievements = null;
 	decodedColorName = '';
 	oldNotches = {};
 	aimerList = {};

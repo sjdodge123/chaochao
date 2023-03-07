@@ -316,6 +316,32 @@ function drawGameOverScreen() {
     var winString = decodedColorName + " won the game.";
     gameContext.fillText(winString, gameCanvas.width / 2 - 400, (gameCanvas.height + 48) / 2);
     gameContext.restore();
+
+    if (achievements != null) {
+        gameContext.save();
+        gameContext.fillStyle = "black";
+        gameContext.font = '28px serif';
+        gameContext.fillText("-- Medals -- ", (gameCanvas.width / 2) + 200, (gameCanvas.height + 48) / 2);
+        var startingHeight = (gameCanvas.height + 48) / 2;
+        var lineHeight = 40;
+        var count = 1;
+        for (var medal in achievements) {
+            if (achievements[medal].id == null || playerList[achievements[medal].id] == null) {
+                continue;
+            }
+            gameContext.beginPath();
+            gameContext.arc((gameCanvas.width / 2) + 200, startingHeight + (lineHeight * count) - 7.5, 15, 0, 2 * Math.PI);
+            gameContext.fillStyle = playerList[achievements[medal].id].color;
+            gameContext.strokeStyle = "black";
+            gameContext.lineWidth = 3;
+            gameContext.fill();
+            gameContext.stroke();
+            gameContext.fillStyle = "black";
+            gameContext.fillText(achievements[medal].title + ": " + achievements[medal].value, (gameCanvas.width / 2) + 220, startingHeight + (lineHeight * count));
+        }
+        gameContext.restore();
+    }
+
 }
 function preShake() {
     if (currentState == config.stateMap.gameOver || currentState == config.stateMap.overview) {
@@ -729,7 +755,7 @@ function drawCutAimer(x, y, angle, color) {
     gameContext.setLineDash([15, 10, 12, 0, 0, 2]);
     gameContext.shadowColor = color;
     gameContext.shadowBlur = 10;
-    gameContext.lineWidth = 2;
+    gameContext.lineWidth = 1;
     gameContext.strokeStyle = "black";
     gameContext.moveTo(x, y);
     var pointFWD = pos({ x: x, y: y }, config.worldWidth, angle);

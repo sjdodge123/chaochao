@@ -11,6 +11,7 @@
     "forceConstant": 5000,
     "explosionWarnTime": 2,
     "explosionRadius": 100,
+    "explosionStrength": 500,
     "baseNotchesToWin": 5,
     "minimumNotchesToWin": 3,
     "chanceToSpawnAbility": 35,

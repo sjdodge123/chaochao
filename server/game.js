@@ -467,7 +467,29 @@ class Game {
 	gameOver(player) {
 		console.log("Game Over");
 		this.currentState = this.stateMap.gameOver;
-		messenger.messageRoomBySig(this.roomSig, 'startGameover', player);
+		messenger.messageRoomBySig(this.roomSig, 'startGameover', { winner: player, achievements: this.gatherAchievements() });
+	}
+	gatherAchievements() {
+		return null;
+		var achievements = {
+			mostKills: { id: null, value: 0, title: "Most kills" },
+			mostMurdered: { id: null, value: 0, title: "Most murdered" },
+			mostBrutals: { id: null, value: 0, title: "Most brutal victories" },
+			bully: { id: null, value: 0, title: "Most aggresive" },
+			gameSaves: { id: null, value: 0, title: "Saved the game" },
+		};
+		for (var id in this.playerList) {
+			var player = this.playerList[id];
+			if (player.totalKills > achievements.mostKills.value) {
+				achievements.mostKills.id = id;
+				achievements.mostKills.value = player.totalKills;
+			}
+			if (player.savier > achievements.gameSaves.value) {
+				achievements.gameSaves.id = id;
+				achievements.gameSaves.value = player.savier;
+			}
+		}
+		return achievements;
 	}
 }
 
@@ -817,6 +839,7 @@ class GameBoard {
 				explodedCells.push(cells[i].site.voronoiId);
 			}
 		}
+		this.applyExplosionForce(explodeLoc, owner);
 		if (this.abilityList[owner] != null) {
 			this.abilityList[owner].alive = false;
 		}
@@ -839,6 +862,7 @@ class GameBoard {
 				this.tileChanges[cells[i].site.voronoiId] = cells[i].id;
 			}
 		}
+		this.applyExplosionForce(explodeLoc, owner);
 		messenger.messageRoomBySig(this.roomSig, 'snowFlakeExploded', owner);
 		messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(this.gatherTileChanges()));
 	}
@@ -854,8 +878,21 @@ class GameBoard {
 				this.tileChanges[cells[i].site.voronoiId] = cells[i].id;
 			}
 		}
+		this.applyExplosionForce(explodeLoc, null);
 		messenger.messageRoomBySig(this.roomSig, 'lavaExplosion');
 		messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(this.gatherTileChanges()));
+	}
+	applyExplosionForce(loc, owner) {
+		for (var id in this.playerList) {
+			var player = this.playerList[id];
+			var distance = utils.getMag(loc.x - player.x, loc.y - player.y);
+			if (c.tileMap.abilities.bomb.explosionRadius > distance) {
+				if (this.playerList[owner] != null) {
+					player.setPunchedBy(owner);
+				}
+				_engine.explosion(player, loc, distance);
+			}
+		}
 	}
 	createExplosionAimer(loc, radius, owner) {
 		var aimer = new ExplosionAimer(loc.x, loc.y, radius, "red", owner, this.roomSig);
@@ -1008,13 +1045,6 @@ class GameBoard {
 		this.currentMap = {};
 		this.nextMap = {};
 		this.resetPlayers(currentState);
-		for (var playerID in this.playerList) {
-			var player = this.playerList[playerID];
-			player.notches = 0;
-			player.totalKills = 0;
-			player.onFire = 0;
-			player.killedPlayerList = [];
-		}
 	}
 	gatePlayers() {
 		for (var playerID in this.playerList) {
@@ -1724,6 +1754,9 @@ class Player extends Circle {
 		this.fireTimer = null;
 		this.fireTimeLeft = 0;
 
+		//Achievements
+		this.savier = 0;
+
 		//Engine Variables
 		this.newX = this.x;
 		this.newY = this.y;
@@ -1821,6 +1854,7 @@ class Player extends Circle {
 		this.totalKills += 1;
 		this.addFire(c.playerKillFireBonus);
 		if (player.fellFromVictory) {
+			this.savier += 1;
 			this.addFire(c.playerKilledNearVictoryBonus);
 		}
 		if (this.openMultiKillWindow == true) {
@@ -2177,7 +2211,6 @@ class Player extends Circle {
 	killSelf() {
 		this.killPlayer(this);
 	}
-	//Every round reset
 	reset(currentState) {
 		this.alive = true;
 		this.enabled = true;
@@ -2214,6 +2247,11 @@ class Player extends Circle {
 		this.angle = 315;
 		if (currentState == c.stateMap.gameOver) {
 			this.ability = null;
+			this.notches = 0;
+			this.totalKills = 0;
+			this.onFire = 0;
+			this.savier = 0;
+			this.killedPlayerList = [];
 		}
 	}
 }

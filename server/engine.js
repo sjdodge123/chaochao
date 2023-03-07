@@ -36,6 +36,9 @@ exports.cutPlayer = function (player, cuttingPlayer, angle) {
 exports.checkFlipAroundWorld = function (proj, world) {
 	checkFlipAroundWorld(proj, world);
 }
+exports.explosion = function (player, location, distance) {
+	explosion(player, location, distance);
+}
 
 class Engine {
 	constructor(playerList, projectileList) {
@@ -411,6 +414,11 @@ function puckPlayer(puck, player) {
 	player.velX += velCont.velContX * c.brutalRounds.hockey.puckHitStrength;
 	player.velY += velCont.velContY * c.brutalRounds.hockey.puckHitStrength;
 }
+function explosion(player, loc, dist) {
+	var velCont = _calcVelCont(dist, player, loc.x, loc.y);
+	player.velX += velCont.velContX * c.explosionStrength;
+	player.velY += velCont.velContY * c.explosionStrength;
+}
 
 function checkFlipAroundWorld(proj, world) {
 	if (proj.x - proj.radius > world.width) {
@@ -460,9 +468,20 @@ function bumpPlayer(player, bumper) {
 	player.velY += velCont.velContY * 0.3;
 }
 function _calcVelCont(distance, object, x, y) {
+	if (distance == 0) {
+		distance = 1;
+	}
+	var xDist = object.x - x;
+	var yDist = object.y - y;
+	if (xDist == 0) {
+		xDist = utils.getRandomInt(-4, 4);
+	}
+	if (yDist == 0) {
+		yDist = utils.getRandomInt(-4, 4);
+	}
 	var velCont = { velContX: 0, velContY: 0 };
-	velCont.velContX = (forceConstant / Math.pow(distance, 2)) * (object.x - x) / distance;
-	velCont.velContY = (forceConstant / Math.pow(distance, 2)) * (object.y - y) / distance;
+	velCont.velContX = (forceConstant / Math.pow(distance, 2)) * xDist / distance;
+	velCont.velContY = (forceConstant / Math.pow(distance, 2)) * yDist / distance;
 	return velCont;
 }
 

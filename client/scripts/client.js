@@ -188,11 +188,12 @@ function clientConnect() {
 		loadMapPreview(packet.nextMapID);
 		currentState = config.stateMap.overview;
 	});
-	server.on("startGameover", function (player) {
-		playerWon = player;
+	server.on("startGameover", function (packet) {
+		playerWon = packet.winner;
+		achievements = packet.achievements;
 		stopAllSounds();
 		playSound(gameOverSound);
-		decodedColorName = Colors.decode(playerList[player].color);
+		decodedColorName = Colors.decode(playerList[packet.winner].color);
 		currentState = config.stateMap.gameOver;
 	});
 	server.on("startCollapse", function () {
