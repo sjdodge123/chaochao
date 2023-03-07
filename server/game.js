@@ -2560,7 +2560,7 @@ class Puck extends Projectile {
 		this.speed = c.brutalRounds.hockey.baseSpeed;
 	}
 	handleHit(object) {
-		if (object.isPunch && object.ownerId != this.id) {
+		if (object.isPunch && object.ownerId != this.ownerId) {
 			_engine.punchPuck(this, object);
 			messenger.messageRoomBySig(this.roomSig, "playerPunched", object.ownerId);
 			return;

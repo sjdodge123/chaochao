@@ -974,7 +974,7 @@ function drawBumper(x, y) {
     gameContext.save();
     gameContext.beginPath();
     gameContext.strokeStyle = "red";
-    createContext.lineWidth = 3;
+    gameContext.lineWidth = 3;
     gameContext.arc(x, y, config.hazards.bumper.attackRadius, 0, 2 * Math.PI);
     gameContext.stroke();
     gameContext.beginPath();
