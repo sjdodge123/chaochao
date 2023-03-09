@@ -318,26 +318,41 @@ function drawGameOverScreen() {
     gameContext.restore();
 
     if (achievements != null) {
+        var xOffset = 200;
+        var yOffset = -200;
+        var startingHeight = (gameCanvas.height + 48) / 2;
         gameContext.save();
         gameContext.fillStyle = "black";
         gameContext.font = '28px serif';
-        gameContext.fillText("-- Medals -- ", (gameCanvas.width / 2) + 200, (gameCanvas.height + 48) / 2);
-        var startingHeight = (gameCanvas.height + 48) / 2;
+        gameContext.fillText("-- Medals -- ", (gameCanvas.width / 2) + xOffset, startingHeight + yOffset);
+
+
         var lineHeight = 40;
         var count = 1;
         for (var medal in achievements) {
-            if (achievements[medal].id == null || playerList[achievements[medal].id] == null) {
+            if (achievements[medal].ids.length == 0) {
                 continue;
             }
-            gameContext.beginPath();
-            gameContext.arc((gameCanvas.width / 2) + 200, startingHeight + (lineHeight * count) - 7.5, 15, 0, 2 * Math.PI);
-            gameContext.fillStyle = playerList[achievements[medal].id].color;
-            gameContext.strokeStyle = "black";
-            gameContext.lineWidth = 3;
-            gameContext.fill();
-            gameContext.stroke();
             gameContext.fillStyle = "black";
-            gameContext.fillText(achievements[medal].title + ": " + achievements[medal].value, (gameCanvas.width / 2) + 220, startingHeight + (lineHeight * count));
+            gameContext.fillText(achievements[medal].title, (gameCanvas.width / 2) + xOffset, startingHeight + (lineHeight * count) + yOffset);
+            count++;
+            for (var i = 0; i < achievements[medal].ids.length; i++) {
+                var player = playerList[achievements[medal].ids[i]];
+
+                gameContext.beginPath();
+                gameContext.arc((gameCanvas.width / 2) + (xOffset + (35 * (i + 1))), startingHeight + (lineHeight * count) - 15 + yOffset, 15, 0, 2 * Math.PI);
+                if (player != null) {
+                    gameContext.fillStyle = player.color;
+                    gameContext.strokeStyle = "black";
+                } else {
+                    gameContext.fillStyle = "grey";
+                    gameContext.strokeStyle = "grey";
+                }
+                gameContext.lineWidth = 3;
+                gameContext.fill();
+                gameContext.stroke();
+            }
+            count++;
         }
         gameContext.restore();
     }

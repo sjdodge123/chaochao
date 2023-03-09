@@ -307,6 +307,10 @@ class Game {
 			}
 			if (this.playerList[player].reachedGoal == true) {
 				playersConcluded++;
+				this.playerList[player].survivalist += 1;
+				if (this.gameBoard.brutalRound) {
+					this.playerList[player].brutalist += 1;
+				}
 				if (this.firstPlaceSig == null) {
 					if (this.playerList[player].notches == this.notchesToWin) {
 						//Game over player wins
@@ -472,28 +476,75 @@ class Game {
 		messenger.messageRoomBySig(this.roomSig, 'startGameover', { winner: player, achievements: this.gatherAchievements() });
 	}
 	gatherAchievements() {
-		return null;
 		var achievements = {
-			mostKills: { id: null, value: 0, title: "Most kills" },
-			mostMurdered: { id: null, value: 0, title: "Most murdered" },
-			mostBrutals: { id: null, value: 0, title: "Most brutal victories" },
-			bully: { id: null, value: 0, title: "Most aggresive" },
-			gameSaves: { id: null, value: 0, title: "Saved the game" },
+			mostKills: { ids: [], value: 0, title: "Serial killer" },
+			savior: { ids: [], value: 0, title: "Savior" },
+			survivalist: { ids: [], value: 0, title: "Survivalist" },
+			brutalist: { ids: [], value: 0, title: "Brutalist" },
+			mostMurdered: { ids: [], value: 0, title: "Picked on" },
+			resourceful: { ids: [], value: 0, title: "Resouceful" },
+			bully: { ids: [], value: 0, title: "Bully" },
+			doubleKill: { ids: [], value: 0, title: "Double Kill" },
+			tripleKill: { ids: [], value: 0, title: "Triple Kill" },
+			megaKill: { ids: [], value: 0, title: "Mega Kill" },
 		};
 		for (var id in this.playerList) {
 			var player = this.playerList[id];
-			if (player.totalKills > achievements.mostKills.value) {
-				achievements.mostKills.id = id;
-				achievements.mostKills.value = player.totalKills;
+
+			//Best Murderer
+			this.checkForNewMedalHolder(achievements.mostKills, id, player.totalKills);
+
+			//Savior
+			if (player.savior > 0) {
+				achievements.savior.ids.push(id);
 			}
-			if (player.savier > achievements.gameSaves.value) {
-				achievements.gameSaves.id = id;
-				achievements.gameSaves.value = player.savier;
+
+			//Survivalist
+			this.checkForNewMedalHolder(achievements.survivalist, id, player.survivalist);
+
+			//Brutalist
+			this.checkForNewMedalHolder(achievements.brutalist, id, player.brutalist);
+
+			//Bully
+			this.checkForNewMedalHolder(achievements.bully, id, player.bully);
+
+			//Resourceful
+			this.checkForNewMedalHolder(achievements.resourceful, id, player.resourceful);
+
+			//Picked on
+			var mostKilled = null;
+			for (var i = 0; i < player.killedPlayerList.length; i++) {
+				var murderedID = player.killedPlayerList[i];
+				if (mostKilled == null) {
+					mostKilled = {};
+					mostKilled[murderedID] = 1;
+				} else {
+					mostKilled[murderedID] += 1;
+				}
+			}
+			if (mostKilled != null) {
+				for (var murderID in mostKilled) {
+					this.checkForNewMedalHolder(achievements.mostMurdered, murderID, mostKilled[murderID]);
+				}
 			}
 		}
 		return achievements;
 	}
+	checkForNewMedalHolder(medal, id, value) {
+		if (value == 0) {
+			return;
+		}
+		if (value >= medal.value) {
+			if (value > medal.value) {
+				medal.ids = [id];
+			} else {
+				medal.ids.push(id);
+			}
+			medal.value = value;
+		}
+	}
 }
+
 
 class GameBoard {
 	constructor(world, playerList, projectileList, aimerList, hazardList, engine, roomSig) {
@@ -1778,7 +1829,7 @@ class Player extends Circle {
 		this.punch = null;
 		this.punchedBy = null;
 		this.murderedBy = null;
-		this.totalKills = 0;
+
 		this.roundKills = 0;
 		this.multiKillCount = 0;
 		this.openMultiKillWindow = false;
@@ -1795,7 +1846,12 @@ class Player extends Circle {
 		this.fireTimeLeft = 0;
 
 		//Achievements
-		this.savier = 0;
+		this.savior = 0;
+		this.totalKills = 0;
+		this.brutalist = 0;
+		this.survivalist = 0;
+		this.resourceful = 0;
+		this.bully = 0;
 
 		//Engine Variables
 		this.newX = this.x;
@@ -1830,6 +1886,7 @@ class Player extends Circle {
 		if (this.attack) {
 			if ((currentState == c.stateMap.racing || currentState == c.stateMap.collapsing) && this.ability != null) {
 				this.punchedTimer = Date.now();
+				this.resourceful += 1;
 				this.ability.use();
 				return;
 			}
@@ -1842,6 +1899,7 @@ class Player extends Circle {
 				punchRadius = c.brutalRounds.infection.punchRadius;
 			}
 			this.punch = new Punch(this.x, this.y, punchRadius, this.color, this.id, this.roomSig, 1, this.isZombie);
+			this.bully += 1;
 			messenger.messageRoomBySig(this.roomSig, "punch", compressor.sendPunch(this.punch));
 			this.attack = false;
 		}
@@ -1894,7 +1952,7 @@ class Player extends Circle {
 		this.totalKills += 1;
 		this.addFire(c.playerKillFireBonus);
 		if (player.fellFromVictory) {
-			this.savier += 1;
+			this.savior += 1;
 			this.addFire(c.playerKilledNearVictoryBonus);
 		}
 		if (this.openMultiKillWindow == true) {
@@ -2284,11 +2342,15 @@ class Player extends Circle {
 		this.acquiredAbility = null;
 		this.angle = 315;
 		if (currentState == c.stateMap.gameOver) {
+			this.survivalist = 0;
+			this.brutalist = 0;
+			this.resourceful = 0;
+			this.bully = 0;
 			this.ability = null;
 			this.notches = 0;
 			this.totalKills = 0;
 			this.onFire = 0;
-			this.savier = 0;
+			this.savior = 0;
 			this.killedPlayerList = [];
 		}
 	}
