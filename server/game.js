@@ -349,7 +349,7 @@ class Game {
 						var goal = context.gameBoard.findRandomGoalTile();
 						context.startCollapse(goal.x, goal.y);
 					}
-				}, 5000, this);
+				}, 15000, this);
 			}
 		}
 	}
