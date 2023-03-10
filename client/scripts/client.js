@@ -224,7 +224,13 @@ function clientConnect() {
 			playSound(zombieSwing);
 			return;
 		}
-		playSound(meleeSound);
+		if (punch.type == "player") {
+			playSound(meleeSound);
+		}
+		if (punch.type == "bumper") {
+			playSound(bumperSound);
+		}
+
 	});
 	server.on("spawnBomb", function (owner) {
 		spawnBomb(owner);
@@ -234,6 +240,11 @@ function clientConnect() {
 		spawnPuck(owner);
 		playSound(bombShot);
 	});
+	server.on("applyBlackout", function (owner) {
+		blackout = true;
+		playSound(blackoutSound);
+	});
+
 	server.on("spawnSnowFlake", function (owner) {
 		spawnSnowFlake(owner);
 		playSound(bombShot);

@@ -7,6 +7,8 @@ var server = null,
     myID = null,
     gameContext = null,
     gameCanvas = null,
+    overlayCanvas = null,
+    overlayContext = null,
     newWidth = 0,
     newHeight = 0,
     maps = [],
@@ -84,7 +86,9 @@ function setupPage() {
     });
     volumeChange();
     gameCanvas = document.getElementById('gameCanvas');
+    overlayCanvas = document.getElementById('overlayCanvas');
     gameContext = gameCanvas.getContext('2d');
+    overlayContext = overlayCanvas.getContext('2d');
     init();
     $.when.apply($, promises).then(function () {
         enterLobby();
@@ -170,6 +174,9 @@ function resize() {
 
     gameCanvas.style.width = newWidth + "px";
     gameCanvas.style.height = newHeight + "px";
+    overlayCanvas.style.width = newWidth + "px";
+    overlayCanvas.style.height = newHeight + "px";
+
     camera = {
         active: false,
         x: gameCanvas.width / 2,

@@ -36,6 +36,8 @@ var iceCannon = new Audio("./assets/sounds/iceCannon.mp3");
 var iceExplosion = new Audio("./assets/sounds/iceExplosion.mp3");
 var lavaExplosion = new Audio("./assets/sounds/lavaExplosion.mp3");
 var cutSound = new Audio("./assets/sounds/thwack.mp3");
+var bumperSound = new Audio("./assets/sounds/bumper.mp3");
+var blackoutSound = new Audio("./assets/sounds/blackout.mp3");
 
 var newZombie = new Audio("./assets/sounds/newzombie.mp3");
 var zombieHit = new Audio("./assets/sounds/zombiehit.mp3");
@@ -84,13 +86,17 @@ excitingBackgroundMusicList.push(bumpinbits5);
 var heavyfabric = new Audio("./assets/sounds/heavyfabric.mp3");
 var desperationSetsIn = new Audio("./assets/sounds/DesperationSetsIn.mp3");
 var horrorLoop = new Audio("./assets/sounds/HorrorLoop.mp3");
+var depthOfDespair = new Audio("./assets/sounds/depthOfDespair.mp3");
 
+brutalBackgroundMusicList.push(depthOfDespair);
 brutalBackgroundMusicList.push(horrorLoop);
 brutalBackgroundMusicList.push(desperationSetsIn);
 brutalBackgroundMusicList.push(heavyfabric);
 
 
 function volumeChange() {
+    blackoutSound.volume = .35 * masterVolume;
+    bumperSound.volume = .25 * masterVolume;
     cutSound.volume = .15 * masterVolume;
     godLike.volume = .1 * masterVolume;
     rampage.volume = .1 * masterVolume;
@@ -147,29 +153,32 @@ function volumeChange() {
     beastv2.volume = .035 * masterVolume * musicVolume;
     beastv2.targetVolume = beastv2.volume;
 
-    mindInMotion.volume = .035 * masterVolume * musicVolume
+    mindInMotion.volume = .035 * masterVolume * musicVolume;
     mindInMotion.targetVolume = mindInMotion.volume;
 
-    desperationSetsIn.volume = .015 * masterVolume * musicVolume
+    desperationSetsIn.volume = .015 * masterVolume * musicVolume;
     desperationSetsIn.targetVolume = desperationSetsIn.volume;
 
-    horrorLoop.volume = .015 * masterVolume * musicVolume
+    horrorLoop.volume = .015 * masterVolume * musicVolume;
     horrorLoop.targetVolume = horrorLoop.volume;
 
-    bumpinbits1.volume = .05 * masterVolume * musicVolume
+    bumpinbits1.volume = .05 * masterVolume * musicVolume;
     bumpinbits1.targetVolume = bumpinbits1.volume;
 
-    bumpinbits2.volume = .05 * masterVolume * musicVolume
+    bumpinbits2.volume = .05 * masterVolume * musicVolume;
     bumpinbits2.targetVolume = bumpinbits2.volume;
 
-    bumpinbits3.volume = .05 * masterVolume * musicVolume
+    bumpinbits3.volume = .05 * masterVolume * musicVolume;
     bumpinbits3.targetVolume = bumpinbits3.volume;
 
-    bumpinbits4.volume = .05 * masterVolume * musicVolume
+    bumpinbits4.volume = .05 * masterVolume * musicVolume;
     bumpinbits4.targetVolume = bumpinbits4.volume;
 
-    bumpinbits5.volume = .05 * masterVolume * musicVolume
+    bumpinbits5.volume = .05 * masterVolume * musicVolume;
     bumpinbits5.targetVolume = bumpinbits5.volume;
+
+    depthOfDespair.volume = .20 * masterVolume * musicVolume;
+    depthOfDespair.targetVolume = depthOfDespair.volume;
 }
 
 

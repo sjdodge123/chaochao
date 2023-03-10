@@ -15,6 +15,7 @@ var mousex,
 	blindfold,
 	achievements = null,
 	screenShake = false,
+	blackout = false,
 	timerList = [],
 	playersNearVictory = [],
 	pingCircles = [],
@@ -40,6 +41,8 @@ function resetGameboard() {
 }
 
 function resetRound() {
+	blackout = false;
+	infection = false;
 	for (var aimerID in this.aimerList) {
 		delete this.aimerList[aimerID];
 	}
@@ -323,7 +326,6 @@ function clearInfection() {
 
 function applyBrutalMap(brconfig) {
 	if (brconfig.brutal == false) {
-		infection = false;
 		brutalRound = false;
 		brutalRoundConfig = null;
 		return;
@@ -364,6 +366,7 @@ function spawnPunch(payload) {
 	punch.y = payload[2];
 	punch.color = payload[3];
 	punch.radius = payload[4];
+	punch.type = payload[5];
 	punchList[punch.ownerId] = punch;
 	return punch;
 }
@@ -478,6 +481,7 @@ function fullReset() {
 	nextMapPreview = null;
 	nextMapThumbnail = null;
 	brutalRound = false;
+	blackout = false;
 	infection = false;
 	brutalRoundConfig = null;
 	resetProjectiles();

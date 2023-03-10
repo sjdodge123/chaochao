@@ -398,6 +398,13 @@ class Game {
 			}
 			setTimeout(this.gameBoard.applyBrutalHockeyRound, puckSpawnDelay * 1000, { context: this });
 		}
+		if (this.gameBoard.checkForActiveBrutal(c.brutalRounds.blackout.id)) {
+			var blackoutDelay = utils.getRandomInt(2, 3);
+			if (lightningRound) {
+				blackoutDelay = utils.getRandomInt(1, 2);
+			}
+			setTimeout(this.gameBoard.applyBrutalBlackoutRound, blackoutDelay * 1000, { context: this });
+		}
 
 
 		messenger.messageRoomBySig(this.roomSig, "startRace", null);
@@ -1341,6 +1348,10 @@ class GameBoard {
 		var puck = new Puck(loc.x, loc.y, c.brutalRounds.hockey.puckRadius, "black", context.roomSig, context.roomSig, utils.getRandomInt(1, 360));
 		context.projectileList[context.roomSig] = puck;
 		messenger.messageRoomBySig(context.roomSig, "spawnPuck", context.roomSig);
+	}
+	applyBrutalBlackoutRound(packet) {
+		var context = packet.context;
+		messenger.messageRoomBySig(context.roomSig, "applyBlackout", context.roomSig);
 	}
 
 	checkForDynamicDifficultyIncrease() {
@@ -2456,6 +2467,7 @@ class Punch extends Circle {
 		this.isPunch = true;
 		this.ownerInfected = infected;
 		this.punchBonus = punchBonus;
+		this.type = "player";
 		this.mapOwned = false;
 	}
 	handleHit(object) {
@@ -2492,6 +2504,7 @@ class Bumper extends Hazard {
 		if (this.punch == null) {
 			this.punch = new Punch(this.x, this.y, c.hazards.bumper.attackRadius, c.hazards.bumper.color, this.ownerId, this.roomSig, c.hazards.bumper.punchBonus, false);
 			this.punch.mapOwned = true;
+			this.punch.type = "bumper";
 		}
 	}
 }

@@ -25,7 +25,10 @@
             <!-- Game enclosed here -->
             <div id="progressContainer" class="row justify-content-center align-self-center mx-auto">Loading Assets..<div id="progressWindow"><div id="progressBar"></div></div></div>
             <div id="gameWindow" >
-            <div id="mapContainer"><canvas id="gameCanvas" width="1366" height="768"></canvas></div>
+            <div id="mapContainer">
+                <canvas id="gameCanvas" width="1366" height="768"></canvas>
+                <canvas id="overlayCanvas" width="1366" height="768"></canvas>
+            </div>
             <div class="emojiMenu" id="emojiMenu">
                 <a onclick="closeEmojiWindow('cancel')" href="#">
                 <i class="fas fa-window-close"></i>

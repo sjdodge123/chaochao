@@ -68,6 +68,8 @@ var puckIcon = new Image(576, 512);
 puckIcon.src = "../assets/img/hockey-puck-solid.svg";
 var explosionIcon = new Image(576, 512);
 explosionIcon.src = "../assets/img/explosion-solid.svg";
+var moonIcon = new Image(576, 512);
+moonIcon.src = "../assets/img/moon-solid.svg";
 var scissorsIcon = new Image(576, 512);
 scissorsIcon.src = "../assets/img/scissors-solid.svg";
 
@@ -144,6 +146,7 @@ function loadPatterns() {
     brutalRoundImages[config.brutalRounds.infection.id] = infectionIcon;
     brutalRoundImages[config.brutalRounds.hockey.id] = puckIcon;
     brutalRoundImages[config.brutalRounds.explosive.id] = explosionIcon;
+    brutalRoundImages[config.brutalRounds.blackout.id] = moonIcon;
 
     if (brutalRoundConfig != null && brutalPatterns[brutalRoundConfig.brutalTypes.toString()] == null) {
         brutalPatterns[brutalRoundConfig.brutalTypes.toString()] = makeComplexPattern(brutalRoundConfig.brutalTypes);
@@ -288,7 +291,7 @@ function drawObjects(dt) {
     drawPunches();
     drawProjectiles();
     drawAbilties();
-
+    drawOverlay();
     postShake();
 
     if (currentState == config.stateMap.gameOver) {
@@ -299,6 +302,7 @@ function drawObjects(dt) {
 
 function drawBackground() {
     gameContext.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
+    overlayContext.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 }
 function drawGameOverScreen() {
     if (playerWon == null) {
@@ -421,6 +425,25 @@ function drawAbilties() {
         gameContext.rect(world.x, world.y, world.width, world.height);
         gameContext.fill();
         gameContext.restore();
+    }
+}
+
+function drawOverlay() {
+    if (brutalRound == true && blackout == true && myPlayer != null && myPlayer.alive) {
+        overlayContext.save();
+        overlayContext.fillStyle = "black";
+        overlayContext.fillRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+        overlayContext.restore();
+
+
+        overlayContext.save();
+        var radius = 50;
+        overlayContext.globalCompositeOperation = 'destination-out';
+        overlayContext.filter = "blur(50px)";
+        overlayContext.beginPath();
+        overlayContext.arc(myPlayer.x, myPlayer.y, radius, 0, 2 * Math.PI, false);
+        overlayContext.fill();
+        overlayContext.restore();
     }
 }
 

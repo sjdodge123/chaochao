@@ -39,9 +39,12 @@ nav {
   }
 
 canvas {
-    position: relative;
+    position: absolute;
     font-weight: 600;
     display: inline-block;
+    top: 0;
+    left: 0;
+    right: 0;
 }
 
 .nav-item {
