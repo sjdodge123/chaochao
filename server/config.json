@@ -183,6 +183,7 @@
         "lightning": {
             "id": 1006,
             "active": true,
+            "movingHazardSpeedMod": 3,
             "volcanoCollapseSpeed": 4,
             "title": "Lightning"
         },
@@ -205,8 +206,8 @@
         "hockey": {
             "id": 1009,
             "puckRadius": 25,
-            "baseSpeed": 20000,
-            "spikeSpeed": 1.25,
+            "baseSpeed": 15000,
+            "spikeSpeed": 1.075,
             "puckHitStrength": 800,
             "active": true,
             "title": "Air Hockey"
@@ -226,6 +227,16 @@
         "bumper": {
             "id": 900,
             "color": "orange",
+            "attackRadius": 15,
+            "radius": 10,
+            "punchBonus": 10
+        },
+        "movingBumper": {
+            "id": 901,
+            "color": "orange",
+            "speed": 2000,
+            "width": 100,
+            "height": 5,
             "attackRadius": 15,
             "radius": 10,
             "punchBonus": 10

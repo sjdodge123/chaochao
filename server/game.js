@@ -49,11 +49,13 @@ class Room {
 		var playerData = compressor.sendPlayerUpdates(this.playerList);
 		var projData = compressor.sendProjUpdates(this.projectileList);
 		var aimerData = compressor.sendAimerUpdates(this.aimerList);
+		var hazardData = compressor.sendHazardUpdates(this.hazardList);
 		var gameStateData = compressor.gameState(this.game);
 		messenger.messageRoomBySig(this.sig, "gameUpdates", {
 			playerList: playerData,
 			projList: projData,
 			aimerList: aimerData,
+			hazardList: hazardData,
 			state: gameStateData,
 			totalPlayers: this.game.playerCount
 		});
@@ -1209,12 +1211,12 @@ class GameBoard {
 		this.currentMap = this.nextMap;
 		this.round++;
 		this.checkForDynamicDifficultyIncrease();
-		this.generateHazards();
 		this.mapsPlayed.push(this.currentMap.id);
 		console.log("Round: " + this.round);
 		this.brutalConfig = this.checkForBrutalRound();
 		var randomGen = this.generateRandomTiles();
-		this.newMapPayload = { id: this.currentMap.id, abilities: this.generateAbilities(), round: this.round, randomTiles: randomGen, brutalRoundConfig: this.brutalConfig, currentState: currentState };
+		this.generateHazards();
+		this.newMapPayload = { id: this.currentMap.id, abilities: this.generateAbilities(), round: this.round, randomTiles: randomGen, brutalRoundConfig: this.brutalConfig, hazards: compressor.newHazards(this.hazardList), currentState: currentState };
 		messenger.messageRoomBySig(this.roomSig, "newMap", this.newMapPayload);
 	}
 	checkApplyBrutalConfig() {
@@ -1469,6 +1471,7 @@ class GameBoard {
 		return brutalRoundConfig;
 	}
 	generateHazards() {
+		this.resetHazards();
 		if (this.currentMap.hazards == null) {
 			return;
 		}
@@ -1477,6 +1480,15 @@ class GameBoard {
 				var mapID = utils.generateHash(this.roomSig, String(this.currentMap.hazards[i].x + this.currentMap.hazards[i].y));
 				var hazard = new Bumper(this.currentMap.hazards[i].x, this.currentMap.hazards[i].y, c.hazards.bumper.radius, c.hazards.bumper.color, mapID, this.roomSig);
 				this.hazardList[mapID] = hazard;
+			}
+			if (this.currentMap.hazards[i].id == c.hazards.movingBumper.id) {
+				var mapID = utils.generateHash(this.roomSig, String(this.currentMap.hazards[i].x + this.currentMap.hazards[i].y));
+				var rail = new HazardRail(this.currentMap.hazards[i].x, this.currentMap.hazards[i].y, c.hazards.movingBumper.width, c.hazards.movingBumper.height, this.currentMap.hazards[i].angle, c.hazards.bumper.color, mapID, this.roomSig);
+				var bumper = new Bumper(this.currentMap.hazards[i].x, this.currentMap.hazards[i].y, c.hazards.bumper.radius, c.hazards.bumper.color, mapID, this.roomSig, rail);
+				if (this.checkForActiveBrutal(c.brutalRounds.lightning.id)) {
+					bumper.speed *= c.brutalRounds.lightning.movingHazardSpeedMod;
+				}
+				this.hazardList[mapID] = bumper;
 			}
 		}
 	}
@@ -1560,6 +1572,10 @@ class Shape {
 	constructor(x, y, color) {
 		this.x = x;
 		this.y = y;
+		this.newX = this.x;
+		this.newY = this.y;
+		this.velX = 0;
+		this.velY = 0;
 		this.color = color;
 	}
 	inBounds(shape) {
@@ -2478,10 +2494,13 @@ class Punch extends Circle {
 	}
 }
 
-class Hazard extends Circle {
-	constructor(x, y, radius, color, ownerId, roomSig) {
-		super(x, y, radius, color);
+class HazardRail extends Rect {
+	constructor(x, y, width, height, angle, color, ownerId, roomSig) {
+		super(x, y, width, height, angle, color);
 		this.alive = true;
+		this.ownerId = ownerId;
+		this.roomSig = roomSig;
+		this.lengthSq = this.width * this.width;
 	}
 	update() {
 		if (this.alive == false) {
@@ -2489,12 +2508,49 @@ class Hazard extends Circle {
 		}
 	}
 	handleHit(object) {
+		console.log("hazard rail hit");
+	}
+}
+
+class Hazard extends Circle {
+	constructor(x, y, radius, color, ownerId, roomSig, rail) {
+		super(x, y, radius, color);
+		this.alive = true;
+		this.ownerId = ownerId;
+		this.roomSig = roomSig;
+		this.moveable = false;
+		this.id = -1;
+		this.speed = 0;
+		this.angle = 0;
+		this.lengthSq = this.radius * radius;
+		if (rail != null) {
+			this.moveable = true;
+			this.rail = rail;
+		}
+	}
+	update() {
+		if (this.alive == false) {
+			return;
+		}
+		this.move();
+	}
+	move() {
+		this.x = this.newX;
+		this.y = this.newY;
+	}
+	handleHit(object) {
 
 	}
 }
 class Bumper extends Hazard {
-	constructor(x, y, radius, color, ownerId, roomSig) {
-		super(x, y, radius, color, ownerId, roomSig);
+	constructor(x, y, radius, color, ownerId, roomSig, rail) {
+		super(x, y, radius, color, ownerId, roomSig, rail);
+		this.id = c.hazards.bumper.id;
+		if (this.rail != null) {
+			this.speed = c.hazards.movingBumper.speed;
+			this.id = c.hazards.movingBumper.id;
+			this.angle = this.rail.angle;
+		}
 		this.punch = null;
 	}
 	handleHit(object) {

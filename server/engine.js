@@ -49,6 +49,7 @@ class Engine {
 	}
 	update(dt) {
 		this.dt = dt;
+		this.updateHazards();
 		this.updateProjectiles();
 		this.updatePlayers();
 	}
@@ -152,6 +153,32 @@ class Engine {
 			proj.velY = newVelY;
 			proj.newX += proj.velX * this.dt;
 			proj.newY += proj.velY * this.dt;
+		}
+	}
+	updateHazards() {
+		for (var id in this.hazardList) {
+			var hazard = this.hazardList[id];
+			if (!hazard.moveable) {
+				continue;
+			}
+			var newVelX = 0;
+			var newVelY = 0;
+			if (hazard.rail != null) {
+				var currentDist = utils.getMagSq(hazard.rail.x, hazard.rail.y, hazard.x, hazard.y);
+				if (currentDist > hazard.rail.lengthSq) {
+					hazard.angle -= 180;
+				}
+				if (hazard.angle != hazard.rail.angle && currentDist < hazard.lengthSq) {
+					hazard.angle += 180;
+				}
+
+				newVelX = Math.cos((hazard.angle) * (Math.PI / 180)) * hazard.speed * this.dt;
+				newVelY = Math.sin((hazard.angle) * (Math.PI / 180)) * hazard.speed * this.dt;
+			}
+			hazard.velX = newVelX;
+			hazard.velY = newVelY;
+			hazard.newX += hazard.velX * this.dt;
+			hazard.newY += hazard.velY * this.dt;
 		}
 	}
 

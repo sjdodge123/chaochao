@@ -9,6 +9,7 @@ var mousex,
 	currentMap,
 	punchList,
 	aimerList,
+	hazardList,
 	infection = false,
 	projectileList,
 	playerList,
@@ -33,6 +34,7 @@ function resetGameboard() {
 	blindfold = {};
 	currentMap = {};
 	aimerList = {};
+	hazardList = {};
 	round = 0;
 	brutalRound = false;
 	brutalRoundConfig = null;
@@ -185,6 +187,20 @@ function updateAimerList(packet) {
 	}
 }
 
+function updateHazardList(packet) {
+	if (packet == null) {
+		return;
+	}
+	packet = JSON.parse(packet);
+	for (var i = 0; i < packet.length; i++) {
+		var hazard = packet[i];
+		if (hazardList[hazard[0]] != null) {
+			hazardList[hazard[0]].x = hazard[1];
+			hazardList[hazard[0]].y = hazard[2];
+		}
+	}
+}
+
 
 function updatePlayerNotches(packet) {
 	if (packet == null) {
@@ -286,7 +302,6 @@ function loadNewMap(id) {
 	}
 }
 function loadMapPreview(id) {
-
 	for (var i = 0; i < maps.length; i++) {
 		if (id == maps[i].id) {
 			nextMapPreview = JSON.parse(JSON.stringify(maps[i]));
@@ -314,6 +329,28 @@ function applyRandomTiles(randomTiles) {
 		if (currentMap.cells[i].id == config.tileMap.random.id) {
 			currentMap.cells[i].id = randomTiles[currentMap.cells[i].site.voronoiId];
 		}
+	}
+}
+function applyHazards(payload) {
+	if (payload == null) {
+		return;
+	}
+	payload = JSON.parse(payload);
+	for (var i = 0; i < payload.length; i++) {
+		var hazard = payload[i];
+		if (hazardList[hazard[0]] != null) {
+			continue;
+		}
+		hazardList[hazard[0]] = {};
+		hazardList[hazard[0]].ownerId = hazard[0];
+		hazardList[hazard[0]].id = hazard[1];
+		hazardList[hazard[0]].x = hazard[2];
+		hazardList[hazard[0]].y = hazard[3];
+		hazardList[hazard[0]].angle = hazard[4];
+
+		hazardList[hazard[0]].railX = hazardList[hazard[0]].x;
+		hazardList[hazard[0]].railY = hazardList[hazard[0]].y;
+
 	}
 }
 function clearInfection() {
@@ -437,6 +474,7 @@ function spawnExplosionAimer(owner) {
 	aimerList[owner] = aimer;
 	return aimer;
 }
+
 function terminatePunch(id) {
 	if (punchList[id] != null) {
 		delete punchList[id];
@@ -451,6 +489,9 @@ function terminateAimer(id) {
 	if (aimerList[id] != null) {
 		delete aimerList[id];
 	}
+}
+function resetHazardList() {
+	hazardList = {};
 }
 
 function resetPlayers() {
@@ -485,6 +526,7 @@ function fullReset() {
 	infection = false;
 	brutalRoundConfig = null;
 	resetProjectiles();
+	resetHazardList();
 	for (var id in playerList) {
 		var player = playerList[id];
 		player.alive = true;

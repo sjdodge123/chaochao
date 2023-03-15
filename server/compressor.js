@@ -6,6 +6,7 @@ var listItem = null;
 var player = null;
 var proj = null;
 var aimer = null;
+var hazard = null;
 var prop = null;
 
 exports.sendPlayerUpdates = function (playerList) {
@@ -62,6 +63,24 @@ exports.sendAimerUpdates = function (aimerList) {
 	}
 	packet = JSON.stringify(packet);
 	aimer = null;
+	listItem = null;
+	prop = null;
+	return packet;
+}
+
+exports.sendHazardUpdates = function (hazardList) {
+	var packet = [];
+	for (prop in hazardList) {
+		hazard = hazardList[prop];
+		listItem = [
+			hazard.ownerId,
+			hazard.x,
+			hazard.y
+		];
+		packet.push(listItem);
+	}
+	packet = JSON.stringify(packet);
+	hazard = null;
 	listItem = null;
 	prop = null;
 	return packet;
@@ -184,6 +203,25 @@ exports.sendClouds = function (clouds) {
 	}
 	packet = JSON.stringify(packet);
 	proj = null;
+	listItem = null;
+	prop = null;
+	return packet;
+}
+exports.newHazards = function (hazardList) {
+	var packet = [];
+	for (prop in hazardList) {
+		hazard = hazardList[prop];
+		listItem = [
+			hazard.ownerId,
+			hazard.id,
+			hazard.x,
+			hazard.y,
+			hazard.angle
+		];
+		packet.push(listItem);
+	}
+	packet = JSON.stringify(packet);
+	hazard = null;
 	listItem = null;
 	prop = null;
 	return packet;

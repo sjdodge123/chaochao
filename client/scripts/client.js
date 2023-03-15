@@ -69,6 +69,7 @@ function clientConnect() {
 		updatePlayerList(updatePacket.playerList);
 		updateProjecileList(updatePacket.projList);
 		updateAimerList(updatePacket.aimerList);
+		updateHazardList(updatePacket.hazardList);
 		checkGameState(updatePacket.state);
 		totalPlayers = updatePacket.totalPlayers;
 		timeSinceLastCom = 0;
@@ -80,6 +81,7 @@ function clientConnect() {
 			loadNewMap(payload.id);
 			round = payload.round;
 			applyRandomTiles(payload.randomTiles);
+			applyHazards(payload.hazards);
 			applyAbilites(payload.abilities);
 			applyBrutalMap(payload.brutalRoundConfig);
 			loadPatterns();
@@ -208,7 +210,7 @@ function clientConnect() {
 		resetProjectiles();
 	});
 	server.on("resetHazards", function () {
-		//console.log("reset hazards");
+		resetHazardList();
 	});
 	server.on("resetGame", function () {
 		fullReset();

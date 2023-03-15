@@ -174,7 +174,17 @@ function setupPage() {
         return false;
     });
 
-    $("#eraserButton").on("click", function () {
+    $("#rotateButton").on("click", function () {
+        drawObject = null;
+        drawBrushAimer = false;
+        if (selectedObject != null) {
+            selectedObject.angle += 15;
+            updateSelectedObject();
+        }
+        return false;
+    });
+
+    $("#mouseButton").on("click", function () {
         drawBrushAimer = false;
         drawObject = null;
         return false;
@@ -238,7 +248,14 @@ function setupPage() {
     });
     $("#bumperButton").on("click", function () {
         drawBrushAimer = false;
+        drawObject = null;
         drawObject = config.hazards.bumper.id;
+        return false;
+    });
+    $("#movingBumperButton").on("click", function () {
+        drawBrushAimer = false;
+        drawObject = null;
+        drawObject = config.hazards.movingBumper.id;
         return false;
     });
     $("#exportButton").on("click", function () {
@@ -251,6 +268,7 @@ function setupPage() {
     });
 
     $("#loadButton").on("click", function () {
+        selectedObject = null;
         $("#createNewImage").attr("src", createCanvas.toDataURL("image/jpeg", 0.1));
         $('#createWindow').hide();
         $('#loadWindow').show();
@@ -276,7 +294,6 @@ function setupPage() {
 
     createCanvas = document.getElementById('createCanvas');
     createContext = createCanvas.getContext('2d');
-
 }
 
 function addListeners() {
@@ -427,12 +444,17 @@ function drawMap() {
         createContext.restore();
     }
 }
-function drawMyObject(x, y, myObject) {
-    for (var object in config.hazards) {
-        if (myObject == config.hazards[object].id) {
-            drawBumper(x, y);
-            break;
-        }
+function drawMyObject(x, y, myObject, angle) {
+    if (angle == null) {
+        angle = 0;
+    }
+    if (myObject == config.hazards.bumper.id) {
+        drawBumper(x, y);
+        return;
+    }
+    if (myObject == config.hazards.movingBumper.id) {
+        drawMovingBumper(x, y, angle);
+        return;
     }
 }
 function drawBumper(x, y) {
@@ -446,6 +468,29 @@ function drawBumper(x, y) {
     createContext.arc(x, y, config.hazards.bumper.radius, 0, 2 * Math.PI);
     createContext.fillStyle = config.hazards.bumper.color;
     createContext.fill();
+    createContext.restore();
+}
+function drawMovingBumper(x, y, angle) {
+    createContext.save();
+    createContext.beginPath();
+    createContext.translate(x, y);
+    createContext.rotate(angle * (Math.PI / 180));
+    createContext.rect(0, -config.hazards.movingBumper.height / 2, config.hazards.movingBumper.width, config.hazards.movingBumper.height);
+    createContext.fillStyle = "black";
+    createContext.fill();
+    createContext.restore();
+
+    createContext.save();
+    createContext.beginPath();
+    createContext.strokeStyle = "red";
+    createContext.lineWidth = 3;
+    createContext.arc(x, y, config.hazards.movingBumper.attackRadius, 0, 2 * Math.PI);
+    createContext.stroke();
+    createContext.beginPath();
+    createContext.arc(x, y, config.hazards.movingBumper.radius, 0, 2 * Math.PI);
+    createContext.fillStyle = config.hazards.movingBumper.color;
+    createContext.fill();
+
     createContext.restore();
 }
 function handleClick(event) {
@@ -502,7 +547,7 @@ function addObjectToMap(x, y, obj) {
     if (vMap.hazards == undefined) {
         vMap.hazards = [];
     }
-    vMap.hazards.push({ id: drawObject, x: x, y: y });
+    vMap.hazards.push({ id: drawObject, x: x, y: y, angle: 0 });
 }
 
 function locateObject(x, y) {
@@ -519,11 +564,22 @@ function locateObject(x, y) {
         }
         var distance = getMagSq(x, y, vMap.hazards[hazard].x, vMap.hazards[hazard].y);
         if (distance < Math.pow(hazardObj.radius, 2)) {
-            selectedObject = { id: vMap.hazards[hazard].id, x: vMap.hazards[hazard].x, y: vMap.hazards[hazard].y, radius: hazardObj.radius };
+            selectedObject = { id: vMap.hazards[hazard].id, x: vMap.hazards[hazard].x, y: vMap.hazards[hazard].y, angle: vMap.hazards[hazard].angle, radius: hazardObj.radius };
             return;
         }
     }
     selectedObject = null;
+}
+
+function updateSelectedObject() {
+    for (var i = 0; i < vMap.hazards.length; i++) {
+        if (vMap.hazards[i].id == selectedObject.id) {
+            if (vMap.hazards[i].x == selectedObject.x && vMap.hazards[i].y == selectedObject.y) {
+                vMap.hazards[i].angle = selectedObject.angle;
+                return;
+            }
+        }
+    }
 }
 
 function removeSelectedObject() {
@@ -602,7 +658,7 @@ function renderHazards() {
     var hazards = vMap.hazards;
     for (var i = 0; i < hazards.length; i++) {
         var hazard = hazards[i];
-        drawMyObject(hazard.x, hazard.y, hazard.id);
+        drawMyObject(hazard.x, hazard.y, hazard.id, hazard.angle);
     }
 }
 
@@ -701,6 +757,8 @@ function basicSanitize() {
     if (name == "") {
         name = "unknown";
     }
+    selectedObject = null;
+    drawEditor(null);
     vMap.thumbnail = createCanvas.toDataURL("image/jpeg", 0.1);
     vMap.id = makeid(32);
     vMap.author = author.substring(0, 15);
@@ -735,6 +793,10 @@ function locateId(color) {
 
 function drawSelectedObject() {
     if (selectedObject != null) {
+        if (selectedObject.angle == undefined) {
+            selectedObject.angle = 0;
+        }
+
         createContext.save();
         createContext.beginPath();
         createContext.arc(selectedObject.x, selectedObject.y, selectedObject.radius + 10, 0, 2 * Math.PI);
@@ -752,7 +814,29 @@ function drawSelectedObject() {
         createContext.strokeStyle = "black";
         createContext.stroke();
         createContext.restore();
+        drawRotationRing();
     }
+}
+
+function drawRotationRing() {
+    var loc = pos({ x: selectedObject.x, y: selectedObject.y }, 60, selectedObject.angle);
+    createContext.save();
+    createContext.beginPath();
+    createContext.moveTo(selectedObject.x, selectedObject.y);
+    createContext.lineTo(loc.x, loc.y);
+    createContext.lineWidth = 3;
+    createContext.strokeStyle = "blue";
+    createContext.stroke();
+    createContext.restore();
+
+    createContext.save();
+    createContext.beginPath();
+    createContext.arc(selectedObject.x, selectedObject.y, selectedObject.radius + 50, 0, 2 * Math.PI);
+    createContext.lineWidth = 5;
+    createContext.setLineDash([5, 10]);
+    createContext.strokeStyle = "blue";
+    createContext.stroke();
+    createContext.restore();
 }
 
 function drawPointerCircle() {

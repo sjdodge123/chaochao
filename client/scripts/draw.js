@@ -994,10 +994,9 @@ function drawMap() {
             gameContext.stroke();
         }
         gameContext.restore();
-
-        if (currentMap.hazards != null) {
-            for (var i = 0; i < currentMap.hazards.length; i++) {
-                drawHazard(currentMap.hazards[i]);
+        if (Object.keys(hazardList).length > 0) {
+            for (var id in hazardList) {
+                drawHazard(hazardList[id]);
             }
         }
     }
@@ -1005,6 +1004,9 @@ function drawMap() {
 function drawHazard(hazard) {
     if (hazard.id == config.hazards.bumper.id) {
         drawBumper(hazard.x, hazard.y);
+    }
+    if (hazard.id == config.hazards.movingBumper.id) {
+        drawMovingBumper(hazard.x, hazard.y, hazard.railX, hazard.railY, hazard.angle);
     }
 }
 
@@ -1018,6 +1020,28 @@ function drawBumper(x, y) {
     gameContext.beginPath();
     gameContext.arc(x, y, config.hazards.bumper.radius, 0, 2 * Math.PI);
     gameContext.fillStyle = config.hazards.bumper.color;
+    gameContext.fill();
+    gameContext.restore();
+}
+function drawMovingBumper(x, y, railX, railY, angle) {
+    gameContext.save();
+    gameContext.beginPath();
+    gameContext.translate(railX, railY);
+    gameContext.rotate(angle * (Math.PI / 180));
+    gameContext.rect(0, -config.hazards.movingBumper.height / 2, config.hazards.movingBumper.width, config.hazards.movingBumper.height);
+    gameContext.fillStyle = "black";
+    gameContext.fill();
+    gameContext.restore();
+
+    gameContext.save();
+    gameContext.beginPath();
+    gameContext.strokeStyle = "red";
+    gameContext.lineWidth = 3;
+    gameContext.arc(x, y, config.hazards.movingBumper.attackRadius, 0, 2 * Math.PI);
+    gameContext.stroke();
+    gameContext.beginPath();
+    gameContext.arc(x, y, config.hazards.movingBumper.radius, 0, 2 * Math.PI);
+    gameContext.fillStyle = config.hazards.movingBumper.color;
     gameContext.fill();
     gameContext.restore();
 }
