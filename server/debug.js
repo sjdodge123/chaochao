@@ -6,3 +6,7 @@ exports.log = function () {
     args.unshift("[debug]");
     console.log.apply(console, args);
 };
+
+// DEBUG: force every round to be a brutal blackout round for testing.
+// Defaults to false.
+exports.forceBlackout = false;
