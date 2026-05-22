@@ -1,4 +1,6 @@
 const express = require('express');
+const compression = require('compression');
+const fs = require('fs');
 const app = express();
 const http = require('http');
 const server = http.createServer(app);
@@ -6,6 +8,27 @@ const { Server } = require("socket.io");
 const io = new Server(server);
 const path = require('path');
 const htmlPath = path.join(__dirname, 'client');
+
+app.use(compression());
+
+const bundleMap = {
+    '/play.html': 'scripts/dist/play.bundle.min.js',
+    '/create.html': 'scripts/dist/create.bundle.min.js',
+    '/join.html': 'scripts/dist/join.bundle.min.js'
+};
+app.use(function (req, res, next) {
+    if (process.env.NODE_ENV !== 'production') return next();
+    var url = req.path === '/' ? '/index.html' : req.path;
+    if (!(url in bundleMap)) return next();
+    fs.readFile(path.join(htmlPath, url), 'utf8', function (err, html) {
+        if (err) return next();
+        var bundleTag = '<script src="' + bundleMap[url] + '"></script>';
+        var modified = html.replace(/<!-- BUILD: bundle-start -->[\s\S]*?<!-- BUILD: bundle-end -->/g, bundleTag);
+        res.set('Content-Type', 'text/html');
+        res.send(modified);
+    });
+});
+
 app.use(express.static(htmlPath));
 
 var utils = require('./server/utils.js');
