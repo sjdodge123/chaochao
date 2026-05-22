@@ -1412,6 +1412,10 @@ class GameBoard {
 	checkForBrutalRound() {
 		var brutalRoundConfig = { brutal: false, brutalTypes: [] };
 		this.brutalRound = false;
+		if (debug.forceBlackout) {
+			this.brutalRound = true;
+			return { brutal: true, brutalTypes: [c.brutalRounds.blackout.id] };
+		}
 		var brutalChance = utils.getRandomInt(1, 100);
 
 		//console.log("Initial roll: " + brutalChance);

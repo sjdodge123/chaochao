@@ -108,6 +108,23 @@ function discardMapCache() {
 }
 
 var playerSpriteCache = {};
+
+var blackoutHoleSprite = null;
+function getBlackoutHoleSprite() {
+    if (blackoutHoleSprite != null) return blackoutHoleSprite;
+    var size = 512;
+    var canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    var ctx = canvas.getContext("2d");
+    ctx.filter = "blur(50px)";
+    ctx.beginPath();
+    ctx.arc(size / 2, size / 2, 50, 0, 2 * Math.PI);
+    ctx.fillStyle = "white";
+    ctx.fill();
+    blackoutHoleSprite = canvas;
+    return canvas;
+}
 function getPlayerSprite(color, radius, strokeColor) {
     var key = color + '|' + radius + '|' + strokeColor;
     var cached = playerSpriteCache[key];
@@ -475,14 +492,10 @@ function drawOverlay() {
         overlayContext.fillRect(0, 0, overlayCanvas.width, overlayCanvas.height);
         overlayContext.restore();
 
-
         overlayContext.save();
-        var radius = 50;
         overlayContext.globalCompositeOperation = 'destination-out';
-        overlayContext.filter = "blur(50px)";
-        overlayContext.beginPath();
-        overlayContext.arc(myPlayer.x, myPlayer.y, radius, 0, 2 * Math.PI, false);
-        overlayContext.fill();
+        var sprite = getBlackoutHoleSprite();
+        overlayContext.drawImage(sprite, myPlayer.x - sprite.width / 2, myPlayer.y - sprite.height / 2);
         overlayContext.restore();
     }
 }
