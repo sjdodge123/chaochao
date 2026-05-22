@@ -2,6 +2,7 @@ var utils = require('./utils.js');
 var hostess = require('./hostess.js');
 var c = utils.loadConfig();
 var compressor = require('./compressor.js');
+var debug = require('./debug.js');
 var mailBoxList = {},
 	roomMailList = {},
 	io;
@@ -76,7 +77,7 @@ function checkForMail(client) {
 	});
 
 	client.on('enterGame', function (id) {
-
+		debug.log("enterGame: client=", client.id, " requestedId=", id);
 		var roomSig = '';
 		if (id == -1) {
 			roomSig = hostess.findARoom(client.id);
@@ -85,9 +86,11 @@ function checkForMail(client) {
 		}
 		var room = hostess.joinARoom(roomSig, client.id);
 		if (room == false) {
+			debug.log("enterGame: joinARoom FAILED for client=", client.id, " roomSig=", roomSig);
 			client.emit("roomNotFound");
 			return;
 		}
+		debug.log("enterGame: client=", client.id, " joined room=", roomSig, " state=", room.game.currentState, " playerCount=", room.game.playerCount);
 		//client.emit("maplisting", utils.getMapListings());
 
 		//Add this player to the list of current clients in the room

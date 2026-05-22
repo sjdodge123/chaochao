@@ -1,3 +1,12 @@
+// DEBUG: set to true to log network events and state changes. Defaults to false.
+var DEBUG_NETWORK = false;
+function debugLog() {
+    if (!DEBUG_NETWORK) return;
+    var args = Array.prototype.slice.call(arguments);
+    args.unshift("[debug]");
+    console.log.apply(console, args);
+}
+
 var server = null,
     interval = null,
     gameLength = null,

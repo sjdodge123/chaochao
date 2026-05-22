@@ -94,6 +94,46 @@ sand.scale = 0.25;
 
 var playerAnimating = null;
 
+var mapCanvas = null;
+var mapCtx = null;
+var mapDirty = true;
+var mapCanvasPad = 8;
+function invalidateMapCache() {
+    mapDirty = true;
+}
+function discardMapCache() {
+    mapCanvas = null;
+    mapCtx = null;
+    mapDirty = true;
+}
+
+var playerSpriteCache = {};
+function getPlayerSprite(color, radius, strokeColor) {
+    var key = color + '|' + radius + '|' + strokeColor;
+    var cached = playerSpriteCache[key];
+    if (cached != null) {
+        return cached;
+    }
+    var pad = 8;
+    var size = (radius + pad) * 2;
+    var canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    var ctx = canvas.getContext("2d");
+    ctx.translate(size / 2, size / 2);
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, 2 * Math.PI);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = strokeColor;
+    ctx.stroke();
+    canvas.halfSize = size / 2;
+    playerSpriteCache[key] = canvas;
+    return canvas;
+}
+
 //Flames
 var redFire = new Image(32, 128);
 redFire.src = "../assets/img/redFire.png";
@@ -535,6 +575,9 @@ function drawPlayer(player, dt) {
         gameContext.stroke();
         gameContext.restore();
     }
+    if (DEBUG_FORCE_FIRE && player.id == myID) {
+        player.onFire = 500;
+    }
     if (player.onFire > 0) {
         drawFire(player);
     }
@@ -545,18 +588,12 @@ function drawPlayer(player, dt) {
             playerStrokeColor = "red"
         }
     }
-    gameContext.save();
-    gameContext.beginPath();
-    gameContext.shadowColor = player.color;
-    gameContext.shadowBlur = 3;
-    gameContext.arc(player.x + camera.getCameraX(), player.y + camera.getCameraY(), player.radius, 0, 2 * Math.PI);
-    gameContext.fillStyle = player.color;
-    gameContext.fill();
-    gameContext.strokeStyle = playerStrokeColor;
-    gameContext.stroke();
-    gameContext.restore();
-
-
+    var sprite = getPlayerSprite(player.color, player.radius, playerStrokeColor);
+    gameContext.drawImage(
+        sprite,
+        player.x + camera.getCameraX() - sprite.halfSize,
+        player.y + camera.getCameraY() - sprite.halfSize
+    );
 
     if (player.ability != null) {
         drawAbilityIndicator(player.x, player.y, player);
@@ -636,7 +673,6 @@ function drawFire(player) {
 }
 
 function drawFlameColor(player, size) {
-    loadSpriteSheets();
     if (player.onFire < 1000) {
         redFire.spriteSheet.update(dt);
         redFire.spriteSheet.draw(size, size);
@@ -808,28 +844,9 @@ function drawCutAimer(x, y, angle, color) {
 }
 
 function drawTrail(player) {
-    if (player.trail.vertices[0] != null) {
-        gameContext.save();
-        gameContext.beginPath();
-        gameContext.moveTo(player.trail.vertices[0].x, player.trail.vertices[0].y);
-        var len = player.trail.vertices.length;
-        for (var i = 0; i < len; i++) {
-            var point = player.trail.vertices[i];
-            gameContext.lineTo(point.x, point.y);
-        }
-        gameContext.lineWidth = 5;
-        gameContext.shadowBlur = 3;
-        gameContext.shadowColor = "black";
-        gameContext.strokeStyle = player.color;
-
-        if (player.notches == gameLength) {
-            gameContext.lineWidth = 6;
-            gameContext.setLineDash([20, 3, 3, 3, 3, 3, 3, 3]);
-        }
-        gameContext.stroke();
-        gameContext.restore();
+    if (player.trail.canvas != null) {
+        gameContext.drawImage(player.trail.canvas, player.trail.canvasOriginX, player.trail.canvasOriginY);
     }
-
 }
 
 function drawWorld() {
@@ -931,75 +948,94 @@ function drawPingCircles() {
     gameContext.save();
     gameContext.lineWidth = 3;
     gameContext.strokeStyle = config.tileMap.goal.color;
-    gameContext.shadowBlur = 3;
-    gameContext.shadowColor = "black";
+    gameContext.beginPath();
     for (var i = 0; i < pingCircles.length; i++) {
-        gameContext.beginPath();
-        gameContext.arc(pingCircles[i].x, pingCircles[i].y, pingCircles[i].radius, 0, 2 * Math.PI);
-        gameContext.stroke();
+        var ping = pingCircles[i];
+        gameContext.moveTo(ping.x + ping.radius, ping.y);
+        gameContext.arc(ping.x, ping.y, ping.radius, 0, 2 * Math.PI);
     }
+    gameContext.stroke();
     gameContext.restore();
 }
 function drawMap() {
-    if (Object.keys(currentMap).length > 0) {
-        gameContext.save();
-        var cells = currentMap.cells,
-            iCell = cells.length;
-
-        while (iCell--) {
-            gameContext.beginPath();
-            var cell = cells[iCell];
-            var halfedges = cell.halfedges;
-            var nHalfedges = halfedges.length;
-            if (nHalfedges == 0) {
-                continue;
-            }
-            var v = getStartpoint(halfedges[0]);
-            gameContext.moveTo(v.x, v.y);
-            for (var i = 0; i < nHalfedges; i++) {
-                v = getEndpoint(halfedges[i]);
-                gameContext.lineTo(v.x, v.y);
-            }
-            var color = null;
-
-
-            if (cell.id > 99) {
-                //Ability Tiles
-                gameContext.setLineDash([2, 2]);
-                gameContext.lineWidth = 5;
-                gameContext.strokeStyle = '#FFFF00';
-                color = patterns[cell.id];
-            } else if (patterns[cell.id] != null) {
-                // Textured Tiles
-                color = patterns[cell.id];
-                gameContext.setLineDash([]);
-                gameContext.lineWidth = 1;
-                gameContext.strokeStyle = patterns[cell.id];
-            } else if (cell.id == config.tileMap.goal.id) {
-                gameContext.setLineDash([0, 0]);
-                gameContext.lineWidth = 5;
-                gameContext.strokeStyle = '#756300';
-                color = locateColor(cell.id);
-            } else {
-                //Regular colors
-                color = locateColor(cell.id);
-                gameContext.setLineDash([]);
-                gameContext.lineWidth = 3;
-                gameContext.strokeStyle = color;
-            }
-            gameContext.shadowBlur = null;
-            gameContext.shadowColor = null;
-            gameContext.fillStyle = color;
-            gameContext.fill();
-            gameContext.stroke();
-        }
-        gameContext.restore();
-        if (Object.keys(hazardList).length > 0) {
-            for (var id in hazardList) {
-                drawHazard(hazardList[id]);
-            }
+    if (currentMap == null || currentMap.cells == null || currentMap.cells.length === 0) {
+        return;
+    }
+    if (mapDirty || mapCanvas == null) {
+        renderMapToCache();
+        mapDirty = false;
+    }
+    if (mapCanvas != null) {
+        gameContext.drawImage(mapCanvas, world.x - mapCanvasPad, world.y - mapCanvasPad);
+    }
+    if (Object.keys(hazardList).length > 0) {
+        for (var id in hazardList) {
+            drawHazard(hazardList[id]);
         }
     }
+}
+
+function renderMapToCache() {
+    if (world == null) {
+        return;
+    }
+    if (mapCanvas == null) {
+        mapCanvas = document.createElement("canvas");
+        mapCanvas.width = world.width + mapCanvasPad * 2;
+        mapCanvas.height = world.height + mapCanvasPad * 2;
+        mapCtx = mapCanvas.getContext("2d");
+    } else {
+        mapCtx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
+    }
+    mapCtx.save();
+    mapCtx.translate(-world.x + mapCanvasPad, -world.y + mapCanvasPad);
+
+    var cells = currentMap.cells;
+    var iCell = cells.length;
+    while (iCell--) {
+        mapCtx.beginPath();
+        var cell = cells[iCell];
+        var halfedges = cell.halfedges;
+        var nHalfedges = halfedges.length;
+        if (nHalfedges == 0) {
+            continue;
+        }
+        var v = getStartpoint(halfedges[0]);
+        mapCtx.moveTo(v.x, v.y);
+        for (var i = 0; i < nHalfedges; i++) {
+            v = getEndpoint(halfedges[i]);
+            mapCtx.lineTo(v.x, v.y);
+        }
+        var color = null;
+
+        if (cell.id > 99) {
+            mapCtx.setLineDash([2, 2]);
+            mapCtx.lineWidth = 5;
+            mapCtx.strokeStyle = '#FFFF00';
+            color = patterns[cell.id];
+        } else if (patterns[cell.id] != null) {
+            color = patterns[cell.id];
+            mapCtx.setLineDash([]);
+            mapCtx.lineWidth = 1;
+            mapCtx.strokeStyle = patterns[cell.id];
+        } else if (cell.id == config.tileMap.goal.id) {
+            mapCtx.setLineDash([0, 0]);
+            mapCtx.lineWidth = 5;
+            mapCtx.strokeStyle = '#756300';
+            color = locateColor(cell.id);
+        } else {
+            color = locateColor(cell.id);
+            mapCtx.setLineDash([]);
+            mapCtx.lineWidth = 3;
+            mapCtx.strokeStyle = color;
+        }
+        mapCtx.shadowBlur = 0;
+        mapCtx.shadowColor = "transparent";
+        mapCtx.fillStyle = color;
+        mapCtx.fill();
+        mapCtx.stroke();
+    }
+    mapCtx.restore();
 }
 function drawHazard(hazard) {
     if (hazard.id == config.hazards.bumper.id) {
