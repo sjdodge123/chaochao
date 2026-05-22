@@ -5,6 +5,7 @@ var messenger = require('./messenger.js');
 var hostess = require('./hostess.js');
 var _engine = require('./engine.js');
 var compressor = require('./compressor.js');
+var debug = require('./debug.js');
 
 exports.getRoom = function (sig, size) {
 	return new Room(sig, size);
@@ -200,6 +201,7 @@ class Game {
 		client.emit("allAbilityHoldings", JSON.stringify(this.gameBoard.gatherAbilities()));
 	}
 	checkLobbyStart() {
+		debug.log("checkLobbyStart: playerCount=", this.playerCount, " min=", c.minPlayersToStart, " state=", this.currentState);
 		if (this.playerCount >= c.minPlayersToStart) {
 			this.startLobby();
 		}
@@ -361,6 +363,7 @@ class Game {
 	}
 	startLobby() {
 		console.log("Start Lobby")
+		debug.log("startLobby: from state=", this.currentState, " playerCount=", this.playerCount);
 		this.currentState = this.stateMap.lobby;
 		this.world.resize();
 		this.gameBoard.startLobby();
@@ -2076,6 +2079,7 @@ class Player extends Circle {
 	checkAFK(currentState) {
 		if (this.awake == true) {
 			if (currentState == c.stateMap.waiting || currentState == c.stateMap.lobby) {
+				debug.log("checkAFK: kicking player id=", this.id, " from state=", currentState, " (awake AFK)");
 				this.kick = true;
 				return;
 			}
@@ -2087,6 +2091,7 @@ class Player extends Circle {
 			if (this.kickTimeLeft > 0) {
 				return;
 			}
+			debug.log("checkAFK: kicking player id=", this.id, " from state=", currentState, " (kickTimer expired)");
 			this.kick = true;
 			return;
 		}

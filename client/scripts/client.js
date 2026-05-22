@@ -12,6 +12,7 @@ function clientConnect() {
 	var server = io();
 
 	server.on('welcome', function (id) {
+		debugLog("welcome, myID=", id);
 		myID = id;
 	});
 
@@ -23,12 +24,14 @@ function clientConnect() {
 	})
 
 	server.on("serverKick", function () {
+		debugLog("serverKick received -- being booted");
 		server.disconnect();
 		window.parent.location.href = "./index.html";
 	});
 
 
 	server.on("gameState", function (gameState) {
+		debugLog("gameState received, gameID=", gameState.gameID, "myID=", gameState.myID, "players=", Object.keys(gameState.clientList || {}).length);
 		config = gameState.config;
 		round = gameState.round;
 		gameLength = config.baseNotchesToWin;
@@ -40,8 +43,9 @@ function clientConnect() {
 		interval = config.serverTickSpeed;
 		gameRunning = true;
 		playSoundAfterFinish(lobbyMusic);
-		init();
 		loadPatterns();
+		loadSpriteSheets();
+		init();
 		if (gameState.myID != null) {
 			myID = gameState.myID;
 		}
@@ -156,15 +160,18 @@ function clientConnect() {
 
 	//Game State Map changes
 	server.on("startWaiting", function (packet) {
+		debugLog("startWaiting");
 		currentState = config.stateMap.waiting;
 		playSoundAfterFinish(lobbyMusic);
 	});
 	server.on("startLobby", function (packet) {
+		debugLog("startLobby, packet=", packet);
 		spawnLobbyStartButton(packet);
 		playSoundAfterFinish(lobbyMusic);
 		currentState = config.stateMap.lobby;
 	});
 	server.on("startGated", function (packet) {
+		debugLog("startGated");
 		stopSound(lobbyMusic);
 		playSound(gameStart);
 		currentState = config.stateMap.gated;
@@ -176,10 +183,6 @@ function clientConnect() {
 		resetTrails();
 		resetPlayerRanks();
 		currentState = config.stateMap.racing;
-		for (var i = 0; i < pingIntervals.length; i++) {
-			clearInterval(pingIntervals[i]);
-		}
-
 	});
 	server.on("startOverview", function (packet) {
 		resetRound();
@@ -480,6 +483,7 @@ function calcPing() {
 function checkForTimeout() {
 	timeSinceLastCom++;
 	if (timeSinceLastCom > serverTimeoutWait) {
+		debugLog("client timeout -- no server comm for " + timeSinceLastCom + "s, reloading");
 		server.disconnect();
 		window.parent.location.reload();
 	}

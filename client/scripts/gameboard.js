@@ -20,10 +20,14 @@ var mousex,
 	timerList = [],
 	playersNearVictory = [],
 	pingCircles = [],
-	pingIntervals = [],
 	brutalRound = false,
 	brutalRoundConfig = null,
 	clientList;
+
+// DEBUG: force my player's trail to render in near-victory (dashed) style. Set to false for real play.
+var DEBUG_FORCE_NEAR_VICTORY = false;
+// DEBUG: force my player to be on fire for testing flame animation. Set to false for real play.
+var DEBUG_FORCE_FIRE = false;
 
 resetGameboard();
 
@@ -54,7 +58,30 @@ function updateGameboard(dt) {
 	if (currentState == config.stateMap.racing || currentState == config.stateMap.overview || currentState == config.stateMap.collapsing) {
 		updateTrails();
 	}
+	updatePingCircles(dt);
 	checkTimers(dt);
+}
+
+function updatePingCircles(dt) {
+	if (pingCircles.length == 0) return;
+	if (currentState != config.stateMap.gated) return;
+	var wrapped = false;
+	for (var i = pingCircles.length - 1; i >= 0; i--) {
+		var ping = pingCircles[i];
+		if (ping.pass >= 2) {
+			pingCircles.splice(i, 1);
+			continue;
+		}
+		ping.radius += 200 * dt / 1000;
+		if (ping.radius > 500) {
+			ping.radius = 0;
+			ping.pass++;
+			wrapped = true;
+		}
+	}
+	if (wrapped) {
+		playSound(countDownA);
+	}
 }
 function resetTrails() {
 	for (var id in playerList) {
@@ -69,7 +96,7 @@ function updateTrails() {
 		if (player.alive == false || player.infected == true) {
 			continue;
 		}
-		player.trail.update({ x: player.x, y: player.y });
+		player.trail.update({ x: player.x, y: player.y }, player);
 	}
 }
 
@@ -271,6 +298,7 @@ function checkGameState(payload) {
 function loadNewMap(id) {
 	currentMap = {};
 	pingCircles = [];
+	invalidateMapCache();
 	for (var i = 0; i < maps.length; i++) {
 		if (id == maps[i].id) {
 			currentMap = JSON.parse(JSON.stringify(maps[i]));
@@ -278,26 +306,15 @@ function loadNewMap(id) {
 		}
 	}
 	if (currentState == config.stateMap.gated) {
+		var goalFound = false;
 		for (var j = 0; j < currentMap.cells.length; j++) {
 			if (currentMap.cells[j].id == config.tileMap.goal.id) {
-				playSound(countDownA);
-				var pingCircle = { x: currentMap.cells[j].site.x, y: currentMap.cells[j].site.y, radius: 0, pass: 0 };
-				pingCircles.push(pingCircle);
-				pingIntervals.push(setInterval(function (ping) {
-					if (ping.pass == 2) {
-						var index = pingCircles.indexOf(ping);
-						pingCircles.splice(index, 1);
-					}
-					if (ping.radius > 500) {
-						ping.radius = 0;
-						playSound(countDownA);
-						ping.pass++;
-					} else {
-						ping.radius += 10;
-					}
-
-				}, 50, pingCircle));
+				goalFound = true;
+				pingCircles.push({ x: currentMap.cells[j].site.x, y: currentMap.cells[j].site.y, radius: 0, pass: 0 });
 			}
+		}
+		if (goalFound) {
+			playSound(countDownA);
 		}
 	}
 }
@@ -320,6 +337,7 @@ function applyAbilites(abilities) {
 			currentMap.cells[i].id = abilities[currentMap.cells[i].site.voronoiId];
 		}
 	}
+	invalidateMapCache();
 }
 function applyRandomTiles(randomTiles) {
 	if (randomTiles.length == 0) {
@@ -330,6 +348,7 @@ function applyRandomTiles(randomTiles) {
 			currentMap.cells[i].id = randomTiles[currentMap.cells[i].site.voronoiId];
 		}
 	}
+	invalidateMapCache();
 }
 function applyHazards(payload) {
 	if (payload == null) {
@@ -552,7 +571,7 @@ function collapseCells(cells) {
 			}
 		}
 	}
-
+	invalidateMapCache();
 }
 function explodedCells(cells) {
 	for (var i = 0; i < currentMap.cells.length; i++) {
@@ -564,7 +583,7 @@ function explodedCells(cells) {
 			}
 		}
 	}
-
+	invalidateMapCache();
 }
 
 function playerPickedUpAbility(payload) {
@@ -576,6 +595,7 @@ function playerPickedUpAbility(payload) {
 		var cell = currentMap.cells[i];
 		if (cell.site.voronoiId == payload.voronoiId) {
 			cell.id = config.tileMap.normal.id;
+			invalidateMapCache();
 			return;
 		}
 	}
@@ -592,6 +612,7 @@ function changeTilesBulk(tileChanges) {
 
 		}
 	}
+	invalidateMapCache();
 }
 
 
@@ -626,20 +647,102 @@ function setupEmojiWheel() {
 class Trail {
 	constructor(initialPosition) {
 		this.vertices = [];
-		this.maxLength = 10000;
+		this.maxLength = 100000;
+		this.canvas = null;
+		this.ctx = null;
+		this.canvasOriginX = 0;
+		this.canvasOriginY = 0;
+		this.wasNearVictory = false;
+		this.accumulatedLength = 0;
 	}
-	update(currentPosition) {
-		if (this.vertices.length > 0 &&
-			currentPosition.x == this.vertices[this.vertices.length - 1].x &&
-			currentPosition.y == this.vertices[this.vertices.length - 1].y) {
+	_ensureCanvas() {
+		if (this.canvas != null || world == null) {
+			return;
+		}
+		var pad = 8;
+		this.canvas = document.createElement("canvas");
+		this.canvas.width = world.width + pad * 2;
+		this.canvas.height = world.height + pad * 2;
+		this.ctx = this.canvas.getContext("2d");
+		this.canvasOriginX = world.x - pad;
+		this.canvasOriginY = world.y - pad;
+	}
+	_applyStrokeStyle(color, dashed) {
+		this.ctx.lineWidth = dashed ? 6 : 5;
+		this.ctx.shadowBlur = 3;
+		this.ctx.shadowColor = "black";
+		this.ctx.strokeStyle = color;
+		this.ctx.setLineDash(dashed ? [20, 3, 3, 3, 3, 3, 3, 3] : []);
+	}
+	_redrawAll(color, dashed) {
+		this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+		var total = 0;
+		for (var i = 1; i < this.vertices.length; i++) {
+			var dx = this.vertices[i].x - this.vertices[i - 1].x;
+			var dy = this.vertices[i].y - this.vertices[i - 1].y;
+			total += Math.sqrt(dx * dx + dy * dy);
+		}
+		this.accumulatedLength = total;
+		if (this.vertices.length < 2) {
+			return;
+		}
+		this._applyStrokeStyle(color, dashed);
+		this.ctx.lineDashOffset = 0;
+		this.ctx.beginPath();
+		var v0 = this.vertices[0];
+		this.ctx.moveTo(v0.x - this.canvasOriginX, v0.y - this.canvasOriginY);
+		for (var j = 1; j < this.vertices.length; j++) {
+			var v = this.vertices[j];
+			this.ctx.lineTo(v.x - this.canvasOriginX, v.y - this.canvasOriginY);
+		}
+		this.ctx.stroke();
+	}
+	update(currentPosition, player) {
+		var last = this.vertices.length > 0 ? this.vertices[this.vertices.length - 1] : null;
+		if (last != null && currentPosition.x == last.x && currentPosition.y == last.y) {
 			return;
 		}
 		if (this.vertices.length > this.maxLength) {
 			this.vertices.shift();
 		}
 		this.vertices.push(currentPosition);
+
+		this._ensureCanvas();
+		if (this.canvas == null || player == null) {
+			return;
+		}
+
+		var isNearVictory = player.notches == gameLength;
+		if (DEBUG_FORCE_NEAR_VICTORY && player.id == myID) {
+			isNearVictory = true;
+		}
+		if (isNearVictory != this.wasNearVictory) {
+			this._redrawAll(player.color, isNearVictory);
+			this.wasNearVictory = isNearVictory;
+			return;
+		}
+		if (last == null) {
+			return;
+		}
+		var sdx = currentPosition.x - last.x;
+		var sdy = currentPosition.y - last.y;
+		var segLen = Math.sqrt(sdx * sdx + sdy * sdy);
+
+		this._applyStrokeStyle(player.color, isNearVictory);
+		this.ctx.lineDashOffset = isNearVictory ? this.accumulatedLength : 0;
+		this.ctx.beginPath();
+		this.ctx.moveTo(last.x - this.canvasOriginX, last.y - this.canvasOriginY);
+		this.ctx.lineTo(currentPosition.x - this.canvasOriginX, currentPosition.y - this.canvasOriginY);
+		this.ctx.stroke();
+
+		this.accumulatedLength += segLen;
 	}
 	reset(player) {
 		this.vertices = [];
+		this.wasNearVictory = false;
+		this.accumulatedLength = 0;
+		if (this.ctx != null) {
+			this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+		}
 	}
 }
