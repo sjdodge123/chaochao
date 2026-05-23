@@ -40,3 +40,17 @@ Tracked work that is known and intentionally deferred. The currently-in-progress
 
 - **No responsive design / no mobile-specific layout.** At narrow widths the flex card may still need a column layout (stat group on top, button on bottom).
 - **`section { margin-top: var(--navbar-height); height: 100vh }`** leaves a big empty area below the card list on tall screens. Either centre the join UI vertically or let it hug the top with a sensible cap.
+
+## Landing page (`client/index.html`, related CSS)
+
+### UX
+
+- **No live "X games in progress / Y players online" signal.** The server already serves this data via `getRooms` / `config`. Reuse the join-page pattern (socket connect → roomListing → DOM update) on the landing page so visitors can tell at a glance whether to click Play or Join. Include a stale-data fallback ("Server sleeping…") if no response arrives.
+- **Patch Notes opens GitHub Releases in a new tab.** Now that `CHANGELOG.md` exists, an in-page modal (fetching the latest release notes from GitHub or the local CHANGELOG) would be friendlier to non-technical players.
+- **No "how to play" / controls hint.** WASD-vs-mouse drive isn't obvious to newcomers; one line + a short link is enough.
+
+### Polish
+
+- **`#game-title { font-family: "San Francisco" }`** renders only on macOS. Either ship a real web font or pick a system stack with broader cross-platform fidelity.
+- **No screenshot / animated preview.** A small hero image (or a rotating row of map thumbnails — we already serve them via `contentDelivery`) would set expectations for the game.
+- **No mobile-specific layout** beyond Bootstrap defaults. Card and title don't reflow; consider a proper mobile pass.
