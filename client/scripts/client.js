@@ -25,13 +25,13 @@ function clientConnect() {
 		// page so they can pick a real room (or start a new one).
 		debugLog("roomNotFound -- redirecting to join page");
 		server.disconnect();
-		window.parent.location.href = "./join.html?notfound=1";
+		window.location.href = "./join.html?notfound=1";
 	});
 
 	server.on("serverKick", function () {
 		debugLog("serverKick received -- being booted");
 		server.disconnect();
-		window.parent.location.href = "./index.html";
+		window.location.href = "./index.html";
 	});
 
 

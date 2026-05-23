@@ -58,7 +58,19 @@ function clientConnect() {
         renderRooms(JSON.parse(packet));
     });
 
+    // Stop polling on socket disconnect or page navigation so we don't
+    // leak the timer or fire getRooms into a dead/buffering socket.
+    server.on("disconnect", stopRefreshing);
+    window.addEventListener("pagehide", stopRefreshing);
+
     return server;
+}
+
+function stopRefreshing() {
+    if (refreshInterval != null) {
+        clearInterval(refreshInterval);
+        refreshInterval = null;
+    }
 }
 
 function renderRooms(rooms) {

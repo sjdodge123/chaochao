@@ -68,10 +68,15 @@ jobs:
           fi
           # Reject changes that only edit existing released sections — new notes
           # should land under '## Unreleased' so the next release can sweep them up.
+          # Treat ADDED and CONTEXT section headers (lines starting with '+' or ' ')
+          # as section boundaries, but never DELETED ones — otherwise a release-prep
+          # PR that renames '## Unreleased' to '## vX.Y.Z' (the diff contains
+          # '-## Unreleased') would flip into in_unrel state and false-positive the
+          # next added line as a new note.
           unreleased_added=$(git diff "$base" "$head" -- CHANGELOG.md | awk '
             /^@@/ {in_unrel = 0; next}
-            /^[+-]## Unreleased/ {in_unrel = 1; next}
-            /^[+-]## [0-9]/ {in_unrel = 0; next}
+            /^[+ ]## Unreleased/ {in_unrel = 1; next}
+            /^[+ ]## [0-9]/ {in_unrel = 0; next}
             in_unrel && /^\+[^+]/ {n++}
             END {print n+0}
           ')

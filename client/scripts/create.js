@@ -27,30 +27,36 @@ var server,
 
 var scale = 0.035;
 
-// Tile textures. Attach onload BEFORE setting src so cached images still
-// fire the load handler. loadPatterns() is gated on all images being ready
-// AND the config socket message arriving — see tryStart().
+// Tile textures. Attach load + error BEFORE setting src so cached images
+// still fire and a missing/broken asset can't hang the gate forever.
+// Pass explicit width/height: PNGs are OK from intrinsic size, but the
+// SVG icons (question-solid, bomb) have only viewBox — Firefox returns
+// width=0 for those without an attribute, which makes makePattern()
+// render a 3px transparent canvas for the random/ability tiles.
+// loadPatterns() is gated on all images being ready AND the config
+// socket message arriving — see tryStart().
 var imagesPending = 0,
     imagesLoaded = 0;
-function loadTileImage(src, scale) {
-    var img = new Image();
+function loadTileImage(src, width, height, scale) {
+    var img = new Image(width, height);
     if (scale != null) img.scale = scale;
     imagesPending++;
-    img.addEventListener('load', onTileImageLoad);
+    img.addEventListener('load', onTileImageSettled, { once: true });
+    img.addEventListener('error', onTileImageSettled, { once: true });
     img.src = src;
     return img;
 }
-function onTileImageLoad() {
+function onTileImageSettled() {
     imagesLoaded++;
     tryStart();
 }
-var lava = loadTileImage("../assets/img/lava.png");
-var grass = loadTileImage("../assets/img/grass.png", 0.5);
-var dirt = loadTileImage("../assets/img/dirt.png", 0.25);
-var ice = loadTileImage("../assets/img/ice.png", 0.75);
-var sand = loadTileImage("../assets/img/sand.png", 0.25);
-var random = loadTileImage("../assets/img/question-solid.svg");
-var bombIcon = loadTileImage("../assets/img/bomb.svg");
+var lava = loadTileImage("../assets/img/lava.png", 256, 256);
+var grass = loadTileImage("../assets/img/grass.png", 256, 256, 0.5);
+var dirt = loadTileImage("../assets/img/dirt.png", 256, 256, 0.25);
+var ice = loadTileImage("../assets/img/ice.png", 256, 256, 0.75);
+var sand = loadTileImage("../assets/img/sand.png", 256, 256, 0.25);
+var random = loadTileImage("../assets/img/question-solid.svg", 576, 512);
+var bombIcon = loadTileImage("../assets/img/bomb.svg", 576, 512);
 
 // Redraw gate. Set dirty=true from anything that mutates rendered state
 // (mouse moved, click, paint, hazard added/removed/rotated, resize, rebuild);
