@@ -81,6 +81,11 @@ var primarySlot = 0;        // index in localPlayers of the render/audio owner
 // claims the primary slot (P1) so the game is playable with controllers only; if
 // the keyboard is in use it owns P1 and pads start at P2.
 var keyboardClaimedPrimary = false;
+// The emoji wheel is a single shared element; this is the slot that currently has
+// it open (null = closed). Only that player navigates it (others keep playing),
+// and the chosen emoji is emitted on that player's own socket so it's attributed
+// to the right player.
+var emojiOwnerSlot = null;
 
 // Gated for now (the lobby in a later phase replaces this with a real claim flow).
 // When absent, only the primary slot ever exists => identical to today. Memoised

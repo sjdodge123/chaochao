@@ -673,6 +673,15 @@ function sendEmoji(emoji) {
 	server.emit('sendEmoji', emoji);
 }
 
+// Emit an emoji on a specific local player's socket so the server attributes it
+// (ownerId = emitting socket id) to the player who actually picked it. Falls back
+// to the primary socket if the slot is gone.
+function sendEmojiForSlot(emoji, slot) {
+	var lp = (slot != null && localPlayers[slot]) ? localPlayers[slot] : null;
+	var sock = (lp && lp.socket) ? lp.socket : server;
+	sock.emit('sendEmoji', emoji);
+}
+
 function calcPing() {
 	ping = new Date() - lastTime;
 	pingTimeout = setTimeout(pingServer, 1000);

@@ -436,20 +436,29 @@ function openEmojiWindow(x, y) {
     if (menuOpen == false) {
         emojiMenu.style.transform = "scale(2)";
         menuOpen = true;
+        // Mouse/touch/keyboard opens belong to the primary; a pad open overrides
+        // this in openEmojiFromPad. Tint the wheel border with the opener's color.
+        emojiOwnerSlot = primarySlot;
+        if (typeof playerList !== "undefined" && playerList && myID != null && playerList[myID]) {
+            emojiMenu.style.borderColor = playerList[myID].color;
+        }
         moveEmojiMenu(x, y);
     }
 
 }
 function closeEmojiWindow(source) {
+    var owner = emojiOwnerSlot;
     if (menuOpen) {
         emojiMenu.style.transform = "scale(0)";
         menuOpen = false;
     }
+    emojiOwnerSlot = null;
     if (source == "cancel") {
         return;
     }
     var emoji = String(source).trim();
-    sendEmoji(emoji);
+    // Attribute the emoji to the player who opened the wheel (their socket).
+    sendEmojiForSlot(emoji, owner);
 }
 
 function moveEmojiMenu(x, y) {
