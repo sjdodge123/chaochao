@@ -89,6 +89,11 @@ function registerPrimaryHandlers(server) {
 			setBackgroundMusic(gameState.music.mood, gameState.music.track);
 		}
 		setupEmojiWheel();
+		// In local multiplayer P1 also gets a top hint block (the bottom bar is
+		// suppressed); created once the primary has joined.
+		if (localMultiplayerEnabled() && typeof onLocalPlayerJoined === "function" && localPlayers[primarySlot]) {
+			onLocalPlayerJoined(localPlayers[primarySlot]);
+		}
 	});
 
 	server.on("playerJoin", function (appendPlayerList) {

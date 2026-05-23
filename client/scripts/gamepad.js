@@ -180,8 +180,10 @@ function onGamepadDisconnected(e) {
         if (activeInputMethod === "pad") {
             setInputMethod((typeof isTouchScreen !== "undefined" && isTouchScreen) ? "touch" : "kbm");
         }
-        if (typeof onLocalPlayerDropped === "function") {
-            onLocalPlayerDropped(lp.slot);
+        // P1 persists (keyboard can drive it) — revert its block hints to keyboard
+        // rather than removing the block.
+        if (typeof setBlockHints === "function") {
+            setBlockHints(lp);
         }
     }
 }
@@ -320,7 +322,10 @@ function bindPadToPrimary(padIndex, pad) {
     primary.gp.prevButtons = snapshotButtons(pad);
     gamepadType = primary.padType; // the bottom hint bar's attack glyph
     if (typeof onLocalPlayerJoined === "function") {
-        onLocalPlayerJoined(primary); // give P1 a color-dot block too
+        onLocalPlayerJoined(primary); // ensure P1 has a block
+    }
+    if (typeof setBlockHints === "function") {
+        setBlockHints(primary); // P1 now drives by pad — switch its hints to pad glyphs
     }
 }
 
@@ -910,6 +915,12 @@ function setInputMethod(method) {
         return;
     }
     activeInputMethod = method;
+    // In local multiplayer the single bottom bar can't represent several players'
+    // schemes at once (it would flip-flop), so each player carries their own
+    // compact hints in their top block instead — don't show the bottom bar.
+    if (localMultiplayerEnabled()) {
+        return;
+    }
     if (!hintBarEl) {
         buildHintBar();
     }
@@ -950,15 +961,29 @@ function padHasInput(pad) {
 }
 
 // Show the hint bar at full opacity and (re)start the ~60s countdown to fade.
-function scheduleHintFade() {
-    if (!hintBarEl) {
-        return;
+// The hint UI is the bottom bar (single-player) and/or the per-player top blocks
+// (local MP). Fade/hide apply to whichever exist.
+function hintFadeEls() {
+    var els = [];
+    if (hintBarEl) {
+        els.push(hintBarEl);
     }
-    hintBarEl.classList.remove("faded");
+    if (padPlayersEl) {
+        els.push(padPlayersEl);
+    }
+    return els;
+}
+
+function scheduleHintFade() {
+    var els = hintFadeEls();
+    for (var i = 0; i < els.length; i++) {
+        els[i].classList.remove("faded");
+    }
     clearTimeout(gpFadeTimer);
     gpFadeTimer = setTimeout(function () {
-        if (hintBarEl && hintBarEl.classList.contains("visible")) {
-            hintBarEl.classList.add("faded");
+        var e = hintFadeEls();
+        for (var j = 0; j < e.length; j++) {
+            e[j].classList.add("faded");
         }
     }, HINT_FADE_MS);
 }
@@ -1041,28 +1066,56 @@ function onLocalPlayerJoined(lp) {
     var label = document.createElement("span");
     label.className = "pp-label";
     label.textContent = "P" + (lp.slot + 1);
-    var move = document.createElement("span");
-    move.className = "gp-glyph gp-stick";
-    move.textContent = "L";
-    var atk = document.createElement("span");
-    atk.className = "gp-glyph gp-face";
-    atk.textContent = attackGlyphFor(lp.padType);
-    var emoji = document.createElement("span");
-    emoji.className = "gp-glyph gp-face";
-    emoji.textContent = emojiGlyphFor(lp.padType);
+    var hints = document.createElement("span");
+    hints.className = "pp-hints";
 
     block.appendChild(dot);
     block.appendChild(label);
-    block.appendChild(move);
-    block.appendChild(atk);
-    block.appendChild(emoji);
+    block.appendChild(hints);
     padPlayersEl.appendChild(block);
-    padBlocks[lp.slot] = { el: block, dot: dot, lastColor: null };
+    padBlocks[lp.slot] = { el: block, dot: dot, hints: hints, lastColor: null, lastMethod: null };
+    setBlockHints(lp);
+    scheduleHintFade(); // a player joined — show the hints, restart the auto-fade
 
     // A join just happened — drop the connect toast.
     if (padToastEl) {
         padToastEl.classList.remove("visible");
     }
+}
+
+// The compact control hints for a player's CURRENT input method (keyboard vs
+// their own pad brand) — baked into each top block so every player sees their own
+// scheme without the single bottom bar flip-flopping.
+function blockMethodFor(lp) {
+    return (lp.padIndex != null) ? "pad" : "kbm";
+}
+
+function miniHintsFor(method, padType) {
+    if (method === "pad") {
+        return '<span class="gp-glyph gp-stick">L</span>' +
+            '<span class="gp-glyph gp-face">' + attackGlyphFor(padType) + '</span>' +
+            '<span class="gp-glyph gp-face">' + emojiGlyphFor(padType) + '</span>';
+    }
+    // keyboard / mouse
+    return '<span class="gp-glyph gp-key">WASD</span>' +
+        '<span class="gp-glyph gp-key">🖱</span>' +
+        '<span class="gp-glyph gp-key">RMB</span>';
+}
+
+// (Re)set a block's hint glyphs to match the player's current method. No-op when
+// unchanged, so a pad binding/unbinding only rewrites the DOM when needed.
+function setBlockHints(lp) {
+    var b = padBlocks[lp.slot];
+    if (!b) {
+        return;
+    }
+    var method = blockMethodFor(lp);
+    var key = method + "|" + lp.padType;
+    if (key === b.lastMethod) {
+        return;
+    }
+    b.hints.innerHTML = miniHintsFor(method, lp.padType);
+    b.lastMethod = key;
 }
 
 // Hook (client.js): grey a pad player's block while their socket is reconnecting,
@@ -1115,13 +1168,22 @@ function refreshPadBlocks() {
 
 // Manual toggle (Select button / H key): hide the bar now, or restore it.
 function toggleHintFade() {
-    if (!hintBarEl) {
+    var els = hintFadeEls();
+    if (els.length === 0) {
         return;
     }
-    if (hintBarEl.classList.contains("faded")) {
+    var anyFaded = false;
+    for (var i = 0; i < els.length; i++) {
+        if (els[i].classList.contains("faded")) {
+            anyFaded = true;
+        }
+    }
+    if (anyFaded) {
         scheduleHintFade(); // restore to full opacity + restart the auto-fade
     } else {
         clearTimeout(gpFadeTimer);
-        hintBarEl.classList.add("faded"); // hide on demand
+        for (var j = 0; j < els.length; j++) {
+            els[j].classList.add("faded"); // hide on demand
+        }
     }
 }
