@@ -100,7 +100,11 @@ function setupPage() {
     overlayContext = overlayCanvas.getContext('2d');
     init();
     $.when.apply($, promises).then(function () {
-        enterLobby();
+        // Don't enterLobby until the tile/ability Image() objects are
+        // actually decoded — otherwise loadPatterns() in the gameState
+        // handler builds empty CanvasPatterns and the board renders
+        // transparent for mid-game joiners.
+        tileImagesReady.then(enterLobby);
     });
 }
 
@@ -140,18 +144,14 @@ function animloop() {
     }
     if (loading == true) {
         var loadedCount = 0;
-        var totalToLoad = promises.length;
         for (var i = 0; i < promises.length; i++) {
-            if (promises[i].status != 200) {
-                continue;
-            }
-            if (promises[i].status == 200) {
-                loadedCount++;
-            }
+            if (promises[i].status == 200) loadedCount++;
         }
-
+        // Roll the tile/ability Image() decodes into the loading bar so
+        // it reflects what we actually wait on before entering the game.
+        loadedCount += requiredImagesLoaded;
+        var totalToLoad = promises.length + requiredImages.length;
         progressBar.style.width = ((loadedCount / totalToLoad) * 100 + "%");
-        //console.log("Loaded (" + loadedCount + " / " + totalToLoad + ")");
         if (loadedCount == totalToLoad) {
             enterLobby();
         }
