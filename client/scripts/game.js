@@ -149,6 +149,7 @@ $(function () {
 function setupPage() {
 
     window.addEventListener('blur', cancelAllLocalMovement);
+    window.addEventListener('focus', onTabRefocus);
     window.addEventListener('resize', resize, false);
     window.requestAnimFrame = (function () {
         return window.requestAnimationFrame ||
