@@ -105,6 +105,7 @@ function keyDown(evt) {
     if (movingByMouse) {
         movingByMouse = false;
     }
+    var gameKey = true;
     switch (evt.keyCode) {
         case 65: { turnLeft = true; break; } //Left key
         case 37: { turnLeft = true; break; } //Left key
@@ -115,6 +116,12 @@ function keyDown(evt) {
         case 83: { moveBackward = true; break; } //Down key
         case 40: { moveBackward = true; break; } //Down key
         case 32: { attack = true; break; } // Spacebar
+        default: { gameKey = false; }
+    }
+    // The keyboard is being used to play -> it owns the primary slot (P1), so
+    // controllers hot-join as P2+. (When this stays false, the first pad takes P1.)
+    if (gameKey) {
+        keyboardClaimedPrimary = true;
     }
     if (playerList[myID] != null) {
         calcAngleFromKeys(playerList[myID]);
