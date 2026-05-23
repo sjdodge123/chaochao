@@ -56,6 +56,14 @@ Colors.random = function () {
     }
     return result;
 };
+Colors.decode = function (input) {
+    for (var prop in this.names) {
+        if (input == this.names[prop]) {
+            return prop;
+        }
+    }
+    return "A player";
+};
 exports.submitPullRequest = async function (map) {
     var returnToClient = { status: false, message: "" };
     if (process.env.GITHUB_AUTH == null) {
@@ -223,6 +231,28 @@ exports.getRandomInt = function (min, max) {
 
 exports.getColor = function () {
     return Colors.random();
+};
+
+// Returns a color not already present in usedColors (a map of color -> true).
+// Prefers a distinct named color from the fixed palette; once the palette is
+// exhausted (a room can hold more players than there are named colors) it
+// derives a generated fallback color. Never recurses, so it can't blow the
+// stack and crash the process when a room fills up.
+exports.getUniqueColor = function (usedColors) {
+    usedColors = usedColors || {};
+    for (var name in Colors.names) {
+        if (!usedColors[Colors.names[name]]) {
+            return Colors.names[name];
+        }
+    }
+    for (var hue = 0; hue < 360; hue++) {
+        var color = 'hsl(' + hue + ', 70%, 50%)';
+        if (!usedColors[color]) {
+            return color;
+        }
+    }
+    // Far more players than possible colors; return something valid rather than throw.
+    return 'hsl(' + (Object.keys(usedColors).length % 360) + ', 70%, 50%)';
 };
 
 exports.getDT = function () {
