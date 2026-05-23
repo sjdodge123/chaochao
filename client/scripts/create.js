@@ -80,6 +80,8 @@ function showEditor() {
     $('#loadWindow').hide();
     $('#createWindow').show();
     document.body.classList.add('editor-open');
+    var cp = document.getElementById('controlPanel');
+    if (cp != null) cp.scrollTop = 0;
     resize();
     addListeners();
 }

@@ -136,6 +136,21 @@
       height: auto;
     }
 
+    /* Keep the toolbar icons pinned to the top of the panel so they
+       stay visible when the rest of the panel content scrolls. */
+    #editorToolbar {
+      position: sticky;
+      top: 0;
+      background: #f8f9fa;
+      z-index: 1;
+      padding-top: 1rem;
+      padding-bottom: 0.5rem;
+      margin: 0 -1rem 1rem;
+      padding-left: 1rem;
+      padding-right: 1rem;
+      border-bottom: thin solid #e6e6e6;
+    }
+
     @media screen and (max-width:768px) {
       #controlPanel {
         display: none;
@@ -160,7 +175,7 @@
     <div id="createWindow">
       <div id="mapEditor">
         <div id="controlPanel" class="bg-light">
-          <div class="d-flex align-items-center justify-content-between mb-3 mt-3">
+          <div id="editorToolbar" class="d-flex align-items-center justify-content-between">
             <button id="loadButton" class="btn bg-light p-0" title="Back to map list"><i class="fa fa-arrow-left fa-2x" aria-hidden="true"></i></button>
             <button id="rebuildButton" class="btn bg-light p-0" title="Wipe map and start over"><i class="fa fa-trash fa-2x" aria-hidden="true"></i></button>
             <button id="deleteSelectedButton" class="btn bg-light p-0" title="Delete selected hazard" disabled><i class="fa fa-times fa-2x" aria-hidden="true"></i></button>
