@@ -113,7 +113,8 @@ function checkForMail(client) {
 			config: c,
 			myID: client.id,
 			gameID: roomSig,
-			world: worldData
+			world: worldData,
+			music: room.game.currentMusic
 		};
 		client.emit("gameState", gameState);
 		//Update all existing players with the new player's info
@@ -128,6 +129,14 @@ function checkForMail(client) {
 
 	client.on('playerLeaveRoom', function () {
 		hostess.kickFromRoom(client.id);
+	});
+
+	client.on('musicTrackEnded', function (trackName) {
+		var room = hostess.getRoomBySig(roomMailList[client.id]);
+		if (room == undefined) {
+			return;
+		}
+		room.game.rotateMusicTrack(trackName);
 	});
 
 	client.on('drip', function () {
