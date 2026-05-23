@@ -1097,6 +1097,11 @@ function renderMapToCache() {
     while (iCell--) {
         mapCtx.beginPath();
         var cell = cells[iCell];
+        // Transparent "background" cells render nothing, so the plain lobby shows
+        // through and only the curated islands are visible.
+        if (cell.id == config.tileMap.background.id) {
+            continue;
+        }
         var halfedges = cell.halfedges;
         var nHalfedges = halfedges.length;
         if (nHalfedges == 0) {
