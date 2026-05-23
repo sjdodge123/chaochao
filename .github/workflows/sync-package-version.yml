@@ -43,28 +43,35 @@ jobs:
 
       - name: Bump package.json if it doesn't match
         id: bump
+        # Pass tag-derived values via env: instead of inlining ${{ }} into
+        # shell or node -e strings — a tag like `v1.0.0';rm -rf .;'` would
+        # otherwise close the JS/shell string literal and run arbitrary
+        # code on a runner that has contents: write.
+        env:
+          TARGET_VERSION: ${{ steps.version.outputs.version }}
         run: |
           current=$(node -p "require('./package.json').version")
-          target='${{ steps.version.outputs.version }}'
-          if [ "$current" = "$target" ]; then
-            echo "package.json already at $target; nothing to do"
+          if [ "$current" = "$TARGET_VERSION" ]; then
+            echo "package.json already at $TARGET_VERSION; nothing to do"
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
-            node -e "
-              const fs = require('fs');
-              const p = require('./package.json');
-              p.version = '${{ steps.version.outputs.version }}';
-              fs.writeFileSync('package.json', JSON.stringify(p, null, 4) + '\n');
-            "
-            echo "Bumped $current -> $target"
+            node -e '
+              const fs = require("fs");
+              const p = require("./package.json");
+              p.version = process.env.TARGET_VERSION;
+              fs.writeFileSync("package.json", JSON.stringify(p, null, 4) + "\n");
+            '
+            echo "Bumped $current -> $TARGET_VERSION"
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Commit and push
         if: steps.bump.outputs.changed == 'true'
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add package.json
-          git commit -m "Sync package.json to ${{ steps.version.outputs.tag }}"
+          git commit -m "Sync package.json to $RELEASE_TAG"
           git push origin main

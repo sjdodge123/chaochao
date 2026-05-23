@@ -102,14 +102,21 @@ function setupPage() {
     gameContext = gameCanvas.getContext('2d');
     overlayContext = overlayCanvas.getContext('2d');
     init();
-    $.when.apply($, promises).then(function () {
-        // Don't enterLobby until the tile/ability Image() objects are
-        // actually decoded — otherwise loadPatterns() in the gameState
-        // handler builds empty CanvasPatterns and the board renders
-        // transparent for mid-game joiners.
+    // Use .always() (not .then()) so a single 404 / CORS error in the
+    // preload list doesn't leave the lobby never being entered. Once
+    // every XHR has settled (success or failure), wait on the image
+    // decodes too — otherwise loadPatterns() in the gameState handler
+    // builds empty CanvasPatterns and the board renders transparent for
+    // mid-game joiners. animloop also surfaces a "still loading?" prompt
+    // after LOADING_TIMEOUT_MS as a last-resort recovery path.
+    $.when.apply($, promises).always(function () {
         tileImagesReady.then(enterLobby);
     });
 }
+
+var loadingStartedAt = Date.now();
+var LOADING_TIMEOUT_MS = 20000;
+var loadingTimeoutShown = false;
 
 function enterLobby() {
     if (inLobby == true) {
@@ -148,7 +155,10 @@ function animloop() {
     if (loading == true) {
         var loadedCount = 0;
         for (var i = 0; i < promises.length; i++) {
-            if (promises[i].status == 200) loadedCount++;
+            // readyState 4 = DONE for any settled XHR (200, 304, 404, etc).
+            // Counting only status==200 would stall the bar on 304s and
+            // mask CDN cache hits as "still loading".
+            if (promises[i].readyState === 4) loadedCount++;
         }
         // Roll the tile/ability Image() decodes into the loading bar so
         // it reflects what we actually wait on before entering the game.
@@ -157,6 +167,9 @@ function animloop() {
         progressBar.style.width = ((loadedCount / totalToLoad) * 100 + "%");
         if (loadedCount == totalToLoad) {
             enterLobby();
+        } else if (!loadingTimeoutShown && Date.now() - loadingStartedAt > LOADING_TIMEOUT_MS) {
+            loadingTimeoutShown = true;
+            progressContainer.html('Loading is taking longer than usual. <a href="#" onclick="location.reload();return false;">Refresh the page</a> to retry.');
         }
         requestAnimFrame(animloop);
     }
