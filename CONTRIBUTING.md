@@ -15,9 +15,10 @@ The `Game mechanic changes need release notes` GitHub Actions check enforces thi
 ### Cutting a release
 
 1. Move the `## Unreleased` block under a new `## vX.Y.Z — YYYY-MM-DD` heading in `CHANGELOG.md`. Leave a fresh empty `## Unreleased` at the top.
-2. Bump `version` in `package.json`.
-3. Commit, tag (`git tag vX.Y.Z`), push.
-4. Publish a GitHub release with the same tag, pasting the `vX.Y.Z` section as the body.
+2. Commit and push to `main`.
+3. Tag the commit: `git tag vX.Y.Z && git push --tags`.
+4. The `Sync package.json to release tag` workflow lands a follow-up commit on `main` bumping `package.json` to match the tag. Heroku deploys main HEAD, so the landing page picks up the new version automatically.
+5. Publish a GitHub release with the same tag, pasting the `vX.Y.Z` section of `CHANGELOG.md` as the body.
 
 ### Recommended repo settings
 
@@ -27,6 +28,8 @@ For full enforcement, enable branch protection on `main` in GitHub settings:
 - Require status check `check-release-notes` to pass
 
 Without branch protection a direct push to `main` will still get a red check on the commit, but the push isn't blocked.
+
+Note: if you enable "require a PR before merging" for `main`, the `sync-package-version` workflow won't be able to push its bump commit directly — swap its push step for `peter-evans/create-pull-request` or similar so it opens a PR instead.
 
 ## What doesn't need release notes
 
