@@ -123,6 +123,15 @@ canvas {
     padding: 1.5rem 1rem;
     color: #6c757d;
 }
+.not-found-banner {
+    background-color: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeeba;
+    border-radius: 4px;
+    padding: 0.6rem 0.9rem;
+    margin-bottom: 0.75rem;
+    font-size: 0.95rem;
+}
 .start-new {
     text-align: center;
     margin-top: 1rem;

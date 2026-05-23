@@ -20,8 +20,13 @@ function clientConnect() {
 		calcPing();
 	});
 	server.on("roomNotFound", function () {
-		alert("Game ID not found");
-	})
+		// Don't use alert() — it blocks the page and the user has no recovery
+		// path once dismissed. Disconnect and bounce them back to the join
+		// page so they can pick a real room (or start a new one).
+		debugLog("roomNotFound -- redirecting to join page");
+		server.disconnect();
+		window.parent.location.href = "./join.html?notfound=1";
+	});
 
 	server.on("serverKick", function () {
 		debugLog("serverKick received -- being booted");

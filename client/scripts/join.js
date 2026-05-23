@@ -14,6 +14,11 @@ $(function () {
             if (server != null) server.emit('getRooms');
         });
     }
+    var params = new URLSearchParams(window.location.search);
+    if (params.has('notfound')) {
+        var banner = document.getElementById('notFoundBanner');
+        if (banner != null) banner.hidden = false;
+    }
 });
 
 function clientConnect() {
