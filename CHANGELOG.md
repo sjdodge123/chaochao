@@ -20,7 +20,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 ## v0.1.4 — 2026-05-23
 
 ### General
-- Now with controller support! Plug in a controller and play
+- [headline] Now with controller support! Plug in a controller and play
 
 ## v0.1.3 — 2026-05-23
 
