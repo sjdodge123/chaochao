@@ -160,13 +160,29 @@ function onGamepadDisconnected(e) {
         debugLog("gamepad disconnected");
         return;
     }
-    // Local multiplayer: a pad player's controller was unplugged. Stop their
-    // movement and drop just that slot (everyone else keeps playing).
+    // Local multiplayer: a pad's controller was unplugged.
     var lp = localPlayerForPadIndex(e.gamepad.index);
     if (lp && !lp.isPrimary) {
+        // A pad player (P2+) unplugged — stop and drop just that slot.
         debugLog("[localmp] pad", e.gamepad.index, "unplugged — dropping slot", lp.slot);
         cancelMovementForSlot(lp);
         dropLocalPlayer(lp.slot);
+    } else if (lp && lp.isPrimary) {
+        // The pad driving P1 (pad-only) unplugged — keep the primary player alive
+        // (keyboard, or a re-pressed pad, can drive it) but release the binding
+        // and clear its block.
+        debugLog("[localmp] P1 pad", e.gamepad.index, "unplugged — releasing binding");
+        cancelMovementForSlot(lp);
+        lp.padIndex = null;
+        lp.gp.hadMoveInput = false;
+        gamepadConnected = false;
+        gamepadIndex = null;
+        if (activeInputMethod === "pad") {
+            setInputMethod((typeof isTouchScreen !== "undefined" && isTouchScreen) ? "touch" : "kbm");
+        }
+        if (typeof onLocalPlayerDropped === "function") {
+            onLocalPlayerDropped(lp.slot);
+        }
     }
 }
 
@@ -258,6 +274,83 @@ function rebaselinePadEdges(pads) {
     }
 }
 
+// An unclaimed pad pressed a button — claim a slot for it.
+function tryClaimPadSlot(padIndex, pad) {
+    var primary = localPlayers[primarySlot];
+    // Pad-only P1: if no keyboard is being used to play and the primary slot has
+    // no pad yet, the FIRST controller drives P1 (the existing primary
+    // connection) so no keyboard is required. This reuses the existing player, so
+    // there's no new join and no capacity check.
+    if (primary && primary.padIndex == null && !keyboardClaimedPrimary) {
+        bindPadToPrimary(padIndex, pad);
+        return;
+    }
+    // Otherwise the pad becomes a new local player (P2+). Joining by gameId
+    // bypasses the server's hasSpace()/isLocked() checks (§5.4), so guard here.
+    var slot = nextFreeSlot();
+    if (slot == null) {
+        showPadToast("All " + LOCAL_PLAYER_CAP + " local player slots are full", 3000);
+        return;
+    }
+    if (typeof gameID === "undefined" || gameID == null) {
+        return; // primary hasn't confirmed a room yet
+    }
+    if (roomIsFull()) {
+        showPadToast("Room is full — can't add another player", 3000);
+        return;
+    }
+    var lp = addLocalPlayer(slot, padIndex);
+    if (lp) {
+        lp.gp.prevButtons = snapshotButtons(pad); // don't let the join press = attack
+        if (joinWouldSpectate()) {
+            showPadToast("P" + (slot + 1) + " joining — spectator until next round", 3500);
+        }
+    }
+}
+
+// Bind a pad to the existing primary slot (pad-only P1). Drives the primary
+// player via the same path the single-player pad uses.
+function bindPadToPrimary(padIndex, pad) {
+    var primary = localPlayers[primarySlot];
+    if (!primary) {
+        return;
+    }
+    primary.padIndex = padIndex;
+    primary.padType = detectGamepadType(pad.id);
+    primary.gp.prevButtons = snapshotButtons(pad);
+    gamepadType = primary.padType; // the bottom hint bar's attack glyph
+    if (typeof onLocalPlayerJoined === "function") {
+        onLocalPlayerJoined(primary); // give P1 a color-dot block too
+    }
+}
+
+// True when the room already holds its max players. Counts the live playerList
+// plus any local players that have joined but whose playerJoin hasn't reflected
+// on the primary yet, so two quick joins can't both slip past.
+function roomIsFull() {
+    if (typeof config === "undefined" || !config || !config.maxPlayersInRoom) {
+        return false;
+    }
+    if (typeof playerList === "undefined" || !playerList) {
+        return false;
+    }
+    var count = Object.keys(playerList).length;
+    for (var s = 0; s < localPlayers.length; s++) {
+        var lp = localPlayers[s];
+        if (lp && lp.myID != null && !playerList[lp.myID]) {
+            count++;
+        }
+    }
+    return count >= config.maxPlayersInRoom;
+}
+
+// True if a join right now would land mid-race (server makes them a spectator
+// until the next round, §6.15).
+function joinWouldSpectate() {
+    return typeof config !== "undefined" && config && typeof currentState !== "undefined" &&
+        (currentState === config.stateMap.racing || currentState === config.stateMap.collapsing);
+}
+
 // Called once per frame from gameLoop().
 function pollGamepad(dt) {
     var pads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -289,14 +382,7 @@ function pollGamepad(dt) {
         var lp = localPlayerForPadIndex(i);
         if (!lp) {
             if (anyButtonPressed(pad)) {
-                var slot = nextFreeSlot();
-                if (slot != null && typeof gameID !== "undefined" && gameID != null) {
-                    lp = addLocalPlayer(slot, i);
-                    if (lp) {
-                        // Don't let the join press also register as an attack next frame.
-                        lp.gp.prevButtons = snapshotButtons(pad);
-                    }
-                }
+                tryClaimPadSlot(i, pad);
             }
             continue; // wait until the slot has joined (myID set) before polling
         }
@@ -888,8 +974,9 @@ function attackGlyphFor(type) {
     return type === "playstation" ? "✕" : "A";
 }
 
-// Brief "controller detected — press A to join" toast when a pad connects.
-function showJoinToast(type) {
+// Brief transient toast at the top of the screen (controller join prompts,
+// room-full / spectator notices).
+function showPadToast(html, ms) {
     if (typeof document === "undefined" || !document.body) {
         return;
     }
@@ -898,15 +985,20 @@ function showJoinToast(type) {
         padToastEl.id = "padToast";
         document.body.appendChild(padToastEl);
     }
-    padToastEl.innerHTML = '🎮 Controller detected — press ' +
-        '<span class="gp-glyph gp-face">' + attackGlyphFor(type) + '</span> to join';
+    padToastEl.innerHTML = html;
     padToastEl.classList.add("visible");
     clearTimeout(padToastTimer);
     padToastTimer = setTimeout(function () {
         if (padToastEl) {
             padToastEl.classList.remove("visible");
         }
-    }, 4000);
+    }, ms || 4000);
+}
+
+// "Controller detected — press A to join" toast when a pad connects.
+function showJoinToast(type) {
+    showPadToast('🎮 Controller detected — press ' +
+        '<span class="gp-glyph gp-face">' + attackGlyphFor(type) + '</span> to join', 4000);
 }
 
 // Hook (client.js addLocalPlayer): a pad player joined — create its block.

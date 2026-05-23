@@ -75,6 +75,10 @@ var LOCAL_PLAYER_CAP = 4;   // ship default; raise toward 8 once hardware + the
                             // server color-palette fix (getUniqueColorR) land.
 var localPlayers = [];      // slot index -> local player entry (slot 0 = primary)
 var primarySlot = 0;        // index in localPlayers of the render/audio owner
+// Set once a movement key is pressed. While false, the FIRST controller to press
+// claims the primary slot (P1) so the game is playable with controllers only; if
+// the keyboard is in use it owns P1 and pads start at P2.
+var keyboardClaimedPrimary = false;
 
 // Gated for now (the lobby in a later phase replaces this with a real claim flow).
 // When absent, only the primary slot ever exists => identical to today. Memoised
