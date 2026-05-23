@@ -625,6 +625,17 @@ div.desc {
     opacity: 0.45;
 }
 
+/* a player's inline "Leave?" confirm (B opens it, A confirms, B cancels) */
+.pad-player.confirming {
+    outline: 2px solid #e05a5a;
+    outline-offset: -1px;
+}
+
+.pad-player .pp-confirm {
+    font-weight: 700;
+    color: #e05a5a;
+}
+
 /* the controller -> player color link; lights up once the server assigns a color */
 .gp-color-dot {
     width: 14px;

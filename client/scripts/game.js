@@ -87,16 +87,10 @@ var keyboardClaimedPrimary = false;
 // to the right player.
 var emojiOwnerSlot = null;
 
-// Gated for now (the lobby in a later phase replaces this with a real claim flow).
-// When absent, only the primary slot ever exists => identical to today. Memoised
-// because pollGamepad calls this every frame.
-var _localMpFlag = null;
-function localMultiplayerEnabled() {
-    if (_localMpFlag === null) {
-        _localMpFlag = new URLSearchParams(window.location.search).has('localmp');
-    }
-    return _localMpFlag;
-}
+// Local multiplayer is always on: there is no URL flag. A solo player is simply
+// the primary slot (P1); additional controllers join as their own players when
+// they press a button. The hint UI is per-player top blocks (no single bottom
+// bar to flip-flop between schemes).
 
 // One local player's state. For the primary slot, `input` is unused (the keyboard
 // writes the movement globals instead); for pad slots it is the per-slot input.
@@ -109,6 +103,7 @@ function makeLocalPlayer(slot, socket, isPrimary) {
         joined: false,
         everJoined: false,        // has this slot ever confirmed a room? (drives auto-rejoin)
         reconnectTimer: null,     // grace timer started on a transient disconnect
+        leaveConfirm: false,      // showing the inline "leave?" confirm in this player's block
         // pad mapping (null for the keyboard/primary slot)
         padIndex: null,
         padType: "generic",

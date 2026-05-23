@@ -118,73 +118,33 @@ function onGamepadKeyDown(e) {
 function onGamepadConnected(e) {
     var type = detectGamepadType(e.gamepad.id);
     debugLog("gamepad connected:", e.gamepad.id, "->", type, "idx", e.gamepad.index);
-    if (!localMultiplayerEnabled()) {
-        // Single-player: adopt this pad onto the primary slot (today's behavior).
-        gamepadConnected = true;
-        gamepadIndex = e.gamepad.index;
-        gamepadType = type;
-        var p = localPlayers[primarySlot];
-        if (p) {
-            p.padIndex = e.gamepad.index;
-            p.padType = type;
-            p.gp.prevButtons = [];
-        }
-        // Don't swap the glyphs yet — wait until the pad is actually used, so a
-        // connected-but-idle pad doesn't override a player still on keyboard.
-        return;
-    }
-    // Local multiplayer: the pad hot-joins as a NEW local player on its first
-    // button press (pollGamepad). Browsers only reliably surface an idle pad
-    // after a press anyway, so we wait for that rather than joining on connect.
-    debugLog("[localmp] controller detected — press a button to join");
+    // The pad hot-joins as a local player on its first button press (pollGamepad);
+    // browsers only reliably surface an idle pad after a press anyway. Prompt for it.
     showJoinToast(type);
 }
 
 function onGamepadDisconnected(e) {
-    if (!localMultiplayerEnabled()) {
-        var p = localPlayers[primarySlot];
-        if (!p || e.gamepad.index !== p.padIndex) {
-            return;
-        }
-        gamepadConnected = false;
-        gamepadIndex = null;
-        p.padIndex = null;
-        if (p.gp.hadMoveInput) {
-            cancelMovement();
-            p.gp.hadMoveInput = false;
-        }
-        p.gp.prevMove = { moveForward: false, moveBackward: false, turnLeft: false, turnRight: false, attack: false };
-        if (activeInputMethod === "pad") {
-            setInputMethod((typeof isTouchScreen !== "undefined" && isTouchScreen) ? "touch" : "kbm");
-        }
-        debugLog("gamepad disconnected");
+    var lp = localPlayerForPadIndex(e.gamepad.index);
+    if (!lp) {
         return;
     }
-    // Local multiplayer: a pad's controller was unplugged.
-    var lp = localPlayerForPadIndex(e.gamepad.index);
-    if (lp && !lp.isPrimary) {
-        // A pad player (P2+) unplugged — stop and drop just that slot.
-        debugLog("[localmp] pad", e.gamepad.index, "unplugged — dropping slot", lp.slot);
-        cancelMovementForSlot(lp);
-        dropLocalPlayer(lp.slot);
-    } else if (lp && lp.isPrimary) {
-        // The pad driving P1 (pad-only) unplugged — keep the primary player alive
-        // (keyboard, or a re-pressed pad, can drive it) but release the binding
-        // and clear its block.
+    cancelMovementForSlot(lp);
+    lp.gp.hadMoveInput = false;
+    if (lp.isPrimary) {
+        // The pad driving P1 unplugged — keep the player (keyboard, or a re-pressed
+        // pad, can drive it); just release the binding. Its block hints (if in
+        // multiplayer) revert to keyboard on the next refresh.
         debugLog("[localmp] P1 pad", e.gamepad.index, "unplugged — releasing binding");
-        cancelMovementForSlot(lp);
         lp.padIndex = null;
-        lp.gp.hadMoveInput = false;
         gamepadConnected = false;
         gamepadIndex = null;
         if (activeInputMethod === "pad") {
             setInputMethod((typeof isTouchScreen !== "undefined" && isTouchScreen) ? "touch" : "kbm");
         }
-        // P1 persists (keyboard can drive it) — revert its block hints to keyboard
-        // rather than removing the block.
-        if (typeof setBlockHints === "function") {
-            setBlockHints(lp);
-        }
+    } else {
+        // A pad player (P2+) unplugged — drop just that slot.
+        debugLog("[localmp] pad", e.gamepad.index, "unplugged — dropping slot", lp.slot);
+        dropLocalPlayer(lp.slot);
     }
 }
 
@@ -198,45 +158,6 @@ function detectGamepadType(id) {
         return "playstation";
     }
     return "generic";
-}
-
-// Chrome only surfaces a pad after the first button press, and a pad held at
-// page load never fires 'gamepadconnected'. So in single-player we adopt the
-// first live pad onto the primary slot while polling.
-function adoptFirstPadToPrimary(pads) {
-    var p = localPlayers[primarySlot];
-    if (!p) {
-        return null;
-    }
-    if (p.padIndex != null && pads[p.padIndex]) {
-        return pads[p.padIndex];
-    }
-    for (var i = 0; i < pads.length; i++) {
-        if (pads[i]) {
-            p.padIndex = i;
-            p.padType = detectGamepadType(pads[i].id);
-            gamepadConnected = true;
-            gamepadIndex = i;
-            gamepadType = p.padType;
-            return pads[i];
-        }
-    }
-    // No pad present. If we thought one was connected, it vanished without a
-    // 'gamepaddisconnected' event — release any held movement so the player
-    // doesn't keep drifting, and fall back to keyboard/touch hints.
-    if (p.padIndex != null) {
-        p.padIndex = null;
-        gamepadConnected = false;
-        gamepadIndex = null;
-        if (p.gp.hadMoveInput && typeof cancelMovement === "function") {
-            cancelMovement();
-            p.gp.hadMoveInput = false;
-        }
-        if (activeInputMethod === "pad") {
-            setInputMethod((typeof isTouchScreen !== "undefined" && isTouchScreen) ? "touch" : "kbm");
-        }
-    }
-    return null;
 }
 
 function anyButtonPressed(pad) {
@@ -320,13 +241,9 @@ function bindPadToPrimary(padIndex, pad) {
     primary.padIndex = padIndex;
     primary.padType = detectGamepadType(pad.id);
     primary.gp.prevButtons = snapshotButtons(pad);
-    gamepadType = primary.padType; // the bottom hint bar's attack glyph
-    if (typeof onLocalPlayerJoined === "function") {
-        onLocalPlayerJoined(primary); // ensure P1 has a block
-    }
-    if (typeof setBlockHints === "function") {
-        setBlockHints(primary); // P1 now drives by pad — switch its hints to pad glyphs
-    }
+    gamepadType = primary.padType; // the (solo) bottom hint bar's attack glyph
+    // Solo: the bottom bar will show the pad scheme on first input. In multiplayer
+    // P1's block hints refresh to pad glyphs automatically (refreshPadBlocks).
 }
 
 // True when the room already holds its max players. Counts the live playerList
@@ -366,19 +283,21 @@ function pollGamepad(dt) {
         padEdgeResetPending = false;
         return;
     }
-    if (!localMultiplayerEnabled()) {
-        // Single-player: one pad drives the primary slot, exactly as before.
-        var pad = adoptFirstPadToPrimary(pads);
-        if (pad) {
-            pollPadForSlot(pad, localPlayers[primarySlot]);
+    // Release any bound pad that vanished without a 'gamepaddisconnected' event so
+    // the player doesn't keep drifting (a browser quirk the old single-pad path
+    // guarded against).
+    for (var v = 0; v < localPlayers.length; v++) {
+        var lpv = localPlayers[v];
+        if (lpv && lpv.padIndex != null && !pads[lpv.padIndex] && lpv.gp.hadMoveInput) {
+            cancelMovementForSlot(lpv);
+            lpv.gp.hadMoveInput = false;
         }
-        return;
     }
-    // Keep each pad player's color dot in sync with their server-assigned color.
+    // Keep the top blocks (color dots + per-player hints) in sync.
     refreshPadBlocks();
-    // Local multiplayer: keyboard owns the primary slot; each connected pad drives
-    // its own claimed slot, and an unclaimed pad hot-joins as a new local player
-    // on its first button press.
+    // Each connected pad drives its claimed slot; the first pad (with no keyboard
+    // in use) takes P1, and any other unclaimed pad hot-joins as a new local
+    // player on its first button press.
     for (var i = 0; i < pads.length; i++) {
         var pad = pads[i];
         if (!pad) {
@@ -401,51 +320,47 @@ function pollGamepad(dt) {
     }
 }
 
-// Poll one pad and apply it to its local player `lp`. The emoji wheel is a single
-// shared element owned by one slot at a time: only the OWNER navigates it; every
-// other player keeps playing, so one player's wheel never freezes the others
-// (§6.16). The leave modal stays primary-only.
+// Poll one pad and apply it to its local player `lp`.
+// - Emoji wheel: a single shared element owned by one slot at a time; only the
+//   owner navigates it, everyone else keeps playing (§6.16).
+// - Leave (B): in multiplayer it's an inline "Leave?" confirm in this player's own
+//   block (per-slot); when solo it's the existing centre modal.
 function pollPadForSlot(pad, lp) {
+    var blocks = (hintUiMode === "blocks");
     var wheelOpen = (typeof menuOpen !== "undefined" && menuOpen);
     var iOwnWheel = wheelOpen && emojiOwnerSlot === lp.slot;
 
-    if (lp.isPrimary) {
-        // Using the pad swaps the glyphs to the controller scheme.
-        if (padHasInput(pad)) {
-            lastPadInputAt = Date.now();
-            setInputMethod("pad");
+    // Any pad can toggle the hints; only the primary's pad swaps the (solo) bar.
+    if (buttonPressedThisFrame(pad, GP_BTN_SELECT, lp)) {
+        toggleHintFade();
+    }
+    if (lp.isPrimary && padHasInput(pad)) {
+        lastPadInputAt = Date.now();
+        setInputMethod("pad");
+    }
+
+    if (lp.leaveConfirm) {
+        // This player is confirming leave inline in their block.
+        pollLeaveConfirm(pad, lp);
+    } else if (!blocks && lp.isPrimary && leaveModalIsOpen()) {
+        // Solo: navigate the centre leave modal.
+        pollLeaveModal(pad, lp);
+    } else if (iOwnWheel) {
+        pollEmojiWheel(pad, lp);
+    } else if (!wheelOpen && buttonPressedThisFrame(pad, GP_BTN_B, lp)) {
+        if (blocks) {
+            openLeaveConfirm(lp);  // inline confirm in this player's block
+        } else if (lp.isPrimary) {
+            openLeaveModal();      // solo: the centre modal
         }
-        // Select toggles the hint bar between hidden (transparent) and shown.
-        if (buttonPressedThisFrame(pad, GP_BTN_SELECT, lp)) {
-            toggleHintFade();
-        }
-        if (leaveModalIsOpen()) {
-            pollLeaveModal(pad, lp);
-        } else if (iOwnWheel) {
-            pollEmojiWheel(pad, lp);
-        } else if (!wheelOpen && buttonPressedThisFrame(pad, GP_BTN_B, lp)) {
-            openLeaveModal();
-        } else if (!wheelOpen && buttonPressedThisFrame(pad, GP_BTN_EMOJI, lp)) {
-            openEmojiFromPad(lp);
-        } else {
-            // Normal play (also the case when another player owns the wheel).
-            pollAim(pad, lp);
-            pollMovementAndAttack(pad, lp);
-            if (buttonPressedThisFrame(pad, GP_BTN_START, lp)) {
-                goFullScreen();
-            }
-        }
+    } else if (!wheelOpen && buttonPressedThisFrame(pad, GP_BTN_EMOJI, lp)) {
+        openEmojiFromPad(lp);
     } else {
-        if (iOwnWheel) {
-            pollEmojiWheel(pad, lp);
-        } else if (!wheelOpen && buttonPressedThisFrame(pad, GP_BTN_EMOJI, lp)) {
-            openEmojiFromPad(lp);
-        } else {
-            pollAim(pad, lp);
-            pollMovementAndAttack(pad, lp);
-            if (buttonPressedThisFrame(pad, GP_BTN_START, lp)) {
-                goFullScreen();
-            }
+        // Normal play (also when another player owns the wheel).
+        pollAim(pad, lp);
+        pollMovementAndAttack(pad, lp);
+        if (buttonPressedThisFrame(pad, GP_BTN_START, lp)) {
+            goFullScreen();
         }
     }
     rememberButtons(pad, lp);
@@ -915,10 +830,9 @@ function setInputMethod(method) {
         return;
     }
     activeInputMethod = method;
-    // In local multiplayer the single bottom bar can't represent several players'
-    // schemes at once (it would flip-flop), so each player carries their own
-    // compact hints in their top block instead — don't show the bottom bar.
-    if (localMultiplayerEnabled()) {
+    // With 2+ local players the single bottom bar can't represent everyone's
+    // scheme at once, so it's replaced by per-player top blocks — don't show it.
+    if (hintUiMode === "blocks") {
         return;
     }
     if (!hintBarEl) {
@@ -988,21 +902,22 @@ function scheduleHintFade() {
     }, HINT_FADE_MS);
 }
 
-// --- per-pad player overlay (local multiplayer, §5.3) ---
+// --- per-player hint overlay ---
 //
-// One compact block per pad player, each carrying a color dot tinted with that
-// player's server-assigned color — the readable link "this controller = the red
-// player" — plus the player's slot label and that pad's own attack glyph (A on
-// Xbox, ✕ on PlayStation, so mixed-brand pads show their real button). Built
-// lazily; populated by the onLocalPlayerJoined/Dropped hooks (client.js) and kept
-// in color-sync by refreshPadBlocks() each frame (the color arrives a beat after
-// join via playerJoin/gameUpdates). The keyboard/primary player keeps the bottom
-// hint bar; these blocks are for the pad players only.
+// SOLO (one local player) keeps the single bottom hint bar, which adapts to the
+// player's input (keyboard / pad / touch) — the behaviour people are used to.
+// As soon as a SECOND local player joins we switch to per-player top blocks:
+// each block carries a color dot tinted with that player's server-assigned color
+// (the readable "this controller = the red player" link), the slot label, and
+// that player's OWN compact hints (their pad's glyphs, or keyboard chips) — so a
+// keyboard P1 + pad players don't fight over one bar. Dropping back to one local
+// player restores the bottom bar. The blocks inherit the bar's fade/hide.
 
-var padPlayersEl = null;     // container element
-var padBlocks = {};          // slot -> { el, dot, lastColor }
+var padPlayersEl = null;     // container element for the top blocks
+var padBlocks = {};          // slot -> { el, dot, hints, lastColor, lastMethod }
 var padToastEl = null;
 var padToastTimer = null;
+var hintUiMode = "bar";      // "bar" (solo) | "blocks" (>= 2 local players)
 
 function buildPadPlayersUI() {
     if (padPlayersEl || typeof document === "undefined" || !document.body) {
@@ -1012,6 +927,40 @@ function buildPadPlayersUI() {
     el.id = "padPlayers";
     document.body.appendChild(el);
     padPlayersEl = el;
+}
+
+// Called whenever the set of local players changes (join/drop). Switches the hint
+// UI between the solo bottom bar and the per-player top blocks, and reconciles
+// which blocks exist.
+function onLocalPlayersChanged() {
+    var multi = (typeof liveLocalPlayerCount === "function") && liveLocalPlayerCount() >= 2;
+    if (multi) {
+        if (hintUiMode !== "blocks") {
+            hintUiMode = "blocks";
+            if (hintBarEl) {
+                hintBarEl.className = "gamepad-prompts hidden"; // bottom bar off in multiplayer
+            }
+        }
+        for (var s = 0; s < localPlayers.length; s++) {
+            if (localPlayers[s]) {
+                ensureBlock(localPlayers[s]);
+            }
+        }
+        // Remove blocks for slots that no longer exist.
+        for (var slot in padBlocks) {
+            if (!localPlayers[slot]) {
+                removeBlock(slot);
+            }
+        }
+        scheduleHintFade();
+    } else if (hintUiMode === "blocks") {
+        // Back down to one local player — restore the bottom bar.
+        hintUiMode = "bar";
+        removeAllBlocks();
+        var method = activeInputMethod || "kbm";
+        activeInputMethod = null; // force setInputMethod to rebuild + show the bar
+        setInputMethod(method);
+    }
 }
 
 function attackGlyphFor(type) {
@@ -1049,8 +998,8 @@ function showJoinToast(type) {
         '<span class="gp-glyph gp-face">' + attackGlyphFor(type) + '</span> to join', 4000);
 }
 
-// Hook (client.js addLocalPlayer): a pad player joined — create its block.
-function onLocalPlayerJoined(lp) {
+// Create a block for a local player if it doesn't already have one.
+function ensureBlock(lp) {
     if (!padPlayersEl) {
         buildPadPlayersUI();
     }
@@ -1075,7 +1024,6 @@ function onLocalPlayerJoined(lp) {
     padPlayersEl.appendChild(block);
     padBlocks[lp.slot] = { el: block, dot: dot, hints: hints, lastColor: null, lastMethod: null };
     setBlockHints(lp);
-    scheduleHintFade(); // a player joined — show the hints, restart the auto-fade
 
     // A join just happened — drop the connect toast.
     if (padToastEl) {
@@ -1083,23 +1031,36 @@ function onLocalPlayerJoined(lp) {
     }
 }
 
-// The compact control hints for a player's CURRENT input method (keyboard vs
-// their own pad brand) — baked into each top block so every player sees their own
-// scheme without the single bottom bar flip-flopping.
+// The compact control hints for a player's CURRENT input method (keyboard, touch,
+// or their own pad brand) — baked into each top block so every player sees their
+// own scheme without the single bottom bar flip-flopping.
 function blockMethodFor(lp) {
-    return (lp.padIndex != null) ? "pad" : "kbm";
+    if (lp.padIndex != null) {
+        return "pad";
+    }
+    if (typeof isTouchScreen !== "undefined" && isTouchScreen) {
+        return "touch";
+    }
+    return "kbm";
 }
 
 function miniHintsFor(method, padType) {
     if (method === "pad") {
         return '<span class="gp-glyph gp-stick">L</span>' +
             '<span class="gp-glyph gp-face">' + attackGlyphFor(padType) + '</span>' +
-            '<span class="gp-glyph gp-face">' + emojiGlyphFor(padType) + '</span>';
+            '<span class="gp-glyph gp-face">' + emojiGlyphFor(padType) + '</span>' +
+            '<span class="gp-glyph gp-face">' + leaveGlyphFor(padType) + '</span>';
+    }
+    if (method === "touch") {
+        return '<span class="gp-glyph gp-key">🕹️</span>' +
+            '<span class="gp-glyph gp-key">👆</span>' +
+            '<span class="gp-glyph gp-key">💬</span>';
     }
     // keyboard / mouse
     return '<span class="gp-glyph gp-key">WASD</span>' +
         '<span class="gp-glyph gp-key">🖱</span>' +
-        '<span class="gp-glyph gp-key">RMB</span>';
+        '<span class="gp-glyph gp-key">RMB</span>' +
+        '<span class="gp-glyph gp-key">Esc</span>';
 }
 
 // (Re)set a block's hint glyphs to match the player's current method. No-op when
@@ -1133,8 +1094,7 @@ function onLocalPlayerReconnecting(slot, isReconnecting) {
     }
 }
 
-// Hook (client.js dropLocalPlayer): a pad player left — remove its block.
-function onLocalPlayerDropped(slot) {
+function removeBlock(slot) {
     var b = padBlocks[slot];
     if (!b) {
         return;
@@ -1145,8 +1105,16 @@ function onLocalPlayerDropped(slot) {
     delete padBlocks[slot];
 }
 
-// Tint each pad player's dot with their current server-assigned color (which only
-// arrives a moment after join). Cheap; only writes the DOM when the color changes.
+function removeAllBlocks() {
+    for (var slot in padBlocks) {
+        removeBlock(slot);
+    }
+}
+
+// Keep each block in sync each frame: tint its dot with the player's current
+// server-assigned color (arrives a beat after join) and update its hint glyphs if
+// the player's input method changed (e.g. a pad bound to / unbound from P1). Both
+// only touch the DOM on an actual change.
 function refreshPadBlocks() {
     if (typeof playerList === "undefined" || !playerList) {
         return;
@@ -1157,11 +1125,65 @@ function refreshPadBlocks() {
         if (!lp || !b) {
             continue;
         }
+        if (!lp.leaveConfirm) {
+            setBlockHints(lp);
+        }
         var p = (lp.myID != null) ? playerList[lp.myID] : null;
         var color = (p && p.color) ? p.color : null;
         if (color && color !== b.lastColor) {
             b.dot.style.backgroundColor = color;
             b.lastColor = color;
+        }
+    }
+}
+
+// --- per-player "leave game" confirm, inline in the block (controllers) ---
+
+function leaveGlyphFor(type) {
+    return type === "playstation" ? "○" : "B";
+}
+
+// B opens an inline "Leave?" confirm in this player's block; A confirms (drops
+// the player / disconnects), B cancels. Per-slot, so it never freezes the others.
+function openLeaveConfirm(lp) {
+    if (lp.gp.hadMoveInput) {
+        cancelMovementForSlot(lp);
+        lp.gp.hadMoveInput = false;
+    }
+    lp.gp.prevMove = { moveForward: false, moveBackward: false, turnLeft: false, turnRight: false, attack: false };
+    lp.leaveConfirm = true;
+    setBlockLeaveConfirm(lp.slot, true);
+}
+
+function pollLeaveConfirm(pad, lp) {
+    if (buttonPressedThisFrame(pad, GP_BTN_A, lp)) {
+        lp.leaveConfirm = false;
+        dropLocalPlayer(lp.slot); // confirmed — disconnect this player
+        return;
+    }
+    if (buttonPressedThisFrame(pad, GP_BTN_B, lp)) {
+        lp.leaveConfirm = false;
+        setBlockLeaveConfirm(lp.slot, false); // cancelled
+    }
+}
+
+function setBlockLeaveConfirm(slot, confirming) {
+    var b = padBlocks[slot];
+    if (!b) {
+        return;
+    }
+    if (confirming) {
+        b.el.classList.add("confirming");
+        var lp = localPlayers[slot];
+        var type = (lp && lp.padType) ? lp.padType : "generic";
+        b.hints.innerHTML = '<span class="pp-confirm">Leave?</span>' +
+            '<span class="gp-glyph gp-face">' + attackGlyphFor(type) + '</span>' +
+            '<span class="gp-glyph gp-face">' + leaveGlyphFor(type) + '</span>';
+    } else {
+        b.el.classList.remove("confirming");
+        b.lastMethod = null; // force a hint rebuild on the next refresh
+        if (localPlayers[slot]) {
+            setBlockHints(localPlayers[slot]);
         }
     }
 }
