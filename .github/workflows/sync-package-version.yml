@@ -26,12 +26,27 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Check out main
+      - name: Check out the tagged commit
         uses: actions/checkout@v4
         with:
-          ref: main
+          # Default ref is the pushed tag, so GITHUB_SHA = the tag's
+          # target commit. fetch-depth: 0 gives us history for the
+          # merge-base check below.
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify the tagged commit is on main
+        # Catches the "tag pushed from a feature branch by mistake" case.
+        # If the tag isn't an ancestor of main, refuse to bump rather
+        # than overwrite main with a version that doesn't correspond to
+        # any of its commits.
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag points at $GITHUB_SHA which is not on main."
+            echo "::error::Re-tag the release from a commit that is on main."
+            exit 1
+          fi
 
       - name: Extract version from tag
         id: version
@@ -40,6 +55,14 @@ jobs:
           version="${tag#v}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Switch to main for the bump
+        # Apply the bump on top of current main HEAD (not the tagged
+        # commit) so a concurrent push that already added other work
+        # to main isn't overwritten.
+        run: |
+          git checkout main
+          git reset --hard origin/main
 
       - name: Bump package.json if it doesn't match
         id: bump
@@ -74,4 +97,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add package.json
           git commit -m "Sync package.json to $RELEASE_TAG"
+          # Fast-forward-only push: if main moved between our reset and
+          # now, the push is rejected and the workflow fails loudly
+          # rather than silently overwriting the newer state.
           git push origin main
