@@ -143,12 +143,60 @@
       top: 0;
       background: #f8f9fa;
       z-index: 1;
-      padding-top: 1rem;
+      padding-top: 0.5rem;
       padding-bottom: 0.5rem;
-      margin: 0 -1rem 1rem;
+      margin: 0 -1rem 0.5rem;
       padding-left: 1rem;
       padding-right: 1rem;
       border-bottom: thin solid #e6e6e6;
+    }
+
+    /* Compact the panel so every control fits in a typical viewport
+       height without needing to scroll. */
+    #controlPanel .h5 {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      color: #6c757d;
+      margin: 0.4rem 0 0.25rem;
+    }
+    #controlPanel hr {
+      display: none;
+    }
+    #controlPanel .mb-3 {
+      margin-bottom: 0.4rem !important;
+    }
+    #controlPanel .editor-inputs {
+      margin-bottom: 0.35rem !important;
+      padding: 0.25rem 0.5rem;
+      height: auto;
+      min-height: 0;
+      font-size: 0.85rem;
+    }
+    #controlPanel .btn-block {
+      padding: 0.3rem 0.5rem;
+      font-size: 0.85rem;
+      margin-bottom: 0.25rem;
+      margin-top: 0;
+    }
+    #controlPanel .mapEditorTile {
+      font-size: 0.85rem;
+      padding: 3px 7px;
+      min-width: 50px;
+    }
+
+    /* Pin the Actions section to the bottom of the panel — together
+       with the sticky toolbar, this guarantees the user can always
+       reach Copy/Upload regardless of viewport height. */
+    #actionsSection {
+      position: sticky;
+      bottom: 0;
+      background: #f8f9fa;
+      z-index: 1;
+      margin: 0.4rem -1rem 0;
+      padding: 0.5rem 1rem;
+      border-top: thin solid #e6e6e6;
     }
 
     @media screen and (max-width:768px) {
@@ -217,7 +265,7 @@
               <button id="movingBumperButton" style="background-color: orange" title="Moving Bumper" class="mapEditorTile"><span>Moving Bumper</span></button>
             </div>
           </div>
-          <div>
+          <div id="actionsSection">
             <div class="h5">
               Actions
             </div>
