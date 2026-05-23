@@ -575,6 +575,108 @@ div.desc {
     font-weight: 600;
 }
 
+/* --- per-pad player overlay (local multiplayer) --- */
+/* One compact block per pad player, top-centre, each with a color dot tinted to
+   that player's assigned color so a controller maps visibly to its player. */
+#padPlayers {
+    position: fixed;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 10px;
+    z-index: 1006;
+    pointer-events: none;
+}
+
+.pad-player {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    background-color: rgba(255, 255, 255, 0.92);
+    border-radius: 18px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 13px;
+    color: #555;
+    transition: opacity 0.3s;
+}
+
+.pad-player .pp-label {
+    font-weight: 700;
+}
+
+/* the controller -> player color link; lights up once the server assigns a color */
+.gp-color-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background-color: #bbb;
+    border: 2px solid rgba(0, 0, 0, 0.25);
+    box-sizing: border-box;
+}
+
+.pad-player .gp-glyph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 5px;
+    border-radius: 10px;
+    background-color: #c87f8a;
+    color: white;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.pad-player .gp-glyph.gp-stick {
+    border-radius: 50%;
+    background-color: #555;
+}
+
+/* "controller detected — press A to join" toast, just below the player blocks */
+#padToast {
+    position: fixed;
+    top: 50px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    background-color: rgba(255, 255, 255, 0.92);
+    border-radius: 22px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    color: #c87f8a;
+    z-index: 1007;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+#padToast.visible {
+    opacity: 1;
+}
+
+#padToast .gp-glyph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 5px;
+    border-radius: 11px;
+    background-color: #c87f8a;
+    color: white;
+    font-size: 12px;
+    font-weight: 600;
+}
+
 /* on-screen keyboard (simple-keyboard) for controller text entry */
 .osk-container {
     position: fixed;
