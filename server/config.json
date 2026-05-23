@@ -24,6 +24,12 @@
     "maxTotalBrutals": 3,
     "TESTSingleMap": false,
     "submitViaMail": "chaochaothegame@gmail.com",
+    "music": {
+        "calm": ["slowstride", "slow-pipes"],
+        "exciting": ["mind_in_motion", "the-rush", "beastv2", "bumpinbits1", "bumpinbits2", "bumpinbits3", "bumpinbits4", "bumpinbits5"],
+        "brutal": ["depthOfDespair", "HorrorLoop", "DesperationSetsIn", "heavyfabric"]
+    },
+    "musicFallbackSeconds": 600,
     "tileMap": {
         "slow": {
             "id": 0,

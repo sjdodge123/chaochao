@@ -8,7 +8,12 @@ Releases are cut automatically on merge to `main` by the `Release on merge to ma
 
 ## Unreleased
 
-(none yet)
+### General
+- Everyone in a game now hears the same background music at the same time, and it switches moods together — calm normally, intense when someone's one win away, and ominous on brutal rounds.
+
+### Bug fixes
+- Background music no longer cuts out to silence mid-round when a track finishes; it rolls straight into the next one.
+- Background music now plays continuously through the round-transition and map-load screens instead of restarting at the start of every race.
 
 ## v0.1.4 — 2026-05-23
 

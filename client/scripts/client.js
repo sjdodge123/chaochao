@@ -11,6 +11,11 @@ var config,
 function clientConnect() {
 	var server = io();
 
+	//Let audio.js report a finished background track so the server picks the next one.
+	musicTrackEndedHandler = function (trackName) {
+		server.emit("musicTrackEnded", trackName);
+	};
+
 	server.on('welcome', function (id) {
 		debugLog("welcome, myID=", id);
 		myID = id;
@@ -56,6 +61,10 @@ function clientConnect() {
 		}
 		if (playerList[myID] != null) {
 			myPlayer = playerList[myID];
+		}
+		//Late joiners: pick up the race already in progress on the right track/mood.
+		if (gameState.music != null) {
+			setBackgroundMusic(gameState.music.mood, gameState.music.track);
 		}
 		setupEmojiWheel();
 	});
@@ -183,11 +192,19 @@ function clientConnect() {
 	});
 	server.on("startRace", function (packet) {
 		playSound(countDownB);
-		playBackgroundSound();
+		if (packet != null && packet.music != null) {
+			setBackgroundMusic(packet.music.mood, packet.music.track);
+		}
 		oldNotches = {};
 		resetTrails();
 		resetPlayerRanks();
 		currentState = config.stateMap.racing;
+	});
+	//Server-driven mood change (near-victory) or next track (previous one ended).
+	server.on("musicMood", function (packet) {
+		if (packet != null) {
+			setBackgroundMusic(packet.mood, packet.track);
+		}
 	});
 	server.on("startOverview", function (packet) {
 		resetRound();
