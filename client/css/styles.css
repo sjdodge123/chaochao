@@ -587,6 +587,19 @@ div.desc {
     gap: 10px;
     z-index: 1006;
     pointer-events: none;
+    transition: opacity 0.3s;
+}
+
+/* inherit the bottom bar's fade behaviour: dim after ~60s idle / on toggle */
+#padPlayers.faded {
+    opacity: 0.15;
+    transition: opacity 0.8s;
+}
+
+.pad-player .pp-hints {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
 }
 
 .pad-player {
@@ -639,6 +652,15 @@ div.desc {
 .pad-player .gp-glyph.gp-stick {
     border-radius: 50%;
     background-color: #555;
+}
+
+/* keyboard player's chips look like keycaps (matches the bottom-bar gp-key) */
+.pad-player .gp-glyph.gp-key {
+    background-color: #fff;
+    color: #333;
+    border: 1px solid #bbb;
+    border-radius: 4px;
+    font-weight: 600;
 }
 
 /* "controller detected — press A to join" toast, just below the player blocks */
