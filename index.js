@@ -11,6 +11,21 @@ const htmlPath = path.join(__dirname, 'client');
 
 app.use(compression());
 
+// Inject the running server's version into index.html so the landing
+// page always reflects what's actually deployed. Runs in both dev and
+// prod; read once at startup so we don't fs.readFile on every request.
+const APP_VERSION = require('./package.json').version;
+app.use(function (req, res, next) {
+    var url = req.path === '/' ? '/index.html' : req.path;
+    if (url !== '/index.html') return next();
+    fs.readFile(path.join(htmlPath, url), 'utf8', function (err, html) {
+        if (err) return next();
+        var modified = html.replace(/<!-- VERSION -->/g, 'v' + APP_VERSION);
+        res.set('Content-Type', 'text/html');
+        res.send(modified);
+    });
+});
+
 const bundleMap = {
     '/play.html': 'scripts/dist/play.bundle.min.js',
     '/create.html': 'scripts/dist/create.bundle.min.js',

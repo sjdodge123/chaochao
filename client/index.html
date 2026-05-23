@@ -21,7 +21,7 @@
     <link rel="stylesheet" type="text/css" href="assets/css/all.css">
     <title>Chao Chao</title>
   </head>
-  <body style="overflow-y: scroll;">
+  <body>
     <nav class="d-flex align-items-center px-3">
       <div class="navbar-brand">
         <a style="text-decoration: inherit;
@@ -30,22 +30,18 @@
     </nav>
     <section>
       <div id="main">
-        <div class ="container d-flex h-100">
-          <div class="row justify-content-center mx-auto">
-            <div class="play-container w-100">
-              <span id="version"><b>v0.1.2</b></span>
-              <form id="guestPlay">
-
-                <span id="game-title">Chao Chao</span>
-                <button type="submit" formaction="./play.html" id="playButton" class="btn btn-outline-success w-100 mt10">Play</button>
-                <button type="submit" formaction="./join.html"id="joinButton" class="btn btn-outline-info w-100 mt10">Join</button>
-                <button type="submit" formaction="./create.html" id="createButton" class="btn btn-outline-warning w-100 mt10">Create</button>
-              </form>
-
-                <div class="patch-notes"><a target="_blank" href="https://github.com/sjdodge123/chaochao/releases/latest">Patch Notes</a></div>
+        <div class="container d-flex h-100 align-items-center">
+          <div class="row justify-content-center align-self-center mx-auto w-100">
+            <div class="play-container">
+              <span id="version"><b><!-- VERSION --></b></span>
+              <span id="game-title">Chao Chao</span>
+              <p class="tagline">Multiplayer web-based slow-paced racing — punch, slide, survive.</p>
+              <a href="./play.html" id="playButton" class="btn btn-outline-success w-100 mt-3">Play</a>
+              <a href="./join.html" id="joinButton" class="btn btn-outline-info w-100 mt-2">Join</a>
+              <a href="./create.html" id="createButton" class="btn btn-outline-warning w-100 mt-2">Create</a>
+              <div class="patch-notes"><a target="_blank" href="https://github.com/sjdodge123/chaochao/releases/latest">Patch Notes</a></div>
             </div>
-
-        </div>
+          </div>
         </div>
       </div>
     </section>
