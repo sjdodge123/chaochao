@@ -439,3 +439,69 @@ div.desc {
 .mt10{
     margin-top: 10px;
 }
+
+/* --- gamepad / controller prompts --- */
+.gamepad-prompts {
+    position: fixed;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 8px 16px;
+    background-color: rgba(255, 255, 255, 0.92);
+    border-radius: 22px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 14px;
+    color: #555;
+    z-index: 1006;
+    pointer-events: none;
+    transition: opacity 0.3s;
+}
+
+.gamepad-prompts.hidden {
+    opacity: 0;
+    display: none;
+}
+
+.gamepad-prompts.visible {
+    opacity: 1;
+}
+
+.gamepad-prompts .gp-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+}
+
+.gamepad-prompts .gp-glyph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 5px;
+    border-radius: 11px;
+    background-color: #c87f8a;
+    color: white;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.gamepad-prompts .gp-glyph.gp-stick {
+    border-radius: 50%;
+    background-color: #555;
+}
+
+.gamepad-prompts .gp-toast {
+    font-weight: 600;
+    color: #c87f8a;
+}
+
+/* once connected the toast fades, leaving just the control hints */
+.gamepad-prompts.compact .gp-toast {
+    display: none;
+}

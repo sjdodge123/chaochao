@@ -8,6 +8,7 @@ const bundles = {
         'client/scripts/client.js',
         'client/scripts/audio.js',
         'client/scripts/input.js',
+        'client/scripts/gamepad.js',
         'client/scripts/draw.js',
         'client/scripts/gameboard.js',
         'client/scripts/joystick.js',
