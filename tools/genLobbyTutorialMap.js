@@ -46,33 +46,42 @@ const bbox = { xl: 0, xr: W, yt: 0, yb: H };
 // palette weights sum ~1; the dominant type owns the core, secondaries blend in
 // toward the edges where the noise value runs higher.
 const BIOMES = [
+	// Near the spawn pad (left): safe-to-learn biomes, no lava.
 	{
-		name: "volcano",
-		cx: 340, cy: 240, r: 130,
-		palette: [[ID.lava, 0.58], [ID.slow, 0.27], [ID.fast, 0.15]],
-	},
-	{
-		name: "glacier",
-		cx: 1030, cy: 240, r: 130,
-		palette: [[ID.ice, 0.58], [ID.fast, 0.27], [ID.normal, 0.15]],
+		name: "meadow",
+		cx: 360, cy: 220, r: 128,
+		palette: [[ID.fast, 0.58], [ID.normal, 0.27], [ID.ice, 0.15]],
 	},
 	{
 		name: "dunes",
-		cx: 340, cy: 540, r: 130,
+		cx: 360, cy: 548, r: 128,
 		palette: [[ID.slow, 0.58], [ID.normal, 0.27], [ID.fast, 0.15]],
 	},
+	// Goal side (right): ice, and the lava danger guarding the goals — kept well
+	// away from the spawn pad on the opposite side of the map.
 	{
-		name: "meadow",
-		cx: 1030, cy: 540, r: 130,
-		palette: [[ID.fast, 0.58], [ID.normal, 0.27], [ID.ice, 0.15]],
+		name: "glacier",
+		cx: 950, cy: 215, r: 122,
+		palette: [[ID.ice, 0.58], [ID.fast, 0.27], [ID.normal, 0.15]],
+	},
+	{
+		name: "volcano",
+		cx: 950, cy: 553, r: 122,
+		palette: [[ID.lava, 0.6], [ID.slow, 0.26], [ID.fast, 0.14]],
 	},
 ];
 
 // --- pure (single-type) islands: kept un-blended for teaching clarity ---
 const PURE = [
-	{ id: ID.goal, cx: 1230, cy: 384, r: 90 }, // the objective (yellow)
 	{ id: ID.bomb, cx: 683, cy: 150, r: 55 }, // ability tile (aim/fire)
 	{ id: ID.bomb, cx: 683, cy: 620, r: 55 }, // ability tile
+];
+
+// Two single goal tiles, each its own distinct little island on the goal side
+// (far right). Placed as the lone nearest cell to each point (see main()).
+const GOAL_POINTS = [
+	{ x: 1235, y: 235 },
+	{ x: 1235, y: 535 },
 ];
 
 // Background spawn pad (just neutral background; recorded for spawn/respawn).
@@ -186,6 +195,22 @@ function main() {
 		const id = classify(cell.site.x, cell.site.y);
 		cell.id = id;
 		counts[id] = (counts[id] || 0) + 1;
+	}
+
+	// Exactly two goal tiles, one per distinct island: tag the single nearest
+	// cell to each goal point (each becomes a lone 1-tile island on background).
+	for (const g of GOAL_POINTS) {
+		let best = null, bestD = Infinity;
+		for (const cell of diagram.cells) {
+			const dx = cell.site.x - g.x, dy = cell.site.y - g.y;
+			const dd = dx * dx + dy * dy;
+			if (dd < bestD) { bestD = dd; best = cell; }
+		}
+		if (best) {
+			counts[best.id]--;
+			best.id = ID.goal;
+			counts[ID.goal] = (counts[ID.goal] || 0) + 1;
+		}
 	}
 
 	diagram.id = "lobbyTutorialIslandsV1";
