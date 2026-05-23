@@ -160,7 +160,17 @@ canvas {
     background: white;
     overflow: hidden;
     display: none;
-    height: 100%;
+    /* Fill the section and flex-centre the canvas stack inside so the
+       game canvas uses all the space the page has, not 90% with
+       hard-coded margins. game.js switches display to 'flex' when the
+       game becomes visible. */
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    align-items: center;
+    justify-content: center;
 }
 
 #createWindow {
@@ -179,14 +189,11 @@ canvas {
     margin-left: 5%;
     margin-right: 5%;
 }
-#mapContainer{
-    height: 95%;
-    width: 90%;
-    display: inline-block;
+#mapContainer {
+    /* Sized by resize() to match the fitted canvas dimensions. The
+       gameWindow flex container centres us in the available space. */
     position: relative;
-    margin-top: 1%;
-    margin-left: 5%;
-    margin-right: 5%;
+    margin: 0;
 }
 #progressContainer{
     width: 50%;
