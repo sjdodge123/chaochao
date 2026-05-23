@@ -389,6 +389,9 @@ function pollGamepad(dt) {
         if (lp.myID == null) {
             continue;
         }
+        if (lp.socket && lp.socket.connected === false) {
+            continue; // mid-reconnect — don't emit into a dropped socket
+        }
         pollPadForSlot(pad, lp);
     }
 }
@@ -1035,6 +1038,21 @@ function onLocalPlayerJoined(lp) {
     // A join just happened — drop the connect toast.
     if (padToastEl) {
         padToastEl.classList.remove("visible");
+    }
+}
+
+// Hook (client.js): grey a pad player's block while their socket is reconnecting,
+// and restore it on recovery — so a transient blip shows as "reconnecting" rather
+// than vanishing.
+function onLocalPlayerReconnecting(slot, isReconnecting) {
+    var b = padBlocks[slot];
+    if (!b || !b.el) {
+        return;
+    }
+    if (isReconnecting) {
+        b.el.classList.add("reconnecting");
+    } else {
+        b.el.classList.remove("reconnecting");
     }
 }
 
