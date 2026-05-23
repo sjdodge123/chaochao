@@ -8,6 +8,10 @@ Releases are cut automatically on merge to `main` by the `Release on merge to ma
 
 ## Unreleased
 
+(none yet)
+
+## v0.1.5 — 2026-05-23
+
 ### Bug fixes
 - Fixed a crash that could take down a game when a room filled with many players.
 
