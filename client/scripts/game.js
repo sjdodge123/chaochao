@@ -54,6 +54,18 @@ var attack = false,
     mousex = null,
     mousey = null;
 
+// --- PHASE 1 SPIKE: local two-player proof (gated behind ?spike2p=1) ---
+// Opens a SECOND, independent Socket.IO connection from this one tab and joins
+// it into the same room as the primary player, to prove Approach A end-to-end:
+// two forceNew sockets => two distinct server players in one room, with a
+// gamepad routed to player #2. Throwaway scaffolding; Phase 2 generalises it
+// into a per-slot localPlayers[0..N-1] table. When the flag is absent, none of
+// this runs and behaviour is identical to today (N=1).
+function spikeTwoPlayers() {
+    return new URLSearchParams(window.location.search).has('spike2p');
+}
+var spikePlayer2 = { socket: null, myID: null, joined: false };
+
 var then = Date.now(),
     dt;
 

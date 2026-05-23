@@ -58,6 +58,12 @@ function clientConnect() {
 			myPlayer = playerList[myID];
 		}
 		setupEmojiWheel();
+		// PHASE 1 SPIKE: once the primary player has confirmed its room, open the
+		// second local player into the SAME gameID (sequential join, §5.4). The
+		// guard makes this fire exactly once.
+		if (spikeTwoPlayers() && spikePlayer2.socket == null && gameID != null) {
+			openSpikeSecondPlayer(gameID);
+		}
 	});
 
 	server.on("playerJoin", function (appendPlayerList) {
@@ -468,6 +474,53 @@ function clientSendStart(id) {
 	if (id != null) {
 		server.emit('enterGame', id);
 	}
+}
+
+// PHASE 1 SPIKE: open a second, independent connection from this same tab and
+// join it into `gameId` (the room the primary already confirmed). The critical
+// detail (§6.7): `forceNew` — without it, io() reuses the cached Manager and you
+// get the SAME socket.id, i.e. one server player. This socket is an
+// input/identity channel only: it deliberately registers NO render/audio
+// handlers (the primary owns those, §5.1/§6.8a) and NO navigation handlers, so a
+// kick/notfound on player #2 drops only player #2 and never tears down the tab
+// (previews the per-slot teardown of §6.17).
+function openSpikeSecondPlayer(gameId) {
+	if (spikePlayer2.socket != null) {
+		return;
+	}
+	debugLog("[spike] opening 2nd player socket -> gameId=", gameId);
+	var sock = io({ forceNew: true });
+	spikePlayer2.socket = sock;
+
+	sock.on('welcome', function (id) {
+		spikePlayer2.myID = id;
+		debugLog("[spike] P2 welcome, myID=", id);
+	});
+
+	sock.on('gameState', function (gs) {
+		spikePlayer2.joined = true;
+		// Proof line: two distinct ids, same room.
+		console.log("[spike] P2 joined room", gs.gameID, "as", gs.myID,
+			"| P1 is", myID, "in room", gameID,
+			"| distinct?", gs.myID !== myID, "| same room?", String(gs.gameID) === String(gameID));
+		// Route the gamepad to player #2 (keyboard/mouse still drive player #1).
+		gpEmitSocket = sock;
+		gpEmitID = spikePlayer2.myID;
+	});
+
+	// Per-slot teardown preview: log, do NOT navigate the tab.
+	sock.on('roomNotFound', function () {
+		console.warn("[spike] P2 roomNotFound — could not join", gameId, "(tab kept alive)");
+		gpEmitSocket = null;
+		gpEmitID = null;
+	});
+	sock.on('serverKick', function () {
+		console.warn("[spike] P2 serverKick — dropping P2 only (tab kept alive)");
+		gpEmitSocket = null;
+		gpEmitID = null;
+	});
+
+	sock.emit('enterGame', gameId);
 }
 
 function pingServer() {
