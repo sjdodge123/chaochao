@@ -67,12 +67,12 @@ objective, and the dangers (lava) before a real game ever starts.
 10. **Safe-spawn zone is a protected sanctuary.** The spawn area is protected: its cells
     cannot be mutated, abilities/projectiles/force have no effect inside it, and players in it
     take no lava/goal damage. Guaranteed-safe ground for both initial spawn and respawn.
-    - **Impl (deep scan):** define the sanctuary as a **Set of voronoiIds** (authored
-      `sanctuary:true` on those cells → resolved to `this.sanctuaryIds` at map load, rebuilt
-      on every map reset). Add early-`continue`/return guards keyed on that set at the
-      mutation sites — `swapTiles` (esp. — it's global), `explodeBomb`, `explodeIce`,
-      `explodeLava`, and `changeTile` — **reusing the existing goal/lava `continue` idiom**
-      already in those functions. Good news: this pattern already exists in the codebase.
+    - **Impl (updated for Option 2 islands):** the sanctuary **is the `background` terrain
+      type** — no separate `sanctuary:true` flag. Any cell whose `id` is `background` is
+      neutral + immutable. Add early-`continue`/return guards keyed on "is `background`?" at
+      the mutation sites — `explodeBomb`, `explodeIce`, `explodeLava`, and `changeTile`
+      (tileSwap dropped) — **reusing the existing goal/lava `continue` idiom** already in
+      those functions. Good news: this pattern already exists in the codebase.
     - **⚠ Force functions bypass damage guards:** `cutPlayer` (`engine.js`) and
       `applyExplosionForce` mutate position/velocity directly without checking
       `alive`/invuln/sanctuary, so another player's cut/bomb could physically fling an
@@ -82,6 +82,68 @@ objective, and the dangers (lava) before a real game ever starts.
       different scope** — unify into one `isProtected(player, cell)` helper.
     - **Scope note:** "hazards have no effect" is broader than v1 delivers — bumpers are
       deferred for v1, so that clause only fully applies once a bumper position-guard is added.
+
+---
+
+## Lobby shape: ISLANDS, not a full-coverage map
+
+**Intended design:** the lobby stays the existing plain background, with a few small *islands*
+of tiles placed on it (lava pool, ice patch, grass, goal, ability tile, spawn pad). The whole
+lobby is NOT a map — only parts of it are.
+
+**Confirmed possible by code inspection:**
+- **Collision tolerates sparse cells.** `checkCollideCells` (`engine.js:504-516`) just iterates
+  whatever cells exist and runs point-in-polygon (`pointIntersection`, `engine.js:518-539`). A
+  player standing on no cell simply gets **no `handleHit`** — no crash, no full-coverage
+  assumption.
+- **Rendering tolerates sparse cells.** `renderMapToCache` (`draw.js:1030`) paints each cell
+  polygon onto a **transparent** cached canvas (`clearRect` + per-cell fill) and `drawImage`s
+  it over the world — **no backing fill**. Gaps show the existing lobby background. Islands
+  render exactly as islands.
+
+**The one wrinkle this introduces — off-island physics:** player `acel`/`dragCoeff`/`brakeCoeff`
+are *only ever set by `handleHit`* (`game.js:2168-2220`) and are **never reset on walk-off**
+(on a full map you're always on a cell, so it never mattered). With islands, a player who
+crosses an ice patch and steps back onto plain background would **keep the ice grip forever**.
+The two representations below handle this differently.
+
+### Two ways to represent islands
+
+**Option 1 — true sparse cells.** `currentMap.cells` holds *only* the island cells; gaps are
+genuine empty background.
+- Pros: matches the mental model literally; minimal map data.
+- Cons: (a) **must add an off-island physics reset** — each frame, if the player hit no cell,
+  restore `c.playerDragCoeff`/`playerBrakeCoeff`/`playerBaseAcel`; (b) **authoring is awkward**
+  — the editor generates full Voronoi diagrams, so a sparse cell array means hand-editing JSON
+  or extending the editor to export a subset (the halfedge/va/vb geometry is fiddly to author
+  by hand).
+
+**Option 2 — full map with a transparent "background" terrain type (✅ CHOSEN).** Author a
+normal full map in the editor, but paint everything except the islands as a new
+*background/transparent* type that renders nothing and applies normal physics.
+- Pros: **authorable in the existing editor** (add a transparent/erase brush); the off-island
+  physics wrinkle **disappears for free** (background cells set normal physics every frame);
+  the entire background area naturally *becomes* the decision-10 sanctuary (neutral,
+  immutable), with islands as the only interactive zones.
+- Cons: under the hood the world is still a full Voronoi map (just mostly invisible) — a
+  representational, not behavioral, difference. Visually/behaviorally identical to Option 1.
+
+**Recommendation: Option 2** — less work, uses existing authoring tools, dissolves the physics
+wrinkle, and unifies "background = sanctuary." The rest of the analysis (option-B respawn,
+lava death, goal, abilities, reset cadence) is unaffected — it all keys off the *island* cells
+either way.
+
+**✅ DECISION: Option 2.** Implications now baked into the plan below:
+- A **new `background` terrain type** (config `tileMap`): transparent (renderer skips its
+  fill), normal physics, no death/goal/ability effect. Its `handleHit` is a no-op that just
+  sets default grip — which is what makes background cells reset physics for free.
+- **`background` = the sanctuary** (decision 10). No separate `sanctuary:true` flag needed:
+  the background type itself marks immutable/neutral ground. Mutation guards key off "is this
+  cell `background`?" (or its id), reusing the existing goal/lava `continue` idiom.
+- **Spawn pad** = a chosen background region away from the islands; any background ground is
+  inherently safe, so spawn/respawn just needs coordinates within it (+ jitter).
+- **Editor** needs a transparent/"erase" brush to paint the background type. Authoring is
+  otherwise unchanged (full Voronoi map as today).
 
 ---
 
@@ -210,15 +272,18 @@ route both through this helper after playing the appropriate (death vs. win) fee
 
 ## Curated lobby layout (proposed)
 
-Authored in the existing map editor (`client/scripts/create.js` + `create.html`), saved as a
-normal map JSON, sized to 1366 × 768, center kept clear for the start button:
+Authored as **ISLANDS** in the existing map editor (`client/scripts/create.js` +
+`create.html`), saved as a normal map JSON sized 1366 × 768, with **everything outside the
+islands painted `background`** (transparent → shows the existing lobby) and the center kept
+clear for the start button. The islands:
 
-- A small **lava pool** — the danger.
-- An **ice** strip and a **sand (slow)** strip — controls/feel contrast.
-- A **grass (fast)** lane — speed contrast.
-- One **yellow goal** cell — the objective.
-- A **safe grass spawn zone** (known coordinates) for initial spawn + respawn.
-- (Optional, deferred) one ability tile; bumpers left out for v1.
+- A small **lava pool** island — the danger.
+- An **ice** patch and a **sand (slow)** patch — controls/feel contrast.
+- A **grass (fast)** patch — speed contrast.
+- A **yellow goal** island — the objective.
+- One or more **`bomb` ability tiles** (fast-respawning) — teach ability aim/fire.
+- A **spawn pad** — just a `background` region (inherently safe) for initial spawn + respawn.
+- Bumpers left out for v1.
 
 ---
 
@@ -226,13 +291,14 @@ normal map JSON, sized to 1366 × 768, center kept clear for the start button:
 
 | # | Change | File(s) | Effort |
 |---|--------|---------|--------|
-| 1 | Author tutorial lobby map (lava, ice/sand/grass, yellow goal, safe spawn zone, clear center) | editor → new map JSON | 0.5–1 day |
+| 0 | **New `background` terrain type** (transparent render, normal physics, no-op `handleHit`, = sanctuary) + **editor transparent/"erase" brush** | `config.json`, `draw.js`, `create.js`, `game.js` | ~0.5 day |
+| 1 | Author tutorial lobby map as **ISLANDS** — lava pool, ice/sand/grass patches, yellow goal, ability tile(s), spawn pad; everything else painted `background` | editor → new map JSON | 0.5–1 day |
 | 2 | Load tutorial map + button in `startLobby`; **exclude from race rotation** | `game.js`, `utils.js` | ~2 hrs |
 | 3 | Enable `checkCollideCells` for lobby state | `game.js:616-628` | ~30 min |
 | 4 | Render map client-side during lobby | `client.js:162`, `draw.js:275` | ~1 hr |
 | 5 | Lobby-aware **lava**: death cosmetics + respawn, **no `killPlayer`/`removeNotch`** | `game.js` (lava `handleHit`) | ~0.5 day |
 | 6 | Lobby-aware **goal**: win cosmetics + respawn, **no `reachedGoal`/`playerConcluded`/`addNotch`** | `game.js:2202-2213` | ~2 hrs |
-| 7 | Fixed safe-spawn zone w/ jitter (initial + respawn) — **protected sanctuary: no cell mutation, no projectile/ability/hazard effect, no collision damage inside it** | `game.js` (spawn path, collision/mutation guards) | ~0.5 day |
+| 7 | Spawn/respawn on a **`background` (sanctuary) region** w/ jitter (initial + respawn); mutation/force guards key off the `background` type | `game.js` (spawn path, mutation/force guards) | ~0.5 day |
 | 8 | Shared `respawnInLobby(player)` helper used by 5 & 6 | `game.js` | (folded into 5/6) |
 | 9 | **2–3s respawn invulnerability** + **flash/fade visual** (client) after lobby death or goal touch | `game.js` (`respawnInLobby`), `draw.js` (flash/fade) | ~0.5 day |
 | 10 | **Un-gate `ability.use()` for lobby** in `checkAttack` (lobby ability set: bomb, iceCannon, speedBuff, speedDebuff, cut — `swap`/`blindfold`/`tileSwap` excluded via curated map tiles) | `game.js:1921`, lobby map JSON | ~2 hrs |
@@ -245,9 +311,9 @@ normal map JSON, sized to 1366 × 768, center kept clear for the start button:
 | 17 | **Hard-code curated ability ids in lobby map JSON** (skip random pool) instead of config `spawnable` edits; `tileSwap` excluded | lobby map JSON, `game.js` load | ~1 hr |
 | 18 | **Fast lobby-only ability-tile respawn** — timer restores a consumed ability tile so every player can learn (broadcast via `tileChanges`) | `game.js` (lobby tick / reset helper) | ~2 hrs |
 
-**Total: ~4–5 days** — the deep scan added the achievement-stat guard, force-function guards,
-and curated-ability authoring; dropping tileSwap removes the global-churn risk and lightens
-the reset work, roughly offsetting the new ability-respawn timer.
+**Total: ~4.5–5.5 days** — the islands model adds the `background` terrain type + editor brush
+(change #0, ~0.5 day) but simplifies the sanctuary (it *is* the background type) and dissolves
+the off-island physics wrinkle, so net add is modest.
 
 ### Map-rotation leakage gotcha
 `loadMaps()` (`server/utils.js:308`) ingests *everything* in `client/maps/`, so a tutorial map
@@ -322,3 +388,5 @@ Validated all decisions against the current code after rebasing onto 3 upstream 
 - ~~Feedback reuse~~ → reuse in-game death/win cues at lobby volume (decision 7).
 - ~~Respawn cooldown length~~ → 2–3s invuln with flash/fade indicator (decision 9).
 - ~~Safe-spawn protection level~~ → fully protected sanctuary (decision 10).
+- ~~Whole-map vs partial lobby~~ → ISLANDS via full map + transparent `background` type
+  (Option 2); background = sanctuary; needs a `background` terrain type + editor brush.
