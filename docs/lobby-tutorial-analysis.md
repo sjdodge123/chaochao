@@ -23,37 +23,36 @@ objective, and the dangers (lava) before a real game ever starts.
    without actually concluding/winning anything.
 4. **No scoring in the lobby.** Neither touching lava nor touching the goal may change a
    player's score (notches). See "Scoring safety" below — this is the subtle part.
-5. **Abilities fully active (curated subset).** Players can pick up *and fire* abilities in
-   the lobby. **`swap` is dropped** (it teleports players around, disruptive while they're
-   learning to move) and **`blindfold` is dropped** (darkens the screen, confusing without
-   context). **`bomb` and `tileSwap` are intentionally kept** — they teach the ability
-   controls (aim/fire), and their map mutation is accepted in exchange for the reset cadence
-   (decision 8).
+5. **Abilities active (curated subset).** Players can pick up *and fire* abilities in the
+   lobby. **Dropped: `swap`** (teleports players, disruptive while learning to move),
+   **`blindfold`** (darkens screen, confusing without context), and **`tileSwap`** (GLOBAL —
+   one fire swaps every fast↔ice cell on the whole map, wrecking the curated layout; bomb
+   teaches aim/fire with far less collateral). **Kept: `bomb`** (the primary teaching
+   ability) plus `iceCannon`, `speedBuff`, `speedDebuff`, `cut`. With tileSwap gone, the only
+   remaining map-mutators are **bomb and ice cannon, both *local*** — so layout churn is minor
+   and the reset cadence is lighter-duty.
    - **Authoring note (deep scan):** the ability pool (`allAbilityIDs`) is built once in the
-     constructor and shared by *all* states, so you can't drop swap/blindfold via a config
+     constructor and shared by *all* states, so you can't drop abilities via a config
      `spawnable` flag without removing them from real races. Instead **hard-code the curated
-     ability tile ids directly in the lobby map JSON** (e.g. `102` bomb, `106` tileSwap)
-     rather than the `id:5` placeholder — bypasses the random pool, gives deterministic
-     tutorial placement.
-   - **⚠ tileSwap is GLOBAL:** one fire swaps *every* fast↔ice cell on the whole map, wrecking
-     the entire curated layout in a single use. Keeping it needs the sanctuary guard
-     (decision 10) on `swapTiles` AND tolerating frequent full-layout churn. **Open question
-     below: is tileSwap worth the collateral, or does `bomb` alone teach aim/fire?**
-   - **Replenishment:** picking up an ability tile rewrites it to `normal` (`changeTile` on
-     pickup), so each tile is one-shot until a reset — in a shared lobby only the first player
-     per cycle learns each ability unless we add multiple tiles or a faster tile respawn.
+     ability tile ids directly in the lobby map JSON** (e.g. `102` bomb) rather than the
+     `id:5` placeholder — bypasses the random pool, gives deterministic tutorial placement.
+   - **Replenishment (decision: fast lobby-only respawn).** Picking up an ability tile
+     rewrites it to `normal` (`changeTile` on pickup), so each tile is one-shot. Add a
+     **lobby-only timer that restores a consumed ability tile** after a short delay so every
+     player — not just the first per cycle — can learn each ability. (See change #18.)
 6. **All lobby SFX dampened uniformly.** Every lobby sound effect — abilities *and* the reused
    death/win cues — plays at a single reduced lobby volume so the whole lobby reads as
    practice, not a live round.
 7. **Reuse in-game death/win feedback.** Lobby death and goal-win use the same explosion /
    finish-celebration cues as a real round (zero new assets, players learn the real cues),
    played at the dampened lobby volume from decision 6.
-8. **Layered map-reset cadence.** Because `bomb`/`tileSwap` rewrite cells, the curated layout
-   is restored via: (a) game start, (b) lobby (re)start, (c) lobby empties, and (d) an
-   **idle-gated safety reset**: if the map differs from pristine *and* there's been no
+8. **Layered map-reset cadence.** Because `bomb`/`ice cannon` locally rewrite cells, the
+   curated layout is restored via: (a) game start, (b) lobby (re)start, (c) lobby empties, and
+   (d) an **idle-gated safety reset**: if the map differs from pristine *and* there's been no
    ability/projectile activity for **15s**, restore it. (Checked on a short tick; the 15s idle
    gate means active players are never interrupted, but a mutated-then-abandoned lobby
-   self-heals 15s after the last ability use.)
+   self-heals 15s after the last ability use.) With tileSwap dropped (decision 5) the
+   mutations are now *local* only, so this is lighter-duty than originally scoped.
 9. **Respawn invulnerability: 2–3s, with a visual indicator.** After a lobby death or goal
    touch the player respawns invulnerable for ~2–3s, shown by **flashing the player or fading
    them in/out** so the state is legible. During invuln the player can't re-trigger
@@ -147,9 +146,11 @@ the lobby today. The actual gates are:
    branch (`game.js:661`). Needs lobby handling if ice cannon / bomb should reshape lobby
    terrain.
 
-**Map-mutation consequence:** bomb (`changeTile` → slow), tileSwap (fast↔ice), and ice cannon
-(freeze → ice) permanently rewrite `currentMap` cells. In a *persistent, shared* lobby this
-slowly erodes the curated layout, so we need a reset strategy (see Risks).
+**Map-mutation consequence:** bomb (`changeTile` → slow), tileSwap (fast↔ice, *global*), and
+ice cannon (freeze → ice) permanently rewrite `currentMap` cells. We **exclude tileSwap** from
+the lobby (decision 5) precisely because it's global; the kept mutators (bomb, ice cannon) are
+*local*, so a *persistent, shared* lobby erodes only slowly — handled by the reset strategy
+(see Risks / decision 8).
 
 ### Spawn placement is terrain-blind
 `spawnPlayerRandomLoc` → `findFreeLoc` → `getSafeLoc` (`server/game.js:1657-1665`) only keeps
@@ -234,17 +235,19 @@ normal map JSON, sized to 1366 × 768, center kept clear for the start button:
 | 7 | Fixed safe-spawn zone w/ jitter (initial + respawn) — **protected sanctuary: no cell mutation, no projectile/ability/hazard effect, no collision damage inside it** | `game.js` (spawn path, collision/mutation guards) | ~0.5 day |
 | 8 | Shared `respawnInLobby(player)` helper used by 5 & 6 | `game.js` | (folded into 5/6) |
 | 9 | **2–3s respawn invulnerability** + **flash/fade visual** (client) after lobby death or goal touch | `game.js` (`respawnInLobby`), `draw.js` (flash/fade) | ~0.5 day |
-| 10 | **Un-gate `ability.use()` for lobby** in `checkAttack`; **exclude `swap` and `blindfold`** from lobby ability pool | `game.js:1912-1918`, ability spawn | ~2 hrs |
+| 10 | **Un-gate `ability.use()` for lobby** in `checkAttack` (lobby ability set: bomb, iceCannon, speedBuff, speedDebuff, cut — `swap`/`blindfold`/`tileSwap` excluded via curated map tiles) | `game.js:1921`, lobby map JSON | ~2 hrs |
 | 11 | **Lobby projectile→terrain collision** (ice cannon / bomb reshape) | `game.js:661` | ~2 hrs |
 | 12 | **Dampen ALL lobby SFX uniformly** (single lobby volume scalar) | `client/scripts/audio.js` | ~2 hrs |
 | 13 | **Layered map-reset cadence** — game-start / lobby-(re)start / lobby-empty / **15s idle-gated** safety reset; reset = reapply pristine cell ids + broadcast `tileChanges` | `game.js` (`startLobby`, reset helper, timer) | ~0.5 day |
 | 14 | Multiplayer testing (concurrent deaths, spawn stacking, griefing tolerance, no score drift, map-mutation recovery) | — | ~0.5–1 day |
 | 15 | **Guard achievement stats in lobby** — don't increment `resourceful`/`bully` (and verify `savior`/`totalKills`) on lobby ability-fire/punch; clear `onFire` in `respawnInLobby` | `game.js` (`checkAttack`, `respawnInLobby`) | ~2 hrs |
 | 16 | **Sanctuary/invuln guards on force functions** — `cutPlayer` (`engine.js`), `applyExplosionForce`; unify with `isProtected()` helper | `game.js`, `engine.js` | ~2 hrs |
-| 17 | **Hard-code curated ability ids in lobby map JSON** (skip random pool) instead of config `spawnable` edits | lobby map JSON, `game.js` load | ~1 hr |
+| 17 | **Hard-code curated ability ids in lobby map JSON** (skip random pool) instead of config `spawnable` edits; `tileSwap` excluded | lobby map JSON, `game.js` load | ~1 hr |
+| 18 | **Fast lobby-only ability-tile respawn** — timer restores a consumed ability tile so every player can learn (broadcast via `tileChanges`) | `game.js` (lobby tick / reset helper) | ~2 hrs |
 
 **Total: ~4–5 days** — the deep scan added the achievement-stat guard, force-function guards,
-and curated-ability authoring (~0.5–1 day) on top of the prior estimate.
+and curated-ability authoring; dropping tileSwap removes the global-churn risk and lightens
+the reset work, roughly offsetting the new ability-respawn timer.
 
 ### Map-rotation leakage gotcha
 `loadMaps()` (`server/utils.js:308`) ingests *everything* in `client/maps/`, so a tutorial map
@@ -293,31 +296,29 @@ Validated all decisions against the current code after rebasing onto 3 upstream 
   lingering when the real game starts.
 - **Score drift** — verify notches are byte-for-byte unchanged after a lobby session full of
   lava deaths, goal touches, and ability use (incl. punch/cut knocking players into lava).
-- **Map mutation in a persistent shared lobby** — bomb/tileSwap/ice-cannon rewrite cells, so
-  the curated layout degrades over a long-lived lobby. Need a reset strategy (change #13):
-  reload the pristine lobby map on a cadence, or on lobby (re)entry, or when it empties.
-- **Griefing tolerance** — fully-active abilities in a shared lobby are accepted by design
-  (swap teleports, speed debuff affects everyone). Watch that it stays fun, not disruptive.
+- **Map mutation in a persistent shared lobby** — bomb/ice-cannon locally rewrite cells (tileSwap
+  dropped), so the curated layout degrades slowly over a long-lived lobby. Reset strategy
+  (change #13): reload the pristine lobby map on a cadence, on lobby (re)entry, or when empty.
+- **Griefing tolerance** — the curated active abilities in a shared lobby are accepted by
+  design (speedDebuff affects everyone; cut can knock players around). Watch that it stays
+  fun, not disruptive.
 
 ---
 
 ## Open questions (to refine)
 
-- **tileSwap — keep or drop?** Deep scan found it's *global* (swaps every fast↔ice cell on the
-  whole map per fire), so it wrecks the curated layout in one use and forces frequent resets.
-  Keep it (with sanctuary guard + churn) to teach ability controls, or drop it and let `bomb`
-  alone teach aim/fire? **Needs a decision.**
-- **Ability replenishment** — tiles are one-shot per reset cycle; do we want multiple tiles or
-  a faster lobby-only ability-tile respawn so more than the first player learns each ability?
 - Exact safe-spawn zone coordinates depend on the final authored layout.
 - Flash vs. fade for the invuln indicator (change #9) — pick during implementation/eyeballing.
+- Ability-tile respawn delay (change #18) — pick a short value during implementation.
 
 ### Resolved
 - ~~Map-reset cadence~~ → layered: game-start / lobby-(re)start / lobby-empty / **15s**
   idle-gated safety reset (decision 8).
 - ~~SFX dampening scope~~ → all lobby SFX dampened uniformly (decision 6).
-- ~~Abilities present-but-inert vs active~~ → fully active, curated subset; `swap` and
-  `blindfold` dropped; `bomb`/`tileSwap` kept to teach controls (decision 5).
+- ~~Abilities present-but-inert vs active~~ → active curated subset; `swap`, `blindfold`,
+  `tileSwap` dropped; `bomb` (+ iceCannon/speedBuff/speedDebuff/cut) kept (decision 5).
+- ~~tileSwap keep/drop~~ → dropped (it's global, wrecks layout); `bomb` teaches aim/fire.
+- ~~Ability replenishment~~ → fast lobby-only ability-tile respawn (change #18).
 - ~~Feedback reuse~~ → reuse in-game death/win cues at lobby volume (decision 7).
 - ~~Respawn cooldown length~~ → 2–3s invuln with flash/fade indicator (decision 9).
 - ~~Safe-spawn protection level~~ → fully protected sanctuary (decision 10).
