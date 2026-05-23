@@ -1,0 +1,82 @@
+name: Game mechanic changes need release notes
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  check-release-notes:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine diff range
+        id: range
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "base=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+            echo "head=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            # For pushes, compare against the parent commit (covers single commits
+            # and pushed batches via github.event.before).
+            before='${{ github.event.before }}'
+            if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
+              before="${{ github.sha }}^"
+            fi
+            echo "base=$before" >> "$GITHUB_OUTPUT"
+            echo "head=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Look for game mechanic changes
+        id: mechanics
+        run: |
+          base='${{ steps.range.outputs.base }}'
+          head='${{ steps.range.outputs.head }}'
+          mechanic_paths='server/config.json server/game.js server/engine.js'
+          changed=$(git diff --name-only "$base" "$head" -- $mechanic_paths || true)
+          if [ -z "$changed" ]; then
+            echo "Touched no game mechanic files. Skipping release notes check."
+            echo "changed=" >> "$GITHUB_OUTPUT"
+          else
+            echo "Changed game mechanic files:"
+            echo "$changed"
+            echo "changed<<EOF" >> "$GITHUB_OUTPUT"
+            echo "$changed" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Require a CHANGELOG.md entry
+        if: steps.mechanics.outputs.changed != ''
+        run: |
+          base='${{ steps.range.outputs.base }}'
+          head='${{ steps.range.outputs.head }}'
+          if ! git diff --name-only "$base" "$head" | grep -qx CHANGELOG.md; then
+            echo "::error::This change touches a game mechanic file but CHANGELOG.md was not updated."
+            echo "::error::Add a player-facing entry under '## Unreleased' in CHANGELOG.md."
+            echo "::error::Touched: ${{ steps.mechanics.outputs.changed }}"
+            exit 1
+          fi
+          added=$(git diff "$base" "$head" -- CHANGELOG.md | awk '/^\+[^+]/ {n++} END {print n+0}')
+          if [ "$added" -lt 1 ]; then
+            echo "::error::CHANGELOG.md was modified but no new content was added. Please describe the change for players."
+            exit 1
+          fi
+          # Reject changes that only edit existing released sections — new notes
+          # should land under '## Unreleased' so the next release can sweep them up.
+          unreleased_added=$(git diff "$base" "$head" -- CHANGELOG.md | awk '
+            /^@@/ {in_unrel = 0; next}
+            /^[+-]## Unreleased/ {in_unrel = 1; next}
+            /^[+-]## [0-9]/ {in_unrel = 0; next}
+            in_unrel && /^\+[^+]/ {n++}
+            END {print n+0}
+          ')
+          if [ "$unreleased_added" -lt 1 ]; then
+            echo "::error::Add the new entry under the '## Unreleased' heading in CHANGELOG.md so it ships in the next release."
+            exit 1
+          fi
+          echo "Release notes check passed."

@@ -12,6 +12,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 There is no test suite, no linter, and no formatter configured. `client/scripts/dist/` is ignored by `.gitignore` (the `dist` rule), so bundles are produced at deploy time, not committed.
 
+## Release notes for game mechanic changes
+
+Any change that touches `server/config.json`, `server/game.js`, or `server/engine.js` is a "game mechanic" change and MUST add a player-facing bullet under `## Unreleased` in `CHANGELOG.md` in the same commit. The `.github/workflows/release-notes-check.yml` workflow enforces this on PRs and pushes to `main`. Write the entry the way a player would describe what they noticed, not what the code does — see existing GitHub releases (https://github.com/sjdodge123/chaochao/releases) and `CONTRIBUTING.md` for the format. Refactors, perf work, UI/CSS, build/CI changes, and map JSON submissions are exempt.
+
 ## Architecture
 
 This is a multiplayer top-down racing/arena game. A single Node process hosts both the static client and the Socket.IO server; gameplay is fully authoritative on the server, and the client only renders state and forwards input.
