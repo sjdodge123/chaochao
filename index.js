@@ -16,7 +16,8 @@ app.use(compression());
 // Runs in both dev and prod; read once at startup so we don't hit disk on
 // every request.
 const APP_VERSION = require('./package.json').version;
-const APP_NEWS = loadLatestHeadline();
+const APP_NEWS = loadWeeklyNews();
+const RELEASES_REPO = 'sjdodge123/chaochao';
 
 function escapeHtml(s) {
     return String(s)
@@ -26,41 +27,68 @@ function escapeHtml(s) {
         .replace(/"/g, '&quot;');
 }
 
-// The news banner surfaces the most recent CHANGELOG entry: the first bullet
-// under the topmost section that has one (Unreleased first, then the latest
-// versioned release). Returns '' if there are no entries yet.
-function loadLatestHeadline() {
+// Monday (UTC, YYYY-MM-DD) of the calendar week containing a YYYY-MM-DD date.
+// MUST match mondayOf() in .github/scripts/changelog-lib.mjs, which names the
+// "week-YYYY-MM-DD" digest release this banner links to.
+function mondayOf(dateStr) {
+    var d = new Date(dateStr + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+    return d.toISOString().slice(0, 10);
+}
+
+// The news banner surfaces ONE headline for the latest week of releases and
+// links to that week's consolidated digest release. The headline is the most
+// recent bullet flagged "[headline]" within the week of the topmost release
+// section, falling back to that week's first bullet. Returns null when there
+// are no releases yet. Kept in lockstep with the digest built in
+// .github/scripts/changelog-lib.mjs.
+function loadWeeklyNews() {
     try {
         var md = fs.readFileSync(path.join(__dirname, 'CHANGELOG.md'), 'utf8');
         var lines = md.split('\n');
-        // Only scan inside the release sections (after the first "## " heading),
-        // so a stray bullet in the intro/guidance prose can't become the headline.
-        var inSections = false;
+        var weekMonday = null;     // week of the topmost release section
+        var inWeek = false;        // currently scanning a section in that week
+        var headline = null;       // [headline]-marked bullet (first wins)
+        var firstBullet = null;    // fallback: first bullet of the week
+        var headlineRe = /^-\s+\[headline\]\s*/i;
         for (var i = 0; i < lines.length; i++) {
             var line = lines[i].trim();
-            if (line.indexOf('## ') === 0) {
-                inSections = true;
+            var ver = line.match(/^##\s+v\d+\.\d+\.\d+\s+—\s+(\d{4}-\d{2}-\d{2})/);
+            if (ver) {
+                var monday = mondayOf(ver[1]);
+                if (weekMonday === null) weekMonday = monday;
+                inWeek = monday === weekMonday;
                 continue;
             }
-            if (inSections && line.indexOf('- ') === 0) {
-                return line.slice(2).trim()
-                    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1') // [text](url) -> text
-                    .replace(/[*`_]/g, '');                  // strip emphasis/code marks
+            if (line.indexOf('## ') === 0) { inWeek = false; continue; }
+            if (!inWeek || line.indexOf('- ') !== 0) continue;
+            var clean = function (t) {
+                return t.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1') // [text](url) -> text
+                    .replace(/[*`_]/g, '').trim();              // strip emphasis/code
+            };
+            if (firstBullet === null) firstBullet = clean(line.slice(2));
+            if (headline === null && headlineRe.test(line)) {
+                headline = clean(line.replace(headlineRe, ''));
             }
         }
+        var text = headline || firstBullet;
+        if (!text || !weekMonday) return null;
+        return { headline: text, weekTag: 'week-' + weekMonday };
     } catch (e) {
         console.log('Could not read CHANGELOG.md for news banner:', e.message);
+        return null;
     }
-    return '';
 }
 
 function newsBannerHtml() {
     if (!APP_NEWS) {
         return '';
     }
-    return '<a class="news-banner" target="_blank" href="https://github.com/sjdodge123/chaochao/releases/latest">' +
-        '<span class="news-badge">Patch notes</span>' +
-        '<span class="news-headline">' + escapeHtml(APP_NEWS) + '</span>' +
+    var href = 'https://github.com/' + RELEASES_REPO +
+        '/releases/tag/' + encodeURIComponent(APP_NEWS.weekTag);
+    return '<a class="news-banner" target="_blank" href="' + escapeHtml(href) + '">' +
+        '<span class="news-badge">This week</span>' +
+        '<span class="news-headline">' + escapeHtml(APP_NEWS.headline) + '</span>' +
         '</a>';
 }
 

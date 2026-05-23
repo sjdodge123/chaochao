@@ -12,6 +12,18 @@ For any such change, add a bullet under `## Unreleased` in `CHANGELOG.md` in the
 
 The `Game mechanic changes need release notes` GitHub Actions check enforces this on every PR and push to `main`.
 
+### Weekly digest and the front-page headline
+
+Every PR still cuts its own `vX.Y.Z` release, but the landing-page banner shows **one headline per calendar week** (Mon–Sun, UTC) linking to a consolidated `week-YYYY-MM-DD` GitHub release that the release workflow builds automatically. To pick the bullet featured as that week's headline, prefix it with `[headline]`:
+
+```
+### General
+- [headline] Now with controller support!
+- Smaller polish that won't be the headline
+```
+
+The most recent `[headline]` bullet in the week wins; if none is flagged, the week's first bullet is used. The marker is stripped wherever the line is shown (banner, per-PR release notes, and the weekly digest), so it only affects which line gets promoted.
+
 ### Cutting a release
 
 1. Move the `## Unreleased` block under a new `## vX.Y.Z — YYYY-MM-DD` heading in `CHANGELOG.md`. Leave a fresh empty `## Unreleased` at the top.
