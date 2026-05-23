@@ -2,6 +2,12 @@
 
 Tracked work that is known and intentionally deferred. The currently-in-progress changes are not listed here.
 
+## In-game play (`client/scripts/input.js`, `client/play.html`)
+
+### Bugs
+
+- **Touch handlers crash when `virtualButtonList` is null.** The `touchstart`/`touchend`/`touchmove` listeners are registered unconditionally (`input.js:22-24`), but `virtualButtonList` starts as `null` (`input.js:6`) and is only built by `setupVirtualbuttons()` when `isTouchDevice()` is true (`input.js:30-32`). On a hybrid device where `isTouchDevice()` returns false but the browser still dispatches touch events (touchscreen laptop + trackpad, a force-touch trackpad, or Chrome touch emulation), `onTouchStart`/`onTouchEnd` iterate `virtualButtonList.length` and throw `Cannot read properties of null (reading 'length')`. It doesn't break gameplay — the handlers just abort — but it spams the console. Fix: guard the touch handlers with an early `if (!virtualButtonList) return;`, or build the button list unconditionally at init. Pre-existing; surfaced during local-multiplayer controller testing but unrelated to it (touch input is out of scope for local MP).
+
 ## Map editor (`client/scripts/create.js`, `client/create.html`)
 
 ### Bugs
