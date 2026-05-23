@@ -93,7 +93,7 @@ function draw(){
 
   // dev legend (preview only — no text in the real lobby)
   var L=[['lava (death)','#cf1020'],['ice (slip)','#A5F2F3'],['sand (slow)','#000'],
-         ['grass (fast)','#90ee90'],['goal','#FFD700'],['bomb tile','#FFFF00']];
+         ['grass (fast)','#90ee90'],['dirt (normal)','#b5651d'],['goal','#FFD700'],['bomb tile','#FFFF00']];
   ctx.textAlign='left'; ctx.font='14px sans-serif';
   for(var j=0;j<L.length;j++){ var y=20+j*22;
     ctx.fillStyle=L[j][1]; ctx.fillRect(12,y-12,16,16);
