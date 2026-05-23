@@ -602,6 +602,11 @@ function dropLocalPlayer(slot) {
 		clearTimeout(lp.reconnectTimer);
 		lp.reconnectTimer = null;
 	}
+	// The controller that drove this player must release its buttons before it can
+	// (re)join, so the press that confirmed leaving doesn't instantly re-join them.
+	if (lp.padIndex != null && typeof markPadNeedsRelease === "function") {
+		markPadNeedsRelease(lp.padIndex);
+	}
 	if (lp.isPrimary) {
 		handlePrimaryLost();
 		return;
