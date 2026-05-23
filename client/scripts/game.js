@@ -38,7 +38,10 @@ var masterControl = $('#masterControl');
 var progressContainer = $('#progressContainer');
 var progressBar = document.getElementById("progressBar");
 var emojiMenu = document.getElementById("emojiMenu");
-var canvasWindow = document.getElementById("mapContainer");
+// Read available space from #gameWindow (the section-filling flex
+// container); #mapContainer is sized inside it to match the canvas.
+var canvasWindow = document.getElementById("gameWindow");
+var mapContainer = document.getElementById("mapContainer");
 var exitIconID = document.getElementById("exitIcon");
 
 //Input Vars
@@ -116,7 +119,7 @@ function enterLobby() {
     loading = false;
     progressContainer.hide();
     $('#main').hide();
-    $('#gameWindow').show();
+    $('#gameWindow').css('display', 'flex');
     resize();
     var playParams = new URLSearchParams(window.location.search);
     if (playParams.has("gameid")) {
@@ -166,21 +169,25 @@ function gameLoop(dt) {
 
 function resize() {
     var gameWindowRect = canvasWindow.getBoundingClientRect();
+    if (gameWindowRect.width === 0 || gameWindowRect.height === 0) return;
     var viewport = { width: gameWindowRect.width, height: gameWindowRect.height };
-    var scaleToFitX = viewport.width / gameCanvas.width;
-    var scaleToFitY = viewport.height / gameCanvas.height;
-    var currentScreenRatio = viewport.width / viewport.height;
-    var optimalRatio = Math.min(scaleToFitX, scaleToFitY);
+    var optimalRatio = Math.min(viewport.width / gameCanvas.width, viewport.height / gameCanvas.height);
 
     if (window.document.fullscreenElement) {
         newWidth = viewport.width;
         newHeight = viewport.height;
     } else {
-        newWidth = gameCanvas.width * optimalRatio / 1.1;
-        newHeight = gameCanvas.height * optimalRatio / 1.1;
+        // Fit the canvas to the available space at its native 16:9
+        // aspect ratio (no padding shrink — the gameWindow flex
+        // container provides any breathing room).
+        newWidth = gameCanvas.width * optimalRatio;
+        newHeight = gameCanvas.height * optimalRatio;
     }
 
-
+    if (mapContainer != null) {
+        mapContainer.style.width = newWidth + "px";
+        mapContainer.style.height = newHeight + "px";
+    }
     gameCanvas.style.width = newWidth + "px";
     gameCanvas.style.height = newHeight + "px";
     overlayCanvas.style.width = newWidth + "px";
