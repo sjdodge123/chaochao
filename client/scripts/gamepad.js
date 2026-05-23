@@ -160,6 +160,17 @@ function detectGamepadType(id) {
     return "generic";
 }
 
+// Pad indices that must release all buttons before they can (re)join. Set when a
+// player leaves, so the button they held to confirm the leave doesn't instantly
+// re-join them — they have to release and press again. A brand-new pad isn't in
+// this set, so its very first press still joins immediately.
+var padNeedsRelease = {};
+function markPadNeedsRelease(idx) {
+    if (idx != null) {
+        padNeedsRelease[idx] = true;
+    }
+}
+
 function anyButtonPressed(pad) {
     for (var i = 0; i < pad.buttons.length; i++) {
         if (pad.buttons[i] && (pad.buttons[i].pressed || pad.buttons[i].value > GP_TRIGGER_THRESHOLD)) {
@@ -305,7 +316,14 @@ function pollGamepad(dt) {
         }
         var lp = localPlayerForPadIndex(i);
         if (!lp) {
-            if (anyButtonPressed(pad)) {
+            var pressed = anyButtonPressed(pad);
+            if (padNeedsRelease[i]) {
+                // Just-left pad: wait until its buttons are released before it can
+                // join again (so the leave-confirm press can't re-join it).
+                if (!pressed) {
+                    delete padNeedsRelease[i];
+                }
+            } else if (pressed) {
                 tryClaimPadSlot(i, pad);
             }
             continue; // wait until the slot has joined (myID set) before polling
