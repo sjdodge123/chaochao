@@ -8,10 +8,6 @@ Releases are cut automatically on merge to `main` by the `Release on merge to ma
 
 ## Unreleased
 
-(none yet)
-
-## v0.1.3 — 2026-05-23
-
 ### Bug fixes
 
 - Using an ability no longer brings your character to a stop. Only punching without an ability slows you down now.
