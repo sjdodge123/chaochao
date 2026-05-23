@@ -94,6 +94,14 @@
             "canBeRandomed": false,
             "color": "#020DFE"
         },
+        "background": {
+            "id": 9,
+            "brakeCoeff": 0.235,
+            "dragCoeff": 0.25,
+            "acel": 300,
+            "canBeRandomed": false,
+            "color": "#2b2b2b"
+        },
         "abilities": {
             "canBeRandomed": false,
             "blindfold": {

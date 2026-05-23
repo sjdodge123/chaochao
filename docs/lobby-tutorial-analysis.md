@@ -287,12 +287,43 @@ clear for the start button. The islands:
 
 ---
 
+## Draft artifacts (on this branch)
+
+Concrete drafts produced so far (validated: config parses, map is well-formed, `game.js`/
+`draw.js` pass `node --check`, `loadMaps()` excludes the tutorial from the race pool):
+
+- **`background` terrain type** — `server/config.json` `tileMap.background` (id 9, normal
+  physics, editor color `#2b2b2b`). Renderer skips it (`draw.js` `renderMapToCache`); `handleHit`
+  treats it as normal ground (`game.js`), which also resets off-island physics. Race rotation
+  filters out `lobbyOnly` maps (`game.js` ctor → `this.maps` / `this.lobbyMaps`).
+- **Island map** — `tools/genLobbyTutorialMap.js` (deterministic, seeded) generates
+  `client/maps/_lobbyTutorial.json`: a full 320-cell Voronoi field, 269 transparent
+  `background` cells + islands. Layout (1366×768, center kept clear for the start button):
+
+  | Island | Type (id) | Center | r | Cells |
+  |---|---|---|---|---|
+  | lava pool (danger) | lava (3) | (380, 200) | 95 | 11 |
+  | ice patch | ice (4) | (986, 200) | 95 | 11 |
+  | sand patch | slow (0) | (380, 568) | 95 | 9 |
+  | grass patch | fast (2) | (986, 568) | 95 | 9 |
+  | goal (yellow) | goal (6) | (1210, 384) | 80 | 8 |
+  | bomb tiles ×2 | bomb (102) | (683,130)/(683,638) | 46 | 3 |
+  | spawn pad | background | (175, 384) | 70 | (bg) |
+
+  Re-run with `node tools/genLobbyTutorialMap.js` after tweaking layout. The map carries
+  `lobbyOnly:true` and `spawnPad` (for change #7's spawn/respawn).
+
+**Still TODO to make it live** (implementation phase, not drafted): wire `startLobby` to load
+`lobbyMaps[0]` + broadcast it (change #2), render map + enable cell collision in lobby state
+(#3/#4), the option-B respawn/invuln/scoring guards (#5/#6/#9/#15), ability un-gate + respawn
+(#10/#18), SFX dampen (#12), reset cadence (#13), force-fn guards (#16), and the editor brush.
+
 ## Change list
 
 | # | Change | File(s) | Effort |
 |---|--------|---------|--------|
-| 0 | **New `background` terrain type** (transparent render, normal physics, no-op `handleHit`, = sanctuary) + **editor transparent/"erase" brush** | `config.json`, `draw.js`, `create.js`, `game.js` | ~0.5 day |
-| 1 | Author tutorial lobby map as **ISLANDS** — lava pool, ice/sand/grass patches, yellow goal, ability tile(s), spawn pad; everything else painted `background` | editor → new map JSON | 0.5–1 day |
+| 0 | **New `background` terrain type** (transparent render, normal physics, no-op `handleHit`, = sanctuary). ✅ **DRAFTED** (config + game.js handleHit + draw.js skip + rotation filter). Editor "erase" brush still TODO. | `config.json`, `draw.js`, `create.js`, `game.js` | ~0.5 day |
+| 1 | Author tutorial lobby map as **ISLANDS**. ✅ **DRAFTED** via `tools/genLobbyTutorialMap.js` → `client/maps/_lobbyTutorial.json` (lava/ice/slow/fast/goal/bomb islands on a background field). | generator → map JSON | 0.5–1 day |
 | 2 | Load tutorial map + button in `startLobby`; **exclude from race rotation** | `game.js`, `utils.js` | ~2 hrs |
 | 3 | Enable `checkCollideCells` for lobby state | `game.js:616-628` | ~30 min |
 | 4 | Render map client-side during lobby | `client.js:162`, `draw.js:275` | ~1 hr |

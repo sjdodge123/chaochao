@@ -691,7 +691,11 @@ class GameBoard {
 		this.alivePlayerCount = 0;
 		this.sleepingPlayerCount = 0;
 		this.startingGate = null;
-		this.maps = utils.loadMaps();
+		var allMaps = utils.loadMaps();
+		// lobbyOnly maps (e.g. the lobby tutorial islands) are kept out of the race
+		// rotation; the lobby loads its map from lobbyMaps separately.
+		this.maps = allMaps.filter(function (m) { return !m.lobbyOnly; });
+		this.lobbyMaps = allMaps.filter(function (m) { return m.lobbyOnly; });
 		this.mapsPlayed = [];
 		this.currentMap = {};
 		this.nextMap = {};
@@ -2295,6 +2299,19 @@ class Player extends Circle {
 			return;
 		}
 		if (object.isMapCell) {
+			if (object.id == c.tileMap.background.id) {
+				// Transparent lobby "background" / sanctuary ground: behaves as normal
+				// terrain. Applying normal grip here is what resets a player's physics
+				// when they step off an island onto background.
+				if (this.isZombie == true) {
+					this.applyInfectedMods(object);
+					return;
+				}
+				this.acel = object.acel;
+				this.brakeCoeff = object.brakeCoeff;
+				this.dragCoeff = object.dragCoeff;
+				return;
+			}
 			if (object.id == c.tileMap.normal.id) {
 				if (this.isZombie == true) {
 					this.applyInfectedMods(object);
