@@ -19,6 +19,13 @@ html,body {
     height: 100vh;
 }
 
+body {
+    /* Push body content below the fixed navbar with padding (not margin
+       on the first child) so the offset doesn't margin-collapse out of
+       body and inflate the page height past the viewport. */
+    padding-top: var(--navbar-height);
+}
+
 nav {
     height: var(--navbar-height);
     width: 100%;
@@ -33,8 +40,9 @@ nav {
   }
 
   section {
-    margin-top: var(--navbar-height);
-    height: 100vh;
+    /* navbar offset comes from body { padding-top } so margins don't
+       collapse out and inflate the page height. */
+    height: calc(100vh - var(--navbar-height));
     position: relative;
   }
 
