@@ -77,10 +77,11 @@ var RECONNECT_GRACE_MS = 12000; // keep a pad slot alive this long across a
                                 // transient disconnect before dropping it.
 var localPlayers = [];      // slot index -> local player entry (slot 0 = primary)
 var primarySlot = 0;        // index in localPlayers of the render/audio owner
-// Set once a movement key is pressed. While false, the FIRST controller to press
-// claims the primary slot (P1) so the game is playable with controllers only; if
-// the keyboard is in use it owns P1 and pads start at P2.
-var keyboardClaimedPrimary = false;
+// Set once the keyboard OR mouse drives P1 (a movement key, a click, or
+// mouse-move play). While false, the FIRST controller to give input claims the
+// primary slot (P1) so the game is playable with controllers only; once kb/m is
+// in use it owns P1 and controllers join as P2+.
+var kbmClaimedPrimary = false;
 // The emoji wheel is a single shared element; this is the slot that currently has
 // it open (null = closed). Only that player navigates it (others keep playing),
 // and the chosen emoji is emitted on that player's own socket so it's attributed

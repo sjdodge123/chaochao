@@ -215,7 +215,7 @@ function tryClaimPadSlot(padIndex, pad) {
     // no pad yet, the FIRST controller drives P1 (the existing primary
     // connection) so no keyboard is required. This reuses the existing player, so
     // there's no new join and no capacity check.
-    if (primary && primary.padIndex == null && !keyboardClaimedPrimary) {
+    if (primary && primary.padIndex == null && !kbmClaimedPrimary) {
         bindPadToPrimary(padIndex, pad);
         return;
     }
@@ -316,22 +316,18 @@ function pollGamepad(dt) {
         }
         var lp = localPlayerForPadIndex(i);
         if (!lp) {
-            // A pad that just left must release its buttons before (re)joining, so
-            // the press that confirmed leaving can't instantly re-join it.
+            // A pad that just left must go idle before (re)joining, so the input
+            // that confirmed leaving can't instantly re-join it.
             if (padNeedsRelease[i]) {
-                if (!anyButtonPressed(pad)) {
+                if (!padHasInput(pad)) {
                     delete padNeedsRelease[i];
                 }
                 continue;
             }
-            var primary = localPlayers[primarySlot];
-            if (primary && primary.padIndex == null && !keyboardClaimedPrimary) {
-                // First controller, no keyboard in use → it drives P1. Adopt it as
-                // soon as it's present (no button required) so stick/d-pad menu and
-                // lobby navigation work immediately, matching the old single-pad UX.
-                bindPadToPrimary(i, pad);
-            } else if (anyButtonPressed(pad)) {
-                // An additional controller joins as a new player (P2+) on a press.
+            // Claim on ANY input — stick OR button — so navigating with the stick
+            // works without first pressing a button. tryClaimPadSlot decides
+            // whether this pad takes P1 (no kb/m player yet) or joins as P2+.
+            if (padHasInput(pad)) {
                 tryClaimPadSlot(i, pad);
             }
             continue; // wait until the slot has joined (myID set) before polling

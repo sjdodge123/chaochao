@@ -59,6 +59,7 @@ function handleClick(event) {
     switch (event.which) {
         case 1: {
             if (menuOpen == false) {
+                kbmClaimedPrimary = true; // mouse is playing P1 -> controllers are P2+
                 attack = true;
                 server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
             }
@@ -91,6 +92,7 @@ function handleUnClick(event) {
     }
 }
 function handleDblClick(event) {
+    kbmClaimedPrimary = true; // mouse-move play claims P1 -> controllers are P2+
     if (movingByMouse) {
         cancelMovement(event);
     }
@@ -121,7 +123,7 @@ function keyDown(evt) {
     // The keyboard is being used to play -> it owns the primary slot (P1), so
     // controllers hot-join as P2+. (When this stays false, the first pad takes P1.)
     if (gameKey) {
-        keyboardClaimedPrimary = true;
+        kbmClaimedPrimary = true;
     }
     if (playerList[myID] != null) {
         calcAngleFromKeys(playerList[myID]);
