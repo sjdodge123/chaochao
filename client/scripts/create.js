@@ -67,8 +67,21 @@ window.onload = function () {
     server.emit("getConfig");
     setupPage();
     rebuild();
+    showLoadWindow();
+}
+
+function showLoadWindow() {
     $('#loadWindow').show();
     $('#createWindow').hide();
+    document.body.classList.remove('editor-open');
+}
+
+function showEditor() {
+    $('#loadWindow').hide();
+    $('#createWindow').show();
+    document.body.classList.add('editor-open');
+    resize();
+    addListeners();
 }
 
 function clientConnect() {
@@ -108,10 +121,7 @@ function clientConnect() {
                             vMap = JSON.parse(JSON.stringify(maps[j]));
                             $('#author').val(vMap.author);
                             $('#name').val(vMap.name);
-                            $('#loadWindow').hide();
-                            $('#createWindow').show();
-                            resize();
-                            addListeners();
+                            showEditor();
                             return;
                         }
                     }
@@ -181,10 +191,7 @@ function makeSeamlessPattern(image) {
 function setupPage() {
     $("#createNew").on("click", function () {
         $("#submitStatus").hide();
-        $('#loadWindow').hide();
-        $('#createWindow').show();
-        resize();
-        addListeners();
+        showEditor();
     });
     $("#rebuildButton").on("click", function () {
         if (confirmWipeIfDirty()) {
@@ -298,9 +305,8 @@ function setupPage() {
     $("#loadButton").on("click", function () {
         setSelectedObject(null);
         $("#createNewImage").attr("src", createCanvas.toDataURL("image/jpeg", 0.1));
-        $('#createWindow').hide();
-        $('#loadWindow').show();
         $("#submitStatus").hide();
+        showLoadWindow();
 
         window.removeEventListener("mousemove", cellUnderMouse, false);
         window.removeEventListener("mousedown", handleClick, false);
@@ -404,15 +410,12 @@ function animloop() {
 }
 
 function resize() {
+    if (createCanvas == null) return;
     var rect = canvasWindow.getBoundingClientRect();
-    var viewport = { width: rect.width, height: rect.height };
-    var scaleToFitX = viewport.width / createCanvas.width;
-    var scaleToFitY = viewport.height / createCanvas.height;
-    var optimalRatio = Math.min(scaleToFitX, scaleToFitY);
-    newWidth = createCanvas.width * optimalRatio / 1.2;
-    newHeight = createCanvas.height * optimalRatio / 1.2;
-    var controlPanel = document.getElementById("controlPanel");
-    controlPanel.style.height = newHeight + "px";
+    if (rect.width === 0 || rect.height === 0) return;
+    var optimalRatio = Math.min(rect.width / createCanvas.width, rect.height / createCanvas.height);
+    newWidth = createCanvas.width * optimalRatio;
+    newHeight = createCanvas.height * optimalRatio;
     createCanvas.style.width = newWidth + "px";
     createCanvas.style.height = newHeight + "px";
     dirty = true;
