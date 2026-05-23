@@ -83,6 +83,19 @@ function draw(){
     ctx.fillText('spawn pad', s.cx, s.cy);
   }
 
+  // hazards (mirror drawBumper / drawMovingBumper): bumper r10 + attackRadius r15;
+  // moving bumper also draws its rail (width 100) oriented by angle.
+  (MAP.hazards||[]).forEach(function(h){
+    if(h.id === 901){ // moving bumper: draw the rail it sweeps along
+      ctx.save(); ctx.translate(h.x, h.y); ctx.rotate((h.angle||0)*Math.PI/180);
+      ctx.fillStyle='#222'; ctx.fillRect(-50, -3, 100, 6); ctx.restore();
+    }
+    ctx.beginPath(); ctx.arc(h.x, h.y, 15, 0, 6.2832);
+    ctx.lineWidth=3; ctx.strokeStyle='red'; ctx.stroke();
+    ctx.beginPath(); ctx.arc(h.x, h.y, 10, 0, 6.2832);
+    ctx.fillStyle='orange'; ctx.fill();
+  });
+
   // lobby start button (red ring r75 @ world center, like drawLobbyStartButton)
   var bx=683, by=384, br=75;
   ctx.beginPath(); ctx.arc(bx,by,br,0,6.2832); ctx.lineWidth=5; ctx.strokeStyle='red'; ctx.stroke();
@@ -93,7 +106,8 @@ function draw(){
 
   // dev legend (preview only — no text in the real lobby)
   var L=[['lava (death)','#cf1020'],['ice (slip)','#A5F2F3'],['sand (slow)','#000'],
-         ['grass (fast)','#90ee90'],['dirt (normal)','#b5651d'],['goal','#FFD700'],['bomb tile','#FFFF00']];
+         ['grass (fast)','#90ee90'],['dirt (normal)','#b5651d'],['goal','#FFD700'],['bomb tile','#FFFF00'],
+         ['bumper (hazard)','orange']];
   ctx.textAlign='left'; ctx.font='14px sans-serif';
   for(var j=0;j<L.length;j++){ var y=20+j*22;
     ctx.fillStyle=L[j][1]; ctx.fillRect(12,y-12,16,16);
