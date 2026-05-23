@@ -89,10 +89,10 @@ function registerPrimaryHandlers(server) {
 			setBackgroundMusic(gameState.music.mood, gameState.music.track);
 		}
 		setupEmojiWheel();
-		// In local multiplayer P1 also gets a top hint block (the bottom bar is
-		// suppressed); created once the primary has joined.
-		if (localMultiplayerEnabled() && typeof onLocalPlayerJoined === "function" && localPlayers[primarySlot]) {
-			onLocalPlayerJoined(localPlayers[primarySlot]);
+		// Refresh the hint UI now the primary has joined (solo bottom bar by
+		// default; switches to per-player blocks once a 2nd local player joins).
+		if (typeof onLocalPlayersChanged === "function") {
+			onLocalPlayersChanged();
 		}
 	});
 
@@ -600,8 +600,8 @@ function addLocalPlayer(slot, padIndex) {
 	localPlayers[slot] = lp;
 	registerSecondaryHandlers(sock, slot);
 	sock.emit('enterGame', gameID);
-	if (typeof onLocalPlayerJoined === "function") {
-		onLocalPlayerJoined(lp); // hook for the glyph overlay (Phase 5)
+	if (typeof onLocalPlayersChanged === "function") {
+		onLocalPlayersChanged(); // switch to per-player blocks if now >= 2 players
 	}
 	return lp;
 }
@@ -625,8 +625,8 @@ function dropLocalPlayer(slot) {
 	}
 	try { lp.socket.disconnect(); } catch (e) { /* already gone */ }
 	localPlayers[slot] = null;
-	if (typeof onLocalPlayerDropped === "function") {
-		onLocalPlayerDropped(slot); // hook for the glyph overlay (Phase 5)
+	if (typeof onLocalPlayersChanged === "function") {
+		onLocalPlayersChanged(); // restore the bottom bar if back to 1 player
 	}
 }
 
@@ -678,6 +678,9 @@ function promoteToPrimary(lp) {
 		lp.socket.off('disconnect');
 	} catch (e) { /* ignore */ }
 	registerPrimaryHandlers(lp.socket); // resume render/audio/state handlers
+	if (typeof onLocalPlayersChanged === "function") {
+		onLocalPlayersChanged(); // reconcile the hint UI for the new player count
+	}
 }
 
 function clientSendStart(id) {
