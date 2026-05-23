@@ -19,6 +19,17 @@ var gamepadConnected = false;
 var gamepadIndex = null;
 var gamepadType = "generic"; // "xbox" | "playstation" | "generic"
 
+// --- PHASE 1 SPIKE: per-pad emit routing ---
+// When set, this pad's input is emitted on `gpEmitSocket` and attributed to the
+// player `gpEmitID`, instead of the primary `server` / global `myID`. When both
+// are null (the default, flag off), behaviour is identical to today (N=1). This
+// is the throwaway proof that one tab can drive a second, independent server
+// player; Phase 2 replaces it with the per-slot localPlayers table.
+var gpEmitSocket = null;
+var gpEmitID = null;
+function gpSocket() { return gpEmitSocket || server; }
+function gpID() { return gpEmitID != null ? gpEmitID : myID; }
+
 // --- tuning ---
 var GP_MOVE_DEADZONE = 0.30;     // left stick: ignore drift below this
 var GP_AIM_DEADZONE = 0.35;      // right stick: only re-aim when pushed past this
@@ -241,7 +252,7 @@ function pollAim(pad) {
     if (!gpAimActive) {
         return;
     }
-    if (typeof playerList === "undefined" || !playerList || myID == null || !playerList[myID]) {
+    if (typeof playerList === "undefined" || !playerList || gpID() == null || !playerList[gpID()]) {
         return;
     }
 
@@ -266,9 +277,9 @@ function pollAim(pad) {
         return;
     }
 
-    playerList[myID].angle = deg;
-    if (server) {
-        server.emit('mousemove', deg);
+    playerList[gpID()].angle = deg;
+    if (gpSocket()) {
+        gpSocket().emit('mousemove', deg);
     }
     gpPrevAimAngle = deg;
     gpLastAimEmit = now;
@@ -347,10 +358,10 @@ function applyInputState(mf, mb, tl, tr, atk, moveActive) {
             attack = atk;
             // When the right stick isn't aiming, face the movement direction
             // (mirrors the keyboard behaviour).
-            if (!gpAimActive && typeof playerList !== "undefined" && playerList && myID != null && playerList[myID]) {
-                calcAngleFromKeys(playerList[myID]);
-                if (server) {
-                    server.emit('mousemove', playerList[myID].angle);
+            if (!gpAimActive && typeof playerList !== "undefined" && playerList && gpID() != null && playerList[gpID()]) {
+                calcAngleFromKeys(playerList[gpID()]);
+                if (gpSocket()) {
+                    gpSocket().emit('mousemove', playerList[gpID()].angle);
                 }
             }
             emitMovement();
@@ -361,8 +372,8 @@ function applyInputState(mf, mb, tl, tr, atk, moveActive) {
 }
 
 function emitMovement() {
-    if (server) {
-        server.emit('movement', {
+    if (gpSocket()) {
+        gpSocket().emit('movement', {
             turnLeft: turnLeft,
             moveForward: moveForward,
             turnRight: turnRight,
