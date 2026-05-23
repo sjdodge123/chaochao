@@ -234,25 +234,27 @@ exports.getColor = function () {
 };
 
 // Returns a color not already present in usedColors (a map of color -> true).
-// Prefers a distinct named color from the fixed palette; once the palette is
-// exhausted (a room can hold more players than there are named colors) it
-// derives a generated fallback color. Never recurses, so it can't blow the
-// stack and crash the process when a room fills up.
+// Picks a RANDOM unused color from the fixed named palette; once the palette is
+// exhausted (a room can hold more players than there are named colors) it picks
+// a random generated fallback color, retrying a bounded number of times to dodge
+// collisions. Never recurses, so it can't blow the stack and crash the process
+// when a room fills up.
 exports.getUniqueColor = function (usedColors) {
     usedColors = usedColors || {};
+    var available = [];
     for (var name in Colors.names) {
         if (!usedColors[Colors.names[name]]) {
-            return Colors.names[name];
+            available.push(Colors.names[name]);
         }
     }
-    for (var hue = 0; hue < 360; hue++) {
-        var color = 'hsl(' + hue + ', 70%, 50%)';
-        if (!usedColors[color]) {
-            return color;
-        }
+    if (available.length > 0) {
+        return available[Math.floor(Math.random() * available.length)];
     }
-    // Far more players than possible colors; return something valid rather than throw.
-    return 'hsl(' + (Object.keys(usedColors).length % 360) + ', 70%, 50%)';
+    var color = 'hsl(' + Math.floor(Math.random() * 360) + ', 70%, 50%)';
+    for (var tries = 0; tries < 100 && usedColors[color]; tries++) {
+        color = 'hsl(' + Math.floor(Math.random() * 360) + ', 70%, 50%)';
+    }
+    return color;
 };
 
 exports.getDT = function () {
