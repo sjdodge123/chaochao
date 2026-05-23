@@ -524,8 +524,37 @@ function drawAbilties() {
     }
 }
 
+// The player objects for every LOCAL player (slot) that is currently alive. On a
+// shared couch screen there can be several, so blackout cuts a vision hole around
+// each (not just the primary). At N=1 this is just [myPlayer] when alive, so the
+// behaviour is identical to before.
+function livingLocalPlayers() {
+    var out = [];
+    if (typeof localPlayers === "undefined" || typeof playerList === "undefined" || !playerList) {
+        return out;
+    }
+    for (var s = 0; s < localPlayers.length; s++) {
+        var lp = localPlayers[s];
+        if (!lp || lp.myID == null) {
+            continue;
+        }
+        var p = playerList[lp.myID];
+        if (p != null && p.alive) {
+            out.push(p);
+        }
+    }
+    return out;
+}
+
 function drawOverlay() {
-    if (brutalRound == true && blackout == true && myPlayer != null && myPlayer.alive) {
+    if (brutalRound == true && blackout == true) {
+        // Cut a vision hole around each living local player. If none are alive
+        // (everyone local is dead/spectating) we draw no overlay, so spectators
+        // see the whole map — same as the single-player behaviour when dead.
+        var living = livingLocalPlayers();
+        if (living.length === 0) {
+            return;
+        }
         overlayContext.save();
         overlayContext.fillStyle = "black";
         overlayContext.fillRect(0, 0, overlayCanvas.width, overlayCanvas.height);
@@ -534,7 +563,10 @@ function drawOverlay() {
         overlayContext.save();
         overlayContext.globalCompositeOperation = 'destination-out';
         var sprite = getBlackoutHoleSprite();
-        overlayContext.drawImage(sprite, myPlayer.x - sprite.width / 2, myPlayer.y - sprite.height / 2);
+        for (var i = 0; i < living.length; i++) {
+            var p = living[i];
+            overlayContext.drawImage(sprite, p.x - sprite.width / 2, p.y - sprite.height / 2);
+        }
         overlayContext.restore();
     }
 }
