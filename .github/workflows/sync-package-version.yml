@@ -1,0 +1,70 @@
+name: Sync package.json to release tag
+
+# When a vX.Y.Z tag is pushed, update package.json's "version" on main
+# to match. The landing page reads this value at request time
+# (see index.js), so this keeps the displayed version in sync with the
+# release the server is actually running.
+#
+# Workflow:
+#   1. Cut your release commit on main (CHANGELOG, etc).
+#   2. git tag vX.Y.Z && git push --tags
+#   3. This workflow lands a follow-up commit on main bumping
+#      package.json. Heroku auto-deploys main HEAD so the deployed
+#      runtime picks it up.
+#
+# If you enable branch protection on main that requires PRs, swap the
+# direct push for peter-evans/create-pull-request — see CONTRIBUTING.md.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  sync-version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          version="${tag#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Bump package.json if it doesn't match
+        id: bump
+        run: |
+          current=$(node -p "require('./package.json').version")
+          target='${{ steps.version.outputs.version }}'
+          if [ "$current" = "$target" ]; then
+            echo "package.json already at $target; nothing to do"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            node -e "
+              const fs = require('fs');
+              const p = require('./package.json');
+              p.version = '${{ steps.version.outputs.version }}';
+              fs.writeFileSync('package.json', JSON.stringify(p, null, 4) + '\n');
+            "
+            echo "Bumped $current -> $target"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and push
+        if: steps.bump.outputs.changed == 'true'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package.json
+          git commit -m "Sync package.json to ${{ steps.version.outputs.tag }}"
+          git push origin main
