@@ -1,0 +1,45 @@
+name: PR validation
+
+# Basic standards gate for pull requests into main:
+#   1. dependencies install cleanly against the committed lockfile,
+#   2. every JavaScript file parses (no syntax errors), and
+#   3. the client bundles build.
+# Keep this fast and dependency-light so it stays a low-friction check.
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        # `npm ci` also fails if package.json and package-lock.json drift.
+        run: npm ci
+
+      - name: Syntax-check all JavaScript
+        # Parse every tracked .js file; skip vendored deps and build output.
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            if ! node --check "$f"; then
+              echo "::error file=$f::Syntax check failed"
+              fail=1
+            fi
+          done < <(find . \
+            \( -path ./node_modules -o -path ./client/scripts/dist \) -prune -o \
+            -name '*.js' -print)
+          exit $fail
+
+      - name: Build client bundles
+        run: npm run build
