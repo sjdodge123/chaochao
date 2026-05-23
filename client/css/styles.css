@@ -58,58 +58,74 @@ canvas {
     right: 0;
 }
 
-#joinMenu{
-    width: 100%;
-    height: 400px;
-    margin: 50px;
-    border-radius: 5px;
-    box-shadow: 0px 0px 6px #B2B2B2;
+.join-container {
+    max-width: 720px;
+    padding-top: 1rem;
 }
-#gameSelection{
-    width: 90%;
-    height: auto;
-    margin-top: 50px;
-}
-.gameCard{
-    width: 95%;
-    height: 100px;
-    border-radius: 3px;
-    background-color: #F6F6F6;
-    box-shadow: 0px 0px 3px #B2B2B2;
-    margin-bottom: 10px;
-}
-.join-btn{
+.join-header {
     display: flex;
     align-items: center;
-    justify-content: center;
-    padding: 0px;
-    height: 100%;
-    float: right;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
 }
-.game-content{
-    width: 75%;
-    display: inline-block;
-    float: left;
+.join-title {
+    margin: 0;
+    font-weight: 600;
 }
-.gameState{
-    display: inline-block;
-    height: 40px;
-    width: 100%;
+#joinMenu {
+    border-radius: 6px;
+    box-shadow: 0px 0px 6px #B2B2B2;
+    padding: 0.75rem;
+    background: #fff;
+    min-height: 80px;
+}
+#gameSelection {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.gameCard {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.6rem 0.9rem;
+    border-radius: 4px;
+    background-color: #F6F6F6;
+    box-shadow: 0px 0px 3px #B2B2B2;
+}
+.card-info {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.25rem 1.25rem;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.card-state {
+    font-size: 1.05rem;
+    font-weight: 600;
+}
+.card-stat {
+    font-size: 0.9rem;
+    color: #495057;
+    white-space: nowrap;
+}
+.card-stat-label {
+    color: #6c757d;
+}
+.gameCard .join-btn {
+    flex: 0 0 auto;
+    min-width: 90px;
+}
+.empty-state {
     text-align: center;
-    font-size: 32px;
+    padding: 1.5rem 1rem;
+    color: #6c757d;
 }
-.mapData {
-    width: 100%;
-    display: inline-block;
-    width: 100%;
-    margin: 5px;
-    height: 50px;
+.start-new {
     text-align: center;
-}
-th,
-td {
-  padding-left: 10px;
-  padding-top: 3px;
+    margin-top: 1rem;
 }
 
 #gameWindow {

@@ -25,36 +25,25 @@
           </div>
       </nav>
     <section>
-        <div class="container">
-            <div class="row justify-content-center align-self-center mx-auto">
-                <div id="joinMenu">
-                    <div id="gameSelection" class="justify-content-center align-self-center mx-auto">
-                        <div class="gameCard justify-content-center align-self-center mx-auto">
-                            <form>
-                                <div class="game-content">
-                                    <div class="gameState"><span>Lobby</span></div>
-                                    <table class="mapData">
-                                        <tr>
-                                            <th>Round</th>
-                                            <th>Current Map</th>
-                                            <th>Game ID</th>
-                                            <th>Players</th>
-                                        </tr>
-                                        <tr>
-                                            <td>0</td>
-                                            <td>Lobby</td>
-                                            <td>0</td>
-                                            <td>0</td>
-                                        </tr>
-                                    </table>
-                                </div>
-                                <button type="submit" formaction="./play.html" class="btn btn-outline-success w-25 join-btn">Play</button>
-                            </form>
-                        </div>
-                    </div>
+        <div class="container join-container">
+            <div class="join-header">
+                <h4 class="join-title">Available games</h4>
+                <button id="refreshButton" type="button" class="btn btn-outline-secondary btn-sm" title="Refresh game list">
+                    <i class="fa fa-refresh" aria-hidden="true"></i> Refresh
+                </button>
+            </div>
+            <div id="joinMenu">
+                <div id="gameSelection"></div>
+                <div id="emptyState" class="empty-state" hidden>
+                    No games right now — start a new one!
+                </div>
+                <div id="loadingState" class="empty-state">
+                    Looking for games…
                 </div>
             </div>
-
+            <div class="start-new">
+                <a href="./play.html" class="btn btn-outline-success">Start a new game</a>
+            </div>
         </div>
     </section>
     <script src='socket.io/socket.io.js'></script>
