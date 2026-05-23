@@ -236,9 +236,36 @@ function snapshotButtons(pad) {
     return out;
 }
 
+// Browsers pause rAF/gamepad polling while the tab is hidden and may zero gamepad
+// state across a focus change. On refocus, re-baseline each pad's button
+// edge-state from the live reading so a button held across the focus change isn't
+// seen as a fresh press (no phantom attacks/menu-opens, §6.18). Set on `focus`,
+// consumed on the next poll.
+var padEdgeResetPending = false;
+function onTabRefocus() {
+    padEdgeResetPending = true;
+}
+function rebaselinePadEdges(pads) {
+    for (var s = 0; s < localPlayers.length; s++) {
+        var lp = localPlayers[s];
+        if (lp && lp.padIndex != null && pads[lp.padIndex]) {
+            lp.gp.prevButtons = snapshotButtons(pads[lp.padIndex]);
+            lp.gp.prevMove = { moveForward: false, moveBackward: false, turnLeft: false, turnRight: false, attack: false };
+            lp.gp.hadMoveInput = false;
+        }
+    }
+}
+
 // Called once per frame from gameLoop().
 function pollGamepad(dt) {
     var pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    if (padEdgeResetPending) {
+        // First poll after refocus: establish a clean edge baseline and skip
+        // edge-triggered actions for this frame (movement resumes next frame).
+        rebaselinePadEdges(pads);
+        padEdgeResetPending = false;
+        return;
+    }
     if (!localMultiplayerEnabled()) {
         // Single-player: one pad drives the primary slot, exactly as before.
         var pad = adoptFirstPadToPrimary(pads);
