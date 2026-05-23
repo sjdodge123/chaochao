@@ -9,11 +9,26 @@ var config,
 	playerWon = null;
 
 function clientConnect() {
-	var server = io();
+	// The primary connection (slot 0): the keyboard/mouse player and the sole
+	// owner of rendering, audio, UI and one-shot/timer handlers. The globals
+	// `server`/`myID`/`myPlayer` alias this slot (see game.js localPlayers).
+	var sock = io();
+	server = sock;
+	localPlayers[primarySlot] = makeLocalPlayer(primarySlot, sock, true);
+	registerPrimaryHandlers(sock);
+	return sock;
+}
+
+// Registers the FULL handler set on the primary connection. The bodies use the
+// `server`/`myID`/`playerList`/`myPlayer` globals, which alias the primary slot.
+function registerPrimaryHandlers(server) {
 
 	server.on('welcome', function (id) {
 		debugLog("welcome, myID=", id);
 		myID = id;
+		if (localPlayers[primarySlot]) {
+			localPlayers[primarySlot].myID = id;
+		}
 	});
 
 	server.on("drop", function () {
@@ -30,8 +45,11 @@ function clientConnect() {
 
 	server.on("serverKick", function () {
 		debugLog("serverKick received -- being booted");
-		server.disconnect();
-		window.location.href = "./index.html";
+		// Per-slot teardown (§6.17): drop the primary slot. With no other local
+		// players this disconnects and navigates exactly as before (N=1); with pad
+		// players still in the game it fails over to one of them instead of ending
+		// everyone's session.
+		dropLocalPlayer(primarySlot);
 	});
 
 
@@ -54,16 +72,14 @@ function clientConnect() {
 		if (gameState.myID != null) {
 			myID = gameState.myID;
 		}
+		if (localPlayers[primarySlot]) {
+			localPlayers[primarySlot].myID = myID;
+			localPlayers[primarySlot].joined = true;
+		}
 		if (playerList[myID] != null) {
 			myPlayer = playerList[myID];
 		}
 		setupEmojiWheel();
-		// PHASE 1 SPIKE: once the primary player has confirmed its room, open the
-		// second local player into the SAME gameID (sequential join, §5.4). The
-		// guard makes this fire exactly once.
-		if (spikeTwoPlayers() && spikePlayer2.socket == null && gameID != null) {
-			openSpikeSecondPlayer(gameID);
-		}
 	});
 
 	server.on("playerJoin", function (appendPlayerList) {
@@ -466,61 +482,144 @@ function clientConnect() {
 			lobbyStartButton.startSpin = false;
 		}
 	});
+}
 
-	return server;
+// Minimal handler set for a NON-primary connection (a pad player). It is an
+// input/identity channel only: it captures its own server id and handles its own
+// teardown, but does NOT run rendering/audio/UI/timer handlers (the primary owns
+// those — running them per socket would fire every room broadcast N times,
+// §6.8a). Teardown is per-slot: a kick/notfound on this slot drops only this
+// slot and never navigates the tab (§6.17).
+function registerSecondaryHandlers(sock, slot) {
+	sock.on('welcome', function (id) {
+		debugLog("[localmp] slot", slot, "welcome, myID=", id);
+		if (localPlayers[slot]) {
+			localPlayers[slot].myID = id;
+		}
+	});
+	sock.on('gameState', function (gs) {
+		if (localPlayers[slot]) {
+			localPlayers[slot].myID = gs.myID;
+			localPlayers[slot].joined = true;
+		}
+		debugLog("[localmp] slot", slot, "joined room", gs.gameID, "as", gs.myID);
+	});
+	sock.on('roomNotFound', function () {
+		debugLog("[localmp] slot", slot, "roomNotFound — dropping slot, tab kept alive");
+		dropLocalPlayer(slot);
+	});
+	sock.on('serverKick', function () {
+		debugLog("[localmp] slot", slot, "serverKick — dropping slot, tab kept alive");
+		dropLocalPlayer(slot);
+	});
+	sock.on('disconnect', function () {
+		// An unintended drop of a pad player's socket: free the slot so the pad
+		// can re-press to rejoin. (No-op if we already tore it down.)
+		if (localPlayers[slot] && localPlayers[slot].socket === sock) {
+			debugLog("[localmp] slot", slot, "socket disconnected — dropping slot");
+			dropLocalPlayer(slot);
+		}
+	});
+}
+
+// Open a new local player on `slot`, driven by gamepad `padIndex`, and join it
+// into the SAME room as the primary (`gameID`). `forceNew` is load-bearing
+// (§6.7): without it io() reuses the cached Manager and the new "player" would
+// share the primary's socket id.
+function addLocalPlayer(slot, padIndex) {
+	if (localPlayers[slot]) {
+		return localPlayers[slot];
+	}
+	if (gameID == null) {
+		return null; // primary hasn't confirmed a room yet
+	}
+	debugLog("[localmp] opening slot", slot, "pad", padIndex, "-> gameID", gameID);
+	var sock = io({ forceNew: true });
+	var lp = makeLocalPlayer(slot, sock, false);
+	lp.padIndex = padIndex;
+	localPlayers[slot] = lp;
+	registerSecondaryHandlers(sock, slot);
+	sock.emit('enterGame', gameID);
+	if (typeof onLocalPlayerJoined === "function") {
+		onLocalPlayerJoined(lp); // hook for the glyph overlay (Phase 5)
+	}
+	return lp;
+}
+
+// Drop one local player. Non-primary: close its socket and free its slot, leaving
+// everyone else running. Primary: if other locals remain, fail over to one of
+// them rather than tearing down the whole tab (§6.17 — only navigate when the
+// LAST local player is gone).
+function dropLocalPlayer(slot) {
+	var lp = localPlayers[slot];
+	if (!lp) {
+		return;
+	}
+	if (lp.isPrimary) {
+		handlePrimaryLost();
+		return;
+	}
+	try { lp.socket.disconnect(); } catch (e) { /* already gone */ }
+	localPlayers[slot] = null;
+	if (typeof onLocalPlayerDropped === "function") {
+		onLocalPlayerDropped(slot); // hook for the glyph overlay (Phase 5)
+	}
+}
+
+// The primary (rendering/audio) connection was lost. If pad players are still in
+// the game, promote the lowest surviving slot to primary so the couch session and
+// its rendering continue; only when no local players remain do we leave the page.
+function handlePrimaryLost() {
+	var survivor = null;
+	for (var s = 0; s < localPlayers.length; s++) {
+		if (localPlayers[s] && !localPlayers[s].isPrimary) {
+			survivor = localPlayers[s];
+			break;
+		}
+	}
+	if (survivor == null) {
+		// Last local player gone — behave as today and leave.
+		try { server.disconnect(); } catch (e) { /* ignore */ }
+		window.location.href = "./index.html";
+		return;
+	}
+	promoteToPrimary(survivor);
+}
+
+// Best-effort failover: re-point the primary aliases at `lp`'s socket and attach
+// the full handler set so rendering/audio resume on it. The keyboard then drives
+// this player too (acceptable until the lobby formalises slot ownership).
+function promoteToPrimary(lp) {
+	debugLog("[localmp] promoting slot", lp.slot, "to primary");
+	var old = localPlayers[primarySlot];
+	if (old) {
+		localPlayers[primarySlot] = null;
+		try { old.socket.disconnect(); } catch (e) { /* ignore */ }
+	}
+	lp.isPrimary = true;
+	lp.padIndex = null; // keyboard owns the primary slot
+	primarySlot = lp.slot;
+	server = lp.socket;
+	myID = lp.myID;
+	if (playerList && myID != null && playerList[myID]) {
+		myPlayer = playerList[myID];
+	}
+	// Drop the secondary-only listeners before attaching the full set, so the
+	// promoted socket doesn't run both handler sets for the same event.
+	try {
+		lp.socket.off('welcome');
+		lp.socket.off('gameState');
+		lp.socket.off('roomNotFound');
+		lp.socket.off('serverKick');
+		lp.socket.off('disconnect');
+	} catch (e) { /* ignore */ }
+	registerPrimaryHandlers(lp.socket); // resume render/audio/state handlers
 }
 
 function clientSendStart(id) {
 	if (id != null) {
 		server.emit('enterGame', id);
 	}
-}
-
-// PHASE 1 SPIKE: open a second, independent connection from this same tab and
-// join it into `gameId` (the room the primary already confirmed). The critical
-// detail (§6.7): `forceNew` — without it, io() reuses the cached Manager and you
-// get the SAME socket.id, i.e. one server player. This socket is an
-// input/identity channel only: it deliberately registers NO render/audio
-// handlers (the primary owns those, §5.1/§6.8a) and NO navigation handlers, so a
-// kick/notfound on player #2 drops only player #2 and never tears down the tab
-// (previews the per-slot teardown of §6.17).
-function openSpikeSecondPlayer(gameId) {
-	if (spikePlayer2.socket != null) {
-		return;
-	}
-	debugLog("[spike] opening 2nd player socket -> gameId=", gameId);
-	var sock = io({ forceNew: true });
-	spikePlayer2.socket = sock;
-
-	sock.on('welcome', function (id) {
-		spikePlayer2.myID = id;
-		debugLog("[spike] P2 welcome, myID=", id);
-	});
-
-	sock.on('gameState', function (gs) {
-		spikePlayer2.joined = true;
-		// Proof line: two distinct ids, same room.
-		console.log("[spike] P2 joined room", gs.gameID, "as", gs.myID,
-			"| P1 is", myID, "in room", gameID,
-			"| distinct?", gs.myID !== myID, "| same room?", String(gs.gameID) === String(gameID));
-		// Route the gamepad to player #2 (keyboard/mouse still drive player #1).
-		gpEmitSocket = sock;
-		gpEmitID = spikePlayer2.myID;
-	});
-
-	// Per-slot teardown preview: log, do NOT navigate the tab.
-	sock.on('roomNotFound', function () {
-		console.warn("[spike] P2 roomNotFound — could not join", gameId, "(tab kept alive)");
-		gpEmitSocket = null;
-		gpEmitID = null;
-	});
-	sock.on('serverKick', function () {
-		console.warn("[spike] P2 serverKick — dropping P2 only (tab kept alive)");
-		gpEmitSocket = null;
-		gpEmitID = null;
-	});
-
-	sock.emit('enterGame', gameId);
 }
 
 function pingServer() {

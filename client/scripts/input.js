@@ -330,12 +330,64 @@ function touchMovement() {
 }
 
 function cancelMovement(evt) {
+    // Cancels the PRIMARY (keyboard/mouse) player's movement via the globals.
     turnLeft = false;
     turnRight = false;
     moveForward = false;
     moveBackward = false;
     attack = false;
     server.emit('movement', { turnLeft: false, moveForward: false, turnRight: false, moveBackward: false, attack: false });
+}
+
+// Stop one local player's movement on its own socket. Primary -> the globals;
+// pad slot -> its own input struct.
+function cancelMovementForSlot(lp) {
+    if (!lp) {
+        return;
+    }
+    if (lp.isPrimary) {
+        cancelMovement();
+        return;
+    }
+    lp.input.turnLeft = false;
+    lp.input.turnRight = false;
+    lp.input.moveForward = false;
+    lp.input.moveBackward = false;
+    lp.input.attack = false;
+    if (lp.socket) {
+        lp.socket.emit('movement', { turnLeft: false, moveForward: false, turnRight: false, moveBackward: false, attack: false });
+    }
+}
+
+// On tab blur, stop EVERY local player (not just the primary) so no one drifts
+// while the tab is backgrounded, emitting a stop on each player's own socket
+// (§6.18).
+function cancelAllLocalMovement(evt) {
+    if (typeof localPlayers === "undefined" || !localPlayers.length) {
+        cancelMovement(evt); // bootstrap / nothing set up yet
+        return;
+    }
+    for (var i = 0; i < localPlayers.length; i++) {
+        if (localPlayers[i]) {
+            cancelMovementForSlot(localPlayers[i]);
+        }
+    }
+}
+
+// Pure version of calcAngleFromKeys: derive the facing angle from explicit
+// movement booleans instead of the keyboard globals, so a pad slot can compute
+// its own facing without reading the primary player's input. Returns `fallback`
+// (the player's current angle) when no direction is held.
+function calcAngleFromInput(mf, mb, tl, tr, fallback) {
+    if (tl && mf) { return 225; }
+    if (tr && mf) { return 315; }
+    if (tr && mb) { return 45; }
+    if (tl && mb) { return 135; }
+    if (mf) { return 270; }
+    if (mb) { return 90; }
+    if (tl) { return 180; }
+    if (tr) { return 0; }
+    return fallback;
 }
 
 function calcAngleFromKeys(player) {
