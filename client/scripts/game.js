@@ -143,6 +143,7 @@ function init() {
     }
     animloop();
     initEventHandlers();
+    initGamepad();
 }
 function animloop() {
     if (gameRunning) {
@@ -175,6 +176,7 @@ function animloop() {
     }
 }
 function gameLoop(dt) {
+    pollGamepad(dt);
     drawObjects(dt);
     updateGameboard(dt);
 }
