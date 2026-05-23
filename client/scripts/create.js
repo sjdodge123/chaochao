@@ -26,25 +26,37 @@ var server,
     createContext;
 
 var scale = 0.035;
-//TileTextures
-var lava = new Image(256, 256);
-lava.src = "../assets/img/lava.png";
-var grass = new Image(256, 256);
-grass.src = "../assets/img/grass.png";
-grass.scale = 0.5;
-var dirt = new Image(256, 256);
-dirt.src = "../assets/img/dirt.png";
-dirt.scale = 0.25;
-var ice = new Image(256, 256);
-ice.src = "../assets/img/ice.png";
-ice.scale = 0.75;
-var sand = new Image(256, 256)
-sand.src = "../assets/img/sand.png";
-sand.scale = 0.25;
-var random = new Image(576, 512);
-random.src = "../assets/img/question-solid.svg";
-var bombIcon = new Image(576, 512);
-bombIcon.src = "../assets/img/bomb.svg";
+
+// Tile textures. Attach onload BEFORE setting src so cached images still
+// fire the load handler. loadPatterns() is gated on all images being ready
+// AND the config socket message arriving — see tryStart().
+var imagesPending = 0,
+    imagesLoaded = 0;
+function loadTileImage(src, scale) {
+    var img = new Image();
+    if (scale != null) img.scale = scale;
+    imagesPending++;
+    img.addEventListener('load', onTileImageLoad);
+    img.src = src;
+    return img;
+}
+function onTileImageLoad() {
+    imagesLoaded++;
+    tryStart();
+}
+var lava = loadTileImage("../assets/img/lava.png");
+var grass = loadTileImage("../assets/img/grass.png", 0.5);
+var dirt = loadTileImage("../assets/img/dirt.png", 0.25);
+var ice = loadTileImage("../assets/img/ice.png", 0.75);
+var sand = loadTileImage("../assets/img/sand.png", 0.25);
+var random = loadTileImage("../assets/img/question-solid.svg");
+var bombIcon = loadTileImage("../assets/img/bomb.svg");
+
+// Redraw gate. Set dirty=true from anything that mutates rendered state
+// (mouse moved, click, paint, hazard added/removed/rotated, resize, rebuild);
+// the animloop skips drawEditor when not dirty so an idle editor doesn't
+// re-render 250 voronoi cells at 60fps.
+var dirty = true;
 
 var then = Date.now(),
     dt;
@@ -64,9 +76,7 @@ function clientConnect() {
 
     server.on("config", function (c) {
         config = c;
-        gameRunning = true;
-        loadPatterns();
-        init();
+        tryStart();
     });
 
     server.on('githubFailure', function (error) {
@@ -81,7 +91,7 @@ function clientConnect() {
         var submitStatus = $("#submitStatus");
         submitStatus.css("color", "white");
         submitStatus.css("background-color", "green");
-        submitStatus.text("Sucesss");
+        submitStatus.text("Success");
     });
 
     server.on("maplisting", function (mapnames) {
@@ -110,6 +120,15 @@ function clientConnect() {
         }
     });
     return server;
+}
+
+function tryStart() {
+    if (!config) return;
+    if (imagesLoaded < imagesPending) return;
+    if (gameRunning) return;
+    loadPatterns();
+    gameRunning = true;
+    init();
 }
 
 function loadPatterns() {
@@ -168,9 +187,16 @@ function setupPage() {
         addListeners();
     });
     $("#rebuildButton").on("click", function () {
-        if (validateWithUser()) {
+        if (confirmWipeIfDirty()) {
             rebuild();
-        };
+        }
+        return false;
+    });
+
+    $("#deleteSelectedButton").on("click", function () {
+        if (selectedObject != null) {
+            removeSelectedObject();
+        }
         return false;
     });
 
@@ -180,6 +206,7 @@ function setupPage() {
         if (selectedObject != null) {
             selectedObject.angle += 15;
             updateSelectedObject();
+            dirty = true;
         }
         return false;
     });
@@ -187,6 +214,7 @@ function setupPage() {
     $("#mouseButton").on("click", function () {
         drawBrushAimer = false;
         drawObject = null;
+        dirty = true;
         return false;
     });
 
@@ -268,7 +296,7 @@ function setupPage() {
     });
 
     $("#loadButton").on("click", function () {
-        selectedObject = null;
+        setSelectedObject(null);
         $("#createNewImage").attr("src", createCanvas.toDataURL("image/jpeg", 0.1));
         $('#createWindow').hide();
         $('#loadWindow').show();
@@ -277,11 +305,9 @@ function setupPage() {
         window.removeEventListener("mousemove", cellUnderMouse, false);
         window.removeEventListener("mousedown", handleClick, false);
         window.removeEventListener("mouseup", handleUnClick, false);
-        window.removeEventListener('contextmenu', function (ev) {
-            return false;
-        }, false);
         return false;
     });
+    window.addEventListener('contextmenu', suppressContextMenu, false);
     window.addEventListener('resize', resize, false);
     window.requestAnimFrame = (function () {
         return window.requestAnimationFrame ||
@@ -300,9 +326,36 @@ function addListeners() {
     window.addEventListener("mousemove", cellUnderMouse, false);
     window.addEventListener("mousedown", handleClick, false);
     window.addEventListener("mouseup", handleUnClick, false);
-    window.addEventListener('contextmenu', function (ev) {
-        return false;
-    }, false);
+}
+
+function suppressContextMenu(ev) {
+    ev.preventDefault();
+    return false;
+}
+
+function setSelectedObject(obj) {
+    selectedObject = obj;
+    var btn = document.getElementById("deleteSelectedButton");
+    if (btn != null) btn.disabled = (obj == null);
+    dirty = true;
+}
+
+function confirmWipeIfDirty() {
+    var cells = vMap.cells;
+    var needsConfirm = false;
+    for (var i = 0; i < cells.length; i++) {
+        if (cells[i].id != config.tileMap.normal.id) {
+            needsConfirm = true;
+            break;
+        }
+    }
+    if (!needsConfirm && vMap.hazards && vMap.hazards.length > 0) {
+        needsConfirm = true;
+    }
+    if (needsConfirm) {
+        return confirm("Are you sure you want to delete this map?");
+    }
+    return true;
 }
 
 function validateEmail(mail) {
@@ -312,32 +365,9 @@ function validateEmail(mail) {
     return (false)
 }
 
-function validateWithUser() {
-
-    if (selectedObject != null) {
-        removeSelectedObject();
-        return;
-    }
-
-    var cells = vMap.cells;
-    var prompt = false;
-    for (var i = 0; i < cells.length; i++) {
-        if (cells[i].id != config.tileMap.normal.id) {
-            prompt = true;
-            break;
-        }
-    }
-    if (prompt == false && vMap.hazards.length > 0) {
-        prompt = true;
-    }
-    if (prompt) {
-        return confirm("Are you sure you want to delete this map?");
-    }
-    return true;
-}
-
 function rebuild() {
     $("#submitStatus").hide();
+    setSelectedObject(null);
     vMap = generateVMap();
     $('#author').val("");
     $('#name').val("");
@@ -350,26 +380,27 @@ function init() {
 }
 
 function animloop() {
-    if (gameRunning) {
-        var now = Date.now();
-        dt = now - then;
-        gameLoop(dt);
-        then = now;
-        requestAnimFrame(animloop);
-    }
-}
-function gameLoop(dt) {
-    if (drawBrushAimer) {
-        currentCell = cellIdFromPoint(mousex, mousey);
-    }
-    drawEditor(dt);
+    if (!gameRunning) return;
+    var now = Date.now();
+    dt = now - then;
     if (mapReady == false) {
         mapReady = true;
         rebuild();
     }
-    if (brushing) {
-        paintTile();
+    if (drawBrushAimer) {
+        var prev = currentCell;
+        currentCell = cellIdFromPoint(mousex, mousey);
+        if (prev !== currentCell) dirty = true;
     }
+    if (brushing) {
+        if (paintTile()) dirty = true;
+    }
+    if (dirty) {
+        drawEditor(dt);
+        dirty = false;
+    }
+    then = now;
+    requestAnimFrame(animloop);
 }
 
 function resize() {
@@ -377,23 +408,14 @@ function resize() {
     var viewport = { width: rect.width, height: rect.height };
     var scaleToFitX = viewport.width / createCanvas.width;
     var scaleToFitY = viewport.height / createCanvas.height;
-    var currentScreenRatio = viewport.width / viewport.height;
     var optimalRatio = Math.min(scaleToFitX, scaleToFitY);
-
-
-    /*
-    if (currentScreenRatio >= 1.77 && currentScreenRatio <= 1.79) {
-        newWidth = viewport.width ;
-        newHeight = viewport.height;
-    } else {
-        */
     newWidth = createCanvas.width * optimalRatio / 1.2;
     newHeight = createCanvas.height * optimalRatio / 1.2;
-    // }
     var controlPanel = document.getElementById("controlPanel");
     controlPanel.style.height = newHeight + "px";
     createCanvas.style.width = newWidth + "px";
     createCanvas.style.height = newHeight + "px";
+    dirty = true;
 }
 
 function drawEditor(dt) {
@@ -525,13 +547,13 @@ function setMousePos(x, y) {
 }
 
 function paintTile() {
+    if (currentCell == null) return false;
+    var cell = vMap.cells[currentCell];
+    if (cell == null) return false;
     var newId = locateId(brushColor);
-    var cells = vMap.cells;
-    for (var i = 0; i < cells.length; i++) {
-        if (currentCell == cells[i].site.voronoiId) {
-            cells[i].id = newId;
-        }
-    }
+    if (cell.id === newId) return false;
+    cell.id = newId;
+    return true;
 }
 
 function addObjectToMap(x, y, obj) {
@@ -548,6 +570,7 @@ function addObjectToMap(x, y, obj) {
         vMap.hazards = [];
     }
     vMap.hazards.push({ id: drawObject, x: x, y: y, angle: 0 });
+    dirty = true;
 }
 
 function locateObject(x, y) {
@@ -562,13 +585,14 @@ function locateObject(x, y) {
                 break;
             }
         }
+        if (hazardObj == null) continue;
         var distance = getMagSq(x, y, vMap.hazards[hazard].x, vMap.hazards[hazard].y);
         if (distance < Math.pow(hazardObj.radius, 2)) {
-            selectedObject = { id: vMap.hazards[hazard].id, x: vMap.hazards[hazard].x, y: vMap.hazards[hazard].y, angle: vMap.hazards[hazard].angle, radius: hazardObj.radius };
+            setSelectedObject({ id: vMap.hazards[hazard].id, x: vMap.hazards[hazard].x, y: vMap.hazards[hazard].y, angle: vMap.hazards[hazard].angle, radius: hazardObj.radius });
             return;
         }
     }
-    selectedObject = null;
+    setSelectedObject(null);
 }
 
 function updateSelectedObject() {
@@ -587,7 +611,7 @@ function removeSelectedObject() {
         if (vMap.hazards[i].id == selectedObject.id) {
             if (vMap.hazards[i].x == selectedObject.x && vMap.hazards[i].y == selectedObject.y) {
                 vMap.hazards.splice(i, 1);
-                selectedObject = null;
+                setSelectedObject(null);
                 return;
             }
         }
@@ -615,7 +639,7 @@ function generateVMap() {
     }
     localMap = voronoi.compute(sites, localbbox);
     var cells = localMap.cells;
-    iCells = cells.length;
+    var iCells = cells.length;
     while (iCells--) {
         cells[iCells].id = 1;
     }
@@ -630,6 +654,7 @@ function cellUnderMouse(evt) {
     x = (((evt.pageX - rect.left) / newWidth) * createCanvas.width);
     y = (((evt.pageY - rect.top) / newHeight) * createCanvas.height);
     setMousePos(x, y);
+    dirty = true;
 }
 
 function cellIdFromPoint(xmouse, ymouse) {
