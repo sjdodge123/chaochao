@@ -97,6 +97,11 @@ function handleDblClick(event) {
     movingByMouse = !movingByMouse;
 }
 function keyDown(evt) {
+    // While the leave-game confirmation is up, don't let movement keys drive the
+    // player (gamepad.js owns that modal; openLeaveModal already stopped motion).
+    if (typeof leaveModalIsOpen === "function" && leaveModalIsOpen()) {
+        return;
+    }
     if (movingByMouse) {
         movingByMouse = false;
     }
