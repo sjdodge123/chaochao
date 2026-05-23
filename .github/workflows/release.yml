@@ -1,0 +1,132 @@
+name: Release on merge to main
+
+# When a PR merges into main (or via manual dispatch), if the CHANGELOG's
+# "## Unreleased" section has notes, cut a release automatically:
+#   1. Pick the version bump from the merged PR's labels
+#      (release:major / release:minor / release:patch; default patch).
+#   2. Move the Unreleased notes under a new "## vX.Y.Z — <date>" heading,
+#      reset Unreleased, and bump package.json — committed back to main.
+#   3. Create and push the vX.Y.Z tag.
+#   4. Publish a GitHub release using those notes as the body.
+#
+# REQUIRED SETUP: a repo secret named RELEASE_TOKEN holding a personal
+# access token from a repo admin (fine-grained: Contents read/write on this
+# repo). main is protected with a required review and the default
+# GITHUB_TOKEN cannot push to it; an admin's token can because
+# "Include administrators" is OFF on the branch rule. Without this secret
+# the workflow fails fast with instructions (see the "Check token" step).
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump to apply
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+# Serialize releases so two quick merges can't race on version/tag.
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # Manual runs always proceed; PR runs only when the PR was actually merged.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check token
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_TOKEN" ]; then
+            echo "::error::Missing the RELEASE_TOKEN secret. Create a fine-grained PAT"
+            echo "::error::(Contents: read/write on this repo) owned by a repo admin and"
+            echo "::error::add it as the RELEASE_TOKEN repository secret. It is needed to"
+            echo "::error::push the release commit to the protected main branch."
+            exit 1
+          fi
+
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0          # need full history + tags for versioning
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Determine version bump
+        id: bump
+        env:
+          # JSON array of label names on the merged PR (empty for dispatch).
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          DISPATCH_BUMP: ${{ github.event.inputs.bump }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            bump="${DISPATCH_BUMP:-patch}"
+          elif echo "$LABELS" | jq -e 'index("release:major")' >/dev/null; then
+            bump=major
+          elif echo "$LABELS" | jq -e 'index("release:minor")' >/dev/null; then
+            bump=minor
+          else
+            bump=patch
+          fi
+          echo "Bump: $bump"
+          echo "bump=$bump" >> "$GITHUB_OUTPUT"
+
+      - name: Compute next version
+        id: version
+        env:
+          BUMP: ${{ steps.bump.outputs.bump }}
+        run: |
+          latest=$(git tag --list 'v*.*.*' --sort=-v:refname | head -1)
+          latest=${latest#v}
+          [ -z "$latest" ] && latest=0.0.0
+          IFS=. read -r MA MI PA <<EOF
+          $latest
+          EOF
+          case "$BUMP" in
+            major) MA=$((MA + 1)); MI=0; PA=0 ;;
+            minor) MI=$((MI + 1)); PA=0 ;;
+            patch) PA=$((PA + 1)) ;;
+          esac
+          version="$MA.$MI.$PA"
+          echo "Latest tag: ${latest:-none} -> next: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Cut release from CHANGELOG
+        id: cut
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_DATE: ${{ steps.version.outputs.date }}
+        run: node .github/scripts/cut-release.mjs
+
+      - name: Commit, tag, and push
+        if: steps.cut.outputs.released == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add CHANGELOG.md package.json
+          git commit -m "Release v$VERSION"
+          git tag "v$VERSION"
+          git push origin HEAD:main
+          git push origin "v$VERSION"
+
+      - name: Publish GitHub release
+        if: steps.cut.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "v$VERSION" \
+            --title "v$VERSION" \
+            --notes-file RELEASE_NOTES.md
