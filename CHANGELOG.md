@@ -4,7 +4,7 @@ All notable player-facing changes land here. Anything that changes a game mechan
 
 Write entries in the same player-friendly style as the GitHub releases: short bullets describing what a player will notice, grouped under section headings (`### General`, `### Ability changes`, `### Brutal rounds`, `### Map editor`, `### Bug fixes`, etc.).
 
-When cutting a release: move the `Unreleased` contents under a new `## vX.Y.Z — YYYY-MM-DD` heading, leave a fresh empty `Unreleased` block at the top, tag the commit, and publish the release on GitHub using that section as the body.
+Releases are cut automatically on merge to `main` by the `Release on merge to main` workflow: when `## Unreleased` has notes, it moves them under a new `## vX.Y.Z — YYYY-MM-DD` heading, resets `Unreleased`, bumps `package.json`, tags `vX.Y.Z`, and publishes the GitHub release using that section as the body. The version bump comes from the merged PR's label — `release:major`, `release:minor`, or `release:patch` (default `patch`). PRs that add no notes don't trigger a release.
 
 ## Unreleased
 
