@@ -130,3 +130,34 @@ jobs:
           gh release create "v$VERSION" \
             --title "v$VERSION" \
             --notes-file RELEASE_NOTES.md
+
+      # Roll every release from the current calendar week (Mon–Sun) into a
+      # single "week-YYYY-MM-DD" digest release. The landing-page banner links
+      # here, so players see one headline + one consolidated set of notes per
+      # week even though every PR still cuts its own vX.Y.Z release above.
+      - name: Build weekly digest
+        id: digest
+        if: steps.cut.outputs.released == 'true'
+        run: node .github/scripts/build-weekly-digest.mjs
+
+      - name: Publish weekly digest release
+        if: steps.cut.outputs.released == 'true' && steps.digest.outputs.built == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          WEEK_TAG: ${{ steps.digest.outputs.week_tag }}
+          WEEK_TITLE: ${{ steps.digest.outputs.week_title }}
+        run: |
+          # Upsert: refresh the week's digest release if it already exists (a
+          # later PR in the same week), otherwise create it (gh anchors the new
+          # week-* tag at the release commit on main). The week-* tag matches no
+          # other workflow trigger, so this publishes nothing downstream.
+          if gh release view "$WEEK_TAG" >/dev/null 2>&1; then
+            gh release edit "$WEEK_TAG" \
+              --title "$WEEK_TITLE" \
+              --notes-file WEEKLY_NOTES.md
+          else
+            gh release create "$WEEK_TAG" \
+              --title "$WEEK_TITLE" \
+              --notes-file WEEKLY_NOTES.md \
+              --latest=false
+          fi
