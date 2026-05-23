@@ -1922,6 +1922,11 @@ class Player extends Circle {
 				this.punchedTimer = Date.now();
 				this.resourceful += 1;
 				this.ability.use();
+				// Clear the attack input so using an ability doesn't bleed into the
+				// next tick. Otherwise, once checkAbilities() nulls out the consumed
+				// ability, the still-true attack flag would trigger the punch
+				// slow-down in the engine (and throw a stray punch), stopping movement.
+				this.attack = false;
 				return;
 			}
 			if (this.checkPunchCoolDown()) {
