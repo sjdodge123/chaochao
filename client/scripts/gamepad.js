@@ -73,6 +73,7 @@ function initGamepad() {
     window.addEventListener("touchstart", markTouchUsed, false);
     buildHintBar();
     buildLeaveModalUI();
+    buildPadPlayersUI();
     // Start on the device's most likely method; live usage swaps it.
     setInputMethod((typeof isTouchScreen !== "undefined" && isTouchScreen) ? "touch" : "kbm");
 }
@@ -136,6 +137,7 @@ function onGamepadConnected(e) {
     // button press (pollGamepad). Browsers only reliably surface an idle pad
     // after a press anyway, so we wait for that rather than joining on connect.
     debugLog("[localmp] controller detected — press a button to join");
+    showJoinToast(type);
 }
 
 function onGamepadDisconnected(e) {
@@ -274,6 +276,8 @@ function pollGamepad(dt) {
         }
         return;
     }
+    // Keep each pad player's color dot in sync with their server-assigned color.
+    refreshPadBlocks();
     // Local multiplayer: keyboard owns the primary slot; each connected pad drives
     // its own claimed slot, and an unclaimed pad hot-joins as a new local player
     // on its first button press.
@@ -852,6 +856,127 @@ function scheduleHintFade() {
             hintBarEl.classList.add("faded");
         }
     }, HINT_FADE_MS);
+}
+
+// --- per-pad player overlay (local multiplayer, §5.3) ---
+//
+// One compact block per pad player, each carrying a color dot tinted with that
+// player's server-assigned color — the readable link "this controller = the red
+// player" — plus the player's slot label and that pad's own attack glyph (A on
+// Xbox, ✕ on PlayStation, so mixed-brand pads show their real button). Built
+// lazily; populated by the onLocalPlayerJoined/Dropped hooks (client.js) and kept
+// in color-sync by refreshPadBlocks() each frame (the color arrives a beat after
+// join via playerJoin/gameUpdates). The keyboard/primary player keeps the bottom
+// hint bar; these blocks are for the pad players only.
+
+var padPlayersEl = null;     // container element
+var padBlocks = {};          // slot -> { el, dot, lastColor }
+var padToastEl = null;
+var padToastTimer = null;
+
+function buildPadPlayersUI() {
+    if (padPlayersEl || typeof document === "undefined" || !document.body) {
+        return;
+    }
+    var el = document.createElement("div");
+    el.id = "padPlayers";
+    document.body.appendChild(el);
+    padPlayersEl = el;
+}
+
+function attackGlyphFor(type) {
+    return type === "playstation" ? "✕" : "A";
+}
+
+// Brief "controller detected — press A to join" toast when a pad connects.
+function showJoinToast(type) {
+    if (typeof document === "undefined" || !document.body) {
+        return;
+    }
+    if (!padToastEl) {
+        padToastEl = document.createElement("div");
+        padToastEl.id = "padToast";
+        document.body.appendChild(padToastEl);
+    }
+    padToastEl.innerHTML = '🎮 Controller detected — press ' +
+        '<span class="gp-glyph gp-face">' + attackGlyphFor(type) + '</span> to join';
+    padToastEl.classList.add("visible");
+    clearTimeout(padToastTimer);
+    padToastTimer = setTimeout(function () {
+        if (padToastEl) {
+            padToastEl.classList.remove("visible");
+        }
+    }, 4000);
+}
+
+// Hook (client.js addLocalPlayer): a pad player joined — create its block.
+function onLocalPlayerJoined(lp) {
+    if (!padPlayersEl) {
+        buildPadPlayersUI();
+    }
+    if (!padPlayersEl || padBlocks[lp.slot]) {
+        return;
+    }
+    var block = document.createElement("div");
+    block.className = "pad-player";
+    block.id = "padPlayer-" + lp.slot;
+
+    var dot = document.createElement("span");
+    dot.className = "gp-color-dot";
+    var label = document.createElement("span");
+    label.className = "pp-label";
+    label.textContent = "P" + (lp.slot + 1);
+    var move = document.createElement("span");
+    move.className = "gp-glyph gp-stick";
+    move.textContent = "L";
+    var atk = document.createElement("span");
+    atk.className = "gp-glyph gp-face";
+    atk.textContent = attackGlyphFor(lp.padType);
+
+    block.appendChild(dot);
+    block.appendChild(label);
+    block.appendChild(move);
+    block.appendChild(atk);
+    padPlayersEl.appendChild(block);
+    padBlocks[lp.slot] = { el: block, dot: dot, lastColor: null };
+
+    // A join just happened — drop the connect toast.
+    if (padToastEl) {
+        padToastEl.classList.remove("visible");
+    }
+}
+
+// Hook (client.js dropLocalPlayer): a pad player left — remove its block.
+function onLocalPlayerDropped(slot) {
+    var b = padBlocks[slot];
+    if (!b) {
+        return;
+    }
+    if (b.el && b.el.parentNode) {
+        b.el.parentNode.removeChild(b.el);
+    }
+    delete padBlocks[slot];
+}
+
+// Tint each pad player's dot with their current server-assigned color (which only
+// arrives a moment after join). Cheap; only writes the DOM when the color changes.
+function refreshPadBlocks() {
+    if (typeof playerList === "undefined" || !playerList) {
+        return;
+    }
+    for (var slot in padBlocks) {
+        var lp = localPlayers[slot];
+        var b = padBlocks[slot];
+        if (!lp || !b) {
+            continue;
+        }
+        var p = (lp.myID != null) ? playerList[lp.myID] : null;
+        var color = (p && p.color) ? p.color : null;
+        if (color && color !== b.lastColor) {
+            b.dot.style.backgroundColor = color;
+            b.lastColor = color;
+        }
+    }
 }
 
 // Manual toggle (Select button / H key): hide the bar now, or restore it.
