@@ -396,10 +396,14 @@ function pollGamepad(dt) {
     }
 }
 
-// Poll one pad and apply it to its local player `lp`. The primary slot also owns
-// the emoji wheel / leave modal / hint bar; non-primary pads do movement only, so
-// the primary opening a modal never freezes pad players (§6.16).
+// Poll one pad and apply it to its local player `lp`. The emoji wheel is a single
+// shared element owned by one slot at a time: only the OWNER navigates it; every
+// other player keeps playing, so one player's wheel never freezes the others
+// (§6.16). The leave modal stays primary-only.
 function pollPadForSlot(pad, lp) {
+    var wheelOpen = (typeof menuOpen !== "undefined" && menuOpen);
+    var iOwnWheel = wheelOpen && emojiOwnerSlot === lp.slot;
+
     if (lp.isPrimary) {
         // Using the pad swaps the glyphs to the controller scheme.
         if (padHasInput(pad)) {
@@ -412,13 +416,14 @@ function pollPadForSlot(pad, lp) {
         }
         if (leaveModalIsOpen()) {
             pollLeaveModal(pad, lp);
-        } else if (typeof menuOpen !== "undefined" && menuOpen) {
+        } else if (iOwnWheel) {
             pollEmojiWheel(pad, lp);
-        } else if (buttonPressedThisFrame(pad, GP_BTN_B, lp)) {
+        } else if (!wheelOpen && buttonPressedThisFrame(pad, GP_BTN_B, lp)) {
             openLeaveModal();
-        } else if (buttonPressedThisFrame(pad, GP_BTN_EMOJI, lp)) {
+        } else if (!wheelOpen && buttonPressedThisFrame(pad, GP_BTN_EMOJI, lp)) {
             openEmojiFromPad(lp);
         } else {
+            // Normal play (also the case when another player owns the wheel).
             pollAim(pad, lp);
             pollMovementAndAttack(pad, lp);
             if (buttonPressedThisFrame(pad, GP_BTN_START, lp)) {
@@ -426,10 +431,16 @@ function pollPadForSlot(pad, lp) {
             }
         }
     } else {
-        pollAim(pad, lp);
-        pollMovementAndAttack(pad, lp);
-        if (buttonPressedThisFrame(pad, GP_BTN_START, lp)) {
-            goFullScreen();
+        if (iOwnWheel) {
+            pollEmojiWheel(pad, lp);
+        } else if (!wheelOpen && buttonPressedThisFrame(pad, GP_BTN_EMOJI, lp)) {
+            openEmojiFromPad(lp);
+        } else {
+            pollAim(pad, lp);
+            pollMovementAndAttack(pad, lp);
+            if (buttonPressedThisFrame(pad, GP_BTN_START, lp)) {
+                goFullScreen();
+            }
         }
     }
     rememberButtons(pad, lp);
@@ -647,8 +658,7 @@ function nearestEmojiToDir(items, lx, ly) {
     return best;
 }
 
-// The emoji wheel is owned by the PRIMARY slot only (§6.16 MVP), so `lp` here is
-// always the primary; passing it keeps the per-pad edge state consistent.
+// Any pad player can open the shared emoji wheel; that slot becomes its owner.
 function openEmojiFromPad(lp) {
     // Stop driving the player while the wheel is up.
     if (lp.gp.hadMoveInput) {
@@ -659,7 +669,13 @@ function openEmojiFromPad(lp) {
     gpEmojiIndex = 0;
     var w = window.innerWidth || 800;
     var h = window.innerHeight || 600;
-    openEmojiWindow(w / 2 - 50, h / 2 - 50);
+    openEmojiWindow(w / 2 - 50, h / 2 - 50); // sets menuOpen + a default (primary) owner
+    // This pad owns the wheel; tint its border with this player's color.
+    emojiOwnerSlot = lp.slot;
+    if (typeof emojiMenu !== "undefined" && emojiMenu && typeof playerList !== "undefined" &&
+        playerList && lp.myID != null && playerList[lp.myID]) {
+        emojiMenu.style.borderColor = playerList[lp.myID].color;
+    }
 }
 
 function pollEmojiWheel(pad, lp) {
@@ -977,6 +993,10 @@ function attackGlyphFor(type) {
     return type === "playstation" ? "✕" : "A";
 }
 
+function emojiGlyphFor(type) {
+    return type === "playstation" ? "□" : "X";
+}
+
 // Brief transient toast at the top of the screen (controller join prompts,
 // room-full / spectator notices).
 function showPadToast(html, ms) {
@@ -1027,11 +1047,15 @@ function onLocalPlayerJoined(lp) {
     var atk = document.createElement("span");
     atk.className = "gp-glyph gp-face";
     atk.textContent = attackGlyphFor(lp.padType);
+    var emoji = document.createElement("span");
+    emoji.className = "gp-glyph gp-face";
+    emoji.textContent = emojiGlyphFor(lp.padType);
 
     block.appendChild(dot);
     block.appendChild(label);
     block.appendChild(move);
     block.appendChild(atk);
+    block.appendChild(emoji);
     padPlayersEl.appendChild(block);
     padBlocks[lp.slot] = { el: block, dot: dot, lastColor: null };
 
