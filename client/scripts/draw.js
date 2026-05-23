@@ -166,6 +166,45 @@ var purpleFire = new Image(32, 128);
 purpleFire.src = "../assets/img/purpleFire.png";
 
 
+// Every Image() loadPatterns()/loadSpriteSheets()/HUD draws read from.
+// We expose tileImagesReady so setupPage can gate enterLobby on them
+// being fully decoded — otherwise a mid-game joiner runs loadPatterns()
+// before .complete fires and gets non-null but empty CanvasPatterns, so
+// the board renders mostly transparent until the next round's newMap
+// rebuilds patterns. requiredImagesLoaded is exposed for the loading bar.
+var requiredImages = [
+    blindfoldIcon, blindfoldLargeIcon, transferIcon, copyIcon, bombIcon,
+    snowFlakeIcon, windIcon, hourglassIcon, lightningIcon, cloudyIcon,
+    infinityIcon, fiestaIcon, toolBoxIcon, moneyIcon, volcanoIcon,
+    bombImage, snowFlakeImage, cloudImage, infectionIcon, puckIcon,
+    explosionIcon, moonIcon, scissorsIcon,
+    lava, poison, grass, dirt, ice, sand,
+    redFire, orangeFire, yellowFire, greenFire, blueFire, purpleFire
+];
+var requiredImagesLoaded = 0;
+var tileImagesReady = Promise.all(requiredImages.map(function (img) {
+    if (img.complete && img.naturalWidth > 0) {
+        requiredImagesLoaded++;
+        return Promise.resolve();
+    }
+    return new Promise(function (resolve) {
+        var done = function () { requiredImagesLoaded++; resolve(); };
+        img.addEventListener('load', done, { once: true });
+        // Treat decode failures as "done" too so one missing asset can't
+        // hang the loading screen forever.
+        img.addEventListener('error', done, { once: true });
+    });
+}));
+// Belt and suspenders: setupPage waits on this Promise, but if anything
+// renders before patterns are valid we self-heal once the images land.
+tileImagesReady.then(function () {
+    if (typeof config !== 'undefined' && config != null) {
+        loadPatterns();
+    }
+    invalidateMapCache();
+});
+
+
 function loadPatterns() {
     //Abilities
     patterns[config.tileMap.abilities.blindfold.id] = makePattern(blindfoldIcon, makeSeamlessPattern(dirt));
