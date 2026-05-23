@@ -14,21 +14,10 @@
 // poll loop here is careful to do the same: it diffs against the pad's own
 // previous reading and only touches the socket when something actually changed.
 
-// --- connection state ---
+// --- connection state (the PRIMARY slot's pad, single-player path) ---
 var gamepadConnected = false;
 var gamepadIndex = null;
 var gamepadType = "generic"; // "xbox" | "playstation" | "generic"
-
-// --- PHASE 1 SPIKE: per-pad emit routing ---
-// When set, this pad's input is emitted on `gpEmitSocket` and attributed to the
-// player `gpEmitID`, instead of the primary `server` / global `myID`. When both
-// are null (the default, flag off), behaviour is identical to today (N=1). This
-// is the throwaway proof that one tab can drive a second, independent server
-// player; Phase 2 replaces it with the per-slot localPlayers table.
-var gpEmitSocket = null;
-var gpEmitID = null;
-function gpSocket() { return gpEmitSocket || server; }
-function gpID() { return gpEmitID != null ? gpEmitID : myID; }
 
 // --- tuning ---
 var GP_MOVE_DEADZONE = 0.30;     // left stick: ignore drift below this
@@ -49,13 +38,11 @@ var GP_DPAD_DOWN = 13;
 var GP_DPAD_LEFT = 14;
 var GP_DPAD_RIGHT = 15;
 
-// --- per-frame remembered state (so we only emit on change) ---
-var gpPrevMove = { moveForward: false, moveBackward: false, turnLeft: false, turnRight: false, attack: false };
-var gpHadMoveInput = false; // did the pad drive movement on the previous frame?
-var gpAimActive = false;    // is the right stick currently aiming?
-var gpPrevAimAngle = null;
-var gpLastAimEmit = 0;
-var gpPrevButtons = [];     // pressed-state per button, for edge detection
+// --- per-frame remembered state ---
+// The per-pad edge/aim/move state that used to be single globals now lives in
+// each local player's `lp.gp` (game.js makeLocalPlayer), so multiple pads don't
+// clobber each other. These two remain global because the emoji wheel is a
+// single shared DOM element owned by the PRIMARY slot only (§6.16 MVP).
 var gpEmojiIndex = 0;       // highlighted slot while the emoji wheel is open
 var gpEmojiStepAt = 0;      // last d-pad step time (for repeat throttling)
 
@@ -128,33 +115,57 @@ function onGamepadKeyDown(e) {
 }
 
 function onGamepadConnected(e) {
-    gamepadConnected = true;
-    gamepadIndex = e.gamepad.index;
-    gamepadType = detectGamepadType(e.gamepad.id);
-    gpPrevButtons = [];
-    // Don't swap the glyphs yet — wait until the pad is actually used (see
-    // padHasInput in pollGamepad), so a connected-but-idle pad doesn't override
-    // a player still on keyboard/mouse.
-    debugLog("gamepad connected:", e.gamepad.id, "->", gamepadType);
+    var type = detectGamepadType(e.gamepad.id);
+    debugLog("gamepad connected:", e.gamepad.id, "->", type, "idx", e.gamepad.index);
+    if (!localMultiplayerEnabled()) {
+        // Single-player: adopt this pad onto the primary slot (today's behavior).
+        gamepadConnected = true;
+        gamepadIndex = e.gamepad.index;
+        gamepadType = type;
+        var p = localPlayers[primarySlot];
+        if (p) {
+            p.padIndex = e.gamepad.index;
+            p.padType = type;
+            p.gp.prevButtons = [];
+        }
+        // Don't swap the glyphs yet — wait until the pad is actually used, so a
+        // connected-but-idle pad doesn't override a player still on keyboard.
+        return;
+    }
+    // Local multiplayer: the pad hot-joins as a NEW local player on its first
+    // button press (pollGamepad). Browsers only reliably surface an idle pad
+    // after a press anyway, so we wait for that rather than joining on connect.
+    debugLog("[localmp] controller detected — press a button to join");
 }
 
 function onGamepadDisconnected(e) {
-    if (e.gamepad.index !== gamepadIndex) {
+    if (!localMultiplayerEnabled()) {
+        var p = localPlayers[primarySlot];
+        if (!p || e.gamepad.index !== p.padIndex) {
+            return;
+        }
+        gamepadConnected = false;
+        gamepadIndex = null;
+        p.padIndex = null;
+        if (p.gp.hadMoveInput) {
+            cancelMovement();
+            p.gp.hadMoveInput = false;
+        }
+        p.gp.prevMove = { moveForward: false, moveBackward: false, turnLeft: false, turnRight: false, attack: false };
+        if (activeInputMethod === "pad") {
+            setInputMethod((typeof isTouchScreen !== "undefined" && isTouchScreen) ? "touch" : "kbm");
+        }
+        debugLog("gamepad disconnected");
         return;
     }
-    gamepadConnected = false;
-    gamepadIndex = null;
-    // Release anything the pad was holding so the player doesn't keep moving.
-    if (gpHadMoveInput) {
-        cancelMovement();
-        gpHadMoveInput = false;
+    // Local multiplayer: a pad player's controller was unplugged. Stop their
+    // movement and drop just that slot (everyone else keeps playing).
+    var lp = localPlayerForPadIndex(e.gamepad.index);
+    if (lp && !lp.isPrimary) {
+        debugLog("[localmp] pad", e.gamepad.index, "unplugged — dropping slot", lp.slot);
+        cancelMovementForSlot(lp);
+        dropLocalPlayer(lp.slot);
     }
-    gpPrevMove = { moveForward: false, moveBackward: false, turnLeft: false, turnRight: false, attack: false };
-    // The pad is gone — fall back to the device's other input method.
-    if (activeInputMethod === "pad") {
-        setInputMethod((typeof isTouchScreen !== "undefined" && isTouchScreen) ? "touch" : "kbm");
-    }
-    debugLog("gamepad disconnected");
 }
 
 function detectGamepadType(id) {
@@ -170,32 +181,36 @@ function detectGamepadType(id) {
 }
 
 // Chrome only surfaces a pad after the first button press, and a pad held at
-// page load never fires 'gamepadconnected'. So we also adopt the first live
-// pad we see while polling.
-function getActiveGamepad() {
-    var pads = navigator.getGamepads ? navigator.getGamepads() : [];
-    if (gamepadIndex != null && pads[gamepadIndex]) {
-        return pads[gamepadIndex];
+// page load never fires 'gamepadconnected'. So in single-player we adopt the
+// first live pad onto the primary slot while polling.
+function adoptFirstPadToPrimary(pads) {
+    var p = localPlayers[primarySlot];
+    if (!p) {
+        return null;
+    }
+    if (p.padIndex != null && pads[p.padIndex]) {
+        return pads[p.padIndex];
     }
     for (var i = 0; i < pads.length; i++) {
         if (pads[i]) {
+            p.padIndex = i;
+            p.padType = detectGamepadType(pads[i].id);
+            gamepadConnected = true;
             gamepadIndex = i;
-            if (!gamepadConnected) {
-                gamepadConnected = true;
-                gamepadType = detectGamepadType(pads[i].id);
-            }
+            gamepadType = p.padType;
             return pads[i];
         }
     }
     // No pad present. If we thought one was connected, it vanished without a
     // 'gamepaddisconnected' event — release any held movement so the player
     // doesn't keep drifting, and fall back to keyboard/touch hints.
-    if (gamepadConnected) {
+    if (p.padIndex != null) {
+        p.padIndex = null;
         gamepadConnected = false;
         gamepadIndex = null;
-        if (gpHadMoveInput && typeof cancelMovement === "function") {
+        if (p.gp.hadMoveInput && typeof cancelMovement === "function") {
             cancelMovement();
-            gpHadMoveInput = false;
+            p.gp.hadMoveInput = false;
         }
         if (activeInputMethod === "pad") {
             setInputMethod((typeof isTouchScreen !== "undefined" && isTouchScreen) ? "touch" : "kbm");
@@ -204,55 +219,112 @@ function getActiveGamepad() {
     return null;
 }
 
+function anyButtonPressed(pad) {
+    for (var i = 0; i < pad.buttons.length; i++) {
+        if (pad.buttons[i] && (pad.buttons[i].pressed || pad.buttons[i].value > GP_TRIGGER_THRESHOLD)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function snapshotButtons(pad) {
+    var out = [];
+    for (var i = 0; i < pad.buttons.length; i++) {
+        out[i] = pad.buttons[i].pressed;
+    }
+    return out;
+}
+
 // Called once per frame from gameLoop().
 function pollGamepad(dt) {
-    var pad = getActiveGamepad();
-    if (!pad) {
+    var pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    if (!localMultiplayerEnabled()) {
+        // Single-player: one pad drives the primary slot, exactly as before.
+        var pad = adoptFirstPadToPrimary(pads);
+        if (pad) {
+            pollPadForSlot(pad, localPlayers[primarySlot]);
+        }
         return;
     }
-
-    // Using the pad swaps the glyphs to the controller scheme.
-    if (padHasInput(pad)) {
-        lastPadInputAt = Date.now();
-        setInputMethod("pad");
+    // Local multiplayer: keyboard owns the primary slot; each connected pad drives
+    // its own claimed slot, and an unclaimed pad hot-joins as a new local player
+    // on its first button press.
+    for (var i = 0; i < pads.length; i++) {
+        var pad = pads[i];
+        if (!pad) {
+            continue;
+        }
+        var lp = localPlayerForPadIndex(i);
+        if (!lp) {
+            if (anyButtonPressed(pad)) {
+                var slot = nextFreeSlot();
+                if (slot != null && typeof gameID !== "undefined" && gameID != null) {
+                    lp = addLocalPlayer(slot, i);
+                    if (lp) {
+                        // Don't let the join press also register as an attack next frame.
+                        lp.gp.prevButtons = snapshotButtons(pad);
+                    }
+                }
+            }
+            continue; // wait until the slot has joined (myID set) before polling
+        }
+        if (lp.myID == null) {
+            continue;
+        }
+        pollPadForSlot(pad, lp);
     }
+}
 
-    // Select toggles the hint bar between hidden (transparent) and shown.
-    if (buttonPressedThisFrame(pad, GP_BTN_SELECT)) {
-        toggleHintFade();
-    }
-
-    if (leaveModalIsOpen()) {
-        // The confirm modal owns input while it's up.
-        pollLeaveModal(pad);
-    } else if (typeof menuOpen !== "undefined" && menuOpen) {
-        // The emoji wheel owns input while it's up.
-        pollEmojiWheel(pad);
-    } else if (buttonPressedThisFrame(pad, GP_BTN_B)) {
-        openLeaveModal();
-    } else if (buttonPressedThisFrame(pad, GP_BTN_EMOJI)) {
-        openEmojiFromPad();
+// Poll one pad and apply it to its local player `lp`. The primary slot also owns
+// the emoji wheel / leave modal / hint bar; non-primary pads do movement only, so
+// the primary opening a modal never freezes pad players (§6.16).
+function pollPadForSlot(pad, lp) {
+    if (lp.isPrimary) {
+        // Using the pad swaps the glyphs to the controller scheme.
+        if (padHasInput(pad)) {
+            lastPadInputAt = Date.now();
+            setInputMethod("pad");
+        }
+        // Select toggles the hint bar between hidden (transparent) and shown.
+        if (buttonPressedThisFrame(pad, GP_BTN_SELECT, lp)) {
+            toggleHintFade();
+        }
+        if (leaveModalIsOpen()) {
+            pollLeaveModal(pad, lp);
+        } else if (typeof menuOpen !== "undefined" && menuOpen) {
+            pollEmojiWheel(pad, lp);
+        } else if (buttonPressedThisFrame(pad, GP_BTN_B, lp)) {
+            openLeaveModal();
+        } else if (buttonPressedThisFrame(pad, GP_BTN_EMOJI, lp)) {
+            openEmojiFromPad(lp);
+        } else {
+            pollAim(pad, lp);
+            pollMovementAndAttack(pad, lp);
+            if (buttonPressedThisFrame(pad, GP_BTN_START, lp)) {
+                goFullScreen();
+            }
+        }
     } else {
-        // Aim first so movement knows whether the right stick owns the facing.
-        pollAim(pad);
-        pollMovementAndAttack(pad);
-        if (buttonPressedThisFrame(pad, GP_BTN_START)) {
+        pollAim(pad, lp);
+        pollMovementAndAttack(pad, lp);
+        if (buttonPressedThisFrame(pad, GP_BTN_START, lp)) {
             goFullScreen();
         }
     }
-
-    rememberButtons(pad);
+    rememberButtons(pad, lp);
 }
 
-function pollAim(pad) {
+function pollAim(pad, lp) {
+    var gp = lp.gp;
     var rx = pad.axes[2] || 0;
     var ry = pad.axes[3] || 0;
     var mag = Math.sqrt(rx * rx + ry * ry);
-    gpAimActive = mag >= GP_AIM_DEADZONE;
-    if (!gpAimActive) {
+    gp.aimActive = mag >= GP_AIM_DEADZONE;
+    if (!gp.aimActive) {
         return;
     }
-    if (typeof playerList === "undefined" || !playerList || gpID() == null || !playerList[gpID()]) {
+    if (typeof playerList === "undefined" || !playerList || lp.myID == null || !playerList[lp.myID]) {
         return;
     }
 
@@ -263,8 +335,8 @@ function pollAim(pad) {
     }
 
     // Throttle: skip tiny changes and cap the emit rate so we don't flood the socket.
-    if (gpPrevAimAngle != null) {
-        var delta = Math.abs(deg - gpPrevAimAngle);
+    if (gp.prevAimAngle != null) {
+        var delta = Math.abs(deg - gp.prevAimAngle);
         if (delta > 180) {
             delta = 360 - delta;
         }
@@ -273,19 +345,19 @@ function pollAim(pad) {
         }
     }
     var now = Date.now();
-    if (now - gpLastAimEmit < GP_AIM_MIN_INTERVAL) {
+    if (now - gp.lastAimEmit < GP_AIM_MIN_INTERVAL) {
         return;
     }
 
-    playerList[gpID()].angle = deg;
-    if (gpSocket()) {
-        gpSocket().emit('mousemove', deg);
+    playerList[lp.myID].angle = deg;
+    if (lp.socket) {
+        lp.socket.emit('mousemove', deg);
     }
-    gpPrevAimAngle = deg;
-    gpLastAimEmit = now;
+    gp.prevAimAngle = deg;
+    gp.lastAimEmit = now;
 }
 
-function pollMovementAndAttack(pad) {
+function pollMovementAndAttack(pad, lp) {
     var mf = false, mb = false, tl = false, tr = false;
     var moveActive = false;
 
@@ -329,7 +401,7 @@ function pollMovementAndAttack(pad) {
     }
 
     var atk = readAttack(pad);
-    applyInputState(mf, mb, tl, tr, atk, moveActive);
+    applyInputState(lp, mf, mb, tl, tr, atk, moveActive);
 }
 
 function readAttack(pad) {
@@ -338,61 +410,73 @@ function readAttack(pad) {
     return !!(a || rt);
 }
 
-function applyInputState(mf, mb, tl, tr, atk, moveActive) {
+function applyInputState(lp, mf, mb, tl, tr, atk, moveActive) {
+    var gp = lp.gp;
     // Only let the pad drive when it is actually providing input, or when it is
     // releasing input it held last frame. This keeps keyboard/mouse usable while
-    // the pad sits idle.
-    var padDriving = moveActive || atk || gpHadMoveInput;
+    // the (primary) pad sits idle.
+    var padDriving = moveActive || atk || gp.hadMoveInput;
     if (padDriving) {
-        var changed = (mf !== gpPrevMove.moveForward) ||
-            (mb !== gpPrevMove.moveBackward) ||
-            (tl !== gpPrevMove.turnLeft) ||
-            (tr !== gpPrevMove.turnRight) ||
-            (atk !== gpPrevMove.attack);
+        var prev = gp.prevMove;
+        var changed = (mf !== prev.moveForward) ||
+            (mb !== prev.moveBackward) ||
+            (tl !== prev.turnLeft) ||
+            (tr !== prev.turnRight) ||
+            (atk !== prev.attack);
 
         if (changed) {
-            moveForward = mf;
-            moveBackward = mb;
-            turnLeft = tl;
-            turnRight = tr;
-            attack = atk;
+            // Primary slot writes the movement globals (shared with keyboard);
+            // pad slots write their own per-slot input.
+            if (lp.isPrimary) {
+                moveForward = mf;
+                moveBackward = mb;
+                turnLeft = tl;
+                turnRight = tr;
+                attack = atk;
+            } else {
+                lp.input.moveForward = mf;
+                lp.input.moveBackward = mb;
+                lp.input.turnLeft = tl;
+                lp.input.turnRight = tr;
+                lp.input.attack = atk;
+            }
             // When the right stick isn't aiming, face the movement direction
-            // (mirrors the keyboard behaviour).
-            if (!gpAimActive && typeof playerList !== "undefined" && playerList && gpID() != null && playerList[gpID()]) {
-                calcAngleFromKeys(playerList[gpID()]);
-                if (gpSocket()) {
-                    gpSocket().emit('mousemove', playerList[gpID()].angle);
+            // (mirrors the keyboard behaviour), per this slot's own input.
+            if (!gp.aimActive && typeof playerList !== "undefined" && playerList && lp.myID != null && playerList[lp.myID]) {
+                var ang = calcAngleFromInput(mf, mb, tl, tr, playerList[lp.myID].angle);
+                playerList[lp.myID].angle = ang;
+                if (lp.socket) {
+                    lp.socket.emit('mousemove', ang);
                 }
             }
-            emitMovement();
-            gpPrevMove = { moveForward: mf, moveBackward: mb, turnLeft: tl, turnRight: tr, attack: atk };
+            emitMovement(lp);
+            gp.prevMove = { moveForward: mf, moveBackward: mb, turnLeft: tl, turnRight: tr, attack: atk };
         }
     }
-    gpHadMoveInput = moveActive || atk;
+    gp.hadMoveInput = moveActive || atk;
 }
 
-function emitMovement() {
-    if (gpSocket()) {
-        gpSocket().emit('movement', {
-            turnLeft: turnLeft,
-            moveForward: moveForward,
-            turnRight: turnRight,
-            moveBackward: moveBackward,
-            attack: attack
-        });
+function emitMovement(lp) {
+    if (!lp.socket) {
+        return;
     }
+    var inp = lp.isPrimary
+        ? { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack }
+        : { turnLeft: lp.input.turnLeft, moveForward: lp.input.moveForward, turnRight: lp.input.turnRight, moveBackward: lp.input.moveBackward, attack: lp.input.attack };
+    lp.socket.emit('movement', inp);
 }
 
-function rememberButtons(pad) {
-    gpPrevButtons = [];
+function rememberButtons(pad, lp) {
+    var buttons = [];
     for (var i = 0; i < pad.buttons.length; i++) {
-        gpPrevButtons[i] = pad.buttons[i].pressed;
+        buttons[i] = pad.buttons[i].pressed;
     }
+    lp.gp.prevButtons = buttons;
 }
 
-function buttonPressedThisFrame(pad, idx) {
+function buttonPressedThisFrame(pad, idx, lp) {
     var now = pad.buttons[idx] && pad.buttons[idx].pressed;
-    var was = gpPrevButtons[idx] || false;
+    var was = (lp.gp.prevButtons[idx]) || false;
     return !!now && !was;
 }
 
@@ -443,20 +527,22 @@ function nearestEmojiToDir(items, lx, ly) {
     return best;
 }
 
-function openEmojiFromPad() {
+// The emoji wheel is owned by the PRIMARY slot only (§6.16 MVP), so `lp` here is
+// always the primary; passing it keeps the per-pad edge state consistent.
+function openEmojiFromPad(lp) {
     // Stop driving the player while the wheel is up.
-    if (gpHadMoveInput) {
-        cancelMovement();
-        gpHadMoveInput = false;
+    if (lp.gp.hadMoveInput) {
+        cancelMovementForSlot(lp);
+        lp.gp.hadMoveInput = false;
     }
-    gpPrevMove = { moveForward: false, moveBackward: false, turnLeft: false, turnRight: false, attack: false };
+    lp.gp.prevMove = { moveForward: false, moveBackward: false, turnLeft: false, turnRight: false, attack: false };
     gpEmojiIndex = 0;
     var w = window.innerWidth || 800;
     var h = window.innerHeight || 600;
     openEmojiWindow(w / 2 - 50, h / 2 - 50);
 }
 
-function pollEmojiWheel(pad) {
+function pollEmojiWheel(pad, lp) {
     var items = emojiItems();
     if (items.length === 0) {
         return;
@@ -466,13 +552,13 @@ function pollEmojiWheel(pad) {
     }
 
     // Confirm sends the highlighted emoji; B / X cancels.
-    if (buttonPressedThisFrame(pad, GP_BTN_A)) {
+    if (buttonPressedThisFrame(pad, GP_BTN_A, lp)) {
         var chosen = items[gpEmojiIndex].innerHTML;
         clearEmojiHighlight(items);
         closeEmojiWindow(chosen);
         return;
     }
-    if (buttonPressedThisFrame(pad, GP_BTN_B) || buttonPressedThisFrame(pad, GP_BTN_EMOJI)) {
+    if (buttonPressedThisFrame(pad, GP_BTN_B, lp) || buttonPressedThisFrame(pad, GP_BTN_EMOJI, lp)) {
         clearEmojiHighlight(items);
         closeEmojiWindow("cancel");
         return;
@@ -486,10 +572,10 @@ function pollEmojiWheel(pad) {
         gpEmojiIndex = nearestEmojiToDir(items, lx, ly);
     }
     var now = Date.now();
-    if (buttonPressedThisFrame(pad, GP_DPAD_RIGHT) || buttonPressedThisFrame(pad, GP_DPAD_DOWN)) {
+    if (buttonPressedThisFrame(pad, GP_DPAD_RIGHT, lp) || buttonPressedThisFrame(pad, GP_DPAD_DOWN, lp)) {
         gpEmojiIndex = (gpEmojiIndex + 1) % items.length;
         gpEmojiStepAt = now;
-    } else if (buttonPressedThisFrame(pad, GP_DPAD_LEFT) || buttonPressedThisFrame(pad, GP_DPAD_UP)) {
+    } else if (buttonPressedThisFrame(pad, GP_DPAD_LEFT, lp) || buttonPressedThisFrame(pad, GP_DPAD_UP, lp)) {
         gpEmojiIndex = (gpEmojiIndex - 1 + items.length) % items.length;
         gpEmojiStepAt = now;
     }
@@ -552,8 +638,11 @@ function openLeaveModal() {
     if (typeof cancelMovement === "function") {
         cancelMovement();
     }
-    gpHadMoveInput = false;
-    gpPrevMove = { moveForward: false, moveBackward: false, turnLeft: false, turnRight: false, attack: false };
+    var primary = localPlayers[primarySlot];
+    if (primary) {
+        primary.gp.hadMoveInput = false;
+        primary.gp.prevMove = { moveForward: false, moveBackward: false, turnLeft: false, turnRight: false, attack: false };
+    }
     leaveModalEl.className = "confirm-modal visible";
     setLeaveFocus(1); // default to Cancel
 }
@@ -565,8 +654,15 @@ function closeLeaveModal() {
 }
 
 function doLeaveGame() {
-    // Navigating away drops the socket; the server kicks us from the room.
-    window.location.href = "./index.html";
+    // The leave modal is owned by the primary slot. Drop just that slot: with no
+    // other local players this disconnects and navigates away as before (N=1);
+    // with pad players still in the game it fails over to one of them instead of
+    // ending the whole couch session (§6.17).
+    if (typeof dropLocalPlayer === "function") {
+        dropLocalPlayer(primarySlot);
+    } else {
+        window.location.href = "./index.html";
+    }
 }
 
 function leaveButtons() {
@@ -592,21 +688,21 @@ function setLeaveFocus(idx) {
     }
 }
 
-function pollLeaveModal(pad) {
-    if (buttonPressedThisFrame(pad, GP_BTN_B)) {
+function pollLeaveModal(pad, lp) {
+    if (buttonPressedThisFrame(pad, GP_BTN_B, lp)) {
         closeLeaveModal();
         return;
     }
-    if (buttonPressedThisFrame(pad, GP_BTN_A)) {
+    if (buttonPressedThisFrame(pad, GP_BTN_A, lp)) {
         var btns = leaveButtons();
         if (btns[leaveFocusIdx]) {
             btns[leaveFocusIdx].click();
         }
         return;
     }
-    if (buttonPressedThisFrame(pad, GP_DPAD_LEFT)) {
+    if (buttonPressedThisFrame(pad, GP_DPAD_LEFT, lp)) {
         setLeaveFocus(0);
-    } else if (buttonPressedThisFrame(pad, GP_DPAD_RIGHT)) {
+    } else if (buttonPressedThisFrame(pad, GP_DPAD_RIGHT, lp)) {
         setLeaveFocus(1);
     } else {
         var lx = pad.axes[0] || 0;

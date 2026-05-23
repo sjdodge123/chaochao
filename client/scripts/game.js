@@ -54,17 +54,90 @@ var attack = false,
     mousex = null,
     mousey = null;
 
-// --- PHASE 1 SPIKE: local two-player proof (gated behind ?spike2p=1) ---
-// Opens a SECOND, independent Socket.IO connection from this one tab and joins
-// it into the same room as the primary player, to prove Approach A end-to-end:
-// two forceNew sockets => two distinct server players in one room, with a
-// gamepad routed to player #2. Throwaway scaffolding; Phase 2 generalises it
-// into a per-slot localPlayers[0..N-1] table. When the flag is absent, none of
-// this runs and behaviour is identical to today (N=1).
-function spikeTwoPlayers() {
-    return new URLSearchParams(window.location.search).has('spike2p');
+// --- Local multiplayer (Approach A): one Socket.IO connection per local player ---
+//
+// Each local player ("slot") owns its OWN socket + server identity, and — for pad
+// players — its own input state and gamepad mapping. To the server these are just
+// N independent players, so no server changes are needed.
+//
+// Slot 0 is the PRIMARY: it is the page's original connection and the
+// keyboard/mouse player, and it alone owns ALL rendering, audio, UI and one-shot/
+// timer handling (every socket receives every room broadcast, so running those on
+// each socket would fire them N times). The globals `server`, `myID`, `myPlayer`,
+// the movement booleans and `menuOpen` are ALIASES for the primary slot, so every
+// existing render/input path keeps driving the primary player unchanged. This is
+// also why N=1 behaves exactly as before: there is only the primary slot.
+//
+// Non-primary slots (pad players, slot >= 1) are pure input/identity channels:
+// their sockets handle only welcome/gameState(identity)/lifecycle, and their input
+// lives in `lp.input` and emits on `lp.socket`.
+var LOCAL_PLAYER_CAP = 4;   // ship default; raise toward 8 once hardware + the
+                            // server color-palette fix (getUniqueColorR) land.
+var localPlayers = [];      // slot index -> local player entry (slot 0 = primary)
+var primarySlot = 0;        // index in localPlayers of the render/audio owner
+
+// Gated for now (the lobby in a later phase replaces this with a real claim flow).
+// When absent, only the primary slot ever exists => identical to today. Memoised
+// because pollGamepad calls this every frame.
+var _localMpFlag = null;
+function localMultiplayerEnabled() {
+    if (_localMpFlag === null) {
+        _localMpFlag = new URLSearchParams(window.location.search).has('localmp');
+    }
+    return _localMpFlag;
 }
-var spikePlayer2 = { socket: null, myID: null, joined: false };
+
+// One local player's state. For the primary slot, `input` is unused (the keyboard
+// writes the movement globals instead); for pad slots it is the per-slot input.
+function makeLocalPlayer(slot, socket, isPrimary) {
+    return {
+        slot: slot,
+        socket: socket,
+        myID: null,
+        isPrimary: !!isPrimary,
+        joined: false,
+        // pad mapping (null for the keyboard/primary slot)
+        padIndex: null,
+        padType: "generic",
+        // per-slot input (pad slots only)
+        input: { moveForward: false, moveBackward: false, turnLeft: false, turnRight: false, attack: false },
+        // per-pad poll edge state (must be per-slot so pads don't clobber each other)
+        gp: {
+            prevMove: { moveForward: false, moveBackward: false, turnLeft: false, turnRight: false, attack: false },
+            hadMoveInput: false,
+            aimActive: false,
+            prevAimAngle: null,
+            lastAimEmit: 0,
+            prevButtons: []
+        }
+    };
+}
+function localPlayerForPadIndex(idx) {
+    for (var i = 0; i < localPlayers.length; i++) {
+        if (localPlayers[i] && localPlayers[i].padIndex === idx) {
+            return localPlayers[i];
+        }
+    }
+    return null;
+}
+function nextFreeSlot() {
+    // Pads claim slots starting at 1 (slot 0 is the keyboard/primary player).
+    for (var s = 1; s < LOCAL_PLAYER_CAP; s++) {
+        if (!localPlayers[s]) {
+            return s;
+        }
+    }
+    return null;
+}
+function liveLocalPlayerCount() {
+    var n = 0;
+    for (var i = 0; i < localPlayers.length; i++) {
+        if (localPlayers[i]) {
+            n++;
+        }
+    }
+    return n;
+}
 
 var then = Date.now(),
     dt;
@@ -75,7 +148,7 @@ $(function () {
 
 function setupPage() {
 
-    window.addEventListener('blur', cancelMovement);
+    window.addEventListener('blur', cancelAllLocalMovement);
     window.addEventListener('resize', resize, false);
     window.requestAnimFrame = (function () {
         return window.requestAnimationFrame ||
