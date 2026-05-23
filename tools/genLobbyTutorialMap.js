@@ -84,6 +84,15 @@ const GOAL_POINTS = [
 	{ x: 1235, y: 535 },
 ];
 
+// --- hazards (config.hazards): {id,x,y,angle}; placed in open background ---
+const HAZARD = { bumper: 900, movingBumper: 901 };
+const HAZARDS = [
+	// static bumper in the central crossing lane between spawn and the goal side
+	{ id: HAZARD.bumper, x: 540, y: 384, angle: 0 },
+	// moving bumper sweeping vertically in front of the goals (angle = rail dir)
+	{ id: HAZARD.movingBumper, x: 1090, y: 384, angle: 90 },
+];
+
 // Background spawn pad (just neutral background; recorded for spawn/respawn).
 const SPAWN_PAD = { cx: 175, cy: 384, r: 75 };
 
@@ -218,7 +227,7 @@ function main() {
 	diagram.author = "system";
 	diagram.email = "";
 	diagram.thumbnail = "";
-	diagram.hazards = [];
+	diagram.hazards = HAZARDS;
 	diagram.lobbyOnly = true;
 	diagram.spawnPad = SPAWN_PAD;
 
@@ -228,6 +237,7 @@ function main() {
 	const names = { 0: "slow", 1: "normal", 2: "fast", 3: "lava", 4: "ice", 6: "goal", 9: "background", 102: "bomb" };
 	console.log("wrote", path.relative(ROOT, outPath));
 	console.log("cells:", diagram.cells.length, "edges:", diagram.edges.length, "vertices:", diagram.vertices.length);
+	console.log("hazards:", diagram.hazards.length, "(" + diagram.hazards.map((h) => (h.id === HAZARD.bumper ? "bumper" : "movingBumper")).join(", ") + ")");
 	console.log("cell ids:");
 	Object.keys(counts)
 		.sort((a, b) => a - b)
