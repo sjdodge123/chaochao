@@ -390,11 +390,13 @@ function rebuild() {
 }
 
 function init() {
+    initEditorGamepad();
     animloop();
 }
 
 function animloop() {
     if (!gameRunning) return;
+    pollEditorGamepad();
     var now = Date.now();
     dt = now - then;
     if (mapReady == false) {

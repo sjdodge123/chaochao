@@ -8,7 +8,8 @@ Releases are cut automatically on merge to `main` by the `Release on merge to ma
 
 ## Unreleased
 
-(none yet)
+### General
+- Now with controller support! Plug in a controller and play
 
 ## v0.1.3 — 2026-05-23
 

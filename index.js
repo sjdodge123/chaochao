@@ -11,16 +11,67 @@ const htmlPath = path.join(__dirname, 'client');
 
 app.use(compression());
 
-// Inject the running server's version into index.html so the landing
-// page always reflects what's actually deployed. Runs in both dev and
-// prod; read once at startup so we don't fs.readFile on every request.
+// Inject the running server's version and the latest release headline into
+// index.html so the landing page always reflects what's actually deployed.
+// Runs in both dev and prod; read once at startup so we don't hit disk on
+// every request.
 const APP_VERSION = require('./package.json').version;
+const APP_NEWS = loadLatestHeadline();
+
+function escapeHtml(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+// The news banner surfaces the most recent CHANGELOG entry: the first bullet
+// under the topmost section that has one (Unreleased first, then the latest
+// versioned release). Returns '' if there are no entries yet.
+function loadLatestHeadline() {
+    try {
+        var md = fs.readFileSync(path.join(__dirname, 'CHANGELOG.md'), 'utf8');
+        var lines = md.split('\n');
+        // Only scan inside the release sections (after the first "## " heading),
+        // so a stray bullet in the intro/guidance prose can't become the headline.
+        var inSections = false;
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].trim();
+            if (line.indexOf('## ') === 0) {
+                inSections = true;
+                continue;
+            }
+            if (inSections && line.indexOf('- ') === 0) {
+                return line.slice(2).trim()
+                    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1') // [text](url) -> text
+                    .replace(/[*`_]/g, '');                  // strip emphasis/code marks
+            }
+        }
+    } catch (e) {
+        console.log('Could not read CHANGELOG.md for news banner:', e.message);
+    }
+    return '';
+}
+
+function newsBannerHtml() {
+    if (!APP_NEWS) {
+        return '';
+    }
+    return '<a class="news-banner" target="_blank" href="https://github.com/sjdodge123/chaochao/releases/latest">' +
+        '<span class="news-badge">Patch notes</span>' +
+        '<span class="news-headline">' + escapeHtml(APP_NEWS) + '</span>' +
+        '</a>';
+}
+
 app.use(function (req, res, next) {
     var url = req.path === '/' ? '/index.html' : req.path;
     if (url !== '/index.html') return next();
     fs.readFile(path.join(htmlPath, url), 'utf8', function (err, html) {
         if (err) return next();
-        var modified = html.replace(/<!-- VERSION -->/g, 'v' + APP_VERSION);
+        var modified = html
+            .replace(/<!-- VERSION -->/g, 'v' + APP_VERSION)
+            .replace(/<!-- NEWS_BANNER -->/g, newsBannerHtml());
         res.set('Content-Type', 'text/html');
         res.send(modified);
     });

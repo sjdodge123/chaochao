@@ -1255,6 +1255,7 @@ function drawTouchControls() {
         gameContext.fill();
         gameContext.stroke();
         gameContext.restore();
+        drawTouchLabel("Move", joystickMovement.baseX, joystickMovement.baseY + joystickMovement.baseRadius + 20);
     }
     if (joystickCamera != null && joystickCamera.isVisible()) {
         gameContext.save();
@@ -1287,6 +1288,7 @@ function drawTouchControls() {
         gameContext.fill();
         gameContext.stroke();
         gameContext.restore();
+        drawTouchLabel("Attack", attackButton.baseX, attackButton.baseY + attackButton.radius + 20);
     }
     if (exitButton != null && exitButton.isVisible()) {
         if (window.document.fullscreenElement) {
@@ -1302,6 +1304,7 @@ function drawTouchControls() {
             gameContext.drawImage(fullScreenToUse, exitButton.baseX - iconWidth / 2, exitButton.baseY - iconHeight / 2, iconWidth, iconHeight);
             gameContext.restore();
         }
+        drawTouchLabel(window.document.fullscreenElement ? "Exit" : "Fullscreen", exitButton.baseX, exitButton.baseY + 28);
     }
     if (chatButton != null && chatButton.isVisible()) {
         gameContext.save();
@@ -1309,7 +1312,21 @@ function drawTouchControls() {
         var iconHeight = chatToUse.height * 0.1;
         gameContext.drawImage(chatToUse, chatButton.baseX - iconWidth / 2, chatButton.baseY - iconHeight / 2, iconWidth, iconHeight);
         gameContext.restore();
+        drawTouchLabel("Emoji", chatButton.baseX, chatButton.baseY + 28);
     }
+}
+
+// Small caption under a touch control so mobile players know what it does.
+function drawTouchLabel(text, x, y) {
+    gameContext.save();
+    gameContext.font = "bold 16px Arial";
+    gameContext.textAlign = "center";
+    gameContext.lineWidth = 4;
+    gameContext.strokeStyle = "white";
+    gameContext.fillStyle = "black";
+    gameContext.strokeText(text, x, y);
+    gameContext.fillText(text, x, y);
+    gameContext.restore();
 }
 
 function drawTitle() {
