@@ -84,10 +84,10 @@
 
     #canvasWindow {
       height: 100vh;
-      width: calc(100vw - 200px);
+      width: calc(100vw - 250px);
     }
 
-    #pallete {
+    .palette {
       height: auto;
     }
 
@@ -116,10 +116,11 @@
       <div id="mapEditor">
         <div id="controlPanel" class="bg-light">
           <div class="d-flex align-items-center justify-content-between mb-3 mt-3">
-            <button id="loadButton" class="btn bg-light p-0"><i class="fa fa-arrow-left fa-2x" aria-hidden="true"></i></button>
-            <button id="rebuildButton" class="btn bg-light p-0"><i class="fa fa-trash fa-2x" aria-hidden="true"></i></button>
-            <button id="rotateButton" class="btn bg-light p-0"><i class="fa fa-rotate-right fa-2x" aria-hidden="true"></i></button>
-            <button id="mouseButton" class="btn bg-light p-0"><i class="fa fa-mouse-pointer fa-2x" aria-hidden="true"></i></button>
+            <button id="loadButton" class="btn bg-light p-0" title="Back to map list"><i class="fa fa-arrow-left fa-2x" aria-hidden="true"></i></button>
+            <button id="rebuildButton" class="btn bg-light p-0" title="Wipe map and start over"><i class="fa fa-trash fa-2x" aria-hidden="true"></i></button>
+            <button id="deleteSelectedButton" class="btn bg-light p-0" title="Delete selected hazard" disabled><i class="fa fa-times fa-2x" aria-hidden="true"></i></button>
+            <button id="rotateButton" class="btn bg-light p-0" title="Rotate selected hazard 15°"><i class="fa fa-rotate-right fa-2x" aria-hidden="true"></i></button>
+            <button id="mouseButton" class="btn bg-light p-0" title="Switch to selection cursor"><i class="fa fa-mouse-pointer fa-2x" aria-hidden="true"></i></button>
           </div>
           <div id="inputBar" class="mb-3">
             <div class="h5">
@@ -130,7 +131,7 @@
             <input class="editor-inputs form-control" type="text" id="name" name="name" placeholder="Map Name" maxlength="15"></input>
             <input class="editor-inputs form-control" type="text" id="email" name="email" placeholder="Email" maxlength="50"></input>
           </div>
-          <div id="pallete" class="mb-3">
+          <div class="palette mb-3">
             <div class="h5">
               Tiles
             </div>
@@ -146,7 +147,7 @@
               <button id="goalTileButton" style="background-color: #FFD700" title="Goal" class="mapEditorTile"><span>Goal</span></button>
             </div>
           </div>
-          <div id="pallete" class="mb-3">
+          <div class="palette mb-3">
             <div class="h5">
               Hazards
             </div>

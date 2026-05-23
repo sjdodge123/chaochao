@@ -174,7 +174,7 @@ td {
     height: 10%;
     width: 100%;
 }
-#pallete {
+.palette {
     display: inline-block;
     height: 80%;
     width: 100%;
