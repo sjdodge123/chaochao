@@ -9,10 +9,14 @@ var imgListing = [];
 var c = require('./config.json');
 c.port = process.env.PORT || c.port;
 
-const { Octokit } = require("@octokit/core");
-const octokit = new Octokit({
-    auth: process.env.GITHUB_AUTH
-});
+let octokitInstance;
+async function getOctokit() {
+    if (!octokitInstance) {
+        const { Octokit } = await import("@octokit/core");
+        octokitInstance = new Octokit({ auth: process.env.GITHUB_AUTH });
+    }
+    return octokitInstance;
+}
 loadMaps();
 loadSounds();
 loadImages();
@@ -73,6 +77,7 @@ exports.submitPullRequest = async function (map) {
     }
     var branchName = "mapchange-" + mapName.toLowerCase() + "-" + getRandomBranchCode();
     try {
+        const octokit = await getOctokit();
         var result = await octokit.request('GET /repos/{owner}/{repo}/git/refs/heads', {
             owner,
             repo
