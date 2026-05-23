@@ -316,14 +316,22 @@ function pollGamepad(dt) {
         }
         var lp = localPlayerForPadIndex(i);
         if (!lp) {
-            var pressed = anyButtonPressed(pad);
+            // A pad that just left must release its buttons before (re)joining, so
+            // the press that confirmed leaving can't instantly re-join it.
             if (padNeedsRelease[i]) {
-                // Just-left pad: wait until its buttons are released before it can
-                // join again (so the leave-confirm press can't re-join it).
-                if (!pressed) {
+                if (!anyButtonPressed(pad)) {
                     delete padNeedsRelease[i];
                 }
-            } else if (pressed) {
+                continue;
+            }
+            var primary = localPlayers[primarySlot];
+            if (primary && primary.padIndex == null && !keyboardClaimedPrimary) {
+                // First controller, no keyboard in use → it drives P1. Adopt it as
+                // soon as it's present (no button required) so stick/d-pad menu and
+                // lobby navigation work immediately, matching the old single-pad UX.
+                bindPadToPrimary(i, pad);
+            } else if (anyButtonPressed(pad)) {
+                // An additional controller joins as a new player (P2+) on a press.
                 tryClaimPadSlot(i, pad);
             }
             continue; // wait until the slot has joined (myID set) before polling
