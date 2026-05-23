@@ -19,6 +19,20 @@ $(function () {
         var banner = document.getElementById('notFoundBanner');
         if (banner != null) banner.hidden = false;
     }
+
+    var joinByIdInput = document.getElementById('joinByIdInput');
+    var joinByIdButton = document.getElementById('joinByIdButton');
+    if (joinByIdInput != null && joinByIdButton != null) {
+        var goJoinById = function () {
+            var value = joinByIdInput.value.trim();
+            if (value === '') return;
+            window.location.href = './play.html?gameid=' + encodeURIComponent(value);
+        };
+        joinByIdButton.addEventListener('click', goJoinById);
+        joinByIdInput.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); goJoinById(); }
+        });
+    }
 });
 
 function clientConnect() {
@@ -81,6 +95,7 @@ function buildCard(room, maxPlayers) {
     state.textContent = stateLabel(room.state);
     info.appendChild(state);
 
+    info.appendChild(buildStat('Game ID', room.gameID));
     info.appendChild(buildStat('Round', room.round));
     info.appendChild(buildStat('Map', room.currentMap || 'Lobby'));
     info.appendChild(buildStat('Players', room.players + '/' + maxPlayers));

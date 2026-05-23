@@ -132,6 +132,19 @@ canvas {
     margin-bottom: 0.75rem;
     font-size: 0.95rem;
 }
+.join-by-id {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    align-items: stretch;
+}
+.join-by-id input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.join-by-id button {
+    flex: 0 0 auto;
+}
 .start-new {
     text-align: center;
     margin-top: 1rem;
