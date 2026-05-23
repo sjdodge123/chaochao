@@ -8,10 +8,6 @@ When cutting a release: move the `Unreleased` contents under a new `## vX.Y.Z â€
 
 ## Unreleased
 
-(none yet)
-
-## v0.1.3 â€” 2026-05-23
-
 ### Bug fixes
 
 - Using an ability no longer brings your character to a stop. Only punching without an ability slows you down now.
