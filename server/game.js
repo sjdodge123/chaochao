@@ -1709,13 +1709,11 @@ class World extends Rect {
 		player.initialLoc = this.findFreeLoc(player);
 	}
 	getUniqueColorR() {
-		var color = utils.getColor();
+		var usedColors = {};
 		for (var player in this.playerList) {
-			if (this.playerList[player].color == color) {
-				return this.getUniqueColorR();
-			}
+			usedColors[this.playerList[player].color] = true;
 		}
-		return color;
+		return utils.getUniqueColor(usedColors);
 	}
 	resize() {
 		this.width = c.worldWidth;
