@@ -607,6 +607,11 @@ div.desc {
     font-weight: 700;
 }
 
+/* a pad player whose socket is mid-reconnect (transient blip) */
+.pad-player.reconnecting {
+    opacity: 0.45;
+}
+
 /* the controller -> player color link; lights up once the server assigns a color */
 .gp-color-dot {
     width: 14px;

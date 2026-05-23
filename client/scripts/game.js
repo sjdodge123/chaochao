@@ -73,6 +73,8 @@ var attack = false,
 // lives in `lp.input` and emits on `lp.socket`.
 var LOCAL_PLAYER_CAP = 4;   // ship default; raise toward 8 once hardware + the
                             // server color-palette fix (getUniqueColorR) land.
+var RECONNECT_GRACE_MS = 12000; // keep a pad slot alive this long across a
+                                // transient disconnect before dropping it.
 var localPlayers = [];      // slot index -> local player entry (slot 0 = primary)
 var primarySlot = 0;        // index in localPlayers of the render/audio owner
 // Set once a movement key is pressed. While false, the FIRST controller to press
@@ -100,6 +102,8 @@ function makeLocalPlayer(slot, socket, isPrimary) {
         myID: null,
         isPrimary: !!isPrimary,
         joined: false,
+        everJoined: false,        // has this slot ever confirmed a room? (drives auto-rejoin)
+        reconnectTimer: null,     // grace timer started on a transient disconnect
         // pad mapping (null for the keyboard/primary slot)
         padIndex: null,
         padType: "generic",

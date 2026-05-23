@@ -498,11 +498,33 @@ function registerSecondaryHandlers(sock, slot) {
 		}
 	});
 	sock.on('gameState', function (gs) {
-		if (localPlayers[slot]) {
-			localPlayers[slot].myID = gs.myID;
-			localPlayers[slot].joined = true;
+		var lp = localPlayers[slot];
+		if (lp) {
+			lp.myID = gs.myID;
+			lp.joined = true;
+			lp.everJoined = true;
+			if (lp.reconnectTimer) {
+				clearTimeout(lp.reconnectTimer);
+				lp.reconnectTimer = null;
+			}
+		}
+		if (typeof onLocalPlayerReconnecting === "function") {
+			onLocalPlayerReconnecting(slot, false); // recovered — un-grey its block
 		}
 		debugLog("[localmp] slot", slot, "joined room", gs.gameID, "as", gs.myID);
+	});
+	sock.on('connect', function () {
+		var lp = localPlayers[slot];
+		// socket.io fires 'connect' on the initial connect AND on each reconnect.
+		// The initial join is already buffered by addLocalPlayer; on a RECONNECT
+		// (everJoined) re-join the same room so the pad player pops back in
+		// without having to press to rejoin. The reconnect gets a fresh server id
+		// (no server-side session recovery here), so this spawns a new player and
+		// the gameState handler updates the slot's myID.
+		if (lp && lp.everJoined && gameID != null) {
+			debugLog("[localmp] slot", slot, "reconnected — re-joining room", gameID);
+			sock.emit('enterGame', gameID);
+		}
 	});
 	sock.on('roomNotFound', function () {
 		debugLog("[localmp] slot", slot, "roomNotFound — dropping slot, tab kept alive");
@@ -512,13 +534,29 @@ function registerSecondaryHandlers(sock, slot) {
 		debugLog("[localmp] slot", slot, "serverKick — dropping slot, tab kept alive");
 		dropLocalPlayer(slot);
 	});
-	sock.on('disconnect', function () {
-		// An unintended drop of a pad player's socket: free the slot so the pad
-		// can re-press to rejoin. (No-op if we already tore it down.)
-		if (localPlayers[slot] && localPlayers[slot].socket === sock) {
-			debugLog("[localmp] slot", slot, "socket disconnected — dropping slot");
-			dropLocalPlayer(slot);
+	sock.on('disconnect', function (reason) {
+		// We tore it down on purpose (kick / leave / unplug call sock.disconnect()).
+		if (reason === 'io client disconnect') {
+			return;
 		}
+		var lp = localPlayers[slot];
+		if (!lp || lp.socket !== sock) {
+			return;
+		}
+		// Transient blip: keep the slot, grey its block, and let socket.io
+		// auto-reconnect (the 'connect' handler re-joins). Drop only if it can't
+		// recover within the grace window (§6.10).
+		debugLog("[localmp] slot", slot, "disconnected (", reason, ") — awaiting reconnect");
+		if (typeof onLocalPlayerReconnecting === "function") {
+			onLocalPlayerReconnecting(slot, true);
+		}
+		if (lp.reconnectTimer) {
+			clearTimeout(lp.reconnectTimer);
+		}
+		lp.reconnectTimer = setTimeout(function () {
+			debugLog("[localmp] slot", slot, "reconnect grace expired — dropping");
+			dropLocalPlayer(slot);
+		}, RECONNECT_GRACE_MS);
 	});
 }
 
@@ -554,6 +592,10 @@ function dropLocalPlayer(slot) {
 	var lp = localPlayers[slot];
 	if (!lp) {
 		return;
+	}
+	if (lp.reconnectTimer) {
+		clearTimeout(lp.reconnectTimer);
+		lp.reconnectTimer = null;
 	}
 	if (lp.isPrimary) {
 		handlePrimaryLost();
