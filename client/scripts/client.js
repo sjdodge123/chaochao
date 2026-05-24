@@ -602,6 +602,10 @@ function dropLocalPlayer(slot) {
 		clearTimeout(lp.reconnectTimer);
 		lp.reconnectTimer = null;
 	}
+	if (lp.leaveConfirmTimer) {
+		clearTimeout(lp.leaveConfirmTimer);
+		lp.leaveConfirmTimer = null;
+	}
 	// If this player had the shared emoji wheel open, close it — otherwise it
 	// soft-locks open (no surviving player owns it, so none can dismiss it).
 	if (typeof emojiOwnerSlot !== "undefined" && emojiOwnerSlot === slot &&

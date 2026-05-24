@@ -25,6 +25,7 @@ var GP_AIM_DEADZONE = 0.35;      // right stick: only re-aim when pushed past th
 var GP_TRIGGER_THRESHOLD = 0.5;  // analog trigger counts as "pressed" past this
 var GP_AIM_MIN_DELTA = 2;        // deg; skip aim emits smaller than this
 var GP_AIM_MIN_INTERVAL = 50;    // ms; cap aim emits at ~20 Hz
+var LEAVE_CONFIRM_TIMEOUT_MS = 5000; // auto-cancel the inline "Leave?" confirm
 
 // --- standard-mapping button indices ---
 var GP_BTN_A = 0;     // attack / confirm
@@ -135,12 +136,15 @@ function onGamepadKeyDown(e) {
     if (hintUiMode === "blocks" && primary && padBlocks[primarySlot]) {
         if (primary.leaveConfirm) {
             if (e.keyCode === 13 || e.key === "Enter") {
+                if (primary.leaveConfirmTimer) {
+                    clearTimeout(primary.leaveConfirmTimer);
+                    primary.leaveConfirmTimer = null;
+                }
                 primary.leaveConfirm = false;
                 dropLocalPlayer(primarySlot);
                 e.preventDefault();
             } else if (e.key === "Escape" || e.keyCode === 27) {
-                primary.leaveConfirm = false;
-                setBlockLeaveConfirm(primarySlot, false);
+                cancelLeaveConfirm(primary);
                 e.preventDefault();
             }
             return;
@@ -458,7 +462,10 @@ function pollPadForSlot(pad, lp) {
     }
 
     if (lp.leaveConfirm) {
-        // This player is confirming leave inline in their block.
+        // Confirming leave inline: keep steering (movement isn't halted), but A
+        // confirms and B cancels, so attack is suppressed while the prompt is up.
+        pollAim(pad, lp);
+        pollMovementAndAttack(pad, lp, true);
         pollLeaveConfirm(pad, lp);
     } else if (!blocks && lp.isPrimary && leaveModalIsOpen()) {
         // Solo: navigate the centre leave modal.
@@ -527,7 +534,7 @@ function pollAim(pad, lp) {
     gp.lastAimEmit = now;
 }
 
-function pollMovementAndAttack(pad, lp) {
+function pollMovementAndAttack(pad, lp, ignoreAttack) {
     var mf = false, mb = false, tl = false, tr = false;
     var moveActive = false;
 
@@ -570,7 +577,9 @@ function pollMovementAndAttack(pad, lp) {
         }
     }
 
-    var atk = readAttack(pad);
+    // During the leave-confirm A is the confirm button, so attack is suppressed
+    // (the player can still steer with the stick/d-pad).
+    var atk = ignoreAttack ? false : readAttack(pad);
     applyInputState(lp, mf, mb, tl, tr, atk, moveActive);
 }
 
@@ -1102,10 +1111,14 @@ function onLocalPlayersChanged() {
         if (hintUiMode === "blocks") {
             // No controllers and solo — restore the bottom bar.
             hintUiMode = "bar";
-            // Clear any in-progress inline leave-confirm flags before their blocks
-            // are removed, so a flag can't linger with no visible UI.
+            // Clear any in-progress inline leave-confirm (flag + timer) before
+            // their blocks are removed, so nothing lingers with no visible UI.
             for (var c = 0; c < localPlayers.length; c++) {
                 if (localPlayers[c]) {
+                    if (localPlayers[c].leaveConfirmTimer) {
+                        clearTimeout(localPlayers[c].leaveConfirmTimer);
+                        localPlayers[c].leaveConfirmTimer = null;
+                    }
                     localPlayers[c].leaveConfirm = false;
                 }
             }
@@ -1287,15 +1300,14 @@ function setBlockHints(lp) {
 function onLocalPlayerReconnecting(slot, isReconnecting) {
     // Cancel any in-progress leave-confirm: while mid-reconnect the slot isn't
     // polled, so its A/B can't resolve the confirm — don't leave it frozen.
-    if (isReconnecting && localPlayers[slot]) {
-        localPlayers[slot].leaveConfirm = false;
+    if (isReconnecting) {
+        cancelLeaveConfirm(localPlayers[slot]);
     }
     var b = padBlocks[slot];
     if (!b || !b.el) {
         return;
     }
     if (isReconnecting) {
-        setBlockLeaveConfirm(slot, false); // restore normal hints if it was confirming
         b.el.classList.add("reconnecting");
     } else {
         b.el.classList.remove("reconnecting");
@@ -1353,25 +1365,45 @@ function leaveGlyphFor(type) {
 
 // B opens an inline "Leave?" confirm in this player's block; A confirms (drops
 // the player / disconnects), B cancels. Per-slot, so it never freezes the others.
+// Opening the confirm does NOT halt movement (the player keeps steering while
+// deciding, matching the keyboard Esc behavior). The block is highlighted, and
+// the prompt auto-cancels after LEAVE_CONFIRM_TIMEOUT_MS with no confirm.
 function openLeaveConfirm(lp) {
-    if (lp.gp.hadMoveInput) {
-        cancelMovementForSlot(lp);
-        lp.gp.hadMoveInput = false;
-    }
-    lp.gp.prevMove = { moveForward: false, moveBackward: false, turnLeft: false, turnRight: false, attack: false };
     lp.leaveConfirm = true;
     setBlockLeaveConfirm(lp.slot, true);
+    if (lp.leaveConfirmTimer) {
+        clearTimeout(lp.leaveConfirmTimer);
+    }
+    lp.leaveConfirmTimer = setTimeout(function () {
+        cancelLeaveConfirm(lp);
+    }, LEAVE_CONFIRM_TIMEOUT_MS);
+}
+
+// Cancel the inline confirm: clear the timeout, drop the flag, and un-highlight.
+function cancelLeaveConfirm(lp) {
+    if (!lp) {
+        return;
+    }
+    if (lp.leaveConfirmTimer) {
+        clearTimeout(lp.leaveConfirmTimer);
+        lp.leaveConfirmTimer = null;
+    }
+    lp.leaveConfirm = false;
+    setBlockLeaveConfirm(lp.slot, false);
 }
 
 function pollLeaveConfirm(pad, lp) {
     if (buttonPressedThisFrame(pad, GP_BTN_A, lp)) {
+        if (lp.leaveConfirmTimer) {
+            clearTimeout(lp.leaveConfirmTimer);
+            lp.leaveConfirmTimer = null;
+        }
         lp.leaveConfirm = false;
         dropLocalPlayer(lp.slot); // confirmed — disconnect this player
         return;
     }
     if (buttonPressedThisFrame(pad, GP_BTN_B, lp)) {
-        lp.leaveConfirm = false;
-        setBlockLeaveConfirm(lp.slot, false); // cancelled
+        cancelLeaveConfirm(lp); // cancelled
     }
 }
 

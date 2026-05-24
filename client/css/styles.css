@@ -637,10 +637,13 @@ div.desc {
     opacity: 0.45;
 }
 
-/* a player's inline "Leave?" confirm (B opens it, A confirms, B cancels) */
+/* a player's inline "Leave?" confirm (B opens it, A confirms, B cancels):
+   highlight the whole block so it stands out while the prompt is up */
 .pad-player.confirming {
     outline: 2px solid #e05a5a;
     outline-offset: -1px;
+    background-color: rgba(224, 90, 90, 0.18);
+    box-shadow: 0 0 10px rgba(224, 90, 90, 0.55);
 }
 
 .pad-player .pp-confirm {
