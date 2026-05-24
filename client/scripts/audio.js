@@ -227,7 +227,10 @@ function playSound(sound) {
         if (sound.currentTime > 0) {
             sound.currentTime = 0;
         }
-        sound.play();
+        // play() rejects if the browser hasn't seen a user gesture yet (autoplay
+        // policy). Swallow it — unlockAudio() resumes looping music on first input.
+        var p = sound.play();
+        if (p && p.catch) { p.catch(function () { }); }
     }
 }
 
@@ -256,8 +259,39 @@ function playSoundAfterFinish(sound) {
         } else {
             sound.currentTime = 0;
         }
-        sound.play();
+        var p = sound.play();
+        if (p && p.catch) { p.catch(function () { }); }
     }
+}
+
+// Browser autoplay policy blocks sound.play() until the user interacts with the
+// page, so background music requested on the waiting/lobby screen (before any
+// click/keypress) silently fails. On the first user gesture, resume any looping
+// music that was requested but blocked (lobby music loops; one-shot SFX are left
+// alone). Fires once, then detaches.
+var audioUnlocked = false;
+function unlockAudio() {
+    if (audioUnlocked) {
+        return;
+    }
+    audioUnlocked = true;
+    ["mousedown", "pointerdown", "keydown", "touchstart"].forEach(function (evt) {
+        window.removeEventListener(evt, unlockAudio);
+    });
+    if (gameMuted) {
+        return;
+    }
+    playingSounds.forEach(function (sound) {
+        if (sound.loop && sound.paused) {
+            var p = sound.play();
+            if (p && p.catch) { p.catch(function () { }); }
+        }
+    });
+}
+if (typeof window !== "undefined") {
+    ["mousedown", "pointerdown", "keydown", "touchstart"].forEach(function (evt) {
+        window.addEventListener(evt, unlockAudio, { passive: true });
+    });
 }
 
 // Server-authoritative: play the exact mood+track the server told us to. The
