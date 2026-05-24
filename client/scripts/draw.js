@@ -380,6 +380,7 @@ function drawObjects(dt) {
     drawWorld(dt);
     cameraOnMyPlayer();
     if (currentState == config.stateMap.lobby) {
+        drawLobbyFloor();
         drawMap();
         drawLobbyStartButton();
     }
@@ -1068,6 +1069,45 @@ function drawPingCircles() {
         gameContext.arc(ping.x, ping.y, ping.radius, 0, 2 * Math.PI);
     }
     gameContext.stroke();
+    gameContext.restore();
+}
+// Lobby-only "practice room" floor treatment: a faint grid + a dashed inset frame
+// over the arena. Races never draw this, so a returning player instantly reads the
+// lobby as a distinct practice space (not a glitched race map) — without any text.
+// Drawn after drawWorld (the plain fill) and before the islands.
+function drawLobbyFloor() {
+    if (world == null) {
+        return;
+    }
+    var ox = world.x + camera.getCameraX();
+    var oy = world.y + camera.getCameraY();
+    // Faint grid, clipped to the arena so it never spills past the border.
+    gameContext.save();
+    gameContext.beginPath();
+    gameContext.rect(ox, oy, world.width, world.height);
+    gameContext.clip();
+    gameContext.strokeStyle = "rgba(0, 0, 0, 0.06)";
+    gameContext.lineWidth = 1;
+    var step = 64;
+    gameContext.beginPath();
+    for (var gx = step; gx < world.width; gx += step) {
+        gameContext.moveTo(ox + gx, oy);
+        gameContext.lineTo(ox + gx, oy + world.height);
+    }
+    for (var gy = step; gy < world.height; gy += step) {
+        gameContext.moveTo(ox, oy + gy);
+        gameContext.lineTo(ox + world.width, oy + gy);
+    }
+    gameContext.stroke();
+    gameContext.restore();
+    // Dashed inset frame — a "this is a bounded practice area" cue.
+    gameContext.save();
+    gameContext.strokeStyle = "rgba(0, 0, 0, 0.30)";
+    gameContext.lineWidth = 3;
+    gameContext.setLineDash([14, 10]);
+    var inset = 12;
+    gameContext.strokeRect(ox + inset, oy + inset, world.width - inset * 2, world.height - inset * 2);
+    gameContext.setLineDash([]);
     gameContext.restore();
 }
 function drawMap() {
