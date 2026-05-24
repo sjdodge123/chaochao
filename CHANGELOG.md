@@ -10,7 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+- [headline] Local multiplayer! Up to 4 people can play on one screen — each on their own controller, plus one on keyboard/mouse — all joining the same game as real players, right alongside anyone online.
+- Plug in controllers and they show up in a header at the top of the screen; press A on one to jump in. The first controller (with no keyboard player) becomes Player 1, and each player gets their own color so you can tell who's who.
+- Each player has their own on-screen controls, emoji wheel, and a "Leave?" prompt (B on a controller, Esc on keyboard) — one player leaving or unplugging never ends everyone else's game.
 
 ## v0.1.6 — 2026-05-23
 
