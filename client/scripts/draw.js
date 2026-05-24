@@ -1127,7 +1127,7 @@ function drawLobbyArrows() {
     gameContext.save();
     gameContext.globalAlpha = 0.5;                       // translucent: float over the map, don't hide it
     for (var i = 0; i < count; i++) {
-        var ang = (i / count) * Math.PI * 2;            // 4 arrows, evenly spaced around the button
+        var ang = (i / count) * Math.PI * 2 + Math.PI / 4; // +45deg -> 4 corner (diagonal) positions
         var bob = Math.sin(t * 2.5 - i * 0.9) * 7;      // gentle staggered float toward/away from center
         var ringR = btnR + 50 + bob;                    // arrow tip distance from button center
         var ax = cx + Math.cos(ang) * ringR;
