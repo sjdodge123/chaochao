@@ -23,7 +23,6 @@ exports.sendPlayerUpdates = function (playerList) {
 		];
 		packet.push(listItem);
 	}
-	packet = JSON.stringify(packet);
 	player = null;
 	listItem = null;
 	prop = null;
@@ -41,7 +40,6 @@ exports.sendProjUpdates = function (projectileList) {
 		];
 		packet.push(listItem);
 	}
-	packet = JSON.stringify(packet);
 	proj = null;
 	listItem = null;
 	prop = null;
@@ -61,7 +59,6 @@ exports.sendAimerUpdates = function (aimerList) {
 		];
 		packet.push(listItem);
 	}
-	packet = JSON.stringify(packet);
 	aimer = null;
 	listItem = null;
 	prop = null;
@@ -79,7 +76,6 @@ exports.sendHazardUpdates = function (hazardList) {
 		];
 		packet.push(listItem);
 	}
-	packet = JSON.stringify(packet);
 	hazard = null;
 	listItem = null;
 	prop = null;

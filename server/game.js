@@ -862,11 +862,14 @@ class GameBoard {
 				this.explodeIce(id);
 			}
 			if (this.projectileList[id].tileChanges != null && Object.keys(this.projectileList[id].tileChanges).length > 0) {
+				var tileDelta = {};
 				for (var vid in this.projectileList[id].tileChanges) {
-					this.changeTile(vid, this.projectileList[id].tileChanges[vid]);
+					var newTileId = this.projectileList[id].tileChanges[vid];
+					this.changeTile(vid, newTileId);
+					tileDelta[vid] = newTileId;
 					delete this.projectileList[id].tileChanges[vid];
 				}
-				messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(this.gatherTileChanges()));
+				messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(tileDelta));
 			}
 
 			if (this.projectileList[id].alive == false) {
@@ -924,19 +927,22 @@ class GameBoard {
 	swapTiles() {
 		//Find all fast tiles, find all ice tiles, swap them
 		var cells = this.currentMap.cells;
+		var tileDelta = {};
 		for (var i = 0; i < cells.length; i++) {
 			if (cells[i].id == c.tileMap.fast.id) {
 				cells[i].id = c.tileMap.ice.id;
 				this.tileChanges[cells[i].site.voronoiId] = cells[i].id;
+				tileDelta[cells[i].site.voronoiId] = cells[i].id;
 				continue;
 			}
 			if (cells[i].id == c.tileMap.ice.id) {
 				cells[i].id = c.tileMap.fast.id;
 				this.tileChanges[cells[i].site.voronoiId] = cells[i].id;
+				tileDelta[cells[i].site.voronoiId] = cells[i].id;
 				continue;
 			}
 		}
-		messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(this.gatherTileChanges()));
+		messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(tileDelta));
 	}
 	cutPlayers(owner) {
 		for (var id in this.playerList) {
@@ -1044,6 +1050,7 @@ class GameBoard {
 		}
 		var explodeLoc = { x: this.projectileList[owner].x, y: this.projectileList[owner].y };
 		var cells = this.currentMap.cells;
+		var tileDelta = {};
 		for (var i = 0; i < cells.length; i++) {
 			if (cells[i].id == c.tileMap.goal.id) {
 				continue;
@@ -1052,14 +1059,16 @@ class GameBoard {
 			if (c.tileMap.abilities.iceCannon.explosionRadius > distance) {
 				cells[i].id = c.tileMap.ice.id;
 				this.tileChanges[cells[i].site.voronoiId] = cells[i].id;
+				tileDelta[cells[i].site.voronoiId] = cells[i].id;
 			}
 		}
 		this.applyExplosionForce(explodeLoc, owner);
 		messenger.messageRoomBySig(this.roomSig, 'snowFlakeExploded', owner);
-		messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(this.gatherTileChanges()));
+		messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(tileDelta));
 	}
 	explodeLava(explodeLoc, radius) {
 		var cells = this.currentMap.cells;
+		var tileDelta = {};
 		for (var i = 0; i < cells.length; i++) {
 			if (cells[i].id == c.tileMap.goal.id) {
 				continue;
@@ -1068,11 +1077,12 @@ class GameBoard {
 			if (radius > distance) {
 				cells[i].id = c.tileMap.lava.id;
 				this.tileChanges[cells[i].site.voronoiId] = cells[i].id;
+				tileDelta[cells[i].site.voronoiId] = cells[i].id;
 			}
 		}
 		this.applyExplosionForce(explodeLoc, null);
 		messenger.messageRoomBySig(this.roomSig, 'lavaExplosion');
-		messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(this.gatherTileChanges()));
+		messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(tileDelta));
 	}
 	applyExplosionForce(loc, owner) {
 		for (var id in this.playerList) {

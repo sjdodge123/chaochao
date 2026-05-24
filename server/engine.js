@@ -243,8 +243,8 @@ class Engine {
 			velCont.velContX = -c.pulseForceMultiplier * forceConstant * (object.x - x);///distance;
 			velCont.velContY = -c.pulseForceMultiplier * forceConstant * (object.y - y);///distance;
 		} else {
-			velCont.velContX = (forceConstant / Math.pow(distance, 2)) * (object.x - x) / distance;
-			velCont.velContY = (forceConstant / Math.pow(distance, 2)) * (object.y - y) / distance;
+			velCont.velContX = (forceConstant / (distance * distance)) * (object.x - x) / distance;
+			velCont.velContY = (forceConstant / (distance * distance)) * (object.y - y) / distance;
 		}
 		return velCont;
 	}
@@ -510,8 +510,8 @@ function _calcVelCont(distance, object, x, y) {
 		yDist = utils.getRandomInt(-4, 4);
 	}
 	var velCont = { velContX: 0, velContY: 0 };
-	velCont.velContX = (forceConstant / Math.pow(distance, 2)) * xDist / distance;
-	velCont.velContY = (forceConstant / Math.pow(distance, 2)) * yDist / distance;
+	velCont.velContX = (forceConstant / (distance * distance)) * xDist / distance;
+	velCont.velContY = (forceConstant / (distance * distance)) * yDist / distance;
 	return velCont;
 }
 
@@ -575,17 +575,24 @@ function compareSite(siteA, siteB) {
 	}
 	return true;
 }
-function locateCell(id) {
-	if (id > 99) {
-		for (var ability in c.tileMap.abilities) {
-			if (id == c.tileMap.abilities[ability].id) {
-				return c.tileMap.abilities[ability];
-			}
-		}
-	}
+// Precomputed id -> tile lookup, built once from the static config. Stores the
+// same shared config object references locateCell used to return (so the
+// caller's voronoiId/isMapCell mutation behaves exactly as before). Abilities
+// are inserted last so they win on any id collision, matching the original
+// "abilities checked first" precedence for ids > 99.
+var tileIdMap = (function () {
+	var map = {};
 	for (var type in c.tileMap) {
-		if (id == c.tileMap[type].id) {
-			return c.tileMap[type];
+		var tile = c.tileMap[type];
+		if (tile != null && tile.id != null) {
+			map[tile.id] = tile;
 		}
 	}
+	for (var ability in c.tileMap.abilities) {
+		map[c.tileMap.abilities[ability].id] = c.tileMap.abilities[ability];
+	}
+	return map;
+})();
+function locateCell(id) {
+	return tileIdMap[id];
 }
