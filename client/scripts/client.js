@@ -220,6 +220,9 @@ function registerPrimaryHandlers(server) {
 	});
 	server.on("broadCastEmoji", function (payload) {
 		playerList[payload.ownerId].chatMessage = payload.emoji;
+		// Stamp when/how long so drawEmoji can fade other players' bubbles out.
+		playerList[payload.ownerId].chatMessageAt = Date.now();
+		playerList[payload.ownerId].chatMessageDuration = 4000;
 		setTimeout(function (owner) {
 			playerList[owner].chatMessage = null;
 		}, 4000, payload.ownerId);
@@ -611,6 +614,8 @@ function registerPrimaryHandlers(server) {
 		}
 		// Reuse the chat-bubble render path (drawEmoji) for the bot's taunt.
 		playerList[payload.id].chatMessage = payload.emote;
+		playerList[payload.id].chatMessageAt = Date.now();
+		playerList[payload.id].chatMessageDuration = 2500;
 		setTimeout(function () {
 			if (playerList[payload.id] != null && playerList[payload.id].chatMessage === payload.emote) {
 				playerList[payload.id].chatMessage = null;
