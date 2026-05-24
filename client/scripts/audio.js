@@ -166,6 +166,7 @@ function volumeChange() {
     bombShot.volume = .2 * sfx;
     bombExplosion.volume = .2 * sfx;
     playerFinished.volume = .3 * sfx;
+    playerDiedSound.volume = .3 * sfx;
     blindSound.volume = .4 * sfx;
     teleportSound.volume = .05 * sfx;
     newZombie.volume = .65 * sfx;

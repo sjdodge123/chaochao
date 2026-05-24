@@ -212,6 +212,8 @@ class Game {
 				client.emit("startLobby", compressor.sendLobbyStart(this.gameBoard.lobbyStartButton, lobbyMapID));
 				client.emit("applyHazards", compressor.newHazards(this.gameBoard.hazardList));
 				client.emit("tileChanges", JSON.stringify(this.gameBoard.gatherTileChanges()));
+				// So the late joiner sees ability indicators for players already holding one.
+				client.emit("allAbilityHoldings", JSON.stringify(this.gameBoard.gatherAbilities()));
 			}
 			return;
 		}
@@ -704,7 +706,7 @@ class GameBoard {
 		this.lobbyLastActivity = 0;
 		// Pending speedBuff/speedDebuff removal timers; tracked so lobby-fired ones can be
 		// canceled on game start (otherwise they'd fire mid-race and skew drag/speed).
-		this.speedEffectTimers = [];
+		this.pendingAbilityTimers = [];
 		this.aimerList = aimerList;
 		this.engine = engine;
 		this.roomSig = roomSig;
@@ -870,7 +872,9 @@ class GameBoard {
 			if (this.abilityList[id].spawnBomb) {
 				this.abilityList[id].spawnBomb = false;
 				this.spawnBomb(this.abilityList[id].ownerId);
-				setTimeout(this.acquireBombTrigger, 200, { id: this.abilityList[id].ownerId, abilityList: this.abilityList, playerList: this.playerList, roomSig: this.roomSig });
+				// Tracked so a lobby bomb fired right before game-start can't grant its
+				// detonator (BombTrigger) into the first race (canceled in clearLobbyAbilities).
+				this.pendingAbilityTimers.push(setTimeout(this.acquireBombTrigger, 200, { id: this.abilityList[id].ownerId, abilityList: this.abilityList, playerList: this.playerList, roomSig: this.roomSig }));
 			}
 			if (this.abilityList[id].spawnSnowFlake) {
 				this.abilityList[id].spawnSnowFlake = false;
@@ -882,11 +886,11 @@ class GameBoard {
 			}
 			if (this.abilityList[id].applyBuff) {
 				this.abilityList[id].applyBuff = false;
-				this.speedEffectTimers.push(setTimeout(this.removeSpeedBuff, c.tileMap.abilities.speedBuff.duration, { id: this.abilityList[id].ownerId, playerList: this.playerList, delta: this.applySpeedBuff(this.abilityList[id].ownerId) }));
+				this.pendingAbilityTimers.push(setTimeout(this.removeSpeedBuff, c.tileMap.abilities.speedBuff.duration, { id: this.abilityList[id].ownerId, playerList: this.playerList, delta: this.applySpeedBuff(this.abilityList[id].ownerId) }));
 			}
 			if (this.abilityList[id].applyDebuff) {
 				this.abilityList[id].applyDebuff = false;
-				this.speedEffectTimers.push(setTimeout(this.removeSpeedDebuff, c.tileMap.abilities.speedDebuff.duration, { id: this.abilityList[id].ownerId, playerList: this.playerList, deltaList: this.applySpeedDebuff(this.abilityList[id].ownerId) }));
+				this.pendingAbilityTimers.push(setTimeout(this.removeSpeedDebuff, c.tileMap.abilities.speedDebuff.duration, { id: this.abilityList[id].ownerId, playerList: this.playerList, deltaList: this.applySpeedDebuff(this.abilityList[id].ownerId) }));
 			}
 			if (this.abilityList[id].tileSwap) {
 				this.abilityList[id].tileSwap = false;
@@ -1327,13 +1331,15 @@ class GameBoard {
 			this.playerList[id].ability = null;
 			this.playerList[id].acquiredAbility = null;
 		}
-		// Cancel pending lobby-fired speed-buff/debuff removal timers — otherwise they'd
-		// fire mid-race and skew drag/speed after reset() has normalized it. (reset()
-		// clears the already-applied effect; this stops the late over-correction.)
-		for (var i = 0; i < this.speedEffectTimers.length; i++) {
-			clearTimeout(this.speedEffectTimers[i]);
+		// Cancel pending lobby-fired ability timers (speed-buff/debuff removal and the
+		// bomb-trigger grant) so none fire mid-race: speed timers would skew drag/speed
+		// after reset() normalizes it, and the bomb-trigger timer would hand a player a
+		// detonator in the first round. (reset() clears already-applied effects; this
+		// stops the late ones.)
+		for (var i = 0; i < this.pendingAbilityTimers.length; i++) {
+			clearTimeout(this.pendingAbilityTimers[i]);
 		}
-		this.speedEffectTimers = [];
+		this.pendingAbilityTimers = [];
 	}
 	// Original id of a cell in the pristine lobby template (lobbyMaps[0]), used to
 	// restore a consumed ability tile and to detect mutated cells for the idle reset.
@@ -1582,7 +1588,7 @@ class GameBoard {
 		this.collapseLoc = {};
 		this.collapseLine = this.world.height + 400;
 		this.tileChanges = {};
-		this.speedEffectTimers = []; // bound growth; lobby ones are canceled in clearLobbyAbilities
+		this.pendingAbilityTimers = []; // bound growth; lobby ones are canceled in clearLobbyAbilities
 		this.resetProjectiles();
 		this.resetHazards();
 	}
