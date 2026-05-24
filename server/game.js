@@ -202,7 +202,20 @@ class Game {
 		this.world.setSpawnLocation(newPlayer);
 	}
 	checkSendGameStateUpdates(client) {
-		if (this.currentState == c.stateMap.waiting || this.currentState == c.stateMap.lobby || this.currentState == c.stateMap.gameOver) {
+		if (this.currentState == c.stateMap.lobby) {
+			// Late join into a running lobby: the room-wide startLobby broadcast already
+			// fired before this client joined, so deliver the curated map + button +
+			// bumpers (and any tile mutations) just to them. Without this, every player
+			// after the first sees an empty lobby.
+			if (this.gameBoard.lobbyStartButton != null) {
+				var lobbyMapID = (this.gameBoard.currentMap != null && this.gameBoard.currentMap.cells != null) ? this.gameBoard.currentMap.id : null;
+				client.emit("startLobby", compressor.sendLobbyStart(this.gameBoard.lobbyStartButton, lobbyMapID));
+				client.emit("applyHazards", compressor.newHazards(this.gameBoard.hazardList));
+				client.emit("tileChanges", JSON.stringify(this.gameBoard.gatherTileChanges()));
+			}
+			return;
+		}
+		if (this.currentState == c.stateMap.waiting || this.currentState == c.stateMap.gameOver) {
 			return;
 		}
 		//Send map configuration - Change current state so that its accurate
