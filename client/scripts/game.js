@@ -105,6 +105,7 @@ function makeLocalPlayer(slot, socket, isPrimary) {
         everJoined: false,        // has this slot ever confirmed a room? (drives auto-rejoin)
         reconnectTimer: null,     // grace timer started on a transient disconnect
         leaveConfirm: false,      // showing the inline "leave?" confirm in this player's block
+        leaveConfirmTimer: null,  // auto-cancel timer for the inline leave confirm
         // pad mapping (null for the keyboard/primary slot)
         padIndex: null,
         padType: "generic",
