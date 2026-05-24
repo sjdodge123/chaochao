@@ -705,17 +705,29 @@ function drawPlayer(player, dt) {
     } else {
         player.invulnHeldInCircle = false;
     }
-    // Flash whenever the player is immune to fire/lava damage: lobby respawn-invuln
-    // (timed or held safe in the start circle), OR "on fire" (the flame negates lava
-    // damage in a real race). The pulse quickens as the protection nears expiry so it's
-    // clear it's about to wear off; a circle-held player has no expiry, so it stays steady.
-    var onFire = (player.onFire != null && player.onFire > 0);
-    var immune = timedInvuln || player.invulnHeldInCircle || onFire;
+    // An on-fire player is immune to lava — flash ONLY while they're actually standing
+    // on lava (the moment damage is being negated), not just whenever they're on fire.
+    // The flame's own colour stages already show the fire timer counting down, so this
+    // case doesn't ramp; it just marks "immune right now". Voronoi: the cell a point sits
+    // in is the one whose site is nearest, so we only scan cells when on fire (cheap/rare).
+    var onFireOnLava = false;
+    if (player.onFire != null && player.onFire > 0 && currentMap != null && currentMap.cells != null) {
+        var nearestId = -1, nd = Infinity;
+        for (var ci = 0; ci < currentMap.cells.length; ci++) {
+            var cdx = player.x - currentMap.cells[ci].site.x;
+            var cdy = player.y - currentMap.cells[ci].site.y;
+            var cd = cdx * cdx + cdy * cdy;
+            if (cd < nd) { nd = cd; nearestId = currentMap.cells[ci].id; }
+        }
+        onFireOnLava = (nearestId == config.tileMap.lava.id);
+    }
+    // Flash while immune to fire/lava damage: lobby respawn-invuln (timed or held in the
+    // start circle), or on-fire-on-lava. Lobby timed invuln quickens as it nears expiry;
+    // the held and on-fire-on-lava cases have no countdown here, so they pulse steadily.
+    var immune = timedInvuln || player.invulnHeldInCircle || onFireOnLava;
     if (immune) {
-        var remaining = Infinity; // held-in-circle = no expiry -> steady pulse
-        if (timedInvuln) { remaining = Math.min(remaining, player.invulnUntil - Date.now()); }
-        if (onFire) { remaining = Math.min(remaining, player.onFire); }
-        // Pulse period (ms) shrinks from 130 -> 35 over the last 2s, so the flash speeds up.
+        var remaining = Infinity;
+        if (timedInvuln) { remaining = player.invulnUntil - Date.now(); }
         var pulsePeriod = 130;
         if (remaining < 2000) {
             pulsePeriod = 35 + (130 - 35) * (remaining / 2000);
