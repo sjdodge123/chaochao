@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- Optimized server performance for smoother gameplay, especially in busy rooms.
 
 ## v0.3.1 — 2026-05-24
 
