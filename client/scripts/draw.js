@@ -382,6 +382,7 @@ function drawObjects(dt) {
     if (currentState == config.stateMap.lobby) {
         drawLobbyFloor();
         drawMap();
+        drawLobbyArrows();
         drawLobbyStartButton();
     }
     if (currentState == config.stateMap.gated ||
@@ -1109,6 +1110,57 @@ function drawLobbyFloor() {
     gameContext.strokeRect(ox + inset, oy + inset, world.width - inset * 2, world.height - inset * 2);
     gameContext.setLineDash([]);
     gameContext.restore();
+}
+// Purely-visual "go here!" pointer: a ring of chunky cartoon arrows around the
+// lobby start button, all jabbing inward, with a pulsing neon glow and a comical
+// bob. No collision / no gameplay — just attract-mode flair drawing the eye to the
+// start button. Lobby-only.
+function drawLobbyArrows() {
+    if (lobbyStartButton == null || world == null) {
+        return;
+    }
+    var cx = lobbyStartButton.x + camera.getCameraX();
+    var cy = lobbyStartButton.y + camera.getCameraY();
+    var btnR = lobbyStartButton.radius || 70;
+    var count = 8;
+    var t = Date.now() / 1000;
+    for (var i = 0; i < count; i++) {
+        var ang = (i / count) * Math.PI * 2;            // where the arrow sits, around the button
+        var bob = Math.sin(t * 5 - i * 0.8) * 9;        // staggered jab toward/away from center
+        var ringR = btnR + 52 + bob;                    // arrow tip distance from button center
+        var ax = cx + Math.cos(ang) * ringR;
+        var ay = cy + Math.sin(ang) * ringR;
+        var pulse = 0.5 + 0.5 * Math.sin(t * 6 - i * 0.8);
+        gameContext.save();
+        gameContext.translate(ax, ay);
+        gameContext.rotate(ang + Math.PI);              // local +x now points at the button
+        // glow ("glowing lights")
+        gameContext.shadowColor = "rgba(255, 210, 30, " + (0.6 + 0.4 * pulse) + ")";
+        gameContext.shadowBlur = 16 + 16 * pulse;
+        // chunky cartoon block arrow pointing +x (tip at origin -> toward button)
+        gameContext.beginPath();
+        gameContext.moveTo(0, 0);                        // tip
+        gameContext.lineTo(-26, -22);
+        gameContext.lineTo(-26, -9);
+        gameContext.lineTo(-50, -9);
+        gameContext.lineTo(-50, 9);
+        gameContext.lineTo(-26, 9);
+        gameContext.lineTo(-26, 22);
+        gameContext.closePath();
+        gameContext.fillStyle = "#FFE23A";
+        gameContext.fill();
+        gameContext.shadowBlur = 0;                      // crisp outline on top of the glow
+        gameContext.lineWidth = 4;
+        gameContext.lineJoin = "round";
+        gameContext.strokeStyle = "#C24B00";
+        gameContext.stroke();
+        // little bright "light" at the tip
+        gameContext.beginPath();
+        gameContext.arc(-6, 0, 3.5, 0, 2 * Math.PI);
+        gameContext.fillStyle = "rgba(255, 255, 245, " + (0.55 + 0.45 * pulse) + ")";
+        gameContext.fill();
+        gameContext.restore();
+    }
 }
 function drawMap() {
     if (currentMap == null || currentMap.cells == null || currentMap.cells.length === 0) {
