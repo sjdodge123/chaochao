@@ -318,6 +318,13 @@ exports.getUniqueColor = function (usedColors) {
                 best = available[i];
             }
         }
+        // bestScore stays Infinity only when NO used color was parseable (e.g. the
+        // whole room is on hsl() fallbacks): the greedy has nothing to measure, so
+        // fall back to a random palette pick rather than deterministically
+        // returning the first palette entry every time.
+        if (bestScore === Infinity) {
+            return available[Math.floor(Math.random() * available.length)];
+        }
         return best;
     }
     var color = 'hsl(' + Math.floor(Math.random() * 360) + ', 70%, 50%)';
