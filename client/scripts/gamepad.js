@@ -104,9 +104,38 @@ function markTouchUsed() {
 
 function onGamepadKeyDown(e) {
     setInputMethod("kbm"); // a key press means keyboard/mouse is in use
+    var primary = localPlayers[primarySlot];
+
+    // Multiplayer: the keyboard player leaves via the SAME inline "Leave?" confirm
+    // in their own block that controllers use (not the centre modal). Esc opens it,
+    // Enter confirms (leave), Esc cancels.
+    if (hintUiMode === "blocks" && primary) {
+        if (primary.leaveConfirm) {
+            if (e.keyCode === 13 || e.key === "Enter") {
+                primary.leaveConfirm = false;
+                dropLocalPlayer(primarySlot);
+                e.preventDefault();
+            } else if (e.key === "Escape" || e.keyCode === 27) {
+                primary.leaveConfirm = false;
+                setBlockLeaveConfirm(primarySlot, false);
+                e.preventDefault();
+            }
+            return;
+        }
+        if (e.key === "Escape" || e.keyCode === 27) {
+            openLeaveConfirm(primary);
+            e.preventDefault();
+            return;
+        }
+        if (e.key === "h" || e.key === "H" || e.keyCode === 72) {
+            toggleHintFade();
+        }
+        return;
+    }
+
+    // Solo: the centre leave modal. While it's up, arrows / A-D move between Leave
+    // and Cancel, Enter or Space confirms, Esc closes.
     if (leaveModalIsOpen()) {
-        // The leave modal owns the keyboard while it's up: arrows / A-D move
-        // between Leave and Cancel, Enter or Space confirms, Esc closes.
         if (e.key === "Escape" || e.keyCode === 27) {
             closeLeaveModal();
         } else if (e.keyCode === 37 || e.keyCode === 65 || e.key === "ArrowLeft") {
@@ -778,10 +807,12 @@ function closeLeaveModal() {
 }
 
 function doLeaveGame() {
-    // The leave modal is owned by the primary slot. Drop just that slot: with no
-    // other local players this disconnects and navigates away as before (N=1);
-    // with pad players still in the game it fails over to one of them instead of
-    // ending the whole couch session (§6.17).
+    // Always close the modal first so it can't linger if we fail over instead of
+    // navigating away (a primary leave with surviving pad players promotes one).
+    closeLeaveModal();
+    // Drop the primary slot: with no other local players this disconnects and
+    // navigates away as before (N=1); with pad players still in the game it fails
+    // over to one of them instead of ending the whole couch session (§6.17).
     if (typeof dropLocalPlayer === "function") {
         dropLocalPlayer(primarySlot);
     } else {
@@ -1243,10 +1274,17 @@ function setBlockLeaveConfirm(slot, confirming) {
     if (confirming) {
         b.el.classList.add("confirming");
         var lp = localPlayers[slot];
-        var type = (lp && lp.padType) ? lp.padType : "generic";
-        b.hints.innerHTML = '<span class="pp-confirm">Leave?</span>' +
-            '<span class="gp-glyph gp-face">' + attackGlyphFor(type) + '</span>' +
-            '<span class="gp-glyph gp-face">' + leaveGlyphFor(type) + '</span>';
+        var confirmHints;
+        if (lp && lp.padIndex != null) {
+            // controller: A confirms, B cancels
+            confirmHints = '<span class="gp-glyph gp-face">' + attackGlyphFor(lp.padType) + '</span>' +
+                '<span class="gp-glyph gp-face">' + leaveGlyphFor(lp.padType) + '</span>';
+        } else {
+            // keyboard: Enter confirms, Esc cancels
+            confirmHints = '<span class="gp-glyph gp-key">Enter</span>' +
+                '<span class="gp-glyph gp-key">Esc</span>';
+        }
+        b.hints.innerHTML = '<span class="pp-confirm">Leave?</span>' + confirmHints;
     } else {
         b.el.classList.remove("confirming");
         b.lastMethod = null; // force a hint rebuild on the next refresh
