@@ -582,7 +582,13 @@ function computeWorldViewTarget(dt) {
         var scale = 1 + (focusedView.scale - 1) * e;
         return clampViewToWorld(focusedView.cx, focusedView.cy, scale);
     }
-    return clampViewToWorld(focusedView.cx, focusedView.cy, focusedView.scale);
+    // Back the camera off while aiming/throwing an aimed ability (bomb/ice) so
+    // it's easier to aim and follow the shot; the smoothing eases it out and back.
+    var racingScale = focusedView.scale;
+    if (localAimedAbilityActive()) {
+        racingScale = Math.max(1, racingScale * AIM_ZOOM_OUT_FACTOR);
+    }
+    return clampViewToWorld(focusedView.cx, focusedView.cy, racingScale);
 }
 
 function updateWorldCamera(dt) {
@@ -602,6 +608,45 @@ function updateWorldCamera(dt) {
     worldView.cx += (target.cx - worldView.cx) * a;
     worldView.cy += (target.cy - worldView.cy) * a;
     worldView.scale += (target.scale - worldView.scale) * a;
+}
+
+// True while a local player is dealing with an aimed ability — holding a bomb /
+// ice cannon (lining up the throw), or with its projectile/explosion aimer still
+// live after firing (until it detonates). Drives a sustained camera back-off so
+// the wider view makes aiming and tracking the shot easier.
+function localAimedAbilityActive() {
+    if (typeof config === "undefined" || !config || !config.tileMap || !config.tileMap.abilities) {
+        return false;
+    }
+    if (typeof localPlayers === "undefined" || !localPlayers) {
+        return false;
+    }
+    var bombId = config.tileMap.abilities.bomb.id;
+    var iceId = config.tileMap.abilities.iceCannon.id;
+    for (var i = 0; i < localPlayers.length; i++) {
+        var lp = localPlayers[i];
+        if (!lp || lp.myID == null) {
+            continue;
+        }
+        var id = lp.myID;
+        var p = (typeof playerList !== "undefined" && playerList) ? playerList[id] : null;
+        if (p && (p.ability === bombId || p.ability === iceId)) {
+            return true; // holding / aiming
+        }
+        // fired and in flight: only the bomb/snowFlake projectile (NOT a hockey
+        // puck or cloud, which are also owner/round-keyed in projectileList).
+        var proj = (typeof projectileList !== "undefined" && projectileList) ? projectileList[id] : null;
+        if (proj && (proj.type === "bomb" || proj.type === "snowFlake")) {
+            return true;
+        }
+        // detonating: the bomb's explosion telegraph (NOT the swap aimer, which is
+        // also keyed by owner and uses startSwapCountDown instead).
+        var aim = (typeof aimerList !== "undefined" && aimerList) ? aimerList[id] : null;
+        if (aim && aim.startExplosionCountDown) {
+            return true;
+        }
+    }
+    return false;
 }
 
 function applyWorldTransform() {
