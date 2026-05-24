@@ -55,10 +55,18 @@ function setMousePos(x, y) {
     */
 }
 
+// True only when the emoji wheel is open AND owned by the primary (mouse) player.
+// The mouse must keep working when ANOTHER local player has the wheel open.
+function primaryOwnsWheel() {
+    return (typeof menuOpen !== "undefined" && menuOpen) &&
+        (typeof emojiOwnerSlot === "undefined" || emojiOwnerSlot === primarySlot);
+}
 function handleClick(event) {
     switch (event.which) {
         case 1: {
-            if (menuOpen == false) {
+            // Suppress attack only while the PRIMARY's own wheel is up — a pad
+            // player's wheel must not freeze the mouse player's attack.
+            if (!primaryOwnsWheel()) {
                 // NOTE: a single click is NOT treated as "kb/m is P1" — it's too
                 // ambiguous (could be clicking to start/focus). Only actually
                 // moving the player via keyboard or mouse-move claims P1 (so a
@@ -69,8 +77,12 @@ function handleClick(event) {
             break;
         }
         case 3: {
-            if (menuOpen) {
-                closeEmojiWindow();
+            if (typeof menuOpen !== "undefined" && menuOpen) {
+                // Only close the wheel if it's the primary's own — don't hijack a
+                // pad player's open wheel.
+                if (primaryOwnsWheel()) {
+                    closeEmojiWindow();
+                }
             } else {
                 openEmojiWindow(mousex, mousey);
             }
@@ -83,7 +95,7 @@ function handleClick(event) {
 function handleUnClick(event) {
     switch (event.which) {
         case 1: {
-            if (menuOpen == false) {
+            if (!primaryOwnsWheel()) {
                 attack = false;
                 server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
             }

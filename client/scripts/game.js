@@ -130,8 +130,13 @@ function localPlayerForPadIndex(idx) {
     return null;
 }
 function nextFreeSlot() {
-    // Pads claim slots starting at 1 (slot 0 is the keyboard/primary player).
-    for (var s = 1; s < LOCAL_PLAYER_CAP; s++) {
+    // Any free slot except the current primary's (which always holds a player).
+    // Scanning from 0 — rather than hard-coding slot 0 as primary — so a slot
+    // freed by a primary failover (where primarySlot is no longer 0) is reusable.
+    for (var s = 0; s < LOCAL_PLAYER_CAP; s++) {
+        if (s === primarySlot) {
+            continue;
+        }
         if (!localPlayers[s]) {
             return s;
         }

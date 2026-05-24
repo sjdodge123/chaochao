@@ -79,13 +79,26 @@
         box.classList.add("visible");
     }
 
+    var started = false;
+    var pollTimer = null;
     function start() {
+        if (started) {
+            return; // guard against stacking intervals/listeners on a double init
+        }
+        started = true;
         ensureEl();
         render();
         // A detection indicator doesn't need 60fps; poll a few times a second.
-        setInterval(render, 250);
+        pollTimer = setInterval(render, 250);
         window.addEventListener("gamepadconnected", render, false);
         window.addEventListener("gamepaddisconnected", render, false);
+        // Stop polling when the page goes away (keeps it tidy on bfcache/unload).
+        window.addEventListener("pagehide", function () {
+            if (pollTimer) {
+                clearInterval(pollTimer);
+                pollTimer = null;
+            }
+        }, false);
     }
 
     if (document.readyState === "loading") {

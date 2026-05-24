@@ -104,12 +104,35 @@ function markTouchUsed() {
 
 function onGamepadKeyDown(e) {
     setInputMethod("kbm"); // a key press means keyboard/mouse is in use
-    var primary = localPlayers[primarySlot];
 
-    // Multiplayer: the keyboard player leaves via the SAME inline "Leave?" confirm
-    // in their own block that controllers use (not the centre modal). Esc opens it,
-    // Enter confirms (leave), Esc cancels.
-    if (hintUiMode === "blocks" && primary) {
+    // The centre leave modal (used when solo, or when the primary has no inline
+    // block) owns the keyboard while open, in any mode: arrows / A-D move between
+    // Leave and Cancel, Enter or Space confirms, Esc closes.
+    if (leaveModalIsOpen()) {
+        if (e.key === "Escape" || e.keyCode === 27) {
+            closeLeaveModal();
+        } else if (e.keyCode === 37 || e.keyCode === 65 || e.key === "ArrowLeft") {
+            setLeaveFocus(0); // Leave
+            e.preventDefault();
+        } else if (e.keyCode === 39 || e.keyCode === 68 || e.key === "ArrowRight") {
+            setLeaveFocus(1); // Cancel
+            e.preventDefault();
+        } else if (e.keyCode === 13 || e.keyCode === 32 || e.key === "Enter" || e.key === " ") {
+            var btns = leaveButtons();
+            if (btns[leaveFocusIdx]) {
+                btns[leaveFocusIdx].click();
+            }
+            e.preventDefault();
+        }
+        return;
+    }
+
+    var primary = localPlayers[primarySlot];
+    // Multiplayer WITH a visible P1 block: the keyboard player leaves via the same
+    // inline "Leave?" confirm in their block that controllers use. (Only when the
+    // block actually exists — otherwise fall through to the visible centre modal,
+    // so we never arm an invisible confirm.)
+    if (hintUiMode === "blocks" && primary && padBlocks[primarySlot]) {
         if (primary.leaveConfirm) {
             if (e.keyCode === 13 || e.key === "Enter") {
                 primary.leaveConfirm = false;
@@ -133,26 +156,7 @@ function onGamepadKeyDown(e) {
         return;
     }
 
-    // Solo: the centre leave modal. While it's up, arrows / A-D move between Leave
-    // and Cancel, Enter or Space confirms, Esc closes.
-    if (leaveModalIsOpen()) {
-        if (e.key === "Escape" || e.keyCode === 27) {
-            closeLeaveModal();
-        } else if (e.keyCode === 37 || e.keyCode === 65 || e.key === "ArrowLeft") {
-            setLeaveFocus(0); // Leave
-            e.preventDefault();
-        } else if (e.keyCode === 39 || e.keyCode === 68 || e.key === "ArrowRight") {
-            setLeaveFocus(1); // Cancel
-            e.preventDefault();
-        } else if (e.keyCode === 13 || e.keyCode === 32 || e.key === "Enter" || e.key === " ") {
-            var btns = leaveButtons();
-            if (btns[leaveFocusIdx]) {
-                btns[leaveFocusIdx].click();
-            }
-            e.preventDefault();
-        }
-        return;
-    }
+    // Solo, or multiplayer with no visible P1 block: the centre modal (visible).
     if (e.key === "Escape" || e.keyCode === 27) {
         openLeaveModal();
     } else if (e.key === "h" || e.key === "H" || e.keyCode === 72) {
@@ -331,7 +335,17 @@ function claimPrimaryForKbm() {
         var lp = addLocalPlayer(slot, padIdx);
         if (lp) {
             lp.padType = padType;
+            // Seed the new slot's button state from the live pad so a button held
+            // during the bump isn't seen as a fresh press (phantom attack/menu).
+            var pads = (typeof navigator !== "undefined" && navigator.getGamepads) ? navigator.getGamepads() : [];
+            if (pads[padIdx]) {
+                lp.gp.prevButtons = snapshotButtons(pads[padIdx]);
+            }
         }
+    } else {
+        // No room to re-home the controller — require a release before it can
+        // re-join, so a held button doesn't spam join attempts / room-full toasts.
+        markPadNeedsRelease(padIdx);
     }
 }
 
@@ -433,8 +447,9 @@ function pollPadForSlot(pad, lp) {
     var wheelOpen = (typeof menuOpen !== "undefined" && menuOpen);
     var iOwnWheel = wheelOpen && emojiOwnerSlot === lp.slot;
 
-    // Any pad can toggle the hints; only the primary's pad swaps the (solo) bar.
-    if (buttonPressedThisFrame(pad, GP_BTN_SELECT, lp)) {
+    // System/shared actions (hint show/hide) belong to the primary pad only, so
+    // multiple players don't fight over the one shared overlay (§6.15).
+    if (lp.isPrimary && buttonPressedThisFrame(pad, GP_BTN_SELECT, lp)) {
         toggleHintFade();
     }
     if (lp.isPrimary && padHasInput(pad)) {
@@ -462,7 +477,8 @@ function pollPadForSlot(pad, lp) {
         // Normal play (also when another player owns the wheel).
         pollAim(pad, lp);
         pollMovementAndAttack(pad, lp);
-        if (buttonPressedThisFrame(pad, GP_BTN_START, lp)) {
+        // Fullscreen is a shared-screen action — primary pad only.
+        if (lp.isPrimary && buttonPressedThisFrame(pad, GP_BTN_START, lp)) {
             goFullScreen();
         }
     }
@@ -1086,6 +1102,13 @@ function onLocalPlayersChanged() {
         if (hintUiMode === "blocks") {
             // No controllers and solo — restore the bottom bar.
             hintUiMode = "bar";
+            // Clear any in-progress inline leave-confirm flags before their blocks
+            // are removed, so a flag can't linger with no visible UI.
+            for (var c = 0; c < localPlayers.length; c++) {
+                if (localPlayers[c]) {
+                    localPlayers[c].leaveConfirm = false;
+                }
+            }
             removeAllBlocks();
             removeAllJoinPrompts();
             var method = activeInputMethod || "kbm";
@@ -1262,11 +1285,17 @@ function setBlockHints(lp) {
 // and restore it on recovery — so a transient blip shows as "reconnecting" rather
 // than vanishing.
 function onLocalPlayerReconnecting(slot, isReconnecting) {
+    // Cancel any in-progress leave-confirm: while mid-reconnect the slot isn't
+    // polled, so its A/B can't resolve the confirm — don't leave it frozen.
+    if (isReconnecting && localPlayers[slot]) {
+        localPlayers[slot].leaveConfirm = false;
+    }
     var b = padBlocks[slot];
     if (!b || !b.el) {
         return;
     }
     if (isReconnecting) {
+        setBlockLeaveConfirm(slot, false); // restore normal hints if it was confirming
         b.el.classList.add("reconnecting");
     } else {
         b.el.classList.remove("reconnecting");

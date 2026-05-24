@@ -619,6 +619,12 @@ function dropLocalPlayer(slot) {
 		clearTimeout(lp.reconnectTimer);
 		lp.reconnectTimer = null;
 	}
+	// If this player had the shared emoji wheel open, close it — otherwise it
+	// soft-locks open (no surviving player owns it, so none can dismiss it).
+	if (typeof emojiOwnerSlot !== "undefined" && emojiOwnerSlot === slot &&
+		typeof closeEmojiWindow === "function") {
+		closeEmojiWindow("cancel");
+	}
 	// The controller that drove this player must release its buttons before it can
 	// (re)join, so the press that confirmed leaving doesn't instantly re-join them.
 	if (lp.padIndex != null && typeof markPadNeedsRelease === "function") {
@@ -681,6 +687,7 @@ function promoteToPrimary(lp) {
 		lp.socket.off('roomNotFound');
 		lp.socket.off('serverKick');
 		lp.socket.off('disconnect');
+		lp.socket.off('connect'); // drop the secondary reconnect-rejoin handler too
 	} catch (e) { /* ignore */ }
 	registerPrimaryHandlers(lp.socket); // resume render/audio/state handlers
 	if (typeof onLocalPlayersChanged === "function") {
