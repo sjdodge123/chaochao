@@ -214,6 +214,10 @@ class Game {
 				client.emit("tileChanges", JSON.stringify(this.gameBoard.gatherTileChanges()));
 				// So the late joiner sees ability indicators for players already holding one.
 				client.emit("allAbilityHoldings", JSON.stringify(this.gameBoard.gatherAbilities()));
+				// So the late joiner sees the invuln flash on players who respawned (or are
+				// parked safe in the start circle) before they joined — the per-player
+				// lobbyRespawn event was one-shot and they missed it.
+				client.emit("lobbyInvulnStates", this.gameBoard.gatherInvulnStates());
 			}
 			return;
 		}
@@ -1032,6 +1036,19 @@ class GameBoard {
 			abilities[player.id] = { owner: player.id, ability: player.ability.id, voronoiId: null };
 		}
 		return abilities;
+	}
+	// Snapshot of currently-invulnerable players for late joiners (lobby): remaining
+	// timed grace (ms) + whether they're held safe in the start circle. The joining
+	// client seeds these so the invuln flash shows correctly from the start.
+	gatherInvulnStates() {
+		var states = [];
+		for (var id in this.playerList) {
+			var player = this.playerList[id];
+			if (player.isInvuln()) {
+				states.push({ id: id, remainingMs: Math.max(0, player.invulnUntil - Date.now()), held: player.invulnHeldInCircle === true });
+			}
+		}
+		return states;
 	}
 	gatherTileChanges() {
 		return this.tileChanges;
