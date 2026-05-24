@@ -14,6 +14,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 - Big pass on animations and game feel: punches now swing with an impact spark, hits and explosions shake the screen with weight, abilities telegraph and flash when used, and players kick up dust at speed and trail embers while on fire.
 - Punches are now directional — your punch lands in front of you, so you have to face an opponent to knock them away. Bashing the hockey puck and swatting infected players stay all-directional, but zombies have to face their prey to bite.
+- AI racers move a little faster now, cruising closer to human pace.
 
 ### Ability changes
 
