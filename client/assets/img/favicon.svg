@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Chao Chao: top-down arena pucks on the site's black tile -->
+  <rect width="64" height="64" rx="14" fill="#0a0a0a"/>
+  <g stroke="#000" stroke-opacity="0.35" stroke-width="1.5">
+    <circle cx="32" cy="23" r="13" fill="#FFD700"/>
+    <circle cx="22" cy="41" r="13" fill="#cf1020"/>
+    <circle cx="42" cy="41" r="13" fill="#90ee90"/>
+  </g>
+  <!-- glossy highlights to read as round pucks -->
+  <g fill="#fff" fill-opacity="0.45">
+    <circle cx="28" cy="19" r="3.2"/>
+    <circle cx="18" cy="37" r="3.2"/>
+    <circle cx="38" cy="37" r="3.2"/>
+  </g>
+</svg>
