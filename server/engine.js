@@ -515,17 +515,99 @@ function _calcVelCont(distance, object, x, y) {
 	return velCont;
 }
 
+// Axis-aligned bounding box of a Voronoi cell from its halfedge vertices.
+function cellExtents(cell) {
+	var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+	var hes = cell.halfedges;
+	for (var i = 0; i < hes.length; i++) {
+		var edge = hes[i].edge;
+		var pts = [edge.va, edge.vb];
+		for (var p = 0; p < 2; p++) {
+			var v = pts[p];
+			if (v == null) {
+				continue;
+			}
+			if (v.x < minX) minX = v.x;
+			if (v.x > maxX) maxX = v.x;
+			if (v.y < minY) minY = v.y;
+			if (v.y > maxY) maxY = v.y;
+		}
+	}
+	return { minX: minX, minY: minY, maxX: maxX, maxY: maxY };
+}
+
+// Uniform spatial grid over the map's cells. A cell is bucketed into every grid
+// square its bounding box overlaps, so the square containing any query point is
+// guaranteed to contain that point's cell. Geometry is static for a round (only
+// cell.id mutates on tile changes), so the index is built once per map.
+class CellIndex {
+	constructor(cells) {
+		this.cells = cells;
+		var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+		var extents = new Array(cells.length);
+		for (var i = 0; i < cells.length; i++) {
+			var ext = cellExtents(cells[i]);
+			extents[i] = ext;
+			if (ext.minX < minX) minX = ext.minX;
+			if (ext.minY < minY) minY = ext.minY;
+			if (ext.maxX > maxX) maxX = ext.maxX;
+			if (ext.maxY > maxY) maxY = ext.maxY;
+		}
+		var w = maxX - minX || 1;
+		var h = maxY - minY || 1;
+		// Aim for roughly one cell per bucket, preserving the map's aspect ratio.
+		this.cols = Math.max(1, Math.round(Math.sqrt(cells.length * (w / h))));
+		this.rows = Math.max(1, Math.round(Math.sqrt(cells.length * (h / w))));
+		this.minX = minX;
+		this.minY = minY;
+		this.invW = this.cols / w;
+		this.invH = this.rows / h;
+		this.buckets = new Array(this.cols * this.rows);
+		for (var b = 0; b < this.buckets.length; b++) {
+			this.buckets[b] = [];
+		}
+		for (var j = 0; j < cells.length; j++) {
+			var e = extents[j];
+			var c0 = this._col(e.minX), c1 = this._col(e.maxX);
+			var r0 = this._row(e.minY), r1 = this._row(e.maxY);
+			for (var r = r0; r <= r1; r++) {
+				for (var col = c0; col <= c1; col++) {
+					this.buckets[r * this.cols + col].push(cells[j]);
+				}
+			}
+		}
+	}
+	_col(x) {
+		var c = Math.floor((x - this.minX) * this.invW);
+		return c < 0 ? 0 : (c >= this.cols ? this.cols - 1 : c);
+	}
+	_row(y) {
+		var r = Math.floor((y - this.minY) * this.invH);
+		return r < 0 ? 0 : (r >= this.rows ? this.rows - 1 : r);
+	}
+	candidates(x, y) {
+		return this.buckets[this._row(y) * this.cols + this._col(x)];
+	}
+}
+
 function checkCollideCells(player, map) {
-	var cells = map.cells,
-		iCell = cells.length,
-		cell;
-	while (iCell--) {
-		cell = cells[iCell];
-		if (pointIntersection(player.x, player.y, cells[iCell]) > 0) {
+	if (map._cellIndex == null) {
+		Object.defineProperty(map, '_cellIndex', {
+			value: new CellIndex(map.cells),
+			enumerable: false,
+			writable: true,
+			configurable: true
+		});
+	}
+	var candidates = map._cellIndex.candidates(player.x, player.y);
+	for (var i = 0; i < candidates.length; i++) {
+		var cell = candidates[i];
+		if (pointIntersection(player.x, player.y, cell) > 0) {
 			var mapCell = locateCell(cell.id);
 			mapCell.voronoiId = cell.site.voronoiId;
 			mapCell.isMapCell = true;
 			player.handleHit(mapCell);
+			return; // a point lies in exactly one Voronoi cell
 		}
 	}
 }
