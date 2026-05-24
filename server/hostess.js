@@ -13,7 +13,7 @@ exports.getRooms = function () {
 		return rooms;
 	}
 	for (var sig in roomList) {
-		if (roomList[sig].hasSpace()) {
+		if (roomList[sig].hasSpace() && !roomList[sig].isPreview) {
 			var room = roomList[sig];
 			rooms[sig] = {
 				state: room.game.currentState,
@@ -51,11 +51,17 @@ exports.kickFromRoom = function (clientID) {
 	}
 }
 exports.joinARoom = function (sig, clientID) {
-	if (roomList[sig] == null) {
+	var room = roomList[sig];
+	if (room == null) {
 		return false;
 	}
-	roomList[sig].join(clientID);
-	return roomList[sig];
+	// A preview room is a private capacity-1 play-test; never let a second
+	// client (e.g. a guessed ?gameid= link) in once the creator has joined.
+	if (room.isPreview && !room.hasSpace()) {
+		return false;
+	}
+	room.join(clientID);
+	return room;
 }
 exports.updateRooms = function (dt) {
 	for (var sig in roomList) {
@@ -78,6 +84,30 @@ exports.updateRooms = function (dt) {
 }
 exports.getRoomBySig = function (sig) {
 	return roomList[sig];
+}
+// Create an isolated, single-player room running an unsaved (injected) map for
+// the editor's play-test. Capacity 1 + isPreview + locked keep matchmaking from
+// ever placing a stranger here (findARoom skips isLocked; getRooms skips
+// isPreview; once the creator joins hasSpace() is false anyway). The map is
+// injected onto this room's gameBoard only — never the shared map library.
+exports.createPreviewRoom = function (previewMap) {
+	var sig = generateRoomSig();
+	var room = game.getRoom(sig, 1);
+	room.isPreview = true;
+	room.game.locked = true;
+	room.game.gameBoard.isPreview = true;
+	room.game.gameBoard.previewMap = previewMap;
+	roomList[sig] = room;
+	// Safety net: if the creator's play page never connects (abandoned launch),
+	// reclaim the empty room so it can't linger. A joined room is left alone.
+	setTimeout(function () {
+		var orphan = roomList[sig];
+		if (orphan != null && orphan.clientCount == 0) {
+			console.log("Reclaiming unjoined preview room: " + sig);
+			delete roomList[sig];
+		}
+	}, 60000);
+	return sig;
 }
 
 function getRoomCount() {
@@ -102,7 +132,7 @@ function generateRoomSig() {
 	if (roomList[sig] == null || roomList[sig] == undefined) {
 		return sig;
 	}
-	sig = generateRoomSig();
+	return generateRoomSig();
 }
 
 function generateNewRoom() {

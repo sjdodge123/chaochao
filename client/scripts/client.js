@@ -6,6 +6,7 @@ var config,
 	lastTime = null,
 	totalPlayers = 0,
 	serverTimeoutWait = 5,
+	previewReturnScheduled = false,
 	playerWon = null;
 
 function clientConnect() {
@@ -179,6 +180,9 @@ function registerPrimaryHandlers(server) {
 		playerList[id].onFire = 0;
 		playerList[id].deathMessage = '💀';
 		createDownRankSymbol(id);
+		if (id == myID) {
+			previewReturnToEditor();
+		}
 	});
 	server.on("playerInfected", function (id) {
 		playerList[id].alive = true;
@@ -234,6 +238,9 @@ function registerPrimaryHandlers(server) {
 		}
 	});
 	server.on("startOverview", function (packet) {
+		// Round ended (solo death or goal reached) — schedule the editor return
+		// first, so a throw in the rendering calls below can't strand the creator.
+		previewReturnToEditor();
 		resetRound();
 		stopSound(lavaCollapse);
 		resetTrails();
@@ -243,6 +250,9 @@ function registerPrimaryHandlers(server) {
 		currentState = config.stateMap.overview;
 	});
 	server.on("startGameover", function (packet) {
+		// Match over (solo creator hit the winning notch) — schedule the editor
+		// return first so the calls below can't strand the creator if they throw.
+		previewReturnToEditor();
 		playerWon = packet.winner;
 		achievements = packet.achievements;
 		stopAllSounds();
@@ -703,6 +713,20 @@ function clientSendStart(id) {
 	if (id != null) {
 		server.emit('enterGame', id);
 	}
+}
+
+// In a preview session, the round ends when the solo creator dies or reaches
+// the goal (both surface as startOverview, plus startGameover on a win). After
+// a short beat to see the result, navigate back to the editor with the map
+// intact. The flag makes whichever trigger fires first win and dedupes the rest.
+function previewReturnToEditor() {
+	if (!previewMode || previewReturnScheduled) {
+		return;
+	}
+	previewReturnScheduled = true;
+	setTimeout(function () {
+		window.location = './create.html';
+	}, 1500);
 }
 
 function pingServer() {

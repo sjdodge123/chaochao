@@ -76,6 +76,23 @@ function checkForMail(client) {
 
 	});
 
+	client.on('createPreviewRoom', function (package) {
+		var previewMap;
+		try {
+			previewMap = JSON.parse(package);
+		} catch (e) {
+			client.emit("previewRejected", { reason: "Could not read map data." });
+			return;
+		}
+		var result = utils.validateMap(previewMap, c);
+		if (!result.valid) {
+			client.emit("previewRejected", { reason: result.reason });
+			return;
+		}
+		var sig = hostess.createPreviewRoom(previewMap);
+		client.emit("previewRoomCreated", { gameID: sig });
+	});
+
 	client.on('enterGame', function (id) {
 		debug.log("enterGame: client=", client.id, " requestedId=", id);
 		var roomSig = '';

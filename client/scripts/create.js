@@ -17,6 +17,7 @@ var server,
     brushColor = "black",
     patterns = {},
     currentCell = null,
+    previewPending = false,
     newWidth = 0,
     newHeight = 0,
     world = { x: 0, y: 0, width: 1366, height: 768 },
@@ -72,8 +73,32 @@ window.onload = function () {
     server.emit("getMaps");
     server.emit("getConfig");
     setupPage();
-    rebuild();
-    showLoadWindow();
+
+    // Returning from a play-test? Rehydrate the in-progress map and drop the
+    // creator straight back into the editor, mirroring the "load a saved map"
+    // path. removeItem so a later manual reload doesn't re-restore. mapReady is
+    // forced true so animloop's first-frame rebuild() can't wipe the restored
+    // map (the wipe only matters before the editor is first shown).
+    var saved = sessionStorage.getItem('previewMap');
+    var restored = null;
+    if (saved != null) {
+        sessionStorage.removeItem('previewMap');
+        try {
+            restored = JSON.parse(saved);
+        } catch (e) {
+            restored = null;
+        }
+    }
+    if (restored != null) {
+        vMap = restored;
+        $('#author').val(vMap.author);
+        $('#name').val(vMap.name);
+        mapReady = true;
+        showEditor();
+    } else {
+        rebuild();
+        showLoadWindow();
+    }
 }
 
 function showLoadWindow() {
@@ -113,6 +138,18 @@ function clientConnect() {
         submitStatus.css("color", "white");
         submitStatus.css("background-color", "green");
         submitStatus.text("Success");
+    });
+
+    server.on('previewRoomCreated', function (payload) {
+        // sessionStorage.previewMap was stashed before emitting; navigate the
+        // same tab into the play page, which injects that map and starts a
+        // solo session. preview=1 flags the play page to reroute back here.
+        window.location = 'play.html?gameid=' + payload.gameID + '&preview=1';
+    });
+    server.on('previewRejected', function (payload) {
+        previewPending = false;
+        $("#previewButton").prop("disabled", false);
+        showPreviewError(payload && payload.reason ? payload.reason : "Map could not be previewed.");
     });
 
     server.on("maplisting", function (mapnames) {
@@ -299,6 +336,10 @@ function setupPage() {
         drawBrushAimer = false;
         drawObject = null;
         drawObject = config.hazards.movingBumper.id;
+        return false;
+    });
+    $("#previewButton").on("click", function () {
+        previewMap();
         return false;
     });
     $("#exportButton").on("click", function () {
@@ -786,6 +827,99 @@ function submitToGithub() {
     submitStatus.text("Submitting..");
     server.emit('submitNewMap', JSON.stringify(vMap));
 }
+// Mirror of server/utils.js validateMap — gives fast inline feedback in the
+// editor; the server re-runs it as the trust boundary. Returns { valid, reason }.
+function validateMap(map) {
+    if (map == null) {
+        return { valid: false, reason: "No map data." };
+    }
+    if (!Array.isArray(map.cells) || map.cells.length === 0) {
+        return { valid: false, reason: "Map has no cells." };
+    }
+    var hasGoal = false;
+    for (var i = 0; i < map.cells.length; i++) {
+        var cell = map.cells[i];
+        if (cell == null || cell.site == null) {
+            return { valid: false, reason: "Map has a malformed cell." };
+        }
+        if (typeof cell.site.x !== "number" || typeof cell.site.y !== "number") {
+            return { valid: false, reason: "Map has a cell with an invalid position." };
+        }
+        if (!Array.isArray(cell.halfedges)) {
+            return { valid: false, reason: "Map has a cell with no geometry." };
+        }
+        if (typeof cell.id !== "number") {
+            return { valid: false, reason: "Map has a cell with an invalid tile." };
+        }
+        if (cell.id === config.tileMap.goal.id) {
+            hasGoal = true;
+        }
+    }
+    if (!hasGoal) {
+        return { valid: false, reason: "Add a goal tile before previewing." };
+    }
+    if (map.hazards != null) {
+        if (!Array.isArray(map.hazards)) {
+            return { valid: false, reason: "Map has malformed hazards." };
+        }
+        for (var h = 0; h < map.hazards.length; h++) {
+            var hazard = map.hazards[h];
+            if (hazard == null || hazard.id == null ||
+                typeof hazard.x !== "number" || typeof hazard.y !== "number") {
+                return { valid: false, reason: "Map has a malformed hazard." };
+            }
+            // A moving bumper rides a rail at a given angle; without a numeric
+            // angle the engine's rail math goes NaN.
+            if (hazard.id === config.hazards.movingBumper.id &&
+                typeof hazard.angle !== "number") {
+                return { valid: false, reason: "Map has a moving bumper with no direction." };
+            }
+        }
+    }
+    return { valid: true };
+}
+
+function showPreviewError(message) {
+    var status = $("#previewStatus");
+    status.css("color", "white");
+    status.css("background-color", "red");
+    status.find("span").text(message);
+    status.show();
+}
+
+function previewMap() {
+    // Ignore re-clicks while a launch is in flight: basicSanitize() mints a
+    // fresh id each call, so a double-click would create two rooms whose map
+    // ids no longer match what's stashed/navigated to.
+    if (previewPending) {
+        return;
+    }
+    // config arrives async (the editor can be shown before it lands, e.g. on
+    // the return-from-preview restore). validateMap needs it.
+    if (config == null) {
+        showPreviewError("Still loading — try again in a moment.");
+        return;
+    }
+    // basicSanitize() fills id/author/name/thumbnail. Prefix the id so the
+    // unsaved map can't collide with a real one in the client's maps[] lookup.
+    basicSanitize();
+    vMap.id = "preview-" + vMap.id;
+    var result = validateMap(vMap);
+    if (!result.valid) {
+        showPreviewError(result.reason);
+        return;
+    }
+    $("#previewStatus").hide();
+    previewPending = true;
+    $("#previewButton").prop("disabled", true);
+    // Stash for the editor to rehydrate on the round-trip back, and for the
+    // play page to inject into its maps[] before enterGame. Same serialized
+    // object goes to the server so both sides resolve the same id.
+    var json = JSON.stringify(vMap);
+    sessionStorage.setItem('previewMap', json);
+    server.emit('createPreviewRoom', json);
+}
+
 function basicSanitize() {
     var author = $("#author").val();
     if (author == "") {
