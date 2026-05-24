@@ -66,12 +66,13 @@
             return;
         }
         var html = '<span class="ch-count">🎮 ' + present.length + " " +
-            (present.length === 1 ? "controller" : "controllers") + "</span>";
+            (present.length === 1 ? "controller" : "controllers detected") + "</span>";
         for (var j = 0; j < present.length; j++) {
+            // Informational only on the menu pages: a label + the pad's glyph, no
+            // "press to join" (you can only actually join in-game).
             html += '<span class="ch-pad">' +
                 '<span class="pp-label">P' + (j + 1) + '</span>' +
                 '<span class="gp-glyph gp-face">' + attackGlyph(present[j]) + '</span>' +
-                '<span class="ch-join">press to join</span>' +
                 '</span>';
         }
         box.innerHTML = html;
