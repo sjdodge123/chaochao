@@ -10,6 +10,9 @@ var complexPatternScale = 0.1;
 // punches) are NOT dimmed — danger always stays full strength.
 var NONLOCAL_KART_ALPHA = 0.55;
 var NONLOCAL_TRAIL_ALPHA = 0.3;
+// Other players' emote bubbles draw fainter than your own and fade out over the
+// back half of their lifetime, so chat clutter doesn't crowd the action.
+var NONLOCAL_EMOJI_ALPHA = 0.5;
 
 // --- Colour-blind assist ---
 // When colorblindEnabled (navbar toggle, persisted) is on, every kart is remapped
@@ -1623,6 +1626,20 @@ function drawSpeedFx(player) {
 function drawEmoji(player) {
     if (player.chatMessage != null) {
         gameContext.save();
+        // Other players' bubble + emoji read fainter and fade out over the back
+        // half of their lifetime so they don't clutter the view; your own stays
+        // full-strength and crisp.
+        if (!isLocalId(player.id)) {
+            var alpha = NONLOCAL_EMOJI_ALPHA;
+            if (player.chatMessageAt != null && player.chatMessageDuration) {
+                var elapsed = Date.now() - player.chatMessageAt;
+                var fadeStart = player.chatMessageDuration * 0.5;
+                if (elapsed > fadeStart) {
+                    alpha *= clamp01(1 - (elapsed - fadeStart) / (player.chatMessageDuration - fadeStart));
+                }
+            }
+            gameContext.globalAlpha = alpha;
+        }
         gameContext.drawImage(commentIconSolid, player.x, player.y - 40, commentIconSolid.width * 0.07, commentIconSolid.height * 0.07);
         gameContext.font = '20px Times New Roman';
         gameContext.fillStyle = "white";
