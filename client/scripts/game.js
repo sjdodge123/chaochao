@@ -44,6 +44,10 @@ var server = null,
     WORLD_ZOOM_PAD = 120,      // world-units padding around framed points
     WORLD_ZOOM_TAU = 620,      // smoothing time-constant (ms); higher = slower, gentler glide
     WORLD_ZOOM_HOLD_MS = 1100, // hold the whole-map view this long when a round starts, before easing in
+    // Sustained camera back-off while holding/throwing an aimed ability (bomb/ice)
+    // until it detonates, so it's easier to aim. Multiplies the focused scale
+    // (0.62 => ~38% wider); the smoothing eases it out and back.
+    AIM_ZOOM_OUT_FACTOR = 0.62,
     maps = [],
     oldNotches = {},
     camera,
