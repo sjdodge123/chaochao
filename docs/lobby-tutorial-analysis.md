@@ -1,7 +1,8 @@
-# Lobby Tutorial — Analysis (WIP)
+# Lobby Tutorial — Analysis
 
-**Status:** Work in progress. This is a design/feasibility analysis, not an implementation.
-We are still refining it; no production code has been changed.
+**Status:** ✅ Implemented. This document was the design/feasibility analysis; the feature is now
+built on branch `worktree-lobby-tutorial-analysis` (see "Implementation status" near the end for
+the per-change breakdown). Original analysis prose is preserved below for context.
 
 ## Goal
 
@@ -313,10 +314,14 @@ Concrete drafts produced so far (validated: config parses, map is well-formed, `
   Re-run with `node tools/genLobbyTutorialMap.js` after tweaking layout. The map carries
   `lobbyOnly:true` and `spawnPad` (for change #7's spawn/respawn).
 
-**Still TODO to make it live** (implementation phase, not drafted): wire `startLobby` to load
-`lobbyMaps[0]` + broadcast it (change #2), render map + enable cell collision in lobby state
-(#3/#4), the option-B respawn/invuln/scoring guards (#5/#6/#9/#15), ability un-gate + respawn
-(#10/#18), SFX dampen (#12), reset cadence (#13), force-fn guards (#16), and the editor brush.
+**✅ IMPLEMENTED** (the implementation phase is complete — see the per-change status in the
+table below). `startLobby` loads `lobbyMaps[0]` + broadcasts it; the map renders and cell
+collision is enabled in the lobby; the Option-B respawn/invuln/scoring guards, the curated
+abilities (bomb) + ability-tile respawn, the SFX dampening, the layered reset cadence, and the
+force-fn guards are all live and verified in the running game (lobby renders the islands, player
+spawns on the pad, bumpers spawn + render, SFX dampened, no console errors, scoring untouched —
+audited at the code level). The only item NOT built is the optional editor "erase"/transparent
+brush (change #0) — the map is authored via the deterministic generator instead.
 
 ## Change list
 
@@ -345,6 +350,31 @@ Concrete drafts produced so far (validated: config parses, map is well-formed, `
 **Total: ~4.5–5.5 days** — the islands model adds the `background` terrain type + editor brush
 (change #0, ~0.5 day) but simplifies the sanctuary (it *is* the background type) and dissolves
 the off-island physics wrinkle, so net add is modest.
+
+### ✅ Implementation status (built on `worktree-lobby-tutorial-analysis`)
+
+All gameplay changes are implemented and committed. Status per change:
+
+- **#0 background type / rotation filter** — ✅ DONE (config + `handleHit` + `draw.js` skip + `this.maps`/`this.lobbyMaps`). Editor "erase" brush: **not built** (optional; map is generator-authored).
+- **#1 islands map** — ✅ DONE (`tools/genLobbyTutorialMap.js` → `_lobbyTutorial.json`, 470 cells, lava/ice/slow/fast/goal/bomb islands + 2 bumpers + spawn pad).
+- **#2 load + broadcast lobby map** — ✅ DONE (`GameBoard.startLobby`/`loadLobbyMap`, `sendLobbyStart` packet[4]).
+- **#3 enable `checkCollideCells` in lobby** — ✅ DONE (`checkCollisions` lobby branch).
+- **#4 render map client-side in lobby** — ✅ DONE (client `loadLobbyMap`, `drawMap()` in the lobby draw branch).
+- **#5/#6/#8 lobby-aware lava/goal + shared `respawnInLobby`** — ✅ DONE (deferred `lobbyRespawnPending` flag → `respawnInLobby`; no `killPlayer`/`reachedGoal`/`playerConcluded`).
+- **#7 spawn/respawn on sanctuary + jitter** — ✅ DONE (`placePlayerOnSpawnPad`, `getLobbySpawnLoc`; mutation/force guards key off the `background` type).
+- **#9 2–3s invuln + flash/fade** — ✅ DONE (`invulnUntil`, synced via `lobbyRespawn` event; `drawPlayer` pulses sprite alpha).
+- **#10 un-gate `ability.use()` (bomb)** — ✅ DONE (`checkAttack`; curated set enforced by map tiles).
+- **#11 lobby projectile→terrain** — ✅ DONE (snowFlake `checkCollideCells` in the lobby branch).
+- **#12 dampen all lobby SFX** — ✅ DONE (single `sfxVolumeScalar` in `audio.js`, toggled on lobby enter/exit).
+- **#13 layered map-reset cadence** — ✅ DONE (game-start / lobby-(re)start / lobby-empty re-clone + 15s idle-gated `checkLobbyMapReset`/`restoreLobbyMap`).
+- **#14 multiplayer testing** — partial: solo runtime verification done (render, spawn, bumpers, SFX, no-score audit); concurrent-player stress not exercised.
+- **#15 guard achievement stats** — ✅ DONE (`bully`/`resourceful` skip lobby; `onFire` cleared in `respawnInLobby`).
+- **#16 sanctuary/invuln force guards** — ✅ DONE (`isProtected()`; `applyExplosionForce`/`cutPlayers` skip protected; `explodeBomb`/`explodeIce`/`explodeLava` skip background).
+- **#17 hard-coded curated ability ids in map** — ✅ DONE (map places only bomb tiles, id 102).
+- **#18 fast ability-tile respawn** — ✅ DONE (`respawnLobbyAbilityTile`, lobbyAbilityTileRespawnMs).
+
+A late runtime-found fix: lobby bumpers needed an explicit `applyHazards` broadcast (gameUpdates
+only moves known hazards; creation is via the newMap/`applyHazards` path the lobby lacked).
 
 ### Map-rotation leakage gotcha
 `loadMaps()` (`server/utils.js:308`) ingests *everything* in `client/maps/`, so a tutorial map
