@@ -1713,7 +1713,8 @@ function drawMouseDriveIndicator() {
     gameContext.font = "bold 15px Arial";
     gameContext.textAlign = "center";
     gameContext.lineWidth = 4;
-    gameContext.strokeStyle = "white";
+    // Theme-aware halo so the pink label reads on the dark board too.
+    gameContext.strokeStyle = themeColor('inkOutline', 'white');
     gameContext.fillStyle = "#c87f8a";
     var label = "Mouse-drive ON — double-click to toggle";
     gameContext.strokeText(label, LOGICAL_WIDTH / 2, 44);
@@ -1732,8 +1733,10 @@ function drawTouchLabel(text, x, y) {
     gameContext.font = "bold " + fontPx + "px Arial";
     gameContext.textAlign = "center";
     gameContext.lineWidth = 4;
-    gameContext.strokeStyle = "white";
-    gameContext.fillStyle = "black";
+    // Theme-aware so the captions read correctly on the dark board too (matches
+    // the rest of the renderer + the adjacent touch-control rings).
+    gameContext.strokeStyle = themeColor('inkOutline', 'white');
+    gameContext.fillStyle = themeColor('ink', 'black');
     gameContext.strokeText(text, x, y);
     gameContext.fillText(text, x, y);
     gameContext.restore();
