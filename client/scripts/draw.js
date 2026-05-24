@@ -1122,21 +1122,23 @@ function drawLobbyArrows() {
     var cx = lobbyStartButton.x + camera.getCameraX();
     var cy = lobbyStartButton.y + camera.getCameraY();
     var btnR = lobbyStartButton.radius || 70;
-    var count = 8;
+    var count = 4;
     var t = Date.now() / 1000;
+    gameContext.save();
+    gameContext.globalAlpha = 0.5;                       // translucent: float over the map, don't hide it
     for (var i = 0; i < count; i++) {
-        var ang = (i / count) * Math.PI * 2;            // where the arrow sits, around the button
-        var bob = Math.sin(t * 5 - i * 0.8) * 9;        // staggered jab toward/away from center
-        var ringR = btnR + 52 + bob;                    // arrow tip distance from button center
+        var ang = (i / count) * Math.PI * 2;            // 4 arrows, evenly spaced around the button
+        var bob = Math.sin(t * 2.5 - i * 0.9) * 7;      // gentle staggered float toward/away from center
+        var ringR = btnR + 50 + bob;                    // arrow tip distance from button center
         var ax = cx + Math.cos(ang) * ringR;
         var ay = cy + Math.sin(ang) * ringR;
-        var pulse = 0.5 + 0.5 * Math.sin(t * 6 - i * 0.8);
+        var pulse = 0.5 + 0.5 * Math.sin(t * 4 - i * 0.9);
         gameContext.save();
         gameContext.translate(ax, ay);
         gameContext.rotate(ang + Math.PI);              // local +x now points at the button
         // glow ("glowing lights")
-        gameContext.shadowColor = "rgba(255, 210, 30, " + (0.6 + 0.4 * pulse) + ")";
-        gameContext.shadowBlur = 16 + 16 * pulse;
+        gameContext.shadowColor = "rgba(255, 210, 30, " + (0.5 + 0.4 * pulse) + ")";
+        gameContext.shadowBlur = 14 + 14 * pulse;
         // chunky cartoon block arrow pointing +x (tip at origin -> toward button)
         gameContext.beginPath();
         gameContext.moveTo(0, 0);                        // tip
@@ -1161,6 +1163,7 @@ function drawLobbyArrows() {
         gameContext.fill();
         gameContext.restore();
     }
+    gameContext.restore();
 }
 function drawMap() {
     if (currentMap == null || currentMap.cells == null || currentMap.cells.length === 0) {
