@@ -215,6 +215,9 @@ function markPadNeedsRelease(idx) {
         padNeedsRelease[idx] = true;
     }
 }
+// Per-pad-index "was A pressed last frame" for UNCLAIMED pads, so a controller
+// joins on an A-press edge (not a held A).
+var unclaimedAPrev = {};
 
 function anyButtonPressed(pad) {
     for (var i = 0; i < pad.buttons.length; i++) {
@@ -379,11 +382,13 @@ function pollGamepad(dt) {
             lpv.gp.hadMoveInput = false;
         }
     }
-    // Keep the top blocks (color dots + per-player hints) in sync.
+    // Reconcile the header (player blocks + "press A to join" prompts) and keep
+    // the color dots / hints in sync.
+    onLocalPlayersChanged();
     refreshPadBlocks();
-    // Each connected pad drives its claimed slot; the first pad (with no keyboard
-    // in use) takes P1, and any other unclaimed pad hot-joins as a new local
-    // player on its first button press.
+    // Each connected pad drives its claimed slot; an unclaimed controller shows a
+    // "press A to join" prompt and joins on its A button (tryClaimPadSlot decides
+    // whether it takes P1 — no kb/m player yet — or joins as P2+).
     for (var i = 0; i < pads.length; i++) {
         var pad = pads[i];
         if (!pad) {
@@ -391,22 +396,23 @@ function pollGamepad(dt) {
         }
         var lp = localPlayerForPadIndex(i);
         if (!lp) {
-            // A pad that just left must go idle before (re)joining, so the input
-            // that confirmed leaving can't instantly re-join it.
+            var aDown = !!(pad.buttons[GP_BTN_A] && pad.buttons[GP_BTN_A].pressed);
+            // A pad that just left must go idle before it can (re)join.
             if (padNeedsRelease[i]) {
-                if (!padHasInput(pad)) {
+                if (!anyButtonPressed(pad)) {
                     delete padNeedsRelease[i];
                 }
+                unclaimedAPrev[i] = aDown;
                 continue;
             }
-            // Claim on ANY input — stick OR button — so navigating with the stick
-            // works without first pressing a button. tryClaimPadSlot decides
-            // whether this pad takes P1 (no kb/m player yet) or joins as P2+.
-            if (padHasInput(pad)) {
+            // Join on the A button (an edge, so a held A doesn't double-join).
+            if (aDown && !unclaimedAPrev[i]) {
                 tryClaimPadSlot(i, pad);
             }
+            unclaimedAPrev[i] = aDown;
             continue; // wait until the slot has joined (myID set) before polling
         }
+        delete unclaimedAPrev[i];
         if (lp.myID == null) {
             continue;
         }
@@ -1014,9 +1020,41 @@ function scheduleHintFade() {
 
 var padPlayersEl = null;     // container element for the top blocks
 var padBlocks = {};          // slot -> { el, dot, hints, lastColor, lastMethod }
+var joinPromptBlocks = {};   // pad index -> "press A to join" block element
 var padToastEl = null;
 var padToastTimer = null;
-var hintUiMode = "bar";      // "bar" (solo) | "blocks" (>= 2 local players)
+var hintUiMode = "bar";      // "bar" (solo, no controllers) | "blocks" (header up)
+
+// A "press A to join" block for a connected controller that hasn't joined yet.
+function ensureJoinPrompt(idx, type) {
+    if (!padPlayersEl) {
+        buildPadPlayersUI();
+    }
+    if (!padPlayersEl || joinPromptBlocks[idx]) {
+        return;
+    }
+    var el = document.createElement("div");
+    el.className = "pad-player join-prompt";
+    el.innerHTML = '<span class="gp-glyph gp-face">' + attackGlyphFor(type) + '</span>' +
+        '<span class="pp-join">press to join</span>';
+    padPlayersEl.appendChild(el);
+    joinPromptBlocks[idx] = el;
+}
+function removeJoinPrompt(idx) {
+    var el = joinPromptBlocks[idx];
+    if (!el) {
+        return;
+    }
+    if (el.parentNode) {
+        el.parentNode.removeChild(el);
+    }
+    delete joinPromptBlocks[idx];
+}
+function removeAllJoinPrompts() {
+    for (var k in joinPromptBlocks) {
+        removeJoinPrompt(k);
+    }
+}
 
 function buildPadPlayersUI() {
     if (padPlayersEl || typeof document === "undefined" || !document.body) {
@@ -1028,37 +1066,69 @@ function buildPadPlayersUI() {
     padPlayersEl = el;
 }
 
-// Called whenever the set of local players changes (join/drop). Switches the hint
-// UI between the solo bottom bar and the per-player top blocks, and reconciles
-// which blocks exist.
+// Reconciles the in-game header each frame (and on join/drop). The per-controller
+// header is shown whenever a controller is connected OR 2+ local players are in;
+// otherwise the solo bottom bar. In header mode it renders: a block per joined
+// local player (mini controls), and a "press A to join" prompt per connected
+// controller that hasn't joined yet (the prompt becomes a mini-controls block
+// when that controller joins).
 function onLocalPlayersChanged() {
-    var multi = (typeof liveLocalPlayerCount === "function") && liveLocalPlayerCount() >= 2;
-    if (multi) {
-        if (hintUiMode !== "blocks") {
-            hintUiMode = "blocks";
-            if (hintBarEl) {
-                hintBarEl.className = "gamepad-prompts hidden"; // bottom bar off in multiplayer
-            }
+    var pads = (typeof navigator !== "undefined" && navigator.getGamepads) ? navigator.getGamepads() : [];
+    var nControllers = 0;
+    for (var i = 0; i < pads.length; i++) {
+        if (pads[i]) {
+            nControllers++;
         }
-        for (var s = 0; s < localPlayers.length; s++) {
-            if (localPlayers[s]) {
-                ensureBlock(localPlayers[s]);
-            }
+    }
+    var showBlocks = (typeof liveLocalPlayerCount === "function" && liveLocalPlayerCount() >= 2) || nControllers >= 1;
+
+    if (!showBlocks) {
+        if (hintUiMode === "blocks") {
+            // No controllers and solo — restore the bottom bar.
+            hintUiMode = "bar";
+            removeAllBlocks();
+            removeAllJoinPrompts();
+            var method = activeInputMethod || "kbm";
+            activeInputMethod = null; // force setInputMethod to rebuild + show the bar
+            setInputMethod(method);
         }
-        // Remove blocks for slots that no longer exist.
-        for (var slot in padBlocks) {
-            if (!localPlayers[slot]) {
-                removeBlock(slot);
-            }
+        return;
+    }
+
+    if (hintUiMode !== "blocks") {
+        hintUiMode = "blocks";
+        if (hintBarEl) {
+            hintBarEl.className = "gamepad-prompts hidden"; // bottom bar off when the header is up
         }
         scheduleHintFade();
-    } else if (hintUiMode === "blocks") {
-        // Back down to one local player — restore the bottom bar.
-        hintUiMode = "bar";
-        removeAllBlocks();
-        var method = activeInputMethod || "kbm";
-        activeInputMethod = null; // force setInputMethod to rebuild + show the bar
-        setInputMethod(method);
+    }
+    // A block per joined local player; drop blocks for slots that are gone.
+    for (var s = 0; s < localPlayers.length; s++) {
+        if (localPlayers[s]) {
+            ensureBlock(localPlayers[s]);
+        }
+    }
+    for (var slot in padBlocks) {
+        if (!localPlayers[slot]) {
+            removeBlock(slot);
+        }
+    }
+    // A "press A to join" prompt per connected controller that hasn't joined.
+    for (var j = 0; j < pads.length; j++) {
+        if (!pads[j]) {
+            continue;
+        }
+        if (localPlayerForPadIndex(j)) {
+            removeJoinPrompt(j); // joined now — its mini-controls block takes over
+        } else {
+            ensureJoinPrompt(j, detectGamepadType(pads[j].id));
+        }
+    }
+    for (var key in joinPromptBlocks) {
+        var idx = parseInt(key, 10);
+        if (!pads[idx] || localPlayerForPadIndex(idx)) {
+            removeJoinPrompt(idx);
+        }
     }
 }
 
