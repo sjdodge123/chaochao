@@ -213,27 +213,44 @@ function recapDraw(dt) {
 	var CW = (typeof LOGICAL_WIDTH !== "undefined" && LOGICAL_WIDTH > 0) ? LOGICAL_WIDTH : gameCanvas.width;
 	var CH = (typeof LOGICAL_HEIGHT !== "undefined" && LOGICAL_HEIGHT > 0) ? LOGICAL_HEIGHT : gameCanvas.height;
 
-	// Window geometry: centred horizontally and sat in the lower-centre band,
-	// directly under the headline winner text (which is centred at ~CH/2). The
-	// caption sits in the gap above the window; medals stay clear on the right.
+	// Window geometry: sit it in the lower band, directly under the headline
+	// winner text, and centre it on that text. The caption sits in the gap above.
 	var winW = Math.min(RECAP_WIN_W, CW * 0.42);
 	var aspect = (world != null && world.width > 0) ? (world.height / world.width) : 0.6;
 	var headlineBaseline = (CH + 48) / 2; // matches drawGameOverScreen's winString
 	var winY = Math.round(headlineBaseline + 56); // leave room for the caption above
 	var maxH = CH - winY - 18;            // keep the whole window on-screen
 	var winH = Math.min(winW * aspect, CH * 0.42, maxH);
-	var winX = Math.round((CW - winW) / 2);
 
-	// Caption above the window.
+	// The headline is drawn left-aligned at CW/2-400 (see drawGameOverScreen), so
+	// its visual centre is offset from screen centre — measure it and align to it.
+	var headlineStr = ((typeof decodedColorName !== "undefined" && decodedColorName != null) ? decodedColorName : "") + " won the game.";
+	gameContext.save();
+	gameContext.font = "48px serif";
+	var headlineCX = (CW / 2 - 400) + gameContext.measureText(headlineStr).width / 2;
+	gameContext.restore();
+	// Centre on the headline, but stay clear of the medals column (CW/2+200) and
+	// the left edge for long winner names.
+	var medalsLeft = CW / 2 + 200;
+	var winX = Math.round(headlineCX - winW / 2);
+	winX = Math.max(16, Math.min(winX, Math.round(medalsLeft - winW - 12)));
+	var winCX = winX + winW / 2;
+
+	// Caption above the window, centred on the window (which is centred on the
+	// headline) so the whole block reads as one balanced column.
 	gameContext.save();
 	gameContext.fillStyle = "black";
 	gameContext.font = "20px serif";
-	gameContext.fillText("Recap " + (recapIndex + 1) + "/" + recapSequence.length + " — " + item.title, winX, winY - 14);
-	// involved player color chips
-	for (var c = 0; c < item.ids.length && c < 6; c++) {
+	gameContext.textAlign = "center";
+	gameContext.fillText("Recap " + (recapIndex + 1) + "/" + recapSequence.length + " — " + item.title, winCX, winY - 14);
+	gameContext.textAlign = "left";
+	// involved player color chips, centred as a row above the caption
+	var nChips = Math.min(item.ids.length, 6);
+	var chipStartX = winCX - (nChips * 24) / 2 + 12;
+	for (var c = 0; c < nChips; c++) {
 		var who = (playerList != null) ? playerList[item.ids[c]] : null;
 		gameContext.beginPath();
-		gameContext.arc(winX + 10 + c * 24, winY - 38, 9, 0, 2 * Math.PI);
+		gameContext.arc(chipStartX + c * 24, winY - 38, 9, 0, 2 * Math.PI);
 		gameContext.fillStyle = (who != null) ? who.color : "grey";
 		gameContext.strokeStyle = "black";
 		gameContext.lineWidth = 2;
