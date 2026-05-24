@@ -1,0 +1,125 @@
+'use strict';
+
+// Content validation gate for PRs into main.
+//
+// Catches broken game *data* that a JavaScript syntax check and bundle build
+// cannot see: a malformed map JSON (the in-browser editor opens PRs that add
+// these), or a config.json that no longer has the keys the engine reads. Both
+// would pass `node --check` yet crash the server at boot or mid-game.
+//
+// Structural map validation reuses the server's own utils.validateMap() so this
+// stays in lockstep with the trust-boundary check the live editor runs before a
+// play-test — one source of truth, not a re-implementation that can drift.
+//
+// Note on ordering: server/utils.js require()s every map at module load, so a
+// malformed map JSON would crash this script with an ugly stack trace before any
+// of our checks run. We therefore JSON-parse config.json and all maps OURSELVES
+// first (clean per-file ::error:: messages — these failures come from non-dev
+// map submissions), and only require utils.js once we know everything parses.
+//
+// Exits 0 when everything is valid, 1 (with ::error:: annotations) otherwise.
+
+const fs = require('fs');
+const path = require('path');
+
+const repoRoot = path.join(__dirname, '..', '..');
+const mapsDir = path.join(repoRoot, 'client', 'maps');
+const configPath = path.join(repoRoot, 'server', 'config.json');
+
+const errors = [];
+function fail(msg) {
+    errors.push(msg);
+    console.log('::error::' + msg);
+}
+
+function done() {
+    if (errors.length > 0) {
+        console.log('\nContent validation FAILED with ' + errors.length + ' error(s).');
+        process.exit(1);
+    }
+}
+
+// --- Phase 1: parse everything ourselves (no utils.js require yet) ----------
+let config = null;
+try {
+    config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+} catch (e) {
+    fail('server/config.json: invalid JSON — ' + e.message);
+}
+
+const parsedMaps = []; // { file, map }
+const mapFiles = fs.readdirSync(mapsDir).filter(f => f.endsWith('.json'));
+if (mapFiles.length === 0) {
+    fail('client/maps contains no .json maps');
+}
+for (const file of mapFiles) {
+    try {
+        parsedMaps.push({ file, map: JSON.parse(fs.readFileSync(path.join(mapsDir, file), 'utf8')) });
+    } catch (e) {
+        fail('client/maps/' + file + ': invalid JSON — ' + e.message);
+    }
+}
+
+// A parse failure (or unreadable config) means requiring utils.js below would
+// itself crash. Bail now with the clean messages we already have.
+done();
+
+// --- Phase 2: structural checks (safe to load the server's own validator) ---
+const utils = require(path.join(repoRoot, 'server', 'utils.js'));
+
+// config.json keys read unconditionally in game.js / engine.js / validateMap;
+// if any go missing or change type, the server breaks on the first tick.
+const numericKeys = [
+    'port', 'serverTickSpeed', 'worldWidth', 'worldHeight',
+    'worldCollapseSpeed', 'minPlayersToStart', 'maxPlayersInRoom',
+    'forceConstant', 'baseNotchesToWin', 'minimumNotchesToWin'
+];
+for (const key of numericKeys) {
+    if (typeof config[key] !== 'number') {
+        fail('config.json: "' + key + '" must be a number, got ' + typeof config[key]);
+    }
+}
+
+// The state machine indexes config.stateMap by name throughout game.js.
+const requiredStates = ['waiting', 'lobby', 'overview', 'gated', 'racing', 'collapsing', 'gameOver'];
+if (config.stateMap == null || typeof config.stateMap !== 'object') {
+    fail('config.json: "stateMap" is missing or not an object');
+} else {
+    for (const s of requiredStates) {
+        if (!(s in config.stateMap)) {
+            fail('config.json: stateMap is missing state "' + s + '"');
+        }
+    }
+}
+
+// tileMap.goal.id is what utils.validateMap looks for to confirm a map is
+// playable; the other tile types are referenced across engine.js.
+const requiredTiles = ['slow', 'normal', 'fast', 'lava', 'ice', 'ability', 'goal', 'bumper', 'random'];
+if (config.tileMap == null || typeof config.tileMap !== 'object') {
+    fail('config.json: "tileMap" is missing or not an object');
+} else {
+    for (const t of requiredTiles) {
+        if (config.tileMap[t] == null) {
+            fail('config.json: tileMap is missing tile "' + t + '"');
+        }
+    }
+    if (config.tileMap.goal != null && typeof config.tileMap.goal.id !== 'number') {
+        fail('config.json: tileMap.goal.id must be a number');
+    }
+}
+
+// utils.validateMap dereferences config.hazards.movingBumper.id.
+if (config.hazards == null || config.hazards.movingBumper == null ||
+    typeof config.hazards.movingBumper.id !== 'number') {
+    fail('config.json: hazards.movingBumper.id must be a number');
+}
+
+for (const { file, map } of parsedMaps) {
+    const result = utils.validateMap(map, config);
+    if (!result.valid) {
+        fail('client/maps/' + file + ': ' + result.reason);
+    }
+}
+
+done();
+console.log('Content validation passed: config.json OK, ' + parsedMaps.length + ' map(s) valid.');

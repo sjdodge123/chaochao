@@ -1,10 +1,13 @@
 name: PR validation
 
-# Basic standards gate for pull requests into main:
-#   1. dependencies install cleanly against the committed lockfile,
-#   2. every JavaScript file parses (no syntax errors), and
-#   3. the client bundles build.
-# Keep this fast and dependency-light so it stays a low-friction check.
+# Standards gate for pull requests into main. Three independent jobs so a red
+# check tells you *what* broke at a glance:
+#   validate         — deps install cleanly, every .js parses, the bundles build.
+#   validate-content — every map JSON and config.json is structurally valid.
+#   smoke-test       — the server boots and the game actually ticks without
+#                      crashing (the part a parse/build check can't see).
+# Keep this fast and dependency-light so it stays a low-friction check — the
+# runtime checks reuse the server's own modules and add no new npm dependency.
 
 on:
   pull_request:
@@ -43,3 +46,71 @@ jobs:
 
       - name: Build client bundles
         run: npm run build
+
+  validate-content:
+    # Catches broken game data — a malformed map JSON (the in-browser editor
+    # opens PRs that add these) or a config.json missing keys the engine reads.
+    # Both pass `node --check` yet break the server, so they need their own gate.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        # Needed because the validator reuses server/utils.js (which requires deps).
+        run: npm ci
+
+      - name: Validate maps and config
+        run: node .github/scripts/validate-content.js
+
+  smoke-test:
+    # Boots the server and ticks the game — proves it still *runs*, not just that
+    # it parses and builds. Catches runtime breakage in game.js / engine.js /
+    # compressor.js / messenger.js that the other jobs cannot see.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Boot check (server starts and stays up)
+        # Start the server on an ephemeral port; require it to log "listening"
+        # within the timeout and not exit early. Catches module-load/boot crashes.
+        run: |
+          PORT=28734 node index.js > boot.log 2>&1 &
+          server_pid=$!
+          ok=0
+          for i in $(seq 1 30); do
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              echo "::error::Server exited before it finished booting:"
+              cat boot.log
+              exit 1
+            fi
+            if grep -q "listening on" boot.log; then ok=1; break; fi
+            sleep 0.5
+          done
+          kill "$server_pid" 2>/dev/null || true
+          wait "$server_pid" 2>/dev/null || true
+          if [ "$ok" -ne 1 ]; then
+            echo "::error::Server did not report 'listening' within the timeout:"
+            cat boot.log
+            exit 1
+          fi
+          echo "Server booted and is listening."
+
+      - name: Headless game-loop smoke test
+        run: node .github/scripts/smoke-test.js
