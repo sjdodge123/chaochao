@@ -476,21 +476,20 @@ function clampViewToWorld(cx, cy, scale) {
     return { cx: cx, cy: cy, scale: scale };
 }
 
-// World positions of every LIVE local player (so split-on-one-screen co-op keeps
-// everyone framed). Only local players — remote/online players live elsewhere on
-// the map and aren't followed. Falls back to the primary myPlayer.
+// World positions of every LIVING local player (so split-on-one-screen co-op
+// keeps everyone framed). Reuses livingLocalPlayers() so dead / mid-round
+// spectating local players — parked off-arena at (-100,-100) by the server —
+// don't drag the camera. Only local players are followed (remote/online players
+// live elsewhere on the map). Falls back to the primary myPlayer only when it's
+// alive; if nobody local is alive, returns empty (computeFocusedView -> whole map
+// so a dead/spectating cohort can watch the action).
 function focusWorldPoints() {
     var pts = [];
-    if (typeof localPlayers !== "undefined" && localPlayers) {
-        for (var i = 0; i < localPlayers.length; i++) {
-            var lp = localPlayers[i];
-            if (lp && lp.myID != null && typeof playerList !== "undefined" &&
-                playerList && playerList[lp.myID]) {
-                pts.push({ x: playerList[lp.myID].x, y: playerList[lp.myID].y });
-            }
-        }
+    var living = livingLocalPlayers();
+    for (var i = 0; i < living.length; i++) {
+        pts.push({ x: living[i].x, y: living[i].y });
     }
-    if (pts.length === 0 && myPlayer) {
+    if (pts.length === 0 && myPlayer && myPlayer.alive) {
         pts.push({ x: myPlayer.x, y: myPlayer.y });
     }
     return pts;
@@ -503,7 +502,12 @@ function focusWorldPoints() {
 // player contributes a max-zoom half-box. Centre is kept separate from the zoom
 // so a transition can ramp only the zoom (players can't slide out of frame).
 function computeFocusedView() {
+    var wholeMap = { cx: LOGICAL_WIDTH / 2, cy: LOGICAL_HEIGHT / 2, scale: 1 };
     var pts = focusWorldPoints();
+    if (pts.length === 0) {
+        // Nobody local alive to follow -> whole map (watch the action).
+        return wholeMap;
+    }
     var halfX = LOGICAL_WIDTH / (2 * WORLD_ZOOM_MAX);
     var halfY = LOGICAL_HEIGHT / (2 * WORLD_ZOOM_MAX);
     var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -533,7 +537,12 @@ function computeFocusedView() {
     var boxW = Math.max(1, maxX - minX), boxH = Math.max(1, maxY - minY);
     var scale = Math.min(LOGICAL_WIDTH / boxW, LOGICAL_HEIGHT / boxH);
     scale = Math.max(1, Math.min(WORLD_ZOOM_MAX, scale)); // never zoom out past the whole map
-    return { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, scale: scale };
+    var cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    // Defensive: a NaN coordinate would poison setTransform and blank the canvas.
+    if (!isFinite(cx) || !isFinite(cy) || !isFinite(scale)) {
+        return wholeMap;
+    }
+    return { cx: cx, cy: cy, scale: scale };
 }
 
 function computeWorldViewTarget(dt) {
