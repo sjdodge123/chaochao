@@ -13,11 +13,17 @@ function clearFade(sound) {
     }
 }
 
-var calmBackgroundMusicList = [];
-var excitingBackgroundMusicList = [];
-var brutalBackgroundMusicList = [];
+// Playlists are name-keyed maps (trackName -> Audio) so a server-sent track name
+// resolves to the exact same Audio instance that volumeChange() tunes.
+var calmBackgroundMusicList = {};
+var excitingBackgroundMusicList = {};
+var brutalBackgroundMusicList = {};
+var backgroundMusicLists = {};
 var currentBackgroundMusic = null;
 var backgroundBuildTimer = null;
+// Set by client.js once the socket exists; lets the server drive the next track
+// when one finishes so background music stays continuous and in sync.
+var musicTrackEndedHandler = null;
 
 var playerJoinSound = new Audio("./assets/sounds/pleasing-bell.mp3");
 var playerDiedSound = new Audio("./assets/sounds/TailWhip.mp3");
@@ -71,9 +77,6 @@ var gameStart = new Audio("./assets/sounds/gamestart.mp3");
 var slowstride = new Audio("./assets/sounds/slowstride.mp3");
 var slowpipes = new Audio("./assets/sounds/slow-pipes.mp3");
 
-calmBackgroundMusicList.push(slowstride);
-calmBackgroundMusicList.push(slowpipes);
-
 var therush = new Audio("./assets/sounds/the-rush.mp3");
 var beastv2 = new Audio("./assets/sounds/beastv2.mp3");
 var mindInMotion = new Audio("./assets/sounds/mind_in_motion.mp3");
@@ -83,24 +86,37 @@ var bumpinbits3 = new Audio("./assets/sounds/bumpinbits3.mp3");
 var bumpinbits4 = new Audio("./assets/sounds/bumpinbits4.mp3");
 var bumpinbits5 = new Audio("./assets/sounds/bumpinbits5.mp3");
 
-excitingBackgroundMusicList.push(mindInMotion);
-excitingBackgroundMusicList.push(therush);
-excitingBackgroundMusicList.push(beastv2);
-excitingBackgroundMusicList.push(bumpinbits1);
-excitingBackgroundMusicList.push(bumpinbits2);
-excitingBackgroundMusicList.push(bumpinbits3);
-excitingBackgroundMusicList.push(bumpinbits4);
-excitingBackgroundMusicList.push(bumpinbits5);
-
 var heavyfabric = new Audio("./assets/sounds/heavyfabric.mp3");
 var desperationSetsIn = new Audio("./assets/sounds/DesperationSetsIn.mp3");
 var horrorLoop = new Audio("./assets/sounds/HorrorLoop.mp3");
 var depthOfDespair = new Audio("./assets/sounds/depthOfDespair.mp3");
 
-brutalBackgroundMusicList.push(depthOfDespair);
-brutalBackgroundMusicList.push(horrorLoop);
-brutalBackgroundMusicList.push(desperationSetsIn);
-brutalBackgroundMusicList.push(heavyfabric);
+// Register a track under a mood. Keys MUST match the names in config.json "music"
+// so a server-sent {mood, track} resolves here. trackName is stamped on the Audio
+// so the "ended" listener can report which track finished back to the server.
+function registerBackgroundTrack(playlist, mood, name, sound) {
+	sound.trackName = name;
+	playlist[name] = sound;
+	sound.addEventListener("ended", handleBackgroundTrackEnded);
+	backgroundMusicLists[mood] = playlist;
+}
+
+registerBackgroundTrack(calmBackgroundMusicList, "calm", "slowstride", slowstride);
+registerBackgroundTrack(calmBackgroundMusicList, "calm", "slow-pipes", slowpipes);
+
+registerBackgroundTrack(excitingBackgroundMusicList, "exciting", "mind_in_motion", mindInMotion);
+registerBackgroundTrack(excitingBackgroundMusicList, "exciting", "the-rush", therush);
+registerBackgroundTrack(excitingBackgroundMusicList, "exciting", "beastv2", beastv2);
+registerBackgroundTrack(excitingBackgroundMusicList, "exciting", "bumpinbits1", bumpinbits1);
+registerBackgroundTrack(excitingBackgroundMusicList, "exciting", "bumpinbits2", bumpinbits2);
+registerBackgroundTrack(excitingBackgroundMusicList, "exciting", "bumpinbits3", bumpinbits3);
+registerBackgroundTrack(excitingBackgroundMusicList, "exciting", "bumpinbits4", bumpinbits4);
+registerBackgroundTrack(excitingBackgroundMusicList, "exciting", "bumpinbits5", bumpinbits5);
+
+registerBackgroundTrack(brutalBackgroundMusicList, "brutal", "depthOfDespair", depthOfDespair);
+registerBackgroundTrack(brutalBackgroundMusicList, "brutal", "HorrorLoop", horrorLoop);
+registerBackgroundTrack(brutalBackgroundMusicList, "brutal", "DesperationSetsIn", desperationSetsIn);
+registerBackgroundTrack(brutalBackgroundMusicList, "brutal", "heavyfabric", heavyfabric);
 
 
 function volumeChange() {
@@ -218,31 +234,6 @@ function stopAllSounds() {
     playingSounds.clear();
 }
 
-function playBackgroundSound() {
-    //Count all players near victory
-    for (var id in playerList) {
-        if (playerList[id].nearVictory == true) {
-            playersNearVictory.push(id);
-        } else {
-            playersNearVictory.splice(playersNearVictory.indexOf(id), 1);
-        }
-    }
-    //Not a match point, change to calming music
-    if (playersNearVictory.length < 1) {
-        if (brutalRound == false) {
-            changeBackgroundMusic(calmBackgroundMusicList);
-        } else {
-            changeBackgroundMusic(brutalBackgroundMusicList);
-        }
-        return;
-    }
-    //If match point, change to exciting music
-    if (playersNearVictory.length > 0) {
-        changeBackgroundMusic(excitingBackgroundMusicList);
-        return;
-    }
-}
-
 function playSoundAfterFinish(sound) {
     playingSounds.add(sound);
     if (!gameMuted) {
@@ -255,29 +246,45 @@ function playSoundAfterFinish(sound) {
     }
 }
 
-function changeBackgroundMusic(musicList) {
-    //No existing background sounds, set musiclist provided
-    if (currentBackgroundMusic == null || currentBackgroundMusic.ended || currentBackgroundMusic.paused) {
-        currentBackgroundMusic = musicList[getRandomInt(0, musicList.length - 1)];
-        fadeSoundIn(currentBackgroundMusic);
-        playSound(currentBackgroundMusic);
+// Server-authoritative: play the exact mood+track the server told us to. The
+// server decides what everyone hears; the client only obeys.
+function setBackgroundMusic(mood, trackName) {
+    if (mood == null || trackName == null) {
         return;
     }
-    //Existing background music playing from provided musiclist, continue
-    if (musicList === brutalBackgroundMusicList && isBrutalPlaylist(currentBackgroundMusic)) {
+    var playlist = backgroundMusicLists[mood];
+    if (playlist == null) {
+        console.warn("setBackgroundMusic: unknown mood '" + mood + "' from server — no music change");
         return;
     }
-    if (musicList === calmBackgroundMusicList && isCalmingPlaylist(currentBackgroundMusic)) {
+    var track = playlist[trackName];
+    if (track == null) {
+        console.warn("setBackgroundMusic: track '" + trackName + "' not registered for mood '" + mood + "' (config.json/audio.js mismatch?) — no music change");
         return;
     }
-    if (musicList === excitingBackgroundMusicList && isExcitingPlaylist(currentBackgroundMusic)) {
+    //Already playing this exact track — leave it (and its fade) alone.
+    if (currentBackgroundMusic === track && !track.paused && !track.ended) {
         return;
     }
-    //Existing background music does not match playlist, fade out and change playlist
-    fadeSoundOut(currentBackgroundMusic);
-    currentBackgroundMusic = musicList[getRandomInt(0, musicList.length - 1)];
-    fadeSoundIn(currentBackgroundMusic);
-    playSound(currentBackgroundMusic);
+    //Fade out whatever else is playing before switching.
+    if (currentBackgroundMusic != null && currentBackgroundMusic !== track) {
+        fadeSoundOut(currentBackgroundMusic);
+    }
+    currentBackgroundMusic = track;
+    fadeSoundIn(track);
+    playSound(track);
+}
+
+// Background tracks don't loop. When the active one finishes, tell the server so
+// it can pick the next track for everyone — keeps music continuous and in sync.
+function handleBackgroundTrackEnded(event) {
+    var sound = event.target;
+    if (sound !== currentBackgroundMusic) {
+        return;
+    }
+    if (musicTrackEndedHandler != null) {
+        musicTrackEndedHandler(sound.trackName);
+    }
 }
 
 function fadeSoundIn(sound) {
@@ -310,29 +317,3 @@ function fadeSoundOut(sound) {
     fadeTimers.set(sound, timer);
 }
 
-function isExcitingPlaylist(sound) {
-    for (var i = 0; i < excitingBackgroundMusicList.length; i++) {
-        if (sound === excitingBackgroundMusicList[i]) {
-            return true;
-        }
-    }
-    return false;
-}
-
-function isBrutalPlaylist(sound) {
-    for (var i = 0; i < brutalBackgroundMusicList.length; i++) {
-        if (sound === brutalBackgroundMusicList[i]) {
-            return true;
-        }
-    }
-    return false;
-}
-
-function isCalmingPlaylist(sound) {
-    for (var i = 0; i < calmBackgroundMusicList.length; i++) {
-        if (sound === calmBackgroundMusicList[i]) {
-            return true;
-        }
-    }
-    return false;
-}

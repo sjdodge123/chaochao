@@ -40,12 +40,12 @@ Colors.random = function () {
     return result;
 };
 Colors.decode = function (input) {
-    var result;
     for (var prop in this.names) {
         if (input == this.names[prop]) {
             return prop;
         }
     }
+    return "A player";
 }
 
 function getColor() {

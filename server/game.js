@@ -131,6 +131,10 @@ class Game {
 		//State mgmt
 		this.stateMap = c.stateMap;
 		this.currentState = this.stateMap.waiting;
+		//Server-authoritative background music ({mood, track}); null until a race starts
+		this.currentMusic = null;
+		//When currentMusic.track was last chosen, for the fallback rotation timer
+		this.musicChangedAt = null;
 		this.gameBoard = new GameBoard(world, playerList, projectileList, aimerList, hazardList, engine, roomSig);
 	}
 
@@ -151,6 +155,8 @@ class Game {
 		//In Racing State or Collapse State
 		if (this.currentState == this.stateMap.racing || this.currentState == this.stateMap.collapsing) {
 			this.checkForWinners();
+			this.updateMusicMood();
+			this.checkMusicFallback();
 		}
 		//In Overview State
 		if (this.currentState == this.stateMap.overview) {
@@ -361,6 +367,83 @@ class Game {
 		messenger.messageRoomBySig(this.roomSig, "startWaiting", null);
 		this.currentState = this.stateMap.waiting;
 	}
+	//The mood the room should be hearing right now: exciting overrides everything
+	//when anyone is one notch from winning, otherwise brutal rounds get brutal music.
+	computeMusicMood() {
+		for (var id in this.playerList) {
+			if (this.playerList[id].nearVictory == true) {
+				return "exciting";
+			}
+		}
+		if (this.gameBoard.brutalRound == true) {
+			return "brutal";
+		}
+		return "calm";
+	}
+	//Pick a track name for a mood from the shared config manifest, avoiding an
+	//immediate repeat of avoidTrack when the playlist has alternatives.
+	pickMusicTrack(mood, avoidTrack) {
+		var playlist = c.music[mood];
+		if (playlist == null || playlist.length == 0) {
+			return null;
+		}
+		if (playlist.length == 1) {
+			return playlist[0];
+		}
+		var track = playlist[utils.getRandomInt(0, playlist.length - 1)];
+		var attempts = 0;
+		while (track == avoidTrack && attempts < 5) {
+			track = playlist[utils.getRandomInt(0, playlist.length - 1)];
+			attempts++;
+		}
+		return track;
+	}
+	//Set the room's music and remember when, so the fallback timer can recover
+	//if no client ever reports the track ending.
+	setRoomMusic(mood, track) {
+		this.currentMusic = { mood: mood, track: track };
+		this.musicChangedAt = Date.now();
+	}
+	//Called every racing tick: if the room's mood changed (someone hit/left
+	//near-victory), pick a track for the new mood and tell every client to switch.
+	updateMusicMood() {
+		if (this.currentMusic == null) {
+			return;
+		}
+		var desiredMood = this.computeMusicMood();
+		if (desiredMood == this.currentMusic.mood) {
+			return;
+		}
+		this.setRoomMusic(desiredMood, this.pickMusicTrack(desiredMood, null));
+		messenger.messageRoomBySig(this.roomSig, "musicMood", this.currentMusic);
+	}
+	//A client reported its background track finished. Background tracks don't loop,
+	//so pick the next one for the current mood and broadcast it, keeping music
+	//continuous and in sync. Stale reports for an already-rotated track are ignored.
+	rotateMusicTrack(endedTrack) {
+		if (this.currentMusic == null || this.currentMusic.track != endedTrack) {
+			return;
+		}
+		var mood = this.currentMusic.mood;
+		this.setRoomMusic(mood, this.pickMusicTrack(mood, endedTrack));
+		messenger.messageRoomBySig(this.roomSig, "musicMood", this.currentMusic);
+	}
+	//Safety net: clients normally drive rotation by reporting "ended" (precise,
+	//per-track). But if every client is muted/backgrounded/autoplay-blocked, that
+	//report never comes. If the current track has been playing past the fallback
+	//window (set above the longest track so it never cuts normal playback), advance
+	//it anyway so the room never gets stuck in silence.
+	checkMusicFallback() {
+		if (this.currentMusic == null || this.musicChangedAt == null) {
+			return;
+		}
+		if (Date.now() - this.musicChangedAt < c.musicFallbackSeconds * 1000) {
+			return;
+		}
+		var mood = this.currentMusic.mood;
+		this.setRoomMusic(mood, this.pickMusicTrack(mood, this.currentMusic.track));
+		messenger.messageRoomBySig(this.roomSig, "musicMood", this.currentMusic);
+	}
 	startLobby() {
 		console.log("Start Lobby")
 		debug.log("startLobby: from state=", this.currentState, " playerCount=", this.playerCount);
@@ -412,7 +495,15 @@ class Game {
 		}
 
 
-		messenger.messageRoomBySig(this.roomSig, "startRace", null);
+		//Keep the current track playing across the load/overview screens — only pick
+		//a new one for the first race or when the mood actually changes. The client
+		//re-plays the same track as a no-op, so music continues uninterrupted.
+		var mood = this.computeMusicMood();
+		if (this.currentMusic == null || this.currentMusic.mood != mood) {
+			this.setRoomMusic(mood, this.pickMusicTrack(mood, null));
+		}
+
+		messenger.messageRoomBySig(this.roomSig, "startRace", { music: this.currentMusic });
 	}
 
 	startOverview() {
@@ -444,6 +535,8 @@ class Game {
 		this.locked = false;
 		this.collapseInitated = false;
 		this.notchesToWin = c.baseNotchesToWin;
+		this.currentMusic = null;
+		this.musicChangedAt = null;
 		this.gameBoard.resetGame(this.currentState);
 		messenger.messageRoomBySig(this.roomSig, "resetGame", null);
 	}
@@ -1709,13 +1802,11 @@ class World extends Rect {
 		player.initialLoc = this.findFreeLoc(player);
 	}
 	getUniqueColorR() {
-		var color = utils.getColor();
+		var usedColors = {};
 		for (var player in this.playerList) {
-			if (this.playerList[player].color == color) {
-				return this.getUniqueColorR();
-			}
+			usedColors[this.playerList[player].color] = true;
 		}
-		return color;
+		return utils.getUniqueColor(usedColors);
 	}
 	resize() {
 		this.width = c.worldWidth;
