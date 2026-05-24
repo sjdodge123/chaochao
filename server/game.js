@@ -2854,6 +2854,16 @@ class Player extends Circle {
 				this.attack = false;
 				return;
 			}
+			// Punching is only meaningful during active play: the race itself
+			// (racing/collapsing), the pre-race gate where players jostle at the start
+			// (gated), and the lobby tutorial. In the non-play screens — the overview
+			// "next map" screen, waiting, and gameOver — swallow the input so no punch
+			// (and no punch sound, which the client only plays on the server's "punch"
+			// event) is thrown.
+			if (currentState != c.stateMap.racing && currentState != c.stateMap.collapsing && currentState != c.stateMap.lobby && currentState != c.stateMap.gated) {
+				this.attack = false;
+				return;
+			}
 			if (this.checkPunchCoolDown()) {
 				return;
 			}
@@ -3093,6 +3103,22 @@ class Player extends Circle {
 		this.acel = object.acel * c.brutalRounds.infection.acelModifer;
 		this.dragCoeff = object.dragCoeff * c.brutalRounds.infection.dragModifer;
 		this.brakeCoeff = object.brakeCoeff * c.brutalRounds.infection.brakeModifer;
+	}
+	// Restore normal ground grip (accel/drag/brake). Called when a player is off every
+	// map cell — e.g. shoved back behind the starting gate, a region with no terrain
+	// tile to stamp physics. Without this, the last tile they touched (ice in particular)
+	// keeps them sliding there until they step back onto real terrain. Zombies keep their
+	// infection handicap, measured against normal ground.
+	resetGrip() {
+		if (this.isZombie == true) {
+			this.acel = c.playerBaseAcel * c.brutalRounds.infection.acelModifer;
+			this.dragCoeff = c.playerDragCoeff * c.brutalRounds.infection.dragModifer;
+			this.brakeCoeff = c.playerBrakeCoeff * c.brutalRounds.infection.brakeModifer;
+			return;
+		}
+		this.acel = c.playerBaseAcel;
+		this.dragCoeff = c.playerDragCoeff;
+		this.brakeCoeff = c.playerBrakeCoeff;
 	}
 	handleHit(object) {
 		if (object.isLobbyStart) {
