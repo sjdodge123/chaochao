@@ -28,8 +28,9 @@ var ARRIVE_RADIUS = 26;         // px: treat a waypoint as reached within this
 var LOOKAHEAD = 60;             // px: carrot distance ahead along the path
 var TURN_BRAKE_COS = 0.45;      // brake when the upcoming bend is sharper than this (cos)
 var BRAKE_SPEED_MIN = 30;       // only brake for turns/lava when moving faster than this
-var HAZARD_AVOID_RADIUS = 58;   // px: start steering away from a bumper within this
+var HAZARD_AVOID_RADIUS = 64;   // px: start steering away from a bumper within this
 var HAZARD_AVOID_STRENGTH = 1.7;// weight of hazard repulsion vs desired heading
+var BUMPER_DANGER_PAD = 22;     // px: extra clearance for a bumper's strike (radius+punch)
 var COLLAPSE_DANGER_MARGIN = 55;// px: also block cells this close to the lava front
 var LAVA_AVOID_RADIUS = 70;     // px: soft repulsion from a lava cell center within this
 var LAVA_AVOID_STRENGTH = 2.2;  // weight of the soft lava field
@@ -75,6 +76,34 @@ function newBotState(profile) {
 }
 
 function mag(x, y) { return Math.sqrt(x * x + y * y); }
+
+// The line segment a moving bumper sweeps along its rail, as {ax,ay,bx,by}. A
+// railed bumper is a small fast circle (radius ~10) whipping back and forth at
+// ~2000px/s, so its instantaneous point is a poor thing to dodge — by the time a
+// bot reacts to where it IS, it's already elsewhere. The bot must treat the whole
+// rail (where it CAN be) as the hazard. The bumper rides from ~radius to ~railLen
+// out from the rail origin along rail.angle (see engine.updateHazards).
+function bumperSegment(h) {
+    var rail = h.rail;
+    var rad = rail.angle * Math.PI / 180;
+    var dirX = Math.cos(rad), dirY = Math.sin(rad);
+    var railLen = Math.sqrt(rail.lengthSq);            // = rail.width
+    var near = Math.sqrt(h.lengthSq || 0) || 0;        // bumper's near-end reversal point
+    return {
+        ax: rail.x + dirX * near, ay: rail.y + dirY * near,
+        bx: rail.x + dirX * railLen, by: rail.y + dirY * railLen
+    };
+}
+
+// Nearest point on segment AB to P, returned as {x,y}.
+function closestOnSegment(px, py, ax, ay, bx, by) {
+    var abx = bx - ax, aby = by - ay;
+    var len2 = abx * abx + aby * aby;
+    if (len2 < 1e-6) { return { x: ax, y: ay }; }
+    var t = ((px - ax) * abx + (py - ay) * aby) / len2;
+    if (t < 0) { t = 0; } else if (t > 1) { t = 1; }
+    return { x: ax + abx * t, y: ay + aby * t };
+}
 
 // Build a voronoiId -> {x,y} site lookup once per tick (shared across bots).
 function buildSiteIndex(map) {
@@ -138,15 +167,24 @@ function carrotPoint(bot, waypoints, startIndex) {
 
 // Sum of repulsion away from nearby bumpers/moving bumpers, scaled so it ramps
 // up sharply as the bot closes on a hazard's strike range. Returns {x,y} (may be
-// {0,0} when clear).
+// {0,0} when clear). A moving bumper (has a rail) is dodged from the closest point
+// on the WHOLE swept segment — not its flickering instantaneous position — so the
+// push stays a stable "stay off the track" vector instead of jittering as the
+// bumper races back and forth, which is what let bots thread in and get clipped.
 function hazardRepulsion(bot, hazardList) {
     var rx = 0, ry = 0;
     for (var id in hazardList) {
         var h = hazardList[id];
         if (h.alive === false) { continue; }
-        var dx = bot.x - h.x, dy = bot.y - h.y;
+        var hx = h.x, hy = h.y;
+        if (h.moveable && h.rail != null) {
+            var seg = bumperSegment(h);
+            var cp = closestOnSegment(bot.x, bot.y, seg.ax, seg.ay, seg.bx, seg.by);
+            hx = cp.x; hy = cp.y;
+        }
+        var dx = bot.x - hx, dy = bot.y - hy;
         var d = mag(dx, dy);
-        var range = HAZARD_AVOID_RADIUS + (h.radius || 0);
+        var range = HAZARD_AVOID_RADIUS + (h.radius || 0) + BUMPER_DANGER_PAD;
         if (d > 0 && d < range) {
             var w = (range - d) / range; // 0 at edge -> 1 at center
             w = w * w;                   // ramp harder up close
@@ -278,10 +316,6 @@ function nearestRivalToPoint(px, py, players, self) {
         if (d < bd) { bd = d; }
     }
     return bd;
-}
-function hasRacingRival(bot, players) {
-    for (var id in players) { if (isRacer(players[id], bot)) { return true; } }
-    return false;
 }
 function countRacers(players) {
     var n = 0;
@@ -449,18 +483,36 @@ function decideAbility(bot, ctx, ability, nav) {
         if (held > BOMB_MAX_HOLD) { bot.attack = true; }
         return;
     }
-    // Abilities persist all round, so bots use them strategically but never hoard:
-    // each has a "good moment" to fire, plus a hold-timeout (longer for hoarders,
-    // shorter for trigger-happy) after which it fires at the next safe opportunity.
+    // Abilities persist the whole round, so bots HOLD them like a patient human —
+    // banking the ability and spending it only when there's a real reason, not on a
+    // short timer. Three gates:
+    //   armed   — a brief anti-twitch floor so a bot doesn't fire the literal instant
+    //             it grabs one; opportunistic plays (bomb a rival, cut a neighbour)
+    //             still fire soon after, but never on frame one.
+    //   endgame — "use it or lose it": once the floor starts collapsing the round is
+    //             wrapping up, so a banked ability is deployed at the next safe chance
+    //             rather than carried into oblivion. This is the usual trigger for a
+    //             situational ability that never found its moment.
+    //   forced  — a long patience cap (tens of seconds) as a last-resort fallback for
+    //             a quiet round that somehow never collapses, so nothing is wasted.
     var held = nav.held || 0;
-    var maxHold = 2 + (1 - bot.ai.abilityTempo) * 5; // ~2s (eager) .. ~7s (hoarder)
-    var forced = held > maxHold;
+    var tempo = bot.ai.abilityTempo;
+    var minHold = 2 + (1 - tempo) * 4;     // ~2s (eager) .. ~6s (hoarder): anti-twitch floor
+    var maxHold = 30 + (1 - tempo) * 60;   // ~30s (eager) .. ~90s (hoarder): patience cap
+    var armed = held >= minHold;
+    var endgame = ctx.collapsing === true; // round ending -> deploy now or waste it
+    var forced = endgame || held > maxHold;
     var rank = goalRank(bot, ctx.players, bot.ai.goal);
+    var racers = countRacers(ctx.players);
+    var behind = racers > 1 && rank >= 1;  // at least one rival is ahead of us
     var aimAhead = function () { bot.angle = snap45(Math.atan2(bot.targetDirY, bot.targetDirX) * 180 / Math.PI); };
+    // A straight, fast stretch with no brake/lava — the only time a self speed boost
+    // is worth spending (and even then only when it actually helps; see below).
+    var openRunway = !nav.lavaAhead && !nav.sharpTurn && !nav.braking;
 
     if (id === AB.bomb.id) {
         var nr = preferredTarget(bot, ctx); // Nemesis aims at the human
-        if (nr != null && nr.dist < BOMB_THROW_RANGE) {
+        if (nr != null && nr.dist < BOMB_THROW_RANGE && armed) {
             bot.angle = snap45(angleDeg(bot.x, bot.y, nr.player.x, nr.player.y));
             bot.attack = true; bot.ai.bombFiredAt = Date.now();
         } else if (forced) {
@@ -474,7 +526,7 @@ function decideAbility(bot, ctx, ability, nav) {
         // giving away the lead, so never force it while in front).
         if (rank >= 1) {
             var nrs = preferredTarget(bot, ctx);
-            if (nrs != null && (nrs.dist < SWAP_RANGE || forced)) { bot.attack = true; }
+            if (nrs != null && ((nrs.dist < SWAP_RANGE && armed) || forced)) { bot.attack = true; }
         }
         return;
     }
@@ -482,31 +534,37 @@ function decideAbility(bot, ctx, ability, nav) {
         // Shove nearby rivals aside (perpendicular to facing); aim along travel.
         var nrc = nearestRival(bot, ctx.players);
         var range = forced ? CUT_RANGE * 2 : CUT_RANGE;
-        if (nrc != null && nrc.dist < range) { aimAhead(); bot.attack = true; }
+        if (nrc != null && nrc.dist < range && (armed || forced)) { aimAhead(); bot.attack = true; }
         return;
     }
     if (id === AB.speedDebuff.id) {
-        if (hasRacingRival(bot, ctx.players)) { bot.attack = true; } // slows ALL rivals
+        // Slows ALL rivals — hold it until a rival is near AND ahead of us (catch-up
+        // value); a runaway leader banks it for the collapse instead of wasting it.
+        var nrd = nearestRival(bot, ctx.players);
+        if ((armed && behind && nrd != null && nrd.dist < BOMB_THROW_RANGE) || forced) { bot.attack = true; }
         return;
     }
     if (id === AB.speedBuff.id) {
-        // Self speed boost: spend it on the move (just not braking into lava).
-        if (!nav.lavaAhead) { bot.attack = true; }
+        // Self speed boost: bank it until it actually wins ground — a straightaway
+        // while CHASING (behind) — or the endgame dash; a leader holds it. Forced
+        // fallback still avoids boosting into lava.
+        if ((behind && openRunway && armed) || (forced && !nav.lavaAhead)) { bot.attack = true; }
         return;
     }
     if (id === AB.iceCannon.id) {
-        if (!nav.lavaAhead) { aimAhead(); bot.attack = true; } // self-boost + ice the lane ahead
+        // Self-boost + ice the lane ahead: same chase/endgame timing as speedBuff.
+        if ((behind && openRunway && armed) || (forced && !nav.lavaAhead)) { aimAhead(); bot.attack = true; }
         return;
     }
     if (id === AB.blindfold.id) {
         // Room-wide blind: best when a human rival is in play and the bot isn't out
-        // front; otherwise use it once held a while so it isn't wasted.
-        if ((hasHumanRival(bot, ctx.players) && rank >= 1) || forced) { bot.attack = true; }
+        // front; otherwise bank it until the round's wrapping up so it isn't wasted.
+        if ((hasHumanRival(bot, ctx.players) && rank >= 1 && armed) || forced) { bot.attack = true; }
         return;
     }
     if (id === AB.tileSwap.id) {
         // Map-wide chaos: best when behind, but use it before the round's out.
-        if (rank >= 2 || forced) { bot.attack = true; }
+        if ((rank >= 2 && armed) || forced) { bot.attack = true; }
         return;
     }
 }
@@ -783,7 +841,7 @@ function steerBot(bot, ctx, dt) {
     bot.braking = braking;
 
     // Combat & abilities (may override bot.angle to an 8-way aim and set bot.attack).
-    decideAttack(bot, ctx, { sharpTurn: sharpTurn, lavaAhead: fl.brake });
+    decideAttack(bot, ctx, { sharpTurn: sharpTurn, lavaAhead: fl.brake, braking: braking });
 }
 
 // The non-lava launch lanes along the gate's front row: the Y positions where a
@@ -901,11 +959,30 @@ function update(gameBoard, currentState, dt) {
     // this A* routes straight through them and the bot gets knocked/stuck. Penalize
     // those cells so routes go AROUND. Recomputed each tick so a moving bumper's
     // cell is tracked (re-pathing is throttled; local repulsion handles the rest).
+    // A MOVING bumper sweeps a whole rail at ~2000px/s, so penalizing only the cell
+    // it sits in this instant is useless — the route must go around the entire
+    // track. Penalize every cell whose center is near the swept segment.
     var hazardCells = null;
     var hazardList = gameBoard.hazardList;
+    var RAIL_PENALTY_MARGIN = 48; // px from the swept segment to still penalize a cell
     for (var hkey in hazardList) {
         var hz = hazardList[hkey];
         if (!hz || hz.alive === false) { continue; }
+        if (hz.moveable && hz.rail != null) {
+            var seg = bumperSegment(hz);
+            var marginSq = RAIL_PENALTY_MARGIN * RAIL_PENALTY_MARGIN;
+            for (var ri = 0; ri < map.cells.length; ri++) {
+                var rc = map.cells[ri];
+                if (!rc || !rc.site) { continue; }
+                var cpr = closestOnSegment(rc.site.x, rc.site.y, seg.ax, seg.ay, seg.bx, seg.by);
+                var rdx = rc.site.x - cpr.x, rdy = rc.site.y - cpr.y;
+                if (rdx * rdx + rdy * rdy < marginSq) {
+                    if (hazardCells == null) { hazardCells = new Set(); }
+                    hazardCells.add(rc.site.voronoiId);
+                }
+            }
+            continue;
+        }
         var bestI = -1, bestD = Infinity;
         for (var ci2 = 0; ci2 < map.cells.length; ci2++) {
             var cc = map.cells[ci2];
@@ -1002,3 +1079,11 @@ function update(gameBoard, currentState, dt) {
 }
 
 module.exports = { update: update };
+// Pure helpers exposed for unit tests (cf. lastRubberBand diagnostic above).
+module.exports._test = {
+    bumperSegment: bumperSegment,
+    closestOnSegment: closestOnSegment,
+    hazardRepulsion: hazardRepulsion,
+    decideAbility: decideAbility,
+    newBotState: newBotState
+};
