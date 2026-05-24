@@ -1104,9 +1104,19 @@ function onLocalPlayersChanged() {
     }
     // A block per joined local player; drop blocks for slots that are gone.
     for (var s = 0; s < localPlayers.length; s++) {
-        if (localPlayers[s]) {
-            ensureBlock(localPlayers[s]);
+        var lp = localPlayers[s];
+        if (!lp) {
+            continue;
         }
+        // Don't show a phantom kb/m "P1" block when no one is actually using the
+        // keyboard/mouse — so a controller-only player just sees their controller
+        // (which becomes P1 when they press A). Once kb/m is used (kbmClaimedPrimary)
+        // or a controller binds to P1, the block appears.
+        if (lp.isPrimary && lp.padIndex == null && !kbmClaimedPrimary) {
+            removeBlock(s);
+            continue;
+        }
+        ensureBlock(lp);
     }
     for (var slot in padBlocks) {
         if (!localPlayers[slot]) {
