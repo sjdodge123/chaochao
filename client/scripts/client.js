@@ -650,9 +650,37 @@ function dropLocalPlayer(slot) {
 	}
 	try { lp.socket.disconnect(); } catch (e) { /* already gone */ }
 	localPlayers[slot] = null;
+	// A controller player who just left was effectively the only player if all that
+	// remains is the primary slot with no one actually driving it — no pad bound and
+	// the keyboard/mouse was never used to play (a phantom P1 that only exists to
+	// hold the tab). In that case fall through to the same teardown the primary leave
+	// uses, so leaving returns to the menu instead of stranding the tab on a player
+	// nobody is controlling. A real keyboard/mouse player (kbmClaimedPrimary) or
+	// another controller still in the game keeps the session alive.
+	if (onlyPhantomPrimaryRemains()) {
+		// No real player left — tear the tab down and go back to the menu, same as
+		// the last-player-leaving path in handlePrimaryLost().
+		try { server.disconnect(); } catch (e) { /* ignore */ }
+		window.location.href = "./index.html";
+		return;
+	}
 	if (typeof onLocalPlayersChanged === "function") {
 		onLocalPlayersChanged(); // restore the bottom bar if back to 1 player
 	}
+}
+
+// True when the sole surviving local player is the primary slot and nobody is
+// actually driving it: no controller bound and the keyboard/mouse never claimed P1.
+function onlyPhantomPrimaryRemains() {
+	var remaining = null, count = 0;
+	for (var s = 0; s < localPlayers.length; s++) {
+		if (localPlayers[s]) {
+			count++;
+			remaining = localPlayers[s];
+		}
+	}
+	return count === 1 && remaining.isPrimary &&
+		remaining.padIndex == null && !kbmClaimedPrimary;
 }
 
 // The primary (rendering/audio) connection was lost. If pad players are still in
