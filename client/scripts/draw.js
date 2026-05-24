@@ -3,6 +3,17 @@ var spreadScale = 0.15;
 var bombScale = 0.025;
 var complexPatternScale = 0.1;
 
+// Theme-aware colours for canvas elements that sit on the board surface and
+// must stay readable in dark mode (playfield fill/border + on-board text).
+// theme.js keeps window.themePalette in sync with the active theme; the
+// fallbacks match the original light-mode literals so this degrades safely if
+// theme.js hasn't run yet. Intrinsic colours (player/tile/podium/hazard) are
+// left untouched on purpose.
+function themeColor(key, fallback) {
+    var pal = (typeof window !== 'undefined') ? window.themePalette : null;
+    return (pal && pal[key]) ? pal[key] : fallback;
+}
+
 var patterns = {};
 var brutalPatterns = {};
 var brutalRoundImages = {};
@@ -609,9 +620,9 @@ function drawAimer(aimer) {
 function drawMapTitle() {
     if (currentMap != null) {
         gameContext.save();
-        gameContext.strokeStyle = "white";
+        gameContext.strokeStyle = themeColor('inkOutline', 'white');
         gameContext.lineWidth = 4;
-        gameContext.fillStyle = "black";
+        gameContext.fillStyle = themeColor('ink', 'black');
         gameContext.font = "14px Arial";
         gameContext.strokeText('"' + currentMap.name + '"', 5, gameCanvas.height - 25);
         gameContext.strokeText('~' + currentMap.author, 5, gameCanvas.height - 10);
@@ -709,6 +720,13 @@ function drawDeathMessage(player) {
         gameContext.save();
         gameContext.drawImage(commentIconSolid, player.x, player.y - 40, commentIconSolid.width * 0.07, commentIconSolid.height * 0.07);
         gameContext.font = '20px Times New Roman';
+        // theme-aware so the message stays readable where it overflows the
+        // bubble onto the (now theme-coloured) board; outline gives a contrast
+        // halo in both themes, matching drawMapTitle.
+        gameContext.lineWidth = 3;
+        gameContext.strokeStyle = themeColor('inkOutline', 'white');
+        gameContext.fillStyle = themeColor('ink', 'black');
+        gameContext.strokeText(player.deathMessage, player.x + 8, player.y - 17);
         gameContext.fillText(player.deathMessage, player.x + 8, player.y - 17);
         gameContext.restore();
     }
@@ -937,7 +955,7 @@ function drawWorld() {
     if (world != null) {
         gameContext.save();
         gameContext.beginPath();
-        gameContext.fillStyle = "#F0F0F0";
+        gameContext.fillStyle = themeColor('surface', '#F0F0F0');
         gameContext.rect(world.x + camera.getCameraX(), world.y + camera.getCameraY(), world.width, world.height);
         gameContext.fill();
         gameContext.restore();
@@ -945,7 +963,7 @@ function drawWorld() {
         gameContext.save();
         gameContext.beginPath();
         gameContext.lineWidth = 4;
-        gameContext.strokeStyle = "black";
+        gameContext.strokeStyle = themeColor('ink', 'black');
         gameContext.rect(world.x + camera.getCameraX(), world.y + camera.getCameraY(), world.width, world.height);
         gameContext.stroke();
         gameContext.restore();
@@ -1224,9 +1242,9 @@ function drawGameInfo() {
     var startX = world.width / 2 - 125;
     gameContext.save();
     gameContext.font = "14px Arial";
-    gameContext.strokeStyle = "white";
+    gameContext.strokeStyle = themeColor('inkOutline', 'white');
     gameContext.lineWidth = 4;
-    gameContext.fillStyle = "black";
+    gameContext.fillStyle = themeColor('ink', 'black');
     gameContext.strokeText("GameID: " + gameID, startX + 10, 20);
     gameContext.fillText("GameID: " + gameID, startX + 10, 20);
     gameContext.strokeText("Players: " + totalPlayers, startX + 100, 20);
@@ -1273,7 +1291,7 @@ function drawTouchControls() {
         gameContext.save();
         gameContext.beginPath();
         gameContext.lineWidth = 3;
-        gameContext.strokeStyle = "black ";
+        gameContext.strokeStyle = themeColor('ink', 'black');
         gameContext.arc(joystickMovement.baseX, joystickMovement.baseY, joystickMovement.baseRadius, 0, Math.PI * 2, false);
         gameContext.stroke();
         gameContext.beginPath();
@@ -1294,7 +1312,7 @@ function drawTouchControls() {
 
         gameContext.beginPath();
         gameContext.lineWidth = 3;
-        gameContext.strokeStyle = "black ";
+        gameContext.strokeStyle = themeColor('ink', 'black');
         gameContext.arc(joystickCamera.baseX, joystickCamera.baseY, joystickCamera.baseRadius, 0, Math.PI * 2, false);
         gameContext.stroke();
         gameContext.beginPath();
@@ -1312,7 +1330,7 @@ function drawTouchControls() {
         gameContext.save();
         gameContext.beginPath();
         gameContext.lineWidth = 1;
-        gameContext.strokeStyle = "black";
+        gameContext.strokeStyle = themeColor('ink', 'black');
         gameContext.fillStyle = "rgba(0, 0, 255, 0.2)";
 
         //gameContext.rect(attackButton.baseX, attackButton.baseY, attackButton.width, attackButton.height);
@@ -1395,7 +1413,7 @@ function drawTitle() {
     }
     if (currentState == config.stateMap.waiting && lobbyStartButton == null) {
         gameContext.save();
-        gameContext.fillStyle = "black";;
+        gameContext.fillStyle = themeColor('ink', 'black');
         gameContext.lineWidth = 3;
         gameContext.font = "30px Arial";
         gameContext.fillText('Waiting for more players..', (gameCanvas.width / 2) - 200, (gameCanvas.height / 2) - 25);

@@ -12,7 +12,54 @@
 }
 :root {
     --navbar-height: 60px;
+
+    /* Theme palette — light (default). The dark overrides live in the
+       [data-theme="dark"] block below; theme.js flips the data-theme
+       attribute on <html> based on the saved light/dark/auto preference. */
+    --bg: #ffffff;
+    --surface: #ffffff;        /* cards, panels, modals */
+    --surface-2: #f6f6f6;      /* subtle inset panels (game cards, editor) */
+    --text: #212529;
+    --text-soft: #495057;      /* slightly muted body text (stats, news copy) */
+    --text-muted: #6c757d;
+    --border: #e6e6e6;
+    --card-shadow: var(--card-shadow);     /* drop shadow / glow on cards and banners */
+    --navbar-bg: #000000;
+    --navbar-text: #ffffff;
+    /* navbar control chrome — kept white-based because the navbar stays dark in
+       both themes; change here (not in .theme-toggle) if the navbar ever lightens. */
+    --navbar-control-border: rgba(255, 255, 255, 0.35);
+    --navbar-control-hover: rgba(255, 255, 255, 0.15);
+    --board-bg: #ffffff;       /* letterbox around the game/editor canvas */
+    --overlay-bg: rgba(255, 255, 255, 0.92);  /* floating controller toasts */
+    --overlay-text: #555555;
+
+    /* Colours consumed by the canvas renderer via window.themePalette. */
+    --canvas-surface: #f0f0f0;     /* playfield fill */
+    --canvas-ink: #000000;         /* on-board text/borders */
+    --canvas-ink-outline: #ffffff; /* contrast halo behind that text */
 }
+
+[data-theme="dark"] {
+    --bg: #15171a;
+    --surface: #1e2127;
+    --surface-2: #262a31;
+    --text: #e6e6e6;
+    --text-soft: #b9bfc6;
+    --text-muted: #9aa0a6;
+    --border: #2c2f36;
+    --card-shadow: rgba(0, 0, 0, 0.55);
+    --navbar-bg: #0a0a0a;
+    --navbar-text: #f0f0f0;
+    --board-bg: #15171a;
+    --overlay-bg: rgba(30, 33, 39, 0.94);
+    --overlay-text: #cfd2d6;
+
+    --canvas-surface: #20242b;
+    --canvas-ink: #e6e6e6;
+    --canvas-ink-outline: #000000;
+}
+
 html,body {
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
     width: 100vw;
@@ -24,20 +71,49 @@ body {
        on the first child) so the offset doesn't margin-collapse out of
        body and inflate the page height past the viewport. */
     padding-top: var(--navbar-height);
+    background: var(--bg);
+    color: var(--text);
 }
 
 nav {
     height: var(--navbar-height);
     width: 100%;
-    border-bottom: thin solid #e6e6e6;
+    border-bottom: thin solid var(--border);
     box-shadow: 0px 8px 15px rgba(0, 0, 0, 0.1);
     position: fixed;
     z-index: 1005;
     top: 0;
     left: 0;
-    background: #000;
-    color: #fff;
+    background: var(--navbar-bg);
+    color: var(--navbar-text);
   }
+
+/* light/dark/auto toggle injected into the navbar by theme.js */
+.theme-toggle {
+    margin-left: auto;        /* push to the far right of the navbar */
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid var(--navbar-control-border);
+    background: transparent;
+    color: var(--navbar-text);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s, border-color 0.2s;
+}
+.theme-toggle:hover {
+    background: var(--navbar-control-hover);
+}
+.theme-toggle:focus {
+    outline: none;
+    border-color: #c87f8a;
+    box-shadow: 0 0 0 3px rgba(200, 127, 138, 0.4);
+}
 
   section {
     /* navbar offset comes from body { padding-top } so margins don't
@@ -80,9 +156,9 @@ canvas {
 }
 #joinMenu {
     border-radius: 6px;
-    box-shadow: 0px 0px 6px #B2B2B2;
+    box-shadow: 0px 0px 6px var(--card-shadow);
     padding: 0.75rem;
-    background: #fff;
+    background: var(--surface);
     min-height: 80px;
 }
 #gameSelection {
@@ -97,8 +173,8 @@ canvas {
     gap: 1rem;
     padding: 0.6rem 0.9rem;
     border-radius: 4px;
-    background-color: #F6F6F6;
-    box-shadow: 0px 0px 3px #B2B2B2;
+    background-color: var(--surface-2);
+    box-shadow: 0px 0px 3px var(--card-shadow);
 }
 .card-info {
     display: flex;
@@ -114,11 +190,11 @@ canvas {
 }
 .card-stat {
     font-size: 0.9rem;
-    color: #495057;
+    color: var(--text-soft);
     white-space: nowrap;
 }
 .card-stat-label {
-    color: #6c757d;
+    color: var(--text-muted);
 }
 .gameCard .join-btn {
     flex: 0 0 auto;
@@ -127,7 +203,7 @@ canvas {
 .empty-state {
     text-align: center;
     padding: 1.5rem 1rem;
-    color: #6c757d;
+    color: var(--text-muted);
 }
 .not-found-banner {
     background-color: #fff3cd;
@@ -157,7 +233,7 @@ canvas {
 }
 
 #gameWindow {
-    background: white;
+    background: var(--board-bg);
     overflow: hidden;
     display: none;
     /* Fill the section and flex-centre the canvas stack inside so the
@@ -174,7 +250,7 @@ canvas {
 }
 
 #createWindow {
-    background: white;
+    background: var(--board-bg);
     overflow: hidden;
     display: none;
     height: 100%;
@@ -324,16 +400,16 @@ div.desc {
 }
 
 .play-container {
-    background-color: white;
+    background-color: var(--surface);
     width: 100%;
     padding: 1.5rem;
     border-radius: 6px;
-    box-shadow: 0px 0px 6px #B2B2B2;
+    box-shadow: 0px 0px 6px var(--card-shadow);
 }
 
 .tagline {
     margin: 0.75rem 0 0;
-    color: #6c757d;
+    color: var(--text-muted);
     font-size: 0.9rem;
     text-align: center;
 }
@@ -346,18 +422,18 @@ div.desc {
     width: 100%;
     margin-top: 0.75rem;
     padding: 0.6rem 0.9rem;
-    background-color: #fff;
+    background-color: var(--surface);
     border: 1px solid #f0d6da;
     border-left: 4px solid #c87f8a;
     border-radius: 6px;
-    box-shadow: 0px 0px 6px #B2B2B2;
+    box-shadow: 0px 0px 6px var(--card-shadow);
     text-decoration: none;
-    color: #444;
+    color: var(--text-soft);
     transition: box-shadow 0.2s, transform 0.2s;
 }
 .news-banner:hover {
     text-decoration: none;
-    color: #444;
+    color: var(--text-soft);
     box-shadow: 0px 2px 10px rgba(200, 127, 138, 0.35);
     transform: translateY(-1px);
 }
@@ -379,12 +455,12 @@ div.desc {
 
 
 .create-container {
-    background-color: white;
+    background-color: var(--surface);
     height: 100px;
     width: 50%;
     padding: 10px;
     border-radius: 5px;
-    box-shadow: 0px 0px 6px #B2B2B2;
+    box-shadow: 0px 0px 6px var(--card-shadow);
 }
 
 #exitIcon {
@@ -489,12 +565,12 @@ div.desc {
     align-items: center;
     gap: 14px;
     padding: 8px 16px;
-    background-color: rgba(255, 255, 255, 0.92);
+    background-color: var(--overlay-bg);
     border-radius: 22px;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
     font-size: 14px;
-    color: #555;
+    color: var(--overlay-text);
     z-index: 1006;
     pointer-events: none;
     transition: opacity 0.3s;
@@ -619,12 +695,12 @@ div.desc {
     align-items: center;
     gap: 6px;
     padding: 5px 10px;
-    background-color: rgba(255, 255, 255, 0.92);
+    background-color: var(--overlay-bg);
     border-radius: 18px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
     font-size: 13px;
-    color: #555;
+    color: var(--overlay-text);
     transition: opacity 0.3s;
 }
 
@@ -699,12 +775,12 @@ div.desc {
     align-items: center;
     gap: 12px;
     padding: 6px 14px;
-    background-color: rgba(255, 255, 255, 0.92);
+    background-color: var(--overlay-bg);
     border-radius: 18px;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
     font-size: 13px;
-    color: #555;
+    color: var(--overlay-text);
     z-index: 2000;
     pointer-events: none;
 }
@@ -757,7 +833,7 @@ div.desc {
     align-items: center;
     gap: 6px;
     padding: 8px 16px;
-    background-color: rgba(255, 255, 255, 0.92);
+    background-color: var(--overlay-bg);
     border-radius: 22px;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
@@ -827,7 +903,7 @@ div.desc {
     display: none;
 }
 .confirm-dialog {
-    background: #fff;
+    background: var(--surface);
     border-radius: 10px;
     padding: 1.5rem 1.75rem;
     box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
@@ -838,7 +914,7 @@ div.desc {
 .confirm-title {
     font-size: 1.25rem;
     font-weight: 600;
-    color: #333;
+    color: var(--text);
     margin-bottom: 1.1rem;
 }
 .confirm-buttons {
@@ -852,13 +928,62 @@ div.desc {
     font-size: 1rem;
     font-weight: 600;
     border-radius: 6px;
-    border: 1px solid #ccc;
-    background: #f6f6f6;
-    color: #333;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
     cursor: pointer;
 }
 .confirm-btn.confirm-leave {
     background: #c87f8a;
     border-color: #c87f8a;
     color: #fff;
+}
+
+/* --- dark-mode overrides for Bootstrap-driven and map-editor surfaces ---
+   These selectors carry extra specificity (or !important) so they win over
+   Bootstrap utilities and the per-page inline styles in create.html. */
+[data-theme="dark"] .bg-light {
+    background-color: var(--surface-2) !important;
+    color: var(--text);
+}
+[data-theme="dark"] .form-control {
+    background-color: var(--surface-2);
+    color: var(--text);
+    border-color: var(--border);
+}
+[data-theme="dark"] .form-control::placeholder {
+    color: var(--text-muted);
+}
+[data-theme="dark"] .form-control:focus {
+    background-color: var(--surface-2);
+    color: var(--text);
+}
+/* map editor (create.html) toolbars are pinned with hardcoded light greys */
+[data-theme="dark"] #editorToolbar,
+[data-theme="dark"] #actionsSection {
+    background: var(--surface-2);
+    border-color: var(--border);
+}
+[data-theme="dark"] #controlPanel {
+    border-right-color: var(--border);
+}
+/* the Actions buttons render with the native button face (light); pull them
+   into the dark theme so they match the rest of the editor panel. */
+[data-theme="dark"] #controlPanel .btn-block {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+}
+/* the "game not found" warning banner is a hardcoded light amber; give it a
+   dark-amber variant so it doesn't read as a light-mode artifact. */
+[data-theme="dark"] .not-found-banner {
+    background-color: #3a3320;
+    color: #ffe08a;
+    border-color: #5c4a1f;
+}
+/* news banner: its surface/text follow the theme, so soften the hardcoded
+   pink hairline border in dark mode (keeping the brand left accent). */
+[data-theme="dark"] .news-banner {
+    border-color: #43363a;
+    border-left-color: #c87f8a;
 }
