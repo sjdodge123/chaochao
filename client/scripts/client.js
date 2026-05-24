@@ -332,6 +332,7 @@ function registerPrimaryHandlers(server) {
 
 	server.on("punch", function (packet) {
 		var punch = spawnPunch(packet);
+		spawnPunchEffect(punch);
 		var owner = playerList[punch.ownerId];
 		if (owner != null && owner.infected) {
 			playSound(zombieSwing);
@@ -347,6 +348,7 @@ function registerPrimaryHandlers(server) {
 	});
 	server.on("spawnBomb", function (owner) {
 		spawnBomb(owner);
+		fireMuzzleFlash(owner, "#ffcf8f");
 		playSound(bombShot);
 	});
 	server.on("spawnPuck", function (owner) {
@@ -355,17 +357,38 @@ function registerPrimaryHandlers(server) {
 	});
 	server.on("applyBlackout", function (owner) {
 		blackout = true;
+		blackoutStart = Date.now();
 		playSound(blackoutSound);
 	});
 
 	server.on("spawnSnowFlake", function (owner) {
 		spawnSnowFlake(owner);
+		fireMuzzleFlash(owner, "#bfefff");
 		playSound(bombShot);
 	});
 	server.on("spawnClouds", function (packet) {
 		spawnClouds(packet);
 	});
-	server.on("playerPunched", function (owner) {
+	server.on("playerPunched", function (payload) {
+		// payload: { owner: attacker id, victim: id of whoever got hit, x, y: the
+		// victim's position }. victim may be a non-player target (e.g. the hockey
+		// puck), so use the payload position rather than a playerList lookup for
+		// the spark — that way bashing the puck still gets a hit effect.
+		var owner = payload != null ? payload.owner : null;
+		var victim = payload != null ? payload.victim : null;
+		var victimPlayer = playerList[victim];
+		var hitX = victimPlayer != null ? victimPlayer.x : (payload != null ? payload.x : null);
+		var hitY = victimPlayer != null ? victimPlayer.y : (payload != null ? payload.y : null);
+		if (hitX != null && hitY != null) {
+			var sparkColor = playerList[owner] != null ? playerList[owner].color : "white";
+			spawnHitEffect(hitX, hitY, sparkColor);
+			// Feel a connecting hit when a local player is on either end of it —
+			// but not during the gated countdown (jostling at the start line
+			// shouldn't rattle the camera while everyone's waiting to race).
+			if ((isLocalId(victim) || isLocalId(owner)) && currentState != config.stateMap.gated) {
+				addTrauma(0.28);
+			}
+		}
 		// Only a real scrum — several hits landing in quick succession — reads as
 		// "a fight broke out." A single punch (or one multi-hit swing) shouldn't
 		// trigger it, and once it fires the crowd stays quiet for a while so it
@@ -404,15 +427,33 @@ function registerPrimaryHandlers(server) {
 	});
 	server.on('explodedCells', function (cells) {
 		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing || currentState == config.stateMap.lobby) {
+			var center = cellsCentroid(cells);
 			explodedCells(cells);
+			if (center != null) {
+				spawnExplosion(center.x, center.y, config.tileMap.abilities.bomb.explosionRadius);
+			}
 			playSound(bombExplosion);
-			rumbleScreen(100);
+			addTrauma(0.5);
 		}
 	});
-	server.on("snowFlakeExploded", function (owner) {
+	server.on("snowFlakeExploded", function (payload) {
 		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing || currentState == config.stateMap.lobby) {
+			// payload carries the true detonation point { owner, x, y }; fall back
+			// to the projectile's last position (older shape) if needed. Using the
+			// sent point means the blast renders even if the flake was already
+			// removed by a terminateProj/gameUpdates arriving first.
+			var ex = (payload != null && payload.x != null) ? payload.x : null;
+			var ey = (payload != null && payload.y != null) ? payload.y : null;
+			if (ex == null) {
+				var owner = (payload != null && payload.owner != null) ? payload.owner : payload;
+				var flake = projectileList[owner];
+				if (flake != null) { ex = flake.x; ey = flake.y; }
+			}
+			if (ex != null && ey != null) {
+				spawnExplosion(ex, ey, config.tileMap.abilities.iceCannon.explosionRadius, "#9fe8ff");
+			}
 			playSound(iceExplosion);
-			rumbleScreen(100);
+			addTrauma(0.45);
 		}
 	});
 	server.on("firstBlood", function () {
@@ -517,6 +558,22 @@ function registerPrimaryHandlers(server) {
 			changeTilesBulk(tileChanges);
 		});
 	});
+	// The tiles a tileSwap is about to flip — clients pulse/flicker them for the
+	// (random 3-6s) warn-up before the swap actually lands.
+	server.on("tileSwapPending", function (payload) {
+		$.when.apply($, promises).then(function () {
+			var data = JSON.parse(payload);
+			markPendingSwap(data.ids, data.duration);
+		});
+	});
+	// Fires the instant the swap actually flips the tiles — drives the delayed
+	// swap sound and clears the telegraph for exactly the tiles that flipped.
+	server.on("tileSwapPerformed", function (payload) {
+		$.when.apply($, promises).then(function () {
+			var ids = JSON.parse(payload);
+			tileSwapLanded(ids);
+		});
+	});
 
 	server.on("projBounced", function () {
 		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing || currentState == config.stateMap.lobby) {
@@ -542,12 +599,17 @@ function registerPrimaryHandlers(server) {
 	});
 	server.on("cutUsed", function (owner) {
 		playSound(cutSound);
+		var cutter = playerList[owner];
+		if (cutter != null) {
+			spawnSlashEffect(cutter.x, cutter.y, cutter.angle, cutter.color);
+		}
 		playerAbilityUsed(owner);
-		rumbleScreen(100);
+		addTrauma(0.4);
 	});
 	server.on("tileSwap", function (owner) {
+		// The swap is telegraphed then delayed (see tileSwapPending); the sound
+		// now plays when the tiles actually flip (see tileSwapPerformed), not here.
 		playerAbilityUsed(owner);
-		playSound(tileSwap);
 	});
 	server.on("iceCannon", function (owner) {
 		playerAbilityUsed(owner);
@@ -556,18 +618,20 @@ function registerPrimaryHandlers(server) {
 	server.on("lavaExplosion", function () {
 		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
 			playSound(lavaExplosion);
-			rumbleScreen(100);
+			spawnScreenFlash("#ff5a1a", 0.3, 300);
+			addTrauma(0.5);
 		}
 	});
 	server.on("spawnExplosionAimer", function (owner) {
 		spawnExplosionAimer(owner);
 		aimerList[owner].startExplosionCountDown = true;
+		aimerList[owner].countdownStart = Date.now();
+		aimerList[owner].countdownDuration = config.explosionWarnTime * 1000;
 
 		for (var i = 1; i < config.explosionWarnTime + 1; i++) {
 			addTimer(function (params) {
 				if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
 					playSound(teleportWarnSound);
-					params.explosionPulse = true;
 				}
 			}, i * 1000, aimerList[owner]);
 			if (i == config.explosionWarnTime) {
@@ -583,12 +647,13 @@ function registerPrimaryHandlers(server) {
 		playerAbilityUsed(owner);
 		spawnSwapAimer(owner);
 		aimerList[owner].startSwapCountDown = true;
+		aimerList[owner].countdownStart = Date.now();
+		aimerList[owner].countdownDuration = config.tileMap.abilities.swap.warnTime;
 
 		for (var i = 1; i < (config.tileMap.abilities.swap.warnTime / 1000) + 1; i++) {
 			addTimer(function (params) {
 				if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
 					playSound(teleportWarnSound);
-					params.swapCountDownPulse = true;
 				}
 			}, i * 1000, aimerList[owner]);
 			if (i == (config.tileMap.abilities.swap.warnTime / 1000)) {
@@ -600,9 +665,25 @@ function registerPrimaryHandlers(server) {
 			}
 		}
 	});
-	server.on("playerSwapped", function (owner) {
-		if (aimerList[owner].startSwapCountDown) {
-			aimerList[owner].startSwapCountDown = false;
+	server.on("playerSwapped", function (payload) {
+		// payload: { owner, points: [end A, end B] } — the two world positions the
+		// swapped players occupy just after exchanging. Puffing at both ends puts
+		// the effect where players actually appear/vanish; reading the owner's
+		// live position instead would land on the pre-swap spot, since the new
+		// coordinates only arrive in a later gameUpdates.
+		var data = (typeof payload === "string") ? JSON.parse(payload) : payload;
+		var owner = data != null ? data.owner : null;
+		var swapColor = playerList[owner] != null ? playerList[owner].color : "white";
+		var aimer = aimerList[owner];
+		if (aimer != null && aimer.startSwapCountDown) {
+			aimer.startSwapCountDown = false;
+		}
+		if (data != null && data.points != null) {
+			for (var pi = 0; pi < data.points.length; pi++) {
+				spawnTeleportPuff(data.points[pi].x, data.points[pi].y, swapColor);
+			}
+		} else if (playerList[owner] != null) {
+			spawnTeleportPuff(playerList[owner].x, playerList[owner].y, swapColor);
 		}
 		playSound(teleportSound);
 	});
@@ -611,19 +692,30 @@ function registerPrimaryHandlers(server) {
 	});
 	server.on("volcanoEruption", function () {
 		playSound(volcanoErupt);
-		rumbleScreen(2500);
+		spawnScreenFlash("#ff7a18", 0.28, 400);
+		rumbleSustained(2500, 0.7);
 	});
 
 	server.on("speedBuff", function (owner) {
 		playSound(speedBuff);
+		if (playerList[owner] != null) {
+			playerList[owner].speedBuffUntil = Date.now() + config.tileMap.abilities.speedBuff.duration;
+		}
 		playerAbilityUsed(owner);
 	});
 
 	server.on("speedDebuff", function (owner) {
 		playSound(speedDebuff);
+		if (playerList[owner] != null) {
+			playerList[owner].speedDebuffUntil = Date.now() + config.tileMap.abilities.speedDebuff.duration;
+		}
 		playerAbilityUsed(owner);
 	});
 	server.on("triggerUsed", function (owner) {
+		var p = playerList[owner];
+		if (p != null) {
+			spawnTriggerPulse(p.x, p.y, p.color);
+		}
 		playerAbilityUsed(owner);
 	});
 	server.on("startLobbyTimer", function () {

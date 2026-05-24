@@ -2,6 +2,8 @@
     "port": 3000,
     "serverTickSpeed": 33.33,
     "punchRadius": 11,
+    "directionalPunch": true,
+    "punchReach": 14,
     "worldWidth": 1366,
     "worldHeight": 768,
     "worldCollapseSpeed": 6,
@@ -170,7 +172,9 @@
             },
             "tileSwap": {
                 "spawnable": true,
-                "id": 106
+                "id": 106,
+                "minSwapDelay": 3000,
+                "maxSwapDelay": 6000
             },
             "iceCannon": {
                 "spawnable": true,

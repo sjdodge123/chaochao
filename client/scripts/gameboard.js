@@ -15,12 +15,15 @@ var mousex,
 	playerList,
 	blindfold,
 	achievements = null,
-	screenShake = false,
 	blackout = false,
 	timerList = [],
 	playersNearVictory = [],
 	pingCircles = [],
 	collapseShockwaves = [],
+	effectsList = [],
+	shakeTrauma = 0,
+	pendingSwapCells = null,
+	blackoutStart = null,
 	brutalRound = false,
 	brutalRoundConfig = null,
 	clientList;
@@ -45,11 +48,38 @@ function resetGameboard() {
 	brutalRoundConfig = null;
 	projectileList = {};
 	gameID = null;
+	effectsList = [];
+	shakeTrauma = 0;
+	shakeSustainUntil = 0;
+	shakeSustainFloor = 0;
+	pendingSwapCells = null;
 }
 
 function resetRound() {
 	blackout = false;
+	blackoutStart = null;
 	infection = false;
+	// Transient visuals shouldn't bleed into the next round.
+	effectsList = [];
+	shakeTrauma = 0;
+	shakeSustainUntil = 0;
+	shakeSustainFloor = 0;
+	pendingSwapCells = null;
+	blindfold = {};
+	// Buff auras, movement-particle cooldowns and the last-velocity sample all
+	// live on the persistent playerList objects, so they have to be cleared by
+	// hand or they bleed into the next round (stale wind streaks, a phantom skid
+	// burst on the first frame, etc.).
+	for (var pid in playerList) {
+		var rp = playerList[pid];
+		rp.speedBuffUntil = null;
+		rp.speedDebuffUntil = null;
+		rp.prevVelX = null;
+		rp.prevVelY = null;
+		rp.dustCD = 0;
+		rp.skidCD = 0;
+		rp.emberCD = 0;
+	}
 	for (var aimerID in this.aimerList) {
 		delete this.aimerList[aimerID];
 	}
@@ -61,6 +91,11 @@ function updateGameboard(dt) {
 	}
 	updatePingCircles(dt);
 	updateCollapseShockwaves(dt);
+	updateEffects(dt);
+	updateShake(dt);
+	if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
+		updateMovementParticles(dt);
+	}
 	checkTimers(dt);
 }
 
@@ -468,6 +503,7 @@ function spawnPunch(payload) {
 	punch.color = payload[3];
 	punch.radius = payload[4];
 	punch.type = payload[5];
+	punch.directional = payload[6] == 1;
 	punchList[punch.ownerId] = punch;
 	return punch;
 }
@@ -631,6 +667,30 @@ function explodedCells(cells) {
 	invalidateMapCache();
 }
 
+// Average site position of a set of voronoi ids — used to place a blast effect
+// at the centre of the cells a bomb just flattened.
+function cellsCentroid(voronoiIds) {
+	if (currentMap == null || currentMap.cells == null || voronoiIds == null) {
+		return null;
+	}
+	var sumX = 0, sumY = 0, count = 0;
+	for (var i = 0; i < currentMap.cells.length; i++) {
+		var cell = currentMap.cells[i];
+		for (var j = 0; j < voronoiIds.length; j++) {
+			if (voronoiIds[j] == cell.site.voronoiId) {
+				sumX += cell.site.x;
+				sumY += cell.site.y;
+				count++;
+				break;
+			}
+		}
+	}
+	if (count === 0) {
+		return null;
+	}
+	return { x: sumX / count, y: sumY / count, count: count };
+}
+
 function playerPickedUpAbility(payload) {
 	playerList[payload.owner].ability = payload.ability;
 	if (payload.voronoiId == null) {
@@ -656,8 +716,61 @@ function changeTilesBulk(tileChanges) {
 			}
 
 		}
+		// A telegraphed tile that just changed — by ANY cause (the swap itself, a
+		// bomb, the collapse) — no longer needs pulsing. We stop telegraphing it
+		// here but do NOT play the swap sound from this path: an unrelated change
+		// flipping the last pending tile must not trigger the swap audio early.
+		// The sound is driven by the dedicated "tileSwapPerformed" event.
+		if (pendingSwapCells != null && pendingSwapCells.set[prop] != null) {
+			delete pendingSwapCells.set[prop];
+		}
+	}
+	if (pendingSwapCells != null && Object.keys(pendingSwapCells.set).length === 0) {
+		pendingSwapCells = null;
 	}
 	invalidateMapCache();
+}
+
+// Record which tiles a tileSwap is about to flip, so drawPendingSwap can
+// pulse/flicker them during the warn-up. Each tile carries its OWN start/end
+// timeline, so when two tileSwaps overlap the second one doesn't restart the
+// pulse on the first's already-warming tiles. If a tile is telegraphed by both,
+// keep whichever flip is imminent (the earliest end) so its pulse keeps
+// intensifying toward the real flip.
+function markPendingSwap(ids, duration) {
+	if (ids == null || ids.length === 0) {
+		return;
+	}
+	var now = Date.now();
+	var end = now + duration;
+	var set = (pendingSwapCells != null) ? pendingSwapCells.set : {};
+	for (var i = 0; i < ids.length; i++) {
+		var existing = set[ids[i]];
+		if (existing == null || end < existing.end) {
+			set[ids[i]] = { start: now, end: end };
+		}
+	}
+	pendingSwapCells = { set: set };
+}
+
+// The swap actually landed. Driven by a dedicated server event (not inferred
+// from the tile-change batch), so it fires exactly once when the flip happens
+// — never early because some other tile change emptied the pending set, and
+// never dropped because a telegraphed tile got converted before the swap. Plays
+// the delayed swap sound and stops telegraphing the tiles this swap flipped.
+function tileSwapLanded(ids) {
+	playSound(tileSwap);
+	if (pendingSwapCells == null) {
+		return;
+	}
+	if (ids != null) {
+		for (var i = 0; i < ids.length; i++) {
+			delete pendingSwapCells.set[ids[i]];
+		}
+	}
+	if (Object.keys(pendingSwapCells.set).length === 0) {
+		pendingSwapCells = null;
+	}
 }
 
 
@@ -667,17 +780,326 @@ function playerAbilityUsed(owner) {
 
 function createBlindFold(owner) {
 	blindfold.color = makePattern(blindfoldLargeIcon, this.playerList[owner].color);
+	// Timestamps let drawAbilties() ease the overlay in and out (see blindfoldAlpha).
+	blindfold.start = Date.now();
+	blindfold.duration = config.tileMap.abilities.blindfold.duration * 1000;
 	var int = setInterval(function () {
 		clearInterval(int);
 		blindfold.color = null;
 	}, config.tileMap.abilities.blindfold.duration * 1000);
 }
 
+// --- Screen shake (trauma model) ---
+// Callers add "trauma" (0..1); the rendered offset is maxShakeOffset * trauma^2
+// so a big hit reads much harder than a small one, and the shake tapers off
+// smoothly as trauma decays instead of snapping off after a fixed timer.
+var maxShakeOffset = 16;        // px at full trauma
+var shakeDecayPerSec = 1.6;     // trauma units bled off per second
+var shakeSustainUntil = 0;      // for events that should rumble for a while
+var shakeSustainFloor = 0;
+
+function addTrauma(amount) {
+	shakeTrauma = Math.min(1, shakeTrauma + amount);
+}
+// Hold a minimum trauma floor for a duration (e.g. a long volcano eruption),
+// then let it decay normally.
+function rumbleSustained(durationMs, intensity) {
+	shakeSustainUntil = Date.now() + durationMs;
+	shakeSustainFloor = intensity;
+	addTrauma(intensity);
+}
+function updateShake(dt) {
+	if (Date.now() < shakeSustainUntil && shakeTrauma < shakeSustainFloor) {
+		shakeTrauma = shakeSustainFloor;
+	}
+	if (shakeTrauma > 0) {
+		shakeTrauma = Math.max(0, shakeTrauma - shakeDecayPerSec * (dt / 1000));
+	}
+}
+// Back-compat shim: a couple of call sites still pass a duration in ms. Map it
+// to a one-shot trauma jolt (longer => slightly stronger).
 function rumbleScreen(time) {
-	screenShake = true;
-	setTimeout(function () {
-		screenShake = false;
-	}, time);
+	addTrauma(time >= 500 ? 0.6 : 0.45);
+}
+
+// --- Transient render effects (shockwaves, sparks, slashes, puffs) ---
+// Each effect carries its own clock so its visual lifetime is independent of
+// any server object (the punch object, for instance, only lives ~100ms). An
+// effect is { age, maxAge, draw(ctx, t, effect), update?(dt), screen? }; t is
+// the normalized 0..1 progress passed to draw. screen:true skips the camera
+// translate (for screen-space flashes); world-space is the default.
+function addEffect(effect) {
+	if (effect == null) {
+		return null;
+	}
+	effect.age = 0;
+	if (effect.maxAge == null) {
+		effect.maxAge = 300;
+	}
+	effectsList.push(effect);
+	return effect;
+}
+function updateEffects(dt) {
+	for (var i = effectsList.length - 1; i >= 0; i--) {
+		var e = effectsList[i];
+		e.age += dt;
+		if (e.update != null) {
+			e.update(dt);
+		}
+		if (e.age >= e.maxAge) {
+			effectsList.splice(i, 1);
+		}
+	}
+}
+// True if id belongs to a player controlled on this screen (covers couch
+// multiplayer where several local slots share one client).
+function isLocalId(id) {
+	if (id == null) {
+		return false;
+	}
+	if (id == myID) {
+		return true;
+	}
+	if (typeof localPlayers !== "undefined" && localPlayers) {
+		for (var s = 0; s < localPlayers.length; s++) {
+			if (localPlayers[s] && localPlayers[s].myID == id) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+// --- Movement & burn particles ---
+// Driven per-frame from player velocity (decoded from gameUpdates), throttled
+// by per-player cooldowns so a fast lap doesn't flood the effects list.
+
+// A single drifting, fading puff. vx/vy are in px per ms. A faint dark outline
+// keeps it readable even when its colour is close to the terrain underneath.
+function spawnDustParticle(x, y, vx, vy, size, color) {
+	addEffect({
+		x: x,
+		y: y,
+		maxAge: 430,
+		draw: function (ctx, t, e) {
+			var a = 1 - t;
+			var r = size * (1 - 0.35 * t);
+			ctx.save();
+			ctx.beginPath();
+			ctx.arc(x + vx * e.age, y + vy * e.age, r, 0, 2 * Math.PI);
+			ctx.globalAlpha = a * 0.85;
+			ctx.fillStyle = color;
+			ctx.fill();
+			ctx.globalAlpha = a * 0.4;
+			ctx.lineWidth = 1;
+			ctx.strokeStyle = "rgba(0, 0, 0, 1)";
+			ctx.stroke();
+			ctx.restore();
+		}
+	});
+}
+
+// A rising, cooling ember for a burning player (complements the flame sprite).
+function spawnEmber(x, y) {
+	var vx = (Math.random() * 2 - 1) * 0.015;
+	var vy = -(0.03 + Math.random() * 0.03);
+	var hue = 18 + Math.random() * 32;
+	var maxAge = 500 + Math.random() * 300;
+	addEffect({
+		x: x,
+		y: y,
+		maxAge: maxAge,
+		draw: function (ctx, t, e) {
+			ctx.save();
+			ctx.globalAlpha = (1 - t) * 0.9;
+			ctx.fillStyle = "hsl(" + hue + ", 100%, " + (62 - 22 * t) + "%)";
+			ctx.beginPath();
+			ctx.arc(x + vx * e.age, y + vy * e.age, 2.5 * (1 - t) + 0.5, 0, 2 * Math.PI);
+			ctx.fill();
+			ctx.restore();
+		}
+	});
+}
+
+// Fire a muzzle flash from a player's front edge in their facing direction, and
+// a small recoil kick (screen shake) if a local player fired.
+function fireMuzzleFlash(owner, color) {
+	var p = playerList[owner];
+	if (p == null) {
+		return;
+	}
+	var front = pos({ x: p.x, y: p.y }, p.radius, p.angle);
+	spawnMuzzleFlash(front.x, front.y, p.angle, color);
+	if (isLocalId(owner)) {
+		addTrauma(0.18);
+	}
+}
+
+// Terrain palette for movement particles. Colours are picked to CONTRAST the
+// tile they land on (bright lime over green grass, pale dust over tan sand,
+// deep cyan over pale ice) so the flecks read instead of blending in.
+function dustColor() { return "rgba(170, 150, 120, 1)"; }   // dirt
+function grassColor() { return "rgba(150, 230, 70, 1)"; }    // bright lime
+function sandColor() { return "rgba(250, 238, 205, 1)"; }    // pale dust puff
+function iceColor() { return "rgba(70, 165, 220, 1)"; }      // deep cyan scrape
+function terrainParticleColor(tile) {
+	if (config != null) {
+		if (tile == config.tileMap.fast.id) { return grassColor(); }
+		if (tile == config.tileMap.slow.id) { return sandColor(); }
+		if (tile == config.tileMap.ice.id) { return iceColor(); }
+	}
+	return dustColor();
+}
+
+// Which tile id a point sits on. The map is a Voronoi diagram, so the cell a
+// point belongs to is simply the one whose site is nearest — cheap and exact,
+// and it tracks tile changes (bombs, tileSwap) since cell.id is mutated in place.
+function tileIdAt(x, y) {
+	if (currentMap == null || currentMap.cells == null) {
+		return null;
+	}
+	var cells = currentMap.cells;
+	var bestId = null, bestD = Infinity;
+	for (var i = 0; i < cells.length; i++) {
+		var s = cells[i].site;
+		var dx = s.x - x, dy = s.y - y;
+		var d = dx * dx + dy * dy;
+		if (d < bestD) { bestD = d; bestId = cells[i].id; }
+	}
+	return bestId;
+}
+
+// `count` flecks kicked up behind a moving player, coloured by the terrain and
+// scattered a little so they read as a puff rather than a single dot.
+function spawnTerrainParticle(p, color, minSize, count) {
+	count = count || 1;
+	var dir = Math.atan2(p.velY, p.velX);
+	for (var i = 0; i < count; i++) {
+		var bx = p.x - Math.cos(dir) * p.radius + (Math.random() * 2 - 1) * p.radius * 0.5;
+		var by = p.y - Math.sin(dir) * p.radius + (Math.random() * 2 - 1) * p.radius * 0.5;
+		var spread = (Math.random() * 2 - 1) * 0.03;
+		var vx = -Math.cos(dir) * 0.013 + Math.cos(dir + Math.PI / 2) * spread;
+		var vy = -Math.sin(dir) * 0.013 + Math.sin(dir + Math.PI / 2) * spread;
+		spawnDustParticle(bx, by, vx, vy, minSize + Math.random() * 2, color);
+	}
+}
+
+// One lingering skate streak (blade mark) left on ice.
+function addIceStreak(bx, by, ex, ey) {
+	addEffect({
+		x: bx,
+		y: by,
+		maxAge: 700,
+		draw: function (ctx, t) {
+			ctx.save();
+			ctx.globalAlpha = (1 - t) * 0.6;
+			ctx.strokeStyle = iceColor();
+			ctx.lineWidth = 3;
+			ctx.lineCap = "round";
+			ctx.beginPath();
+			ctx.moveTo(bx, by);
+			ctx.lineTo(ex, ey);
+			ctx.stroke();
+			ctx.restore();
+		}
+	});
+}
+// A pair of skate marks behind a player gliding over ice.
+function spawnIceTrail(p) {
+	var dir = Math.atan2(p.velY, p.velX);
+	var len = p.radius * 1.7;
+	var perp = dir + Math.PI / 2;
+	var gap = p.radius * 0.5;
+	for (var s = -1; s <= 1; s += 2) {
+		var bx = p.x + Math.cos(perp) * gap * s;
+		var by = p.y + Math.sin(perp) * gap * s;
+		addIceStreak(bx, by, bx - Math.cos(dir) * len, by - Math.sin(dir) * len);
+	}
+}
+
+// A skid burst when a player whips around — particles fly off in the old
+// direction of travel, coloured by the terrain underfoot.
+function spawnSkid(p, color) {
+	var dir = Math.atan2(p.prevVelY, p.prevVelX);
+	for (var i = 0; i < 4; i++) {
+		var spread = (Math.random() * 2 - 1) * 0.04;
+		var vx = Math.cos(dir) * 0.02 + Math.cos(dir + Math.PI / 2) * spread;
+		var vy = Math.sin(dir) * 0.02 + Math.sin(dir + Math.PI / 2) * spread;
+		spawnDustParticle(p.x, p.y, vx, vy, 2.5 + Math.random() * 2, color);
+	}
+}
+
+function updateMovementParticles(dt) {
+	if (config == null) {
+		return;
+	}
+	var maxSpeed = config.playerMaxSpeed;
+	var fastThresh = maxSpeed * 0.55;
+	var walkThresh = maxSpeed * 0.08;
+	for (var id in playerList) {
+		var p = playerList[id];
+		if (p == null || p.alive == false || p.velX == null) {
+			continue;
+		}
+		var speed = Math.sqrt(p.velX * p.velX + p.velY * p.velY);
+
+		if (p.dustCD == null) { p.dustCD = 0; }
+		if (p.skidCD == null) { p.skidCD = 0; }
+		if (p.emberCD == null) { p.emberCD = 0; }
+		p.dustCD -= dt;
+		p.skidCD -= dt;
+		p.emberCD -= dt;
+
+		// Sharp turn at speed -> skid burst (dot product of old/new velocity).
+		if (p.prevVelX != null && p.skidCD <= 0 && speed > fastThresh * 0.5) {
+			var prevSpeed = Math.sqrt(p.prevVelX * p.prevVelX + p.prevVelY * p.prevVelY);
+			if (prevSpeed > 1) {
+				var dot = (p.velX * p.prevVelX + p.velY * p.prevVelY) / (speed * prevSpeed);
+				if (dot < 0.6) {
+					spawnSkid(p, terrainParticleColor(tileIdAt(p.x, p.y)));
+					p.skidCD = 140;
+				}
+			}
+		}
+
+		// Moving -> terrain-aware trail. Ice leaves skate marks even at a walk;
+		// grass/sand sprinkle flecks; bare dirt only kicks up dust at speed.
+		if (speed > walkThresh && p.dustCD <= 0) {
+			var tile = tileIdAt(p.x, p.y);
+			if (tile == config.tileMap.ice.id) {
+				// Skate trails only when actually gliding fast across the ice.
+				if (speed > fastThresh) {
+					spawnIceTrail(p);
+					p.dustCD = 40;
+				} else {
+					p.dustCD = 60;
+				}
+			} else if (tile == config.tileMap.fast.id) {
+				// Grass dialed back ~20% (smaller flecks) — it read a touch strong.
+				spawnTerrainParticle(p, grassColor(), 1.8, 2);
+				p.dustCD = speed > fastThresh ? 45 : 70;
+			} else if (tile == config.tileMap.slow.id) {
+				spawnTerrainParticle(p, sandColor(), 3, 2);
+				p.dustCD = speed > fastThresh ? 45 : 70;
+			} else if (speed > fastThresh) {
+				spawnTerrainParticle(p, dustColor(), 2.5, 2);
+				p.dustCD = 50;
+			} else {
+				// Bare dirt at a walk: nothing to emit; recheck shortly (keeps the
+				// per-frame nearest-cell lookup throttled).
+				p.dustCD = 60;
+			}
+		}
+
+		// Burning -> rising embers.
+		if (p.onFire > 0 && p.emberCD <= 0) {
+			spawnEmber(p.x + (Math.random() * 2 - 1) * p.radius, p.y + (Math.random() * 2 - 1) * p.radius);
+			p.emberCD = 70;
+		}
+
+		p.prevVelX = p.velX;
+		p.prevVelY = p.velY;
+	}
 }
 
 function setupEmojiWheel() {
