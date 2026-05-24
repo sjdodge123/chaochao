@@ -215,9 +215,14 @@ function registerPrimaryHandlers(server) {
 		// Set state first so loadNewMap doesn't run its gated-only goal-ping branch.
 		currentState = config.stateMap.lobby;
 		spawnLobbyStartButton(packet);
-		loadLobbyMap(packet);
 		setLobbySfxDampen(true);
 		playSoundAfterFinish(lobbyMusic);
+		// Wait for the async map/asset loads to finish before loading the lobby map —
+		// otherwise on a fresh page load maps[] may not yet contain the tutorial map and
+		// it silently fails to render (the islands "disappear"). Mirrors the newMap path.
+		$.when.apply($, promises).then(function () {
+			loadLobbyMap(packet);
+		});
 	});
 	// Lobby bumpers (the race path creates hazards inside the newMap handler; the lobby
 	// has no newMap, so it sends them separately).
