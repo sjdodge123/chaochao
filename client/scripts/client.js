@@ -429,6 +429,21 @@ function registerPrimaryHandlers(server) {
 		playerPickedUpAbility(payload);
 		playSound(collectItem);
 	});
+	// Late-join seed of invuln state so already-protected players flash on this client.
+	server.on("lobbyInvulnStates", function (states) {
+		if (states == null) {
+			return;
+		}
+		for (var i = 0; i < states.length; i++) {
+			var s = states[i];
+			if (playerList[s.id] != null) {
+				if (s.remainingMs > 0) {
+					playerList[s.id].invulnUntil = Date.now() + s.remainingMs;
+				}
+				playerList[s.id].invulnHeldInCircle = s.held;
+			}
+		}
+	});
 	server.on("allAbilityHoldings", function (payload) {
 		$.when.apply($, promises).then(function () {
 			var abilities = JSON.parse(payload);
