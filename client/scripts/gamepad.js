@@ -412,6 +412,12 @@ function pollGamepad(dt) {
         if (!pad) {
             continue;
         }
+        // A controller button is a user gesture too, but gamepad input fires no DOM
+        // mouse/key events — so the audio-unlock listeners never see it. Resume blocked
+        // music here on any button press (idempotent; only matters for the first one).
+        if (typeof unlockAudio === "function" && anyButtonPressed(pad)) {
+            unlockAudio();
+        }
         var lp = localPlayerForPadIndex(i);
         if (!lp) {
             var aDown = !!(pad.buttons[GP_BTN_A] && pad.buttons[GP_BTN_A].pressed);
