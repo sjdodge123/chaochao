@@ -16,7 +16,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ### Animations & game feel
 
-- [headline] A big animation & game-feel pass — punches, hits, explosions and ability casts now land with real weight and screen shake.
+- A big animation & game-feel pass — punches, hits, explosions and ability casts now land with real weight and screen shake.
 - Players kick up dust at speed and trail embers while on fire.
 
 ### Combat
@@ -53,7 +53,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ### Audience
 
-- [headline] A stadium crowd now watches and reacts — quiet early, but as someone nears the win they roar for multi-kills and sprees, cheer kills, "ooh" at fights, gasp at near-lava escapes, and erupt when you beat the lava to the goal.
+- A stadium crowd now watches and reacts — quiet early, but as someone nears the win they roar for multi-kills and sprees, cheer kills, "ooh" at fights, gasp at near-lava escapes, and erupt when you beat the lava to the goal.
 
 ## v0.3.3 — 2026-05-24
 
@@ -86,7 +86,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 ## v0.2.0 — 2026-05-24
 
 ### General
-- [headline] Local multiplayer! Up to 4 people can play on one screen — each on their own controller, plus one on keyboard/mouse — all joining the same game as real players, right alongside anyone online.
+- [headline] Local co-op with controller support — up to 4 players on one screen (controllers plus one on keyboard/mouse), all in the same game as anyone online.
 - Plug in controllers and they show up in a header at the top of the screen; press A on one to jump in. The first controller (with no keyboard player) becomes Player 1, and each player gets their own color so you can tell who's who.
 - Each player has their own on-screen controls, emoji wheel, and a "Leave?" prompt (B on a controller, Esc on keyboard) — one player leaving or unplugging never ends everyone else's game.
 
