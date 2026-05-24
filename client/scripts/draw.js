@@ -1295,6 +1295,11 @@ function drawPlayer(player, dt) {
         drawFire(player);
     }
     drawSpeedFx(player);
+    // Draw a halo behind your own kart(s) — the primary plus every couch co-op
+    // slot — so you can always find yourself in a crowded pack.
+    if (isLocalId(player.id)) {
+        drawLocalPlayerHighlight(player);
+    }
 
     var playerStrokeColor = "black";
     for (var aimerID in aimerList) {
@@ -1376,6 +1381,63 @@ function drawPlayer(player, dt) {
         gameContext.fillText("😴", player.x + 8, player.y - 17);
         gameContext.restore();
     }
+}
+
+// Pre-baked halo sprites keyed by colour+radius. shadowBlur is expensive per
+// frame, so — like getPlayerSprite — we render the ring and its glow into an
+// offscreen canvas exactly once per kart colour and reuse it every frame. The
+// palette + radius are fixed, so this cache stays tiny.
+var playerHighlightCache = {};
+function getPlayerHighlightSprite(color, radius) {
+    var key = color + '|' + radius;
+    var cached = playerHighlightCache[key];
+    if (cached != null) {
+        return cached;
+    }
+    var ringRadius = radius + 5;   // mid-pulse offset from the kart centre
+    var lineWidth = 3;
+    var blur = 13;                 // baked glow (the old mid-pulse shadowBlur)
+    var pad = blur + lineWidth + 2;
+    var size = (ringRadius + pad) * 2;
+    var canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    var ctx = canvas.getContext("2d");
+    ctx.translate(size / 2, size / 2);
+    ctx.beginPath();
+    ctx.arc(0, 0, ringRadius, 0, 2 * Math.PI);
+    ctx.lineWidth = lineWidth;
+    ctx.strokeStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = blur;
+    ctx.stroke();
+    canvas.halfSize = size / 2;
+    playerHighlightCache[key] = canvas;
+    return canvas;
+}
+
+// Highlight every kart the player controls so you can pick yourself out of the
+// pack — works for the primary kart and each couch co-op slot. A glowing ring
+// pulses just behind the sprite (drawn before the blit so it reads as an aura)
+// and uses the same camera offset as the sprite blit so it stays attached when
+// the dynamic camera is active. The ring takes the player's own kart colour so
+// couch co-op players can tell their halos apart, and the glow spills past the
+// kart so it reads against both the light and dark canvas surfaces. The breathe
+// rides on a cheap alpha+scale blit of the pre-baked sprite — no per-frame
+// shadowBlur in this hot path.
+function drawLocalPlayerHighlight(player) {
+    var ringColor = (player.color != null) ? player.color : "rgb(255, 215, 0)";
+    var halo = getPlayerHighlightSprite(ringColor, player.radius);
+    var pulse = 0.5 + 0.5 * Math.sin(Date.now() / 350);
+    var x = player.x + camera.getCameraX();
+    var y = player.y + camera.getCameraY();
+    var s = 0.97 + pulse * 0.06;   // subtle size breathe via the blit, not a re-stroke
+    var w = halo.width * s;
+    var h = halo.height * s;
+    gameContext.save();
+    gameContext.globalAlpha = 0.6 + 0.35 * pulse;
+    gameContext.drawImage(halo, x - w / 2, y - h / 2, w, h);
+    gameContext.restore();
 }
 
 // Sustained speed-ability feedback driven by timestamps set on the player when
@@ -2245,7 +2307,13 @@ function drawTouchControls() {
     var fullScreenToUse = fullscreenIcon;
     var chatToUse = commentIconSolid;
 
-    if (currentState == config.stateMap.overview) {
+    // The default icons are dark (no SVG fill = black) and vanish on the dark
+    // overview background or the dark-theme canvas surface, so swap in the white
+    // PNG variants for both of those cases.
+    var useWhiteIcons = currentState == config.stateMap.overview ||
+        (typeof document !== 'undefined' &&
+            document.documentElement.getAttribute('data-theme') === 'dark');
+    if (useWhiteIcons) {
         exitToUse = exitIconWhite;
         fullScreenToUse = fullscreenIconWhite;
         chatToUse = commentIconWhite;
