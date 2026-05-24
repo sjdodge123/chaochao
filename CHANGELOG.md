@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.6.0 — 2026-05-24
+
 ### General
 
 - Big pass on animations and game feel: punches now swing with an impact spark, hits and explosions shake the screen with weight, abilities telegraph and flash when used, and players kick up dust at speed and trail embers while on fire.
