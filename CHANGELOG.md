@@ -14,44 +14,56 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## v0.6.0 — 2026-05-24
 
-### General
+### Animations & game feel
 
-- Big pass on animations and game feel: punches now swing with an impact spark, hits and explosions shake the screen with weight, abilities telegraph and flash when used, and players kick up dust at speed and trail embers while on fire.
-- Punches are now directional — your punch lands in front of you, so you have to face an opponent to knock them away. Bashing the hockey puck and swatting infected players stay all-directional, but zombies have to face their prey to bite.
-- AI racers move a little faster now, cruising closer to human pace.
+- [headline] A big animation & game-feel pass — punches, hits, explosions and ability casts now land with real weight and screen shake.
+- Players kick up dust at speed and trail embers while on fire.
 
-### Ability changes
+### Combat
 
-- Tile Swap now warns before it fires — the tiles about to flip pulse and flicker, and the swap itself lands a few seconds later instead of instantly.
+- Punches are now directional — face an opponent to knock them away. (Hockey-puck bashes and swatting the infected stay all-directional; zombies must face their prey to bite.)
+
+### Abilities
+
+- Tile Swap telegraphs before it fires: the tiles about to flip pulse and flicker, then swap a few seconds later.
+
+### AI racers
+
+- AI racers move a little faster, closer to human pace.
 
 ## v0.5.0 — 2026-05-24
 
-### General
+### AI racers
 
-- You're no longer racing alone: solo and small games now fill out with a roster of named AI racers that drive the course — finding their way to the goal, braking through corners, and steering clear of lava and bumpers — so there's always a full grid to race against.
-- The AI racers fight back: they grab and use abilities (bombs, speed boosts and slows, swaps, ice, blindfolds), and throw punches — including shoving a rival toward the lava when you give them the opening.
-- AI racers handle the brutal rounds: infected bots turn zombie and chase you across the lava to spread it (and healthy bots fend them off), they bash and dodge the hockey puck, ease up for the lightning round's speed, and — fair's fair — they lose their bearings in the blackout, blindfold, and clouds just like you do.
-- The AI racers have personalities now: a pace-setter who runs clean optimal lines, a wrecking ball who'd rather punch than race, a high-roller who corner-cuts past the lava (and sometimes into it), a rival who fixates on you, a chaos-merchant who hoards nothing and fires everything, a cautious tortoise who rarely dies, and a hothead who goes reckless when behind. They also rubber-band to your pace within a race — easing off when you're struggling and pushing when you're ahead — so a win feels earned, not handed to you.
-- Each AI racer shows its name and title under its kart, and they talk: a little taunt pops up when one wins or knocks somebody out, in character.
-- Playing solo is winnable now: when you're the only one in a room, the lava closes in from the goal you're nearest to and at a pace tuned to how far you have to travel, so a clean run actually beats the map instead of getting swallowed by a random, map-blind collapse.
-- The collapse now telegraphs itself: an erupting shockwave sweeps in from where the lava starts toward the goal it's closing on (with the volcano rumble), so you can read which way to run. Volcano rounds use the same warning shockwave.
-- Volcano rounds now erupt on a timer scaled to the map — about how long it takes to reach the nearest goal — instead of a fixed delay, so bigger maps give you proportionally more warning.
+- Solo and small games now fill out with named AI racers that drive the course — pathfinding to the goal, braking through corners, and avoiding lava and bumpers — so there's always a full grid.
+- They play the whole game: grabbing and using abilities (bombs, boosts, slows, swaps, ice, blindfolds) and throwing punches — including shoving you toward the lava when you leave an opening.
+- They handle brutal rounds too: infected bots turn zombie and chase you (healthy bots fend them off), they bash and dodge the hockey puck, ease up for lightning, and get just as lost in blackout, blindfold and clouds as you do.
+- Each racer has a personality — a clean pace-setter, a punch-happy wrecking ball, a corner-cutting high-roller, a rival who fixates on you, a chaos-merchant, a cautious tortoise, and a hothead who tilts when behind — and they rubber-band to your pace so a win feels earned. Names and in-character taunts show under each kart.
+
+### Solo play
+
+- Playing solo is winnable: when you're alone, the lava closes in from the goal nearest you at a pace tuned to the distance, so a clean run beats the map instead of a random, map-blind collapse.
+
+### Brutal rounds
+
+- The collapse telegraphs itself — an erupting shockwave sweeps from where the lava starts toward the goal it's closing on (with the volcano rumble), so you can read which way to run.
+- Volcano eruptions are timed to map size (about how long it takes to reach the nearest goal) instead of a fixed delay, so bigger maps give proportionally more warning.
 
 ## v0.4.0 — 2026-05-24
 
-### General
+### Audience
 
-- [headline] There's a crowd watching now — a stadium audience that warms up as the match heats up. Early on they barely stir unless something special happens, but as someone closes in on the win they grow louder and react to more: roaring for multi-kills and killing sprees, cheering kills, "oohing" when a fight breaks out, gasping when you skate the edge of the lava and live, and erupting when you beat the lava to the goal.
+- [headline] A stadium crowd now watches and reacts — quiet early, but as someone nears the win they roar for multi-kills and sprees, cheer kills, "ooh" at fights, gasp at near-lava escapes, and erupt when you beat the lava to the goal.
 
 ## v0.3.3 — 2026-05-24
 
 ### General
 
-- The lobby is now a hands-on practice area. Before a match starts you can walk around curated patches of terrain — lava, ice, sand, grass, goal tiles, and a handful of ability pickups (bombs in the middle, plus speed-boost, ice cannon, slice, and slow in the corners) — and learn the controls, the feel of each surface, and the win condition by just doing it. Touch lava and you "die" and respawn safely with several seconds of invulnerability; reach a goal to see the victory cue. None of it touches your score. If someone's pestering you, just step into the start circle in the middle — you stay invulnerable there until the match begins.
+- The lobby is now a hands-on practice area: before a match you can roam curated patches of terrain (lava, ice, sand, grass, goals) and try a handful of ability pickups to learn the controls and the feel of each surface. Touch lava and you respawn safely with a few seconds of invulnerability; reach a goal for the victory cue. Nothing counts toward your score, and stepping into the center start circle keeps you invulnerable until the match begins.
 
 ### Bug fixes
 
-- Sliding bumpers no longer freeze in place at the end of their track once a match starts — they turn around and keep sweeping back and forth as intended.
+- Sliding bumpers no longer freeze at the end of their track once a match starts — they turn around and keep sweeping as intended.
 
 ## v0.3.2 — 2026-05-24
 
