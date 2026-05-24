@@ -687,7 +687,11 @@ function drawGameOverScreen(dt) {
     gameContext.fillStyle = "black";
     gameContext.font = '48px serif';
     var winString = decodedColorName + " won the game.";
-    gameContext.fillText(winString, LOGICAL_WIDTH / 2 - 400, (LOGICAL_HEIGHT + 48) / 2);
+    // When a recap montage is showing, lift the header so the header + clip
+    // block is vertically centred (recap.js owns the shared layout). No recap
+    // (or recap.js absent) -> the usual vertical-centre baseline.
+    var goHeaderY = (typeof recapHeaderBaseline === "function") ? recapHeaderBaseline() : (LOGICAL_HEIGHT + 48) / 2;
+    gameContext.fillText(winString, LOGICAL_WIDTH / 2 - 400, goHeaderY);
     gameContext.restore();
 
     if (achievements != null) {

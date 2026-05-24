@@ -191,6 +191,40 @@ function recapActive() {
 	return recapSequence != null && recapSequence.length > 0;
 }
 
+// Logical canvas dims (the gameOver screen runs in LOGICAL space under
+// applyCanvasTransform; gameCanvas.width/height is the device backing store).
+function recapLogicalW() {
+	if (typeof LOGICAL_WIDTH !== "undefined" && LOGICAL_WIDTH > 0) { return LOGICAL_WIDTH; }
+	return (typeof gameCanvas !== "undefined" && gameCanvas) ? gameCanvas.width : 1366;
+}
+function recapLogicalH() {
+	if (typeof LOGICAL_HEIGHT !== "undefined" && LOGICAL_HEIGHT > 0) { return LOGICAL_HEIGHT; }
+	return (typeof gameCanvas !== "undefined" && gameCanvas) ? gameCanvas.height : 768;
+}
+
+// Clip window height — derived from the world aspect, capped. Shared so draw.js
+// can size the centred header/clip block consistently with recapDraw.
+function recapWindowHeight() {
+	var winW = Math.min(RECAP_WIN_W, recapLogicalW() * 0.42);
+	var aspect = (world != null && world.width > 0) ? (world.height / world.width) : 0.6;
+	return Math.min(winW * aspect, recapLogicalH() * 0.42);
+}
+
+// Baseline for the gameOver header so the header + caption + clip-window block
+// sits vertically centred on the page. With no active montage it returns the
+// usual centred baseline, leaving vanilla gameOver unchanged. Called by BOTH
+// draw.js (header text) and recapDraw (window placement) so they stay aligned.
+function recapHeaderBaseline() {
+	var CH = recapLogicalH();
+	if (!recapActive()) {
+		return (CH + 48) / 2; // no montage — leave the header where it always was
+	}
+	var headerCapTop = 38; // header text rises ~38px above its baseline (48px serif)
+	var gap = 56;          // header baseline -> clip window top (caption lives here)
+	var blockH = headerCapTop + gap + recapWindowHeight();
+	return Math.round((CH - blockH) / 2 + headerCapTop);
+}
+
 // Advance and render the montage. Called from drawGameOverScreen each frame.
 // Wrapped by the caller in a guard so any render error can't break gameOver.
 function recapDraw(dt) {
@@ -213,14 +247,13 @@ function recapDraw(dt) {
 	var CW = (typeof LOGICAL_WIDTH !== "undefined" && LOGICAL_WIDTH > 0) ? LOGICAL_WIDTH : gameCanvas.width;
 	var CH = (typeof LOGICAL_HEIGHT !== "undefined" && LOGICAL_HEIGHT > 0) ? LOGICAL_HEIGHT : gameCanvas.height;
 
-	// Window geometry: sit it in the lower band, directly under the headline
-	// winner text, and centre it on that text. The caption sits in the gap above.
+	// Window geometry: sit it directly under the headline winner text, centred on
+	// that text. The header + caption + window block is centred vertically on the
+	// page (see recapHeaderBaseline, shared with draw.js). Caption fills the gap.
 	var winW = Math.min(RECAP_WIN_W, CW * 0.42);
-	var aspect = (world != null && world.width > 0) ? (world.height / world.width) : 0.6;
-	var headlineBaseline = (CH + 48) / 2; // matches drawGameOverScreen's winString
+	var winH = recapWindowHeight();
+	var headlineBaseline = recapHeaderBaseline();
 	var winY = Math.round(headlineBaseline + 56); // leave room for the caption above
-	var maxH = CH - winY - 18;            // keep the whole window on-screen
-	var winH = Math.min(winW * aspect, CH * 0.42, maxH);
 
 	// The headline is drawn left-aligned at CW/2-400 (see drawGameOverScreen), so
 	// its visual centre is offset from screen centre — measure it and align to it.
