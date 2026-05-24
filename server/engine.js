@@ -516,15 +516,20 @@ function _calcVelCont(distance, object, x, y) {
 }
 
 // Axis-aligned bounding box of a Voronoi cell from its halfedge vertices.
+// `bounded` is false if any endpoint is missing/non-finite (an open or clipped
+// cell): such a cell's bbox can't be trusted, so the index registers it in every
+// bucket rather than risk a missed collision.
 function cellExtents(cell) {
 	var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+	var bounded = true;
 	var hes = cell.halfedges;
 	for (var i = 0; i < hes.length; i++) {
 		var edge = hes[i].edge;
 		var pts = [edge.va, edge.vb];
 		for (var p = 0; p < 2; p++) {
 			var v = pts[p];
-			if (v == null) {
+			if (v == null || !isFinite(v.x) || !isFinite(v.y)) {
+				bounded = false;
 				continue;
 			}
 			if (v.x < minX) minX = v.x;
@@ -533,31 +538,56 @@ function cellExtents(cell) {
 			if (v.y > maxY) maxY = v.y;
 		}
 	}
-	return { minX: minX, minY: minY, maxX: maxX, maxY: maxY };
+	if (!isFinite(minX)) {
+		bounded = false; // no usable vertices at all
+	}
+	return { minX: minX, minY: minY, maxX: maxX, maxY: maxY, bounded: bounded };
 }
 
 // Uniform spatial grid over the map's cells. A cell is bucketed into every grid
 // square its bounding box overlaps, so the square containing any query point is
 // guaranteed to contain that point's cell. Geometry is static for a round (only
 // cell.id mutates on tile changes), so the index is built once per map.
+//
+// Degenerate cells (an edge endpoint missing/non-finite, i.e. an open/unclipped
+// cell) are excluded entirely: their bbox is untrustworthy AND pointIntersection
+// would dereference the null vertex and throw. Excluding them yields "no tile in
+// that region" rather than crashing the server tick — strictly safer than the
+// original full scan, which fed every cell to pointIntersection. Real maps are
+// fully clipped/closed, so no cell is ever excluded in practice.
 class CellIndex {
 	constructor(cells) {
 		this.cells = cells;
 		var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-		var extents = new Array(cells.length);
+		var bounded = []; // {cell, ext} for usable cells only
 		for (var i = 0; i < cells.length; i++) {
 			var ext = cellExtents(cells[i]);
-			extents[i] = ext;
+			if (!ext.bounded) {
+				continue;
+			}
+			bounded.push({ cell: cells[i], ext: ext });
 			if (ext.minX < minX) minX = ext.minX;
 			if (ext.minY < minY) minY = ext.minY;
 			if (ext.maxX > maxX) maxX = ext.maxX;
 			if (ext.maxY > maxY) maxY = ext.maxY;
 		}
-		var w = maxX - minX || 1;
-		var h = maxY - minY || 1;
+		var w = maxX - minX;
+		var h = maxY - minY;
+		// No usable cells (empty or all-degenerate): one empty bucket, so queries
+		// return nothing without crashing.
+		if (bounded.length === 0 || !isFinite(w) || !isFinite(h) || w <= 0 || h <= 0) {
+			this.cols = 1;
+			this.rows = 1;
+			this.minX = 0;
+			this.minY = 0;
+			this.invW = 0;
+			this.invH = 0;
+			this.buckets = [[]];
+			return;
+		}
 		// Aim for roughly one cell per bucket, preserving the map's aspect ratio.
-		this.cols = Math.max(1, Math.round(Math.sqrt(cells.length * (w / h))));
-		this.rows = Math.max(1, Math.round(Math.sqrt(cells.length * (h / w))));
+		this.cols = Math.max(1, Math.round(Math.sqrt(bounded.length * (w / h))));
+		this.rows = Math.max(1, Math.round(Math.sqrt(bounded.length * (h / w))));
 		this.minX = minX;
 		this.minY = minY;
 		this.invW = this.cols / w;
@@ -566,13 +596,13 @@ class CellIndex {
 		for (var b = 0; b < this.buckets.length; b++) {
 			this.buckets[b] = [];
 		}
-		for (var j = 0; j < cells.length; j++) {
-			var e = extents[j];
+		for (var j = 0; j < bounded.length; j++) {
+			var e = bounded[j].ext;
 			var c0 = this._col(e.minX), c1 = this._col(e.maxX);
 			var r0 = this._row(e.minY), r1 = this._row(e.maxY);
 			for (var r = r0; r <= r1; r++) {
 				for (var col = c0; col <= c1; col++) {
-					this.buckets[r * this.cols + col].push(cells[j]);
+					this.buckets[r * this.cols + col].push(bounded[j].cell);
 				}
 			}
 		}
@@ -671,7 +701,10 @@ var tileIdMap = (function () {
 		}
 	}
 	for (var ability in c.tileMap.abilities) {
-		map[c.tileMap.abilities[ability].id] = c.tileMap.abilities[ability];
+		var a = c.tileMap.abilities[ability];
+		if (a != null && a.id != null) {
+			map[a.id] = a;
+		}
 	}
 	return map;
 })();
