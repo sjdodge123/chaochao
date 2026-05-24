@@ -8,18 +8,30 @@ c.colorPalette = utils.getColorPalette();
 var compressor = require('./compressor.js');
 var debug = require('./debug.js');
 var mailBoxList = {},
+	identityList = {},
 	roomMailList = {},
 	io;
 
 exports.build = function (mainIO) {
 	io = mainIO;
 }
-exports.addMailBox = function (id, client) {
+// `identity` is { userId, deviceId } resolved by the io.use() auth middleware
+// (both null for guests). We keep it in a parallel map so the socket-id mailbox
+// keeps storing the raw socket — existing consumers (getClient, game.js) are
+// unchanged — while later account-aware code can resolve client id → user id.
+exports.addMailBox = function (id, client, identity) {
 	mailBoxList[id] = client;
+	identityList[id] = identity || { userId: null, deviceId: null };
 	checkForMail(mailBoxList[id]);
 }
 exports.removeMailBox = function (id) {
 	delete mailBoxList[id];
+	delete identityList[id];
+}
+// Resolve a connected client id to its account identity ({ userId, deviceId }).
+// userId is null for guests. Returns null if the client isn't connected.
+exports.getIdentity = function (id) {
+	return identityList[id] || null;
 }
 exports.addRoomToMailBox = function (id, roomSig) {
 	roomMailList[id] = roomSig;

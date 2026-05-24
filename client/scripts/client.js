@@ -11,11 +11,25 @@ var config,
 	nextFightReactionTime = 0,
 	playerWon = null;
 
+// Socket.IO auth-callback form: invoked right before each (re)connection
+// handshake, so the Supabase access token is read at connection time (after
+// auth.js's getSession() microtask has settled) rather than at io() call time.
+// Returns { token, deviceId }; token is null for guests, which the server
+// allows. Falls back to {} if auth.js isn't present on the page.
+function handshakeAuth(cb) {
+	if (window.chaochaoAuth && typeof window.chaochaoAuth.getHandshake === "function") {
+		cb(window.chaochaoAuth.getHandshake());
+	} else {
+		cb({});
+	}
+}
+
 function clientConnect() {
 	// The primary connection (slot 0): the keyboard/mouse player and the sole
 	// owner of rendering, audio, UI and one-shot/timer handlers. The globals
 	// `server`/`myID`/`myPlayer` alias this slot (see game.js localPlayers).
-	var sock = io();
+	// This slot carries the signed-in account's token (if any).
+	var sock = io({ auth: handshakeAuth });
 	server = sock;
 	localPlayers[primarySlot] = makeLocalPlayer(primarySlot, sock, true);
 	registerPrimaryHandlers(sock);
@@ -1008,6 +1022,10 @@ function addLocalPlayer(slot, padIndex) {
 		return null; // primary hasn't confirmed a room yet
 	}
 	debugLog("[localmp] opening slot", slot, "pad", padIndex, "-> gameID", gameID);
+	// Auth foundation: local players 2-4 connect as guests (no token). The browser
+	// session has at most one signed-in account and it rides the primary socket.
+	// TODO: per-seat sign-in is technically feasible (each socket could carry its
+	// own token) — revisit if local-multiplayer accounts are wanted later.
 	var sock = io({ forceNew: true });
 	var lp = makeLocalPlayer(slot, sock, false);
 	lp.padIndex = padIndex;

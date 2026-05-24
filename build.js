@@ -5,6 +5,7 @@ const path = require('path');
 const bundles = {
     'play.bundle.min.js': [
         'client/scripts/game.js',
+        'client/scripts/auth.js',
         'client/scripts/client.js',
         'client/scripts/audio.js',
         'client/scripts/input.js',
