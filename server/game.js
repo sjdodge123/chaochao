@@ -22,6 +22,7 @@ class Room {
 		this.hazardList = {};
 		this.clientCount = 0;
 		this.alive = true;
+		this.isPreview = false;
 		this.engine = _engine.getEngine(this.playerList, this.projectileList, this.hazardList);
 		this.world = new World(0, 0, c.worldWidth, c.worldHeight, this.engine, this.playerList, this.hazardList, this.sig);
 		this.game = new Game(this.clientList, this.playerList, this.projectileList, this.aimerList, this.hazardList, this.world, this.engine, this.sig);
@@ -216,6 +217,14 @@ class Game {
 		//Reset back to waiting if someone leaves
 		if (this.playerCount < c.minPlayersToStart) {
 			this.startWaiting();
+			this.resetLobbyTimer();
+			return;
+		}
+		//Preview play-test: the solo creator has no one to rally on the lobby
+		//start button, so skip the lobby and head straight to the race gate.
+		if (this.gameBoard.isPreview) {
+			this.startGated();
+			return;
 		}
 		//If majority of players stand on the gamestart button start the timer
 		var percentPlayers = (this.lobbyButtonPressedCount / this.playerCount) * 100;
@@ -357,6 +366,9 @@ class Game {
 				setTimeout(function (context) {
 					if (context.currentState == c.stateMap.racing || context.currentState == c.stateMap.collapsing) {
 						var goal = context.gameBoard.findRandomGoalTile();
+						if (goal == null) {
+							return;
+						}
 						context.startCollapse(goal.x, goal.y);
 					}
 				}, 15000, this);
@@ -683,6 +695,11 @@ class GameBoard {
 		this.mapsPlayed = [];
 		this.currentMap = {};
 		this.nextMap = {};
+		// Injected-map (preview) mode: when set, every round loads previewMap
+		// instead of a random library map. previewMap is a per-instance copy —
+		// NEVER push it into the shared this.maps array.
+		this.isPreview = false;
+		this.previewMap = null;
 
 		this.allAbilityIDs = this.indexAbilities();
 		this.collapseLoc = {};
@@ -1188,12 +1205,20 @@ class GameBoard {
 		messenger.messageRoomBySig(this.roomSig, 'collapsedCells', collapsedCells);
 	}
 	findRandomGoalTile() {
-		var goalTiles = [];
 		var cells = this.currentMap.cells;
+		if (cells == null) {
+			return null;
+		}
+		var goalTiles = [];
 		for (var i = 0; i < cells.length; i++) {
 			if (cells[i].id == c.tileMap.goal.id) {
 				goalTiles.push({ x: cells[i].site.x, y: cells[i].site.y });
 			}
+		}
+		// No goal tile (or a torn-down room): return null so callers skip the
+		// collapse instead of dereferencing undefined and crashing the engine.
+		if (goalTiles.length === 0) {
+			return null;
 		}
 		return goalTiles[utils.getRandomInt(0, goalTiles.length - 1)];
 	}
@@ -1288,6 +1313,12 @@ class GameBoard {
 		return false;
 	}
 	determineNextMap() {
+		if (this.isPreview && this.previewMap != null) {
+			// Re-select the injected preview map every round (incl. round 2 via
+			// startOverview), never the random library — mirrors TESTSingleMap.
+			this.nextMap = JSON.parse(JSON.stringify(this.previewMap));
+			return this.nextMap.id;
+		}
 		if (c.TESTSingleMap) {
 			this.nextMap = JSON.parse(JSON.stringify(this.maps[0]));
 			return this.nextMap.id;
@@ -1415,6 +1446,9 @@ class GameBoard {
 		if (context.currentState == c.stateMap.racing || context.currentState == c.stateMap.collapsing) {
 			//Find gold tile location to collapse on
 			var loc = context.gameBoard.findRandomGoalTile();
+			if (loc == null) {
+				return;
+			}
 			context.startCollapse(loc.x, loc.y);
 		}
 

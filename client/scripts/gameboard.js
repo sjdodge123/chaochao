@@ -305,6 +305,11 @@ function loadNewMap(id) {
 			break;
 		}
 	}
+	if (currentMap.cells == null) {
+		// id wasn't in maps[] (e.g. an unsynced preview map); bail rather than
+		// dereferencing undefined cells below.
+		return;
+	}
 	if (currentState == config.stateMap.gated) {
 		var goalFound = false;
 		for (var j = 0; j < currentMap.cells.length; j++) {

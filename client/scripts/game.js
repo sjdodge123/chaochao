@@ -30,6 +30,7 @@ var server = null,
     currentState = null,
     inLobby = false,
     loading = true,
+    previewMode = false,
     gameRunning = null;
 
 
@@ -230,6 +231,25 @@ function enterLobby() {
     $('#gameWindow').css('display', 'flex');
     resize();
     var playParams = new URLSearchParams(window.location.search);
+    // Preview launch: the editor stashed the unsaved map in sessionStorage.
+    // Inject it into maps[] BEFORE enterGame so the server's newMap (which
+    // carries only the id) resolves via the existing loadNewMap(id) lookup.
+    if (playParams.get("preview") === "1") {
+        var saved = sessionStorage.getItem('previewMap');
+        if (saved != null) {
+            try {
+                var pMap = JSON.parse(saved);
+                var alreadyLoaded = false;
+                for (var i = 0; i < maps.length; i++) {
+                    if (maps[i].id === pMap.id) { alreadyLoaded = true; break; }
+                }
+                if (!alreadyLoaded) maps.push(pMap);
+                previewMode = true;
+            } catch (e) {
+                debugLog("preview map parse failed", e);
+            }
+        }
+    }
     if (playParams.has("gameid")) {
         var paramGameID = playParams.get("gameid");
         clientSendStart(paramGameID);

@@ -309,6 +309,59 @@ exports.loadConfig = function () {
 exports.loadMaps = function () {
     return maps;
 }
+// Shared structural validation for a map before it can be play-tested.
+// Mirrored on the client (client/scripts/create.js) so the editor can give
+// fast feedback; re-run here as the trust boundary before a preview room is
+// created. Returns { valid: bool, reason: string }.
+exports.validateMap = function (vMap, config) {
+    if (vMap == null) {
+        return { valid: false, reason: "No map data." };
+    }
+    if (!Array.isArray(vMap.cells) || vMap.cells.length === 0) {
+        return { valid: false, reason: "Map has no cells." };
+    }
+    var hasGoal = false;
+    for (var i = 0; i < vMap.cells.length; i++) {
+        var cell = vMap.cells[i];
+        if (cell == null || cell.site == null) {
+            return { valid: false, reason: "Map has a malformed cell." };
+        }
+        if (typeof cell.site.x !== "number" || typeof cell.site.y !== "number") {
+            return { valid: false, reason: "Map has a cell with an invalid position." };
+        }
+        if (!Array.isArray(cell.halfedges)) {
+            return { valid: false, reason: "Map has a cell with no geometry." };
+        }
+        if (typeof cell.id !== "number") {
+            return { valid: false, reason: "Map has a cell with an invalid tile." };
+        }
+        if (cell.id === config.tileMap.goal.id) {
+            hasGoal = true;
+        }
+    }
+    if (!hasGoal) {
+        return { valid: false, reason: "Add a goal tile before previewing." };
+    }
+    if (vMap.hazards != null) {
+        if (!Array.isArray(vMap.hazards)) {
+            return { valid: false, reason: "Map has malformed hazards." };
+        }
+        for (var h = 0; h < vMap.hazards.length; h++) {
+            var hazard = vMap.hazards[h];
+            if (hazard == null || hazard.id == null ||
+                typeof hazard.x !== "number" || typeof hazard.y !== "number") {
+                return { valid: false, reason: "Map has a malformed hazard." };
+            }
+            // A moving bumper rides a rail at a given angle; without a numeric
+            // angle the engine's rail math goes NaN.
+            if (hazard.id === config.hazards.movingBumper.id &&
+                typeof hazard.angle !== "number") {
+                return { valid: false, reason: "Map has a moving bumper with no direction." };
+            }
+        }
+    }
+    return { valid: true };
+}
 exports.getContentCount = function () {
     return mapListing.length + soundListing.length + imgListing.length;
 }
