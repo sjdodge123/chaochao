@@ -1672,7 +1672,21 @@ function drawBotName(player) {
 
 function drawDeathMessage(player) {
     if (player.deathMessage != null) {
+        // Fade the skull out over time so dead karts don't clutter the board
+        // (a ping re-reveals them). deathAt is stamped on race deaths only; lobby
+        // respawns leave it null and clear the message quickly on their own.
+        var alpha = 1;
+        if (player.deathAt != null) {
+            var elapsed = Date.now() - player.deathAt;
+            if (elapsed > DEATH_SKULL_HOLD_MS) {
+                alpha = clamp01(1 - (elapsed - DEATH_SKULL_HOLD_MS) / DEATH_SKULL_FADE_MS);
+            }
+        }
+        if (alpha <= 0.02) {
+            return;
+        }
         gameContext.save();
+        gameContext.globalAlpha = alpha;
         gameContext.drawImage(commentIconSolid, player.x, player.y - 40, commentIconSolid.width * 0.07, commentIconSolid.height * 0.07);
         gameContext.font = '20px Times New Roman';
         // theme-aware so the message stays readable where it overflows the
@@ -1908,11 +1922,16 @@ function drawTrail(player) {
 }
 
 // --- Death ping ---
-// While you're dead, pressing attack pulses a sonar marker at the spot where
-// you fell — a local-only nudge to help you find your body in the chaos (it is
-// never sent to the server or shown to other players). Works for every local
-// slot (couch co-op): each dead controller pings its own spot.
+// Floating death skulls (drawDeathMessage) fade out a few seconds after a death
+// so the board declutters. While you're dead, pressing attack pulses a sonar
+// marker over EVERY dead player's spot (yours plus all others) so you can see
+// the whole carnage at a glance. Local-only/visual — never sent to the server.
+// Works for every local slot (couch co-op).
 var DEATH_PING_COOLDOWN_MS = 900;
+// Death-skull fade: fully visible for HOLD ms after death, then fades to gone
+// over FADE ms (re-revealed by a ping's sonar pulse).
+var DEATH_SKULL_HOLD_MS = 1500;
+var DEATH_SKULL_FADE_MS = 4000;
 
 function spawnDeathPingEffect(x, y, color) {
     var ringColor = color || "rgb(255, 215, 0)";
@@ -1952,13 +1971,21 @@ function spawnDeathPingEffect(x, y, color) {
     });
 }
 
-function requestDeathPing(lp, player) {
+// Pulse a sonar marker over every dead player's death spot (yours included),
+// each in that player's colour — pressing punch while dead reveals the whole
+// board's carnage at once. Cooldown-gated per local slot to prevent spam.
+function pingAllDeathSpots(lp) {
     var now = Date.now();
     if (lp._lastDeathPingAt != null && now - lp._lastDeathPingAt < DEATH_PING_COOLDOWN_MS) {
         return;
     }
     lp._lastDeathPingAt = now;
-    spawnDeathPingEffect(player.deathX, player.deathY, player.color);
+    for (var id in playerList) {
+        var p = playerList[id];
+        if (p != null && p.alive === false && p.deathX != null) {
+            spawnDeathPingEffect(p.deathX, p.deathY, p.color);
+        }
+    }
 }
 
 // Per-frame: detect a fresh attack press on each local slot whose player is
@@ -1981,9 +2008,11 @@ function updateDeathPings() {
         var prev = !!lp._deadAttackPrev;
         lp._deadAttackPrev = atk;
         if (atk && !prev) {
+            // Only a player who actually died this round (deathX set) can ping;
+            // the ping then reveals ALL dead players' spots.
             var p = playerList[lp.myID];
             if (p != null && p.alive === false && p.deathX != null) {
-                requestDeathPing(lp, p);
+                pingAllDeathSpots(lp);
             }
         }
     }
