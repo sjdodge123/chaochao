@@ -4,6 +4,14 @@ var fadeTimers = new Map();
 var masterVolume = 1,
     effectsVolume = 1,
     musicVolume = 1;
+// Lobby tutorial: all SFX play at this fraction of normal while in the lobby (1 = no
+// change). Toggled by setLobbySfxDampen() on lobby enter/exit; applied in volumeChange.
+var sfxVolumeScalar = 1;
+var LOBBY_SFX_SCALAR = 0.35;
+function setLobbySfxDampen(on) {
+    sfxVolumeScalar = on ? LOBBY_SFX_SCALAR : 1;
+    volumeChange();
+}
 
 function clearFade(sound) {
     var timer = fadeTimers.get(sound);
@@ -120,48 +128,53 @@ registerBackgroundTrack(brutalBackgroundMusicList, "brutal", "heavyfabric", heav
 
 
 function volumeChange() {
-    blackoutSound.volume = .35 * masterVolume;
-    bumperSound.volume = .25 * masterVolume;
-    cutSound.volume = .15 * masterVolume;
-    godLike.volume = .1 * masterVolume;
-    rampage.volume = .1 * masterVolume;
-    killingSpree.volume = .1 * masterVolume;
-    megaKill.volume = .1 * masterVolume;
-    tripleKill.volume = .1 * masterVolume;
-    doubleKill.volume = .1 * masterVolume;
-    firstBlood.volume = .1 * masterVolume;
-    lavaExplosion.volume = .75 * masterVolume;
-    iceExplosion.volume = .25 * masterVolume;
-    iceCannon.volume = .25 * masterVolume;
-    tileSwap.volume = .5 * masterVolume;
-    speedBuff.volume = 0.25 * masterVolume;
-    speedDebuff.volume = 0.05 * masterVolume;
-    volcanoErupt.volume = 0.05 * masterVolume;
-    brutalRoundSound.volume = 0.35 * masterVolume;
-    bombBounce.volume = 0.75 * masterVolume;
-    abilityFizzle.volume = .65 * masterVolume;
-    teleportWarnSound.volume = .025 * masterVolume;
-    countDownA.volume = .05 * masterVolume;
-    countDownB.volume = .05 * masterVolume;
-    lavaCollapse.volume = .1 * masterVolume;
-    meleeSound.volume = .05 * masterVolume;
-    meleeHitSound.volume = .016 * masterVolume;
-    gameOverSound.volume = .5 * masterVolume;
-    nearVictorySound.volume = .3 * masterVolume;
-    fallFromVictorySound.volume = .15 * masterVolume;
-    collectItem.volume = .4 * masterVolume;
-    bombShot.volume = .2 * masterVolume;
-    bombExplosion.volume = .2 * masterVolume;
-    playerFinished.volume = .3 * masterVolume;
-    blindSound.volume = .4 * masterVolume;
-    teleportSound.volume = .05 * masterVolume;
-    newZombie.volume = .65 * masterVolume;
-    zombieHit.volume = .25 * masterVolume;
-    zombieSwing.volume = .35 * masterVolume;
+    // Single lobby SFX scalar: dampens every sound effect uniformly while in the
+    // lobby tutorial (so it reads as practice, not a live round). Music is untouched
+    // — only lines that used "* masterVolume;" (SFX) became "* sfx;". sfxVolumeScalar
+    // is 1 everywhere except the lobby (see setLobbySfxDampen).
+    var sfx = masterVolume * sfxVolumeScalar;
+    blackoutSound.volume = .35 * sfx;
+    bumperSound.volume = .25 * sfx;
+    cutSound.volume = .15 * sfx;
+    godLike.volume = .1 * sfx;
+    rampage.volume = .1 * sfx;
+    killingSpree.volume = .1 * sfx;
+    megaKill.volume = .1 * sfx;
+    tripleKill.volume = .1 * sfx;
+    doubleKill.volume = .1 * sfx;
+    firstBlood.volume = .1 * sfx;
+    lavaExplosion.volume = .75 * sfx;
+    iceExplosion.volume = .25 * sfx;
+    iceCannon.volume = .25 * sfx;
+    tileSwap.volume = .5 * sfx;
+    speedBuff.volume = 0.25 * sfx;
+    speedDebuff.volume = 0.05 * sfx;
+    volcanoErupt.volume = 0.05 * sfx;
+    brutalRoundSound.volume = 0.35 * sfx;
+    bombBounce.volume = 0.75 * sfx;
+    abilityFizzle.volume = .65 * sfx;
+    teleportWarnSound.volume = .025 * sfx;
+    countDownA.volume = .05 * sfx;
+    countDownB.volume = .05 * sfx;
+    lavaCollapse.volume = .1 * sfx;
+    meleeSound.volume = .05 * sfx;
+    meleeHitSound.volume = .016 * sfx;
+    gameOverSound.volume = .5 * sfx;
+    nearVictorySound.volume = .3 * sfx;
+    fallFromVictorySound.volume = .15 * sfx;
+    collectItem.volume = .4 * sfx;
+    bombShot.volume = .2 * sfx;
+    bombExplosion.volume = .2 * sfx;
+    playerFinished.volume = .3 * sfx;
+    blindSound.volume = .4 * sfx;
+    teleportSound.volume = .05 * sfx;
+    newZombie.volume = .65 * sfx;
+    zombieHit.volume = .25 * sfx;
+    zombieSwing.volume = .35 * sfx;
 
     lobbyMusic.volume = .05 * masterVolume * musicVolume;
     lobbyMusic.loop = true;
-    gameStart.volume = .2 * masterVolume;
+    gameStart.volume = .2 * sfx;
 
     heavyfabric.volume = .030 * masterVolume * musicVolume;
     heavyfabric.targetVolume = heavyfabric.volume;

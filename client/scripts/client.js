@@ -206,6 +206,7 @@ function registerPrimaryHandlers(server) {
 	//Game State Map changes
 	server.on("startWaiting", function (packet) {
 		debugLog("startWaiting");
+		setLobbySfxDampen(false); // lobby emptied back to waiting — restore full SFX
 		currentState = config.stateMap.waiting;
 		playSoundAfterFinish(lobbyMusic);
 	});
@@ -215,10 +216,12 @@ function registerPrimaryHandlers(server) {
 		currentState = config.stateMap.lobby;
 		spawnLobbyStartButton(packet);
 		loadLobbyMap(packet);
+		setLobbySfxDampen(true);
 		playSoundAfterFinish(lobbyMusic);
 	});
 	server.on("startGated", function (packet) {
 		debugLog("startGated");
+		setLobbySfxDampen(false); // restore full SFX before the game-start cue
 		stopSound(lobbyMusic);
 		playSound(gameStart);
 		currentState = config.stateMap.gated;
@@ -342,14 +345,14 @@ function registerPrimaryHandlers(server) {
 		});
 	});
 	server.on('explodedCells', function (cells) {
-		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
+		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing || currentState == config.stateMap.lobby) {
 			explodedCells(cells);
 			playSound(bombExplosion);
 			rumbleScreen(100);
 		}
 	});
 	server.on("snowFlakeExploded", function (owner) {
-		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
+		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing || currentState == config.stateMap.lobby) {
 			playSound(iceExplosion);
 			rumbleScreen(100);
 		}
@@ -432,7 +435,7 @@ function registerPrimaryHandlers(server) {
 	});
 
 	server.on("projBounced", function () {
-		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
+		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing || currentState == config.stateMap.lobby) {
 			playSound(bombBounce);
 		}
 	});
