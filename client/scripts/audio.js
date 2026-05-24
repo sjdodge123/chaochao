@@ -7,7 +7,7 @@ var masterVolume = 1,
 // Lobby tutorial: all SFX play at this fraction of normal while in the lobby (1 = no
 // change). Toggled by setLobbySfxDampen() on lobby enter/exit; applied in volumeChange.
 var sfxVolumeScalar = 1;
-var LOBBY_SFX_SCALAR = 0.35;
+var LOBBY_SFX_SCALAR = 0.2;
 function setLobbySfxDampen(on) {
     sfxVolumeScalar = on ? LOBBY_SFX_SCALAR : 1;
     volumeChange();

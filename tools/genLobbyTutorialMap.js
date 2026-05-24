@@ -41,6 +41,10 @@ const ID = {
 	goal: 6,
 	background: 9,
 	bomb: 102,
+	speedBuff: 104,
+	speedDebuff: 105,
+	iceCannon: 107,
+	cut: 108,
 };
 
 // --- world bounds (config.json worldWidth/worldHeight) ---
@@ -81,6 +85,12 @@ const BIOMES = [
 const PURE = [
 	{ id: ID.bomb, cx: 683, cy: 150, r: 55 }, // ability tile (aim/fire)
 	{ id: ID.bomb, cx: 683, cy: 620, r: 55 }, // ability tile
+	// Corner ability pickups on the outskirts — the curated "safe" set (decision 5),
+	// one per corner so players discover variety. swap/blindfold/tileSwap stay out.
+	{ id: ID.speedBuff, cx: 200, cy: 145, r: 40 }, // top-left
+	{ id: ID.iceCannon, cx: 1175, cy: 145, r: 40 }, // top-right
+	{ id: ID.cut, cx: 200, cy: 623, r: 40 }, // bottom-left
+	{ id: ID.speedDebuff, cx: 1175, cy: 623, r: 40 }, // bottom-right
 ];
 
 // Two single goal tiles, each its own distinct little island on the goal side
@@ -323,7 +333,7 @@ function main() {
 	const outPath = path.join(ROOT, "client/maps/_lobbyTutorial.json");
 	fs.writeFileSync(outPath, JSON.stringify(diagram));
 
-	const names = { 0: "slow", 1: "normal", 2: "fast", 3: "lava", 4: "ice", 6: "goal", 9: "background", 102: "bomb" };
+	const names = { 0: "slow", 1: "normal", 2: "fast", 3: "lava", 4: "ice", 6: "goal", 9: "background", 102: "bomb", 104: "speedBuff", 105: "speedDebuff", 107: "iceCannon", 108: "cut" };
 	console.log("wrote", path.relative(ROOT, outPath));
 	console.log("cells:", diagram.cells.length, "edges:", diagram.edges.length, "vertices:", diagram.vertices.length);
 	console.log("hazards:", diagram.hazards.length, "(" + diagram.hazards.map((h) => (h.id === HAZARD.bumper ? "bumper" : "movingBumper")).join(", ") + ")");
