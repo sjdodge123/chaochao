@@ -180,6 +180,8 @@ io.use(async (socket, next) => {
             if (userId) {
                 socket.userId = userId;
                 await auth.ensureProgressionRow(userId, socket.deviceId);
+                console.log('[auth] socket', socket.id, 'resolved to user', userId,
+                    socket.deviceId ? '(device ' + socket.deviceId + ')' : '');
             }
         } catch (e) {
             console.log('[auth] handshake resolution error (continuing as guest):', e.message);
