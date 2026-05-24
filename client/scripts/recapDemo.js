@@ -34,6 +34,15 @@ function recapDemo() {
 	if (typeof server !== "undefined" && server && server.removeAllListeners) {
 		server.removeAllListeners();
 	}
+	// Detaching listeners also drops the ping ('drip') response handler, so the
+	// no-server-comm watchdog (checkForTimeout) would reload the page every
+	// ~serverTimeoutWait seconds. Defang it so the forced gameOver stays put.
+	if (typeof serverTimeoutWait !== "undefined") {
+		serverTimeoutWait = Number.MAX_SAFE_INTEGER;
+	}
+	if (typeof timeSinceLastCom !== "undefined") {
+		timeSinceLastCom = 0;
+	}
 	recapDemoActive = true;
 
 	// --- synthetic players (live in playerList so colours/radius resolve) -----
