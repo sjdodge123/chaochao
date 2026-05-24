@@ -104,12 +104,28 @@ function markTouchUsed() {
 
 function onGamepadKeyDown(e) {
     setInputMethod("kbm"); // a key press means keyboard/mouse is in use
-    if (e.key === "Escape" || e.keyCode === 27) {
-        if (leaveModalIsOpen()) {
+    if (leaveModalIsOpen()) {
+        // The leave modal owns the keyboard while it's up: arrows / A-D move
+        // between Leave and Cancel, Enter or Space confirms, Esc closes.
+        if (e.key === "Escape" || e.keyCode === 27) {
             closeLeaveModal();
-        } else {
-            openLeaveModal();
+        } else if (e.keyCode === 37 || e.keyCode === 65 || e.key === "ArrowLeft") {
+            setLeaveFocus(0); // Leave
+            e.preventDefault();
+        } else if (e.keyCode === 39 || e.keyCode === 68 || e.key === "ArrowRight") {
+            setLeaveFocus(1); // Cancel
+            e.preventDefault();
+        } else if (e.keyCode === 13 || e.keyCode === 32 || e.key === "Enter" || e.key === " ") {
+            var btns = leaveButtons();
+            if (btns[leaveFocusIdx]) {
+                btns[leaveFocusIdx].click();
+            }
+            e.preventDefault();
         }
+        return;
+    }
+    if (e.key === "Escape" || e.keyCode === 27) {
+        openLeaveModal();
     } else if (e.key === "h" || e.key === "H" || e.keyCode === 72) {
         toggleHintFade(); // hide/show the control hints
     }
