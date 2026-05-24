@@ -1130,7 +1130,10 @@ function drawLobbyFloor() {
     gameContext.beginPath();
     gameContext.rect(ox, oy, world.width, world.height);
     gameContext.clip();
-    gameContext.strokeStyle = "rgba(0, 0, 0, 0.06)";
+    // Theme-aware faint lines: the theme's foreground "ink" (dark on the light theme,
+    // light on dark) at low alpha, so the practice grid reads on both themes.
+    gameContext.globalAlpha = 0.07;
+    gameContext.strokeStyle = themeColor('ink', 'black');
     gameContext.lineWidth = 1;
     var step = 64;
     gameContext.beginPath();
@@ -1144,9 +1147,10 @@ function drawLobbyFloor() {
     }
     gameContext.stroke();
     gameContext.restore();
-    // Dashed inset frame — a "this is a bounded practice area" cue.
+    // Dashed inset frame — a "this is a bounded practice area" cue (theme-aware).
     gameContext.save();
-    gameContext.strokeStyle = "rgba(0, 0, 0, 0.30)";
+    gameContext.globalAlpha = 0.32;
+    gameContext.strokeStyle = themeColor('ink', 'black');
     gameContext.lineWidth = 3;
     gameContext.setLineDash([14, 10]);
     var inset = 12;
