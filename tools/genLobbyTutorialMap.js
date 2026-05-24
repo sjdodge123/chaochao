@@ -10,6 +10,12 @@
  * so islands read as organic landmasses rather than flat single-type blobs.
  * The goal and bomb tiles are kept pure (single type) for teaching clarity.
  *
+ * A sprawling spider-like web of grass (fast) paths wires the islands together
+ * (radial spokes from a cleared central disc + outer connecting strands), with
+ * ice patches sprinkled along it for fun drifts and a few lava patches for
+ * danger (kept away from the spawn side). Classify order keeps the spawn pad,
+ * pure tiles, and biomes clean — patches/paths only fill the open ground.
+ *
  * The game renders `background` cells as nothing (showing the plain lobby
  * behind) and treats them as neutral/normal ground — see the renderer skip in
  * draw.js and the handleHit branch in game.js.
@@ -96,6 +102,55 @@ const HAZARDS = [
 // Background spawn pad (just neutral background; recorded for spawn/respawn).
 const SPAWN_PAD = { cx: 175, cy: 384, r: 75 };
 
+// --- grass web: sprawling spider-like grass (fast) paths connecting the islands ---
+// Radial spokes emanate from a cleared central disc (the start button stays clear of
+// grass) out to each island/goal, plus outer strands wire the islands together into a
+// web. Cells within PATH_HALF of any strand (and outside the center disc) become grass.
+const CENTER_CLEAR = { cx: 683, cy: 384, r: 92 }; // keep the start-button disc grass-free
+const PATH_HALF = 34;
+const HUBS = {
+	center: { x: 683, y: 384 },
+	spawn: { x: 255, y: 384 }, // just off the spawn pad (the pad itself stays clean bg)
+	meadow: { x: 360, y: 220 },
+	dunes: { x: 360, y: 548 },
+	bombTop: { x: 683, y: 150 },
+	bombBot: { x: 683, y: 620 },
+	glacier: { x: 950, y: 215 },
+	volcano: { x: 950, y: 553 },
+	goalTop: { x: 1235, y: 235 },
+	goalBot: { x: 1235, y: 535 },
+};
+const SEGMENTS = [
+	// radial spokes from the (cleared) center out to every island
+	["center", "spawn"], ["center", "meadow"], ["center", "dunes"],
+	["center", "bombTop"], ["center", "bombBot"],
+	["center", "glacier"], ["center", "volcano"],
+	["center", "goalTop"], ["center", "goalBot"],
+	// outer connecting strands — the web rings
+	["spawn", "meadow"], ["spawn", "dunes"],
+	["meadow", "bombTop"], ["bombTop", "glacier"], ["glacier", "goalTop"],
+	["dunes", "bombBot"], ["bombBot", "volcano"], ["volcano", "goalBot"],
+	["meadow", "dunes"], ["glacier", "volcano"], ["goalTop", "goalBot"],
+];
+
+// --- sprinkled patches: ice for fun drifts, lava for danger ---
+// Checked before the grass web, so they interrupt the corridors (drift/dodge spots).
+// They never override the spawn pad, the pure (goal/bomb) tiles, or the biomes
+// (those are classified first), so islands stay clean and the spawn stays safe.
+// Lava is deliberately kept to x > 700 so the spawn side never has danger underfoot.
+const PATCH_ICE = [
+	{ cx: 520, cy: 300, r: 42 },
+	{ cx: 520, cy: 470, r: 42 },
+	{ cx: 815, cy: 262, r: 36 },
+	{ cx: 815, cy: 506, r: 36 },
+	{ cx: 470, cy: 384, r: 34 },
+];
+const PATCH_LAVA = [
+	{ cx: 770, cy: 320, r: 30 },
+	{ cx: 770, cy: 448, r: 30 },
+	{ cx: 1035, cy: 384, r: 30 },
+];
+
 // --- deterministic RNG (mulberry32) ---
 function mulberry32(a) {
 	return function () {
@@ -139,6 +194,29 @@ function dist(x, y, c) {
 	return Math.sqrt(dx * dx + dy * dy);
 }
 
+// Shortest distance from point (px,py) to the segment a->b.
+function distToSegment(px, py, ax, ay, bx, by) {
+	const vx = bx - ax, vy = by - ay;
+	const wx = px - ax, wy = py - ay;
+	const len2 = vx * vx + vy * vy;
+	let t = len2 > 0 ? (wx * vx + wy * vy) / len2 : 0;
+	t = Math.max(0, Math.min(1, t));
+	const cx = ax + t * vx, cy = ay + t * vy;
+	const dx = px - cx, dy = py - cy;
+	return Math.sqrt(dx * dx + dy * dy);
+}
+
+// True if (x,y) sits on a grass strand — within PATH_HALF of any web segment, but
+// outside the cleared central disc (so the start button stays grass-free).
+function onGrassPath(x, y) {
+	if (dist(x, y, CENTER_CLEAR) <= CENTER_CLEAR.r) return false;
+	for (const [aKey, bKey] of SEGMENTS) {
+		const a = HUBS[aKey], b = HUBS[bKey];
+		if (distToSegment(x, y, a.x, a.y, b.x, b.y) <= PATH_HALF) return true;
+	}
+	return false;
+}
+
 function pickFromPalette(palette, val) {
 	let acc = 0;
 	for (const [id, w] of palette) {
@@ -149,14 +227,15 @@ function pickFromPalette(palette, val) {
 }
 
 function classify(x, y) {
-	// Spawn pad stays clean background.
+	// Spawn pad stays clean background (always safe).
 	if (dist(x, y, SPAWN_PAD) <= SPAWN_PAD.r) return ID.background;
 	// Pure islands (goal, bomb) win first and are never blended.
 	for (const p of PURE) {
 		if (dist(x, y, p) <= p.r) return p.id;
 	}
-	// Biome islands: blend the palette by noise, biased toward the dominant
-	// type near the core so each biome stays recognizable.
+	// Biome islands next, so they stay recognizable and the sprinkled patches /
+	// grass web below never carve into them. Blend the palette by noise, biased
+	// toward the dominant type near the core.
 	for (const b of BIOMES) {
 		const d = dist(x, y, b);
 		if (d <= b.r) {
@@ -165,6 +244,16 @@ function classify(x, y) {
 			return pickFromPalette(b.palette, val);
 		}
 	}
+	// Sprinkled patches interrupt the open ground / grass web (checked before the
+	// paths so they punch through the corridors): ice for drifts, lava for danger.
+	for (const p of PATCH_ICE) {
+		if (dist(x, y, p) <= p.r) return ID.ice;
+	}
+	for (const p of PATCH_LAVA) {
+		if (dist(x, y, p) <= p.r) return ID.lava;
+	}
+	// Grass web: sprawling spider-like paths wiring the islands together.
+	if (onGrassPath(x, y)) return ID.fast;
 	return ID.background;
 }
 
