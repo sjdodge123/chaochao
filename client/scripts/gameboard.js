@@ -20,6 +20,7 @@ var mousex,
 	timerList = [],
 	playersNearVictory = [],
 	pingCircles = [],
+	collapseShockwaves = [],
 	brutalRound = false,
 	brutalRoundConfig = null,
 	clientList;
@@ -59,12 +60,17 @@ function updateGameboard(dt) {
 		updateTrails();
 	}
 	updatePingCircles(dt);
+	updateCollapseShockwaves(dt);
 	checkTimers(dt);
 }
 
 function updatePingCircles(dt) {
 	if (pingCircles.length == 0) return;
-	if (currentState != config.stateMap.gated) return;
+	// The goal ping is a gated-phase telegraph. drawPingCircles renders during
+	// racing/collapsing too, but pings were only advanced/cleared while gated — so
+	// any still alive when the race started froze on screen. Clear them on leaving
+	// the gate so they don't linger into the race.
+	if (currentState != config.stateMap.gated) { pingCircles.length = 0; return; }
 	var wrapped = false;
 	for (var i = pingCircles.length - 1; i >= 0; i--) {
 		var ping = pingCircles[i];
@@ -81,6 +87,24 @@ function updatePingCircles(dt) {
 	}
 	if (wrapped) {
 		playSound(countDownA);
+	}
+}
+// Telegraph for an incoming collapse: a shockwave ring centered on the goal the
+// collapse converges on, starting at the outer front (where the lava appears
+// first) and contracting inward toward the goal, matching how the lava sweeps.
+// Used by the solo collapse and the volcano brutal round (both route through
+// the server startCollapse).
+function spawnCollapseShockwave(x, y) {
+	collapseShockwaves.push({ x: x, y: y, radius: 0, maxRadius: 650, pass: 0 });
+}
+function updateCollapseShockwaves(dt) {
+	if (collapseShockwaves.length == 0) { return; }
+	if (currentState != config.stateMap.collapsing) { collapseShockwaves.length = 0; return; }
+	for (var i = collapseShockwaves.length - 1; i >= 0; i--) {
+		var s = collapseShockwaves[i];
+		if (s.pass >= 3) { collapseShockwaves.splice(i, 1); continue; }
+		s.radius += 600 * dt / 1000;
+		if (s.radius >= s.maxRadius) { s.radius = 0; s.pass++; }
 	}
 }
 function resetTrails() {
@@ -154,6 +178,8 @@ function createPlayer(dataArray) {
 	playerList[index].onFire = dataArray[8];
 	playerList[index].ability = null;
 	playerList[index].angle = dataArray[9];
+	playerList[index].name = dataArray[10] || null;   // AI racer identity (humans: null)
+	playerList[index].title = dataArray[11] || null;
 	playerList[index].deathMessage = null;
 	playerList[index].trail = new Trail({ x: dataArray[1], y: dataArray[2] });
 	playerList[index].fizzle = function () {

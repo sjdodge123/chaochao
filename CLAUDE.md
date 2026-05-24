@@ -10,7 +10,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run start:prod` — start with `NODE_ENV=production`, which makes `index.js` rewrite the `<!-- BUILD: bundle-start -->…<!-- BUILD: bundle-end -->` block in each served HTML page to point at the corresponding bundle in `client/scripts/dist/`. The bundles must already exist; run `npm run build` first.
 - `npm run heroku-postbuild` — invoked automatically by Heroku to build bundles during deploy.
 
-There is no test suite, no linter, and no formatter configured. `client/scripts/dist/` is ignored by `.gitignore` (the `dist` rule), so bundles are produced at deploy time, not committed.
+There is no unit-test framework, linter, or formatter configured. `client/scripts/dist/` is ignored by `.gitignore` (the `dist` rule), so bundles are produced at deploy time, not committed.
+
+### Testing gameplay (headless)
+
+CI (`.github/workflows/pr-validation.yml`) runs `.github/scripts/smoke-test.js` — it boots the **real** server modules with no network/browser, drives the live tick loop (`hostess.updateRooms(dt)` / `room.update(dt)`), and ticks every committed map through waiting→racing→collapsing, failing on any throw or malformed compressor payload. There is no separate physics simulator: to test game logic you run the actual engine headlessly the same way.
+
+`smoke-test.js` is the canonical template. The reusable techniques for richer assertions: a fake `socket.io` `io` (`messenger.build`) whose `emit` *records* events so you can assert on them (`bombTriggered`, `botEmote`, `playerInfected`, …); pinning a map via the editor preview path (`gameBoard.isPreview` + `previewMap`); forcing states (`startGated`/`startRace`/`applyBrutalAbilityRound`) to skip timers; and — **important** — mocking `Date.now` + `setTimeout` into a clock you advance per tick, because a tight synchronous tick loop freezes wall-clock and otherwise no cooldown, projectile fuse, or `setTimeout` callback ever fires.
 
 ## Release notes for game mechanic changes
 

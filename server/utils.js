@@ -7,6 +7,7 @@ var soundListing = [];
 var imgListing = [];
 
 var c = require('./config.json');
+var cellGraph = require('./cellGraph.js');
 c.port = process.env.PORT || c.port;
 
 let octokitInstance;
@@ -128,6 +129,10 @@ exports.submitPullRequest = async function (map) {
             sha: head.object.sha,
         })
 
+        // Embed the canonical par time so the committed map carries it.
+        if (map.parTime == null) {
+            map.parTime = cellGraph.computeMapParTime(map);
+        }
         var bufferObj = Buffer.from(JSON.stringify(map, null, 2), 'utf8');
         var base64String = bufferObj.toString("base64");
         var title = 'INSERT - ' + map.name + "/" + map.author + " from " + email;
@@ -397,7 +402,14 @@ function loadMaps() {
     fs.readdirSync(normalizedPath).forEach(function (file) {
         if (file != ".DS_Store") {
             mapListing.push(file);
-            maps.push(require("../client/maps/" + file));
+            var loadedMap = require("../client/maps/" + file);
+            // Par-time is a fixed property of a map's geometry; compute it once
+            // at boot for any map lacking it (submitted maps embed it). Deep
+            // copies (currentMap) preserve the number.
+            if (loadedMap.parTime == null) {
+                loadedMap.parTime = cellGraph.computeMapParTime(loadedMap);
+            }
+            maps.push(loadedMap);
         }
     });
 }

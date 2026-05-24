@@ -10,7 +10,16 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- You're no longer racing alone: solo and small games now fill out with a roster of named AI racers that drive the course — finding their way to the goal, braking through corners, and steering clear of lava and bumpers — so there's always a full grid to race against.
+- The AI racers fight back: they grab and use abilities (bombs, speed boosts and slows, swaps, ice, blindfolds), and throw punches — including shoving a rival toward the lava when you give them the opening.
+- AI racers handle the brutal rounds: infected bots turn zombie and chase you across the lava to spread it (and healthy bots fend them off), they bash and dodge the hockey puck, ease up for the lightning round's speed, and — fair's fair — they lose their bearings in the blackout, blindfold, and clouds just like you do.
+- The AI racers have personalities now: a pace-setter who runs clean optimal lines, a wrecking ball who'd rather punch than race, a high-roller who corner-cuts past the lava (and sometimes into it), a rival who fixates on you, a chaos-merchant who hoards nothing and fires everything, a cautious tortoise who rarely dies, and a hothead who goes reckless when behind. They also rubber-band to your pace within a race — easing off when you're struggling and pushing when you're ahead — so a win feels earned, not handed to you.
+- Each AI racer shows its name and title under its kart, and they talk: a little taunt pops up when one wins or knocks somebody out, in character.
+- Playing solo is winnable now: when you're the only one in a room, the lava closes in from the goal you're nearest to and at a pace tuned to how far you have to travel, so a clean run actually beats the map instead of getting swallowed by a random, map-blind collapse.
+- The collapse now telegraphs itself: an erupting shockwave sweeps in from where the lava starts toward the goal it's closing on (with the volcano rumble), so you can read which way to run. Volcano rounds use the same warning shockwave.
+- Volcano rounds now erupt on a timer scaled to the map — about how long it takes to reach the nearest goal — instead of a fixed delay, so bigger maps give you proportionally more warning.
 
 ## v0.4.0 — 2026-05-24
 
