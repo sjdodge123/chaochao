@@ -10,7 +10,14 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- Big pass on animations and game feel: punches now swing with an impact spark, hits and explosions shake the screen with weight, abilities telegraph and flash when used, and players kick up dust at speed and trail embers while on fire.
+- Punches are now directional — your punch lands in front of you, so you have to face an opponent to knock them away. Bashing the hockey puck and swatting infected players stay all-directional, but zombies have to face their prey to bite.
+
+### Ability changes
+
+- Tile Swap now warns before it fires — the tiles about to flip pulse and flicker, and the swap itself lands a few seconds later instead of instantly.
 
 ## v0.5.0 — 2026-05-24
 

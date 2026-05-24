@@ -374,7 +374,7 @@ function drawObjects(dt) {
     applyCanvasTransform();
     drawBackground(dt);
     if (currentState == config.stateMap.overview) {
-        screenShake = false;
+        shakeTrauma = 0;
         drawOverviewBoard();
         return;
     }
@@ -396,6 +396,7 @@ function drawObjects(dt) {
         currentState == config.stateMap.collapsing) {
         drawGate();
         drawMap();
+        drawPendingSwap();
         drawPingCircles();
         drawCollapseShockwaves();
     }
@@ -403,8 +404,8 @@ function drawObjects(dt) {
         drawGateLine();
     }
     drawPlayers(dt);
-    drawPunches();
-    drawProjectiles();
+    drawProjectiles(dt);
+    drawEffects();
     drawAbilties();
     drawOverlay();
     postShake();
@@ -734,13 +735,16 @@ function preShake() {
     if (currentState == config.stateMap.gameOver || currentState == config.stateMap.overview) {
         return;
     }
-    if (screenShake == true) {
+    if (shakeTrauma > 0) {
         gameContext.save();
-        // This translate runs under the world transform; divide by the camera
-        // zoom so the shake is a constant on-screen magnitude at any zoom level.
+        // Offset scales with trauma^2 so small hits barely nudge while big ones
+        // really kick, and it's bidirectional (the old code only ever drifted
+        // down-right). Runs under the world transform, so divide by the camera
+        // zoom to keep a constant on-screen magnitude at any scale.
         var s = (worldView && worldView.scale) ? worldView.scale : 1;
-        var dx = Math.random() * 15 / s;
-        var dy = Math.random() * 15 / s;
+        var mag = maxShakeOffset * shakeTrauma * shakeTrauma / s;
+        var dx = (Math.random() * 2 - 1) * mag;
+        var dy = (Math.random() * 2 - 1) * mag;
         gameContext.translate(dx, dy);
     }
 }
@@ -748,37 +752,332 @@ function postShake() {
     if (currentState == config.stateMap.gameOver || currentState == config.stateMap.overview) {
         return;
     }
-    if (screenShake == true) {
+    if (shakeTrauma > 0) {
         gameContext.restore();
     }
 }
 
-function drawPunches() {
-    for (var id in punchList) {
-        drawPunch(punchList[id]);
+// Walk the effects list and render each one with its own normalized progress
+// (t in 0..1). drawEffects runs inside the world transform (camera zoom/pan +
+// shake), which is correct for world-anchored effects — they follow the camera
+// like the players and projectiles do. Screen-space effects (full-screen
+// flashes) must ignore all of that and cover the viewport at any zoom/pan.
+function drawEffects() {
+    if (effectsList.length === 0) {
+        return;
+    }
+    for (var i = 0; i < effectsList.length; i++) {
+        var e = effectsList[i];
+        var t = clamp01(e.age / e.maxAge);
+        gameContext.save();
+        // For screen-space effects, reset ONLY this context to the logical HUD
+        // matrix. We can't call applyCanvasTransform() here: it also resets
+        // overlayContext, which drawOverlay() (blackout) still needs in world
+        // space later this same pass. The enclosing save/restore undoes this.
+        if (e.screen) {
+            gameContext.setTransform(canvasScaleX, 0, 0, canvasScaleY, 0, 0);
+        }
+        e.draw(gameContext, t, e);
+        gameContext.restore();
     }
 }
 
-function drawPunch(punch) {
-    var punchSize = punch.radius;
-    var player = playerList[punch.ownerId];
-    if (player != null && player.infected == true) {
-        punchSize = config.brutalRounds.infection.punchRadius;
+// Seeded by the server "punch" event (the punch object itself only lives
+// ~100ms). The original three-part look — a quick impact pop, an expanding
+// shockwave ring, and a directional sweep — but scaled down so nothing exceeds
+// ~1.8x the real punch radius (the first cut sprawled to ~3x). The pop + ring
+// are radial and always shown; the sweep is added only for directional punches
+// (radial punches — hockey, survivors swatting zombies, bumpers — skip it).
+function spawnPunchEffect(punch) {
+    if (punch == null) {
+        return;
     }
-    gameContext.save();
-    gameContext.beginPath();
-    gameContext.fillStyle = punch.color;
-    gameContext.arc(punch.x, punch.y, punchSize, 0, 2 * Math.PI);
-    gameContext.fill();
-    gameContext.restore();
+    var owner = playerList[punch.ownerId];
+    var infected = owner != null && owner.infected === true;
+    var baseRadius = infected ? config.brutalRounds.infection.punchRadius : punch.radius;
+    var color = infected ? "#7CFC00" : punch.color;
+    // Derive the swing direction from where the server actually placed the
+    // punch hitbox (offset punchReach in front of the player at throw time),
+    // not the owner's live angle — a player who keeps turning would otherwise
+    // make the sweep point away from where the hit really landed.
+    var angleDeg = null;
+    if (punch.directional && owner != null) {
+        var ddx = punch.x - owner.x;
+        var ddy = punch.y - owner.y;
+        angleDeg = (ddx * ddx + ddy * ddy > 0.0001) ? Math.atan2(ddy, ddx) * 180 / Math.PI : owner.angle;
+    }
+    var px = punch.x;
+    var py = punch.y;
+    addEffect({
+        x: px,
+        y: py,
+        maxAge: 220,
+        draw: function (ctx, t) {
+            var grow = easeOutCubic(t);
+            ctx.lineCap = "round";
+            // Impact pop — a disc that scales up and fades fast (tops ~1.3x).
+            ctx.globalAlpha = (1 - t) * 0.5;
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(px, py, baseRadius * (0.55 + 0.75 * grow), 0, 2 * Math.PI);
+            ctx.fill();
+            // Expanding shockwave ring (tops ~1.6x — was 2.5x).
+            ctx.globalAlpha = (1 - t);
+            ctx.lineWidth = 2 * (1 - t) + 1;
+            ctx.strokeStyle = color;
+            ctx.beginPath();
+            ctx.arc(px, py, baseRadius * (0.8 + 0.8 * grow), 0, 2 * Math.PI);
+            ctx.stroke();
+            // Directional sweep — a crescent that thrusts out in the facing
+            // direction and narrows as it fades (tops ~1.8x — was 3.1x; thinner).
+            if (angleDeg != null && t < 0.6) {
+                var st = clamp01(t / 0.6);
+                var center = angleDeg * Math.PI / 180;
+                var half = 0.95 * (1 - st * 0.4);
+                var reach = baseRadius * (1.1 + 0.7 * st);
+                ctx.globalAlpha = (1 - st) * 0.85;
+                ctx.lineWidth = baseRadius * 0.45 * (1 - st) + 1.5;
+                ctx.beginPath();
+                ctx.arc(px, py, reach, center - half, center + half);
+                ctx.stroke();
+            }
+        }
+    });
+}
 
-    gameContext.save();
-    gameContext.beginPath();
-    gameContext.lineWidth = 1;
-    gameContext.strokeStyle = "black";
-    gameContext.arc(punch.x, punch.y, punchSize, 0, 2 * Math.PI);
-    gameContext.stroke();
-    gameContext.restore();
+// Burst at the point of contact when a punch connects — a white flash ring
+// plus radiating sparks, so a landed hit has a visible payoff.
+function spawnHitEffect(x, y, color) {
+    addEffect({
+        x: x,
+        y: y,
+        maxAge: 220,
+        draw: function (ctx, t) {
+            var p = easeOutCubic(t);
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.lineCap = "round";
+            ctx.globalAlpha = (1 - t);
+            ctx.strokeStyle = "white";
+            ctx.lineWidth = 3 * (1 - t) + 1;
+            ctx.beginPath();
+            ctx.arc(0, 0, 6 + 22 * p, 0, 2 * Math.PI);
+            ctx.stroke();
+            ctx.strokeStyle = color || "white";
+            ctx.lineWidth = 2 * (1 - t) + 1;
+            for (var i = 0; i < 6; i++) {
+                var a = (i / 6) * Math.PI * 2 + 0.3;
+                var r0 = 2.8 + 8.4 * p;
+                var r1 = 8.4 + 18.2 * p;
+                ctx.beginPath();
+                ctx.moveTo(Math.cos(a) * r0, Math.sin(a) * r0);
+                ctx.lineTo(Math.cos(a) * r1, Math.sin(a) * r1);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+    });
+}
+
+// Teleport flash for the swap ability — an expanding ring plus particles
+// spiralling outward, so a swap reads as a "poof" instead of a silent blink.
+function spawnTeleportPuff(x, y, color) {
+    addEffect({
+        x: x,
+        y: y,
+        maxAge: 360,
+        draw: function (ctx, t) {
+            var p = easeOutCubic(t);
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.globalAlpha = (1 - t) * 0.9;
+            ctx.strokeStyle = color || "white";
+            ctx.lineWidth = 3 * (1 - t) + 1;
+            ctx.beginPath();
+            ctx.arc(0, 0, 8 + 38 * p, 0, 2 * Math.PI);
+            ctx.stroke();
+            ctx.fillStyle = color || "white";
+            for (var i = 0; i < 8; i++) {
+                var a = (i / 8) * Math.PI * 2 + t * 3;
+                var r = 6 + 30 * p;
+                ctx.globalAlpha = (1 - t);
+                ctx.beginPath();
+                ctx.arc(Math.cos(a) * r, Math.sin(a) * r, 2.5 * (1 - t) + 0.5, 0, 2 * Math.PI);
+                ctx.fill();
+            }
+            ctx.restore();
+        }
+    });
+}
+
+// Bright slash streak along the cut axis (both directions through the cutter),
+// a white core inside a coloured glow that flashes and fades quickly.
+function spawnSlashEffect(x, y, angleDeg, color) {
+    var a = angleDeg * Math.PI / 180;
+    var len = config.worldWidth;
+    var dx = Math.cos(a) * len;
+    var dy = Math.sin(a) * len;
+    addEffect({
+        x: x,
+        y: y,
+        maxAge: 280,
+        draw: function (ctx, t) {
+            ctx.save();
+            ctx.lineCap = "round";
+            ctx.globalAlpha = (1 - t) * 0.6;
+            ctx.strokeStyle = color || "white";
+            ctx.lineWidth = (10 * (1 - t)) + 2;
+            ctx.shadowColor = color || "white";
+            ctx.shadowBlur = 12 * (1 - t);
+            ctx.beginPath();
+            ctx.moveTo(x - dx, y - dy);
+            ctx.lineTo(x + dx, y + dy);
+            ctx.stroke();
+            ctx.globalAlpha = (1 - t);
+            ctx.strokeStyle = "white";
+            ctx.lineWidth = (4 * (1 - t)) + 1;
+            ctx.shadowBlur = 0;
+            ctx.beginPath();
+            ctx.moveTo(x - dx, y - dy);
+            ctx.lineTo(x + dx, y + dy);
+            ctx.stroke();
+            ctx.restore();
+        }
+    });
+}
+
+// A small fireball at a blast site — a hot radial flash, a white shock ring,
+// and a scatter of debris sparks. Used by bombs (and reused, tinted, for ice).
+function spawnExplosion(x, y, radius, color) {
+    color = color || "#ff7a18";
+    radius = radius || 70;
+    addEffect({
+        x: x,
+        y: y,
+        maxAge: 430,
+        draw: function (ctx, t) {
+            var p = easeOutCubic(t);
+            ctx.save();
+            ctx.translate(x, y);
+            // Hot core: a radial gradient that blooms then fades.
+            var coreR = radius * (0.4 + 0.9 * p);
+            var grad = ctx.createRadialGradient(0, 0, 0, 0, 0, coreR);
+            grad.addColorStop(0, "rgba(255,245,200," + (1 - t) + ")");
+            grad.addColorStop(0.5, color);
+            grad.addColorStop(1, "rgba(0,0,0,0)");
+            ctx.globalAlpha = (1 - t) * 0.85;
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(0, 0, coreR, 0, 2 * Math.PI);
+            ctx.fill();
+            // Shock ring.
+            ctx.globalAlpha = (1 - t);
+            ctx.strokeStyle = "rgba(255,255,255,0.9)";
+            ctx.lineWidth = 3 * (1 - t) + 1;
+            ctx.beginPath();
+            ctx.arc(0, 0, radius * (0.6 + 1.0 * p), 0, 2 * Math.PI);
+            ctx.stroke();
+            // Debris sparks.
+            ctx.fillStyle = color;
+            for (var i = 0; i < 10; i++) {
+                var a = (i / 10) * Math.PI * 2 + 0.2;
+                var r = radius * (0.3 + 1.1 * p);
+                ctx.globalAlpha = (1 - t);
+                ctx.beginPath();
+                ctx.arc(Math.cos(a) * r, Math.sin(a) * r, 2.5 * (1 - t) + 0.5, 0, 2 * Math.PI);
+                ctx.fill();
+            }
+            ctx.restore();
+        }
+    });
+}
+
+// Brief full-screen colour wash (e.g. the red flash when a Brutal Round
+// begins). Drawn in screen space, so it ignores world coordinates.
+function spawnScreenFlash(color, peakAlpha, maxAge) {
+    addEffect({
+        screen: true,
+        x: 0,
+        y: 0,
+        maxAge: maxAge || 250,
+        draw: function (ctx, t) {
+            ctx.save();
+            ctx.globalAlpha = (1 - t) * (peakAlpha || 0.35);
+            ctx.fillStyle = color || "red";
+            // drawEffects resets screen effects to the logical HUD matrix, so
+            // fill the logical viewport (a small margin guards against rounding).
+            ctx.fillRect(-40, -40, LOGICAL_WIDTH + 80, LOGICAL_HEIGHT + 80);
+            ctx.restore();
+        }
+    });
+}
+
+// Muzzle flash when a bomb/ice cannon is fired — a bright forward cone with a
+// couple of streaks, at the player's front edge in the facing direction. The
+// "recoil kick" is a small screen shake added for the local shooter.
+function spawnMuzzleFlash(x, y, angleDeg, color) {
+    var a = angleDeg * Math.PI / 180;
+    addEffect({
+        x: x,
+        y: y,
+        maxAge: 160,
+        draw: function (ctx, t) {
+            var p = easeOutCubic(t);
+            var reach = 8 + 20 * p;
+            var spread = 6 * (1 - t) + 3;
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(a);
+            // Flash cone.
+            ctx.globalAlpha = (1 - t) * 0.9;
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(reach, -spread);
+            ctx.lineTo(reach + 6, 0);
+            ctx.lineTo(reach, spread);
+            ctx.closePath();
+            ctx.fill();
+            // Hot white streaks down the middle.
+            ctx.globalAlpha = (1 - t);
+            ctx.strokeStyle = "white";
+            ctx.lineCap = "round";
+            ctx.lineWidth = 2 * (1 - t) + 0.5;
+            for (var i = -1; i <= 1; i++) {
+                ctx.beginPath();
+                ctx.moveTo(2, i * 3);
+                ctx.lineTo(reach * 0.8, i * 4);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+    });
+}
+
+// Detonator feedback when the bomb-trigger ability is pressed — a quick ring +
+// inner flash at the player (the blast itself fireballs at the bomb's location).
+function spawnTriggerPulse(x, y, color) {
+    addEffect({
+        x: x,
+        y: y,
+        maxAge: 200,
+        draw: function (ctx, t) {
+            var p = easeOutCubic(t);
+            ctx.save();
+            ctx.globalAlpha = (1 - t);
+            ctx.strokeStyle = color || "white";
+            ctx.lineWidth = 3 * (1 - t) + 1;
+            ctx.beginPath();
+            ctx.arc(x, y, 6 + 18 * p, 0, 2 * Math.PI);
+            ctx.stroke();
+            ctx.globalAlpha = (1 - t) * 0.5;
+            ctx.fillStyle = color || "white";
+            ctx.beginPath();
+            ctx.arc(x, y, 5 * (1 - t), 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.restore();
+        }
+    });
 }
 
 function drawAbilties() {
@@ -791,12 +1090,30 @@ function drawAbilties() {
 
     if (blindfold.color != null) {
         gameContext.save();
+        gameContext.globalAlpha = blindfoldAlpha();
         gameContext.beginPath();
         gameContext.fillStyle = blindfold.color;
         gameContext.rect(world.x, world.y, world.width, world.height);
         gameContext.fill();
         gameContext.restore();
     }
+}
+
+// Ease the blindfold in and out instead of snapping the solid fill on/off.
+function blindfoldAlpha() {
+    if (blindfold.start == null || !blindfold.duration) {
+        return 1;
+    }
+    var e = Date.now() - blindfold.start;
+    var fadeIn = 200;
+    var fadeOut = 500;
+    if (e < fadeIn) {
+        return clamp01(e / fadeIn);
+    }
+    if (e > blindfold.duration - fadeOut) {
+        return clamp01((blindfold.duration - e) / fadeOut);
+    }
+    return 1;
 }
 
 // The player objects for every LOCAL player (slot) that is currently alive. On a
@@ -838,45 +1155,75 @@ function drawOverlay() {
         overlayContext.save();
         overlayContext.globalCompositeOperation = 'destination-out';
         var sprite = getBlackoutHoleSprite();
+        var scale = blackoutHoleScale();
+        var w = sprite.width * scale;
+        var h = sprite.height * scale;
         for (var i = 0; i < living.length; i++) {
             var p = living[i];
-            overlayContext.drawImage(sprite, p.x - sprite.width / 2, p.y - sprite.height / 2);
+            overlayContext.drawImage(sprite, p.x - w / 2, p.y - h / 2, w, h);
         }
         overlayContext.restore();
     }
 }
 
+// The blackout hole starts wide and irises in over ~700ms (the darkness
+// "closes in"), then gently breathes so it feels alive rather than static.
+function blackoutHoleScale() {
+    var breathe = 0.06 * Math.sin(Date.now() / 600);
+    var base = 1;
+    if (blackoutStart != null) {
+        var e = Date.now() - blackoutStart;
+        var irisMs = 700;
+        if (e < irisMs) {
+            base = lerp(2.6, 1, easeOutCubic(e / irisMs));
+        }
+    }
+    return base + breathe;
+}
+
+// How far through its warn-up a countdown aimer is, 0..1. Set when the
+// countdown starts (swapUsed / spawnExplosionAimer handlers).
+function aimerCountdownProgress(aimer) {
+    if (aimer.countdownStart == null || !aimer.countdownDuration) {
+        return 0;
+    }
+    return clamp01((Date.now() - aimer.countdownStart) / aimer.countdownDuration);
+}
+
 function drawAimer(aimer) {
     if (aimer.startSwapCountDown && aimer.hide == false) {
+        // Continuous sine pulse that speeds up and reddens as the swap nears,
+        // instead of the old once-a-second single-frame flash.
+        var prog = aimerCountdownProgress(aimer);
+        var phase = (Date.now() / 1000) * (2 + 5 * prog) * Math.PI * 2;
+        var pulse = 0.5 + 0.5 * Math.sin(phase);
         gameContext.save();
         gameContext.beginPath();
         gameContext.arc(aimer.x, aimer.y, aimer.radius, 0, 2 * Math.PI);
         gameContext.setLineDash([15, 3, 3, 3]);
-        if (aimer.swapCountDownPulse) {
-            aimer.swapCountDownPulse = false;
-            gameContext.lineWidth = 10;
-            gameContext.strokeStyle = "red";
-        } else {
-            gameContext.lineWidth = 3;
-            gameContext.strokeStyle = "black";
-        }
+        gameContext.lineWidth = lerp(2, 10, pulse * (0.4 + 0.6 * prog));
+        gameContext.strokeStyle = prog > 0.66 ? "red" : "black";
+        gameContext.globalAlpha = 0.45 + 0.55 * pulse;
         gameContext.stroke();
         gameContext.restore();
     }
     if (aimer.startExplosionCountDown && aimer.hide == false) {
+        var prog2 = aimerCountdownProgress(aimer);
+        var phase2 = (Date.now() / 1000) * (2 + 5 * prog2) * Math.PI * 2;
+        var pulse2 = 0.5 + 0.5 * Math.sin(phase2);
         gameContext.save();
+        // Fill intensity swells with the pulse and the countdown so the blast
+        // radius "charges up" before it goes off.
         gameContext.beginPath();
         gameContext.arc(aimer.x, aimer.y, aimer.radius, 0, 2 * Math.PI);
-        if (aimer.explosionPulse) {
-            aimer.explosionPulse = false;
-            gameContext.fillStyle = aimer.color;
-            gameContext.fill();
-        } else {
-            gameContext.setLineDash([15, 3, 3, 3]);
-            gameContext.lineWidth = 3;
-            gameContext.strokeStyle = aimer.color;
-            gameContext.stroke();
-        }
+        gameContext.fillStyle = aimer.color;
+        gameContext.globalAlpha = (0.12 + 0.5 * prog2) * pulse2;
+        gameContext.fill();
+        gameContext.globalAlpha = 1;
+        gameContext.setLineDash([15, 3, 3, 3]);
+        gameContext.lineWidth = lerp(2, 7, pulse2);
+        gameContext.strokeStyle = aimer.color;
+        gameContext.stroke();
         gameContext.restore();
     }
 }
@@ -940,6 +1287,7 @@ function drawPlayer(player, dt) {
     if (player.onFire > 0) {
         drawFire(player);
     }
+    drawSpeedFx(player);
 
     var playerStrokeColor = "black";
     for (var aimerID in aimerList) {
@@ -1019,6 +1367,47 @@ function drawPlayer(player, dt) {
         gameContext.drawImage(commentIconSolid, player.x, player.y - 40, commentIconSolid.width * 0.07, commentIconSolid.height * 0.07);
         gameContext.font = '20px Times New Roman';
         gameContext.fillText("😴", player.x + 8, player.y - 17);
+        gameContext.restore();
+    }
+}
+
+// Sustained speed-ability feedback driven by timestamps set on the player when
+// a buff/debuff lands. Buff = wind streaks trailing the direction of travel;
+// debuff = a slow sluggish ripple. Both expire on their own with no server
+// state, and the dust system reinforces the buff via the player's higher speed.
+function drawSpeedFx(player) {
+    var now = Date.now();
+    if (player.speedBuffUntil != null && now < player.speedBuffUntil) {
+        var speed = Math.sqrt(player.velX * player.velX + player.velY * player.velY);
+        if (speed > 0.5) {
+            var dirA = Math.atan2(player.velY, player.velX);
+            gameContext.save();
+            gameContext.translate(player.x, player.y);
+            gameContext.rotate(dirA);
+            gameContext.strokeStyle = "rgba(255,255,255,0.6)";
+            gameContext.lineCap = "round";
+            gameContext.lineWidth = 2;
+            var phase = (now / 60) % 12;
+            for (var i = 0; i < 3; i++) {
+                var off = (i - 1) * player.radius * 0.7;
+                var back = player.radius + 4 + ((phase + i * 4) % 12);
+                gameContext.beginPath();
+                gameContext.moveTo(-back, off);
+                gameContext.lineTo(-back - 10, off);
+                gameContext.stroke();
+            }
+            gameContext.restore();
+        }
+    }
+    if (player.speedDebuffUntil != null && now < player.speedDebuffUntil) {
+        var rp = (now / 700) % 1;
+        gameContext.save();
+        gameContext.globalAlpha = (1 - rp) * 0.4;
+        gameContext.strokeStyle = "rgba(80,80,160,1)";
+        gameContext.lineWidth = 2;
+        gameContext.beginPath();
+        gameContext.arc(player.x, player.y, player.radius + 2 + rp * 12, 0, 2 * Math.PI);
+        gameContext.stroke();
         gameContext.restore();
     }
 }
@@ -1129,11 +1518,14 @@ function drawFlameColor(player, size) {
 
 
 
-function drawProjectiles() {
+function drawProjectiles(dt) {
+    // ~5 degrees per 60fps frame, but scaled by dt so the spin speed is the
+    // same on a 144Hz monitor as on a 60Hz one.
+    var spin = 0.3 * (dt || 16.67);
     for (var proj in projectileList) {
 
         if (projectileList[proj].type == 'bomb') {
-            projectileList[proj].rotation += 5;
+            projectileList[proj].rotation += spin;
             const centerX = bombImage.width * 2;
             const centerY = bombImage.height * 2;
             gameContext.save();
@@ -1152,7 +1544,7 @@ function drawProjectiles() {
             gameContext.restore();
         }
         if (projectileList[proj].type == 'snowFlake') {
-            projectileList[proj].rotation += 5;
+            projectileList[proj].rotation += spin;
             const centerX = snowFlakeImage.width / 2;
             const centerY = snowFlakeImage.height / 2;
             gameContext.save();
@@ -1177,90 +1569,107 @@ function drawProjectiles() {
 
 function drawAbilityIndicator(x, y, player) {
     switch (player.ability) {
-        case config.tileMap.abilities.bomb.id: {
-            if (player.angle % 90 == 0) {
-                drawBombAimer(x, y, player.angle);
-                break;
-            }
-            if ((player.angle + 45) % 90 == 0) {
-                drawBombAimer(x, y, player.angle);
-                break;
-            }
-        }
-        case config.tileMap.abilities.iceCannon.id: {
-            if (player.angle % 90 == 0) {
-                drawBombAimer(x, y, player.angle);
-                break;
-            }
-            if ((player.angle + 45) % 90 == 0) {
-                drawBombAimer(x, y, player.angle);
-                break;
-            }
-        }
-        case config.tileMap.abilities.cut.id: {
-            if (player.angle % 90 == 0) {
-                drawCutAimer(x, y, player.angle, player.color);
-                break;
-            }
-            if ((player.angle + 45) % 90 == 0) {
-                drawCutAimer(x, y, player.angle, player.color);
-                break;
-            }
-        }
-        case config.tileMap.abilities.swap.id: {
-            gameContext.save();
-            gameContext.beginPath();
-            gameContext.setLineDash([15, 3, 3, 3]);
-            gameContext.arc(x, y, 10, 0, 2 * Math.PI);
-            gameContext.stroke();
-            gameContext.restore();
-        }
-        case config.tileMap.abilities.bombTrigger.id: {
-            gameContext.save();
-            gameContext.beginPath();
-            gameContext.lineWidth = 2;
-            gameContext.setLineDash([7, 2, 2]);
-            gameContext.arc(x, y, 10, 0, 2 * Math.PI);
-            gameContext.stroke();
-            gameContext.restore();
-        }
-        default: {
-            gameContext.save();
-            gameContext.beginPath();
-            gameContext.setLineDash([2, 2]);
-            gameContext.arc(x, y, 10, 0, 2 * Math.PI);
-            gameContext.stroke();
-            gameContext.restore();
-        }
+        case config.tileMap.abilities.bomb.id:
+            drawProjectileAimer(x, y, player.angle, "#ff8c3a", config.tileMap.abilities.bomb.aimerLength);
+            break;
+        case config.tileMap.abilities.iceCannon.id:
+            drawProjectileAimer(x, y, player.angle, "#5ad0ff", config.tileMap.abilities.iceCannon.aimerLength);
+            break;
+        case config.tileMap.abilities.cut.id:
+            drawCutAimer(x, y, player.angle, player.color);
+            break;
+        case config.tileMap.abilities.swap.id:
+        case config.tileMap.abilities.bombTrigger.id:
+        default:
+            drawArmedRing(x, y, player.color);
+            break;
     }
 }
 
-function drawBombAimer(x, y, angle) {
+// Directional throw indicator for bomb/ice cannon: a tinted line whose dashes
+// march outward toward the throw direction, capped with a pulsing arrowhead.
+// (It shows direction, not the physics landing spot, so no target/blast ring.)
+function drawProjectileAimer(x, y, angle, color, length) {
+    var now = Date.now();
+    var aimerLength = (length != null) ? length : config.tileMap.abilities.bomb.aimerLength;
+    var tip = pos({ x: x, y: y }, aimerLength, angle);
     gameContext.save();
+    gameContext.lineCap = "round";
+    gameContext.strokeStyle = color;
+    gameContext.lineWidth = 2;
+    gameContext.setLineDash([6, 5]);
+    gameContext.lineDashOffset = -(now / 25) % 11;
     gameContext.beginPath();
-    gameContext.setLineDash([5, 5]);
     gameContext.moveTo(x, y);
-    var point = pos({ x: x, y: y }, config.tileMap.abilities.bomb.aimerLength, angle);
-    gameContext.lineTo(point.x, point.y);
+    gameContext.lineTo(tip.x, tip.y);
+    gameContext.stroke();
+    // Pulsing arrowhead at the tip.
+    gameContext.setLineDash([]);
+    gameContext.globalAlpha = 0.6 + 0.4 * Math.sin(now / 150);
+    gameContext.lineWidth = 2.5;
+    var leftP = pos(tip, 8, angle + 140);
+    var rightP = pos(tip, 8, angle - 140);
+    gameContext.beginPath();
+    gameContext.moveTo(leftP.x, leftP.y);
+    gameContext.lineTo(tip.x, tip.y);
+    gameContext.lineTo(rightP.x, rightP.y);
     gameContext.stroke();
     gameContext.restore();
 }
+
+// Cut telegraph: a soft glowing beam through the player both ways, with a white
+// core whose dashes flow along it and a gentle pulse, plus a bright origin dot.
 function drawCutAimer(x, y, angle, color) {
+    var now = Date.now();
+    var pulse = 0.5 + 0.5 * Math.sin(now / 250);
+    var fwd = pos({ x: x, y: y }, config.worldWidth, angle);
+    var bwd = pos({ x: x, y: y }, config.worldWidth, angle - 180);
     gameContext.save();
-    gameContext.beginPath();
-    gameContext.setLineDash([15, 10, 12, 0, 0, 2]);
+    gameContext.lineCap = "round";
+    // Glow beam.
+    gameContext.globalAlpha = 0.22 + 0.22 * pulse;
+    gameContext.strokeStyle = color;
     gameContext.shadowColor = color;
-    gameContext.shadowBlur = 10;
-    gameContext.lineWidth = 1;
-    gameContext.strokeStyle = "black";
-    gameContext.moveTo(x, y);
-    var pointFWD = pos({ x: x, y: y }, config.worldWidth, angle);
-    gameContext.lineTo(pointFWD.x, pointFWD.y);
+    gameContext.shadowBlur = 12;
+    gameContext.lineWidth = 4;
+    gameContext.beginPath();
+    gameContext.moveTo(bwd.x, bwd.y);
+    gameContext.lineTo(fwd.x, fwd.y);
+    gameContext.stroke();
+    // Flowing white core.
+    gameContext.shadowBlur = 0;
+    gameContext.globalAlpha = 0.7 + 0.3 * pulse;
+    gameContext.strokeStyle = "white";
+    gameContext.lineWidth = 1.5;
+    gameContext.setLineDash([10, 8]);
+    gameContext.lineDashOffset = -(now / 20) % 18;
+    gameContext.beginPath();
+    gameContext.moveTo(bwd.x, bwd.y);
+    gameContext.lineTo(fwd.x, fwd.y);
+    gameContext.stroke();
+    // Bright origin dot.
+    gameContext.setLineDash([]);
+    gameContext.globalAlpha = 0.8;
+    gameContext.fillStyle = color;
+    gameContext.beginPath();
+    gameContext.arc(x, y, 3 + pulse, 0, 2 * Math.PI);
+    gameContext.fill();
+    gameContext.restore();
+}
 
-    gameContext.moveTo(x, y);
-    var pointBWD = pos({ x: x, y: y }, config.worldWidth, angle - 180);
-    gameContext.lineTo(pointBWD.x, pointBWD.y);
-
+// "Ability armed" indicator for swap / bomb-trigger / anything else held: a
+// slowly rotating dashed ring that pulses, in the player's colour.
+function drawArmedRing(x, y, color) {
+    var now = Date.now();
+    gameContext.save();
+    gameContext.translate(x, y);
+    gameContext.rotate((now / 600) % (2 * Math.PI));
+    gameContext.beginPath();
+    gameContext.setLineDash([6, 4]);
+    gameContext.lineWidth = 2;
+    gameContext.globalAlpha = 0.55 + 0.45 * Math.sin(now / 200);
+    gameContext.strokeStyle = color || "black";
+    gameContext.arc(0, 0, 11, 0, 2 * Math.PI);
     gameContext.stroke();
     gameContext.restore();
 }
@@ -1511,6 +1920,70 @@ function drawMap() {
     }
 }
 
+// Trace a voronoi cell's polygon into the current path (no fill/stroke).
+function traceCellPath(ctx, cell) {
+    var halfedges = cell.halfedges;
+    if (halfedges.length == 0) {
+        return false;
+    }
+    ctx.beginPath();
+    var v = getStartpoint(halfedges[0]);
+    ctx.moveTo(v.x, v.y);
+    for (var i = 0; i < halfedges.length; i++) {
+        v = getEndpoint(halfedges[i]);
+        ctx.lineTo(v.x, v.y);
+    }
+    ctx.closePath();
+    return true;
+}
+
+// Overlay drawn on top of the cached map: the tiles a tileSwap is about to flip
+// pulse (a global sine that speeds up as the swap nears) with a brief random
+// flicker per cell, plus a brightening yellow edge. Cleared as tiles flip (see
+// changeTilesBulk) and self-expires if the swap never lands.
+function drawPendingSwap() {
+    if (pendingSwapCells == null || currentMap == null || currentMap.cells == null) {
+        return;
+    }
+    var now = Date.now();
+    var set = pendingSwapCells.set;
+    gameContext.save();
+    for (var i = 0; i < currentMap.cells.length; i++) {
+        var cell = currentMap.cells[i];
+        var tile = set[cell.site.voronoiId];
+        if (tile == null) {
+            continue;
+        }
+        // Fallback self-expiry: a tile whose flip is well past (e.g. it got
+        // converted by something else and never cleared via tileSwapPerformed).
+        if (now - tile.end > 1500) {
+            delete set[cell.site.voronoiId];
+            continue;
+        }
+        // Per-tile progress so overlapping swaps each ramp on their own clock.
+        var span = tile.end - tile.start;
+        var prog = span > 0 ? clamp01((now - tile.start) / span) : 1;
+        var pulse = 0.5 + 0.5 * Math.sin((now / 1000) * (3 + 6 * prog) * Math.PI * 2);
+        // Electrical flicker: occasional dim frames, more frequent near the end.
+        var flicker = Math.random() < (0.08 + 0.2 * prog) ? 0.3 : 1.0;
+        var alpha = (0.18 + 0.4 * pulse) * flicker;
+        if (!traceCellPath(gameContext, cell)) {
+            continue;
+        }
+        gameContext.globalAlpha = alpha;
+        gameContext.fillStyle = "#ffffff";
+        gameContext.fill();
+        gameContext.lineWidth = 2 + 3 * prog;
+        gameContext.strokeStyle = "#ffff66";
+        gameContext.stroke();
+    }
+    gameContext.restore();
+    // Once every tile has flipped/cleared/expired, drop the telegraph.
+    if (Object.keys(set).length === 0) {
+        pendingSwapCells = null;
+    }
+}
+
 function renderMapToCache() {
     if (world == null) {
         return;
@@ -1576,7 +2049,56 @@ function renderMapToCache() {
         mapCtx.fill();
         mapCtx.stroke();
     }
+    drawLavaBorders(mapCtx);
     mapCtx.restore();
+}
+
+// Trace a dark-red rim around every lava grouping. The map is a Voronoi diagram
+// so each edge knows the two cells it separates; we stroke only the edges where
+// a lava cell meets a non-lava cell (or the map boundary), which outlines each
+// island's perimeter without drawing the internal seams between adjacent lava
+// tiles. Runs only on cache rebuilds (map load / tile change), so it's free
+// per-frame. Keys off cell.id, so it tracks bombs/tileSwap/collapse and still
+// works when lava renders as poison in infection rounds.
+var lavaBorderColor = "#7a0000";
+function drawLavaBorders(ctx) {
+    if (currentMap == null || currentMap.cells == null) {
+        return;
+    }
+    var lavaId = config.tileMap.lava.id;
+    var cells = currentMap.cells;
+    var idByVoronoi = {};
+    for (var i = 0; i < cells.length; i++) {
+        idByVoronoi[cells[i].site.voronoiId] = cells[i].id;
+    }
+    ctx.save();
+    ctx.beginPath();
+    for (var c = 0; c < cells.length; c++) {
+        var cell = cells[c];
+        if (cell.id != lavaId) {
+            continue;
+        }
+        var halfedges = cell.halfedges;
+        for (var h = 0; h < halfedges.length; h++) {
+            var he = halfedges[h];
+            // The cell across this edge (null on the map boundary).
+            var neighbor = compareSite(he.edge.lSite, he.site) ? he.edge.rSite : he.edge.lSite;
+            if (neighbor != null && idByVoronoi[neighbor.voronoiId] == lavaId) {
+                continue; // internal seam between two lava tiles — skip
+            }
+            var sp = getStartpoint(he);
+            var ep = getEndpoint(he);
+            ctx.moveTo(sp.x, sp.y);
+            ctx.lineTo(ep.x, ep.y);
+        }
+    }
+    ctx.setLineDash([]);
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = lavaBorderColor;
+    ctx.stroke();
+    ctx.restore();
 }
 function drawHazard(hazard) {
     if (hazard.id == config.hazards.bumper.id) {
@@ -1846,34 +2368,57 @@ function drawTouchLabel(text, x, y) {
 function drawTitle() {
 
     if (brutalRound == true) {
-        if (brutalRoundConfig.drawTitleAlpha == null) {
-            brutalRoundConfig.drawTitleAlpha = 1.0;
+        // Time-based entrance (so it plays the same on any refresh rate):
+        // a quick scale-in with a little overshoot, a hold, then a fade. A
+        // single red screen flash fires the moment the card appears.
+        if (brutalRoundConfig.titleStart == null) {
+            brutalRoundConfig.titleStart = Date.now();
+            spawnScreenFlash("red", 0.4, 350);
         }
-        if (brutalRoundConfig.drawTitleAlpha < 0) {
-            return;
-        }
-        gameContext.save();
-        gameContext.strokeStyle = "rgba(255, 255, 255, " + brutalRoundConfig.drawTitleAlpha + ")";;
-        gameContext.lineWidth = 10;
-        gameContext.fillStyle = "rgba(255, 0, 0, " + brutalRoundConfig.drawTitleAlpha + ")";
-        gameContext.font = "50px Arial";
-        gameContext.strokeText('Brutal Round', (LOGICAL_WIDTH / 2) - 120, (LOGICAL_HEIGHT / 2) - 25);
-        gameContext.fillText('Brutal Round', (LOGICAL_WIDTH / 2) - 120, (LOGICAL_HEIGHT / 2) - 25);
-        var titles = [];
-        for (var i = 0; i < brutalRoundConfig.brutalTypes.length; i++) {
-            for (var prop in config.brutalRounds) {
-                if (config.brutalRounds[prop].id == brutalRoundConfig.brutalTypes[i]) {
-                    titles.push(config.brutalRounds[prop].title);
+        var e = Date.now() - brutalRoundConfig.titleStart;
+        var inMs = 350, holdMs = 2200, outMs = 1500;
+        if (e <= inMs + holdMs + outMs) {
+            var alpha, scale;
+            if (e < inMs) {
+                var ip = e / inMs;
+                scale = lerp(0.4, 1, easeOutBack(ip));
+                alpha = clamp01(ip);
+            } else if (e < inMs + holdMs) {
+                scale = 1;
+                alpha = 1;
+            } else {
+                var fp = (e - inMs - holdMs) / outMs;
+                scale = 1 + 0.06 * fp;
+                alpha = clamp01(1 - fp);
+            }
+            gameContext.save();
+            gameContext.textAlign = "center";
+            // HUD/screen pass: anchor in logical space so it stays centered and
+            // crisp at any DPR (this runs after applyCanvasTransform, not under
+            // the world camera zoom/pan).
+            gameContext.translate(LOGICAL_WIDTH / 2, LOGICAL_HEIGHT / 2 - 10);
+            gameContext.scale(scale, scale);
+            gameContext.strokeStyle = "rgba(255, 255, 255, " + alpha + ")";
+            gameContext.lineWidth = 10;
+            gameContext.fillStyle = "rgba(255, 0, 0, " + alpha + ")";
+            gameContext.font = "50px Arial";
+            gameContext.strokeText('Brutal Round', 0, 0);
+            gameContext.fillText('Brutal Round', 0, 0);
+            var titles = [];
+            for (var i = 0; i < brutalRoundConfig.brutalTypes.length; i++) {
+                for (var prop in config.brutalRounds) {
+                    if (config.brutalRounds[prop].id == brutalRoundConfig.brutalTypes[i]) {
+                        titles.push(config.brutalRounds[prop].title);
+                    }
                 }
             }
+            gameContext.font = "30px Arial";
+            for (var j = 0; j < titles.length; j++) {
+                gameContext.strokeText(titles[j], 0, 40 + (35 * j));
+                gameContext.fillText(titles[j], 0, 40 + (35 * j));
+            }
+            gameContext.restore();
         }
-        gameContext.font = "30px Arial";
-        for (var j = 0; j < titles.length; j++) {
-            gameContext.strokeText(titles[j], (LOGICAL_WIDTH / 2) - 120, (LOGICAL_HEIGHT / 2) + 15 + (35 * j));
-            gameContext.fillText(titles[j], (LOGICAL_WIDTH / 2) - 120, (LOGICAL_HEIGHT / 2) + 15 + (35 * j));
-        }
-        gameContext.restore();
-        brutalRoundConfig.drawTitleAlpha -= .0025;
     }
     if (currentState == config.stateMap.waiting && lobbyStartButton == null) {
         gameContext.save();

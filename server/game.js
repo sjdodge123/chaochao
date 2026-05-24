@@ -1165,7 +1165,7 @@ class GameBoard {
 			}
 			if (this.abilityList[id].tileSwap) {
 				this.abilityList[id].tileSwap = false;
-				this.swapTiles();
+				this.startTileSwap();
 			}
 			if (this.abilityList[id].blind) {
 				this.abilityList[id].blind = false;
@@ -1186,6 +1186,13 @@ class GameBoard {
 		}
 	}
 	updatePlayers(currentState, dt) {
+		// Punch directionality policy (resolved here, applied in checkAttack):
+		//  - Hockey: radial for everyone, so you can smack the puck from any side.
+		//  - Infection: zombies must aim their bite (directional), but survivors
+		//    swat zombies in any direction (radial).
+		//  - Otherwise: per config.directionalPunch.
+		var hockeyRound = this.checkForActiveBrutal(c.brutalRounds.hockey.id);
+		var infectionRound = this.checkForActiveBrutal(c.brutalRounds.infection.id);
 		for (var playerID in this.playerList) {
 			var player = this.playerList[playerID];
 			// handleHit (during checkCollisions, just above) flags lobby lava/goal hits
@@ -1216,7 +1223,13 @@ class GameBoard {
 				}
 				player.acquiredAbility = null;
 			}
-			player.update(currentState, dt);
+			var punchDirectional = c.directionalPunch;
+			if (hockeyRound) {
+				punchDirectional = false;
+			} else if (infectionRound && !player.isZombie) {
+				punchDirectional = false;
+			}
+			player.update(currentState, dt, punchDirectional);
 			if (currentState == c.stateMap.lobby) {
 				this.updateLobbyInvulnHold(player);
 			}
@@ -1331,6 +1344,44 @@ class GameBoard {
 		return this.tileChanges;
 	}
 
+	// TileSwap now telegraphs before it fires: clients are told which tiles are
+	// about to flip (so they can pulse/flicker), and the actual swap is delayed
+	// a random 3-6s. swapTiles() below still performs the flip when the timer
+	// fires.
+	startTileSwap() {
+		if (this.currentMap == null || this.currentMap.cells == null) {
+			return;
+		}
+		var cells = this.currentMap.cells;
+		var pending = [];
+		for (var i = 0; i < cells.length; i++) {
+			if (cells[i].id == c.tileMap.fast.id || cells[i].id == c.tileMap.ice.id) {
+				pending.push(cells[i].site.voronoiId);
+			}
+		}
+		if (pending.length == 0) {
+			return;
+		}
+		var ts = c.tileMap.abilities.tileSwap;
+		var min = ts.minSwapDelay != null ? ts.minSwapDelay : 3000;
+		var max = ts.maxSwapDelay != null ? ts.maxSwapDelay : 6000;
+		var delay = min + Math.floor(Math.random() * (max - min + 1));
+		messenger.messageRoomBySig(this.roomSig, "tileSwapPending", JSON.stringify({ ids: pending, duration: delay }));
+		// Track the timer like every other ability timer so it gets cancelled on
+		// round/match end — otherwise it can fire against a torn-down room or swap
+		// tiles after the round has logically ended.
+		this.pendingAbilityTimers.push(setTimeout(this.performTileSwap, delay, { context: this, map: this.currentMap }));
+	}
+	performTileSwap(packet) {
+		var gameBoard = packet.context;
+		// Bail if the round/map changed while the timer was pending — currentMap
+		// is a fresh object each round, so a reference check catches that.
+		if (gameBoard.currentMap !== packet.map) {
+			return;
+		}
+		gameBoard.swapTiles();
+	}
+
 	swapTiles() {
 		//Find all fast tiles, find all ice tiles, swap them
 		var cells = this.currentMap.cells;
@@ -1350,6 +1401,13 @@ class GameBoard {
 			}
 		}
 		messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(tileDelta));
+		// Tell clients the swap itself just landed (distinct from any other tile
+		// change), carrying the ids it flipped, so the delayed swap sound fires
+		// exactly once at the flip and the right tiles stop telegraphing.
+		var swappedIds = Object.keys(tileDelta);
+		if (swappedIds.length > 0) {
+			messenger.messageRoomBySig(this.roomSig, "tileSwapPerformed", JSON.stringify(swappedIds));
+		}
 	}
 	cutPlayers(owner) {
 		for (var id in this.playerList) {
@@ -1411,7 +1469,16 @@ class GameBoard {
 			randomPlayer[prop] = ownerPlayer[prop];
 			ownerPlayer[prop] = tempVars[prop];
 		}
-		messenger.messageRoomBySig(gameBoard.roomSig, "playerSwapped", packet.owner);
+		// Send both endpoints (the players' positions just after they exchanged)
+		// so the client can puff teleport effects where players actually land,
+		// not where the owner used to be.
+		messenger.messageRoomBySig(gameBoard.roomSig, "playerSwapped", JSON.stringify({
+			owner: packet.owner,
+			points: [
+				{ x: ownerPlayer.x, y: ownerPlayer.y },
+				{ x: randomPlayer.x, y: randomPlayer.y }
+			]
+		}));
 	}
 	spawnBomb(owner) {
 		var player = this.playerList[owner];
@@ -1480,7 +1547,7 @@ class GameBoard {
 		this.applyExplosionForce(explodeLoc, owner);
 		this.lobbyMapDirty = true;
 		this.lobbyLastActivity = Date.now();
-		messenger.messageRoomBySig(this.roomSig, 'snowFlakeExploded', owner);
+		messenger.messageRoomBySig(this.roomSig, 'snowFlakeExploded', { owner: owner, x: explodeLoc.x, y: explodeLoc.y });
 		messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(tileDelta));
 	}
 	explodeLava(explodeLoc, radius) {
@@ -2747,7 +2814,7 @@ class Player extends Circle {
 		//Scratch space for the bot brain (aiController) — path cache, timers, etc.
 		this.ai = null;
 	}
-	update(currentState, dt) {
+	update(currentState, dt, punchDirectional) {
 		this.currentState = currentState;
 		// Bots have no socket and never AFK — the sleep/kick path ends in
 		// messageClientBySig (Room.checkAFK), which would throw on a socketless
@@ -2760,7 +2827,7 @@ class Player extends Circle {
 		}
 		this.dt = dt;
 		this.move();
-		this.checkAttack(currentState);
+		this.checkAttack(currentState, punchDirectional);
 		this.checkChatCoolDownTimer();
 		this.checkFireTimer();
 	}
@@ -2768,7 +2835,7 @@ class Player extends Circle {
 		this.x = this.newX;
 		this.y = this.newY;
 	}
-	checkAttack(currentState) {
+	checkAttack(currentState, punchDirectional) {
 		if (this.attack) {
 			if ((currentState == c.stateMap.racing || currentState == c.stateMap.collapsing || currentState == c.stateMap.lobby) && this.ability != null) {
 				this.punchedTimer = Date.now();
@@ -2795,7 +2862,21 @@ class Player extends Circle {
 			if (this.isZombie == true) {
 				punchRadius = c.brutalRounds.infection.punchRadius;
 			}
-			this.punch = new Punch(this.x, this.y, punchRadius, this.color, this.id, this.roomSig, 1, this.isZombie);
+			// Directional punch: place the hitbox in front of the player along its
+			// facing angle so you have to aim, and the radial knockback shoves the
+			// target forward. The decision (per round/mode) is resolved in
+			// GameBoard.updatePlayers and passed in. (Bumper/hazard punches are
+			// created elsewhere and stay centered/radial.)
+			var directional = punchDirectional === undefined ? c.directionalPunch : punchDirectional;
+			var punchX = this.x;
+			var punchY = this.y;
+			if (directional) {
+				var aim = utils.pos({ x: this.x, y: this.y }, c.punchReach, this.angle);
+				punchX = aim.x;
+				punchY = aim.y;
+			}
+			this.punch = new Punch(punchX, punchY, punchRadius, this.color, this.id, this.roomSig, 1, this.isZombie);
+			this.punch.directional = directional;
 			// No scoring in the lobby: punches still land (knockback feel) but must not
 			// tick the bully achievement stat, which isn't gated by checkForWinners.
 			if (currentState != c.stateMap.lobby) {
@@ -3032,7 +3113,7 @@ class Player extends Circle {
 				this.setPunchedBy(object.ownerId);
 			}
 			_engine.punchPlayer(this, object);
-			messenger.messageRoomBySig(this.roomSig, "playerPunched", object.ownerId);
+			messenger.messageRoomBySig(this.roomSig, "playerPunched", { owner: object.ownerId, victim: this.id, x: this.x, y: this.y });
 			emitBotEmote(this, "hurt"); // an AI racer reacts to getting knocked
 			return;
 		}
@@ -3041,7 +3122,7 @@ class Player extends Circle {
 				return;
 			}
 			_engine.puckPlayer(object, this);
-			messenger.messageRoomBySig(this.roomSig, "playerPunched", object.ownerId);
+			messenger.messageRoomBySig(this.roomSig, "playerPunched", { owner: object.ownerId, victim: this.id, x: this.x, y: this.y });
 			return;
 		}
 		if (object.isGate) {
@@ -3656,7 +3737,7 @@ class Puck extends Projectile {
 	handleHit(object) {
 		if (object.isPunch && object.ownerId != this.ownerId) {
 			_engine.punchPuck(this, object);
-			messenger.messageRoomBySig(this.roomSig, "playerPunched", object.ownerId);
+			messenger.messageRoomBySig(this.roomSig, "playerPunched", { owner: object.ownerId, victim: this.id, x: this.x, y: this.y });
 			return;
 		}
 	}

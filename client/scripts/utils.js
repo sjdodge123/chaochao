@@ -73,3 +73,28 @@ function pos(point, length, angle) {
     var y = point.y + length * Math.sin(a);
     return { x, y };
 }
+
+// --- Animation easing + small render helpers (client render only) ---
+// Used by the effects/particle system, screen-shake trauma, the brutal-round
+// title entrance, and the tileSwap telegraph. All take/return normalized t in
+// [0,1] unless noted.
+function clamp01(t) {
+    if (t < 0) return 0;
+    if (t > 1) return 1;
+    return t;
+}
+function lerp(a, b, t) {
+    return a + (b - a) * t;
+}
+function easeOutQuad(t) {
+    return 1 - (1 - t) * (1 - t);
+}
+function easeOutCubic(t) {
+    return 1 - Math.pow(1 - t, 3);
+}
+// Overshoots past 1 then settles — gives the title card a little "pop".
+function easeOutBack(t) {
+    var c1 = 1.70158;
+    var c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+}
