@@ -656,8 +656,9 @@ function handlePrimaryLost() {
 }
 
 // Best-effort failover: re-point the primary aliases at `lp`'s socket and attach
-// the full handler set so rendering/audio resume on it. The keyboard then drives
-// this player too (acceptable until the lobby formalises slot ownership).
+// the full handler set so rendering/audio resume on it. `lp` KEEPS its gamepad
+// binding (padIndex) so a promoted controller player keeps controlling the game;
+// the keyboard/mouse also drives the primary if used.
 function promoteToPrimary(lp) {
 	debugLog("[localmp] promoting slot", lp.slot, "to primary");
 	var old = localPlayers[primarySlot];
@@ -666,7 +667,6 @@ function promoteToPrimary(lp) {
 		try { old.socket.disconnect(); } catch (e) { /* ignore */ }
 	}
 	lp.isPrimary = true;
-	lp.padIndex = null; // keyboard owns the primary slot
 	primarySlot = lp.slot;
 	server = lp.socket;
 	myID = lp.myID;
