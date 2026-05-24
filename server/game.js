@@ -747,6 +747,10 @@ class GameBoard {
 		this.collapseLoc = {};
 		this.collapseLine = this.world.height;
 		this.firstPlaceSig = null;
+		// Room-wide throttle (ms timestamp) so the crowd's near-burn gasp fires
+		// at most once per audienceNearBurnCooldown, no matter how many racers
+		// are skating the lava edge at once.
+		this.nextNearBurnTime = 0;
 	}
 	update(currentState, playerAliveCount, sleepingPlayerCount, dt) {
 		this.alivePlayerCount = playerAliveCount;
@@ -1513,6 +1517,29 @@ class GameBoard {
 		}
 
 		this.collapseLine -= collapseSpeed;
+
+		// Audience near-burn gasp: the crowd reacts when an alive racer is right
+		// at the edge of the advancing lava (a small positive margin) but hasn't
+		// been swallowed yet — the "you barely made it" moment. Throttled per room.
+		// Stamp each live racer's distance to the advancing lava front. Used for
+		// the clutch-goal cheer (did they beat the lava to the goal?) and the
+		// near-burn gasp (skating the edge); the gasp is throttled per room.
+		var now = Date.now();
+		var nearBurnReady = now > this.nextNearBurnTime;
+		for (var pid in this.playerList) {
+			var racer = this.playerList[pid];
+			if (!racer.alive || racer.isZombie || racer.reachedGoal) {
+				continue;
+			}
+			var racerDist = utils.getMag(this.collapseLoc.x - racer.x, this.collapseLoc.y - racer.y);
+			var margin = this.collapseLine - racerDist;
+			racer.collapseMargin = margin;
+			if (nearBurnReady && margin > 0 && margin < c.audienceNearBurnMargin) {
+				messenger.messageRoomBySig(this.roomSig, "audienceNearBurn");
+				this.nextNearBurnTime = now + c.audienceNearBurnCooldown;
+				nearBurnReady = false;
+			}
+		}
 
 		var collapsedCells = [];
 		var cells = this.currentMap.cells;
@@ -2292,6 +2319,7 @@ class Player extends Circle {
 		this.hittingLobbyButton = false;
 		this.reachedGoal = false;
 		this.timeReached = null;
+		this.collapseMargin = null; // distance to the lava front while collapsing (for clutch-goal cheer)
 		this.notches = 0;
 		this.nearVictory = false;
 		this.fellFromVictory = false;
@@ -2755,7 +2783,11 @@ class Player extends Circle {
 				this.alive = false;
 				this.reachedGoal = true;
 				this.timeReached = Date.now();
-				messenger.messageRoomBySig(this.roomSig, "playerConcluded", this.id);
+				// "clutch" = beat the lava to the goal: only when the lava front was
+				// genuinely close (collapseMargin stamped each collapsing tick), so an
+				// uncontested slow-collapse stroll-in doesn't trigger the big eruption.
+				var clutch = this.collapseMargin != null && this.collapseMargin < c.audienceClutchMargin;
+				messenger.messageRoomBySig(this.roomSig, "playerConcluded", { id: this.id, clutch: clutch });
 				return;
 			}
 			if (object.id == c.tileMap.abilities.blindfold.id) {
@@ -2875,7 +2907,10 @@ class Player extends Circle {
 		packet.turnLeft = false;
 		packet.turnRight = false;
 		packet.attack = false;
-		messenger.messageRoomBySig(packet.roomSig, "playerDied", packet.id);
+		// "killed" marks a player-caused death (punched/cut/blown into oblivion or
+		// the lava) versus an environmental/self death, so the crowd only cheers
+		// kills — not someone driving themselves into the lava.
+		messenger.messageRoomBySig(packet.roomSig, "playerDied", { id: packet.id, killed: packet.murderedBy != null });
 	}
 	killSelf() {
 		this.killPlayer(this);
@@ -2905,6 +2940,7 @@ class Player extends Circle {
 		this.attack = false;
 		this.reachedGoal = false;
 		this.timeReached = null;
+		this.collapseMargin = null;
 		this.punch = null;
 		this.punchedBy = null;
 		this.murderedBy = null;

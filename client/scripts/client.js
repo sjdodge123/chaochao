@@ -7,6 +7,8 @@ var config,
 	totalPlayers = 0,
 	serverTimeoutWait = 5,
 	previewReturnScheduled = false,
+	recentPunchTimes = [],
+	nextFightReactionTime = 0,
 	playerWon = null;
 
 function clientConnect() {
@@ -95,6 +97,9 @@ function registerPrimaryHandlers(server) {
 		if (typeof onLocalPlayersChanged === "function") {
 			onLocalPlayersChanged();
 		}
+		// Mid-match joiners: seed crowd intensity from the current standings so it
+		// isn't stuck tame if someone is already closing in on the win.
+		updateAudienceIntensity();
 	});
 
 	server.on("playerJoin", function (appendPlayerList) {
@@ -169,19 +174,33 @@ function registerPrimaryHandlers(server) {
 	server.on("secondPlaceWinner", function (id) {
 		createSecondRankSymbol(id);
 	});
-	server.on("playerConcluded", function (id) {
-		playerList[id].alive = false;
+	server.on("playerConcluded", function (packet) {
+		var id = (packet != null && packet.id != null) ? packet.id : packet;
+		if (playerList[id] != null) {
+			playerList[id].alive = false;
+		}
 		playSound(playerFinished);
+		// Lava was chasing when they crossed the line — the crowd erupts.
+		if (packet != null && packet.clutch) {
+			playAudience(pickCrowdBig(), 2);
+		}
 	});
-	server.on("playerDied", function (id) {
+	server.on("playerDied", function (packet) {
+		var id = (packet != null && packet.id != null) ? packet.id : packet;
 		playSound(playerDiedSound);
 		playerAbilityUsed(id);
-		playerList[id].alive = false;
-		playerList[id].onFire = 0;
-		playerList[id].deathMessage = '💀';
+		if (playerList[id] != null) {
+			playerList[id].alive = false;
+			playerList[id].onFire = 0;
+			playerList[id].deathMessage = '💀';
+		}
 		createDownRankSymbol(id);
 		if (id == myID) {
 			previewReturnToEditor();
+		}
+		// A player-caused kill (not someone driving into the lava) gets a cheer.
+		if (packet != null && packet.killed) {
+			playAudience(pickCrowdCheer(), 1);
 		}
 	});
 	server.on("playerInfected", function (id) {
@@ -260,6 +279,9 @@ function registerPrimaryHandlers(server) {
 		stopSound(lavaCollapse);
 		resetTrails();
 		updatePlayerNotches(packet.notchUpdates);
+		// Notches just changed — escalate the crowd toward "edge of their seats"
+		// as the leader closes in on the win.
+		updateAudienceIntensity();
 		calculateNotchMoveAmt();
 		loadMapPreview(packet.nextMapID);
 		currentState = config.stateMap.overview;
@@ -291,6 +313,11 @@ function registerPrimaryHandlers(server) {
 	});
 	server.on("resetGame", function () {
 		fullReset();
+		// New match — the crowd starts tame again, and brawl tracking is cleared so
+		// a fight lockout from the last match can't suppress the first new scrum.
+		setAudienceIntensity(0);
+		recentPunchTimes.length = 0;
+		nextFightReactionTime = 0;
 	});
 	server.on("gameLength", function (length) {
 		gameLength = length;
@@ -332,6 +359,20 @@ function registerPrimaryHandlers(server) {
 		spawnClouds(packet);
 	});
 	server.on("playerPunched", function (owner) {
+		// Only a real scrum — several hits landing in quick succession — reads as
+		// "a fight broke out." A single punch (or one multi-hit swing) shouldn't
+		// trigger it, and once it fires the crowd stays quiet for a while so it
+		// punctuates the brawl instead of reacting to every blow.
+		var now = Date.now();
+		recentPunchTimes.push(now);
+		while (recentPunchTimes.length > 0 && now - recentPunchTimes[0] > 2000) {
+			recentPunchTimes.shift();
+		}
+		if (recentPunchTimes.length >= 5 && now > nextFightReactionTime) {
+			recentPunchTimes.length = 0;
+			nextFightReactionTime = now + 6000;
+			playAudience(pickCrowdOoh(), 1);
+		}
 		if (playerList[owner] == null) {
 			playSound(meleeHitSound);
 			return;
@@ -369,6 +410,7 @@ function registerPrimaryHandlers(server) {
 	});
 	server.on("firstBlood", function () {
 		playSound(firstBlood);
+		playAudience(pickCrowdCheer(), 1);
 	});
 	server.on("onFire", function (packet) {
 		var owner = packet.owner;
@@ -401,22 +443,32 @@ function registerPrimaryHandlers(server) {
 	server.on("multiKill", function (count) {
 		if (count == 2) {
 			playSound(doubleKill);
+			playAudience(pickCrowdCheer(), 1);
 		}
 		if (count == 3) {
 			playSound(tripleKill);
+			playAudience(pickCrowdBig(), 2);
 		}
 		if (count > 3) {
 			playSound(megaKill);
+			playAudience(pickCrowdBig(), 2);
 		}
 	});
 	server.on("killingSpree", function (player) {
 		playSound(killingSpree);
+		playAudience(pickCrowdBig(), 2);
 	});
 	server.on("rampage", function (player) {
 		playSound(rampage);
+		playAudience(pickCrowdBig(), 2);
 	});
 	server.on("godLike", function (player) {
 		playSound(godLike);
+		playAudience(pickCrowdBig(), 2);
+	});
+	// The crowd gasps when a racer skates the edge of the advancing lava and lives.
+	server.on("audienceNearBurn", function () {
+		playAudience(pickCrowdOoh(), 1);
 	});
 	server.on("fizzle", function (owner) {
 		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {

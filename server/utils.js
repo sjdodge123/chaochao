@@ -404,7 +404,9 @@ function loadMaps() {
 function loadSounds() {
     var normalizedPath = require("path").join(__dirname, "../client/assets/sounds");
     fs.readdirSync(normalizedPath).forEach(function (file) {
-        if (file != ".DS_Store") {
+        // Only ship actual audio to the client manifest; non-audio files living
+        // alongside the sounds (e.g. CREDITS.md) must not be preloaded as sounds.
+        if (/\.(mp3|wav|ogg|m4a)$/i.test(file)) {
             soundListing.push(file);
         }
     });

@@ -79,6 +79,28 @@ var killingSpree = new Audio("./assets/sounds/killingSpree.mp3");
 var rampage = new Audio("./assets/sounds/rampage.mp3");
 var godLike = new Audio("./assets/sounds/godLike.mp3");
 
+// Audience — a stadium crowd layered under the action that reacts to tense and
+// amazing plays (big kills, fight flurries, narrow lava escapes, clutch goals).
+// Source: "Free Crowd Cheering Sounds" by Gregor Quendel (OpenGameArt, CC-BY 4.0),
+// trimmed into short cues. See client/assets/sounds/CREDITS.md for attribution.
+// Each reaction rotates through interchangeable clips (and gets a small random
+// pitch shift per play, see playAudience) so repeats never sound identical.
+var crowdCheerBigVariants = [                            // amazing plays / clutch finishes
+    new Audio("./assets/sounds/crowd-cheer-big.mp3"),
+    new Audio("./assets/sounds/crowd-cheer-big-2.mp3"),
+    new Audio("./assets/sounds/crowd-cheer-big-3.mp3")
+];
+var crowdCheerVariants = [                               // a single kill
+    new Audio("./assets/sounds/crowd-cheer.mp3"),
+    new Audio("./assets/sounds/crowd-cheer-2.mp3"),
+    new Audio("./assets/sounds/crowd-cheer-3.mp3")
+];
+var crowdOohVariants = [                                 // tension: fight flurries / near-burn escapes
+    new Audio("./assets/sounds/crowd-ooh.mp3"),
+    new Audio("./assets/sounds/crowd-ooh-2.mp3"),
+    new Audio("./assets/sounds/crowd-ooh-3.mp3")
+];
+
 var lobbyMusic = new Audio("./assets/sounds/lobbymusic.mp3");
 var gameStart = new Audio("./assets/sounds/gamestart.mp3");
 
@@ -138,6 +160,9 @@ function volumeChange() {
     cutSound.volume = .15 * sfx;
     godLike.volume = .1 * sfx;
     rampage.volume = .1 * sfx;
+    setVariantVolume(crowdCheerBigVariants, .125 * sfx);
+    setVariantVolume(crowdCheerVariants, .14 * sfx);
+    setVariantVolume(crowdOohVariants, .16 * sfx);
     killingSpree.volume = .1 * sfx;
     megaKill.volume = .1 * sfx;
     tripleKill.volume = .1 * sfx;
@@ -292,6 +317,97 @@ if (typeof window !== "undefined") {
     ["mousedown", "pointerdown", "keydown", "touchstart"].forEach(function (evt) {
         window.addEventListener(evt, unlockAudio, { passive: true });
     });
+}
+
+// All audience reactions share one channel so a chaotic moment yields a single
+// crowd reaction instead of a pile-up. A higher-priority reaction (a big cheer)
+// cuts in over a lower one already playing; within audienceCooldownMs nothing of
+// equal-or-lower priority retriggers. Priorities: 1 = light cheer / tension "ooh",
+// 2 = big eruption (multi-kills, sprees, clutch finishes).
+var audienceCooldownMs = 1800;
+var audienceReactionUntil = 0;
+var audienceCurrentSound = null;
+var audienceCurrentPriority = 0;
+// Audience intensity escalates over a match: tame in the early rounds, on the
+// edge of their seats once someone nears the win. Driven by the leader's notches
+// vs the win target (see updateAudienceIntensity), it both scales reaction volume
+// and gates which reactions fire (early = exceptional plays only).
+var audienceIntensity = 0;     // 0 (match start) .. 1 (someone one notch from winning)
+var audienceVolScale = 0.5;    // volume multiplier derived from intensity
+var audienceMinPriority = 2;   // lowest priority allowed to fire now (early: 2 = exceptional only)
+
+function setVariantVolume(list, vol) {
+    for (var i = 0; i < list.length; i++) {
+        list[i].audienceBaseVolume = vol;
+        list[i].volume = vol * audienceVolScale;
+    }
+}
+
+function setAudienceIntensity(t) {
+    audienceIntensity = Math.max(0, Math.min(1, t));
+    audienceVolScale = 0.5 + 0.6 * audienceIntensity;       // 0.5 (tame) .. 1.1 (boosted)
+    audienceMinPriority = audienceIntensity < 0.34 ? 2 : 1; // minor reactions unlock as the match heats up
+}
+
+// Recompute intensity from the standings: how close is the leader to the win
+// target? Called at each round overview (notches change) and on match reset.
+function updateAudienceIntensity() {
+    var maxNotches = 0;
+    for (var pid in playerList) {
+        var n = playerList[pid].notches;
+        if (typeof n === "number" && n > maxNotches) {
+            maxNotches = n;
+        }
+    }
+    var denom = Math.max(1, gameLength - 1); // intensity reaches 1.0 when someone is one notch from winning
+    setAudienceIntensity(maxNotches / denom);
+}
+
+// Each audience cue rotates through its clips, never repeating the same one
+// twice in a row, so a run of reactions doesn't replay the identical sound.
+var crowdLastIndex = { big: -1, cheer: -1, ooh: -1 };
+function pickVariant(list, key) {
+    var i = Math.floor(Math.random() * list.length);
+    if (list.length > 1 && i === crowdLastIndex[key]) {
+        i = (i + 1) % list.length;
+    }
+    crowdLastIndex[key] = i;
+    return list[i];
+}
+function pickCrowdBig() { return pickVariant(crowdCheerBigVariants, "big"); }
+function pickCrowdCheer() { return pickVariant(crowdCheerVariants, "cheer"); }
+function pickCrowdOoh() { return pickVariant(crowdOohVariants, "ooh"); }
+
+// Small per-play pitch shift (±audiencePitchVariance) so even the same clip
+// sounds slightly different each time. preservesPitch must be off or the browser
+// would time-stretch instead of changing pitch.
+var audiencePitchVariance = 0.06;
+function playAudience(sound, priority) {
+    // Early in a match the crowd only stirs for exceptional plays; minor
+    // reactions unlock as someone approaches the win (see audienceMinPriority).
+    if (priority < audienceMinPriority) {
+        return;
+    }
+    var now = Date.now();
+    // Within the cooldown, only a higher-priority reaction may break through.
+    if (now < audienceReactionUntil && priority <= audienceCurrentPriority) {
+        return;
+    }
+    // One crowd voice: stop whatever clip is still playing before the next one
+    // starts, so reactions never pile up (clips run 2.5-4s, longer than the
+    // cooldown, so a lapsed-cooldown reaction would otherwise overlap the last).
+    if (audienceCurrentSound != null && audienceCurrentSound !== sound) {
+        stopSound(audienceCurrentSound);
+    }
+    sound.preservesPitch = false;
+    sound.mozPreservesPitch = false;
+    sound.webkitPreservesPitch = false;
+    sound.playbackRate = 1 + (Math.random() * 2 - 1) * audiencePitchVariance;
+    sound.volume = (sound.audienceBaseVolume != null ? sound.audienceBaseVolume : sound.volume) * audienceVolScale;
+    audienceCurrentSound = sound;
+    audienceCurrentPriority = priority;
+    audienceReactionUntil = now + audienceCooldownMs;
+    playSound(sound);
 }
 
 // Server-authoritative: play the exact mood+track the server told us to. The

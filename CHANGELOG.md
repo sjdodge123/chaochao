@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- [headline] There's a crowd watching now — a stadium audience that warms up as the match heats up. Early on they barely stir unless something special happens, but as someone closes in on the win they grow louder and react to more: roaring for multi-kills and killing sprees, cheering kills, "oohing" when a fight breaks out, gasping when you skate the edge of the lava and live, and erupting when you beat the lava to the goal.
 
 ## v0.3.3 — 2026-05-24
 
