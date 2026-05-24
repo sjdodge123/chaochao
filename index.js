@@ -1,3 +1,6 @@
+// Load local .env (if present) before anything reads process.env. Harmless and
+// silent when there's no .env file — Heroku injects config vars directly.
+require('dotenv').config({ quiet: true });
 const express = require('express');
 const compression = require('compression');
 const fs = require('fs');
@@ -10,6 +13,23 @@ const path = require('path');
 const htmlPath = path.join(__dirname, 'client');
 
 app.use(compression());
+
+// Auth foundation: validates the Socket.IO handshake (below) and supplies the
+// browser-safe Supabase config injected into served pages. No-ops when the
+// Supabase env vars are absent, so the server boots and everyone is a guest.
+const auth = require('./server/auth.js');
+
+// Browser-safe Supabase config (URL + anon key only) injected via the
+// <!-- SUPABASE_CONFIG --> placeholder. null when auth is disabled, in which
+// case the placeholder is stripped and the client also treats everyone as a
+// guest. The service-role key and JWT secret are NEVER referenced here.
+function supabaseConfigTag() {
+    var cfg = auth.getPublicConfig();
+    if (!cfg) {
+        return '';
+    }
+    return '<script>window.__SUPABASE__ = ' + JSON.stringify(cfg) + ';</script>';
+}
 
 // Inject the running server's version and the latest release headline into
 // index.html so the landing page always reflects what's actually deployed.
@@ -92,32 +112,36 @@ function newsBannerHtml() {
         '</a>';
 }
 
-app.use(function (req, res, next) {
-    var url = req.path === '/' ? '/index.html' : req.path;
-    if (url !== '/index.html') return next();
-    fs.readFile(path.join(htmlPath, url), 'utf8', function (err, html) {
-        if (err) return next();
-        var modified = html
-            .replace(/<!-- VERSION -->/g, 'v' + APP_VERSION)
-            .replace(/<!-- NEWS_BANNER -->/g, newsBannerHtml());
-        res.set('Content-Type', 'text/html');
-        res.send(modified);
-    });
-});
-
 const bundleMap = {
     '/play.html': 'scripts/dist/play.bundle.min.js',
     '/create.html': 'scripts/dist/create.bundle.min.js',
     '/join.html': 'scripts/dist/join.bundle.min.js'
 };
+
+// Single HTML page handler: applies all server-side string injections in one
+// pass (version + news banner for the landing page, browser-safe Supabase
+// config for auth pages, and in production the bundle-tag rewrite). Placeholders
+// that aren't present on a given page are simply left untouched. Everything else
+// (css/js/img/sounds) falls through to express.static below.
+const HTML_PAGES = {
+    '/index.html': true,
+    '/play.html': true,
+    '/create.html': true,
+    '/join.html': true
+};
 app.use(function (req, res, next) {
-    if (process.env.NODE_ENV !== 'production') return next();
     var url = req.path === '/' ? '/index.html' : req.path;
-    if (!(url in bundleMap)) return next();
+    if (!HTML_PAGES[url]) return next();
     fs.readFile(path.join(htmlPath, url), 'utf8', function (err, html) {
         if (err) return next();
-        var bundleTag = '<script src="' + bundleMap[url] + '"></script>';
-        var modified = html.replace(/<!-- BUILD: bundle-start -->[\s\S]*?<!-- BUILD: bundle-end -->/g, bundleTag);
+        var modified = html
+            .replace(/<!-- VERSION -->/g, 'v' + APP_VERSION)
+            .replace(/<!-- NEWS_BANNER -->/g, newsBannerHtml())
+            .replace(/<!-- SUPABASE_CONFIG -->/g, supabaseConfigTag());
+        if (process.env.NODE_ENV === 'production' && (url in bundleMap)) {
+            var bundleTag = '<script src="' + bundleMap[url] + '"></script>';
+            modified = modified.replace(/<!-- BUILD: bundle-start -->[\s\S]*?<!-- BUILD: bundle-end -->/g, bundleTag);
+        }
         res.set('Content-Type', 'text/html');
         res.send(modified);
     });
@@ -142,10 +166,32 @@ server.listen(c.port, () => {
   messenger.build(io);
 });
 
+// Resolve every Socket.IO handshake to a Supabase user id when an access token
+// is supplied, otherwise leave the connection as a guest. We NEVER reject here —
+// anonymous play must keep working exactly as before. A valid token also ensures
+// the user's durable `progression` row exists and records this device.
+io.use(async (socket, next) => {
+    var handshake = socket.handshake.auth || {};
+    socket.deviceId = handshake.deviceId || null;
+    socket.userId = null;
+    if (handshake.token) {
+        try {
+            var userId = await auth.verifyToken(handshake.token);
+            if (userId) {
+                socket.userId = userId;
+                await auth.ensureProgressionRow(userId, socket.deviceId);
+            }
+        } catch (e) {
+            console.log('[auth] handshake resolution error (continuing as guest):', e.message);
+        }
+    }
+    next(); // never reject — guests are allowed
+});
+
 io.on('connection', (client) => {
     checkForWake();
     clientCount++;
-    messenger.addMailBox(client.id,client);
+    messenger.addMailBox(client.id, client, { userId: client.userId, deviceId: client.deviceId });
 
     client.on('disconnect', () => {
       hostess.kickFromRoom(client.id);
