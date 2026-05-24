@@ -1165,8 +1165,22 @@ class GameBoard {
 	}
 
 	startLobby() {
+		this.loadLobbyMap();
 		this.lobbyStartButton = new LobbyStartButton(this.world.center.x, this.world.center.y, 0, "red");
-		messenger.messageRoomBySig(this.roomSig, "startLobby", compressor.sendLobbyStart(this.lobbyStartButton));
+		var lobbyMapID = (this.currentMap != null && this.currentMap.cells != null) ? this.currentMap.id : null;
+		messenger.messageRoomBySig(this.roomSig, "startLobby", compressor.sendLobbyStart(this.lobbyStartButton, lobbyMapID));
+	}
+	// Load the curated tutorial-islands map into the lobby. lobbyMaps[0] stays the
+	// pristine template (we clone from it), so the reset cadence can restore the
+	// layout after bomb/ice-cannon mutate cells. No-op (empty map) if no lobby map
+	// is authored, so the lobby simply falls back to the plain field + button.
+	loadLobbyMap() {
+		this.tileChanges = {};
+		if (this.lobbyMaps == null || this.lobbyMaps.length == 0) {
+			this.currentMap = {};
+			return;
+		}
+		this.currentMap = JSON.parse(JSON.stringify(this.lobbyMaps[0]));
 	}
 	setupMap(currentState) {
 		this.clean();
