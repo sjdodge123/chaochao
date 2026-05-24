@@ -1244,14 +1244,21 @@ function drawMapTitle() {
 }
 
 function drawPlayers(dt) {
+    // Draw remote players first, then ALL local players (the primary plus any
+    // couch co-op slots) on top — so your own karts always read clearly over
+    // other players' floating emojis and name labels.
     for (var id in playerList) {
-        var player = playerList[id];
-        if (id == myID) {
+        if (isLocalId(id)) {
             continue;
         }
-        checkDrawPlayer(player, dt);
+        checkDrawPlayer(playerList[id], dt);
     }
-    checkDrawPlayer(playerList[myID], dt);
+    for (var lid in playerList) {
+        if (!isLocalId(lid)) {
+            continue;
+        }
+        checkDrawPlayer(playerList[lid], dt);
+    }
 }
 function checkDrawPlayer(player, dt) {
     if (player == null) {
@@ -1424,9 +1431,9 @@ function drawEmoji(player) {
     }
 }
 
-// AI racers carry a visible name (and, smaller, their title) below the kart so
-// each personality is recognizable. Aligned with the sprite's camera convention
-// (camera offset is 0 in the default desktop view). Humans have no name.
+// AI racers carry a visible name below the kart so each personality is
+// recognizable. Aligned with the sprite's camera convention (camera offset is 0
+// in the default desktop view). Humans have no name.
 function drawBotName(player) {
     // Use the same raw-coord convention as the emote/chat bubble (drawEmoji) so the
     // name and the bubble stay attached to each other. camera.getCameraX/Y is 0 in
@@ -1443,12 +1450,6 @@ function drawBotName(player) {
     gameContext.font = '11px Times New Roman';
     gameContext.strokeText(player.name, x, y);
     gameContext.fillText(player.name, x, y);
-    if (player.title != null) {
-        gameContext.globalAlpha = 0.38;
-        gameContext.font = 'italic 9px Times New Roman';
-        gameContext.strokeText(player.title, x, y + 11);
-        gameContext.fillText(player.title, x, y + 11);
-    }
     gameContext.restore();
 }
 

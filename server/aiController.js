@@ -768,7 +768,7 @@ function steerBot(bot, ctx, dt) {
     // of this range is set high enough that a max-skill bot's effective input
     // (0.8 x speedFactor) reaches/*slightly* exceeds a human's — otherwise even the
     // best bots are hard-capped below human top speed and trivially beatable.
-    var speedFactor = (0.6 + 0.55 * effSkill) * (ctx.rubberBand || 1);
+    var speedFactor = (0.72 + 0.55 * effSkill) * (ctx.rubberBand || 1);
     if (speedFactor > 1.45) { speedFactor = 1.45; }
     if (speedFactor < 0.4) { speedFactor = 0.4; }
     throttle *= speedFactor;
