@@ -143,6 +143,7 @@ function clientConnect() {
         submitStatus.css("color", "white");
         submitStatus.css("background-color", "green");
         submitStatus.text("Success");
+        trackEvent('map_submitted');
     });
 
     server.on('previewRoomCreated', function (payload) {
