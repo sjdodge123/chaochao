@@ -476,23 +476,53 @@ function clampViewToWorld(cx, cy, scale) {
     return { cx: cx, cy: cy, scale: scale };
 }
 
-// The fully-focused view: the DESIRED (unclamped) centre — the player, growing
-// toward the nearest goal as it's approached — plus the focused zoom. The centre
-// is kept separate from the zoom so a transition can ramp the zoom while always
-// anchoring on the player (so the player can never slide out of frame).
+// World positions of every LIVE local player (so split-on-one-screen co-op keeps
+// everyone framed). Only local players — remote/online players live elsewhere on
+// the map and aren't followed. Falls back to the primary myPlayer.
+function focusWorldPoints() {
+    var pts = [];
+    if (typeof localPlayers !== "undefined" && localPlayers) {
+        for (var i = 0; i < localPlayers.length; i++) {
+            var lp = localPlayers[i];
+            if (lp && lp.myID != null && typeof playerList !== "undefined" &&
+                playerList && playerList[lp.myID]) {
+                pts.push({ x: playerList[lp.myID].x, y: playerList[lp.myID].y });
+            }
+        }
+    }
+    if (pts.length === 0 && myPlayer) {
+        pts.push({ x: myPlayer.x, y: myPlayer.y });
+    }
+    return pts;
+}
+
+// The fully-focused view: the DESIRED (unclamped) centre + zoom that frames every
+// live local player (local co-op widens the zoom as players spread, tightens as
+// they cluster), growing toward the nearest goal as the group approaches it. A
+// single player gets a tight WORLD_ZOOM_MAX framing exactly as before, since each
+// player contributes a max-zoom half-box. Centre is kept separate from the zoom
+// so a transition can ramp only the zoom (players can't slide out of frame).
 function computeFocusedView() {
+    var pts = focusWorldPoints();
     var halfX = LOGICAL_WIDTH / (2 * WORLD_ZOOM_MAX);
     var halfY = LOGICAL_HEIGHT / (2 * WORLD_ZOOM_MAX);
-    var minX = myPlayer.x - halfX, maxX = myPlayer.x + halfX;
-    var minY = myPlayer.y - halfY, maxY = myPlayer.y + halfY;
-    // Pull the nearest goal into frame as we get close to it -> the view zooms
-    // back out to keep both the player and the goal visible.
+    var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (var i = 0; i < pts.length; i++) {
+        minX = Math.min(minX, pts[i].x - halfX);
+        maxX = Math.max(maxX, pts[i].x + halfX);
+        minY = Math.min(minY, pts[i].y - halfY);
+        maxY = Math.max(maxY, pts[i].y + halfY);
+    }
+    // Pull the nearest goal (to any framed player) into frame as the group gets
+    // close to it -> the view zooms out to keep players and the goal visible.
     var goals = worldGoalPoints();
     var ng = null, nd = Infinity;
-    for (var i = 0; i < goals.length; i++) {
-        var dx = goals[i].x - myPlayer.x, dy = goals[i].y - myPlayer.y;
-        var d = Math.sqrt(dx * dx + dy * dy);
-        if (d < nd) { nd = d; ng = goals[i]; }
+    for (var g = 0; g < goals.length; g++) {
+        for (var p = 0; p < pts.length; p++) {
+            var dx = goals[g].x - pts[p].x, dy = goals[g].y - pts[p].y;
+            var d = Math.sqrt(dx * dx + dy * dy);
+            if (d < nd) { nd = d; ng = goals[g]; }
+        }
     }
     if (ng && nd <= WORLD_ZOOM_ENGAGE) {
         minX = Math.min(minX, ng.x - WORLD_ZOOM_PAD);
@@ -513,13 +543,7 @@ function computeWorldViewTarget(dt) {
         worldViewFocusedElapsed = 0;
         return wholeMap;
     }
-    // Local multiplayer: 2-4 players share one screen, so focusing on the
-    // primary would crop the others out — keep the whole map in that case.
-    if (typeof liveLocalPlayerCount === "function" && liveLocalPlayerCount() > 1) {
-        worldViewFocusedElapsed = 0;
-        return wholeMap;
-    }
-    // Focus on the player only once the round is live (gate countdown + race);
+    // Focus once the round is live (gate countdown + race);
     // lobby / overview / game-over keep the whole map so the goal + player and
     // the arena are all visible at the start.
     var focused = (currentState === config.stateMap.gated ||
