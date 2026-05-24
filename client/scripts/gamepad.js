@@ -1371,6 +1371,7 @@ function leaveGlyphFor(type) {
 function openLeaveConfirm(lp) {
     lp.leaveConfirm = true;
     setBlockLeaveConfirm(lp.slot, true);
+    scheduleHintFade(); // un-fade the header so the "Leave?" prompt is readable
     if (lp.leaveConfirmTimer) {
         clearTimeout(lp.leaveConfirmTimer);
     }
