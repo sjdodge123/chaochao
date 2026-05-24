@@ -22,6 +22,9 @@ var RECAP_CLIP_MS = 3000;      // playback length of each replayed clip
 var RECAP_PRE_MS = 1200;       // portion of the clip BEFORE the highlight moment
 var RECAP_DISPLAY_MS = 3500;   // how long each achievement + clip stays on screen
 var RECAP_MAX_CLIPS = 4;       // keep the montage short within gameOverTime (20s)
+var RECAP_ZOOM = 2.4;          // camera zoom over fit-to-window (higher = tighter on the action)
+var RECAP_CAM_LERP = 0.12;     // how fast the follow-cam glides toward the action each frame
+var RECAP_TOP_FRAC = 0.10;     // panel top as a fraction of canvas height (kept high, not centered)
 
 // multi-kill achievement key -> the marker type recorded for it
 var RECAP_TYPE_FOR_KEY = { doubleKill: "double", tripleKill: "triple", megaKill: "mega" };
@@ -33,6 +36,8 @@ var recapMarkers = [];  // [{ t, type, ids: [...] }] highlight moments
 var recapSequence = null; // [{ title, ids, frames, clipMs }] built at gameOver
 var recapIndex = 0;
 var recapElapsed = 0;     // ms spent on the current sequence item
+var recapCamX = null;     // smoothed follow-camera centre (world coords); null = snap next frame
+var recapCamY = null;
 
 // Clear all recap state. Called at the start of every race so the buffer only
 // ever holds frames from the CURRENT map (the one a clip is rendered against).
@@ -42,6 +47,8 @@ function recapReset() {
 	recapSequence = null;
 	recapIndex = 0;
 	recapElapsed = 0;
+	recapCamX = null;
+	recapCamY = null;
 }
 
 // Snapshot the current player positions. Called once per server tick from the
@@ -82,6 +89,8 @@ function recapBuild(achievementSet) {
 	recapSequence = null;
 	recapIndex = 0;
 	recapElapsed = 0;
+	recapCamX = null;
+	recapCamY = null;
 	if (recapFrames.length === 0 || achievementSet == null) {
 		return; // nothing was captured (e.g. an instant finish) — skip the montage
 	}
@@ -192,16 +201,25 @@ function recapDraw(dt) {
 	if (recapElapsed >= RECAP_DISPLAY_MS && recapIndex < recapSequence.length - 1) {
 		recapIndex++;
 		recapElapsed = 0;
+		recapCamX = null; // snap the follow-cam to the new clip's action
+		recapCamY = null;
 	}
 	var item = recapSequence[recapIndex];
 
-	// Window geometry: a panel on the left half (the gameOver winner text sits
-	// center, medals sit right — the left is free). Sized to the world's aspect.
-	var winW = Math.min(360, gameCanvas.width * 0.32);
+	// Draw in LOGICAL (1366x768) space: the gameOver screen runs under
+	// applyCanvasTransform(), so the winner text/medals are in logical units.
+	// gameCanvas.width/height is the device backing store (logical * DPR), so
+	// using it here would push the panel off-position on high-DPR phones.
+	var CW = (typeof LOGICAL_WIDTH !== "undefined" && LOGICAL_WIDTH > 0) ? LOGICAL_WIDTH : gameCanvas.width;
+	var CH = (typeof LOGICAL_HEIGHT !== "undefined" && LOGICAL_HEIGHT > 0) ? LOGICAL_HEIGHT : gameCanvas.height;
+
+	// Window geometry: a panel on the upper-left (winner text sits center, medals
+	// sit right). Anchored near the top — not vertically centered.
+	var winW = Math.min(360, CW * 0.32);
 	var aspect = (world != null && world.width > 0) ? (world.height / world.width) : 0.75;
-	var winH = Math.min(winW * aspect, gameCanvas.height * 0.42);
-	var winX = Math.round(gameCanvas.width * 0.06);
-	var winY = Math.round(gameCanvas.height / 2 - winH / 2);
+	var winH = Math.min(winW * aspect, CH * 0.42);
+	var winX = Math.round(CW * 0.06);
+	var winY = Math.round(Math.max(48, CH * RECAP_TOP_FRAC));
 
 	// Caption above the window.
 	gameContext.save();
@@ -238,33 +256,62 @@ function recapDraw(dt) {
 	gameContext.restore();
 }
 
-// Render the current frame of `item`'s clip, fit into the window rect.
+// Render the current frame of `item`'s clip with a zoom-and-follow camera, so
+// the action fills the window instead of showing the whole map shrunk down.
 function recapRenderClip(item, winX, winY, winW, winH) {
 	if (world == null || world.width == null) {
 		return;
 	}
-	var s = Math.min(winW / world.width, winH / world.height);
-	var originX = winX + (winW - world.width * s) / 2;
-	var originY = winY + (winH - world.height * s) / 2;
-
-	// Blit the cached map (built during the final round) under the same transform.
-	if (typeof mapCanvas !== "undefined" && mapCanvas != null) {
-		var destX = originX - mapCanvasPad * s;
-		var destY = originY - mapCanvasPad * s;
-		gameContext.drawImage(mapCanvas, destX, destY, mapCanvas.width * s, mapCanvas.height * s);
-	}
-
 	// Loop the clip: map elapsed time onto clip progress and pick the frame.
 	var frame = recapFrameAt(item.frames, recapElapsed);
 	if (frame == null) {
 		return;
 	}
+
+	// Scale: start from fit-to-window, then zoom in on the action.
+	var fit = Math.min(winW / world.width, winH / world.height);
+	var s = fit * RECAP_ZOOM;
+
+	// Follow target: the involved players (centroid), clamped so the zoomed view
+	// stays inside the map (no empty gutters). Smoothed so the cam glides.
+	var focus = recapFocusCenter(item, frame);
+	var halfW = (winW / 2) / s;
+	var halfH = (winH / 2) / s;
+	if (world.width > 2 * halfW) {
+		focus.x = Math.max(world.x + halfW, Math.min(world.x + world.width - halfW, focus.x));
+	} else {
+		focus.x = world.x + world.width / 2;
+	}
+	if (world.height > 2 * halfH) {
+		focus.y = Math.max(world.y + halfH, Math.min(world.y + world.height - halfH, focus.y));
+	} else {
+		focus.y = world.y + world.height / 2;
+	}
+	if (recapCamX == null || recapCamY == null) {
+		recapCamX = focus.x;
+		recapCamY = focus.y;
+	} else {
+		recapCamX += (focus.x - recapCamX) * RECAP_CAM_LERP;
+		recapCamY += (focus.y - recapCamY) * RECAP_CAM_LERP;
+	}
+
+	// world coord -> screen: window centre + (world - camera) * scale
+	var screenCX = winX + winW / 2;
+	var screenCY = winY + winH / 2;
+
+	// Blit the cached map (built during the final round) under the camera.
+	if (typeof mapCanvas !== "undefined" && mapCanvas != null) {
+		var destX = screenCX + (world.x - mapCanvasPad - recapCamX) * s;
+		var destY = screenCY + (world.y - mapCanvasPad - recapCamY) * s;
+		gameContext.drawImage(mapCanvas, destX, destY, mapCanvas.width * s, mapCanvas.height * s);
+	}
+
 	for (var i = 0; i < frame.players.length; i++) {
 		var pr = frame.players[i];      // [id, x, y, alive]
 		var live = playerList != null ? playerList[pr[0]] : null;
 		var radius = (live != null && live.radius != null) ? live.radius : 12;
 		gameContext.beginPath();
-		gameContext.arc(originX + (pr[1] - world.x) * s, originY + (pr[2] - world.y) * s,
+		gameContext.arc(screenCX + (pr[1] - recapCamX) * s, screenCY + (pr[2] - recapCamY) * s,
 			Math.max(2, radius * s), 0, 2 * Math.PI);
 		gameContext.globalAlpha = pr[3] ? 1 : 0.35; // dim eliminated players
 		gameContext.fillStyle = (live != null) ? live.color : "grey";
@@ -274,6 +321,38 @@ function recapRenderClip(item, winX, winY, winW, winH) {
 		gameContext.stroke();
 	}
 	gameContext.globalAlpha = 1;
+}
+
+// Where the camera should look this frame: the centroid of the achievement's
+// involved players, falling back to all live players, then the map centre.
+function recapFocusCenter(item, frame) {
+	var sumX = 0, sumY = 0, n = 0;
+	var ids = (item != null && item.ids != null) ? item.ids : [];
+	for (var i = 0; i < frame.players.length; i++) {
+		var pr = frame.players[i];
+		for (var k = 0; k < ids.length; k++) {
+			if (pr[0] === ids[k]) {
+				sumX += pr[1]; sumY += pr[2]; n++;
+				break;
+			}
+		}
+	}
+	if (n === 0) { // no involved players in this frame — track the survivors
+		for (var j = 0; j < frame.players.length; j++) {
+			if (frame.players[j][3]) {
+				sumX += frame.players[j][1]; sumY += frame.players[j][2]; n++;
+			}
+		}
+	}
+	if (n === 0) { // everyone gone — track all captured dots
+		for (var m = 0; m < frame.players.length; m++) {
+			sumX += frame.players[m][1]; sumY += frame.players[m][2]; n++;
+		}
+	}
+	if (n === 0) {
+		return { x: world.x + world.width / 2, y: world.y + world.height / 2 };
+	}
+	return { x: sumX / n, y: sumY / n };
 }
 
 // Pick the frame for the current loop position. The clip loops every
