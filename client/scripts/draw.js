@@ -3,6 +3,112 @@ var spreadScale = 0.15;
 var bombScale = 0.025;
 var complexPatternScale = 0.1;
 
+// --- Visibility tuning ---
+// During the race, other players' kart bodies and trails are drawn fainter so
+// your own kart(s) read clearly in a crowded pack (your kart already carries a
+// pulsing halo via drawLocalPlayerHighlight). Threat FX (fire, ability rings,
+// punches) are NOT dimmed — danger always stays full strength.
+var NONLOCAL_KART_ALPHA = 0.55;
+var NONLOCAL_TRAIL_ALPHA = 0.3;
+
+// --- Colour-blind assist ---
+// When colorblindEnabled (navbar toggle, persisted) is on, every kart is remapped
+// to the Okabe-Ito palette — eight colours chosen to stay distinguishable under
+// the common forms of colour-blindness. We mutate player.color in place (keeping
+// the server's colour in player._serverColor) so every existing draw site — kart
+// sprite, trail, ability rings, scoreboard icons — picks it up with no extra
+// threading. Assignment is stable per player id and greedily maximises distance
+// among the colours already handed out.
+var CB_PALETTE = ['#E69F00', '#56B4E9', '#009E73', '#F0E442', '#0072B2', '#D55E00', '#CC79A7', '#000000'];
+var cbAssigned = {}; // player id -> CVD-safe colour
+
+function cbHexToRgb(hex) {
+    if (typeof hex !== "string") {
+        return null;
+    }
+    var m = /^#([0-9a-f]{6})$/i.exec(hex.trim());
+    if (!m) {
+        return null;
+    }
+    var h = m[1];
+    return { r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16), b: parseInt(h.slice(4, 6), 16) };
+}
+function cbColorDist(a, b) {
+    var ca = cbHexToRgb(a), cb = cbHexToRgb(b);
+    if (ca == null || cb == null) {
+        return Infinity;
+    }
+    var rmean = (ca.r + cb.r) / 2, dr = ca.r - cb.r, dg = ca.g - cb.g, db = ca.b - cb.b;
+    return Math.sqrt((((512 + rmean) * dr * dr) / 256) + 4 * dg * dg + (((767 - rmean) * db * db) / 256));
+}
+function cbAssignColor(id) {
+    if (cbAssigned[id] != null) {
+        return cbAssigned[id];
+    }
+    var used = [];
+    for (var k in cbAssigned) {
+        used.push(cbAssigned[k]);
+    }
+    var best = null, bestScore = -1;
+    for (var i = 0; i < CB_PALETTE.length; i++) {
+        if (used.indexOf(CB_PALETTE[i]) !== -1) {
+            continue; // hand out each palette colour once before repeating
+        }
+        var minDist = Infinity;
+        for (var j = 0; j < used.length; j++) {
+            var d = cbColorDist(CB_PALETTE[i], used[j]);
+            if (d < minDist) {
+                minDist = d;
+            }
+        }
+        if (minDist > bestScore) {
+            bestScore = minDist;
+            best = CB_PALETTE[i];
+        }
+    }
+    if (best == null) {
+        // More than 8 karts: palette exhausted. Cycle deterministically — server
+        // colours already differ, so this only affects the CVD overlay.
+        best = CB_PALETTE[used.length % CB_PALETTE.length];
+    }
+    cbAssigned[id] = best;
+    return best;
+}
+// Per-frame, cheap: keep every player's display colour in sync with the toggle.
+// Idempotent — only writes when a colour actually needs to change.
+function syncColorblind() {
+    if (typeof playerList === "undefined" || !playerList) {
+        return;
+    }
+    var on = (typeof colorblindEnabled !== "undefined" && colorblindEnabled);
+    if (on) {
+        // Drop assignments for players who have left so the 8-colour palette
+        // doesn't appear "used up" over a session with lots of joins/leaves.
+        for (var aid in cbAssigned) {
+            if (playerList[aid] == null) {
+                delete cbAssigned[aid];
+            }
+        }
+    }
+    for (var id in playerList) {
+        var p = playerList[id];
+        if (p == null) {
+            continue;
+        }
+        if (on) {
+            if (p._serverColor == null) {
+                p._serverColor = p.color;
+            }
+            var cb = cbAssignColor(id);
+            if (p.color !== cb) {
+                p.color = cb;
+            }
+        } else if (p._serverColor != null && p.color !== p._serverColor) {
+            p.color = p._serverColor;
+        }
+    }
+}
+
 // Theme-aware colours for canvas elements that sit on the board surface and
 // must stay readable in dark mode (playfield fill/border + on-board text).
 // theme.js keeps window.themePalette in sync with the active theme; the
@@ -369,6 +475,8 @@ function drawObjects(dt) {
     if (config == null) {
         return;
     }
+    updateDeathPings();
+    syncColorblind();
 
     updateWorldCamera(dt);
     applyCanvasTransform();
@@ -1370,11 +1478,23 @@ function drawPlayer(player, dt) {
         gameContext.save();
         gameContext.globalAlpha = 0.35 + 0.45 * Math.abs(Math.sin(Date.now() / pulsePeriod));
     }
+    // Fade other players' kart bodies during the race so yours pops. Never dims
+    // a flashing (immune) kart — that flash carries its own alpha — and never
+    // your own. Threat FX drawn elsewhere (fire/ability rings) stay full.
+    var dimKart = !isLocalId(player.id) && !immune &&
+        (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing);
+    if (dimKart) {
+        gameContext.save();
+        gameContext.globalAlpha = NONLOCAL_KART_ALPHA;
+    }
     gameContext.drawImage(
         sprite,
         player.x + camera.getCameraX() - sprite.halfSize,
         player.y + camera.getCameraY() - sprite.halfSize
     );
+    if (dimKart) {
+        gameContext.restore();
+    }
     if (immune) {
         gameContext.restore();
     }
@@ -1751,7 +1871,98 @@ function drawArmedRing(x, y, color) {
 
 function drawTrail(player) {
     if (player.trail.canvas != null) {
+        // Fade other players' trails so your own line stays legible in the pack.
+        var dim = !isLocalId(player.id);
+        if (dim) {
+            gameContext.save();
+            gameContext.globalAlpha = NONLOCAL_TRAIL_ALPHA;
+        }
         gameContext.drawImage(player.trail.canvas, player.trail.canvasOriginX, player.trail.canvasOriginY);
+        if (dim) {
+            gameContext.restore();
+        }
+    }
+}
+
+// --- Death ping ---
+// While you're dead, pressing attack pulses a sonar marker at the spot where
+// you fell — a local-only nudge to help you find your body in the chaos (it is
+// never sent to the server or shown to other players). Works for every local
+// slot (couch co-op): each dead controller pings its own spot.
+var DEATH_PING_COOLDOWN_MS = 900;
+
+function spawnDeathPingEffect(x, y, color) {
+    var ringColor = color || "rgb(255, 215, 0)";
+    addEffect({
+        x: x,
+        y: y,
+        maxAge: 1100,
+        draw: function (ctx, t) {
+            // World-space: add the camera offset so the ping stays pinned to the
+            // death spot under the dynamic camera (same convention as the kart).
+            var cx = x + camera.getCameraX();
+            var cy = y + camera.getCameraY();
+            ctx.save();
+            ctx.lineCap = "round";
+            // Three staggered sonar rings expanding outward.
+            for (var k = 0; k < 3; k++) {
+                var rt = t - k * 0.18;
+                if (rt <= 0 || rt >= 1) {
+                    continue;
+                }
+                var grow = easeOutCubic(rt);
+                ctx.globalAlpha = (1 - rt) * 0.9;
+                ctx.lineWidth = 3 * (1 - rt) + 1;
+                ctx.strokeStyle = ringColor;
+                ctx.beginPath();
+                ctx.arc(cx, cy, 8 + grow * 70, 0, 2 * Math.PI);
+                ctx.stroke();
+            }
+            // A skull marker holding at the spot, fading over the ping's life.
+            ctx.globalAlpha = 0.85 * (1 - t);
+            ctx.font = "22px Times New Roman";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText("💀", cx, cy);
+            ctx.restore();
+        }
+    });
+}
+
+function requestDeathPing(lp, player) {
+    var now = Date.now();
+    if (lp._lastDeathPingAt != null && now - lp._lastDeathPingAt < DEATH_PING_COOLDOWN_MS) {
+        return;
+    }
+    lp._lastDeathPingAt = now;
+    spawnDeathPingEffect(player.deathX, player.deathY, player.color);
+}
+
+// Per-frame: detect a fresh attack press on each local slot whose player is
+// dead, and fire that slot's death ping. The primary slot reads the shared
+// movement globals (keyboard/mouse/primary pad); couch pad slots read their own
+// per-slot input. Edge-triggered so holding the button doesn't spam pings.
+function updateDeathPings() {
+    if (typeof localPlayers === "undefined" || !localPlayers ||
+        typeof playerList === "undefined" || !playerList) {
+        return;
+    }
+    for (var s = 0; s < localPlayers.length; s++) {
+        var lp = localPlayers[s];
+        if (!lp || lp.myID == null) {
+            continue;
+        }
+        var atk = (s === primarySlot)
+            ? (typeof attack !== "undefined" && !!attack)
+            : !!(lp.input && lp.input.attack);
+        var prev = !!lp._deadAttackPrev;
+        lp._deadAttackPrev = atk;
+        if (atk && !prev) {
+            var p = playerList[lp.myID];
+            if (p != null && p.alive === false && p.deathX != null) {
+                requestDeathPing(lp, p);
+            }
+        }
     }
 }
 

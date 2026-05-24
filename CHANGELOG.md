@@ -10,7 +10,12 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- Other players' karts and trails now fade a little during a race, so your own kart stands out in a crowded pack (danger like fire and ability rings stays at full brightness).
+- Press attack while you're knocked out to ping the spot where you fell, making it easy to find where you died.
+- Kart colours are now chosen to be as visually distinct as possible, so you're far less likely to see two players in lookalike shades.
+- New colour-blind assist toggle in the top bar recolours every kart with a colour-blind-friendly palette.
 
 ## v0.7.0 — 2026-05-25
 
