@@ -686,6 +686,9 @@ class GameBoard {
 		this.tempSpectatorList = {};
 		this.tileChanges = {};
 		this.punchList = {};
+		// Lobby-tutorial idle-reset bookkeeping (set per lobby load in loadLobbyMap).
+		this.lobbyMapDirty = false;
+		this.lobbyLastActivity = 0;
 		this.aimerList = aimerList;
 		this.engine = engine;
 		this.roomSig = roomSig;
@@ -734,6 +737,9 @@ class GameBoard {
 		this.checkAbilities(currentState);
 		this.updateAimers(currentState);
 		this.updateHazards(currentState);
+		if (currentState == c.stateMap.lobby) {
+			this.checkLobbyMapReset();
+		}
 	}
 	checkCollisions(currentState) {
 		var objectArray = [];
@@ -895,7 +901,17 @@ class GameBoard {
 			if (player.acquiredAbility != null) {
 				this.abilityList[playerID] = player.ability;
 				if (player.acquiredAbility.mapID != null) {
-					this.changeTile(player.acquiredAbility.mapID, c.tileMap.normal.id);
+					var consumedVid = player.acquiredAbility.mapID;
+					this.changeTile(consumedVid, c.tileMap.normal.id);
+					// Lobby-only: the curated ability tile is one-shot (rewritten to normal
+					// on pickup). Restore it to its pristine ability id after a short delay
+					// so every player gets to learn it, not just the first per cycle.
+					if (currentState == c.stateMap.lobby) {
+						var pristineId = this.getPristineCellId(consumedVid);
+						if (pristineId != null && pristineId > 99) {
+							setTimeout(this.respawnLobbyAbilityTile, c.lobbyAbilityTileRespawnMs, { context: this, voronoiId: consumedVid, id: pristineId, mapId: this.currentMap.id });
+						}
+					}
 				}
 				player.acquiredAbility = null;
 			}
@@ -1101,6 +1117,9 @@ class GameBoard {
 		if (this.abilityList[owner] != null) {
 			this.abilityList[owner].alive = false;
 		}
+		// Mark the lobby map mutated so the idle-gated reset can later restore it.
+		this.lobbyMapDirty = true;
+		this.lobbyLastActivity = Date.now();
 		messenger.messageRoomBySig(this.roomSig, 'triggerUsed', owner);
 		messenger.messageRoomBySig(this.roomSig, 'explodedCells', explodedCells);
 	}
@@ -1123,6 +1142,8 @@ class GameBoard {
 			}
 		}
 		this.applyExplosionForce(explodeLoc, owner);
+		this.lobbyMapDirty = true;
+		this.lobbyLastActivity = Date.now();
 		messenger.messageRoomBySig(this.roomSig, 'snowFlakeExploded', owner);
 		messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(tileDelta));
 	}
@@ -1261,6 +1282,9 @@ class GameBoard {
 	// is authored, so the lobby simply falls back to the plain field + button.
 	loadLobbyMap() {
 		this.tileChanges = {};
+		// Fresh pristine layout, so the idle-reset bookkeeping starts clean.
+		this.lobbyMapDirty = false;
+		this.lobbyLastActivity = Date.now();
 		if (this.lobbyMaps == null || this.lobbyMaps.length == 0) {
 			this.currentMap = {};
 			this.resetHazards();
@@ -1280,6 +1304,66 @@ class GameBoard {
 		for (var id in this.playerList) {
 			this.playerList[id].ability = null;
 		}
+	}
+	// Original id of a cell in the pristine lobby template (lobbyMaps[0]), used to
+	// restore a consumed ability tile and to detect mutated cells for the idle reset.
+	getPristineCellId(voronoiId) {
+		if (this.lobbyMaps == null || this.lobbyMaps.length == 0) {
+			return null;
+		}
+		var cells = this.lobbyMaps[0].cells;
+		for (var i = 0; i < cells.length; i++) {
+			if (cells[i].site.voronoiId == voronoiId) {
+				return cells[i].id;
+			}
+		}
+		return null;
+	}
+	// Fast lobby-only ability-tile respawn (scheduled on pickup). Restores the tile to
+	// its ability id and broadcasts the change. Bails if the lobby map was swapped out
+	// (e.g. a race started) so a stale timeout can't rewrite a race map.
+	respawnLobbyAbilityTile(packet) {
+		var self = packet.context;
+		if (self.currentMap == null || self.currentMap.cells == null || self.currentMap.id != packet.mapId) {
+			return;
+		}
+		self.changeTile(packet.voronoiId, packet.id);
+		messenger.messageRoomBySig(self.roomSig, "tileChanges", JSON.stringify(self.gatherTileChanges()));
+	}
+	// Idle-gated safety reset (analysis decision 8): if bomb/ice-cannon have mutated the
+	// lobby and there's been no ability/projectile activity for lobbyIdleResetMs, restore
+	// the pristine layout. The idle gate means active players are never interrupted, but a
+	// mutated-then-abandoned lobby self-heals. Runs only in the lobby tick.
+	checkLobbyMapReset() {
+		if (!this.lobbyMapDirty) {
+			return;
+		}
+		if (Object.keys(this.projectileList).length > 0) {
+			this.lobbyLastActivity = Date.now();
+			return;
+		}
+		if (Date.now() - this.lobbyLastActivity < c.lobbyIdleResetMs) {
+			return;
+		}
+		this.restoreLobbyMap();
+	}
+	// Reapply pristine cell ids from the lobby template and broadcast the diff. currentMap
+	// is a deep clone of lobbyMaps[0], so cell indexes line up one-to-one.
+	restoreLobbyMap() {
+		if (this.currentMap == null || this.currentMap.cells == null || this.lobbyMaps == null || this.lobbyMaps.length == 0) {
+			this.lobbyMapDirty = false;
+			return;
+		}
+		var pristine = this.lobbyMaps[0].cells;
+		for (var i = 0; i < this.currentMap.cells.length; i++) {
+			var cell = this.currentMap.cells[i];
+			if (i < pristine.length && cell.id != pristine[i].id) {
+				cell.id = pristine[i].id;
+				this.tileChanges[cell.site.voronoiId] = cell.id;
+			}
+		}
+		messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(this.gatherTileChanges()));
+		this.lobbyMapDirty = false;
 	}
 	// The single safe-respawn helper for the lobby tutorial. Deliberately touches ONLY
 	// cosmetic/positional state: it never calls killPlayer/removeNotch/addNotch, never
