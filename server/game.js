@@ -472,6 +472,13 @@ class Game {
 	startGated() {
 		console.log("Start Gated");
 		this.locked = true;
+		// Leaving the lobby tutorial (this is the lobby->race transition; later rounds
+		// arrive here from overview): drop any ability picked up in the lobby so it
+		// can't be carried into the first real round. reset() only clears ability at
+		// gameOver, so abilities legitimately persist between rounds — hence the guard.
+		if (this.currentState == this.stateMap.lobby) {
+			this.gameBoard.clearLobbyAbilities();
+		}
 		this.resetForRace();
 		this.currentState = this.stateMap.gated;
 		this.gameBoard.setupMap(this.currentState);
@@ -753,6 +760,27 @@ class GameBoard {
 					_engine.checkCollideCells(this.playerList[player], this.currentMap);
 				}
 				objectArray.push(this.playerList[player]);
+			}
+			// Curated abilities are live in the lobby (bomb + ice cannon), so projectiles
+			// must collide with players and ice cannon must be able to freeze terrain —
+			// mirror the racing projectile pass. Hazards (the bumpers) and aimers join the
+			// collision set so they knock players around as a teaching prop.
+			for (var projID in this.projectileList) {
+				if (this.projectileList[projID].type == "cloud") {
+					_engine.checkFlipAroundWorld(this.projectileList[projID], this.world);
+					continue;
+				}
+				_engine.bounceOffBoundry(this.projectileList[projID], this.world);
+				if (this.projectileList[projID].type == "snowFlake" && this.currentMap != null && this.currentMap.cells != null) {
+					_engine.checkCollideCells(this.projectileList[projID], this.currentMap);
+				}
+				objectArray.push(this.projectileList[projID]);
+			}
+			for (var aimerId in this.aimerList) {
+				objectArray.push(this.aimerList[aimerId]);
+			}
+			for (var hazardId in this.hazardList) {
+				objectArray.push(this.hazardList[hazardId]);
 			}
 			for (var punchId in this.punchList) {
 				objectArray.push(this.punchList[punchId]);
@@ -1235,9 +1263,23 @@ class GameBoard {
 		this.tileChanges = {};
 		if (this.lobbyMaps == null || this.lobbyMaps.length == 0) {
 			this.currentMap = {};
+			this.resetHazards();
 			return;
 		}
 		this.currentMap = JSON.parse(JSON.stringify(this.lobbyMaps[0]));
+		// Spawn the map's bumpers (a knock-you-around teaching prop). generateHazards
+		// reads currentMap.hazards and is the same path races use; the per-tick
+		// gameUpdates carries them to the client.
+		this.generateHazards();
+	}
+	// Drop every ability acquired during the lobby tutorial. Called on the lobby->race
+	// transition only (see Game.startGated). Projectiles/hazards/aimers are cleared
+	// separately by setupMap -> clean()/resetPlayers().
+	clearLobbyAbilities() {
+		this.abilityList = {};
+		for (var id in this.playerList) {
+			this.playerList[id].ability = null;
+		}
 	}
 	// The single safe-respawn helper for the lobby tutorial. Deliberately touches ONLY
 	// cosmetic/positional state: it never calls killPlayer/removeNotch/addNotch, never
@@ -2174,9 +2216,15 @@ class Player extends Circle {
 	}
 	checkAttack(currentState) {
 		if (this.attack) {
-			if ((currentState == c.stateMap.racing || currentState == c.stateMap.collapsing) && this.ability != null) {
+			if ((currentState == c.stateMap.racing || currentState == c.stateMap.collapsing || currentState == c.stateMap.lobby) && this.ability != null) {
 				this.punchedTimer = Date.now();
-				this.resourceful += 1;
+				// No scoring in the lobby: firing an ability there must not tick the
+				// resourceful achievement stat (it isn't gated by checkForWinners). The
+				// curated lobby ability set is enforced by the map's tiles (bomb only),
+				// not here — swap/blindfold/tileSwap simply aren't placed to pick up.
+				if (currentState != c.stateMap.lobby) {
+					this.resourceful += 1;
+				}
 				this.ability.use();
 				// Clear the attack input so using an ability doesn't bleed into the
 				// next tick. Otherwise, once checkAbilities() nulls out the consumed
