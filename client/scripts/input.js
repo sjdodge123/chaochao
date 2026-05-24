@@ -59,7 +59,10 @@ function handleClick(event) {
     switch (event.which) {
         case 1: {
             if (menuOpen == false) {
-                claimPrimaryForKbm(); // mouse is playing P1 -> controllers are P2+
+                // NOTE: a single click is NOT treated as "kb/m is P1" — it's too
+                // ambiguous (could be clicking to start/focus). Only actually
+                // moving the player via keyboard or mouse-move claims P1 (so a
+                // controller-only player keeps P1). See keyDown / handleDblClick.
                 attack = true;
                 server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
             }
