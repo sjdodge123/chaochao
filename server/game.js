@@ -1260,6 +1260,10 @@ class GameBoard {
 		this.lobbyStartButton = new LobbyStartButton(this.world.center.x, this.world.center.y, 0, "red");
 		var lobbyMapID = (this.currentMap != null && this.currentMap.cells != null) ? this.currentMap.id : null;
 		messenger.messageRoomBySig(this.roomSig, "startLobby", compressor.sendLobbyStart(this.lobbyStartButton, lobbyMapID));
+		// Deliver the lobby bumpers so the client creates them (gameUpdates only moves
+		// hazards the client already knows about; creation is via this applyHazards path,
+		// the same payload shape the newMap event uses for races).
+		messenger.messageRoomBySig(this.roomSig, "applyHazards", compressor.newHazards(this.hazardList));
 	}
 	// Place a player on the background spawn pad (used for the lobby start and for
 	// players who join mid-lobby). onSanctuary keeps them force-shielded on the pad.
