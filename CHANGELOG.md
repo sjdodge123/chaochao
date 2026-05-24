@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.3.3 — 2026-05-24
+
 ### General
 
 - The lobby is now a hands-on practice area. Before a match starts you can walk around curated patches of terrain — lava, ice, sand, grass, goal tiles, and a handful of ability pickups (bombs in the middle, plus speed-boost, ice cannon, slice, and slow in the corners) — and learn the controls, the feel of each surface, and the win condition by just doing it. Touch lava and you "die" and respawn safely with several seconds of invulnerability; reach a goal to see the victory cue. None of it touches your score. If someone's pestering you, just step into the start circle in the middle — you stay invulnerable there until the match begins.
