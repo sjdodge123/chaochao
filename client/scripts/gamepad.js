@@ -257,6 +257,36 @@ function bindPadToPrimary(padIndex, pad) {
     // P1's block hints refresh to pad glyphs automatically (refreshPadBlocks).
 }
 
+// The keyboard/mouse started driving P1. Mark it claimed; and if a controller had
+// grabbed P1 first (no kb/m yet), bump that controller to its own player (P2+) and
+// give P1 back to kb/m — so "kb/m + controllers" works no matter who moved first.
+function claimPrimaryForKbm() {
+    if (kbmClaimedPrimary) {
+        return;
+    }
+    kbmClaimedPrimary = true;
+    var primary = localPlayers[primarySlot];
+    if (!primary || primary.padIndex == null) {
+        return; // no controller on P1 — nothing to bump
+    }
+    var padIdx = primary.padIndex;
+    var padType = primary.padType;
+    // kb/m takes over P1.
+    primary.padIndex = null;
+    if (typeof cancelMovementForSlot === "function") {
+        cancelMovementForSlot(primary);
+    }
+    primary.gp.hadMoveInput = false;
+    // Re-add the controller as its own player (P2+), if there's room.
+    var slot = nextFreeSlot();
+    if (slot != null && typeof gameID !== "undefined" && gameID != null && !roomIsFull()) {
+        var lp = addLocalPlayer(slot, padIdx);
+        if (lp) {
+            lp.padType = padType;
+        }
+    }
+}
+
 // True when the room already holds its max players. Counts the live playerList
 // plus any local players that have joined but whose playerJoin hasn't reflected
 // on the primary yet, so two quick joins can't both slip past.
