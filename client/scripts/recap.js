@@ -24,7 +24,7 @@ var RECAP_DISPLAY_MS = 3500;   // how long each achievement + clip stays on scre
 var RECAP_MAX_CLIPS = 4;       // keep the montage short within gameOverTime (20s)
 var RECAP_ZOOM = 2.4;          // camera zoom over fit-to-window (higher = tighter on the action)
 var RECAP_CAM_LERP = 0.12;     // how fast the follow-cam glides toward the action each frame
-var RECAP_TOP_FRAC = 0.10;     // panel top as a fraction of canvas height (kept high, not centered)
+var RECAP_WIN_W = 400;         // clip window width (logical px) — centred under the headline winner
 
 // multi-kill achievement key -> the marker type recorded for it
 var RECAP_TYPE_FOR_KEY = { doubleKill: "double", tripleKill: "triple", megaKill: "mega" };
@@ -213,13 +213,16 @@ function recapDraw(dt) {
 	var CW = (typeof LOGICAL_WIDTH !== "undefined" && LOGICAL_WIDTH > 0) ? LOGICAL_WIDTH : gameCanvas.width;
 	var CH = (typeof LOGICAL_HEIGHT !== "undefined" && LOGICAL_HEIGHT > 0) ? LOGICAL_HEIGHT : gameCanvas.height;
 
-	// Window geometry: a panel on the upper-left (winner text sits center, medals
-	// sit right). Anchored near the top — not vertically centered.
-	var winW = Math.min(360, CW * 0.32);
-	var aspect = (world != null && world.width > 0) ? (world.height / world.width) : 0.75;
-	var winH = Math.min(winW * aspect, CH * 0.42);
-	var winX = Math.round(CW * 0.06);
-	var winY = Math.round(Math.max(48, CH * RECAP_TOP_FRAC));
+	// Window geometry: centred horizontally and sat in the lower-centre band,
+	// directly under the headline winner text (which is centred at ~CH/2). The
+	// caption sits in the gap above the window; medals stay clear on the right.
+	var winW = Math.min(RECAP_WIN_W, CW * 0.42);
+	var aspect = (world != null && world.width > 0) ? (world.height / world.width) : 0.6;
+	var headlineBaseline = (CH + 48) / 2; // matches drawGameOverScreen's winString
+	var winY = Math.round(headlineBaseline + 56); // leave room for the caption above
+	var maxH = CH - winY - 18;            // keep the whole window on-screen
+	var winH = Math.min(winW * aspect, CH * 0.42, maxH);
+	var winX = Math.round((CW - winW) / 2);
 
 	// Caption above the window.
 	gameContext.save();
