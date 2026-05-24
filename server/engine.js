@@ -647,6 +647,13 @@ function checkCollideCells(player, map) {
 			return; // a point lies in exactly one Voronoi cell
 		}
 	}
+	// No cell contains this point — it's outside the playable terrain (e.g. punched
+	// back behind the starting gate). Reset grip to normal ground so the last tile's
+	// physics (notably ice) doesn't persist there. Only players carry grip; snowFlake
+	// projectiles also reach this path and have no resetGrip, so guard the call.
+	if (typeof player.resetGrip === "function") {
+		player.resetGrip();
+	}
 }
 function pointIntersection(x, y, cell) {
 	{
