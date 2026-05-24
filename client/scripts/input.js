@@ -28,18 +28,49 @@ function initEventHandlers() {
         return false;
     }, false);
     isTouchScreen = isTouchDevice();
+    // Experiment: dynamic camera defaults ON for every input method (still
+    // toggleable via the navbar camera button). It auto-falls back to the
+    // whole-map view when >1 local player is sharing the screen (see
+    // computeWorldViewTarget) so local multiplayer isn't cropped.
+    cameraZoomEnabled = true;
+    if (typeof updateCameraToggleUI === "function") {
+        updateCameraToggleUI();
+    }
     if (isTouchScreen) {
         setupVirtualbuttons();
-        goFullScreen();
+        // Don't auto-request fullscreen on load: browsers require a user
+        // gesture (so the first call typically fails anyway), and on iOS Safari
+        // the Fullscreen API isn't available on non-<video> elements at all.
+        // Fullscreen is triggered only by an explicit tap on the on-canvas
+        // button (onTouchStart -> goFullScreen), and that button is hidden where
+        // fullscreen is unsupported.
     }
 
 }
 
 function calcMousePos(evt) {
-    evt.preventDefault();
+    // Only suppress the default (text selection / drag) when the pointer is over
+    // the game canvas, so selecting text elsewhere on the page isn't broken by
+    // the global mousemove listener (item 8).
+    var t = evt.target;
+    if (t === gameCanvas || t === overlayCanvas ||
+        (typeof gameWindow !== "undefined" && gameWindow && gameWindow.contains && gameWindow.contains(t))) {
+        evt.preventDefault();
+    }
     if (myPlayer != null) {
         var rect = gameCanvas.getBoundingClientRect();
-        setMousePos((((evt.pageX - rect.left) / newWidth) * gameCanvas.width), (((evt.pageY - rect.top) / newHeight) * gameCanvas.height));
+        // screen -> logical (the un-zoomed 1366x768 canvas space)
+        var lx = ((evt.pageX - rect.left) / newWidth) * LOGICAL_WIDTH;
+        var ly = ((evt.pageY - rect.top) / newHeight) * LOGICAL_HEIGHT;
+        // logical -> world: invert the dynamic-camera transform so aiming points
+        // at the world spot under the cursor even while zoomed. No-op (identity)
+        // when the camera isn't zoomed (worldView centre = LOGICAL/2, scale 1).
+        var wx = lx, wy = ly;
+        if (typeof worldView !== "undefined" && worldView && worldView.scale) {
+            wx = (lx - LOGICAL_WIDTH / 2) / worldView.scale + worldView.cx;
+            wy = (ly - LOGICAL_HEIGHT / 2) / worldView.scale + worldView.cy;
+        }
+        setMousePos(wx, wy);
     }
 }
 
@@ -84,7 +115,8 @@ function handleClick(event) {
                     closeEmojiWindow();
                 }
             } else {
-                openEmojiWindow(mousex, mousey);
+                // Open at the cursor (client coords); moveEmojiMenu clamps it.
+                openEmojiWindow(event.clientX, event.clientY);
             }
 
             break;
@@ -113,6 +145,27 @@ function handleDblClick(event) {
     }
     movingByMouse = !movingByMouse;
 }
+// Map a key event to a movement action using the modern KeyboardEvent.code
+// (layout-independent), falling back to the deprecated keyCode for older
+// browsers. Returns "turnLeft" | "moveForward" | "turnRight" | "moveBackward" |
+// "attack" | null.
+function movementActionFor(evt) {
+    switch (evt.code) {
+        case "KeyA": case "ArrowLeft": return "turnLeft";
+        case "KeyW": case "ArrowUp": return "moveForward";
+        case "KeyD": case "ArrowRight": return "turnRight";
+        case "KeyS": case "ArrowDown": return "moveBackward";
+        case "Space": return "attack";
+    }
+    switch (evt.keyCode) {
+        case 65: case 37: return "turnLeft";
+        case 87: case 38: return "moveForward";
+        case 68: case 39: return "turnRight";
+        case 83: case 40: return "moveBackward";
+        case 32: return "attack";
+    }
+    return null;
+}
 function keyDown(evt) {
     // While the leave-game confirmation is up, don't let movement keys drive the
     // player (gamepad.js owns that modal; openLeaveModal already stopped motion).
@@ -122,22 +175,17 @@ function keyDown(evt) {
     if (movingByMouse) {
         movingByMouse = false;
     }
-    var gameKey = true;
-    switch (evt.keyCode) {
-        case 65: { turnLeft = true; break; } //Left key
-        case 37: { turnLeft = true; break; } //Left key
-        case 87: { moveForward = true; break; } //Up key
-        case 38: { moveForward = true; break; } //Up key
-        case 68: { turnRight = true; break; }//Right key
-        case 39: { turnRight = true; break; }//Right key
-        case 83: { moveBackward = true; break; } //Down key
-        case 40: { moveBackward = true; break; } //Down key
-        case 32: { attack = true; break; } // Spacebar
-        default: { gameKey = false; }
+    var action = movementActionFor(evt);
+    switch (action) {
+        case "turnLeft": { turnLeft = true; break; }
+        case "moveForward": { moveForward = true; break; }
+        case "turnRight": { turnRight = true; break; }
+        case "moveBackward": { moveBackward = true; break; }
+        case "attack": { attack = true; break; }
     }
     // The keyboard is being used to play -> it owns the primary slot (P1), so
-    // controllers hot-join as P2+. (When this stays false, the first pad takes P1.)
-    if (gameKey) {
+    // controllers hot-join as P2+. (When this stays null, the first pad takes P1.)
+    if (action) {
         claimPrimaryForKbm();
     }
     if (playerList[myID] != null) {
@@ -151,16 +199,12 @@ function keyUp(evt) {
         movingByMouse = false;
     }
 
-    switch (evt.keyCode) {
-        case 65: { turnLeft = false; break; } //Left key
-        case 37: { turnLeft = false; break; } //Left key
-        case 87: { moveForward = false; break; } //Up key
-        case 38: { moveForward = false; break; } //Up key
-        case 68: { turnRight = false; break; }//Right key
-        case 39: { turnRight = false; break; }//Right key
-        case 83: { moveBackward = false; break; } //Down key
-        case 40: { moveBackward = false; break; } //Down key
-        case 32: { attack = false; break; } // Spacebar
+    switch (movementActionFor(evt)) {
+        case "turnLeft": { turnLeft = false; break; }
+        case "moveForward": { moveForward = false; break; }
+        case "turnRight": { turnRight = false; break; }
+        case "moveBackward": { moveBackward = false; break; }
+        case "attack": { attack = false; break; }
     }
     if (playerList[myID] != null) {
         calcAngleFromKeys(playerList[myID]);
@@ -222,45 +266,125 @@ function determineMovement() {
 }
 
 function setupVirtualbuttons() {
-
-
-    //var rect = gameCanvas.getBoundingClientRect();
+    // The world (server dims) must be known before we size the tap regions.
+    // It normally is by the time this runs (gameState -> worldResize -> init),
+    // but guard so an early/ordering call can't throw on world.width (matches
+    // layoutTouchControls' guard).
+    if (typeof world === "undefined" || world == null) {
+        return;
+    }
+    // Movement (left quarter) and attack (right quarter) tap regions. These are
+    // proportional to the world so they always cover their half of the screen;
+    // the control sizes within them are physical (see layoutTouchControls).
     var leftRect = new VirtualButton(0, 85, world.width / 4, world.height, false);
     var rightRect = new VirtualButton(0 + world.width - (world.width / 4), 50, world.width / 4, world.height, false);
-    var upperLeftRect = new VirtualButton(0, 10, world.width / 16, 50, false);
-    var upperRightRect = new VirtualButton(0 + world.width - (world.width / 16), 10, world.width / 16, 50, false);
-    var topRightRect = new VirtualButton(0 + world.width - (world.width / 4), 85, world.width / 4, world.height / 2, false);
-    var bottomRightRect = new VirtualButton(0 + world.width - (world.width / 4), topRightRect.bottom, world.width / 4, world.height / 2, false);
-    //var bottomCenterRect = new VirtualButton(leftRect.right,world.height - (world.height/4)-100,rightRect.left-leftRect.right,200,false);
+    // Top-corner icon hit zones — sized & positioned in layoutTouchControls()
+    // (>=44px square, below the top safe strip). Placeholders until then.
+    var upperLeftRect = new VirtualButton(0, 0, 1, 1, false);
+    var upperRightRect = new VirtualButton(0, 0, 1, 1, false);
 
     virtualButtonList = [];
     joystickMovement = new Joystick(0, 0, false, false);
-    //joystickCamera = new Joystick(0, 0, false);
-    attackButton = new Button(0, 0, 0, 0, rightRect.width * 1.5, true, false);
-    exitButton = new Button(world.width - 50, 0, 0, 0, 12.5, false);
-    chatButton = new Button(50, 0, 0, 0, 12.5, false);
+    attackButton = new Button(0, 0, 0, 0, 0, true, false);
+    // radius is set in layoutTouchControls (single source of truth); no dead 12.5.
+    exitButton = new Button(0, 0, 0, 0, 0, false);
+    chatButton = new Button(0, 0, 0, 0, 0, false);
 
     virtualButtonList.push({ button: joystickMovement, bound: leftRect });
-    //virtualButtonList.push({ button: joystickCamera, bound: topRightRect });
     virtualButtonList.push({ button: attackButton, bound: rightRect });
     virtualButtonList.push({ button: exitButton, bound: upperRightRect });
     virtualButtonList.push({ button: chatButton, bound: upperLeftRect });
 
+    layoutTouchControls();
+}
 
+// Convert a physical (CSS-px) size into the canvas' logical 1366x768 space so
+// touch controls keep a constant physical size regardless of how the canvas is
+// fitted to the screen (5.2). fitRatio = CSS px per logical unit.
+function cssToLogical(px) {
+    return px / (fitRatio || 1);
+}
+
+// (Re)size & position the on-canvas touch controls from the current fit ratio.
+// Called after setup and on every resize, so a thumb-sized joystick/buttons
+// stay thumb-sized on any screen width or orientation (5.2), and the top-corner
+// icons keep a >=44px tap zone that matches the drawn icon (2.2).
+function layoutTouchControls() {
+    if (!virtualButtonList || !joystickMovement || typeof world === "undefined" || world == null) {
+        return;
+    }
+    // Joystick: thumb-sized base ring + stick, preserving the original ratios.
+    joystickMovement.baseRadius = cssToLogical(90);
+    joystickMovement.width = joystickMovement.baseRadius;
+    joystickMovement.height = joystickMovement.baseRadius;
+    joystickMovement.stickRadius = cssToLogical(54);
+    joystickMovement.maxPullRadius = cssToLogical(45);
+    joystickMovement.deadzone = cssToLogical(5);
+
+    // Attack: keep a large right-side tap circle, sized in physical units.
+    if (attackButton) {
+        attackButton.radius = cssToLogical(150);
+    }
+
+    // Top-corner icon buttons: >=44px square tap zones matching the drawn icon,
+    // inset from the edges and dropped below the top strip (URL bar / notch).
+    var hit = Math.max(cssToLogical(52), 44);   // tap zone side (logical)
+    var icon = cssToLogical(34);                // drawn icon size (logical)
+    var margin = cssToLogical(12);
+    var topInset = cssToLogical(14);
+    // chat (emoji) -> top-left; exit (fullscreen) -> top-right.
+    sizeCornerButton(chatButton, margin + hit / 2, topInset + hit / 2, hit, icon);
+    sizeCornerButton(exitButton, world.width - margin - hit / 2, topInset + hit / 2, hit, icon);
+
+    // Centre each button in its bound rect (the joystick base is overridden on
+    // touch-down; this fixes the static buttons' positions).
     for (var i = 0; i < virtualButtonList.length; i++) {
-        virtualButtonList[i].button.baseX = virtualButtonList[i].bound.x + virtualButtonList[i].bound.width / 2 - virtualButtonList[i].button.width / 2;
-        virtualButtonList[i].button.stickX = virtualButtonList[i].bound.x + virtualButtonList[i].bound.width / 2 - virtualButtonList[i].button.width / 2;
-        virtualButtonList[i].button.baseY = virtualButtonList[i].bound.y + virtualButtonList[i].bound.height / 2 - virtualButtonList[i].button.height / 2;
-        virtualButtonList[i].button.stickY = virtualButtonList[i].bound.y + virtualButtonList[i].bound.height / 2 - virtualButtonList[i].button.height / 2;
+        var b = virtualButtonList[i].button;
+        var bound = virtualButtonList[i].bound;
+        b.baseX = bound.x + bound.width / 2 - b.width / 2;
+        b.stickX = b.baseX;
+        b.baseY = bound.y + bound.height / 2 - b.height / 2;
+        b.stickY = b.baseY;
+    }
+}
+
+// Centre a corner icon button's tap zone (its bound rect) on (cx,cy) and set the
+// drawn icon size + a real radius — so the bound rect, the radius and the icon
+// are one source of truth for the target size (replaces the dead 12.5 radius).
+function sizeCornerButton(button, cx, cy, hit, icon) {
+    if (!button) {
+        return;
+    }
+    button.iconSize = icon;
+    button.radius = hit / 2;
+    for (var i = 0; i < virtualButtonList.length; i++) {
+        if (virtualButtonList[i].button === button) {
+            var r = virtualButtonList[i].bound;
+            r.x = cx - hit / 2;
+            r.y = cy - hit / 2;
+            r.width = hit;
+            r.height = hit;
+            r.left = r.x;
+            r.top = r.y;
+            r.right = r.x + r.width;
+            r.bottom = r.y + r.height;
+            break;
+        }
     }
 }
 
 
 function onTouchStart(evt) {
+    // Guard against touch events on devices the touch UI wasn't built for
+    // (hybrids where touch fires but isTouchScreen was false) so we never
+    // dereference a null virtualButtonList.
+    if (!virtualButtonList) {
+        return;
+    }
     var rect = gameCanvas.getBoundingClientRect();
     var touch = evt.changedTouches[0];
-    var touchX = (((touch.pageX - rect.left) / newWidth) * gameCanvas.width);
-    var touchY = (((touch.pageY - rect.top) / newHeight) * gameCanvas.height);
+    var touchX = (((touch.pageX - rect.left) / newWidth) * LOGICAL_WIDTH);
+    var touchY = (((touch.pageY - rect.top) / newHeight) * LOGICAL_HEIGHT);
     for (var i = 0; i < virtualButtonList.length; i++) {
         if (virtualButtonList[i].bound.pointInRect(touchX, touchY)) {
             var button = virtualButtonList[i].button;
@@ -281,7 +405,8 @@ function onTouchStart(evt) {
                     if (menuOpen) {
                         closeEmojiWindow();
                     } else {
-                        openEmojiWindow(rect.width / 2 - 50, rect.height / 2 - 50);
+                        // Touch: open centred on the viewport.
+                        openEmojiWindow(window.innerWidth / 2, window.innerHeight / 2);
                     }
                 }
             }
@@ -290,6 +415,9 @@ function onTouchStart(evt) {
     }
 }
 function onTouchEnd(evt) {
+    if (!virtualButtonList) {
+        return;
+    }
     var touchList = evt.changedTouches;
     for (var i = 0; i < touchList.length; i++) {
         for (var j = 0; j < virtualButtonList.length; j++) {
@@ -309,13 +437,19 @@ function onTouchEnd(evt) {
     }
 }
 function onTouchMove(evt) {
+    if (!virtualButtonList) {
+        return;
+    }
+    // The listener is registered passive:false precisely so we can stop the
+    // page scrolling / rubber-banding / pinch-zooming under a joystick drag (6.2).
+    evt.preventDefault();
     var rect = gameCanvas.getBoundingClientRect();
     var touchList = evt.changedTouches;
     var touch, touchX, touchY;
     for (var i = 0; i < touchList.length; i++) {
         touch = touchList[i];
-        var touchX = (((touch.pageX - rect.left) / newWidth) * gameCanvas.width);
-        var touchY = (((touch.pageY - rect.top) / newHeight) * gameCanvas.height);
+        var touchX = (((touch.pageX - rect.left) / newWidth) * LOGICAL_WIDTH);
+        var touchY = (((touch.pageY - rect.top) / newHeight) * LOGICAL_HEIGHT);
         for (var j = 0; j < virtualButtonList.length; j++) {
             var button = virtualButtonList[j].button;
             if (touch.identifier == button.touchIdx) {
@@ -338,7 +472,17 @@ function onTouchMove(evt) {
 }
 
 const isTouchDevice = () => {
-    return window.matchMedia('(hover: none)').matches
+    // Broadened from `(hover: none)` alone: treat the device as touch-first when
+    // its PRIMARY input is touch-like — a coarse primary pointer or no hover
+    // (phones/tablets). Touch-capable laptops keep a fine primary pointer
+    // (trackpad/mouse) and are correctly left as keyboard+mouse, so this doesn't
+    // over-trigger on hybrids. matchMedia is the source of truth; fall back to
+    // touch-hardware probes only where it's unavailable. (Evaluated once at init.)
+    var mm = window.matchMedia;
+    if (mm) {
+        return mm('(pointer: coarse)').matches || mm('(hover: none)').matches;
+    }
+    return ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
 }
 
 function touchMovement() {
@@ -451,7 +595,8 @@ function calcAngleFromKeys(player) {
 
 function openEmojiWindow(x, y) {
     if (menuOpen == false) {
-        emojiMenu.style.transform = "scale(2)";
+        // The wheel's full size comes from CSS (--wheel-size); scale(1) reveals it.
+        emojiMenu.style.transform = "scale(1)";
         menuOpen = true;
         // Mouse/touch/keyboard opens belong to the primary; a pad open overrides
         // this in openEmojiFromPad. Tint the wheel border with the opener's color.
@@ -478,9 +623,17 @@ function closeEmojiWindow(source) {
     sendEmojiForSlot(emoji, owner);
 }
 
-function moveEmojiMenu(x, y) {
-    emojiMenu.style.left = x + "px";
-    emojiMenu.style.top = y + "px";
+// Centre the wheel on (centerX, centerY) given in viewport/client coords, then
+// clamp so the WHOLE wheel stays on-screen even when opened near an edge (3.2).
+function moveEmojiMenu(centerX, centerY) {
+    var size = emojiMenu.offsetWidth || 200;   // full size (unaffected by scale)
+    var half = size / 2;
+    var vw = window.innerWidth;
+    var vh = window.innerHeight;
+    var cx = Math.max(half, Math.min(vw - half, centerX));
+    var cy = Math.max(half, Math.min(vh - half, centerY));
+    emojiMenu.style.left = (cx - half) + "px";
+    emojiMenu.style.top = (cy - half) + "px";
 }
 
 var recursiveOffsetLeftAndTop = function (element) {

@@ -13,6 +13,14 @@
 :root {
     --navbar-height: 60px;
 
+    /* Safe-area insets (notch / home indicator). Resolve to 0px on devices
+       and browsers that don't expose them, so the layout is unchanged there.
+       Requires `viewport-fit=cover` on the viewport meta to be non-zero. */
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+
     /* Theme palette — light (default). The dark overrides live in the
        [data-theme="dark"] block below; theme.js flips the data-theme
        attribute on <html> based on the saved light/dark/auto preference. */
@@ -62,21 +70,40 @@
 
 html,body {
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    /* Stop iOS from auto-inflating text in landscape (it ignores our sizing
+       otherwise) while still allowing user zoom. */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
     width: 100vw;
+    /* `dvh` tracks the *dynamic* viewport so the canvas/section don't shift
+       when the mobile URL bar collapses. `vh` stays as the fallback for
+       browsers without `dvh`. */
     height: 100vh;
+    height: 100dvh;
+    /* Stop pull-to-refresh / overscroll bounce so a touch drag near an edge
+       doesn't yank the page (6.2). */
+    overscroll-behavior: none;
 }
 
 body {
     /* Push body content below the fixed navbar with padding (not margin
        on the first child) so the offset doesn't margin-collapse out of
-       body and inflate the page height past the viewport. */
-    padding-top: var(--navbar-height);
+       body and inflate the page height past the viewport. Include the top
+       safe-area so content clears the notch/status bar. */
+    padding-top: calc(var(--navbar-height) + var(--safe-top));
     background: var(--bg);
     color: var(--text);
 }
 
 nav {
-    height: var(--navbar-height);
+    /* Grow by the top inset and pad it inward so the brand/toggles clear the
+       notch & status bar; pad the sides for the landscape notch. */
+    height: calc(var(--navbar-height) + var(--safe-top));
+    padding-top: var(--safe-top);
+    /* `!important` beats Bootstrap's `.px-3` utility on the same element so
+       the landscape-notch side padding is actually applied. */
+    padding-left: calc(1rem + var(--safe-left)) !important;
+    padding-right: calc(1rem + var(--safe-right)) !important;
     width: 100%;
     border-bottom: thin solid var(--border);
     box-shadow: 0px 8px 15px rgba(0, 0, 0, 0.1);
@@ -117,8 +144,9 @@ nav {
 
   section {
     /* navbar offset comes from body { padding-top } so margins don't
-       collapse out and inflate the page height. */
-    height: calc(100vh - var(--navbar-height));
+       collapse out and inflate the page height. `dvh` mirrors html/body. */
+    height: calc(100vh - var(--navbar-height) - var(--safe-top));
+    height: calc(100dvh - var(--navbar-height) - var(--safe-top));
     position: relative;
   }
 
@@ -138,6 +166,10 @@ canvas {
 #main {
     height: 100%;
     position: relative;
+    /* Let the landing menu scroll instead of being clipped when the viewport is
+       too short (e.g. landscape phones); pairs with the short-viewport rule
+       below that stops vertically centering it. */
+    overflow-y: auto;
 }
 
 .join-container {
@@ -235,6 +267,10 @@ canvas {
 #gameWindow {
     background: var(--board-bg);
     overflow: hidden;
+    /* The game owns all touch gestures inside the play area; disabling native
+       touch-action stops the browser scrolling/zooming during joystick or
+       attack drags (6.2). */
+    touch-action: none;
     display: none;
     /* Fill the section and flex-centre the canvas stack inside so the
        game canvas uses all the space the page has, not 90% with
@@ -387,7 +423,9 @@ div.desc {
 
 #game-title {
     font-family: "San Francisco";
-    font-size: 4em;
+    /* Fluid size: never overflows a 320px phone, never larger than the old 4em
+       on desktop. */
+    font-size: clamp(2.2rem, 12vw, 4em);
 }
 
 .landing-stack {
@@ -470,82 +508,39 @@ div.desc {
     z-index: 99;
 }
 
+/* Emoji wheel: a viewport-sized circle whose slots are positioned by JS
+   (positionEmojiSlots) around a ring, so it scales with the device and adding/
+   removing emojis needs no per-slot CSS. position:fixed so it overlays the
+   viewport and moveEmojiMenu can clamp the whole wheel on-screen. */
 .emojiMenu {
+    --wheel-size: min(72vw, 320px);
+    --slot-size: 46px;
     background-color: white;
-    height: 100px;
-    width: 100px;
+    width: var(--wheel-size);
+    height: var(--wheel-size);
     transform: scale(0);
+    transform-origin: center center;
     border-radius: 50%;
     border-style: solid;
-    position: absolute;
-    top: 0px;
-    bottom: 0px;
-    left: 0px;
-    right: 0px;
-    z-index: 99;
-    transition: 0.3s;
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 2001;
+    transition: transform 0.3s;
 }
 
 #emojiMenu a {
     text-decoration: none;
-    display: inline-block;
     position: absolute;
-    font-size: 12px;
+    /* >=44px tap target; centred on its JS-set left/top point */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: var(--slot-size);
+    min-height: var(--slot-size);
+    font-size: 24px;
     color: #BBBBBB;
-}
-
-#emojiMenu a:nth-child(1) {
-    top: 0px;
-    left: 41px;
-}
-
-#emojiMenu a:nth-child(2) {
-    top: 5px;
-    left: 60px;
-}
-
-#emojiMenu a:nth-child(3) {
-    top: 20px;
-    left: 72px;
-}
-
-#emojiMenu a:nth-child(4) {
-    top: 38px;
-    left: 80px;
-}
-
-#emojiMenu a:nth-child(5) {
-    top: 56px;
-    left: 72px;
-}
-
-#emojiMenu a:nth-child(6) {
-    top: 74px;
-    left: 60px;
-}
-#emojiMenu a:nth-child(7) {
-    top: 78px;
-    left: 41px;
-}
-#emojiMenu a:nth-child(8) {
-    top: 74px;
-    left: 22px;
-}
-#emojiMenu a:nth-child(9) {
-    top: 56px;
-    left: 10px;
-}
-#emojiMenu a:nth-child(10) {
-    top: 38px;
-    left: 2px;
-}
-#emojiMenu a:nth-child(11) {
-    top: 20px;
-    left: 10px;
-}
-#emojiMenu a:nth-child(12) {
-    top: 5px;
-    left: 22px;
+    transform: translate(-50%, -50%);
 }
 
 #emojiMenu a:hover {
@@ -558,7 +553,8 @@ div.desc {
 /* --- gamepad / controller prompts --- */
 .gamepad-prompts {
     position: fixed;
-    bottom: 12px;
+    /* clear the home indicator on notched phones */
+    bottom: calc(12px + var(--safe-bottom));
     left: 50%;
     transform: translateX(-50%);
     display: flex;
@@ -628,6 +624,23 @@ div.desc {
     display: none;
 }
 
+/* --- keyboard-only (Tab) focus indicator --- */
+/* Bootstrap 4 swaps the default focus outline for a subtle box-shadow that's
+   easy to miss. `:focus-visible` matches only keyboard/AT focus (never a mouse
+   click), so keyboard-only desktop users get a clear ring on every control
+   without affecting pointer users. */
+a:focus-visible,
+button:focus-visible,
+.btn:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+    outline: 3px solid #c87f8a;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 4px rgba(200, 127, 138, 0.25);
+}
+
 /* focus ring for controller navigation of DOM menus (landing + join) */
 .gp-focus {
     outline: 3px solid #c87f8a !important;
@@ -635,10 +648,12 @@ div.desc {
     box-shadow: 0 0 0 4px rgba(200, 127, 138, 0.25);
 }
 
-/* highlighted slot while navigating the in-game emoji wheel */
+/* highlighted slot while navigating the in-game emoji wheel.
+   Keep the translate(-50%,-50%) centering and add the scale on top, or the
+   focused slot would jump off its computed position. */
 #emojiMenu a.gp-emoji-focus {
     color: #c87f8a;
-    transform: scale(1.6);
+    transform: translate(-50%, -50%) scale(1.6);
     font-weight: 700;
 }
 
@@ -656,7 +671,7 @@ div.desc {
    that player's assigned color so a controller maps visibly to its player. */
 #padPlayers {
     position: fixed;
-    top: 12px;
+    top: calc(12px + var(--safe-top));
     left: 50%;
     transform: translateX(-50%);
     display: flex;
@@ -768,7 +783,7 @@ div.desc {
 /* informational controller-detection header on the menu/editor pages */
 #controllerHeader {
     position: fixed;
-    top: 8px;
+    top: calc(8px + var(--safe-top));
     left: 50%;
     transform: translateX(-50%);
     display: none;
@@ -826,7 +841,7 @@ div.desc {
 /* "controller detected — press A to join" toast, just below the player blocks */
 #padToast {
     position: fixed;
-    top: 50px;
+    top: calc(50px + var(--safe-top));
     left: 50%;
     transform: translateX(-50%);
     display: inline-flex;
@@ -868,7 +883,8 @@ div.desc {
 .osk-container {
     position: fixed;
     left: 50%;
-    bottom: 16px;
+    /* clear the home indicator on notched phones */
+    bottom: calc(16px + var(--safe-bottom));
     transform: translateX(-50%);
     width: min(720px, 96vw);
     z-index: 2000;
@@ -877,6 +893,11 @@ div.desc {
     background: #ececec;
 }
 .osk-container.hidden {
+    display: none;
+}
+/* 7b: while the on-screen keyboard is up, hide the bottom gamepad prompt bar so
+   the two never overlap on short landscape screens. */
+body.osk-open .gamepad-prompts {
     display: none;
 }
 .osk-container .hg-button.osk-focus {
@@ -986,4 +1007,82 @@ div.desc {
 [data-theme="dark"] .news-banner {
     border-color: #43363a;
     border-left-color: #c87f8a;
+}
+
+/* ===========================================================================
+   Responsive scaffolding (PR F)
+   The breakpoints + pointer/orientation queries the touch-facing tweaks hang
+   off. Kept in one place so the four input modes share one source of truth.
+   =========================================================================== */
+
+/* 4.1 — navbar audio/gamepad toggles get a real, labelled hit box instead of
+   being bare icon links with only a 5px margin. */
+.nav-toggle {
+    display: inline-flex;
+    align-items: center;
+    min-height: 36px;
+    padding: 0 8px;
+    border-radius: 6px;
+}
+
+/* Touch / coarse pointer: enforce the 44px minimum tap target everywhere. */
+@media (pointer: coarse) {
+    /* 5.1 — Bootstrap .btn (~38px) and .btn-sm are below the 44px minimum. */
+    .btn {
+        min-height: 44px;
+        padding-top: 0.5rem;
+        padding-bottom: 0.5rem;
+    }
+    .btn-sm {
+        min-height: 44px;
+    }
+    /* 4.1 — toggles need the full 44x44 target on touch. */
+    .nav-toggle {
+        min-height: 44px;
+        min-width: 44px;
+        justify-content: center;
+    }
+    /* join-page inline controls share the bump */
+    .join-by-id input,
+    .gameCard .join-btn {
+        min-height: 44px;
+    }
+}
+
+/* 4.3 — landscape phones (the game's natural orientation) have very little
+   vertical room; shrink the fixed navbar so the canvas gets it back. The
+   navbar height, body offset and section height all key off this var. */
+@media (orientation: landscape) and (max-height: 480px) {
+    :root {
+        --navbar-height: 44px;
+    }
+    #game-title {
+        font-size: clamp(1.8rem, 9vw, 3rem);
+    }
+}
+
+/* Short viewports (landscape phones / small windows): the landing menu is
+   vertically centred, which clips the title under the fixed navbar when the
+   content is taller than the viewport. Top-align it and let #main scroll so the
+   whole menu is reachable, and tighten the title/card so it usually fits. */
+@media (max-height: 720px) {
+    #main .container {
+        align-items: flex-start !important;
+        height: auto !important;
+        min-height: 100%;
+        padding-top: 0.75rem;
+        padding-bottom: 0.75rem;
+    }
+    #game-title {
+        font-size: clamp(1.6rem, 7vw, 2.6rem);
+    }
+    .play-container {
+        padding: 1rem;
+    }
+    .news-banner {
+        margin-top: 0.5rem;
+    }
+    .tagline {
+        margin-top: 0.5rem;
+    }
 }

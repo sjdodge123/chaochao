@@ -127,7 +127,7 @@ class Joystick {
 	}
 
 	onMove(x, y) {
-		if (this.pressed = true) {
+		if (this.pressed === true) {
 			this.lastTouch = Date.now();
 			this.calcStick(x, y);
 		}
@@ -235,7 +235,7 @@ class Button {
 		}
 	}
 	onMove(x, y) {
-		if (this.pressed = true) {
+		if (this.pressed === true) {
 			this.lastTouch = Date.now();
 		}
 	}

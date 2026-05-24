@@ -1,7 +1,7 @@
 <html>
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover, user-scalable=no">
         <meta name="mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-capable" content="yes">
         <!-- Apply saved theme before first paint to avoid a flash of the wrong theme -->
@@ -28,10 +28,12 @@
                 <a style="text-decoration: inherit;
                 color: inherit;" href="./index.html">ChaoChao</a>
             </div>
-            <a id="masterControl" style="cursor:pointer; text-decoration: inherit;
+            <a id="masterControl" class="nav-toggle" role="button" tabindex="0" aria-label="Toggle sound effects" style="cursor:pointer; text-decoration: inherit;
             color: inherit;"><i class="music-btn fa fa-gamepad" aria-hidden="true"></i> [<i class="music-btn fa fa-volume-up" aria-hidden="true"></i>]</a>
-            <a id="musicControl" style="cursor:pointer; text-decoration: inherit;
+            <a id="musicControl" class="nav-toggle" role="button" tabindex="0" aria-label="Toggle music" style="cursor:pointer; text-decoration: inherit;
             color: inherit;"><i class="music-btn fas fa-music"></i> [<i class="music-btn fa fa-volume-up" aria-hidden="true"></i>]</a>
+            <a id="cameraControl" class="nav-toggle" role="button" tabindex="0" aria-label="Toggle dynamic camera zoom" style="cursor:pointer; text-decoration: inherit;
+            color: inherit;"><i class="music-btn fas fa-video" aria-hidden="true"></i> [<i class="music-btn fa fa-check" aria-hidden="true"></i>]</a>
           </nav>
         <section>
             <!-- Game enclosed here -->

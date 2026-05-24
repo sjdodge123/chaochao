@@ -20,6 +20,30 @@ var server = null,
     overlayContext = null,
     newWidth = 0,
     newHeight = 0,
+    // The fixed logical drawing space (the canvas' initial backing-store size,
+    // 1366x768). All gameplay/HUD/touch coords live in this space; the canvas
+    // backing store is sized to device pixels and scaled back to it each frame
+    // (see resize() + applyCanvasTransform), so high-DPR displays render crisp.
+    LOGICAL_WIDTH = 0,
+    LOGICAL_HEIGHT = 0,
+    fitRatio = 1,   // logical->CSS px scale, for stable physical label sizes
+    canvasScaleX = 1,  // logical->backing-store scale applied per frame (DPR-aware)
+    canvasScaleY = 1,
+    // --- dynamic touch camera (world zoom) ---
+    // Smoothed view {cx, cy, scale} in world coords; null until the first frame.
+    // Whole-map = identity (centre LOGICAL/2, scale 1); racing focuses on the
+    // player and pulls the nearest goal into frame as it's approached.
+    worldView = null,
+    // Dynamic camera on/off. Defaults ON for every input method (set true in
+    // initEventHandlers), toggleable by anyone via the navbar camera button.
+    // Auto-falls back to whole-map when >1 local player shares the screen.
+    cameraZoomEnabled = false,
+    worldViewFocusedElapsed = 0,  // ms accumulated in the focus phase (frame-dt based, not wall-clock)
+    WORLD_ZOOM_MAX = 1.8,      // tightest focus on the player while racing (shows some surroundings)
+    WORLD_ZOOM_ENGAGE = 460,   // world-units: nearest goal pulls into frame within this
+    WORLD_ZOOM_PAD = 120,      // world-units padding around framed points
+    WORLD_ZOOM_TAU = 620,      // smoothing time-constant (ms); higher = slower, gentler glide
+    WORLD_ZOOM_HOLD_MS = 1100, // hold the whole-map view this long when a round starts, before easing in
     maps = [],
     oldNotches = {},
     camera,
@@ -198,11 +222,35 @@ function setupPage() {
             $("#masterControl").html('<i class="music-btn fa fa-gamepad" aria-hidden="true"></i>  [<i class="music-btn fa fa-volume-up" aria-hidden="true"></i>]');
         }
     });
+    // Keyboard activation for the navbar toggles (role="button" tabindex="0"):
+    // Enter/Space fires the click. stopPropagation keeps Space from also
+    // reaching the global gameplay keydown (Space = attack) while a toggle has
+    // focus.
+    function activateToggleOnKey(e) {
+        if (e.key === "Enter" || e.key === " " || e.keyCode === 13 || e.keyCode === 32) {
+            e.preventDefault();
+            e.stopPropagation();
+            $(e.currentTarget).click();
+        }
+    }
+    musicControl.on("keydown", activateToggleOnKey);
+    masterControl.on("keydown", activateToggleOnKey);
+    $("#cameraControl").on("click", function () {
+        cameraZoomEnabled = !cameraZoomEnabled;
+        updateCameraToggleUI();
+    });
+    $("#cameraControl").on("keydown", activateToggleOnKey);
+    updateCameraToggleUI();
     volumeChange();
     gameCanvas = document.getElementById('gameCanvas');
     overlayCanvas = document.getElementById('overlayCanvas');
     gameContext = gameCanvas.getContext('2d');
     overlayContext = overlayCanvas.getContext('2d');
+    // Capture the logical drawing size from the initial backing store (the
+    // 1366x768 width/height HTML attrs) BEFORE resize() repurposes the backing
+    // store for device-pixel rendering.
+    LOGICAL_WIDTH = gameCanvas.width;
+    LOGICAL_HEIGHT = gameCanvas.height;
     init();
     // Use .always() (not .then()) so a single 404 / CORS error in the
     // preload list doesn't leave the lobby never being entered. Once
@@ -307,7 +355,7 @@ function resize() {
     var gameWindowRect = canvasWindow.getBoundingClientRect();
     if (gameWindowRect.width === 0 || gameWindowRect.height === 0) return;
     var viewport = { width: gameWindowRect.width, height: gameWindowRect.height };
-    var optimalRatio = Math.min(viewport.width / gameCanvas.width, viewport.height / gameCanvas.height);
+    var optimalRatio = Math.min(viewport.width / LOGICAL_WIDTH, viewport.height / LOGICAL_HEIGHT);
 
     if (window.document.fullscreenElement) {
         newWidth = viewport.width;
@@ -316,25 +364,53 @@ function resize() {
         // Fit the canvas to the available space at its native 16:9
         // aspect ratio (no padding shrink — the gameWindow flex
         // container provides any breathing room).
-        newWidth = gameCanvas.width * optimalRatio;
-        newHeight = gameCanvas.height * optimalRatio;
+        newWidth = LOGICAL_WIDTH * optimalRatio;
+        newHeight = LOGICAL_HEIGHT * optimalRatio;
     }
+
+    // Logical->CSS scale; used to keep canvas-drawn labels a stable physical
+    // size across phone/desktop widths (see drawTouchLabel).
+    fitRatio = newWidth / LOGICAL_WIDTH;
 
     if (mapContainer != null) {
         mapContainer.style.width = newWidth + "px";
         mapContainer.style.height = newHeight + "px";
     }
+    // CSS (layout) size: the fitted 16:9 box.
     gameCanvas.style.width = newWidth + "px";
     gameCanvas.style.height = newHeight + "px";
     overlayCanvas.style.width = newWidth + "px";
     overlayCanvas.style.height = newHeight + "px";
 
+    // Backing store: render at device resolution so the game (and its text) is
+    // sharp on Retina/phone displays. Cap dpr at 2 to avoid over-rendering on
+    // 3x phones. The logical 1366x768 space is unchanged; applyCanvasTransform()
+    // scales drawing into the backing store each frame, so no gameplay math
+    // moves to device pixels.
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    gameCanvas.width = Math.round(newWidth * dpr);
+    gameCanvas.height = Math.round(newHeight * dpr);
+    overlayCanvas.width = Math.round(newWidth * dpr);
+    overlayCanvas.height = Math.round(newHeight * dpr);
+
+    // Per-frame logical->backing-store transform (set here so applyCanvasTransform
+    // doesn't have to re-read the backing-store size every frame).
+    canvasScaleX = gameCanvas.width / LOGICAL_WIDTH;
+    canvasScaleY = gameCanvas.height / LOGICAL_HEIGHT;
+
+    // Re-flow the on-canvas touch controls to the new fit ratio so they keep a
+    // constant physical size across resizes / orientation changes (no-op until
+    // the controls exist on a touch device).
+    if (typeof layoutTouchControls === "function") {
+        layoutTouchControls();
+    }
+
     camera = {
         active: false,
-        x: gameCanvas.width / 2,
-        y: gameCanvas.height / 2,
-        width: gameCanvas.width,
-        height: gameCanvas.height,
+        x: LOGICAL_WIDTH / 2,
+        y: LOGICAL_HEIGHT / 2,
+        width: LOGICAL_WIDTH,
+        height: LOGICAL_HEIGHT,
         target: null,
         color: 'yellow',
         padding: 150,
@@ -342,8 +418,8 @@ function resize() {
         right: 0,
         top: 0,
         bottom: 0,
-        xOffset: gameCanvas.width / 2,
-        yOffset: gameCanvas.height / 2,
+        xOffset: LOGICAL_WIDTH / 2,
+        yOffset: LOGICAL_HEIGHT / 2,
 
         centerOnObject: function (object) {
             if (!this.active) {
@@ -429,7 +505,33 @@ function resize() {
     }
 }
 
+// Reflect the dynamic-camera on/off state in the navbar toggle (matches the
+// music/master pattern: an icon plus a bracketed status glyph).
+function updateCameraToggleUI() {
+    var el = document.getElementById("cameraControl");
+    if (!el) {
+        return;
+    }
+    var status = cameraZoomEnabled
+        ? '[<i class="music-btn fa fa-check" aria-hidden="true"></i>]'
+        : '[<i class="music-btn fa fa-ban" aria-hidden="true"></i>]';
+    el.innerHTML = '<i class="music-btn fas fa-video" aria-hidden="true"></i> ' + status;
+}
+
+// iOS Safari does NOT implement the Fullscreen API on arbitrary elements (only
+// <video>), so requestFullscreen on #gameWindow silently rejects there. Detect
+// support so we can hide the dead control and skip a doomed request rather than
+// drawing a button that does nothing.
+function fullscreenSupported() {
+    return !!(document.fullscreenEnabled &&
+        typeof gameWindow !== "undefined" && gameWindow &&
+        gameWindow.requestFullscreen);
+}
+
 function goFullScreen() {
+    if (!fullscreenSupported()) {
+        return;
+    }
     if (window.document.fullscreenElement) {
         window.document.exitFullscreen().then(function () {
             resize();

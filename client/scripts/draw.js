@@ -370,12 +370,18 @@ function drawObjects(dt) {
         return;
     }
 
+    updateWorldCamera(dt);
+    applyCanvasTransform();
     drawBackground(dt);
     if (currentState == config.stateMap.overview) {
         screenShake = false;
         drawOverviewBoard();
         return;
     }
+
+    // ---- WORLD PASS: zoomed/panned by the dynamic camera (touch); identity
+    // elsewhere. Everything positioned in world coords goes here. ----
+    applyWorldTransform();
     preShake();
     drawWorld(dt);
     cameraOnMyPlayer();
@@ -391,12 +397,10 @@ function drawObjects(dt) {
         drawGate();
         drawMap();
         drawPingCircles();
-        drawMapTitle();
     }
     if (currentState == config.stateMap.gated) {
         drawGateLine();
     }
-    drawHUD();
     drawPlayers(dt);
     drawPunches();
     drawProjectiles();
@@ -404,15 +408,188 @@ function drawObjects(dt) {
     drawOverlay();
     postShake();
 
+    // ---- HUD PASS: screen space, never zoomed (score, map title, touch
+    // controls, mode indicators, game-over). ----
+    applyCanvasTransform();
+    if (currentState == config.stateMap.gated ||
+        currentState == config.stateMap.racing ||
+        currentState == config.stateMap.collapsing) {
+        drawMapTitle();
+    }
+    drawHUD();
+    drawMouseDriveIndicator();
+
     if (currentState == config.stateMap.gameOver) {
         drawGameOverScreen();
     }
 
 }
 
+// Scale the device-resolution backing store back onto the fixed 1366x768
+// logical drawing space, so every game/HUD/touch coordinate stays in logical
+// units yet renders at full device resolution. setTransform is absolute, so
+// calling it once per frame also resets any stray transform from a prior frame.
+function applyCanvasTransform() {
+    if (gameContext) {
+        gameContext.setTransform(canvasScaleX, 0, 0, canvasScaleY, 0, 0);
+    }
+    if (overlayContext) {
+        overlayContext.setTransform(canvasScaleX, 0, 0, canvasScaleY, 0, 0);
+    }
+}
+
+// --- dynamic touch camera (world zoom) ---------------------------------------
+// World coordinates are the logical 1366x768 space (drawn 1:1 today), so the
+// "whole map" view is identity: centre at LOGICAL/2, scale 1. While racing we
+// frame a tight box on the player (high resolution on a phone) and grow it to
+// include the nearest goal as the player approaches it. The view is smoothed
+// toward its target each frame; applyWorldTransform composes it with the DPR
+// scale so the world zooms but the HUD/touch controls (drawn under the base
+// transform) stay put. Enabled via cameraZoomEnabled (the navbar camera toggle;
+// defaults on for touch, off but toggleable otherwise). Mouse aiming is
+// inverse-mapped through this transform in calcMousePos, so it stays correct
+// when the camera is enabled on desktop.
+
+function worldGoalPoints() {
+    var pts = [];
+    if (typeof currentMap !== "undefined" && currentMap && currentMap.cells &&
+        config && config.tileMap && config.tileMap.goal) {
+        var gid = config.tileMap.goal.id;
+        for (var i = 0; i < currentMap.cells.length; i++) {
+            var c = currentMap.cells[i];
+            if (c && c.id === gid && c.site) {
+                pts.push({ x: c.site.x, y: c.site.y });
+            }
+        }
+    }
+    return pts;
+}
+
+// Clamp a view centre so the visible window never reveals outside the world
+// bounds (at scale 1 the whole world fits, so it locks to the world centre).
+function clampViewToWorld(cx, cy, scale) {
+    var visHalfW = LOGICAL_WIDTH / (2 * scale), visHalfH = LOGICAL_HEIGHT / (2 * scale);
+    cx = (world.width <= visHalfW * 2) ? (world.x + world.width / 2)
+        : Math.max(world.x + visHalfW, Math.min(world.x + world.width - visHalfW, cx));
+    cy = (world.height <= visHalfH * 2) ? (world.y + world.height / 2)
+        : Math.max(world.y + visHalfH, Math.min(world.y + world.height - visHalfH, cy));
+    return { cx: cx, cy: cy, scale: scale };
+}
+
+// The fully-focused view: the DESIRED (unclamped) centre — the player, growing
+// toward the nearest goal as it's approached — plus the focused zoom. The centre
+// is kept separate from the zoom so a transition can ramp the zoom while always
+// anchoring on the player (so the player can never slide out of frame).
+function computeFocusedView() {
+    var halfX = LOGICAL_WIDTH / (2 * WORLD_ZOOM_MAX);
+    var halfY = LOGICAL_HEIGHT / (2 * WORLD_ZOOM_MAX);
+    var minX = myPlayer.x - halfX, maxX = myPlayer.x + halfX;
+    var minY = myPlayer.y - halfY, maxY = myPlayer.y + halfY;
+    // Pull the nearest goal into frame as we get close to it -> the view zooms
+    // back out to keep both the player and the goal visible.
+    var goals = worldGoalPoints();
+    var ng = null, nd = Infinity;
+    for (var i = 0; i < goals.length; i++) {
+        var dx = goals[i].x - myPlayer.x, dy = goals[i].y - myPlayer.y;
+        var d = Math.sqrt(dx * dx + dy * dy);
+        if (d < nd) { nd = d; ng = goals[i]; }
+    }
+    if (ng && nd <= WORLD_ZOOM_ENGAGE) {
+        minX = Math.min(minX, ng.x - WORLD_ZOOM_PAD);
+        maxX = Math.max(maxX, ng.x + WORLD_ZOOM_PAD);
+        minY = Math.min(minY, ng.y - WORLD_ZOOM_PAD);
+        maxY = Math.max(maxY, ng.y + WORLD_ZOOM_PAD);
+    }
+    var boxW = Math.max(1, maxX - minX), boxH = Math.max(1, maxY - minY);
+    var scale = Math.min(LOGICAL_WIDTH / boxW, LOGICAL_HEIGHT / boxH);
+    scale = Math.max(1, Math.min(WORLD_ZOOM_MAX, scale)); // never zoom out past the whole map
+    return { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, scale: scale };
+}
+
+function computeWorldViewTarget(dt) {
+    // Whole-map (identity) baseline — exactly today's view.
+    var wholeMap = { cx: LOGICAL_WIDTH / 2, cy: LOGICAL_HEIGHT / 2, scale: 1 };
+    if (!cameraZoomEnabled || myPlayer == null || typeof world === "undefined" || world == null) {
+        worldViewFocusedElapsed = 0;
+        return wholeMap;
+    }
+    // Local multiplayer: 2-4 players share one screen, so focusing on the
+    // primary would crop the others out — keep the whole map in that case.
+    if (typeof liveLocalPlayerCount === "function" && liveLocalPlayerCount() > 1) {
+        worldViewFocusedElapsed = 0;
+        return wholeMap;
+    }
+    // Focus on the player only once the round is live (gate countdown + race);
+    // lobby / overview / game-over keep the whole map so the goal + player and
+    // the arena are all visible at the start.
+    var focused = (currentState === config.stateMap.gated ||
+        currentState === config.stateMap.racing ||
+        currentState === config.stateMap.collapsing);
+    if (!focused) {
+        worldViewFocusedElapsed = 0;
+        return wholeMap;
+    }
+    // Advance the focus-phase clock by the (already-clamped) frame dt rather than
+    // wall-clock, so backgrounding the tab pauses the ramp (rAF stops) and the
+    // catch-up frame on refocus can't snap the zoom to the end.
+    worldViewFocusedElapsed += (dt || 16);
+    var focusedView = computeFocusedView();
+
+    // During the gate countdown, run a slow, eased zoom timed to the countdown:
+    // whole-map at the start (take in the arena + goal), arriving at the focused
+    // zoom right as the gate opens. Crucially we ONLY ramp the zoom and keep the
+    // centre anchored on the player (clamped to the world) the whole time — at
+    // scale 1 the clamp shows the whole map, and it homes in on the player as it
+    // zooms, so the player can never slide out of frame mid-transition.
+    if (currentState === config.stateMap.gated) {
+        var dur = ((config.gatedWaitTime || 9) * 1000) - WORLD_ZOOM_HOLD_MS;
+        var elapsed = worldViewFocusedElapsed - WORLD_ZOOM_HOLD_MS;
+        var p = (dur > 0) ? Math.max(0, Math.min(1, elapsed / dur)) : 1;
+        var e = p * p * (3 - 2 * p); // smoothstep: gentle in (see the map) and out (settle)
+        var scale = 1 + (focusedView.scale - 1) * e;
+        return clampViewToWorld(focusedView.cx, focusedView.cy, scale);
+    }
+    return clampViewToWorld(focusedView.cx, focusedView.cy, focusedView.scale);
+}
+
+function updateWorldCamera(dt) {
+    // Clamp the frame delta so a long stall / tab-refocus catch-up frame can't
+    // snap the camera (drives both the gate ramp and the exponential smoothing).
+    var cdt = Math.min(dt || 16, 100);
+    var target = computeWorldViewTarget(cdt);
+    if (worldView == null) {
+        worldView = { cx: target.cx, cy: target.cy, scale: target.scale };
+        return;
+    }
+    // During the gate countdown the target is already a precise, eased time-ramp,
+    // so follow it directly (a=1) for the arc to finish exactly as the gate opens.
+    // Everywhere else, smooth exponentially for natural player/goal tracking.
+    var gatedNow = (cameraZoomEnabled && typeof config !== "undefined" && config && currentState === config.stateMap.gated);
+    var a = gatedNow ? 1 : (1 - Math.exp(-cdt / WORLD_ZOOM_TAU));
+    worldView.cx += (target.cx - worldView.cx) * a;
+    worldView.cy += (target.cy - worldView.cy) * a;
+    worldView.scale += (target.scale - worldView.scale) * a;
+}
+
+function applyWorldTransform() {
+    if (!worldView || !LOGICAL_WIDTH) {
+        applyCanvasTransform();
+        return;
+    }
+    var s = worldView.scale;
+    var ex = LOGICAL_WIDTH / 2 - worldView.cx * s;
+    var ey = LOGICAL_HEIGHT / 2 - worldView.cy * s;
+    if (gameContext) {
+        gameContext.setTransform(s * canvasScaleX, 0, 0, s * canvasScaleY, ex * canvasScaleX, ey * canvasScaleY);
+    }
+    if (overlayContext) {
+        overlayContext.setTransform(s * canvasScaleX, 0, 0, s * canvasScaleY, ex * canvasScaleX, ey * canvasScaleY);
+    }
+}
+
 function drawBackground() {
-    gameContext.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
-    overlayContext.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+    gameContext.clearRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
+    overlayContext.clearRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
 }
 function drawGameOverScreen() {
     if (playerWon == null) {
@@ -420,7 +597,7 @@ function drawGameOverScreen() {
     }
     gameContext.save();
     gameContext.fillStyle = playerList[playerWon].color;
-    gameContext.rect(0, 0, gameCanvas.width, gameCanvas.height);
+    gameContext.rect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
     gameContext.fill();
     gameContext.restore();
 
@@ -428,17 +605,17 @@ function drawGameOverScreen() {
     gameContext.fillStyle = "black";
     gameContext.font = '48px serif';
     var winString = decodedColorName + " won the game.";
-    gameContext.fillText(winString, gameCanvas.width / 2 - 400, (gameCanvas.height + 48) / 2);
+    gameContext.fillText(winString, LOGICAL_WIDTH / 2 - 400, (LOGICAL_HEIGHT + 48) / 2);
     gameContext.restore();
 
     if (achievements != null) {
         var xOffset = 200;
         var yOffset = -200;
-        var startingHeight = (gameCanvas.height + 48) / 2;
+        var startingHeight = (LOGICAL_HEIGHT + 48) / 2;
         gameContext.save();
         gameContext.fillStyle = "black";
         gameContext.font = '28px serif';
-        gameContext.fillText("-- Medals -- ", (gameCanvas.width / 2) + xOffset, startingHeight + yOffset);
+        gameContext.fillText("-- Medals -- ", (LOGICAL_WIDTH / 2) + xOffset, startingHeight + yOffset);
 
 
         var lineHeight = 40;
@@ -448,13 +625,13 @@ function drawGameOverScreen() {
                 continue;
             }
             gameContext.fillStyle = "black";
-            gameContext.fillText(achievements[medal].title, (gameCanvas.width / 2) + xOffset, startingHeight + (lineHeight * count) + yOffset);
+            gameContext.fillText(achievements[medal].title, (LOGICAL_WIDTH / 2) + xOffset, startingHeight + (lineHeight * count) + yOffset);
             count++;
             for (var i = 0; i < achievements[medal].ids.length; i++) {
                 var player = playerList[achievements[medal].ids[i]];
 
                 gameContext.beginPath();
-                gameContext.arc((gameCanvas.width / 2) + (xOffset + (35 * (i + 1))), startingHeight + (lineHeight * count) - 15 + yOffset, 15, 0, 2 * Math.PI);
+                gameContext.arc((LOGICAL_WIDTH / 2) + (xOffset + (35 * (i + 1))), startingHeight + (lineHeight * count) - 15 + yOffset, 15, 0, 2 * Math.PI);
                 if (player != null) {
                     gameContext.fillStyle = player.color;
                     gameContext.strokeStyle = "black";
@@ -478,8 +655,11 @@ function preShake() {
     }
     if (screenShake == true) {
         gameContext.save();
-        var dx = Math.random() * 15;
-        var dy = Math.random() * 15;
+        // This translate runs under the world transform; divide by the camera
+        // zoom so the shake is a constant on-screen magnitude at any zoom level.
+        var s = (worldView && worldView.scale) ? worldView.scale : 1;
+        var dx = Math.random() * 15 / s;
+        var dy = Math.random() * 15 / s;
         gameContext.translate(dx, dy);
     }
 }
@@ -571,7 +751,7 @@ function drawOverlay() {
         }
         overlayContext.save();
         overlayContext.fillStyle = "black";
-        overlayContext.fillRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+        overlayContext.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
         overlayContext.restore();
 
         overlayContext.save();
@@ -627,10 +807,10 @@ function drawMapTitle() {
         gameContext.lineWidth = 4;
         gameContext.fillStyle = themeColor('ink', 'black');
         gameContext.font = "14px Arial";
-        gameContext.strokeText('"' + currentMap.name + '"', 5, gameCanvas.height - 25);
-        gameContext.strokeText('~' + currentMap.author, 5, gameCanvas.height - 10);
-        gameContext.fillText('"' + currentMap.name + '"', 5, gameCanvas.height - 25);
-        gameContext.fillText('~' + currentMap.author, 5, gameCanvas.height - 10);
+        gameContext.strokeText('"' + currentMap.name + '"', 5, LOGICAL_HEIGHT - 25);
+        gameContext.strokeText('~' + currentMap.author, 5, LOGICAL_HEIGHT - 10);
+        gameContext.fillText('"' + currentMap.name + '"', 5, LOGICAL_HEIGHT - 25);
+        gameContext.fillText('~' + currentMap.author, 5, LOGICAL_HEIGHT - 10);
         gameContext.restore();
     }
 }
@@ -1397,7 +1577,10 @@ function drawHUD() {
 }
 
 function drawGameInfo() {
-    var startX = world.width / 2 - 125;
+    // Drawn in the HUD pass (logical screen space), so centre on the logical
+    // width, not the world width (they're equal today, but the HUD shouldn't
+    // depend on world dims).
+    var startX = LOGICAL_WIDTH / 2 - 125;
     gameContext.save();
     gameContext.font = "14px Arial";
     gameContext.strokeStyle = themeColor('inkOutline', 'white');
@@ -1498,36 +1681,55 @@ function drawTouchControls() {
         gameContext.restore();
         drawTouchLabel("Attack", attackButton.baseX, attackButton.baseY + attackButton.radius + 20);
     }
-    if (exitButton != null && exitButton.isVisible()) {
+    if (exitButton != null && exitButton.isVisible() && fullscreenSupported()) {
+        var exitSize = exitButton.iconSize || 34;
         if (window.document.fullscreenElement) {
             gameContext.save();
-            var iconWidth = exitToUse.width * 0.1;
-            var iconHeight = exitToUse.height * 0.1;
-            gameContext.drawImage(exitToUse, exitButton.baseX - iconWidth / 2, exitButton.baseY - iconHeight / 2, iconWidth, iconHeight);
+            gameContext.drawImage(exitToUse, exitButton.baseX - exitSize / 2, exitButton.baseY - exitSize / 2, exitSize, exitSize);
             gameContext.restore();
         } else {
             gameContext.save();
-            var iconWidth = fullScreenToUse.width * 0.1;
-            var iconHeight = fullScreenToUse.height * 0.1;
-            gameContext.drawImage(fullScreenToUse, exitButton.baseX - iconWidth / 2, exitButton.baseY - iconHeight / 2, iconWidth, iconHeight);
+            gameContext.drawImage(fullScreenToUse, exitButton.baseX - exitSize / 2, exitButton.baseY - exitSize / 2, exitSize, exitSize);
             gameContext.restore();
         }
-        drawTouchLabel(window.document.fullscreenElement ? "Exit" : "Fullscreen", exitButton.baseX, exitButton.baseY + 28);
+        drawTouchLabel(window.document.fullscreenElement ? "Exit" : "Fullscreen", exitButton.baseX, exitButton.baseY + exitSize / 2 + 16);
     }
     if (chatButton != null && chatButton.isVisible()) {
+        var chatSize = chatButton.iconSize || 34;
         gameContext.save();
-        var iconWidth = chatToUse.width * 0.1;
-        var iconHeight = chatToUse.height * 0.1;
-        gameContext.drawImage(chatToUse, chatButton.baseX - iconWidth / 2, chatButton.baseY - iconHeight / 2, iconWidth, iconHeight);
+        gameContext.drawImage(chatToUse, chatButton.baseX - chatSize / 2, chatButton.baseY - chatSize / 2, chatSize, chatSize);
         gameContext.restore();
-        drawTouchLabel("Emoji", chatButton.baseX, chatButton.baseY + 28);
+        drawTouchLabel("Emoji", chatButton.baseX, chatButton.baseY + chatSize / 2 + 16);
     }
+}
+
+// Surface the otherwise-invisible double-click "mouse-drive" mode so players can
+// tell it's on (and how to toggle it). Desktop/mouse only (item 8).
+function drawMouseDriveIndicator() {
+    if (typeof movingByMouse === "undefined" || !movingByMouse || isTouchScreen) {
+        return;
+    }
+    gameContext.save();
+    gameContext.font = "bold 15px Arial";
+    gameContext.textAlign = "center";
+    gameContext.lineWidth = 4;
+    gameContext.strokeStyle = "white";
+    gameContext.fillStyle = "#c87f8a";
+    var label = "Mouse-drive ON — double-click to toggle";
+    gameContext.strokeText(label, LOGICAL_WIDTH / 2, 44);
+    gameContext.fillText(label, LOGICAL_WIDTH / 2, 44);
+    gameContext.restore();
 }
 
 // Small caption under a touch control so mobile players know what it does.
 function drawTouchLabel(text, x, y) {
     gameContext.save();
-    gameContext.font = "bold 16px Arial";
+    // The 1366x768 logical space is scaled down a lot on a phone, so a fixed
+    // 16px label would render only a few CSS px tall. Size up as the fit ratio
+    // shrinks to hold a roughly constant physical size (~15 CSS px), clamped so
+    // it never goes below the original 16px or balloons on large displays.
+    var fontPx = Math.round(Math.max(16, Math.min(40, 15 / (fitRatio || 1))));
+    gameContext.font = "bold " + fontPx + "px Arial";
     gameContext.textAlign = "center";
     gameContext.lineWidth = 4;
     gameContext.strokeStyle = "white";
@@ -1551,8 +1753,8 @@ function drawTitle() {
         gameContext.lineWidth = 10;
         gameContext.fillStyle = "rgba(255, 0, 0, " + brutalRoundConfig.drawTitleAlpha + ")";
         gameContext.font = "50px Arial";
-        gameContext.strokeText('Brutal Round', (gameCanvas.width / 2) - 120, (gameCanvas.height / 2) - 25);
-        gameContext.fillText('Brutal Round', (gameCanvas.width / 2) - 120, (gameCanvas.height / 2) - 25);
+        gameContext.strokeText('Brutal Round', (LOGICAL_WIDTH / 2) - 120, (LOGICAL_HEIGHT / 2) - 25);
+        gameContext.fillText('Brutal Round', (LOGICAL_WIDTH / 2) - 120, (LOGICAL_HEIGHT / 2) - 25);
         var titles = [];
         for (var i = 0; i < brutalRoundConfig.brutalTypes.length; i++) {
             for (var prop in config.brutalRounds) {
@@ -1563,8 +1765,8 @@ function drawTitle() {
         }
         gameContext.font = "30px Arial";
         for (var j = 0; j < titles.length; j++) {
-            gameContext.strokeText(titles[j], (gameCanvas.width / 2) - 120, (gameCanvas.height / 2) + 15 + (35 * j));
-            gameContext.fillText(titles[j], (gameCanvas.width / 2) - 120, (gameCanvas.height / 2) + 15 + (35 * j));
+            gameContext.strokeText(titles[j], (LOGICAL_WIDTH / 2) - 120, (LOGICAL_HEIGHT / 2) + 15 + (35 * j));
+            gameContext.fillText(titles[j], (LOGICAL_WIDTH / 2) - 120, (LOGICAL_HEIGHT / 2) + 15 + (35 * j));
         }
         gameContext.restore();
         brutalRoundConfig.drawTitleAlpha -= .0025;
@@ -1574,7 +1776,7 @@ function drawTitle() {
         gameContext.fillStyle = themeColor('ink', 'black');
         gameContext.lineWidth = 3;
         gameContext.font = "30px Arial";
-        gameContext.fillText('Waiting for more players..', (gameCanvas.width / 2) - 200, (gameCanvas.height / 2) - 25);
+        gameContext.fillText('Waiting for more players..', (LOGICAL_WIDTH / 2) - 200, (LOGICAL_HEIGHT / 2) - 25);
         gameContext.restore();
     }
 }
@@ -1588,7 +1790,7 @@ function drawOverviewBoard() {
 
 function drawNextMap() {
     if (nextMapPreview != null) {
-        var previewWindow = { x: gameCanvas.width / 2 + 100, y: (gameCanvas.height / 2 - (world.height / 10)) - 100 };
+        var previewWindow = { x: LOGICAL_WIDTH / 2 + 100, y: (LOGICAL_HEIGHT / 2 - (world.height / 10)) - 100 };
         gameContext.save();
         gameContext.beginPath();
         gameContext.fillStyle = "white";
@@ -1619,7 +1821,7 @@ function drawOldNotches() {
     }
     var distanceApart = 7;
     var offSetX = 80;
-    var offSetY = gameCanvas.height / 2 - (count * config.playerBaseRadius * distanceApart * .5);
+    var offSetY = LOGICAL_HEIGHT / 2 - (count * config.playerBaseRadius * distanceApart * .5);
 
 
     gameContext.save();

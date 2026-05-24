@@ -723,7 +723,7 @@ function openEmojiFromPad(lp) {
     gpEmojiIndex = 0;
     var w = window.innerWidth || 800;
     var h = window.innerHeight || 600;
-    openEmojiWindow(w / 2 - 50, h / 2 - 50); // sets menuOpen + a default (primary) owner
+    openEmojiWindow(w / 2, h / 2); // centred on the viewport; sets menuOpen + default owner
     // This pad owns the wheel; tint its border with this player's color.
     emojiOwnerSlot = lp.slot;
     if (typeof emojiMenu !== "undefined" && emojiMenu && typeof playerList !== "undefined" &&
@@ -954,6 +954,7 @@ function hintsForMethod(method) {
         '<span class="gp-hint"><span class="gp-glyph gp-key">🖱</span>Aim</span>' +
         '<span class="gp-hint"><span class="gp-glyph gp-key">Click</span>/<span class="gp-glyph gp-key">Space</span>Attack</span>' +
         '<span class="gp-hint"><span class="gp-glyph gp-key">Right-click</span>Emoji</span>' +
+        '<span class="gp-hint"><span class="gp-glyph gp-key">Dbl-click</span>Mouse-drive</span>' +
         '<span class="gp-hint"><span class="gp-glyph gp-key">Esc</span>Leave</span>' +
         '<span class="gp-hint"><span class="gp-glyph gp-key">H</span>Hide</span>';
 }
