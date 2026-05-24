@@ -124,6 +124,10 @@ function registerPrimaryHandlers(server) {
 		checkGameState(updatePacket.state);
 		totalPlayers = updatePacket.totalPlayers;
 		timeSinceLastCom = 0;
+		// Buffer this tick's positions for the end-of-game recap montage.
+		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
+			recapCaptureFrame();
+		}
 	});
 
 	server.on("newMap", function (payload) {
@@ -194,6 +198,7 @@ function registerPrimaryHandlers(server) {
 			playerList[id].onFire = 0;
 			playerList[id].deathMessage = '💀';
 		}
+		recapMarkHighlight('death', [id]); // flag an elimination moment for the recap
 		createDownRankSymbol(id);
 		if (id == myID) {
 			previewReturnToEditor();
@@ -263,6 +268,7 @@ function registerPrimaryHandlers(server) {
 		oldNotches = {};
 		resetTrails();
 		resetPlayerRanks();
+		recapReset(); // start a fresh recap buffer for this round's map
 		currentState = config.stateMap.racing;
 	});
 	//Server-driven mood change (near-victory) or next track (previous one ended).
@@ -292,6 +298,7 @@ function registerPrimaryHandlers(server) {
 		previewReturnToEditor();
 		playerWon = packet.winner;
 		achievements = packet.achievements;
+		recapBuild(achievements); // assemble the recap montage from the buffer
 		stopAllSounds();
 		playSound(gameOverSound);
 		decodedColorName = Colors.decode(playerList[packet.winner].color);
@@ -492,27 +499,33 @@ function registerPrimaryHandlers(server) {
 		if (count == 2) {
 			playSound(doubleKill);
 			playAudience(pickCrowdCheer(), 1);
+			recapMarkHighlight('double', []);
 		}
 		if (count == 3) {
 			playSound(tripleKill);
 			playAudience(pickCrowdBig(), 2);
+			recapMarkHighlight('triple', []);
 		}
 		if (count > 3) {
 			playSound(megaKill);
 			playAudience(pickCrowdBig(), 2);
+			recapMarkHighlight('mega', []);
 		}
 	});
 	server.on("killingSpree", function (player) {
 		playSound(killingSpree);
 		playAudience(pickCrowdBig(), 2);
+		recapMarkHighlight('spree', [player]);
 	});
 	server.on("rampage", function (player) {
 		playSound(rampage);
 		playAudience(pickCrowdBig(), 2);
+		recapMarkHighlight('rampage', [player]);
 	});
 	server.on("godLike", function (player) {
 		playSound(godLike);
 		playAudience(pickCrowdBig(), 2);
+		recapMarkHighlight('godlike', [player]);
 	});
 	// The crowd gasps when a racer skates the edge of the advancing lava and lives.
 	server.on("audienceNearBurn", function () {
