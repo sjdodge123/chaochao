@@ -422,7 +422,7 @@ function drawObjects(dt) {
     drawMouseDriveIndicator();
 
     if (currentState == config.stateMap.gameOver) {
-        drawGameOverScreen();
+        drawGameOverScreen(dt);
     }
 
 }
@@ -671,7 +671,7 @@ function drawBackground() {
     gameContext.clearRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
     overlayContext.clearRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
 }
-function drawGameOverScreen() {
+function drawGameOverScreen(dt) {
     // playerList[playerWon] can be gone if the winner was an AI racer that
     // removeBots() cleared at the gameOver->waiting transition — guard the deref.
     if (playerWon == null || playerList[playerWon] == null) {
@@ -728,6 +728,14 @@ function drawGameOverScreen() {
             count++;
         }
         gameContext.restore();
+    }
+
+    // Recap montage overlay. Guarded so a replay-render error can never break
+    // the (load-bearing) gameOver screen — worst case the medals show alone.
+    try {
+        recapDraw(dt || 0);
+    } catch (e) {
+        debugLog("recap draw error", e);
     }
 
 }
