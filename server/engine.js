@@ -191,6 +191,13 @@ class Engine {
 					var scale = Math.sqrt(hazard.rail.lengthSq / overshootSq);
 					hazard.newX = hazard.rail.x + (hazard.newX - hazard.rail.x) * scale;
 					hazard.newY = hazard.rail.y + (hazard.newY - hazard.rail.y) * scale;
+					// Clamping pins the bumper exactly AT the far end, where the top-of-loop
+					// reversal (currentDist > lengthSq, strict) can never fire again — so it
+					// would re-clamp to the same spot every tick and freeze there. Turn it
+					// around now if it was heading outward, so it heads back next tick.
+					if (hazard.angle == hazard.rail.angle) {
+						hazard.angle -= 180;
+					}
 				}
 			}
 		}
