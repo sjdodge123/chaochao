@@ -108,12 +108,14 @@ exports.worldResize = function (world) {
 	packet = JSON.stringify(packet);
 	return packet;
 }
-exports.sendLobbyStart = function (lobbyStartButton) {
+exports.sendLobbyStart = function (lobbyStartButton, lobbyMapID) {
 	var packet = [];
 	packet[0] = lobbyStartButton.x;
 	packet[1] = lobbyStartButton.y;
 	packet[2] = lobbyStartButton.radius;
 	packet[3] = lobbyStartButton.color;
+	// [4] = id of the curated tutorial map to render in the lobby (null = plain lobby).
+	packet[4] = (lobbyMapID != null) ? lobbyMapID : null;
 
 	packet = JSON.stringify(packet);
 	return packet;

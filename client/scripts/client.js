@@ -211,9 +211,11 @@ function registerPrimaryHandlers(server) {
 	});
 	server.on("startLobby", function (packet) {
 		debugLog("startLobby, packet=", packet);
-		spawnLobbyStartButton(packet);
-		playSoundAfterFinish(lobbyMusic);
+		// Set state first so loadNewMap doesn't run its gated-only goal-ping branch.
 		currentState = config.stateMap.lobby;
+		spawnLobbyStartButton(packet);
+		loadLobbyMap(packet);
+		playSoundAfterFinish(lobbyMusic);
 	});
 	server.on("startGated", function (packet) {
 		debugLog("startGated");

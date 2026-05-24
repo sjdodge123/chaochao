@@ -412,6 +412,24 @@ function spawnLobbyStartButton(payload) {
 	lobbyStartButton.maxVelocity = 60;
 	lobbyStartButton.startSpin = false;
 }
+// Load the curated tutorial-islands map for the lobby (packet[4] = map id). The
+// map is already in maps[] (delivered to every client at startup); we just render
+// it like a race map so players can walk the islands. null id = plain lobby.
+function loadLobbyMap(payload) {
+	if (payload == null) {
+		return;
+	}
+	var data = JSON.parse(payload);
+	var mapID = data[4];
+	if (mapID == null) {
+		currentMap = {};
+		invalidateMapCache();
+		return;
+	}
+	loadNewMap(mapID);
+	loadPatterns();
+	invalidateMapCache();
+}
 function spawnPunch(payload) {
 	if (payload == null) {
 		return;

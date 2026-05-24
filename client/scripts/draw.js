@@ -380,6 +380,7 @@ function drawObjects(dt) {
     drawWorld(dt);
     cameraOnMyPlayer();
     if (currentState == config.stateMap.lobby) {
+        drawMap();
         drawLobbyStartButton();
     }
     if (currentState == config.stateMap.gated ||
