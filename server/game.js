@@ -702,6 +702,9 @@ class GameBoard {
 		// Lobby-tutorial idle-reset bookkeeping (set per lobby load in loadLobbyMap).
 		this.lobbyMapDirty = false;
 		this.lobbyLastActivity = 0;
+		// Pending speedBuff/speedDebuff removal timers; tracked so lobby-fired ones can be
+		// canceled on game start (otherwise they'd fire mid-race and skew drag/speed).
+		this.speedEffectTimers = [];
 		this.aimerList = aimerList;
 		this.engine = engine;
 		this.roomSig = roomSig;
@@ -879,11 +882,11 @@ class GameBoard {
 			}
 			if (this.abilityList[id].applyBuff) {
 				this.abilityList[id].applyBuff = false;
-				setTimeout(this.removeSpeedBuff, c.tileMap.abilities.speedBuff.duration, { id: this.abilityList[id].ownerId, playerList: this.playerList, delta: this.applySpeedBuff(this.abilityList[id].ownerId) });
+				this.speedEffectTimers.push(setTimeout(this.removeSpeedBuff, c.tileMap.abilities.speedBuff.duration, { id: this.abilityList[id].ownerId, playerList: this.playerList, delta: this.applySpeedBuff(this.abilityList[id].ownerId) }));
 			}
 			if (this.abilityList[id].applyDebuff) {
 				this.abilityList[id].applyDebuff = false;
-				setTimeout(this.removeSpeedDebuff, c.tileMap.abilities.speedDebuff.duration, { id: this.abilityList[id].ownerId, playerList: this.playerList, deltaList: this.applySpeedDebuff(this.abilityList[id].ownerId) });
+				this.speedEffectTimers.push(setTimeout(this.removeSpeedDebuff, c.tileMap.abilities.speedDebuff.duration, { id: this.abilityList[id].ownerId, playerList: this.playerList, deltaList: this.applySpeedDebuff(this.abilityList[id].ownerId) }));
 			}
 			if (this.abilityList[id].tileSwap) {
 				this.abilityList[id].tileSwap = false;
@@ -1319,8 +1322,18 @@ class GameBoard {
 	clearLobbyAbilities() {
 		this.abilityList = {};
 		for (var id in this.playerList) {
+			// Drop both the held ability and any just-grabbed-but-unprocessed pickup, so
+			// nothing collected in the lobby carries into the first real round.
 			this.playerList[id].ability = null;
+			this.playerList[id].acquiredAbility = null;
 		}
+		// Cancel pending lobby-fired speed-buff/debuff removal timers — otherwise they'd
+		// fire mid-race and skew drag/speed after reset() has normalized it. (reset()
+		// clears the already-applied effect; this stops the late over-correction.)
+		for (var i = 0; i < this.speedEffectTimers.length; i++) {
+			clearTimeout(this.speedEffectTimers[i]);
+		}
+		this.speedEffectTimers = [];
 	}
 	// Original id of a cell in the pristine lobby template (lobbyMaps[0]), used to
 	// restore a consumed ability tile and to detect mutated cells for the idle reset.
@@ -1569,6 +1582,7 @@ class GameBoard {
 		this.collapseLoc = {};
 		this.collapseLine = this.world.height + 400;
 		this.tileChanges = {};
+		this.speedEffectTimers = []; // bound growth; lobby ones are canceled in clearLobbyAbilities
 		this.resetProjectiles();
 		this.resetHazards();
 	}
