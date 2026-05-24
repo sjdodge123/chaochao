@@ -299,5 +299,8 @@
     "playerMaxSpeedBonus": 800,
     "playerMaxSpeed_prod": 50,
     "playerMaxSpeed_test": 350,
-    "playerBaseAcel": 375
+    "playerBaseAcel": 375,
+    "lobbyRespawnInvulnMs": 2500,
+    "lobbyAbilityTileRespawnMs": 4000,
+    "lobbyIdleResetMs": 15000
 }
