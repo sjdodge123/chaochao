@@ -165,10 +165,14 @@ class Engine {
 			var newVelY = 0;
 			if (hazard.rail != null) {
 				var currentDist = utils.getMagSq(hazard.rail.x, hazard.rail.y, hazard.x, hazard.y);
-				if (currentDist > hazard.rail.lengthSq) {
+				var movingOutward = (hazard.angle == hazard.rail.angle);
+				// Reverse at the far end only while heading outward, and at the
+				// near end only while heading back. Guarding both ends keeps a
+				// single overshoot (e.g. from a long tick) from flipping the
+				// angle every frame and trapping the bumper jittering in place.
+				if (movingOutward && currentDist > hazard.rail.lengthSq) {
 					hazard.angle -= 180;
-				}
-				if (hazard.angle != hazard.rail.angle && currentDist < hazard.lengthSq) {
+				} else if (!movingOutward && currentDist < hazard.lengthSq) {
 					hazard.angle += 180;
 				}
 
@@ -179,6 +183,16 @@ class Engine {
 			hazard.velY = newVelY;
 			hazard.newX += hazard.velX * this.dt;
 			hazard.newY += hazard.velY * this.dt;
+			// Keep the bumper on its rail: if a long tick overshot the far end,
+			// snap it back onto the segment instead of letting it drift away.
+			if (hazard.rail != null) {
+				var overshootSq = utils.getMagSq(hazard.rail.x, hazard.rail.y, hazard.newX, hazard.newY);
+				if (overshootSq > hazard.rail.lengthSq) {
+					var scale = Math.sqrt(hazard.rail.lengthSq / overshootSq);
+					hazard.newX = hazard.rail.x + (hazard.newX - hazard.rail.x) * scale;
+					hazard.newY = hazard.rail.y + (hazard.newY - hazard.rail.y) * scale;
+				}
+			}
 		}
 	}
 
