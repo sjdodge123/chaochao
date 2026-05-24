@@ -342,6 +342,7 @@ function registerStateHandlers(server) {
 		recapNewMatch(); // a fresh match is forming — drop last game's recap clips
 		// Set state first so loadNewMap doesn't run its gated-only goal-ping branch.
 		currentState = config.stateMap.lobby;
+		trackEvent('lobby_entered');
 		spawnLobbyStartButton(packet);
 		setLobbySfxDampen(true);
 		playSoundAfterFinish(lobbyMusic);
@@ -378,6 +379,13 @@ function registerStateHandlers(server) {
 		resetPlayerRanks();
 		recapReset(); // start a fresh recap buffer for this round's map
 		currentState = config.stateMap.racing;
+		// Fires once per round (racing state is re-entered each round), so this is a
+		// round-start signal. `players` counts humans only: clientList is the room's
+		// client roster and excludes bots (the per-tick compressor never sends isAI).
+		trackEvent('round_start', {
+			players: clientList ? Object.keys(clientList).length : 0,
+			map: (currentMap && currentMap.name) || 'unknown'
+		});
 	});
 	//Server-driven mood change (near-victory) or next track (previous one ended).
 	server.on("musicMood", function (packet) {
@@ -403,6 +411,7 @@ function registerStateHandlers(server) {
 		calculateNotchMoveAmt();
 		loadMapPreview(packet.nextMapID);
 		currentState = config.stateMap.overview;
+		trackEvent('round_complete');
 	});
 	server.on("startGameover", function (packet) {
 		// Match over (solo creator hit the winning notch) — schedule the editor
@@ -421,6 +430,7 @@ function registerStateHandlers(server) {
 			? Colors.decode((winner._serverColor != null) ? winner._serverColor : winner.color)
 			: "";
 		currentState = config.stateMap.gameOver;
+		trackEvent('match_end', { won: (packet.winner === myID) });
 	});
 	server.on("startCollapse", function (info) {
 		currentState = config.stateMap.collapsing;
