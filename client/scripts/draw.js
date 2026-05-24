@@ -685,11 +685,21 @@ function drawPlayer(player, dt) {
         }
     }
     var sprite = getPlayerSprite(player.color, player.radius, playerStrokeColor);
+    // Lobby respawn invulnerability: pulse the sprite's alpha so the grace window is
+    // legible. The sprite is a cached image with no alpha, so wrap the blit.
+    var invuln = (player.invulnUntil != null && Date.now() < player.invulnUntil);
+    if (invuln) {
+        gameContext.save();
+        gameContext.globalAlpha = 0.35 + 0.45 * Math.abs(Math.sin(Date.now() / 120));
+    }
     gameContext.drawImage(
         sprite,
         player.x + camera.getCameraX() - sprite.halfSize,
         player.y + camera.getCameraY() - sprite.halfSize
     );
+    if (invuln) {
+        gameContext.restore();
+    }
 
     if (player.ability != null) {
         drawAbilityIndicator(player.x, player.y, player);

@@ -183,6 +183,12 @@ class Game {
 		return colors;
 	}
 	determineGameState(newPlayer) {
+		if (this.currentState == c.stateMap.lobby && this.gameBoard.currentMap != null && this.gameBoard.currentMap.spawnPad != null) {
+			// Mid-lobby join: drop onto the safe spawn pad, not a random spot (which
+			// could be the lava island now that lobby terrain is live).
+			this.gameBoard.placePlayerOnSpawnPad(newPlayer);
+			return;
+		}
 		if (this.currentState == c.stateMap.waiting || this.currentState == c.stateMap.lobby || this.currentState == c.stateMap.gameOver) {
 			this.world.spawnPlayerRandomLoc(newPlayer);
 			return;
@@ -736,6 +742,16 @@ class GameBoard {
 					continue;
 				}
 				_engine.preventEscape(this.playerList[player], this.world);
+				// Stamp state now (updatePlayers runs after this), so handleHit's lobby
+				// branches read the right state on the same tick they collide.
+				this.playerList[player].currentState = currentState;
+				// Terrain collision is normally racing/collapsing only. Enabling it here
+				// is what makes the curated islands interactive (physics, lava/goal
+				// teaching props, ability pickups). Guarded so a plain (mapless) lobby
+				// still works.
+				if (this.currentMap != null && this.currentMap.cells != null) {
+					_engine.checkCollideCells(this.playerList[player], this.currentMap);
+				}
 				objectArray.push(this.playerList[player]);
 			}
 			for (var punchId in this.punchList) {
@@ -841,6 +857,13 @@ class GameBoard {
 	updatePlayers(currentState, dt) {
 		for (var playerID in this.playerList) {
 			var player = this.playerList[playerID];
+			// handleHit (during checkCollisions, just above) flags lobby lava/goal hits
+			// instead of running the real death/win path; perform the safe respawn here
+			// where the spawn pad and playerList are in scope.
+			if (player.lobbyRespawnPending != null) {
+				this.respawnInLobby(player, player.lobbyRespawnPending);
+				player.lobbyRespawnPending = null;
+			}
 			if (player.acquiredAbility != null) {
 				this.abilityList[playerID] = player.ability;
 				if (player.acquiredAbility.mapID != null) {
@@ -953,6 +976,11 @@ class GameBoard {
 			if (id == owner) {
 				continue;
 			}
+			// Same force-shield as applyExplosionForce: don't cut-fling a protected
+			// (invuln / spawn-pad) player. No-op outside the lobby.
+			if (this.playerList[id].isProtected()) {
+				continue;
+			}
 			_engine.cutPlayer(this.playerList[id], this.playerList[owner], this.playerList[owner].angle);
 			this.playerList[id].setPunchedBy(owner);
 		}
@@ -1031,7 +1059,7 @@ class GameBoard {
 		var explodeLoc = { x: this.projectileList[owner].x, y: this.projectileList[owner].y };
 		var cells = this.currentMap.cells;
 		for (var i = 0; i < cells.length; i++) {
-			if (cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.lava.id) {
+			if (cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.lava.id || cells[i].id == c.tileMap.background.id) {
 				continue;
 			}
 			var distance = utils.getMag(explodeLoc.x - cells[i].site.x, explodeLoc.y - cells[i].site.y);
@@ -1056,7 +1084,7 @@ class GameBoard {
 		var cells = this.currentMap.cells;
 		var tileDelta = {};
 		for (var i = 0; i < cells.length; i++) {
-			if (cells[i].id == c.tileMap.goal.id) {
+			if (cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.background.id) {
 				continue;
 			}
 			var distance = utils.getMag(explodeLoc.x - cells[i].site.x, explodeLoc.y - cells[i].site.y);
@@ -1074,7 +1102,7 @@ class GameBoard {
 		var cells = this.currentMap.cells;
 		var tileDelta = {};
 		for (var i = 0; i < cells.length; i++) {
-			if (cells[i].id == c.tileMap.goal.id) {
+			if (cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.background.id) {
 				continue;
 			}
 			var distance = utils.getMag(explodeLoc.x - cells[i].site.x, explodeLoc.y - cells[i].site.y);
@@ -1091,6 +1119,12 @@ class GameBoard {
 	applyExplosionForce(loc, owner) {
 		for (var id in this.playerList) {
 			var player = this.playerList[id];
+			// Force functions bypass the lava/goal damage guards (they mutate velocity
+			// directly), so respect protection here too — otherwise a bomb could fling an
+			// invuln or spawn-pad player into lava in the lobby. No-op outside the lobby.
+			if (player.isProtected()) {
+				continue;
+			}
 			var distance = utils.getMag(loc.x - player.x, loc.y - player.y);
 			if (c.tileMap.abilities.bomb.explosionRadius > distance) {
 				if (this.playerList[owner] != null) {
@@ -1166,9 +1200,32 @@ class GameBoard {
 
 	startLobby() {
 		this.loadLobbyMap();
+		// Gather players onto the safe spawn pad as the tutorial map appears, so nobody
+		// is left standing on the lava island when collision switches on. Skipped for a
+		// plain (mapless) lobby, where the old free-roam behaviour is kept.
+		if (this.currentMap != null && this.currentMap.spawnPad != null) {
+			for (var id in this.playerList) {
+				this.placePlayerOnSpawnPad(this.playerList[id]);
+			}
+		}
 		this.lobbyStartButton = new LobbyStartButton(this.world.center.x, this.world.center.y, 0, "red");
 		var lobbyMapID = (this.currentMap != null && this.currentMap.cells != null) ? this.currentMap.id : null;
 		messenger.messageRoomBySig(this.roomSig, "startLobby", compressor.sendLobbyStart(this.lobbyStartButton, lobbyMapID));
+	}
+	// Place a player on the background spawn pad (used for the lobby start and for
+	// players who join mid-lobby). onSanctuary keeps them force-shielded on the pad.
+	placePlayerOnSpawnPad(player) {
+		var loc = this.getLobbySpawnLoc();
+		player.x = loc.x;
+		player.y = loc.y;
+		player.newX = loc.x;
+		player.newY = loc.y;
+		player.velX = 0;
+		player.velY = 0;
+		player.initialLoc = { x: loc.x, y: loc.y };
+		player.onSanctuary = true;
+		player.onFire = 0;
+		player.fireTimer = null;
 	}
 	// Load the curated tutorial-islands map into the lobby. lobbyMaps[0] stays the
 	// pristine template (we clone from it), so the reset cadence can restore the
@@ -1181,6 +1238,44 @@ class GameBoard {
 			return;
 		}
 		this.currentMap = JSON.parse(JSON.stringify(this.lobbyMaps[0]));
+	}
+	// The single safe-respawn helper for the lobby tutorial. Deliberately touches ONLY
+	// cosmetic/positional state: it never calls killPlayer/removeNotch/addNotch, never
+	// sets reachedGoal, and never sends playerConcluded — so a lobby full of lava deaths
+	// and goal touches leaves notches and achievement stats byte-for-byte unchanged.
+	// type is "death" or "goal" purely to pick which feedback cue the client plays.
+	respawnInLobby(player, type) {
+		var loc = this.getLobbySpawnLoc();
+		player.x = loc.x;
+		player.y = loc.y;
+		player.newX = loc.x;
+		player.newY = loc.y;
+		player.velX = 0;
+		player.velY = 0;
+		player.currentSpeedBonus = 0;
+		// CRITICAL: clear onFire. The race-start reset() only clears it in the gameOver
+		// branch, so a lobby fire state would otherwise bleed into the first real round.
+		player.onFire = 0;
+		player.fireTimer = null;
+		// Reset grip so dying on ice doesn't leave the player sliding at the pad.
+		player.acel = c.playerBaseAcel;
+		player.dragCoeff = c.playerDragCoeff;
+		player.brakeCoeff = c.playerBrakeCoeff;
+		player.invulnUntil = Date.now() + c.lobbyRespawnInvulnMs;
+		player.onSanctuary = true; // landed on the background spawn pad
+		messenger.messageRoomBySig(this.roomSig, "lobbyRespawn", { id: player.id, death: (type == "death"), invulnMs: c.lobbyRespawnInvulnMs });
+	}
+	// A jittered point inside the spawn pad (a background region, inherently safe).
+	// Jitter keeps several simultaneous respawns from stacking on one spot.
+	getLobbySpawnLoc() {
+		var pad = (this.currentMap != null) ? this.currentMap.spawnPad : null;
+		if (pad == null) {
+			return { x: this.world.center.x, y: this.world.center.y };
+		}
+		var maxR = Math.max(0, pad.r - c.playerBaseRadius);
+		var ang = Math.random() * Math.PI * 2;
+		var dist = Math.random() * maxR;
+		return { x: pad.cx + Math.cos(ang) * dist, y: pad.cy + Math.sin(ang) * dist };
 	}
 	setupMap(currentState) {
 		this.clean();
@@ -2032,6 +2127,14 @@ class Player extends Circle {
 		this.fireTimer = null;
 		this.fireTimeLeft = 0;
 
+		//Lobby tutorial (no scoring). invulnUntil: timestamp grace window after a
+		//lobby respawn; onSanctuary: standing on a transparent "background" cell
+		//(neutral/immutable ground); lobbyRespawnPending: 'death' | 'goal' flagged by
+		//handleHit and consumed by GameBoard.updatePlayers (deferred like ability picks).
+		this.invulnUntil = 0;
+		this.onSanctuary = false;
+		this.lobbyRespawnPending = null;
+
 		//Achievements
 		this.savior = 0;
 		this.totalKills = 0;
@@ -2091,7 +2194,11 @@ class Player extends Circle {
 				punchRadius = c.brutalRounds.infection.punchRadius;
 			}
 			this.punch = new Punch(this.x, this.y, punchRadius, this.color, this.id, this.roomSig, 1, this.isZombie);
-			this.bully += 1;
+			// No scoring in the lobby: punches still land (knockback feel) but must not
+			// tick the bully achievement stat, which isn't gated by checkForWinners.
+			if (currentState != c.stateMap.lobby) {
+				this.bully += 1;
+			}
 			messenger.messageRoomBySig(this.roomSig, "punch", compressor.sendPunch(this.punch));
 			this.attack = false;
 		}
@@ -2104,6 +2211,16 @@ class Player extends Circle {
 			}
 			return false;
 		}
+	}
+	// Lobby-only protection. isInvuln(): inside the post-respawn grace window, so
+	// lava/goal do nothing. isProtected(): invuln OR standing on sanctuary
+	// (background) ground — used to shield a player from cut/explosion force so
+	// another player can't fling them off the spawn pad or into lava.
+	isInvuln() {
+		return this.invulnUntil != 0 && Date.now() < this.invulnUntil;
+	}
+	isProtected() {
+		return this.isInvuln() || this.onSanctuary;
 	}
 	checkChatCoolDownTimer() {
 		if (this.chatCoolDownTimer != null) {
@@ -2313,6 +2430,10 @@ class Player extends Circle {
 			return;
 		}
 		if (object.isMapCell) {
+			// Track sanctuary ground (the transparent background type) for the
+			// force-shield in isProtected(). A player only "is on" the one cell this
+			// hit reports, so this reflects their current footing every tick.
+			this.onSanctuary = (object.id == c.tileMap.background.id);
 			if (object.id == c.tileMap.background.id) {
 				// Transparent lobby "background" / sanctuary ground: behaves as normal
 				// terrain. Applying normal grip here is what resets a player's physics
@@ -2357,6 +2478,16 @@ class Player extends Circle {
 				return;
 			}
 			if (object.id == c.tileMap.lava.id) {
+				if (this.currentState == c.stateMap.lobby) {
+					// Lobby lava is a teaching prop: cosmetic death + safe respawn, never
+					// the real kill path (no killPlayer/removeNotch). Invuln players in
+					// their post-respawn grace window are immune.
+					if (this.isInvuln()) {
+						return;
+					}
+					this.lobbyRespawnPending = "death";
+					return;
+				}
 				if (this.isZombie == true) {
 					this.acel = object.acel;
 					this.dragCoeff = object.dragCoeff;
@@ -2380,6 +2511,16 @@ class Player extends Circle {
 				return;
 			}
 			if (object.id == c.tileMap.goal.id) {
+				if (this.currentState == c.stateMap.lobby) {
+					// Lobby goal teaches the win condition: play the win cue + respawn,
+					// but never conclude/score (no reachedGoal/timeReached/playerConcluded/
+					// addNotch). Invuln players in their grace window are ignored.
+					if (this.isInvuln()) {
+						return;
+					}
+					this.lobbyRespawnPending = "goal";
+					return;
+				}
 				if (this.isZombie == true) {
 					this.acel = object.acel;
 					this.brakeCoeff = object.brakeCoeff;
@@ -2548,6 +2689,11 @@ class Player extends Circle {
 		this.multiKillCount = 0;
 		this.acquiredAbility = null;
 		this.angle = 315;
+		// Clear lobby-only state on every race (re)start so a lobby respawn's invuln
+		// grace / sanctuary flag / pending-respawn can never bleed into a real round.
+		this.invulnUntil = 0;
+		this.onSanctuary = false;
+		this.lobbyRespawnPending = null;
 		if (currentState == c.stateMap.gameOver) {
 			this.survivalist = 0;
 			this.brutalist = 0;

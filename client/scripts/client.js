@@ -364,6 +364,27 @@ function registerPrimaryHandlers(server) {
 			playerList[owner].onFire = value;
 		}
 	});
+	// Lobby tutorial: a player touched lava (death) or the goal (win) and was safely
+	// respawned. Reuse the real death/win cues (dampened to lobby volume) and set the
+	// post-respawn invuln window so drawPlayer can flash the sprite. No scoring here.
+	server.on("lobbyRespawn", function (packet) {
+		if (packet == null) {
+			return;
+		}
+		var p = playerList[packet.id];
+		if (p != null) {
+			p.invulnUntil = Date.now() + packet.invulnMs;
+			if (packet.death) {
+				p.deathMessage = '💀';
+				setTimeout(function (id) {
+					if (playerList[id] != null) {
+						playerList[id].deathMessage = null;
+					}
+				}, 800, packet.id);
+			}
+		}
+		playSound(packet.death ? playerDiedSound : playerFinished);
+	});
 	server.on("multiKill", function (count) {
 		if (count == 2) {
 			playSound(doubleKill);
