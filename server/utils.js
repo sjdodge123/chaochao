@@ -264,7 +264,9 @@ exports.getDT = function () {
     return dt / 1000;
 }
 exports.getMagSq = function (x1, y1, x2, y2) {
-    return Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2);
+    var dx = x2 - x1;
+    var dy = y2 - y1;
+    return dx * dx + dy * dy;
 }
 exports.normalizedVectorFromAngle = function (angle) {
     // Calculate x and y components of vector
@@ -297,7 +299,7 @@ exports.distanceBetweenPoints = function (point1, point2) {
 }
 
 exports.getMag = function (x, y) {
-    return Math.sqrt(Math.pow(x, 2) + Math.pow(y, 2));
+    return Math.sqrt(x * x + y * y);
 }
 
 exports.dotProduct = function (a, b) {

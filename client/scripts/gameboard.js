@@ -168,7 +168,6 @@ function updatePlayerList(packet) {
 	if (packet == null) {
 		return;
 	}
-	packet = JSON.parse(packet);
 	for (var i = 0; i < packet.length; i++) {
 		var player = packet[i];
 		if (playerList[player[0]] != null) {
@@ -185,7 +184,6 @@ function updateProjecileList(packet) {
 	if (packet == null) {
 		return;
 	}
-	packet = JSON.parse(packet);
 	for (var i = 0; i < packet.length; i++) {
 		var proj = packet[i];
 		if (projectileList[proj[0]] != null) {
@@ -201,7 +199,6 @@ function updateAimerList(packet) {
 	if (packet == null) {
 		return;
 	}
-	packet = JSON.parse(packet);
 	for (var i = 0; i < packet.length; i++) {
 		var aimer = packet[i];
 		if (aimerList[aimer[0]] != null) {
@@ -218,7 +215,6 @@ function updateHazardList(packet) {
 	if (packet == null) {
 		return;
 	}
-	packet = JSON.parse(packet);
 	for (var i = 0; i < packet.length; i++) {
 		var hazard = packet[i];
 		if (hazardList[hazard[0]] != null) {
