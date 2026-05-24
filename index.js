@@ -87,7 +87,7 @@ function newsBannerHtml() {
     var href = 'https://github.com/' + RELEASES_REPO +
         '/releases/tag/' + encodeURIComponent(APP_NEWS.weekTag);
     return '<a class="news-banner" target="_blank" href="' + escapeHtml(href) + '">' +
-        '<span class="news-badge">This week</span>' +
+        '<span class="news-badge">Patch notes</span>' +
         '<span class="news-headline">' + escapeHtml(APP_NEWS.headline) + '</span>' +
         '</a>';
 }
