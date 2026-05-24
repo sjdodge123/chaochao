@@ -59,6 +59,9 @@ function oskOpen(input) {
     kb.setInput(input.value || "");
     var c = document.getElementById("oskContainer");
     c.className = "osk-container visible";
+    // Hide the bottom gamepad prompt bar while typing so the two don't overlap
+    // on short landscape screens (7b).
+    document.body.classList.add("osk-open");
     var btns = _oskButtons();
     _oskSetFocus(btns.length ? btns[0] : null);
 }
@@ -68,6 +71,7 @@ function oskClose() {
     if (c) {
         c.className = "osk-container hidden";
     }
+    document.body.classList.remove("osk-open");
     if (_oskFocusEl) {
         _oskFocusEl.classList.remove("osk-focus");
         _oskFocusEl = null;

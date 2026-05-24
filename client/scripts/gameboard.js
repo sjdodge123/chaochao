@@ -656,10 +656,38 @@ function rumbleScreen(time) {
 
 function setupEmojiWheel() {
 	var menu = $("#emojiMenu");
+	// Remove any emoji anchors a previous run added (gameState can re-fire on a
+	// socket reconnect), keeping the static close button — otherwise the wheel
+	// accumulates duplicate emojis and positionEmojiSlots spreads them.
+	menu.find("a").filter(function () {
+		return (this.getAttribute("onclick") || "").indexOf("cancel") === -1;
+	}).remove();
 	for (var i = 0; i < config.emojis.length; i++) {
 		menu.append('<a onclick="closeEmojiWindow(this.innerHTML)" href="#">' + config.emojis[i] + '</a>');
 	}
 	emojiMenu.style.borderColor = playerList[myID].color;
+	positionEmojiSlots();
+}
+
+// Lay the emoji anchors out on a ring with JS-computed positions, expressed in
+// percentages so they scale with the viewport-sized wheel and work for any
+// emoji count (no hand-authored per-slot CSS). The first <a> is the static
+// close button (kept at the centre); the rest are the emojis -- this matches
+// emojiItems(), which skips the close button.
+function positionEmojiSlots() {
+	var items = document.querySelectorAll('#emojiMenu a');
+	if (items.length === 0) {
+		return;
+	}
+	items[0].style.left = '50%';
+	items[0].style.top = '50%';
+	var count = items.length - 1;
+	var radiusPct = 38;
+	for (var i = 1; i <= count; i++) {
+		var ang = (-Math.PI / 2) + (2 * Math.PI * (i - 1) / count);
+		items[i].style.left = (50 + radiusPct * Math.cos(ang)) + '%';
+		items[i].style.top = (50 + radiusPct * Math.sin(ang)) + '%';
+	}
 }
 
 
