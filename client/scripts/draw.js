@@ -689,7 +689,23 @@ function drawPlayer(player, dt) {
     var sprite = getPlayerSprite(player.color, player.radius, playerStrokeColor);
     // Lobby respawn invulnerability: pulse the sprite's alpha so the grace window is
     // legible. The sprite is a cached image with no alpha, so wrap the blit.
-    var invuln = (player.invulnUntil != null && Date.now() < player.invulnUntil);
+    var timedInvuln = (player.invulnUntil != null && Date.now() < player.invulnUntil);
+    // Mirror the server's start-circle hold (server/game.js updateLobbyInvulnHold): a
+    // player parked in the start circle stays invulnerable until they leave, so reflect
+    // that in the flash. Same deterministic latch off the same inputs (position + timer).
+    if (currentState == config.stateMap.lobby && lobbyStartButton != null) {
+        var ix = player.x - lobbyStartButton.x;
+        var iy = player.y - lobbyStartButton.y;
+        var ireach = lobbyStartButton.radius + player.radius;
+        if (ix * ix + iy * iy > ireach * ireach) {
+            player.invulnHeldInCircle = false;
+        } else if (timedInvuln) {
+            player.invulnHeldInCircle = true;
+        }
+    } else {
+        player.invulnHeldInCircle = false;
+    }
+    var invuln = timedInvuln || player.invulnHeldInCircle;
     if (invuln) {
         gameContext.save();
         gameContext.globalAlpha = 0.35 + 0.45 * Math.abs(Math.sin(Date.now() / 120));

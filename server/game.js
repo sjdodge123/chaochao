@@ -936,11 +936,33 @@ class GameBoard {
 				player.acquiredAbility = null;
 			}
 			player.update(currentState, dt);
+			if (currentState == c.stateMap.lobby) {
+				this.updateLobbyInvulnHold(player);
+			}
 			if (player.punch != null) {
 				this.punchList[player.id] = player.punch;
 				setTimeout(this.terminatePunch, 100, { id: player.id, punchList: this.punchList, roomSig: this.roomSig });
 				player.punch = null;
 			}
+		}
+	}
+	// The start circle is a safe haven: a player who reaches it while still invulnerable
+	// keeps that invulnerability (held) until they leave, so a griefed player can die,
+	// walk to the center, and wait out the round start safely. Latch: arriving with timed
+	// invuln sets the hold; leaving the circle clears it; the hold persists in between
+	// even after the timed grace runs out.
+	updateLobbyInvulnHold(player) {
+		if (this.lobbyStartButton == null) {
+			return;
+		}
+		var dx = player.x - this.lobbyStartButton.x;
+		var dy = player.y - this.lobbyStartButton.y;
+		var reach = this.lobbyStartButton.radius + player.radius;
+		var inCircle = (dx * dx + dy * dy) <= (reach * reach);
+		if (!inCircle) {
+			player.invulnHeldInCircle = false;
+		} else if (player.isTimedInvuln()) {
+			player.invulnHeldInCircle = true;
 		}
 	}
 	updateProjectiles(currentState) {
@@ -1424,6 +1446,7 @@ class GameBoard {
 		player.dragCoeff = c.playerDragCoeff;
 		player.brakeCoeff = c.playerBrakeCoeff;
 		player.invulnUntil = Date.now() + c.lobbyRespawnInvulnMs;
+		player.invulnHeldInCircle = false; // re-latches once they reach the start circle
 		player.onSanctuary = true; // landed on the background spawn pad
 		messenger.messageRoomBySig(this.roomSig, "lobbyRespawn", { id: player.id, death: (type == "death"), invulnMs: c.lobbyRespawnInvulnMs });
 	}
@@ -2295,6 +2318,7 @@ class Player extends Circle {
 		//(neutral/immutable ground); lobbyRespawnPending: 'death' | 'goal' flagged by
 		//handleHit and consumed by GameBoard.updatePlayers (deferred like ability picks).
 		this.invulnUntil = 0;
+		this.invulnHeldInCircle = false;
 		this.onSanctuary = false;
 		this.lobbyRespawnPending = null;
 
@@ -2381,12 +2405,18 @@ class Player extends Circle {
 			return false;
 		}
 	}
-	// Lobby-only protection. isInvuln(): inside the post-respawn grace window, so
-	// lava/goal do nothing. isProtected(): invuln OR standing on sanctuary
-	// (background) ground — used to shield a player from cut/explosion force so
-	// another player can't fling them off the spawn pad or into lava.
-	isInvuln() {
+	// Lobby-only protection.
+	// isTimedInvuln(): inside the timed post-respawn grace window.
+	// isInvuln(): timed grace OR "held" — parked in the start circle keeps it alive
+	//   (set by GameBoard.updateLobbyInvulnHold) so a griefed player can die, walk to
+	//   the center, and stand there safely until the game starts. During invuln,
+	//   lava/goal do nothing and knockback (cut/explosion/punch/bumper) is ignored.
+	// isProtected(): invuln OR standing on sanctuary (background) ground.
+	isTimedInvuln() {
 		return this.invulnUntil != 0 && Date.now() < this.invulnUntil;
+	}
+	isInvuln() {
+		return this.isTimedInvuln() || this.invulnHeldInCircle;
 	}
 	isProtected() {
 		return this.isInvuln() || this.onSanctuary;
@@ -2579,6 +2609,12 @@ class Player extends Circle {
 			return;
 		}
 		if (object.isPunch && object.ownerId != this.id) {
+			// Invulnerable lobby players (freshly respawned, or held safe in the start
+			// circle) can't be punched — so a griefer can't shove them into lava or out
+			// of the safe circle. Normal players still bump freely. No-op outside lobby.
+			if (this.isInvuln()) {
+				return;
+			}
 			if (object.ownerInfected) {
 				this.infect();
 			}
@@ -2590,6 +2626,9 @@ class Player extends Circle {
 			return;
 		}
 		if (object.isPuck) {
+			if (this.isInvuln()) {
+				return;
+			}
 			_engine.puckPlayer(object, this);
 			messenger.messageRoomBySig(this.roomSig, "playerPunched", object.ownerId);
 			return;
@@ -2861,6 +2900,7 @@ class Player extends Circle {
 		// Clear lobby-only state on every race (re)start so a lobby respawn's invuln
 		// grace / sanctuary flag / pending-respawn can never bleed into a real round.
 		this.invulnUntil = 0;
+		this.invulnHeldInCircle = false;
 		this.onSanctuary = false;
 		this.lobbyRespawnPending = null;
 		if (currentState == c.stateMap.gameOver) {
