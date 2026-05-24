@@ -397,6 +397,7 @@ function drawObjects(dt) {
         drawGate();
         drawMap();
         drawPingCircles();
+        drawCollapseShockwaves();
     }
     if (currentState == config.stateMap.gated) {
         drawGateLine();
@@ -670,7 +671,9 @@ function drawBackground() {
     overlayContext.clearRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
 }
 function drawGameOverScreen() {
-    if (playerWon == null) {
+    // playerList[playerWon] can be gone if the winner was an AI racer that
+    // removeBots() cleared at the gameOver->waiting transition — guard the deref.
+    if (playerWon == null || playerList[playerWon] == null) {
         return;
     }
     gameContext.save();
@@ -1008,6 +1011,9 @@ function drawPlayer(player, dt) {
         drawAbilityIndicator(player.x, player.y, player);
     }
     drawEmoji(player);
+    if (player.name != null) {
+        drawBotName(player);
+    }
     if (player.awake == false) {
         gameContext.save();
         gameContext.drawImage(commentIconSolid, player.x, player.y - 40, commentIconSolid.width * 0.07, commentIconSolid.height * 0.07);
@@ -1029,6 +1035,34 @@ function drawEmoji(player) {
     }
 }
 
+// AI racers carry a visible name (and, smaller, their title) below the kart so
+// each personality is recognizable. Aligned with the sprite's camera convention
+// (camera offset is 0 in the default desktop view). Humans have no name.
+function drawBotName(player) {
+    // Use the same raw-coord convention as the emote/chat bubble (drawEmoji) so the
+    // name and the bubble stay attached to each other. camera.getCameraX/Y is 0 in
+    // the default desktop view, so this also aligns with the kart there.
+    var x = player.x;
+    var y = player.y + player.radius + 12;
+    gameContext.save();
+    gameContext.textAlign = "center";
+    // Kept translucent so the labels read without obscuring the action underneath.
+    gameContext.globalAlpha = 0.5;
+    gameContext.lineWidth = 2;
+    gameContext.strokeStyle = themeColor('inkOutline', 'white');
+    gameContext.fillStyle = themeColor('ink', 'black');
+    gameContext.font = '11px Times New Roman';
+    gameContext.strokeText(player.name, x, y);
+    gameContext.fillText(player.name, x, y);
+    if (player.title != null) {
+        gameContext.globalAlpha = 0.38;
+        gameContext.font = 'italic 9px Times New Roman';
+        gameContext.strokeText(player.title, x, y + 11);
+        gameContext.fillText(player.title, x, y + 11);
+    }
+    gameContext.restore();
+}
+
 function drawDeathMessage(player) {
     if (player.deathMessage != null) {
         gameContext.save();
@@ -1047,40 +1081,12 @@ function drawDeathMessage(player) {
 }
 function drawFire(player) {
     gameContext.save();
-    switch (player.angle) {
-        case 0: {
-            gameContext.translate(player.x - 5, player.y);
-            break;
-        }
-        case 45: {
-            gameContext.translate(player.x - 5, player.y - 5);
-            break;
-        }
-        case 90: {
-            gameContext.translate(player.x, player.y - 5);
-            break;
-        }
-        case 135: {
-            gameContext.translate(player.x + 5, player.y - 5);
-            break;
-        }
-        case 180: {
-            gameContext.translate(player.x + 5, player.y);
-            break;
-        }
-        case 225: {
-            gameContext.translate(player.x + 5, player.y + 5);
-            break;
-        }
-        case 270: {
-            gameContext.translate(player.x, player.y + 5);
-            break;
-        }
-        case 315: {
-            gameContext.translate(player.x - 5, player.y + 5);
-            break;
-        }
-    }
+    // Offset the flame to the player's trailing edge based on facing. Computed
+    // continuously from the angle so it works for ANY heading — the old 8-way
+    // switch left the flame unplaced (invisible) for the AI racers and for
+    // mouse-aimed players, whose angles aren't multiples of 45.
+    var ar = player.angle * (Math.PI / 180);
+    gameContext.translate(player.x - 5 * Math.cos(ar), player.y - 5 * Math.sin(ar));
 
     gameContext.rotate((player.angle - 90) * (Math.PI / 180));
     gameContext.beginPath();
@@ -1371,6 +1377,23 @@ function drawPingCircles() {
         gameContext.arc(ping.x, ping.y, ping.radius, 0, 2 * Math.PI);
     }
     gameContext.stroke();
+    gameContext.restore();
+}
+function drawCollapseShockwaves() {
+    if (collapseShockwaves.length == 0) {
+        return;
+    }
+    gameContext.save();
+    gameContext.lineWidth = 6;
+    gameContext.strokeStyle = config.tileMap.lava.color;
+    for (var i = 0; i < collapseShockwaves.length; i++) {
+        var s = collapseShockwaves[i];
+        if (s.radius <= 0) { continue; }
+        gameContext.globalAlpha = 0.6 * (1 - s.radius / s.maxRadius);
+        gameContext.beginPath();
+        gameContext.arc(s.x, s.y, s.radius, 0, 2 * Math.PI);
+        gameContext.stroke();
+    }
     gameContext.restore();
 }
 // Lobby-only "practice room" floor treatment: a faint grid + a dashed inset frame

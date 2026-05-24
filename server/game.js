@@ -6,9 +6,51 @@ var hostess = require('./hostess.js');
 var _engine = require('./engine.js');
 var compressor = require('./compressor.js');
 var debug = require('./debug.js');
+var cellGraph = require('./cellGraph.js');
+var aiController = require('./aiController.js');
 
 exports.getRoom = function (sig, size) {
 	return new Room(sig, size);
+}
+
+// Monotonic id source for headless AI racers. Bot ids are namespaced ("bot-N")
+// so they never collide with socket ids (which key human players in playerList).
+var botSeq = 0;
+
+// Reactive bot emotes: pick a chat-wheel emoji from the personality's emote set
+// for an event category (win/kill/hurt/cheer/greet) and broadcast a one-shot
+// botEmote. Each bot is rate-limited to one emote every 45-90s (randomized per bot
+// so they don't all chime at once and the chatter stays sparse). Bots use the full
+// emotional range — celebrating, clapping for others, reacting to hits — not just
+// taunting. The client renders it as a speech bubble. The cooldown lives on the
+// Player and is NOT cleared by reset(), so the cadence holds across rounds.
+function emitBotEmote(player, category) {
+	if (player == null || !player.isAI || player.profile == null) {
+		return;
+	}
+	var emotes = player.profile.emotes;
+	if (emotes == null || emotes[category] == null || emotes[category].length === 0) {
+		return;
+	}
+	var now = Date.now();
+	if (player.emoteReadyAt != null && now < player.emoteReadyAt) {
+		return;
+	}
+	player.emoteReadyAt = now + utils.getRandomInt(45000, 90000);
+	var opts = emotes[category];
+	var emote = opts[Math.floor(Math.random() * opts.length)];
+	messenger.messageRoomBySig(player.roomSig, "botEmote", { id: player.id, emote: emote });
+}
+
+// When a racer reaches the goal, other AI racers react — a wheel emote, often a
+// clap/acknowledgement (cheer), throttled so only a couple pipe up.
+function botsCheerFor(playerList, finisherId) {
+	for (var id in playerList) {
+		var p = playerList[id];
+		if (p.isAI && p.alive && id !== finisherId && Math.random() < 0.3) {
+			emitBotEmote(p, "cheer");
+		}
+	}
 }
 
 class Room {
@@ -72,6 +114,12 @@ class Room {
 	}
 	checkAFK() {
 		for (var id in this.playerList) {
+			// Bots have no socket/mailbox; messageClientBySig would throw. They
+			// also never set kick (Player.update skips checkForSleep for AI), but
+			// guard here too so a bot can never reach the socket-only kick path.
+			if (this.playerList[id].isAI) {
+				continue;
+			}
 			if (this.playerList[id].kick) {
 				messenger.messageClientBySig(id, "serverKick", null);
 				hostess.kickFromRoom(id);
@@ -111,6 +159,8 @@ class Game {
 		this.notchesToWin = c.baseNotchesToWin;
 		this.firstPlaceSig = null;
 		this.secondPlaceSig = null;
+		//AI racers: grid size is rolled once per game and held across rounds.
+		this.botTarget = null;
 
 		//Timers
 		this.lobbyWaitTime = c.lobbyWaitTime;
@@ -365,6 +415,8 @@ class Game {
 					this.playerList[player].addNotch(this.notchesToWin);
 					this.playerList[player].addNotch(this.notchesToWin);
 					this.gameBoard.firstPlaceSig = player;
+					emitBotEmote(this.playerList[player], "win");
+					botsCheerFor(this.playerList, player); // others clap/react
 					this.startCollapse(this.playerList[player].x, this.playerList[player].y);
 					messenger.messageRoomBySig(this.roomSig, "firstPlaceWinner", player);
 					continue;
@@ -388,6 +440,12 @@ class Game {
 		if (this.alivePlayerCount == 1) {
 			if (this.currentState != c.stateMap.collapsing && !this.collapseInitated) {
 				this.collapseInitated = true;
+				// A true single-player room (no rivals, no bots) gets a collapse
+				// tuned to the map so a competent line can win, instead of the
+				// map-blind 15s/random-goal last-player collapse.
+				if (this.playerCount == 1 && this.scheduleSoloCollapse()) {
+					return;
+				}
 				setTimeout(function (context) {
 					if (context.currentState == c.stateMap.racing || context.currentState == c.stateMap.collapsing) {
 						var goal = context.gameBoard.findRandomGoalTile();
@@ -399,6 +457,170 @@ class Game {
 				}, 15000, this);
 			}
 		}
+	}
+	// Fill the race grid with headless AI racers. Called at the start of each
+	// race (startGated). The grid total is rolled once per game (botTarget) and
+	// held across rounds; we only ever top up toward it, never despawn bots when
+	// humans join mid-game. A bot-only room is never created (humanCount == 0
+	// bails). Bots are spawned exactly like a joining human — added to playerList
+	// (not clientList), placed by determineGameState for the current state, and
+	// announced with playerJoin so connected clients render them.
+	fillGridWithBots() {
+		var ai = c.aiRacers;
+		if (!ai || !ai.enabled) {
+			return;
+		}
+		var humanCount = 0, botCount = 0;
+		for (var pid in this.playerList) {
+			if (this.playerList[pid].isAI) { botCount++; } else { humanCount++; }
+		}
+		if (humanCount === 0) {
+			return;
+		}
+		if (this.botTarget == null) {
+			this.botTarget = utils.getRandomInt(ai.minGrid, ai.maxGrid);
+		}
+		var desiredBots = this.botTarget - humanCount;
+		if (desiredBots < 0) { desiredBots = 0; }
+		if (desiredBots <= botCount) {
+			return;
+		}
+		var roster = this.pickBotCast(desiredBots);
+		for (var i = botCount; i < desiredBots; i++) {
+			var id = "bot-" + (++botSeq);
+			var bot = this.world.createNewBot(id, roster[i]);
+			this.playerList[id] = bot;
+			this.determineGameState(bot);
+			messenger.messageRoomBySig(this.roomSig, "playerJoin", {
+				id: id,
+				player: compressor.appendPlayer(bot)
+			});
+		}
+	}
+	// Draw `count` racer identities from the config cast. Distinct personalities
+	// while the cast lasts (shuffled), then repeats with a numeric suffix so the
+	// grid can exceed the cast size without confusing duplicate names. Biased to
+	// open with the pace-setter (Ghost) and the rival (Nemesis) when present.
+	pickBotCast(count) {
+		var cast = (c.aiRacers && c.aiRacers.cast) ? c.aiRacers.cast.slice() : [];
+		if (cast.length === 0) {
+			cast = [{ id: "racer", name: "Racer", title: "Racer" }];
+		}
+		// Fisher-Yates shuffle.
+		for (var s = cast.length - 1; s > 0; s--) {
+			var j = Math.floor(Math.random() * (s + 1));
+			var tmp = cast[s]; cast[s] = cast[j]; cast[j] = tmp;
+		}
+		// Float Ghost then Nemesis to the front so a typical race has a pace-setter
+		// and a rival without forcing them every time the grid is small.
+		this.floatToFront(cast, "nemesis");
+		this.floatToFront(cast, "ghost");
+		var roster = [];
+		for (var i = 0; i < count; i++) {
+			var base = cast[i % cast.length];
+			var rep = Math.floor(i / cast.length);
+			if (rep === 0) {
+				roster.push(base);
+			} else {
+				// A repeat shares the base personality's FULL profile (skill, traits,
+				// emotes) — only the name is suffixed — so it behaves and emotes like
+				// its namesake rather than a generic, silent bot.
+				var dup = Object.assign({}, base);
+				dup.name = base.name + " " + (rep + 1);
+				roster.push(dup);
+			}
+		}
+		return roster;
+	}
+	floatToFront(cast, id) {
+		for (var i = 0; i < cast.length; i++) {
+			if (cast[i].id === id) {
+				var picked = cast.splice(i, 1)[0];
+				cast.unshift(picked);
+				return;
+			}
+		}
+	}
+	// Drop all AI racers and re-roll the grid size for the next game.
+	removeBots() {
+		for (var id in this.playerList) {
+			if (this.playerList[id].isAI) {
+				messenger.messageRoomBySig(this.roomSig, "playerLeft", id);
+				delete this.playerList[id];
+			}
+		}
+		this.botTarget = null;
+	}
+	// Schedule a fair, map-aware collapse for a solo player. Uses the Phase 0
+	// cell graph to find the goal nearest the player's current position and the
+	// shortest traversable distance to it, derives a "par time" from that
+	// distance and the player's realistic speed, then collapses from that goal at a
+	// front speed slower than that realistic speed by config.soloCollapse.marginFactor
+	// (so an optimal line beats it with margin to spare). Returns true if a solo
+	// collapse was scheduled, false to fall back to the legacy last-player path
+	// (e.g. no reachable goal from where the player is).
+	scheduleSoloCollapse() {
+		var player = null;
+		for (var id in this.playerList) {
+			var p = this.playerList[id];
+			if (p.alive && !p.isSpectator && !p.isZombie && p.awake) {
+				player = p;
+				break;
+			}
+		}
+		if (player == null) {
+			return false;
+		}
+		var map = this.gameBoard.currentMap;
+		var route = cellGraph.findPathToNearestGoal(map, { x: player.x, y: player.y });
+		if (route == null) {
+			// No goal reachable without crossing lava from where the player is.
+			// Flag it and let the lenient legacy collapse run so the room never
+			// soft-locks on an unbeatable layout.
+			console.warn("Solo map has no goal reachable from player position (mapId=" + map.id + "); using fallback collapse.");
+			return false;
+		}
+
+		var cfg = c.soloCollapse;
+		var secondsPerTick = c.serverTickSpeed / 1000;
+		// Par = the map's stored canonical par (physics drive gate->nearest goal)
+		// plus a buffer for the random gate-spawn y (a solo player can spawn farther
+		// from the goal than the canonical line). Live fallback if the map lacks it.
+		var parTime = (map.parTime != null && map.parTime > 0) ? map.parTime : cellGraph.estimatePathTime(map, route.path);
+		if (parTime <= 0) { parTime = route.distance / 40; }
+		parTime += cfg.spawnBufferSeconds;
+
+		// Front starts at the player's path distance from the goal (cap at the
+		// world diagonal so a very mazey route doesn't create a long dead lead-in)
+		// plus a buffer so the player's current cell isn't lava on the first tick.
+		var worldDiagonal = Math.sqrt(this.world.width * this.world.width + this.world.height * this.world.height);
+		var startDistance = Math.min(route.distance, worldDiagonal) + cfg.startDistanceBuffer;
+
+		// Front closes the whole start distance in parTime * marginFactor seconds,
+		// so it adapts to how slow/twisty the map actually is and a competent line
+		// always beats it. (Was a flat speed that outran players on hard maps.)
+		var collapseSpeed = (startDistance / (parTime * cfg.marginFactor)) * secondsPerTick;
+		if (collapseSpeed < cfg.minCollapseSpeed) {
+			collapseSpeed = cfg.minCollapseSpeed;
+		}
+
+		var grace = parTime * cfg.graceDelayFactor;
+		if (grace < cfg.minGraceSeconds) grace = cfg.minGraceSeconds;
+		if (grace > cfg.maxGraceSeconds) grace = cfg.maxGraceSeconds;
+
+		this.gameBoard.soloMode = true;
+		this.gameBoard.soloCollapseSpeed = collapseSpeed;
+		this.gameBoard.soloStartDistance = startDistance;
+
+		var context = this;
+		var goal = route.goal;
+		setTimeout(function () {
+			if (context.currentState == c.stateMap.racing || context.currentState == c.stateMap.collapsing) {
+				context.gameBoard.collapseLine = context.gameBoard.soloStartDistance;
+				context.startCollapse(goal.x, goal.y);
+			}
+		}, grace * 1000);
+		return true;
 	}
 	startWaiting() {
 		messenger.messageRoomBySig(this.roomSig, "startWaiting", null);
@@ -501,11 +723,21 @@ class Game {
 		this.resetForRace();
 		this.currentState = this.stateMap.gated;
 		this.gameBoard.setupMap(this.currentState);
+		// Fill the grid with AI racers after the map (and starting gate) are laid
+		// out, so each bot can be placed at the gate via determineGameState.
+		this.fillGridWithBots();
 		messenger.messageRoomBySig(this.roomSig, "startGated", null);
 	}
 	startRace() {
 		console.log("Start Race");
 		this.currentState = this.stateMap.racing;
+
+		// A few AI racers greet/hype as the gate opens (full emote range, not just taunts).
+		for (var gid in this.playerList) {
+			if (this.playerList[gid].isAI && Math.random() < 0.3) {
+				emitBotEmote(this.playerList[gid], "greet");
+			}
+		}
 
 		var lightningRound = this.gameBoard.checkForActiveBrutal(c.brutalRounds.lightning.id);
 
@@ -515,7 +747,7 @@ class Game {
 			}
 		}
 		if (this.gameBoard.checkForActiveBrutal(c.brutalRounds.volcano.id)) {
-			var eruptionDelay = utils.getRandomInt(8, 15);
+			var eruptionDelay = this.gameBoard.computeVolcanoEruptionDelay();
 			if (lightningRound) {
 				eruptionDelay = utils.getRandomInt(1, 4);
 			}
@@ -561,7 +793,11 @@ class Game {
 		console.log("Start Collapse");
 		this.currentState = this.stateMap.collapsing;
 		this.gameBoard.startCollapse({ x: xloc, y: yloc });
-		messenger.messageRoomBySig(this.roomSig, "startCollapse", null);
+		// Telegraph: erupt the shockwave from where the lava FIRST appears (the
+		// point farthest from the collapse center, which turns to lava first),
+		// not from the goal it converges on.
+		var origin = this.gameBoard.getCollapseOrigin({ x: xloc, y: yloc });
+		messenger.messageRoomBySig(this.roomSig, "startCollapse", { x: xloc, y: yloc, originX: origin.x, originY: origin.y });
 	}
 	resetLobbyTimer() {
 		this.lobbyTimer = null;
@@ -581,6 +817,9 @@ class Game {
 		this.notchesToWin = c.baseNotchesToWin;
 		this.currentMusic = null;
 		this.musicChangedAt = null;
+		// A full game is over: drop the AI racers and re-roll the grid for the
+		// next game so the cast and field size vary game to game.
+		this.removeBots();
 		this.gameBoard.resetGame(this.currentState);
 		messenger.messageRoomBySig(this.roomSig, "resetGame", null);
 	}
@@ -604,13 +843,19 @@ class Game {
 		return playerCount;
 	}
 	checkForDynamicGameLength() {
-		//For every dynamicGameLengthModifier players the number of notches to win decreases by 1
+		//For every dynamicGameLengthModifier players the number of notches to win decreases by 1.
+		//Count HUMANS only — AI racers fill the grid but shouldn't shorten the game
+		//(otherwise a solo human + bots would collapse to the minimum notches).
 		var dynamicGameLengthModifier = 6;
 
-		if (this.playerCount < dynamicGameLengthModifier) {
+		var humanCount = 0;
+		for (var hid in this.playerList) {
+			if (!this.playerList[hid].isAI) { humanCount++; }
+		}
+		if (humanCount < dynamicGameLengthModifier) {
 			return;
 		}
-		var notchesToRemove = Math.ceil(this.playerCount / dynamicGameLengthModifier);
+		var notchesToRemove = Math.ceil(humanCount / dynamicGameLengthModifier);
 		var minimumNotches = c.minimumNotchesToWin;
 		if (this.notchesToWin - notchesToRemove <= minimumNotches) {
 			this.notchesToWin = minimumNotches;
@@ -746,6 +991,11 @@ class GameBoard {
 		this.allAbilityIDs = this.indexAbilities();
 		this.collapseLoc = {};
 		this.collapseLine = this.world.height;
+		this.visionBlockedUntil = 0;
+		this.blackoutActive = false;
+		this.soloMode = false;
+		this.soloCollapseSpeed = c.lastPlayerCollapseSpeed;
+		this.soloStartDistance = this.world.height + 400;
 		this.firstPlaceSig = null;
 		// Room-wide throttle (ms timestamp) so the crowd's near-burn gasp fires
 		// at most once per audienceNearBurnCooldown, no matter how many racers
@@ -755,6 +1005,9 @@ class GameBoard {
 	update(currentState, playerAliveCount, sleepingPlayerCount, dt) {
 		this.alivePlayerCount = playerAliveCount;
 		this.sleepingPlayerCount = sleepingPlayerCount;
+		// Drive the AI racers' steering before the engine integrates movement, so
+		// bots set the same targetDir/braking/angle inputs a human's socket would.
+		aiController.update(this, currentState, dt);
 		this.engine.update(dt);
 		this.collapseMap(currentState);
 		this.checkCollisions(currentState);
@@ -870,6 +1123,10 @@ class GameBoard {
 	}
 	checkAbilities(currentState) {
 		for (var id in this.abilityList) {
+			if (this.abilityList[id] == null) {
+				delete this.abilityList[id];
+				continue;
+			}
 			if (this.abilityList[id].swap) {
 				this.abilityList[id].swap = false;
 				var aimer = new SwapAimer(this.playerList[this.abilityList[id].ownerId].x, this.playerList[this.abilityList[id].ownerId].y, c.tileMap.abilities.swap.startSize, "red", this.abilityList[id].ownerId, this.roomSig);
@@ -890,7 +1147,13 @@ class GameBoard {
 			}
 			if (this.abilityList[id].explodeBomb) {
 				this.abilityList[id].explodeBomb = false;
-				this.projectileList[this.abilityList[id].ownerId].explodeBomb();
+				// The bomb may already be gone (auto-expired after its lifetime, or
+				// detonated) by the time the trigger fires — guard the deref so
+				// triggering a spent bomb just clears the trigger instead of crashing.
+				var bombProj = this.projectileList[this.abilityList[id].ownerId];
+				if (bombProj != null) {
+					bombProj.explodeBomb();
+				}
 			}
 			if (this.abilityList[id].applyBuff) {
 				this.abilityList[id].applyBuff = false;
@@ -903,6 +1166,12 @@ class GameBoard {
 			if (this.abilityList[id].tileSwap) {
 				this.abilityList[id].tileSwap = false;
 				this.swapTiles();
+			}
+			if (this.abilityList[id].blind) {
+				this.abilityList[id].blind = false;
+				// Room-wide vision block: bots self-handicap their steering for the
+				// duration so a blindfold bites the AI as it bites a human.
+				this.visionBlockedUntil = Date.now() + c.tileMap.abilities.blindfold.duration * 1000;
 			}
 			if (this.abilityList[id].applyCut) {
 				this.abilityList[id].applyCut = false;
@@ -927,7 +1196,11 @@ class GameBoard {
 				player.lobbyRespawnPending = null;
 			}
 			if (player.acquiredAbility != null) {
-				this.abilityList[playerID] = player.ability;
+				// Never register a null ability — a null entry would crash
+				// checkAbilities on the next tick (it reads abilityList[id].flag).
+				if (player.ability != null) {
+					this.abilityList[playerID] = player.ability;
+				}
 				if (player.acquiredAbility.mapID != null) {
 					var consumedVid = player.acquiredAbility.mapID;
 					this.changeTile(consumedVid, c.tileMap.normal.id);
@@ -1494,6 +1767,42 @@ class GameBoard {
 	startCollapse(loc) {
 		this.collapseLoc = loc;
 	}
+	// Where the lava first appears for a collapse centered at loc: the cell
+	// farthest from loc (the collapse turns the farthest cells to lava first,
+	// then closes inward toward loc). Used to telegraph the eruption origin.
+	getCollapseOrigin(loc) {
+		var cells = this.currentMap.cells;
+		var best = loc, bestD = -1;
+		if (cells != null) {
+			for (var i = 0; i < cells.length; i++) {
+				if (cells[i].id == c.tileMap.goal.id) { continue; }
+				var d = utils.getMag(loc.x - cells[i].site.x, loc.y - cells[i].site.y);
+				if (d > bestD) { bestD = d; best = { x: cells[i].site.x, y: cells[i].site.y }; }
+			}
+		}
+		return best;
+	}
+	// Seconds for a competent line to reach the nearest goal from the start gate
+	// (graph par-time at the realistic player speed) so a volcano round erupts
+	// "around par" -- scaled to the map, not a flat random delay. Samples a few
+	// points down the gate and uses the shortest reachable line; falls back to a
+	// random 8-15s if no goal is reachable.
+	computeVolcanoEruptionDelay() {
+		var vcfg = c.brutalRounds.volcano;
+		// Use the map's stored canonical par (computed at submission/boot); only
+		// compute live if this map somehow lacks it.
+		var bestPar = this.currentMap.parTime;
+		if (bestPar == null || bestPar <= 0) {
+			bestPar = cellGraph.computeMapParTime(this.currentMap);
+		}
+		if (!(bestPar > 0)) {
+			return utils.getRandomInt(8, 15);
+		}
+		var delay = bestPar * vcfg.parFactor + vcfg.eruptionParBonus;
+		if (delay < vcfg.minEruptionDelay) { delay = vcfg.minEruptionDelay; }
+		if (delay > vcfg.maxEruptionDelay) { delay = vcfg.maxEruptionDelay; }
+		return delay;
+	}
 	collapseMap(currentState) {
 		if (currentState != c.stateMap.collapsing) {
 			return;
@@ -1505,6 +1814,11 @@ class GameBoard {
 		if (this.firstPlaceSig == null) {
 
 			collapseSpeed = c.lastPlayerCollapseSpeed;
+
+			//Solo player: map-aware collapse speed tuned to spawn->goal distance
+			if (this.soloMode) {
+				collapseSpeed = this.soloCollapseSpeed;
+			}
 
 			//Brutal round is active
 			if (this.checkForActiveBrutal(c.brutalRounds.volcano.id)) {
@@ -1607,6 +1921,12 @@ class GameBoard {
 		var loc = this.startingGate.findFreeLoc(player);
 		player.x = loc.x;
 		player.y = loc.y;
+		// Sync the engine's integration position too. The engine advances newX/newY
+		// and then move() copies them back to x/y, so a player whose newX/newY were
+		// never set (a freshly spawned bot still at the constructor's 0,0) would snap
+		// to that stale point on the first tick instead of staying at the gate.
+		player.newX = loc.x;
+		player.newY = loc.y;
 		if (!this.checkForActiveBrutal(c.brutalRounds.lightning.id)) {
 			player.setSpeedBonus(500);
 		}
@@ -1654,8 +1974,14 @@ class GameBoard {
 		this.lobbyStartButton = null;
 		this.collapseLoc = {};
 		this.collapseLine = this.world.height + 400;
+		this.soloMode = false;
+		this.soloCollapseSpeed = c.lastPlayerCollapseSpeed;
+		this.soloStartDistance = this.world.height + 400;
 		this.tileChanges = {};
 		this.pendingAbilityTimers = []; // bound growth; lobby ones are canceled in clearLobbyAbilities
+		// AI vision-fairness state, reset each round.
+		this.visionBlockedUntil = 0;
+		this.blackoutActive = false;
 		this.resetProjectiles();
 		this.resetHazards();
 	}
@@ -1836,6 +2162,9 @@ class GameBoard {
 	}
 	applyBrutalBlackoutRound(packet) {
 		var context = packet.context;
+		// Blackout lasts the rest of the round; bots self-handicap their steering
+		// for fairness (a human can only see a small circle around themselves).
+		context.gameBoard.blackoutActive = true;
 		messenger.messageRoomBySig(context.roomSig, "applyBlackout", context.roomSig);
 	}
 
@@ -2179,6 +2508,22 @@ class World extends Rect {
 		var player = new Player(0, 0, 90, color, id, this.roomSig);
 		return player;
 	}
+	// A headless AI racer: a Player with no socket, flagged isAI, given an
+	// identity (name/title/personality) from the config cast. Reuses the same
+	// unique-color picker so bots are visually distinct from the human and each
+	// other. The bot brain (aiController) drives it via targetDirX/Y/braking.
+	createNewBot(id, identity) {
+		var color = this.getUniqueColorR();
+		var bot = new Player(0, 0, 90, color, id, this.roomSig);
+		bot.isAI = true;
+		bot.name = identity.name;
+		bot.title = identity.title;
+		bot.personality = identity.id;
+		// Full personality profile (trait weights) for the AI brain; the
+		// suffix-numbered duplicates share their base personality's traits.
+		bot.profile = identity;
+		return bot;
+	}
 	spawnPlayerRandomLoc(player) {
 		var loc = this.findFreeLoc(player);
 		player.initialLoc = loc;
@@ -2387,10 +2732,29 @@ class Player extends Circle {
 		this.acel = c.playerBaseAcel;
 
 		this.currentSpeedBonus = 0;
+
+		//AI (set on bot players by world.createNewBot; humans leave these untouched)
+		this.isAI = false;
+		this.name = null;
+		this.title = null;
+		this.personality = null;
+		this.profile = null;
+		this.emoteReadyAt = 0;
+		//Steering outputs the engine's isAI branch reads each tick.
+		this.targetDirX = 0;
+		this.targetDirY = 0;
+		this.braking = false;
+		//Scratch space for the bot brain (aiController) — path cache, timers, etc.
+		this.ai = null;
 	}
 	update(currentState, dt) {
 		this.currentState = currentState;
-		this.checkForSleep(currentState);
+		// Bots have no socket and never AFK — the sleep/kick path ends in
+		// messageClientBySig (Room.checkAFK), which would throw on a socketless
+		// bot. Skip it entirely; bots stay awake for their whole life.
+		if (!this.isAI) {
+			this.checkForSleep(currentState);
+		}
 		if (this.alive == false) {
 			return;
 		}
@@ -2503,6 +2867,7 @@ class Player extends Circle {
 		clearTimeout(multiKillIndex);
 		this.roundKills += 1;
 		this.totalKills += 1;
+		emitBotEmote(this, "kill");
 		this.addFire(c.playerKillFireBonus);
 		if (player.fellFromVictory) {
 			this.savior += 1;
@@ -2668,6 +3033,7 @@ class Player extends Circle {
 			}
 			_engine.punchPlayer(this, object);
 			messenger.messageRoomBySig(this.roomSig, "playerPunched", object.ownerId);
+			emitBotEmote(this, "hurt"); // an AI racer reacts to getting knocked
 			return;
 		}
 		if (object.isPuck) {
@@ -2921,6 +3287,11 @@ class Player extends Circle {
 		this.infected = false;
 		this.isZombie = false;
 		this.exploded = false;
+		// Drop any stale AI path from the previous round so the bot re-paths fresh
+		// on the new map instead of steering toward old-map coordinates. Identity,
+		// personality knobs and the emote cooldown live on the Player/profile and
+		// are intentionally preserved.
+		if (this.ai != null) { this.ai.waypoints = null; this.ai.repathTimer = 0; }
 		this.x = this.initialLoc.x;
 		this.y = this.initialLoc.y;
 		this.newX = this.x;
@@ -3309,12 +3680,16 @@ class Blindfold extends Ability {
 	constructor(owner, roomSig) {
 		super(owner, roomSig);
 		this.id = c.tileMap.abilities.blindfold.id;
+		this.blind = false;
 	}
 	use() {
 		if (this.alive == false) {
 			return;
 		}
 		this.alive = false;
+		// Flag the room-wide blind so checkAbilities can record it for the AI
+		// vision-fairness self-handicap (bots read state, not pixels).
+		this.blind = true;
 		messenger.messageRoomBySig(this.roomSig, "blindfoldUsed", this.ownerId);
 	}
 }

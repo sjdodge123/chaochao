@@ -171,6 +171,10 @@ function newPlayerPacket(player) {
 	packet[7] = player.awake;
 	packet[8] = player.onFire;
 	packet[9] = player.angle;
+	// Bot identity (null for human players, who stay nameless). Sent only in the
+	// spawn/append packets, not every tick — name/title are static.
+	packet[10] = player.name || null;
+	packet[11] = player.title || null;
 	return packet;
 }
 

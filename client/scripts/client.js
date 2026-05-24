@@ -108,12 +108,12 @@ function registerPrimaryHandlers(server) {
 		playSound(playerJoinSound);
 	});
 	server.on("playerLeft", function (id) {
-		var name = clientList[id];
-		if (name != null) {
-			delete clientList[id];
-			delete playerList[id];
-			return;
-		}
+		// Always drop the rendered player. AI racers live in playerList but may be
+		// absent from a mid-game joiner's clientList (the server room's clientList
+		// excludes bots), so gating the delete on clientList left them as frozen
+		// ghost karts when removeBots() fired. Delete from both unconditionally.
+		delete clientList[id];
+		delete playerList[id];
 	});
 
 	server.on("gameUpdates", function (updatePacket) {
@@ -297,9 +297,16 @@ function registerPrimaryHandlers(server) {
 		decodedColorName = Colors.decode(playerList[packet.winner].color);
 		currentState = config.stateMap.gameOver;
 	});
-	server.on("startCollapse", function () {
+	server.on("startCollapse", function (info) {
 		currentState = config.stateMap.collapsing;
 		playSound(lavaCollapse);
+		// Telegraph: erupt a shockwave from where the lava first appears and
+		// spreads, plus the volcano cue. info may be null from an older server.
+		if (info && typeof info.originX === "number") {
+			spawnCollapseShockwave(info.originX, info.originY);
+			playSound(volcanoErupt);
+			rumbleScreen(1500);
+		}
 	});
 
 	server.on("resetPlayers", function () {
@@ -520,6 +527,18 @@ function registerPrimaryHandlers(server) {
 		createBlindFold(owner);
 		playerAbilityUsed(owner);
 		playSound(blindSound);
+	});
+	server.on("botEmote", function (payload) {
+		if (payload == null || playerList[payload.id] == null) {
+			return;
+		}
+		// Reuse the chat-bubble render path (drawEmoji) for the bot's taunt.
+		playerList[payload.id].chatMessage = payload.emote;
+		setTimeout(function () {
+			if (playerList[payload.id] != null && playerList[payload.id].chatMessage === payload.emote) {
+				playerList[payload.id].chatMessage = null;
+			}
+		}, 2500);
 	});
 	server.on("cutUsed", function (owner) {
 		playSound(cutSound);

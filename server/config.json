@@ -9,6 +9,31 @@
     "audienceNearBurnMargin": 70,
     "audienceNearBurnCooldown": 3500,
     "audienceClutchMargin": 150,
+    "soloCollapse": {
+        "marginFactor": 1.4,
+        "spawnBufferSeconds": 5,
+        "graceDelayFactor": 0.6,
+        "minGraceSeconds": 9,
+        "maxGraceSeconds": 12,
+        "minCollapseSpeed": 0.35,
+        "startDistanceBuffer": 150
+    },
+    "aiRacers": {
+        "enabled": true,
+        "minGrid": 6,
+        "maxGrid": 10,
+        "rubberBandStrength": 0.18,
+        "_traits": "skill 0..1 (speed+precision+reaction); aggression 0..1 (punch); tempo 0..1 (spend vs hoard abilities); risk 0..1 (tight lava lines / corner-cut); focus race|combat|human|chaos; tilt rage = reckless when behind",
+        "cast": [
+            { "id": "ghost", "name": "The Ghost", "title": "Pace-setter", "skill": 1.0, "aggression": 0.1, "tempo": 0.25, "risk": 0.15, "focus": "race", "emotes": { "win": ["😎", "👋"], "kill": ["😎"], "hurt": ["😳"], "cheer": ["👌"], "greet": ["👋", "😎"] } },
+            { "id": "bulldozer", "name": "Bulldozer", "title": "Wrecking Ball", "skill": 0.55, "aggression": 1.0, "tempo": 0.7, "risk": 0.7, "focus": "combat", "emotes": { "win": ["💪", "😤"], "kill": ["💪", "😤"], "hurt": ["😤"], "cheer": ["💪"], "greet": ["💪", "😤"] } },
+            { "id": "gambler", "name": "The Gambler", "title": "High Roller", "skill": 0.9, "aggression": 0.5, "tempo": 0.95, "risk": 1.0, "focus": "race", "emotes": { "win": ["👌", "😎"], "kill": ["😎"], "hurt": ["😨"], "cheer": ["👌"], "greet": ["👋", "👌"] } },
+            { "id": "nemesis", "name": "Nemesis", "title": "Your Shadow", "skill": 0.93, "aggression": 0.8, "tempo": 0.7, "risk": 0.45, "focus": "human", "emotes": { "win": ["😈"], "kill": ["😈"], "hurt": ["😤"], "cheer": ["🤔"], "greet": ["😈"] } },
+            { "id": "trickster", "name": "Trickster", "title": "Chaos Agent", "skill": 0.6, "aggression": 0.4, "tempo": 1.0, "risk": 0.55, "focus": "chaos", "emotes": { "win": ["😄", "🤔"], "kill": ["😎"], "hurt": ["🥱"], "cheer": ["😄", "👌"], "greet": ["😄", "👋"] } },
+            { "id": "tortoise", "name": "Tortoise", "title": "Slow and Steady", "skill": 0.7, "aggression": 0.15, "tempo": 0.25, "risk": 0.05, "focus": "race", "emotes": { "win": ["👌"], "kill": ["👌"], "hurt": ["😨"], "cheer": ["😄", "👌"], "greet": ["👋", "😄"] } },
+            { "id": "hothead", "name": "Hothead", "title": "Loose Cannon", "skill": 0.7, "aggression": 0.6, "tempo": 0.6, "risk": 0.5, "focus": "race", "tilt": "rage", "emotes": { "win": ["😤"], "kill": ["😤"], "hurt": ["😳"], "cheer": ["😎"], "greet": ["😤", "👋"] } }
+        ]
+    },
     "minPlayersToStart": 1,
     "maxPlayersInRoom": 25,
     "forceConstant": 5000,
@@ -207,6 +232,10 @@
         "volcano": {
             "id": 1007,
             "collapseSpeed": 1,
+            "parFactor": 1.0,
+            "eruptionParBonus": 3,
+            "minEruptionDelay": 7,
+            "maxEruptionDelay": 65,
             "active": true,
             "title": "Volcano"
         },
