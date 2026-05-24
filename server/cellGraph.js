@@ -30,12 +30,19 @@ var adjacencyCache = new Map();
 // normalized to grass = 1.0: grass 2333, dirt 1200, sand 625 -> 1.0 / 1.9 / 3.7.
 // Ice/bumper get a control-risk bump above their raw time. Lava is blocked.
 //   grass = fast (id 2), dirt = normal (id 1), sand = slow (id 0).
+// Ice is near-frictionless (drag 0.0075): its steady-state speed (~2000) is just
+// behind grass (~2333) and well above dirt (~1200) — a real "glide" lane once you
+// enter it carrying speed. Its raw time-cost ratio is ~1.17x grass, so a flat 1.4
+// (a small control-risk bump on top) keeps ice clearly preferred over dirt/sand,
+// letting bots route onto grass→ice glides instead of avoiding them — while still
+// just behind grass so they don't dive onto ice from a standstill, where ice's
+// dismal accel (15) would bog them down.
 function tileWeight(id) {
     switch (id) {
         case c.tileMap.fast.id: return 1.0;   // grass — fastest (baseline)
         case c.tileMap.normal.id: return 1.9; // dirt — ~2x grass time
         case c.tileMap.slow.id: return 3.7;   // sand — ~3.7x grass time (avoid unless clearly shorter)
-        case c.tileMap.ice.id: return 2.5;    // fast but uncontrollable — penalize for control risk
+        case c.tileMap.ice.id: return 1.4;    // near-frictionless glide — prefer over dirt/sand
         case c.tileMap.bumper.id: return 3.0; // knockback hazard
         default: return 1.0; // goal, ability, random
     }
