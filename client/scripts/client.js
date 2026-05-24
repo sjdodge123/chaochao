@@ -197,10 +197,12 @@ function registerPrimaryHandlers(server) {
 			playerList[id].alive = false;
 			playerList[id].onFire = 0;
 			playerList[id].deathMessage = '💀';
-			// Remember where they fell so a local player can ping their own spot
-			// (press attack while dead) — see updateDeathPings() in draw.js.
+			// Remember where/when they fell: a dead local player can press attack
+			// to ping every dead player's spot, and the floating skull fades from
+			// deathAt — see updateDeathPings()/drawDeathMessage() in draw.js.
 			playerList[id].deathX = playerList[id].x;
 			playerList[id].deathY = playerList[id].y;
+			playerList[id].deathAt = Date.now();
 		}
 		recapMarkHighlight('death', [id]); // flag an elimination moment for the recap
 		createDownRankSymbol(id);

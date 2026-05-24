@@ -601,6 +601,7 @@ function resetPlayers() {
 		player.deathMessage = null;
 		player.deathX = null;
 		player.deathY = null;
+		player.deathAt = null;
 		player.trail = new Trail({ x: player.x, y: player.y });
 	}
 }
@@ -637,6 +638,7 @@ function fullReset() {
 		player.deathMessage = null;
 		player.deathX = null;
 		player.deathY = null;
+		player.deathAt = null;
 		player.infected = false;
 		player.onFire = 0;
 		player.trail = new Trail({ x: player.x, y: player.y });
