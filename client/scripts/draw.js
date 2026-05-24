@@ -707,9 +707,8 @@ function drawPlayer(player, dt) {
     }
     // An on-fire player is immune to lava — flash ONLY while they're actually standing
     // on lava (the moment damage is being negated), not just whenever they're on fire.
-    // The flame's own colour stages already show the fire timer counting down, so this
-    // case doesn't ramp; it just marks "immune right now". Voronoi: the cell a point sits
-    // in is the one whose site is nearest, so we only scan cells when on fire (cheap/rare).
+    // Voronoi: the cell a point sits in is the one whose site is nearest, so we only scan
+    // cells when on fire (cheap/rare). The flash ramps with the fire timer below.
     var onFireOnLava = false;
     if (player.onFire != null && player.onFire > 0 && currentMap != null && currentMap.cells != null) {
         var nearestId = -1, nd = Infinity;
@@ -722,12 +721,15 @@ function drawPlayer(player, dt) {
         onFireOnLava = (nearestId == config.tileMap.lava.id);
     }
     // Flash while immune to fire/lava damage: lobby respawn-invuln (timed or held in the
-    // start circle), or on-fire-on-lava. Lobby timed invuln quickens as it nears expiry;
-    // the held and on-fire-on-lava cases have no countdown here, so they pulse steadily.
+    // start circle), or on-fire-on-lava. The pulse quickens over the final 2s of whichever
+    // protection is about to expire — the timed respawn grace or the fire timer
+    // (player.onFire is the live remaining ms). A circle-held player has no expiry, so it
+    // stays a steady pulse.
     var immune = timedInvuln || player.invulnHeldInCircle || onFireOnLava;
     if (immune) {
         var remaining = Infinity;
-        if (timedInvuln) { remaining = player.invulnUntil - Date.now(); }
+        if (timedInvuln) { remaining = Math.min(remaining, player.invulnUntil - Date.now()); }
+        if (onFireOnLava) { remaining = Math.min(remaining, player.onFire); }
         var pulsePeriod = 130;
         if (remaining < 2000) {
             pulsePeriod = 35 + (130 - 35) * (remaining / 2000);
