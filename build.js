@@ -19,12 +19,14 @@ const bundles = {
         'client/scripts/create.js',
         'client/scripts/osk.js',
         'client/scripts/editorGamepad.js',
-        'client/scripts/utils.js'
+        'client/scripts/utils.js',
+        'client/scripts/controllerHeader.js'
     ],
     'join.bundle.min.js': [
         'client/scripts/join.js',
         'client/scripts/osk.js',
-        'client/scripts/menuGamepad.js'
+        'client/scripts/menuGamepad.js',
+        'client/scripts/controllerHeader.js'
     ]
 };
 
