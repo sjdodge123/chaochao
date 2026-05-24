@@ -219,6 +219,11 @@ function registerPrimaryHandlers(server) {
 		setLobbySfxDampen(true);
 		playSoundAfterFinish(lobbyMusic);
 	});
+	// Lobby bumpers (the race path creates hazards inside the newMap handler; the lobby
+	// has no newMap, so it sends them separately).
+	server.on("applyHazards", function (payload) {
+		applyHazards(payload);
+	});
 	server.on("startGated", function (packet) {
 		debugLog("startGated");
 		setLobbySfxDampen(false); // restore full SFX before the game-start cue
