@@ -599,6 +599,8 @@ function resetPlayers() {
 		var player = playerList[id];
 		player.alive = true;
 		player.deathMessage = null;
+		player.deathX = null;
+		player.deathY = null;
 		player.trail = new Trail({ x: player.x, y: player.y });
 	}
 }
@@ -633,6 +635,8 @@ function fullReset() {
 		player.nearVictory = false;
 		player.ability = null;
 		player.deathMessage = null;
+		player.deathX = null;
+		player.deathY = null;
 		player.infected = false;
 		player.onFire = 0;
 		player.trail = new Trail({ x: player.x, y: player.y });
@@ -1149,6 +1153,7 @@ class Trail {
 		this.canvasOriginY = 0;
 		this.wasNearVictory = false;
 		this.accumulatedLength = 0;
+		this.lastColor = null;
 	}
 	_ensureCanvas() {
 		if (this.canvas != null || world == null) {
@@ -1211,7 +1216,12 @@ class Trail {
 		if (DEBUG_FORCE_NEAR_VICTORY && player.id == myID) {
 			isNearVictory = true;
 		}
-		if (isNearVictory != this.wasNearVictory) {
+		// Repaint the whole strip in one colour when the near-victory style flips OR
+		// the player's colour changes mid-round (e.g. toggling colour-blind assist),
+		// so the cached canvas never ends up two-toned.
+		var colorChanged = (this.lastColor != null && this.lastColor !== player.color);
+		this.lastColor = player.color;
+		if (isNearVictory != this.wasNearVictory || colorChanged) {
 			this._redrawAll(player.color, isNearVictory);
 			this.wasNearVictory = isNearVictory;
 			return;
@@ -1236,6 +1246,7 @@ class Trail {
 		this.vertices = [];
 		this.wasNearVictory = false;
 		this.accumulatedLength = 0;
+		this.lastColor = null;
 		if (this.ctx != null) {
 			this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 		}

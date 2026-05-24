@@ -67,9 +67,11 @@ function cbAssignColor(id) {
         }
     }
     if (best == null) {
-        // More than 8 karts: palette exhausted. Cycle deterministically — server
-        // colours already differ, so this only affects the CVD overlay.
-        best = CB_PALETTE[used.length % CB_PALETTE.length];
+        // More than 8 karts: the CVD palette is exhausted. Return null (don't
+        // cache) so the caller keeps this kart's already-max-distinct SERVER
+        // colour instead of handing out a duplicate CVD colour. Re-resolves on a
+        // later frame once a palette slot frees up.
+        return null;
     }
     cbAssigned[id] = best;
     return best;
@@ -100,7 +102,8 @@ function syncColorblind() {
                 p._serverColor = p.color;
             }
             var cb = cbAssignColor(id);
-            if (p.color !== cb) {
+            // cb == null => palette exhausted; keep the server colour (already set).
+            if (cb != null && p.color !== cb) {
                 p.color = cb;
             }
         } else if (p._serverColor != null && p.color !== p._serverColor) {
@@ -475,7 +478,6 @@ function drawObjects(dt) {
     if (config == null) {
         return;
     }
-    updateDeathPings();
     syncColorblind();
 
     updateWorldCamera(dt);
@@ -486,6 +488,10 @@ function drawObjects(dt) {
         drawOverviewBoard();
         return;
     }
+    // After the overview early-return (which skips drawEffects): only spawn death
+    // pings in states where the effect will actually be rendered this frame, so a
+    // press never burns its cooldown invisibly.
+    updateDeathPings();
 
     // ---- WORLD PASS: zoomed/panned by the dynamic camera (touch); identity
     // elsewhere. Everything positioned in world coords goes here. ----

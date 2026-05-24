@@ -305,7 +305,10 @@ function registerPrimaryHandlers(server) {
 		recapBuild(achievements); // assemble the recap montage from the buffer
 		stopAllSounds();
 		playSound(gameOverSound);
-		decodedColorName = Colors.decode(playerList[packet.winner].color);
+		// Decode the SERVER colour (not the live .color, which colour-blind assist
+		// may have remapped to an off-palette CVD hex that Colors.decode can't name).
+		var winner = playerList[packet.winner];
+		decodedColorName = Colors.decode((winner._serverColor != null) ? winner._serverColor : winner.color);
 		currentState = config.stateMap.gameOver;
 	});
 	server.on("startCollapse", function (info) {
