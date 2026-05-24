@@ -38,6 +38,9 @@ var server = null,
     // initEventHandlers), toggleable by anyone via the navbar camera button.
     // Auto-falls back to whole-map when >1 local player shares the screen.
     cameraZoomEnabled = false,
+    // Colour-blind assist: when on, draw.js remaps every kart to a CVD-safe
+    // palette. Persisted in localStorage (see the #colorblindControl wiring).
+    colorblindEnabled = false,
     worldViewFocusedElapsed = 0,  // ms accumulated in the focus phase (frame-dt based, not wall-clock)
     WORLD_ZOOM_MAX = 1.8,      // tightest focus on the player while racing (shows some surroundings)
     WORLD_ZOOM_ENGAGE = 460,   // world-units: nearest goal pulls into frame within this
@@ -245,6 +248,19 @@ function setupPage() {
     });
     $("#cameraControl").on("keydown", activateToggleOnKey);
     updateCameraToggleUI();
+    // Colour-blind assist toggle — persisted so the choice sticks across visits.
+    try {
+        colorblindEnabled = localStorage.getItem("colorblindPref") === "on";
+    } catch (e) {
+        colorblindEnabled = false;
+    }
+    $("#colorblindControl").on("click", function () {
+        colorblindEnabled = !colorblindEnabled;
+        try { localStorage.setItem("colorblindPref", colorblindEnabled ? "on" : "off"); } catch (e) {}
+        updateColorblindToggleUI();
+    });
+    $("#colorblindControl").on("keydown", activateToggleOnKey);
+    updateColorblindToggleUI();
     volumeChange();
     gameCanvas = document.getElementById('gameCanvas');
     overlayCanvas = document.getElementById('overlayCanvas');
@@ -520,6 +536,18 @@ function updateCameraToggleUI() {
         ? '[<i class="music-btn fa fa-check" aria-hidden="true"></i>]'
         : '[<i class="music-btn fa fa-ban" aria-hidden="true"></i>]';
     el.innerHTML = '<i class="music-btn fas fa-video" aria-hidden="true"></i> ' + status;
+}
+
+// Reflect the colour-blind assist on/off state in the navbar toggle.
+function updateColorblindToggleUI() {
+    var el = document.getElementById("colorblindControl");
+    if (!el) {
+        return;
+    }
+    var status = colorblindEnabled
+        ? '[<i class="music-btn fa fa-check" aria-hidden="true"></i>]'
+        : '[<i class="music-btn fa fa-ban" aria-hidden="true"></i>]';
+    el.innerHTML = '<i class="music-btn fas fa-eye" aria-hidden="true"></i> ' + status;
 }
 
 // iOS Safari does NOT implement the Fullscreen API on arbitrary elements (only

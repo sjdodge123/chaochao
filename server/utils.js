@@ -238,12 +238,58 @@ exports.getColor = function () {
     return Colors.random();
 };
 
+// Parse a '#rrggbb' (or '#rgb') hex string into {r,g,b}, else null. Non-hex
+// inputs (the rare hsl() fallback below, or an unexpected value) return null and
+// are simply skipped by the distance check, so they never throw.
+function hexToRgb(hex) {
+    if (typeof hex !== 'string') {
+        return null;
+    }
+    var m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
+    if (!m) {
+        return null;
+    }
+    var h = m[1];
+    if (h.length === 3) {
+        h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    }
+    return {
+        r: parseInt(h.slice(0, 2), 16),
+        g: parseInt(h.slice(2, 4), 16),
+        b: parseInt(h.slice(4, 6), 16)
+    };
+}
+
+// Perceptual-ish distance between two hex colors using the "redmean" weighting
+// (a cheap, dependency-free approximation of how different two colors LOOK,
+// noticeably better than raw RGB). Returns Infinity if either color can't be
+// parsed, so unparseable used-colors don't constrain the pick.
+function colorDistance(a, b) {
+    var ca = hexToRgb(a);
+    var cb = hexToRgb(b);
+    if (ca == null || cb == null) {
+        return Infinity;
+    }
+    var rmean = (ca.r + cb.r) / 2;
+    var dr = ca.r - cb.r;
+    var dg = ca.g - cb.g;
+    var db = ca.b - cb.b;
+    return Math.sqrt(
+        (((512 + rmean) * dr * dr) / 256) +
+        4 * dg * dg +
+        (((767 - rmean) * db * db) / 256)
+    );
+}
+
 // Returns a color not already present in usedColors (a map of color -> true).
-// Picks a RANDOM unused color from the fixed named palette; once the palette is
-// exhausted (a room can hold more players than there are named colors) it picks
-// a random generated fallback color, retrying a bounded number of times to dodge
-// collisions. Never recurses, so it can't blow the stack and crash the process
-// when a room fills up.
+// Picks the unused palette color that is the most PERCEPTUALLY DISTINCT from the
+// colors already in the room (greedy max-min distance), so a full lobby never
+// hands out two lookalikes (e.g. Blue vs Navy, Red vs Maroon). The first player
+// in an empty room gets a random palette color so games still vary. Once the
+// palette is exhausted (a room can hold more players than there are named
+// colors) it picks a random generated fallback color, retrying a bounded number
+// of times to dodge collisions. Never recurses, so it can't blow the stack and
+// crash the process when a room fills up.
 exports.getUniqueColor = function (usedColors) {
     usedColors = usedColors || {};
     var available = [];
@@ -253,7 +299,26 @@ exports.getUniqueColor = function (usedColors) {
         }
     }
     if (available.length > 0) {
-        return available[Math.floor(Math.random() * available.length)];
+        var used = Object.keys(usedColors);
+        if (used.length === 0) {
+            return available[Math.floor(Math.random() * available.length)];
+        }
+        var best = available[0];
+        var bestScore = -1;
+        for (var i = 0; i < available.length; i++) {
+            var minDist = Infinity;
+            for (var j = 0; j < used.length; j++) {
+                var d = colorDistance(available[i], used[j]);
+                if (d < minDist) {
+                    minDist = d;
+                }
+            }
+            if (minDist > bestScore) {
+                bestScore = minDist;
+                best = available[i];
+            }
+        }
+        return best;
     }
     var color = 'hsl(' + Math.floor(Math.random() * 360) + ', 70%, 50%)';
     for (var tries = 0; tries < 100 && usedColors[color]; tries++) {
