@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.5.0 — 2026-05-24
+
 ### General
 
 - You're no longer racing alone: solo and small games now fill out with a roster of named AI racers that drive the course — finding their way to the goal, braking through corners, and steering clear of lava and bumpers — so there's always a full grid to race against.
