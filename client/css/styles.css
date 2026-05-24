@@ -602,6 +602,18 @@ div.desc {
     gap: 4px;
 }
 
+/* a connected controller that hasn't joined yet: "press A to join" */
+.pad-player.join-prompt {
+    opacity: 0.8;
+    border: 1px dashed #c87f8a;
+}
+
+.pad-player .pp-join {
+    color: #888;
+    font-size: 11px;
+    font-style: italic;
+}
+
 .pad-player {
     display: inline-flex;
     align-items: center;
