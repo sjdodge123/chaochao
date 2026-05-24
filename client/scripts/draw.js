@@ -705,17 +705,30 @@ function drawPlayer(player, dt) {
     } else {
         player.invulnHeldInCircle = false;
     }
-    var invuln = timedInvuln || player.invulnHeldInCircle;
-    if (invuln) {
+    // Flash whenever the player is immune to fire/lava damage: lobby respawn-invuln
+    // (timed or held safe in the start circle), OR "on fire" (the flame negates lava
+    // damage in a real race). The pulse quickens as the protection nears expiry so it's
+    // clear it's about to wear off; a circle-held player has no expiry, so it stays steady.
+    var onFire = (player.onFire != null && player.onFire > 0);
+    var immune = timedInvuln || player.invulnHeldInCircle || onFire;
+    if (immune) {
+        var remaining = Infinity; // held-in-circle = no expiry -> steady pulse
+        if (timedInvuln) { remaining = Math.min(remaining, player.invulnUntil - Date.now()); }
+        if (onFire) { remaining = Math.min(remaining, player.onFire); }
+        // Pulse period (ms) shrinks from 130 -> 35 over the last 2s, so the flash speeds up.
+        var pulsePeriod = 130;
+        if (remaining < 2000) {
+            pulsePeriod = 35 + (130 - 35) * (remaining / 2000);
+        }
         gameContext.save();
-        gameContext.globalAlpha = 0.35 + 0.45 * Math.abs(Math.sin(Date.now() / 120));
+        gameContext.globalAlpha = 0.35 + 0.45 * Math.abs(Math.sin(Date.now() / pulsePeriod));
     }
     gameContext.drawImage(
         sprite,
         player.x + camera.getCameraX() - sprite.halfSize,
         player.y + camera.getCameraY() - sprite.halfSize
     );
-    if (invuln) {
+    if (immune) {
         gameContext.restore();
     }
 
