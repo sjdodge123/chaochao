@@ -375,18 +375,16 @@ function resize() {
     var gameWindowRect = canvasWindow.getBoundingClientRect();
     if (gameWindowRect.width === 0 || gameWindowRect.height === 0) return;
     var viewport = { width: gameWindowRect.width, height: gameWindowRect.height };
+    // Fit the canvas to the available space at its native 16:9 aspect ratio,
+    // scaling BOTH axes by the same factor so the game is never stretched. This
+    // also covers fullscreen: on any screen that isn't exactly 16:9 the canvas
+    // is letterboxed/pillarboxed — the #gameWindow flex container centres it and
+    // its --board-bg shows in the bars. (Filling the raw fullscreen viewport
+    // would scale X and Y independently and visibly distort the game — circles
+    // became ovals on 16:10 / ultrawide / notched displays.)
     var optimalRatio = Math.min(viewport.width / LOGICAL_WIDTH, viewport.height / LOGICAL_HEIGHT);
-
-    if (window.document.fullscreenElement) {
-        newWidth = viewport.width;
-        newHeight = viewport.height;
-    } else {
-        // Fit the canvas to the available space at its native 16:9
-        // aspect ratio (no padding shrink — the gameWindow flex
-        // container provides any breathing room).
-        newWidth = LOGICAL_WIDTH * optimalRatio;
-        newHeight = LOGICAL_HEIGHT * optimalRatio;
-    }
+    newWidth = LOGICAL_WIDTH * optimalRatio;
+    newHeight = LOGICAL_HEIGHT * optimalRatio;
 
     // Logical->CSS scale; used to keep canvas-drawn labels a stable physical
     // size across phone/desktop widths (see drawTouchLabel).
