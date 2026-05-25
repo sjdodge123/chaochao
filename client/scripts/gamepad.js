@@ -26,6 +26,7 @@ var GP_TRIGGER_THRESHOLD = 0.5;  // analog trigger counts as "pressed" past this
 var GP_AIM_MIN_DELTA = 2;        // deg; skip aim emits smaller than this
 var GP_AIM_MIN_INTERVAL = 50;    // ms; cap aim emits at ~20 Hz
 var LEAVE_CONFIRM_TIMEOUT_MS = 5000; // auto-cancel the inline "Leave?" confirm
+var LEAVE_HOLD_MS = 800;             // hold the Leave button this long to confirm (anti-misfire)
 
 // --- standard-mapping button indices ---
 var GP_BTN_A = 0;     // attack / confirm
@@ -1034,6 +1035,12 @@ function scheduleHintFade() {
     gpFadeTimer = setTimeout(function () {
         var e = hintFadeEls();
         for (var j = 0; j < e.length; j++) {
+            // In local co-op the per-player blocks stay up permanently so each
+            // player can always see which controller they are and their controls
+            // (slot + colour dot + glyphs). Only the solo bottom bar auto-fades.
+            if (hintUiMode === "blocks" && e[j] === padPlayersEl) {
+                continue;
+            }
             e[j].classList.add("faded");
         }
     }, HINT_FADE_MS);
@@ -1401,17 +1408,33 @@ function cancelLeaveConfirm(lp) {
 }
 
 function pollLeaveConfirm(pad, lp) {
-    if (buttonPressedThisFrame(pad, GP_BTN_A, lp)) {
-        if (lp.leaveConfirmTimer) {
-            clearTimeout(lp.leaveConfirmTimer);
-            lp.leaveConfirmTimer = null;
+    // Confirm only on a sustained HOLD of the Leave button (B). A tap, or the
+    // attack button (A) that players mash mid-fight, never leaves — that
+    // accidental "B then A-mash" exit was the whole problem. Releasing B before
+    // the hold completes, or pressing attack, cancels and resumes play.
+    var bHeld = !!(pad.buttons[GP_BTN_B] && pad.buttons[GP_BTN_B].pressed);
+    if (bHeld) {
+        if (lp._leaveHoldStart == null) {
+            lp._leaveHoldStart = Date.now();
         }
-        lp.leaveConfirm = false;
-        dropLocalPlayer(lp.slot); // confirmed — disconnect this player
+        var held = Date.now() - lp._leaveHoldStart;
+        setBlockLeaveProgress(lp.slot, held / LEAVE_HOLD_MS);
+        if (held >= LEAVE_HOLD_MS) {
+            if (lp.leaveConfirmTimer) {
+                clearTimeout(lp.leaveConfirmTimer);
+                lp.leaveConfirmTimer = null;
+            }
+            lp.leaveConfirm = false;
+            lp._leaveHoldStart = null;
+            dropLocalPlayer(lp.slot); // confirmed by a deliberate hold
+        }
         return;
     }
-    if (buttonPressedThisFrame(pad, GP_BTN_B, lp)) {
-        cancelLeaveConfirm(lp); // cancelled
+    lp._leaveHoldStart = null;
+    setBlockLeaveProgress(lp.slot, 0);
+    // Not holding Leave: an attack press means "I want to keep playing" — resume.
+    if (buttonPressedThisFrame(pad, GP_BTN_A, lp)) {
+        cancelLeaveConfirm(lp);
     }
 }
 
@@ -1424,22 +1447,50 @@ function setBlockLeaveConfirm(slot, confirming) {
         b.el.classList.add("confirming");
         var lp = localPlayers[slot];
         var confirmHints;
+        var prompt;
         if (lp && lp.padIndex != null) {
-            // controller: A confirms, B cancels
-            confirmHints = '<span class="gp-glyph gp-face">' + attackGlyphFor(lp.padType) + '</span>' +
-                '<span class="gp-glyph gp-face">' + leaveGlyphFor(lp.padType) + '</span>';
+            // controller: HOLD B to leave; attack (A) resumes. Hold-to-confirm so
+            // a mashed attack can no longer leave the game by accident.
+            prompt = "Hold to leave";
+            confirmHints = '<span class="gp-glyph gp-face">' + leaveGlyphFor(lp.padType) + '</span>';
         } else {
             // keyboard: Enter confirms, Esc cancels
+            prompt = "Leave?";
             confirmHints = '<span class="gp-glyph gp-key">Enter</span>' +
                 '<span class="gp-glyph gp-key">Esc</span>';
         }
-        b.hints.innerHTML = '<span class="pp-confirm">Leave?</span>' + confirmHints;
+        b.hints.innerHTML = '<span class="pp-confirm">' + prompt + '</span>' + confirmHints;
     } else {
         b.el.classList.remove("confirming");
         b.lastMethod = null; // force a hint rebuild on the next refresh
         if (localPlayers[slot]) {
             setBlockHints(localPlayers[slot]);
         }
+    }
+}
+
+// Live feedback while holding the Leave button: fills a small text bar in the
+// "Hold to leave" prompt so the player sees the hold registering. No new CSS —
+// just swaps the prompt label, and only when the bar actually changes.
+function setBlockLeaveProgress(slot, progress) {
+    var b = padBlocks[slot];
+    if (!b || !b.hints) {
+        return;
+    }
+    var span = b.hints.querySelector(".pp-confirm");
+    if (!span) {
+        return;
+    }
+    var p = progress < 0 ? 0 : (progress > 1 ? 1 : progress);
+    var label;
+    if (p <= 0) {
+        label = "Hold to leave";
+    } else {
+        var filled = Math.round(p * 5);
+        label = "Leaving " + "█".repeat(filled) + "░".repeat(5 - filled);
+    }
+    if (span.textContent !== label) {
+        span.textContent = label;
     }
 }
 
