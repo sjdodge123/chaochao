@@ -217,16 +217,27 @@ function registerPrimaryHandlers(server) {
 	server.on("playerInfected", function (id) {
 		playerList[id].alive = true;
 		playerList[id].deathMessage = null;
+		// Revived as a zombie — clear the death spot so no stale skull/ping data
+		// lingers on a now-alive player (keeps the death-state guards consistent
+		// across every revive/reset path).
+		playerList[id].deathX = null;
+		playerList[id].deathY = null;
+		playerList[id].deathAt = null;
 		playerList[id].infected = true;
 		playSound(newZombie);
 	});
 	server.on("broadCastEmoji", function (payload) {
 		playerList[payload.ownerId].chatMessage = payload.emoji;
 		// Stamp when/how long so drawEmoji can fade other players' bubbles out.
-		playerList[payload.ownerId].chatMessageAt = Date.now();
+		var emoteStamp = Date.now();
+		playerList[payload.ownerId].chatMessageAt = emoteStamp;
 		playerList[payload.ownerId].chatMessageDuration = 4000;
 		setTimeout(function (owner) {
-			playerList[owner].chatMessage = null;
+			// Only clear if still the same emote — a newer one re-stamps
+			// chatMessageAt, so this older timeout must not cut it short.
+			if (playerList[owner] != null && playerList[owner].chatMessageAt === emoteStamp) {
+				playerList[owner].chatMessage = null;
+			}
 		}, 4000, payload.ownerId);
 	});
 	server.on('playerSleeping', function (id) {
@@ -313,7 +324,9 @@ function registerPrimaryHandlers(server) {
 		// Decode the SERVER colour (not the live .color, which colour-blind assist
 		// may have remapped to an off-palette CVD hex that Colors.decode can't name).
 		var winner = playerList[packet.winner];
-		decodedColorName = Colors.decode((winner._serverColor != null) ? winner._serverColor : winner.color);
+		decodedColorName = (winner != null)
+			? Colors.decode((winner._serverColor != null) ? winner._serverColor : winner.color)
+			: "";
 		currentState = config.stateMap.gameOver;
 	});
 	server.on("startCollapse", function (info) {

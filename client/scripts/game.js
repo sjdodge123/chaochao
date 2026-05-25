@@ -372,6 +372,9 @@ function gameLoop(dt) {
 
 
 function resize() {
+    // LOGICAL_WIDTH/HEIGHT are captured in setupPage; if a resize fires before
+    // that (early rotation/devtools), bail so we don't divide by 0 -> Infinity.
+    if (!LOGICAL_WIDTH || !LOGICAL_HEIGHT) return;
     var gameWindowRect = canvasWindow.getBoundingClientRect();
     if (gameWindowRect.width === 0 || gameWindowRect.height === 0) return;
     var viewport = { width: gameWindowRect.width, height: gameWindowRect.height };
