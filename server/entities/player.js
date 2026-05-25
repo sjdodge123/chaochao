@@ -10,6 +10,18 @@ var { Circle } = require('./shapes.js');
 var { Punch } = require('./punch.js');
 var { Blindfold, Swap, Bomb, SpeedBuff, SpeedDebuff, TileSwap, IceCannon, Cut } = require('./abilities.js');
 
+// Ability pickup tiles -> their ability class, so handleHit can acquire any of
+// them through one path (tryAcquireAbility) instead of eight identical branches.
+var ABILITY_TILE_CTORS = {};
+ABILITY_TILE_CTORS[c.tileMap.abilities.blindfold.id] = Blindfold;
+ABILITY_TILE_CTORS[c.tileMap.abilities.swap.id] = Swap;
+ABILITY_TILE_CTORS[c.tileMap.abilities.bomb.id] = Bomb;
+ABILITY_TILE_CTORS[c.tileMap.abilities.speedBuff.id] = SpeedBuff;
+ABILITY_TILE_CTORS[c.tileMap.abilities.speedDebuff.id] = SpeedDebuff;
+ABILITY_TILE_CTORS[c.tileMap.abilities.tileSwap.id] = TileSwap;
+ABILITY_TILE_CTORS[c.tileMap.abilities.iceCannon.id] = IceCannon;
+ABILITY_TILE_CTORS[c.tileMap.abilities.cut.id] = Cut;
+
 class LobbyStartButton extends Circle {
 	constructor(x, y, angle, color) {
 		super(x, y, 75, color);
@@ -446,29 +458,11 @@ class Player extends Circle {
 			return;
 		}
 		if (object.isPunch && object.ownerId != this.id) {
-			// Invulnerable lobby players (freshly respawned, or held safe in the start
-			// circle) can't be punched — so a griefer can't shove them into lava or out
-			// of the safe circle. Normal players still bump freely. No-op outside lobby.
-			if (this.isInvuln()) {
-				return;
-			}
-			if (object.ownerInfected) {
-				this.infect();
-			}
-			if (!object.mapOwned) {
-				this.setPunchedBy(object.ownerId);
-			}
-			_engine.punchPlayer(this, object);
-			messenger.messageRoomBySig(this.roomSig, "playerPunched", { owner: object.ownerId, victim: this.id, x: this.x, y: this.y });
-			emitBotEmote(this, "hurt"); // an AI racer reacts to getting knocked
+			this.handlePunchHit(object);
 			return;
 		}
 		if (object.isPuck) {
-			if (this.isInvuln()) {
-				return;
-			}
-			_engine.puckPlayer(object, this);
-			messenger.messageRoomBySig(this.roomSig, "playerPunched", { owner: object.ownerId, victim: this.id, x: this.x, y: this.y });
+			this.handlePuckHit(object);
 			return;
 		}
 		if (object.isGate) {
@@ -476,187 +470,162 @@ class Player extends Circle {
 			return;
 		}
 		if (object.isMapCell) {
-			// Track sanctuary ground (the transparent background type) for the
-			// force-shield in isProtected(). A player only "is on" the one cell this
-			// hit reports, so this reflects their current footing every tick.
-			this.onSanctuary = (object.id == c.tileMap.background.id);
-			if (object.id == c.tileMap.background.id) {
-				// Transparent lobby "background" / sanctuary ground: behaves as normal
-				// terrain. Applying normal grip here is what resets a player's physics
-				// when they step off an island onto background.
-				if (this.isZombie == true) {
-					this.applyInfectedMods(object);
-					return;
-				}
-				this.acel = object.acel;
-				this.brakeCoeff = object.brakeCoeff;
-				this.dragCoeff = object.dragCoeff;
-				return;
-			}
-			if (object.id == c.tileMap.normal.id) {
-				if (this.isZombie == true) {
-					this.applyInfectedMods(object);
-					return;
-				}
-				this.acel = object.acel;
-				this.brakeCoeff = object.brakeCoeff;
-				this.dragCoeff = object.dragCoeff;
-				return;
-			}
-			if (object.id == c.tileMap.slow.id) {
-				if (this.isZombie == true) {
-					this.applyInfectedMods(object);
-					return;
-				}
-				this.acel = object.acel;
-				this.dragCoeff = object.dragCoeff;
-				this.brakeCoeff = object.brakeCoeff;
-				return;
-			}
-			if (object.id == c.tileMap.fast.id) {
-				if (this.isZombie == true) {
-					this.applyInfectedMods(object);
-					return;
-				}
-				this.acel = object.acel;
-				this.dragCoeff = object.dragCoeff;
-				this.brakeCoeff = object.brakeCoeff;
-				return;
-			}
-			if (object.id == c.tileMap.lava.id) {
-				if (this.currentState == c.stateMap.lobby) {
-					// Lobby lava is a teaching prop: cosmetic death + safe respawn, never
-					// the real kill path (no killPlayer/removeNotch). Invuln players in
-					// their post-respawn grace window are immune.
-					if (this.isInvuln()) {
-						return;
-					}
-					this.lobbyRespawnPending = "death";
-					return;
-				}
-				if (this.isZombie == true) {
-					this.acel = object.acel;
-					this.dragCoeff = object.dragCoeff;
-					this.brakeCoeff = object.brakeCoeff;
-					return;
-				}
-				if (this.onFire > 0) {
-					if (this.fireTimer == null) {
-						this.fireTimer = Date.now();
-					}
-					this.checkFireTimer();
-					return;
-				}
-				this.killSelf();
-				return;
-			}
-			if (object.id == c.tileMap.ice.id) {
-				this.acel = object.acel;
-				this.brakeCoeff = object.brakeCoeff;
-				this.dragCoeff = object.dragCoeff;
-				return;
-			}
-			if (object.id == c.tileMap.goal.id) {
-				if (this.currentState == c.stateMap.lobby) {
-					// Lobby goal teaches the win condition: play the win cue + respawn,
-					// but never conclude/score (no reachedGoal/timeReached/playerConcluded/
-					// addNotch). Invuln players in their grace window are ignored.
-					if (this.isInvuln()) {
-						return;
-					}
-					this.lobbyRespawnPending = "goal";
-					return;
-				}
-				if (this.isZombie == true) {
-					this.acel = object.acel;
-					this.brakeCoeff = object.brakeCoeff;
-					this.dragCoeff = object.dragCoeff;
-					return;
-				}
-				this.alive = false;
-				this.reachedGoal = true;
-				this.timeReached = Date.now();
-				// "clutch" = beat the lava to the goal: only when the lava front was
-				// genuinely close (collapseMargin stamped each collapsing tick), so an
-				// uncontested slow-collapse stroll-in doesn't trigger the big eruption.
-				var clutch = this.collapseMargin != null && this.collapseMargin < c.audienceClutchMargin;
-				messenger.messageRoomBySig(this.roomSig, "playerConcluded", { id: this.id, clutch: clutch });
-				return;
-			}
-			if (object.id == c.tileMap.abilities.blindfold.id) {
-				if (this.ability != null || this.isZombie) {
-					return;
-				}
-				this.ability = new Blindfold(this.id, this.roomSig);
-				this.acquiredAbility = { mapID: object.voronoiId };
-				messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: this.id, ability: object.id, voronoiId: object.voronoiId });
-				return;
-			}
-			if (object.id == c.tileMap.abilities.swap.id) {
-				if (this.ability != null || this.isZombie) {
-					return;
-				}
-				this.ability = new Swap(this.id, this.roomSig);
-				this.acquiredAbility = { mapID: object.voronoiId };
-				messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: this.id, ability: object.id, voronoiId: object.voronoiId });
-				return;
-			}
-			if (object.id == c.tileMap.abilities.bomb.id) {
-				if (this.ability != null || this.isZombie) {
-					return;
-				}
-				this.ability = new Bomb(this.id, this.roomSig);
-				this.acquiredAbility = { mapID: object.voronoiId };
-				messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: this.id, ability: object.id, voronoiId: object.voronoiId });
-				return;
-			}
-			if (object.id == c.tileMap.abilities.speedBuff.id) {
-				if (this.ability != null || this.isZombie) {
-					return;
-				}
-				this.ability = new SpeedBuff(this.id, this.roomSig);
-				this.acquiredAbility = { mapID: object.voronoiId };
-				messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: this.id, ability: object.id, voronoiId: object.voronoiId });
-				return;
-			}
-			if (object.id == c.tileMap.abilities.speedDebuff.id) {
-				if (this.ability != null || this.isZombie) {
-					return;
-				}
-				this.ability = new SpeedDebuff(this.id, this.roomSig);
-				this.acquiredAbility = { mapID: object.voronoiId };
-				messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: this.id, ability: object.id, voronoiId: object.voronoiId });
-				return;
-			}
-			if (object.id == c.tileMap.abilities.tileSwap.id) {
-				if (this.ability != null || this.isZombie) {
-					return;
-				}
-				this.ability = new TileSwap(this.id, this.roomSig);
-				this.acquiredAbility = { mapID: object.voronoiId };
-				messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: this.id, ability: object.id, voronoiId: object.voronoiId });
-				return;
-			}
-			if (object.id == c.tileMap.abilities.iceCannon.id) {
-				if (this.ability != null || this.isZombie) {
-					return;
-				}
-				this.ability = new IceCannon(this.id, this.roomSig);
-				this.acquiredAbility = { mapID: object.voronoiId };
-				messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: this.id, ability: object.id, voronoiId: object.voronoiId });
-				return;
-			}
-			if (object.id == c.tileMap.abilities.cut.id) {
-				if (this.ability != null || this.isZombie) {
-					return;
-				}
-				this.ability = new Cut(this.id, this.roomSig);
-				this.acquiredAbility = { mapID: object.voronoiId };
-				messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: this.id, ability: object.id, voronoiId: object.voronoiId });
-				return;
-			}
-
+			this.handleMapCellHit(object);
 		}
+	}
+	handlePunchHit(object) {
+		// Invulnerable lobby players (freshly respawned, or held safe in the start
+		// circle) can't be punched — so a griefer can't shove them into lava or out
+		// of the safe circle. Normal players still bump freely. No-op outside lobby.
+		if (this.isInvuln()) {
+			return;
+		}
+		if (object.ownerInfected) {
+			this.infect();
+		}
+		if (!object.mapOwned) {
+			this.setPunchedBy(object.ownerId);
+		}
+		_engine.punchPlayer(this, object);
+		messenger.messageRoomBySig(this.roomSig, "playerPunched", { owner: object.ownerId, victim: this.id, x: this.x, y: this.y });
+		emitBotEmote(this, "hurt"); // an AI racer reacts to getting knocked
+		return;
+	}
+	handlePuckHit(object) {
+		if (this.isInvuln()) {
+			return;
+		}
+		_engine.puckPlayer(object, this);
+		messenger.messageRoomBySig(this.roomSig, "playerPunched", { owner: object.ownerId, victim: this.id, x: this.x, y: this.y });
+		return;
+	}
+	// Apply the terrain/lava/goal effect of the cell the player is on; if it wasn't
+	// a terrain tile, fall through to ability-tile pickup.
+	handleMapCellHit(object) {
+		// Track sanctuary ground (the transparent background type) for the
+		// force-shield in isProtected(). A player only "is on" the one cell this
+		// hit reports, so this reflects their current footing every tick.
+		this.onSanctuary = (object.id == c.tileMap.background.id);
+		if (object.id == c.tileMap.background.id) {
+			// Transparent lobby "background" / sanctuary ground: behaves as normal
+			// terrain. Applying normal grip here is what resets a player's physics
+			// when they step off an island onto background.
+			if (this.isZombie == true) {
+				this.applyInfectedMods(object);
+				return;
+			}
+			this.acel = object.acel;
+			this.brakeCoeff = object.brakeCoeff;
+			this.dragCoeff = object.dragCoeff;
+			return;
+		}
+		if (object.id == c.tileMap.normal.id) {
+			if (this.isZombie == true) {
+				this.applyInfectedMods(object);
+				return;
+			}
+			this.acel = object.acel;
+			this.brakeCoeff = object.brakeCoeff;
+			this.dragCoeff = object.dragCoeff;
+			return;
+		}
+		if (object.id == c.tileMap.slow.id) {
+			if (this.isZombie == true) {
+				this.applyInfectedMods(object);
+				return;
+			}
+			this.acel = object.acel;
+			this.dragCoeff = object.dragCoeff;
+			this.brakeCoeff = object.brakeCoeff;
+			return;
+		}
+		if (object.id == c.tileMap.fast.id) {
+			if (this.isZombie == true) {
+				this.applyInfectedMods(object);
+				return;
+			}
+			this.acel = object.acel;
+			this.dragCoeff = object.dragCoeff;
+			this.brakeCoeff = object.brakeCoeff;
+			return;
+		}
+		if (object.id == c.tileMap.lava.id) {
+			if (this.currentState == c.stateMap.lobby) {
+				// Lobby lava is a teaching prop: cosmetic death + safe respawn, never
+				// the real kill path (no killPlayer/removeNotch). Invuln players in
+				// their post-respawn grace window are immune.
+				if (this.isInvuln()) {
+					return;
+				}
+				this.lobbyRespawnPending = "death";
+				return;
+			}
+			if (this.isZombie == true) {
+				this.acel = object.acel;
+				this.dragCoeff = object.dragCoeff;
+				this.brakeCoeff = object.brakeCoeff;
+				return;
+			}
+			if (this.onFire > 0) {
+				if (this.fireTimer == null) {
+					this.fireTimer = Date.now();
+				}
+				this.checkFireTimer();
+				return;
+			}
+			this.killSelf();
+			return;
+		}
+		if (object.id == c.tileMap.ice.id) {
+			this.acel = object.acel;
+			this.brakeCoeff = object.brakeCoeff;
+			this.dragCoeff = object.dragCoeff;
+			return;
+		}
+		if (object.id == c.tileMap.goal.id) {
+			if (this.currentState == c.stateMap.lobby) {
+				// Lobby goal teaches the win condition: play the win cue + respawn,
+				// but never conclude/score (no reachedGoal/timeReached/playerConcluded/
+				// addNotch). Invuln players in their grace window are ignored.
+				if (this.isInvuln()) {
+					return;
+				}
+				this.lobbyRespawnPending = "goal";
+				return;
+			}
+			if (this.isZombie == true) {
+				this.acel = object.acel;
+				this.brakeCoeff = object.brakeCoeff;
+				this.dragCoeff = object.dragCoeff;
+				return;
+			}
+			this.alive = false;
+			this.reachedGoal = true;
+			this.timeReached = Date.now();
+			// "clutch" = beat the lava to the goal: only when the lava front was
+			// genuinely close (collapseMargin stamped each collapsing tick), so an
+			// uncontested slow-collapse stroll-in doesn't trigger the big eruption.
+			var clutch = this.collapseMargin != null && this.collapseMargin < c.audienceClutchMargin;
+			messenger.messageRoomBySig(this.roomSig, "playerConcluded", { id: this.id, clutch: clutch });
+			return;
+		}
+		this.tryAcquireAbility(object);
+	}
+	// Pick up an ability tile. Returns true if `object` was an ability tile (so the
+	// caller stops here), whether or not it was actually acquired — already holding
+	// an ability, or being a zombie, blocks the pickup but still counts as handled.
+	tryAcquireAbility(object) {
+		var Ctor = ABILITY_TILE_CTORS[object.id];
+		if (Ctor == null) {
+			return false;
+		}
+		if (this.ability != null || this.isZombie) {
+			return true;
+		}
+		this.ability = new Ctor(this.id, this.roomSig);
+		this.acquiredAbility = { mapID: object.voronoiId };
+		messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: this.id, ability: object.id, voronoiId: object.voronoiId });
+		return true;
 	}
 	addNotch(notchesToWin) {
 		if (this.notches + 1 >= notchesToWin) {
