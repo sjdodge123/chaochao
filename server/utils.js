@@ -3,6 +3,7 @@ var fs = require('fs');
 const { map } = require('jquery');
 var maps = [];
 var mapListing = [];
+var editorMapListing = []; // mapListing minus lobbyOnly maps (the editor's list)
 var soundListing = [];
 var imgListing = [];
 
@@ -447,6 +448,14 @@ exports.getContentCount = function () {
 exports.getMapListings = function () {
     return mapListing;
 }
+// The map-editor map list excludes lobbyOnly maps (e.g. _lobbyTutorial.json):
+// they're lobby/tutorial-only, not user-editable race maps. Built in loadMaps()
+// from each map's own object (no index-alignment assumption). The full
+// getMapListings() is still used for contentDelivery so the play client can
+// preload the lobby map for client-side rendering.
+exports.getEditorMapListings = function () {
+    return editorMapListing;
+}
 exports.getSoundListings = function () {
     return soundListing;
 }
@@ -482,6 +491,12 @@ function loadMaps() {
                 loadedMap.parTime = cellGraph.computeMapParTime(loadedMap);
             }
             maps.push(loadedMap);
+            // The editor list excludes lobbyOnly maps (e.g. _lobbyTutorial.json).
+            // Built here from this file's own map object so it never relies on
+            // index alignment between mapListing and maps.
+            if (!loadedMap.lobbyOnly) {
+                editorMapListing.push(file);
+            }
         }
     });
 }
