@@ -25,8 +25,8 @@ var GP_AIM_DEADZONE = 0.35;      // right stick: only re-aim when pushed past th
 var GP_TRIGGER_THRESHOLD = 0.5;  // analog trigger counts as "pressed" past this
 var GP_AIM_MIN_DELTA = 2;        // deg; skip aim emits smaller than this
 var GP_AIM_MIN_INTERVAL = 50;    // ms; cap aim emits at ~20 Hz
-var LEAVE_CONFIRM_TIMEOUT_MS = 5000; // auto-cancel the inline "Leave?" confirm
-var LEAVE_HOLD_MS = 1500;            // hold the Leave button this long to confirm (anti-misfire)
+var LEAVE_CONFIRM_TIMEOUT_MS = 5000; // auto-cancel the inline "Leave?" confirm (when idle, not mid-hold)
+var LEAVE_HOLD_MS = 5000;            // hold the Leave button this long to confirm (anti-misfire)
 
 // --- standard-mapping button indices ---
 var GP_BTN_A = 0;     // attack / confirm
@@ -1416,6 +1416,12 @@ function pollLeaveConfirm(pad, lp) {
     if (bHeld) {
         if (lp._leaveHoldStart == null) {
             lp._leaveHoldStart = Date.now();
+            // Pause the idle auto-cancel while a hold is in progress, so the hold
+            // (which can be as long as the idle timeout) never gets cut short.
+            if (lp.leaveConfirmTimer) {
+                clearTimeout(lp.leaveConfirmTimer);
+                lp.leaveConfirmTimer = null;
+            }
         }
         var held = Date.now() - lp._leaveHoldStart;
         setBlockLeaveProgress(lp.slot, held / LEAVE_HOLD_MS);
@@ -1430,7 +1436,15 @@ function pollLeaveConfirm(pad, lp) {
         }
         return;
     }
-    lp._leaveHoldStart = null;
+    // Released before completing: reset progress and re-arm the idle auto-cancel.
+    if (lp._leaveHoldStart != null) {
+        lp._leaveHoldStart = null;
+        if (lp.leaveConfirm && !lp.leaveConfirmTimer) {
+            lp.leaveConfirmTimer = setTimeout(function () {
+                cancelLeaveConfirm(lp);
+            }, LEAVE_CONFIRM_TIMEOUT_MS);
+        }
+    }
     setBlockLeaveProgress(lp.slot, 0);
     // Not holding Leave: an attack press means "I want to keep playing" — resume.
     if (buttonPressedThisFrame(pad, GP_BTN_A, lp)) {
