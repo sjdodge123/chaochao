@@ -1105,21 +1105,26 @@ function buildPadPlayersUI() {
     padPlayersEl = el;
 }
 
-// Reconciles the in-game header each frame (and on join/drop). The per-controller
-// header is shown whenever a controller is connected OR 2+ local players are in;
-// otherwise the solo bottom bar. In header mode it renders: a block per joined
-// local player (mini controls), and a "press A to join" prompt per connected
-// controller that hasn't joined yet (the prompt becomes a mini-controls block
-// when that controller joins).
+// Pure count -> hint-UI-mode decision (kept tiny + side-effect-free so it can be
+// asserted in isolation): two or more ACTIVE local players -> the pinned per-player
+// top "blocks"; otherwise the single bottom "bar". The mode is keyed strictly off
+// how many local players are actually in the game, NOT how many controllers are
+// plugged in.
+function hintModeForPlayerCount(n) {
+    return n >= 2 ? "blocks" : "bar";
+}
+
+// Reconciles the in-game header each frame (and on join/drop). The per-player
+// header (top blocks) is shown for local co-op (2+ active local players); a single
+// player — keyboard, OR one controller bound to P1 — keeps the solo bottom bar.
+// A lone connected controller IS P1 (one local player), so it must show the bottom
+// bar; counting connected pads here is what wrongly forced blocks for one pad.
+// In header mode it also renders a "press A to join" prompt per connected controller
+// that hasn't joined yet (the prompt becomes a mini-controls block when it joins).
 function onLocalPlayersChanged() {
     var pads = (typeof navigator !== "undefined" && navigator.getGamepads) ? navigator.getGamepads() : [];
-    var nControllers = 0;
-    for (var i = 0; i < pads.length; i++) {
-        if (pads[i]) {
-            nControllers++;
-        }
-    }
-    var showBlocks = (typeof liveLocalPlayerCount === "function" && liveLocalPlayerCount() >= 2) || nControllers >= 1;
+    var nLocal = (typeof liveLocalPlayerCount === "function") ? liveLocalPlayerCount() : 1;
+    var showBlocks = (hintModeForPlayerCount(nLocal) === "blocks");
 
     if (!showBlocks) {
         if (hintUiMode === "blocks") {

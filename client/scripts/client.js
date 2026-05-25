@@ -884,6 +884,21 @@ function addLocalPlayer(slot, padIndex) {
 	if (localPlayers[slot]) {
 		return localPlayers[slot];
 	}
+	// Local co-op is NOT available in the editor's Preview/Playtest. Preview runs a
+	// single-human room (play.html?preview=1) and previewReturnToEditor only tracks
+	// the primary slot, so a second hot-joining pad would break the return-to-editor
+	// flow. Refuse the extra join here (this is the single funnel for every spawn
+	// path: the pad hot-join in tryClaimPadSlot AND the keyboard-bump re-home in
+	// claimPrimaryForKbm) and tell the player. NOTE: full co-op-in-preview support is
+	// a deferred follow-up — it needs server-side preview-room changes (createPreviewRoom
+	// accepting a second socket), which the server batch owns, so it's out of scope here.
+	if (previewMode) {
+		if (typeof showPadToast === "function") {
+			showPadToast("Local co-op isn't available in Preview", 3500);
+		}
+		debugLog("[localmp] blocked add in preview — co-op unsupported in Preview");
+		return null;
+	}
 	if (gameID == null) {
 		return null; // primary hasn't confirmed a room yet
 	}
