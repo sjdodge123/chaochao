@@ -112,10 +112,23 @@ function buildCard(room, maxPlayers) {
     info.appendChild(buildStat('Map', room.currentMap || 'Lobby'));
     info.appendChild(buildStat('Players', room.players + '/' + maxPlayers));
 
+    // A full or already-started room is surfaced (so it doesn't silently
+    // vanish) but can't be joined: grey the card and disable its button.
+    var joinable = room.joinable !== false;
     var joinBtn = document.createElement('a');
-    joinBtn.href = './play.html?gameid=' + encodeURIComponent(room.gameID);
-    joinBtn.className = 'btn btn-outline-info join-btn';
-    joinBtn.textContent = 'Join';
+    if (joinable) {
+        joinBtn.href = './play.html?gameid=' + encodeURIComponent(room.gameID);
+        joinBtn.className = 'btn btn-outline-info join-btn';
+        joinBtn.textContent = 'Join';
+    } else {
+        // Not joinable: a started match reads "In progress"; a room that's merely
+        // full (still in the lobby, not locked) reads "Full" — a slot may open up.
+        card.classList.add('gameCard-locked');
+        joinBtn.className = 'btn btn-outline-secondary join-btn disabled';
+        joinBtn.setAttribute('aria-disabled', 'true');
+        joinBtn.setAttribute('tabindex', '-1');
+        joinBtn.textContent = room.locked ? 'In progress' : 'Full';
+    }
 
     card.appendChild(info);
     card.appendChild(joinBtn);

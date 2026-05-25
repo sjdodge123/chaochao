@@ -13,16 +13,25 @@ exports.getRooms = function () {
 		return rooms;
 	}
 	for (var sig in roomList) {
-		if (roomList[sig].hasSpace() && !roomList[sig].isPreview) {
-			var room = roomList[sig];
-			rooms[sig] = {
-				state: room.game.currentState,
-				round: room.game.gameBoard.round,
-				currentMap: room.game.gameBoard.currentMap.name,
-				gameID: Number(sig),
-				players: room.game.playerCount,
-				playerColors: room.game.getPlayerColors(),
-			}
+		var room = roomList[sig];
+		// Preview rooms are private capacity-1 play-tests; never list them.
+		if (room.isPreview) {
+			continue;
+		}
+		// A full room, or one whose match has started (locked), can't be joined
+		// — but it should still appear so the join page can show it greyed out
+		// ("In progress") instead of having it silently vanish. Flag joinability
+		// explicitly (mirrors findARoom's matchmaking test).
+		var joinable = room.hasSpace() && !room.isLocked();
+		rooms[sig] = {
+			state: room.game.currentState,
+			round: room.game.gameBoard.round,
+			currentMap: room.game.gameBoard.currentMap.name,
+			gameID: Number(sig),
+			players: room.game.playerCount,
+			playerColors: room.game.getPlayerColors(),
+			joinable: joinable,
+			locked: room.isLocked(),
 		}
 	}
 	return rooms;
@@ -58,6 +67,14 @@ exports.joinARoom = function (sig, clientID) {
 	// A preview room is a private capacity-1 play-test; never let a second
 	// client (e.g. a guessed ?gameid= link) in once the creator has joined.
 	if (room.isPreview && !room.hasSpace()) {
+		return false;
+	}
+	// getRooms now advertises full and locked (mid-match) rooms so the join page
+	// can show them greyed out — but the disabled UI button is not the enforcement.
+	// Reject a hand-typed/shared ?gameid= (or "Join by ID") into a full or started
+	// room so it can't overflow capacity or drop a player into a live race. Mirrors
+	// findARoom's matchmaking test; preview rooms are handled above.
+	if (!room.isPreview && (!room.hasSpace() || room.isLocked())) {
 		return false;
 	}
 	room.join(clientID);
