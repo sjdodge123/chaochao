@@ -658,6 +658,18 @@ function registerAbilityHandlers(server) {
 		var cutter = playerList[owner];
 		if (cutter != null) {
 			spawnSlashEffect(cutter.x, cutter.y, cutter.angle, cutter.color);
+			// The cut shoves every other player (server game.cutPlayers pushes all
+			// non-owner players perpendicular to the line), so stamp each victim with
+			// the same hit-lines a punch leaves — coloured by the cutter, like
+			// playerPunched — so the impact reads on the players who got flung too.
+			var sparkColor = cutter.color || "white";
+			for (var id in playerList) {
+				var victim = playerList[id];
+				if (id == owner || victim == null || victim.alive == false) {
+					continue;
+				}
+				spawnHitEffect(victim.x, victim.y, sparkColor);
+			}
 		}
 		playerAbilityUsed(owner);
 		addTrauma(0.4);
