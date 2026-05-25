@@ -2301,10 +2301,11 @@ function drawPendingSwap() {
         // Per-tile progress so overlapping swaps each ramp on their own clock.
         var span = tile.end - tile.start;
         var prog = span > 0 ? clamp01((now - tile.start) / span) : 1;
-        var pulse = 0.5 + 0.5 * Math.sin((now / 1000) * (3 + 6 * prog) * Math.PI * 2);
-        // Electrical flicker: occasional dim frames, more frequent near the end.
-        var flicker = Math.random() < (0.08 + 0.2 * prog) ? 0.3 : 1.0;
-        var alpha = (0.18 + 0.4 * pulse) * flicker;
+        var pulse = 0.5 + 0.5 * Math.sin((now / 1000) * (2 + 3 * prog) * Math.PI * 2);
+        // Occasional, gentle dim frames (rarer and shallower than a hard strobe)
+        // so the warn-up reads as a calm electric glow, not an intense flicker.
+        var flicker = Math.random() < (0.03 + 0.07 * prog) ? 0.6 : 1.0;
+        var alpha = (0.15 + 0.32 * pulse) * flicker;
         if (!traceCellPath(gameContext, cell)) {
             continue;
         }
