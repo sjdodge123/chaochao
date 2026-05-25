@@ -86,6 +86,15 @@ class Player extends Circle {
 		this.punch = null;
 		this.punchedBy = null;
 		this.murderedBy = null;
+		// Persistent attributor for a *delayed* burn-on-lava death. punchedBy expires
+		// after c.playerKillWindow, but a killstreak fire shield can keep a victim
+		// burning on lava well past that window before they actually die — so we latch
+		// the attacker who shoved a still-attributed victim into the doom here, and at the
+		// actual lava burn-out death fold it back into punchedBy (handleMapCellHit). It is
+		// consumed ONLY by that lava death; cleared the moment the victim escapes — onto
+		// terrain (handleMapCellHit) or off every cell (resetGrip) — and on any death, so
+		// no later/unrelated death is ever credited to the old attacker.
+		this.burnedBy = null;
 
 		this.roundKills = 0;
 		this.multiKillCount = 0;
@@ -442,6 +451,11 @@ class Player extends Circle {
 	// keeps them sliding there until they step back onto real terrain. Zombies keep their
 	// infection handicap, measured against normal ground.
 	resetGrip() {
+		// Being off every map cell is also an escape from a burn-on-lava doom (e.g.
+		// shoved off the terrain edge / behind the gate while burning). This is the
+		// one escape path that bypasses handleMapCellHit, so clear the persistent burn
+		// attributor here too, mirroring the non-lava-cell clear in handleMapCellHit.
+		this.burnedBy = null;
 		if (this.isZombie == true) {
 			this.acel = c.playerBaseAcel * c.brutalRounds.infection.acelModifer;
 			this.dragCoeff = c.playerDragCoeff * c.brutalRounds.infection.dragModifer;
@@ -506,6 +520,13 @@ class Player extends Circle {
 		// force-shield in isProtected(). A player only "is on" the one cell this
 		// hit reports, so this reflects their current footing every tick.
 		this.onSanctuary = (object.id == c.tileMap.background.id);
+		// Standing on any non-lava cell means we've escaped a burn-on-lava doom: drop
+		// the persistent burn attributor so a later, unrelated lava death isn't credited
+		// to whoever last shoved us. A burning death is itself a lava hit (id == lava),
+		// so the attributor survives right up to the killSelf below.
+		if (object.id != c.tileMap.lava.id) {
+			this.burnedBy = null;
+		}
 		if (object.id == c.tileMap.background.id) {
 			// Transparent lobby "background" / sanctuary ground: behaves as normal
 			// terrain. Applying normal grip here is what resets a player's physics
@@ -570,8 +591,25 @@ class Player extends Circle {
 				if (this.fireTimer == null) {
 					this.fireTimer = Date.now();
 				}
+				// Latch the attacker who shoved us in while we're still attributed, so the
+				// credit survives even if the burn outlasts playerKillWindow. Refreshed
+				// each burning tick while punchedBy is live; once it expires, burnedBy keeps
+				// the last attacker. A self-inflicted burn (no attacker) leaves it null, so
+				// driving yourself into lava while on fire stays uncredited.
+				if (this.punchedBy != null) {
+					this.burnedBy = this.punchedBy;
+				}
 				this.checkFireTimer();
 				return;
+			}
+			// onFire == 0 here: this *is* the lava death (a fresh instant lava death, or
+			// the killstreak burn finally running out). If the kill window expired while
+			// we burned, hand the latched attributor back to the normal punchedBy ->
+			// murderedBy path. Doing it here, gated on an actual lava death, means only a
+			// burn-out death consumes burnedBy — gate / infection-timer / AFK / bomb
+			// deaths can never inherit a stale burn attributor.
+			if (this.punchedBy == null && this.burnedBy != null) {
+				this.punchedBy = this.burnedBy;
 			}
 			this.killSelf();
 			return;
@@ -655,6 +693,10 @@ class Player extends Circle {
 		if (packet.punchedBy != null) {
 			packet.murderedBy = packet.punchedBy;
 		}
+		// Drop any latched burn attributor on every death. A genuine burn-out death
+		// already folded it into punchedBy above (see handleMapCellHit's lava branch);
+		// any other death (gate / infection / AFK / bomb) must NOT inherit it.
+		packet.burnedBy = null;
 		packet.removeNotch();
 		packet.enabled = false;
 		packet.alive = false;
@@ -711,6 +753,7 @@ class Player extends Circle {
 		this.punch = null;
 		this.punchedBy = null;
 		this.murderedBy = null;
+		this.burnedBy = null;
 		this.roundKills = 0;
 		this.fellFromVictory = false;
 		this.openMultiKillWindow = false;

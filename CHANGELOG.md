@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### Bug fixes
+
+- Flame and burn kills now credit the player who shoved you onto the lava, even if your fire shield kept you burning for a few seconds before you went down.
 
 ## v0.8.1 — 2026-05-25
 
