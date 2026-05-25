@@ -232,6 +232,12 @@ canvas {
     flex: 0 0 auto;
     min-width: 90px;
 }
+.gameCard-locked {
+    opacity: 0.55;
+}
+.gameCard-locked .join-btn.disabled {
+    pointer-events: none;
+}
 .empty-state {
     text-align: center;
     padding: 1.5rem 1rem;
