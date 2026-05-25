@@ -307,6 +307,47 @@ canvas {
     position: relative;
     margin: 0;
 }
+/* Rotate-to-play overlay. The game is a fixed 16:9 landscape arena, so rather
+   than squeeze it into a portrait sliver we cover the screen on touch devices
+   held in portrait and ask the player to rotate. Pure CSS via a media query —
+   it appears/clears instantly on orientation change, no JS. */
+#rotatePrompt {
+    display: none;
+}
+@keyframes rotateHint {
+    0%, 30% { transform: rotate(0deg); }
+    60%, 100% { transform: rotate(90deg); }
+}
+@media (orientation: portrait) and (hover: none) and (pointer: coarse) {
+    #rotatePrompt {
+        display: flex;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 10000;
+        background: var(--board-bg);
+        color: var(--canvas-ink);
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 24px;
+    }
+    #rotatePrompt .rotate-inner {
+        max-width: 320px;
+    }
+    #rotatePrompt .rotate-icon {
+        font-size: 3.5rem;
+        display: block;
+        margin: 0 auto 18px;
+        animation: rotateHint 1.8s ease-in-out infinite;
+    }
+    #rotatePrompt .rotate-text {
+        font-size: 1.15rem;
+        line-height: 1.4;
+    }
+}
 #progressContainer{
     width: 50%;
     border-style: solid;
