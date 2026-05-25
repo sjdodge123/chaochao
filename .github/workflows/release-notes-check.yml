@@ -45,9 +45,34 @@ jobs:
           else
             echo "Changed game mechanic files:"
             echo "$changed"
-            echo "changed<<EOF" >> "$GITHUB_OUTPUT"
-            echo "$changed" >> "$GITHUB_OUTPUT"
-            echo "EOF" >> "$GITHUB_OUTPUT"
+            # Exempt non-player-facing work (CLAUDE.md: refactors, perf, UI/CSS,
+            # build/CI are exempt). If EVERY commit in the range that touches a
+            # mechanic file is a non-feature conventional commit
+            # (refactor/perf/build/ci/docs/style/test/chore), no release note is
+            # required. A single feat/fix-type touch flips it back to required, so
+            # real mechanic changes still need a note. On squash-merge to main the
+            # squashed commit's subject is what's judged — type it accordingly.
+            exempt_regex='^(refactor|perf|build|ci|docs|style|test|chore)(\(.+\))?!?:'
+            requires_notes=0
+            for sha in $(git rev-list "$base".."$head"); do
+              if git diff-tree --no-commit-id --name-only -r "$sha" -- $mechanic_paths | grep -q .; then
+                subject=$(git log -1 --format=%s "$sha")
+                if printf '%s' "$subject" | grep -qiE "$exempt_regex"; then
+                  echo "exempt (non-feature): $sha $subject"
+                else
+                  echo "requires notes: $sha $subject"
+                  requires_notes=1
+                fi
+              fi
+            done
+            if [ "$requires_notes" -eq 0 ]; then
+              echo "All commits touching game-mechanic files are non-feature type; release notes not required."
+              echo "changed=" >> "$GITHUB_OUTPUT"
+            else
+              echo "changed<<EOF" >> "$GITHUB_OUTPUT"
+              echo "$changed" >> "$GITHUB_OUTPUT"
+              echo "EOF" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - name: Require a CHANGELOG.md entry
