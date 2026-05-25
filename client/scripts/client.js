@@ -31,6 +31,14 @@ function registerPrimaryHandlers(server) {
 		server.emit("musicTrackEnded", trackName);
 	};
 
+	registerConnectionHandlers(server);
+	registerScoreHandlers(server);
+	registerStateHandlers(server);
+	registerCombatHandlers(server);
+	registerAbilityHandlers(server);
+	registerEffectHandlers(server);
+}
+function registerConnectionHandlers(server) {
 	server.on('welcome', function (id) {
 		debugLog("welcome, myID=", id);
 		myID = id;
@@ -172,6 +180,8 @@ function registerPrimaryHandlers(server) {
 		setupPage();
 	});
 
+}
+function registerScoreHandlers(server) {
 	server.on("firstPlaceWinner", function (id) {
 		createFirstRankSymbol(id);
 	});
@@ -248,6 +258,8 @@ function registerPrimaryHandlers(server) {
 	});
 
 	//Game State Map changes
+}
+function registerStateHandlers(server) {
 	server.on("startWaiting", function (packet) {
 		debugLog("startWaiting");
 		setLobbySfxDampen(false); // lobby emptied back to waiting — restore full SFX
@@ -362,6 +374,8 @@ function registerPrimaryHandlers(server) {
 		gameLength = length;
 	});
 
+}
+function registerCombatHandlers(server) {
 	server.on("punch", function (packet) {
 		var punch = spawnPunch(packet);
 		spawnPunchEffect(punch);
@@ -520,6 +534,8 @@ function registerPrimaryHandlers(server) {
 		}
 		playSound(packet.death ? playerDiedSound : playerFinished);
 	});
+}
+function registerAbilityHandlers(server) {
 	server.on("multiKill", function (count) {
 		if (count == 2) {
 			playSound(doubleKill);
@@ -655,6 +671,8 @@ function registerPrimaryHandlers(server) {
 		playerAbilityUsed(owner);
 		playSound(iceCannon);
 	});
+}
+function registerEffectHandlers(server) {
 	server.on("lavaExplosion", function () {
 		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
 			playSound(lavaExplosion);
