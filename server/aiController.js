@@ -39,6 +39,37 @@ var FEELER_SPEED_K = 0.7;       // feeler grows with speed (stopping-distance pr
 var FEELER_MAX = 120;           // px: cap feeler reach
 var FEELER_SIDE_DEG = 32;       // angle of the two side feelers off the heading
 var FEELER_AVOID_STRENGTH = 3.0;// weight of the predictive feeler push (strongest)
+var FEELER_STEP = 13;           // px between samples along a feeler (catch thin lava fingers)
+var FEELER_MAX_SAMPLES = 8;     // cap samples per feeler so isLavaAt cost stays bounded at high speed
+var FEELER_BOXED_NEAR = 0.6;    // both-sides "boxed in" brakes only when lava is this near (frac of side reach)
+// Anti-stuck escape: in a tight/looping corridor (sidewinder) over-cautious
+// soft-field repulsion can stall a momentum car at a narrow gap — it crawls or
+// slowly orbits one spot ("line up at the 1px pinch and wait"). When a bot loiters
+// inside STUCK_RADIUS for STUCK_TRIGGER seconds, a STAGE-1 escape relaxes the soft
+// lava field + kills the random wobble so it can hug a wall and thread the gap.
+var STUCK_RADIUS = 40;          // px: staying within this of an anchor spot = no real headway
+var STUCK_TRIGGER = 1.6;        // s loitering inside STUCK_RADIUS before an escape fires
+var ESCAPE_MS = 1400;           // ms an escape lasts once triggered
+var ESCAPE_LAVA_RELAX = 0.45;   // shrink the SOFT lava-centering field during an escape (thread the gap)
+var ESCAPE_WANDER_KILL = true;  // suppress the random wobble during an escape so it doesn't fight the gap
+// Escalation: if stage 1 doesn't free the bot and it re-triggers within
+// ESCALATE_WINDOW, it's wedged tighter than the soft approach can solve. STAGE 2
+// COMMITS — throttle floor, drop the soft brake, and lean the steer toward the
+// route exit (shrunk feeler push) — so it threads the gap or, if it's sealed in by
+// lava, dies clearing the pinch instead of clogging it. Only ever reached by a bot
+// already stuck through a failed stage-1 escape, so a normally-racing bot is
+// untouched. (The hard feeler BRAKE that prevents driving point-blank into lava
+// still applies in stage 1; stage 2 is the deliberate thread-or-die override.)
+var ESCAPE_ESCALATE_WINDOW = 4000; // ms: re-trigger within this counts as a repeat
+var ESCAPE_COMMIT_THROTTLE = 0.75; // stage-2 committed throttle floor
+var ESCAPE_COMMIT_FEELER = 0.3;    // stage-2: shrink the feeler PUSH so the bot drives toward the
+                                   // route exit (carrot) instead of being bent back into the pocket
+// Steering low-pass. In a narrow lava-walled corridor the feeler + lava-field push
+// flips side every tick; undamped, that vibration grows until the momentum car
+// clips a wall (death) or cancels its own forward motion (the "stuck" crawl). We
+// blend this tick's steer vector with the last so the bot holds a stable line down
+// the lane. STEER_SMOOTH is the weight on the NEW vector (lower = more damping).
+var STEER_SMOOTH = 0.4;
 
 function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
 
@@ -62,6 +93,13 @@ function newBotState(profile) {
         combatUntil: 0,    // ms: end of the current offensive-punch burst
         combatRestUntil: 0,// ms: earliest a new combat burst may start (refractory)
         gateY: null,       // gated-phase vertical jockey target
+        progressAnchor: null,// {x,y}: spot the bot last made real headway from (anti-stuck)
+        progressAt: 0,     // ms: when it last re-anchored there
+        prevSx: null,      // steering low-pass: previous tick's (unnormalized) steer vector
+        prevSy: null,
+        escapeUntil: 0,    // ms: end of an active stuck-escape (relax soft fields)
+        lastEscapeAt: 0,   // ms: when the current escape was triggered
+        escapeStage: 0,    // 1 = gentle (relax+wander-kill), 2 = committed (thread-or-die)
         heldAbilityId: null,// which ability the bot is currently holding
         abilityHeldSince: 0,// ms: when it picked up the held ability (hold-timeout)
         pathSeed: 1 + Math.floor(Math.random() * 1e9), // per-bot route-diversity seed
@@ -234,9 +272,26 @@ function rotate(x, y, deg) {
     return { x: x * cs - y * sn, y: x * sn + y * cs };
 }
 
+// Walk a feeler ray from the bot out to `reach`, sampling every ~FEELER_STEP px
+// (capped at FEELER_MAX_SAMPLES). Returns the fraction [0..1] of `reach` at which
+// lava first appears, or 1 if the ray is clear. Endpoint-only checks stepped over
+// thin lava fingers narrower than the feeler (so the bot drove straight into them);
+// stepping along the ray catches them, and the fraction lets callers tell "lava
+// right here" from "lava far down the feeler".
+function rayLavaFrac(bot, ctx, dirX, dirY, reach) {
+    var steps = Math.ceil(reach / FEELER_STEP);
+    if (steps < 1) { steps = 1; }
+    if (steps > FEELER_MAX_SAMPLES) { steps = FEELER_MAX_SAMPLES; }
+    for (var i = 1; i <= steps; i++) {
+        var t = i / steps;
+        if (isLavaAt(ctx, bot.x + dirX * reach * t, bot.y + dirY * reach * t)) { return t; }
+    }
+    return 1;
+}
+
 // Predictive avoidance: cast three feelers ahead along the bot's heading (center
-// + two sides). If a feeler lands on lava, push perpendicular toward the clear
-// side and flag a hard brake. Returns { x, y, brake } where x/y is a steer push.
+// + two sides). If a feeler crosses lava, push perpendicular toward the clear side
+// and flag a hard brake. Returns { x, y, brake } where x/y is a steer push.
 function feelerAvoid(bot, ctx, headX, headY, speed) {
     var reach = FEELER_BASE + speed * FEELER_SPEED_K;
     // Lightning round speeds everyone up — look farther ahead to keep control.
@@ -246,21 +301,24 @@ function feelerAvoid(bot, ctx, headX, headY, speed) {
     // Risk: high-risk personalities use shorter feelers, cutting closer to lava.
     if (ctx.riskMult != null) { reach *= ctx.riskMult; }
     var px = 0, py = 0, brake = false;
-    // Center feeler — straight ahead.
-    if (isLavaAt(ctx, bot.x + headX * reach, bot.y + headY * reach)) {
+    // Center feeler — lava anywhere ahead (within stopping distance) means slow down.
+    if (rayLavaFrac(bot, ctx, headX, headY, reach) < 1) {
         brake = true;
     }
     // Side feelers, slightly shorter. Lava on one side pushes toward the other.
     var sd = reach * 0.8;
     var lDir = rotate(headX, headY, FEELER_SIDE_DEG);
     var rDir = rotate(headX, headY, -FEELER_SIDE_DEG);
-    var lLava = isLavaAt(ctx, bot.x + lDir.x * sd, bot.y + lDir.y * sd);
-    var rLava = isLavaAt(ctx, bot.x + rDir.x * sd, bot.y + rDir.y * sd);
+    var lFrac = rayLavaFrac(bot, ctx, lDir.x, lDir.y, sd);
+    var rFrac = rayLavaFrac(bot, ctx, rDir.x, rDir.y, sd);
+    var lLava = lFrac < 1, rLava = rFrac < 1;
     // Perpendicular to heading: right = (headY, -headX), left = (-headY, headX).
     if (lLava && !rLava) { px += headY; py += -headX; }        // push right
     else if (rLava && !lLava) { px += -headY; py += headX; }   // push left
-    else if (lLava && rLava) { brake = true; }                 // boxed in — slow down
-    if (brake && !(lLava || rLava)) { /* only center lava: rely on carrot + brake */ }
+    // Lava on BOTH sides only counts as "boxed in" (brake) when it's genuinely
+    // close on both — otherwise it's just a corridor with walls a safe distance
+    // off, and braking there would needlessly grind the bot to a crawl.
+    else if (lLava && rLava && lFrac < FEELER_BOXED_NEAR && rFrac < FEELER_BOXED_NEAR) { brake = true; }
     return { x: px, y: py, brake: brake };
 }
 
@@ -534,7 +592,15 @@ function decideAbility(bot, ctx, ability, nav) {
         // Shove nearby rivals aside (perpendicular to facing); aim along travel.
         var nrc = nearestRival(bot, ctx.players);
         var range = forced ? CUT_RANGE * 2 : CUT_RANGE;
-        if (nrc != null && nrc.dist < range && (armed || forced)) { aimAhead(); bot.attack = true; }
+        if (nrc != null && nrc.dist < range && (armed || forced)) {
+            aimAhead(); bot.attack = true;
+        } else if (nrc != null) {
+            // Still holding it: point the on-screen Cut beam AT the nearest rival
+            // (8-way snapped) instead of letting it spin with the bot's steering, so
+            // a held Cut reads as a deliberate threat lined up on a target rather
+            // than a wandering line. Facing only — movement uses targetDirX/Y.
+            bot.angle = snap45(angleDeg(bot.x, bot.y, nrc.player.x, nrc.player.y));
+        }
         return;
     }
     if (id === AB.speedDebuff.id) {
@@ -628,6 +694,40 @@ function decideAttack(bot, ctx, nav) {
 function steerBot(bot, ctx, dt) {
     var ai = bot.ai || (bot.ai = newBotState(bot.profile));
 
+    // --- Anti-stuck probe: hold an anchor at the last spot the bot made real
+    // headway from. While it loiters within STUCK_RADIUS of that anchor (crawling
+    // in place, or circling tighter than that radius), clock the time; the moment it
+    // breaks STUCK_RADIUS it's made real headway, so re-anchor AND end any escape /
+    // reset the escalation (the next pinch starts fresh at the gentle stage). Loiter
+    // past STUCK_TRIGGER and the bot is wedged — typically over-cautious soft-field
+    // repulsion stalling it at a narrow gap (the "line up at the 1px pinch and wait"
+    // failure). Open an escape window (stage 1 gentle; stage 2 committed only if a
+    // PRIOR escape that wasn't cleared by real progress re-fires); the steer code
+    // below relaxes the SOFT lava field + drops the wobble so it threads the gap,
+    // while the hard ray-sampled feeler brake still guards against driving INTO lava.
+    // (Zombies skip this — they ignore the goal and chase prey.) ---
+    var nowProbe = Date.now();
+    var escaping = false, committed = false;
+    if (!bot.isZombie) {
+        if (ai.progressAnchor == null || mag(bot.x - ai.progressAnchor.x, bot.y - ai.progressAnchor.y) > STUCK_RADIUS) {
+            ai.progressAnchor = { x: bot.x, y: bot.y };
+            ai.progressAt = nowProbe;
+            ai.escapeUntil = 0; ai.escapeStage = 0; ai.lastEscapeAt = 0; // real headway -> escape over
+        } else if ((nowProbe - ai.progressAt) / 1000 >= STUCK_TRIGGER && nowProbe >= ai.escapeUntil) {
+            // Re-triggering after a previous escape that real progress never cleared
+            // means the gentle approach didn't free it -> escalate to a committed
+            // thread-or-die push (keyed off lastEscapeAt, which only survives if no
+            // re-anchor reset it — so a different, freshly-reached pinch starts at 1).
+            ai.escapeStage = (nowProbe - ai.lastEscapeAt) <= ESCAPE_ESCALATE_WINDOW ? 2 : 1;
+            ai.lastEscapeAt = nowProbe;
+            ai.escapeUntil = nowProbe + ESCAPE_MS;
+            ai.progressAnchor = { x: bot.x, y: bot.y };
+            ai.progressAt = nowProbe;
+        }
+        escaping = nowProbe < ai.escapeUntil;
+        committed = escaping && ai.escapeStage === 2;
+    }
+
     // --- Re-path on a throttle (and immediately if we have no path) ---
     ai.repathTimer -= dt;
     if (ai.repathTimer <= 0 || ai.waypoints == null) {
@@ -706,7 +806,12 @@ function steerBot(bot, ctx, dt) {
         // lava) still HUNTS — fall through to the intercept override below, which
         // sets desired toward the prey. Don't freeze in the no-path hold.
     } else {
-        // No path and not collapsing: hold position (don't drive blindly).
+        // No path and not collapsing: hold position (don't drive blindly). A walled
+        // bot isn't "stuck at a pinch", so clear any charging escape and re-anchor
+        // here — otherwise it would silently escalate to a committed launch the
+        // instant a route reappears, firing it off a standstill with brakes off.
+        ai.escapeUntil = 0; ai.escapeStage = 0; ai.lastEscapeAt = 0;
+        ai.progressAnchor = { x: bot.x, y: bot.y }; ai.progressAt = nowProbe;
         bot.targetDirX = 0; bot.targetDirY = 0; bot.braking = true; bot.attack = false;
         return;
     }
@@ -757,7 +862,10 @@ function steerBot(bot, ctx, dt) {
     var wanderMax = 38 * wobble;
     if (ai.wander > wanderMax) { ai.wander = wanderMax; }
     if (ai.wander < -wanderMax) { ai.wander = -wanderMax; }
-    if (wobble > 0.02) {
+    // While escaping a stuck spot, drop the random wobble — a low-skill bot's
+    // wander is what keeps shoving it into the wall it's trying to thread.
+    if (escaping && ESCAPE_WANDER_KILL) { ai.wander *= 0.5; }
+    else if (wobble > 0.02) {
         var rw = rotate(desiredX, desiredY, ai.wander);
         desiredX = rw.x; desiredY = rw.y;
     }
@@ -796,8 +904,32 @@ function steerBot(bot, ctx, dt) {
     }
 
     var lavaW = LAVA_AVOID_STRENGTH * (ctx.riskMult != null ? ctx.riskMult : 1);
-    var sx = desiredX + fl.x * FEELER_AVOID_STRENGTH + lv.x * lavaW + hz.x * HAZARD_AVOID_STRENGTH + exX;
-    var sy = desiredY + fl.y * FEELER_AVOID_STRENGTH + lv.y * lavaW + hz.y * HAZARD_AVOID_STRENGTH + exY;
+    // While escaping, relax the soft lava-centering field so the bot can hug a wall
+    // to thread a narrow gap (the feeler brake still stops it driving INTO lava).
+    if (escaping) { lavaW *= ESCAPE_LAVA_RELAX; }
+    // Stage-2 commit also leans off the feeler push so the steer points toward the
+    // route exit (desired/carrot) rather than being bent back into the pocket.
+    var feelerW = committed ? FEELER_AVOID_STRENGTH * ESCAPE_COMMIT_FEELER : FEELER_AVOID_STRENGTH;
+    var sx = desiredX + fl.x * feelerW + lv.x * lavaW + hz.x * HAZARD_AVOID_STRENGTH + exX;
+    var sy = desiredY + fl.y * feelerW + lv.y * lavaW + hz.y * HAZARD_AVOID_STRENGTH + exY;
+    // Steering low-pass (see STEER_SMOOTH): blend with the previous tick's steer so
+    // the side-flipping feeler/lava push in a tight corridor can't build into a
+    // vibration that clips a wall or cancels forward motion.
+    if (bot.isZombie) {
+        // Zombies beeline and want instant response — bypass the filter, and drop
+        // the stored history so a zombie->racer revert (infection round end) doesn't
+        // blend in a stale pre-zombie vector.
+        ai.prevSx = null; ai.prevSy = null;
+    } else if (committed) {
+        // A committed (thread-or-die) escape wants its decisive line undiluted, so
+        // snap the filter to it instead of blending in the pre-escape pocket vector.
+        ai.prevSx = sx; ai.prevSy = sy;
+    } else {
+        if (ai.prevSx == null) { ai.prevSx = sx; ai.prevSy = sy; }
+        sx = STEER_SMOOTH * sx + (1 - STEER_SMOOTH) * ai.prevSx;
+        sy = STEER_SMOOTH * sy + (1 - STEER_SMOOTH) * ai.prevSy;
+        ai.prevSx = sx; ai.prevSy = sy;
+    }
     var sm = mag(sx, sy);
     var steerX = desiredX, steerY = desiredY;
     if (sm > 0.0001) { steerX = sx / sm; steerY = sy / sm; }
@@ -809,6 +941,12 @@ function steerBot(bot, ctx, dt) {
     var throttle = 1.0;
     var braking = false;
     var lavaField = mag(lv.x, lv.y);
+    // During an escape, soften the throttle's lava-PROXIMITY gate too (not just the
+    // steering field above) — otherwise being wedged at a lava-walled pinch (exactly
+    // when lavaField is strongest) keeps even a stage-1 escape pinned to the 0.42
+    // crawl, so it never builds the momentum to thread. A real lava-DEAD-AHEAD brake
+    // (fl.brake) still bites, so this doesn't drive it straight into lava.
+    if (escaping) { lavaField *= ESCAPE_LAVA_RELAX; }
     if (fl.brake || lavaField > 1.2) {
         throttle = 0.42;
         if (speed > BRAKE_SPEED_MIN) { braking = true; }
@@ -830,6 +968,17 @@ function steerBot(bot, ctx, dt) {
     if (speedFactor > 1.45) { speedFactor = 1.45; }
     if (speedFactor < 0.4) { speedFactor = 0.4; }
     throttle *= speedFactor;
+
+    // Stage-2 (committed) escape: a bot wedged at a pinch the gentle stage-1
+    // approach couldn't thread stops loitering and commits down its (still
+    // feeler/lava-avoidance-bent) line — threading the gap or, if it's sealed in by
+    // lava, dying to clear the pinch. Either way it no longer clogs the spot and
+    // "lines up forever". Only ever reached by a bot already stuck through a failed
+    // gentle escape, so it can't affect a normally-racing bot.
+    if (committed) {
+        if (throttle < ESCAPE_COMMIT_THROTTLE) { throttle = ESCAPE_COMMIT_THROTTLE; }
+        braking = false;
+    }
 
     // A hunting zombie commits fully: it ignores lava and only wants to catch prey,
     // so skip the cautious governor, rubber-band easing, and braking — full chase.
