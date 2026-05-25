@@ -25,8 +25,8 @@ var GP_AIM_DEADZONE = 0.35;      // right stick: only re-aim when pushed past th
 var GP_TRIGGER_THRESHOLD = 0.5;  // analog trigger counts as "pressed" past this
 var GP_AIM_MIN_DELTA = 2;        // deg; skip aim emits smaller than this
 var GP_AIM_MIN_INTERVAL = 50;    // ms; cap aim emits at ~20 Hz
-var LEAVE_CONFIRM_TIMEOUT_MS = 5000; // auto-cancel the inline "Leave?" confirm (when idle, not mid-hold)
 var LEAVE_HOLD_MS = 5000;            // hold the Leave button this long to confirm (anti-misfire)
+var LEAVE_CONFIRM_TIMEOUT_MS = 8000; // idle auto-cancel of the "Leave?" confirm; kept > LEAVE_HOLD_MS so a hold started late in the window can't race the cancel (and it's paused while actively holding)
 
 // --- standard-mapping button indices ---
 var GP_BTN_A = 0;     // attack / confirm

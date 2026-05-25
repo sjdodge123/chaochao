@@ -1496,16 +1496,21 @@ function drawPlayer(player, dt) {
         gameContext.save();
         gameContext.globalAlpha = NONLOCAL_KART_ALPHA;
     }
-    gameContext.drawImage(
-        sprite,
-        player.x + camera.getCameraX() - sprite.halfSize,
-        player.y + camera.getCameraY() - sprite.halfSize
-    );
-    if (dimKart) {
-        gameContext.restore();
-    }
-    if (immune) {
-        gameContext.restore();
+    // try/finally so a thrown drawImage (e.g. an undecoded sprite -> InvalidStateError)
+    // can't skip the restore() and leak the dimmed/flash alpha onto the rest of the frame.
+    try {
+        gameContext.drawImage(
+            sprite,
+            player.x + camera.getCameraX() - sprite.halfSize,
+            player.y + camera.getCameraY() - sprite.halfSize
+        );
+    } finally {
+        if (dimKart) {
+            gameContext.restore();
+        }
+        if (immune) {
+            gameContext.restore();
+        }
     }
 
     if (player.ability != null) {

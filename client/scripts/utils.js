@@ -79,7 +79,10 @@ function pos(point, length, angle) {
 // title entrance, and the tileSwap telegraph. All take/return normalized t in
 // [0,1] unless noted.
 function clamp01(t) {
-    if (t < 0) return 0;
+    // NaN-safe: a NaN here (e.g. a 0/0 from a zero-duration fade) would otherwise
+    // slip through both comparisons and poison globalAlpha, hiding every draw in
+    // the context. Clamp it to 0 so a bad input degrades to "invisible", not "NaN".
+    if (!(t > 0)) return 0;   // false for t<=0 AND for NaN
     if (t > 1) return 1;
     return t;
 }
