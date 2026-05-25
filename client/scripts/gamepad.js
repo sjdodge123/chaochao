@@ -26,7 +26,7 @@ var GP_TRIGGER_THRESHOLD = 0.5;  // analog trigger counts as "pressed" past this
 var GP_AIM_MIN_DELTA = 2;        // deg; skip aim emits smaller than this
 var GP_AIM_MIN_INTERVAL = 50;    // ms; cap aim emits at ~20 Hz
 var LEAVE_CONFIRM_TIMEOUT_MS = 5000; // auto-cancel the inline "Leave?" confirm
-var LEAVE_HOLD_MS = 800;             // hold the Leave button this long to confirm (anti-misfire)
+var LEAVE_HOLD_MS = 1500;            // hold the Leave button this long to confirm (anti-misfire)
 
 // --- standard-mapping button indices ---
 var GP_BTN_A = 0;     // attack / confirm
