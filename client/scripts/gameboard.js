@@ -93,7 +93,11 @@ function updateGameboard(dt) {
 	updateCollapseShockwaves(dt);
 	updateEffects(dt);
 	updateShake(dt);
-	if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
+	// Tile-based movement particles also run in the lobby — players drive around
+	// on a real terrain map there, so the dust/grass/sand/ice flecks give the same
+	// movement feedback as a race (was previously gated to racing/collapsing only).
+	if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing ||
+		currentState == config.stateMap.lobby) {
 		updateMovementParticles(dt);
 	}
 	checkTimers(dt);

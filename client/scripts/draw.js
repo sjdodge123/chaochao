@@ -537,6 +537,7 @@ function drawObjects(dt) {
     }
     drawHUD();
     drawMouseDriveIndicator();
+    drawOffscreenGoalIndicator();
 
     if (currentState == config.stateMap.gameOver) {
         drawGameOverScreen(dt);
@@ -582,6 +583,91 @@ function worldGoalPoints() {
         }
     }
     return pts;
+}
+
+// When the dynamic camera is zoomed in and no goal is on-screen, pin an arrow to
+// the edge of the screen pointing toward the nearest goal so players always know
+// which way to race. Drawn in the HUD pass (screen space), so it hugs the edge
+// regardless of world zoom. No-ops at the whole-map view since a goal is then
+// visible (anyVisible) and outside the live race states.
+function drawOffscreenGoalIndicator() {
+    if (currentState !== config.stateMap.gated &&
+        currentState !== config.stateMap.racing &&
+        currentState !== config.stateMap.collapsing) {
+        return;
+    }
+    if (!worldView || myPlayer == null || myPlayer.alive == false) {
+        return;
+    }
+    var goals = worldGoalPoints();
+    if (goals.length === 0) {
+        return;
+    }
+    var s = worldView.scale || 1;
+    // Only when actually zoomed in. At the whole-map view (scale 1) the entire
+    // arena — and every goal — already fits on screen, so an edge arrow would be
+    // wrong (and the visMargin inset below could otherwise mislabel an
+    // edge-of-arena goal as off-screen).
+    if (s <= 1) {
+        return;
+    }
+    var cx = LOGICAL_WIDTH / 2, cy = LOGICAL_HEIGHT / 2;
+    var nearest = null, nd = Infinity, anyVisible = false;
+    var visMargin = 36;
+    for (var i = 0; i < goals.length; i++) {
+        var sx = cx + (goals[i].x - worldView.cx) * s;
+        var sy = cy + (goals[i].y - worldView.cy) * s;
+        if (sx >= visMargin && sx <= LOGICAL_WIDTH - visMargin &&
+            sy >= visMargin && sy <= LOGICAL_HEIGHT - visMargin) {
+            anyVisible = true;
+        }
+        var dx = goals[i].x - myPlayer.x, dy = goals[i].y - myPlayer.y;
+        var d = dx * dx + dy * dy;
+        if (d < nd) { nd = d; nearest = goals[i]; }
+    }
+    if (anyVisible || nearest == null) {
+        return;
+    }
+    // Edge point along the direction from screen centre to the nearest goal,
+    // clamped to an inset rectangle so the arrow sits just inside the viewport.
+    var gsx = cx + (nearest.x - worldView.cx) * s;
+    var gsy = cy + (nearest.y - worldView.cy) * s;
+    var ang = Math.atan2(gsy - cy, gsx - cx);
+    var inset = 48;
+    var hw = LOGICAL_WIDTH / 2 - inset, hh = LOGICAL_HEIGHT / 2 - inset;
+    var ca = Math.cos(ang), sa = Math.sin(ang);
+    var tX = Math.abs(ca) > 1e-4 ? hw / Math.abs(ca) : Infinity;
+    var tY = Math.abs(sa) > 1e-4 ? hh / Math.abs(sa) : Infinity;
+    var rr = Math.min(tX, tY);
+    var ex = cx + ca * rr, ey = cy + sa * rr;
+    var pulse = 0.5 + 0.5 * Math.sin(Date.now() / 250);
+    var bob = Math.sin(Date.now() / 260) * 6;           // gentle float along the aim, beckoning toward the goal
+    var goalColor = (config.tileMap.goal && config.tileMap.goal.color) ? config.tileMap.goal.color : "#FFE23A";
+    gameContext.save();
+    gameContext.globalAlpha = 0.92;
+    gameContext.translate(ex, ey);
+    gameContext.rotate(ang);                            // tip (+x) points outward toward the goal
+    gameContext.translate(bob, 0);                      // local +x = toward the goal, so it bobs along the aim
+    gameContext.shadowColor = goalColor;
+    gameContext.shadowBlur = 12 + 12 * pulse;
+    // Same chunky block arrow as the lobby arrows, tip at origin pointing +x.
+    gameContext.beginPath();
+    gameContext.moveTo(0, 0);
+    gameContext.lineTo(-26, -22);
+    gameContext.lineTo(-26, -9);
+    gameContext.lineTo(-50, -9);
+    gameContext.lineTo(-50, 9);
+    gameContext.lineTo(-26, 9);
+    gameContext.lineTo(-26, 22);
+    gameContext.closePath();
+    gameContext.fillStyle = goalColor;
+    gameContext.fill();
+    gameContext.shadowBlur = 0;
+    gameContext.lineWidth = 4;
+    gameContext.lineJoin = "round";
+    gameContext.strokeStyle = "#C24B00";
+    gameContext.stroke();
+    gameContext.restore();
 }
 
 // Clamp a view centre so the visible window never reveals outside the world
@@ -1393,6 +1479,16 @@ function checkDrawPlayer(player, dt) {
     if (player == null) {
         return;
     }
+    // Phantom-entry guard: inactive players are parked at (-100,-100) so
+    // camera.inBounds skips them, but a stale entry sitting at the exact origin
+    // (0,0) — or one with a missing/NaN coordinate — otherwise slips through as
+    // an alive, in-bounds "ghost" circle with no collisions. A real kart never
+    // rests at exactly (0,0) under the physics, so treat that as invalid.
+    if (player.x == null || player.y == null ||
+        isNaN(player.x) || isNaN(player.y) ||
+        (player.x === 0 && player.y === 0)) {
+        return;
+    }
     if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
         drawTrail(player);
     }
@@ -1818,7 +1914,7 @@ function drawAbilityIndicator(x, y, player) {
         case config.tileMap.abilities.swap.id:
         case config.tileMap.abilities.bombTrigger.id:
         default:
-            drawArmedRing(x, y, player.color);
+            drawArmedRing(x, y, player.color, player.radius);
             break;
     }
 }
@@ -1854,18 +1950,54 @@ function drawProjectileAimer(x, y, angle, color, length) {
     gameContext.restore();
 }
 
+// Cut telegraph: a short laser through the holder — a fixed fraction of the
+// screen rather than the whole map — whose brightness falls off logarithmically
+// from the centre out to soft tips. SCREEN_FRAC is the total on-screen length as
+// a fraction of screen width; K sets the fade curvature (higher = quicker drop
+// near the holder); STOPS is the gradient sample count along the beam.
+var CUT_TELEGRAPH_SCREEN_FRAC = 0.10;
+var CUT_FADE_K = 12;
+var CUT_FADE_STOPS = 8;
+
 // Cut telegraph: a soft glowing beam through the player both ways, with a white
 // core whose dashes flow along it and a gentle pulse, plus a bright origin dot.
+// Both layers fade logarithmically out from the holder via a linear gradient.
 function drawCutAimer(x, y, angle, color) {
     var now = Date.now();
     var pulse = 0.5 + 0.5 * Math.sin(now / 250);
-    var fwd = pos({ x: x, y: y }, config.worldWidth, angle);
-    var bwd = pos({ x: x, y: y }, config.worldWidth, angle - 180);
+    // World coords scale by worldView.scale onto the logical screen, so divide
+    // the target screen length by the live zoom to keep the beam ~SCREEN_FRAC of
+    // the screen width at any zoom; half the length reaches each way from the holder.
+    var camScale = (typeof worldView !== "undefined" && worldView && worldView.scale) ? worldView.scale : 1;
+    var reach = (CUT_TELEGRAPH_SCREEN_FRAC * LOGICAL_WIDTH) / (2 * camScale);
+    var fwd = pos({ x: x, y: y }, reach, angle);
+    var bwd = pos({ x: x, y: y }, reach, angle - 180);
+    var rgb = cbHexToRgb(color);   // null for hsl() fallback colours (full rooms)
+    // Gradient along the beam (bwd -> holder -> fwd). The holder sits at the
+    // midpoint, so distance from them is |2t - 1|; alpha = baseAlpha * logFade.
+    function fadedBeam(baseAlpha, r, g, b) {
+        var grad = gameContext.createLinearGradient(bwd.x, bwd.y, fwd.x, fwd.y);
+        for (var i = 0; i <= CUT_FADE_STOPS; i++) {
+            var t = i / CUT_FADE_STOPS;
+            var frac = Math.abs(2 * t - 1);
+            var fade = 1 - Math.log(1 + CUT_FADE_K * frac) / Math.log(1 + CUT_FADE_K);
+            grad.addColorStop(t, "rgba(" + r + "," + g + "," + b + "," + (baseAlpha * fade).toFixed(3) + ")");
+        }
+        return grad;
+    }
     gameContext.save();
     gameContext.lineCap = "round";
-    // Glow beam.
-    gameContext.globalAlpha = 0.22 + 0.22 * pulse;
-    gameContext.strokeStyle = color;
+    // Glow beam. Hex colours get the faded gradient (alpha baked into the stops,
+    // so globalAlpha stays 1); hsl() fallback colours (cbHexToRgb -> null) can't
+    // build rgba stops, so stroke the raw colour at the peak alpha instead of
+    // silently defaulting the beam to white.
+    if (rgb) {
+        gameContext.globalAlpha = 1;
+        gameContext.strokeStyle = fadedBeam(0.22 + 0.22 * pulse, rgb.r, rgb.g, rgb.b);
+    } else {
+        gameContext.globalAlpha = 0.22 + 0.22 * pulse;
+        gameContext.strokeStyle = color;
+    }
     gameContext.shadowColor = color;
     gameContext.shadowBlur = 12;
     gameContext.lineWidth = 4;
@@ -1873,10 +2005,10 @@ function drawCutAimer(x, y, angle, color) {
     gameContext.moveTo(bwd.x, bwd.y);
     gameContext.lineTo(fwd.x, fwd.y);
     gameContext.stroke();
-    // Flowing white core.
+    // Flowing white core, faded the same way (white is always gradient-safe).
     gameContext.shadowBlur = 0;
-    gameContext.globalAlpha = 0.7 + 0.3 * pulse;
-    gameContext.strokeStyle = "white";
+    gameContext.globalAlpha = 1;
+    gameContext.strokeStyle = fadedBeam(0.7 + 0.3 * pulse, 255, 255, 255);
     gameContext.lineWidth = 1.5;
     gameContext.setLineDash([10, 8]);
     gameContext.lineDashOffset = -(now / 20) % 18;
@@ -1895,18 +2027,28 @@ function drawCutAimer(x, y, angle, color) {
 }
 
 // "Ability armed" indicator for swap / bomb-trigger / anything else held: a
-// slowly rotating dashed ring that pulses, in the player's colour.
-function drawArmedRing(x, y, color) {
+// slowly rotating dashed ring that pulses, in the player's colour. Sized off the
+// kart radius so it orbits OUTSIDE the local-player halo (which sits at
+// radius+5 and glows past it) — otherwise the two same-coloured rings merged
+// into one smear when you held an ability. A thin dark backing keeps the dashes
+// legible where they cross the halo's glow.
+function drawArmedRing(x, y, color, radius) {
     var now = Date.now();
+    var r = (radius != null ? radius : 6) + 9;
     gameContext.save();
     gameContext.translate(x, y);
     gameContext.rotate((now / 600) % (2 * Math.PI));
-    gameContext.beginPath();
     gameContext.setLineDash([6, 4]);
-    gameContext.lineWidth = 2;
     gameContext.globalAlpha = 0.55 + 0.45 * Math.sin(now / 200);
+    gameContext.lineWidth = 3.5;
+    gameContext.strokeStyle = "rgba(0,0,0,0.45)";
+    gameContext.beginPath();
+    gameContext.arc(0, 0, r, 0, 2 * Math.PI);
+    gameContext.stroke();
+    gameContext.lineWidth = 2;
     gameContext.strokeStyle = color || "black";
-    gameContext.arc(0, 0, 11, 0, 2 * Math.PI);
+    gameContext.beginPath();
+    gameContext.arc(0, 0, r, 0, 2 * Math.PI);
     gameContext.stroke();
     gameContext.restore();
 }
@@ -2195,6 +2337,53 @@ function drawLobbyFloor() {
 // lobby start button, all jabbing inward, with a pulsing neon glow and a comical
 // bob. No collision / no gameplay — just attract-mode flair drawing the eye to the
 // start button. Lobby-only.
+// Arrow footprint samples as [radial-from-ring, perpendicular] in px. The tip
+// sits on the ring and the body extends OUTWARD (away from the button), so we
+// have to test along the shaft and across the head — a tip-only check left the
+// body clipping lava. Mirrors the block-arrow path drawn in drawLobbyArrows.
+var LOBBY_ARROW_SAMPLES = [
+    [0, 0], [26, 22], [26, -22], [40, 9], [40, -9], [52, 9], [52, -9]
+];
+var LOBBY_ARROW_BOB = 8;   // how far the arrow floats INWARD from its rest radius
+// Find an angle around the button's ring where the whole arrow footprint clears
+// lava, starting from the default slot and fanning outward both ways. The lobby
+// map can drop lava under the fixed diagonal slots, so an arrow on it slides
+// along the ring to clear ground — it still points at the button from wherever
+// it lands (drawLobbyArrows rotates each arrow back toward center). worldR is in
+// world units (tileIdAt takes world coords, no camera offset).
+function lobbyArrowClearAngle(baseAng, worldR) {
+    if (config == null || config.tileMap == null || lobbyStartButton == null) {
+        return baseAng;
+    }
+    var bx = lobbyStartButton.x, by = lobbyStartButton.y;
+    var lavaId = config.tileMap.lava.id;
+    // Cover the rest radius AND the full inward bob travel, so a clear angle stays
+    // clear through the whole float cycle (lava can sit on the inward side too).
+    var shifts = [0, -LOBBY_ARROW_BOB];
+    function footprintOnLava(a) {
+        var dx = Math.cos(a), dy = Math.sin(a);         // outward (tip -> body) direction
+        var px = -dy, py = dx;                          // perpendicular across the arrow
+        for (var b = 0; b < shifts.length; b++) {
+            for (var s = 0; s < LOBBY_ARROW_SAMPLES.length; s++) {
+                var rad = worldR + shifts[b] + LOBBY_ARROW_SAMPLES[s][0];
+                var perp = LOBBY_ARROW_SAMPLES[s][1];
+                if (tileIdAt(bx + dx * rad + px * perp, by + dy * rad + py * perp) == lavaId) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    if (!footprintOnLava(baseAng)) {
+        return baseAng;
+    }
+    var step = Math.PI / 36;                            // 5deg increments
+    for (var k = 1; k <= 18; k++) {                     // search out to ~90deg each way
+        if (!footprintOnLava(baseAng + step * k)) { return baseAng + step * k; }
+        if (!footprintOnLava(baseAng - step * k)) { return baseAng - step * k; }
+    }
+    return baseAng;                                     // ringed by lava: stay put
+}
 function drawLobbyArrows() {
     if (lobbyStartButton == null || world == null) {
         return;
@@ -2204,12 +2393,18 @@ function drawLobbyArrows() {
     var btnR = lobbyStartButton.radius || 70;
     var count = 4;
     var t = Date.now() / 1000;
+    var baseR = btnR + 50;                              // ring radius used for the lava test
     gameContext.save();
     gameContext.globalAlpha = 0.5;                       // translucent: float over the map, don't hide it
     for (var i = 0; i < count; i++) {
-        var ang = (i / count) * Math.PI * 2 + Math.PI / 4; // +45deg -> 4 corner (diagonal) positions
-        var bob = Math.sin(t * 2.5 - i * 0.9) * 7;      // gentle staggered float toward/away from center
-        var ringR = btnR + 50 + bob;                    // arrow tip distance from button center
+        var slotAng = (i / count) * Math.PI * 2 + Math.PI / 4; // +45deg -> 4 corner (diagonal) slots
+        var ang = lobbyArrowClearAngle(slotAng, baseR);  // slide off lava, still points at center
+        // Float only INWARD (toward the button): lobbyArrowClearAngle cleared lava
+        // at the rest radius baseR, so a symmetric bob would push the body back
+        // out onto it each cycle. Pulling toward center keeps it clear and still
+        // reads as a "go this way" nudge.
+        var bob = -(0.5 + 0.5 * Math.sin(t * 2.5 - i * 0.9)) * LOBBY_ARROW_BOB;
+        var ringR = baseR + bob;                        // arrow tip distance from button center
         var ax = cx + Math.cos(ang) * ringR;
         var ay = cy + Math.sin(ang) * ringR;
         var pulse = 0.5 + 0.5 * Math.sin(t * 4 - i * 0.9);
@@ -2280,6 +2475,14 @@ function traceCellPath(ctx, cell) {
     return true;
 }
 
+// Tile-swap telegraph flicker tuning. The per-frame chance of a gentle dim
+// ramps from BASE to BASE+RAMP as the swap nears, and a dim frame multiplies
+// brightness by DIM (closer to 1.0 = calmer). Kept deliberately low so the
+// warn-up reads as a calm electric glow rather than a harsh strobe.
+var SWAP_FLICKER_BASE = 0.01;   // base per-frame dim chance (was 0.03)
+var SWAP_FLICKER_RAMP = 0.03;   // extra chance at full progress (was 0.07)
+var SWAP_FLICKER_DIM = 0.8;     // brightness on a dim frame (was 0.6)
+
 // Overlay drawn on top of the cached map: the tiles a tileSwap is about to flip
 // pulse (a global sine that speeds up as the swap nears) with a brief random
 // flicker per cell, plus a brightening yellow edge. Cleared as tiles flip (see
@@ -2309,7 +2512,7 @@ function drawPendingSwap() {
         var pulse = 0.5 + 0.5 * Math.sin((now / 1000) * (2 + 3 * prog) * Math.PI * 2);
         // Occasional, gentle dim frames (rarer and shallower than a hard strobe)
         // so the warn-up reads as a calm electric glow, not an intense flicker.
-        var flicker = Math.random() < (0.03 + 0.07 * prog) ? 0.6 : 1.0;
+        var flicker = Math.random() < (SWAP_FLICKER_BASE + SWAP_FLICKER_RAMP * prog) ? SWAP_FLICKER_DIM : 1.0;
         var alpha = (0.15 + 0.32 * pulse) * flicker;
         if (!traceCellPath(gameContext, cell)) {
             continue;
