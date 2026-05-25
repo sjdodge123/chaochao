@@ -1377,13 +1377,20 @@ function leaveGlyphFor(type) {
     return type === "playstation" ? "○" : "B";
 }
 
-// B opens an inline "Leave?" confirm in this player's block; A confirms (drops
-// the player / disconnects), B cancels. Per-slot, so it never freezes the others.
-// Opening the confirm does NOT halt movement (the player keeps steering while
-// deciding, matching the keyboard Esc behavior). The block is highlighted, and
-// the prompt auto-cancels after LEAVE_CONFIRM_TIMEOUT_MS with no confirm.
+// B opens an inline "Leave?" confirm in this player's block; HOLDING B for
+// LEAVE_HOLD_MS confirms (drops the player / disconnects), and an attack (A)
+// press resumes play. Hold-to-confirm so a mashed attack can't leave by
+// accident. Per-slot, so it never freezes the others. Opening the confirm does
+// NOT halt movement (the player keeps steering while deciding, matching the
+// keyboard Esc behavior). The block is highlighted, and the prompt auto-cancels
+// after LEAVE_CONFIRM_TIMEOUT_MS with no hold.
 function openLeaveConfirm(lp) {
     lp.leaveConfirm = true;
+    // Re-anchor the hold clock so a freshly-opened confirm always starts the 5s
+    // hold from zero — never inherits a stale _leaveHoldStart left behind when a
+    // prior hold was aborted out-of-band (reconnect, blocks->bar), which would
+    // otherwise make the first held frame fire an instant, accidental leave.
+    lp._leaveHoldStart = null;
     setBlockLeaveConfirm(lp.slot, true);
     scheduleHintFade(); // un-fade the header so the "Leave?" prompt is readable
     if (lp.leaveConfirmTimer) {
@@ -1404,6 +1411,7 @@ function cancelLeaveConfirm(lp) {
         lp.leaveConfirmTimer = null;
     }
     lp.leaveConfirm = false;
+    lp._leaveHoldStart = null; // drop any in-progress hold so it can't carry over
     setBlockLeaveConfirm(lp.slot, false);
 }
 
