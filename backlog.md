@@ -7,6 +7,43 @@ Tracked work that is known and intentionally deferred. The currently-in-progress
 ### Bugs
 
 - **Touch handlers crash when `virtualButtonList` is null.** The `touchstart`/`touchend`/`touchmove` listeners are registered unconditionally (`input.js:22-24`), but `virtualButtonList` starts as `null` (`input.js:6`) and is only built by `setupVirtualbuttons()` when `isTouchDevice()` is true (`input.js:30-32`). On a hybrid device where `isTouchDevice()` returns false but the browser still dispatches touch events (touchscreen laptop + trackpad, a force-touch trackpad, or Chrome touch emulation), `onTouchStart`/`onTouchEnd` iterate `virtualButtonList.length` and throw `Cannot read properties of null (reading 'length')`. It doesn't break gameplay — the handlers just abort — but it spams the console. Fix: guard the touch handlers with an early `if (!virtualButtonList) return;`, or build the button list unconditionally at init. Pre-existing; surfaced during local-multiplayer controller testing but unrelated to it (touch input is out of scope for local MP).
+- **Stray player circles litter the map, intermittently.** `checkDrawPlayer` (`draw.js:1392`) guards `null`, dead, and out-of-bounds players, but has no guard against an `(x=0, y=0)` position — it relies on the server parking inactive players at `(-100, -100)` so `camera.inBounds` skips them. A player momentarily at the origin (or any stale entry) while `alive` and in-bounds is drawn as a ghost circle with no collisions — reported at `(0,0)` and scattered on the board, very intermittent. Add an explicit invalid/zero-position guard and trace which list (player/aimer?) emits the zero-position entries.
+
+### Visibility, HUD & effects (`client/scripts/draw.js`)
+
+- **Player trails never fade.** `drawTrail` blits a persistent per-player trail canvas (the `Trail` class, `gameboard.js`) with `maxLength` 100000 and no time-based expiry; the only reduction is spatial (non-local trails at `NONLOCAL_TRAIL_ALPHA = 0.3`, `draw.js:1920`). Fade trail segments after ~10s of screen time, and consider dropping other players' trails entirely to keep your own legible.
+- **Dim other players ~10% more.** Other karts already render at `NONLOCAL_KART_ALPHA = 0.55` (`draw.js:7-12`, applied at `draw.js:1493`). Drop to ~0.45 so the local player stands out better. Threat FX (fire, ability rings) are intentionally exempt from dimming and should stay that way.
+- **Visibility ring overlaps the ability marker.** `drawLocalPlayerHighlight` (the pulsing local-player halo, `draw.js:1574`) and `drawAbilityIndicator`'s `drawArmedRing` (`draw.js:1516`, `1821`) are both centered on the player and visually collide when you're holding an ability. Offset, resize, or restyle one so both read clearly.
+- **Ability marker artwork is placeholder.** The armed-ability indicator is a plain `drawArmedRing` / aimer line (`draw.js:1821`). Improve the artwork so a held ability looks intentional.
+- **Tile-swap telegraph flicker is too intense.** `drawPendingSwap` (`draw.js:2283`) flickers via a hardcoded `Math.random() < 0.03→0.10` test (ramps with progress) dropping fill brightness; despite the "calm electric glow" intent it reads as harsh. Reduce the flicker probability/contrast and/or make it config-driven.
+- **Lobby is missing client-side movement particles.** The motion trail is gated to `racing`/`collapsing` (`draw.js:1396`) so the lobby has no movement feedback; fire/speed FX do run there. Add client-side movement particles in the lobby for feel.
+
+### Controller (`client/scripts/gamepad.js`)
+
+- **Glyph-bar layout picks the wrong mode.** Intended logic (`gamepad.js:52,1040`, `HINT_FADE_MS = 60000`): one local player → the **bottom bar** (auto-fades after 60s); two or more local players → **top per-player blocks** (pinned, never fade). Observed: a single connected controller shows the **top mini-blocks** when it should show the bottom bar (item: "1 controller should show the bottom bar"), and local co-op shows the **auto-hiding bottom bar** when the pinned blocks were wanted (item: "mini bar shouldn't auto-hide in co-op"). Both point at one root cause — the local-player-count → `hintUiMode` selection is miscounting. Fix the count/mode mapping.
+
+### Gameplay & balance (`server/game.js`, `server/engine.js`, `server/config.json`) — CHANGELOG entry required
+
+- **Make punching more strategic, less spammy (umbrella goal).** Punch is a single press on a flat `playerPunchCooldown` of 300ms (`config.json:333`). Candidate levers, pick one direction: (a) lengthen the cooldown; (b) a hold-to-charge meter (Gears-of-War-style red/green — green = hard punch, red = normal), which does not exist today; (c) the parked double-tap "power jab" combo idea (see the gameplay-ideas memory). These are alternatives to the same goal, not separate features.
+- **Remove the directional punch; fix the animation.** Directional punch is on by default (`config.directionalPunch = true`, applied `game.js:1028`) and draws a crescent sweep (`spawnPunchEffect`, `draw.js:914-976`); the omnidirectional path already exists (bumpers, infection survivors, hockey/zombie hits). Revert to omnidirectional and fix the punch animation.
+- **New ability — terraform / grass-grow (🌧️).** Grows terrain outward from the player: convert +2 tiles to dirt and +1 tile to sand/ice around them. No outward-terraform ability exists today — `tileSwap` only does a one-shot whole-map `fast`↔`ice` swap (`game.js:1224`), not position-relative growth. Needs a new entry in `config.abilities`, a server handler, and a telegraph.
+
+### AI (`server/aiController.js`, `server/cellGraph.js`)
+
+- **AI gets stuck while pathing, most reliably on "sidewinder".** Bots use A* over the cell graph plus feeler steering (`aiController.js` `steerBot`, `cellGraph.js` `findPathToNearestGoal`). They get stuck on `client/maps/sidewinder.json` most often, but it happens on other maps too — just uncommonly — so it's a general pathing/steering failure (likely narrow or looping corridors the cell graph mishandles), not a sidewinder-specific quirk. Use sidewinder as the repro case.
+
+## Lobby (`server/game.js`, `server/hostess.js`, `client/scripts/...`)
+
+### Features
+
+- **AI hub — toggle bots and surface their count.** Bots auto-spawn via `fillGridWithBots` (`game.js:441`, called from `startGated`) at a random 6–10 count (`config.ai.minGrid`/`maxGrid`) with no player control, and `hostess.getRooms` (`hostess.js:18`) doesn't expose a bot count. Add a lobby hub to enable/disable AI, and include "+N AI" as a join detail in the room listing (join page + lobby).
+- **Map-playlist hub — curate the rotation.** Rotation is random no-repeat across the full non-`lobbyOnly` library (`getRandomMapR`, `game.js:2117`; maps assembled at `game.js:809`) with no player control. Add a lobby hub building to pick/curate which maps are in the active playlist.
+
+## Game info / onboarding
+
+### Features
+
+- **In-game codex.** No reference screen exists for abilities, brutal-round modes, or achievements — achievements only surface in the end-match recap montage (`recap.js`). Add a browsable codex/help screen explaining abilities, brutal modes, and achievements.
 
 ## Map editor (`client/scripts/create.js`, `client/create.html`)
 
@@ -14,6 +51,8 @@ Tracked work that is known and intentionally deferred. The currently-in-progress
 
 - **Duplicate-hazard selection collisions.** `updateSelectedObject` and `removeSelectedObject` match by `id + x + y`, so two same-type hazards stacked at identical coordinates can only be edited/deleted as the first one found. Track the array index of the selected hazard instead.
 - **Map JSON is larger than it needs to be.** `vMap.cells` is the raw voronoi structure with `edge` objects shared (and serialized) twice per pair of cells, plus per-halfedge `angle`. Existing maps in `client/maps/` are hundreds of KB largely from this. A minimal export — site coords + tile id, with the voronoi recomputed on load (or just edge endpoints stored once) — would shrink JSON dramatically.
+- **Lobby/tutorial map shows up in the editor's map list.** `loadMaps` (`utils.js:474`) returns every file in `client/maps/` — including `_lobbyTutorial.json` — and `messenger.js:47` (`getMaps`) hands that raw list to the editor (`create.js:155`). The `lobbyOnly` filter only applies to the race rotation (`game.js:809`), not to the listing the editor receives. Filter `lobbyOnly` maps out of the editor list.
+- **Preview/Playtest breaks with local co-op (2+ controllers).** Preview launches a single-human room (`play.html?preview=1`); `previewReturnToEditor` only tracks the primary slot, and a second hot-joining gamepad (`addLocalPlayer`, `client.js:871`) isn't accounted for, so co-op preview is effectively unsupported. Either wire local co-op into the preview game or block extra pads from joining while previewing.
 
 ### UX
 
@@ -23,6 +62,12 @@ Tracked work that is known and intentionally deferred. The currently-in-progress
 - **No undo.** A full undo stack across tile paints would be expensive, but at minimum "undo last hazard placement" is trivial and would prevent a lot of frustration.
 - **No keyboard shortcuts** for switching brushes/tools. Purely mouse-driven editing slows experienced users.
 - **Right-click is suppressed but does nothing useful.** Common expectation: right-click on a hazard deletes it; right-click drag erases to default tile.
+- **No search/filter for the map list.** The editor loads every map but offers no way to search or filter them; a filter input would scale as the library grows (pairs with the keyboard-shortcuts item).
+
+### Features
+
+- **Starting templates for 2/3/4-sided arenas.** New maps start from a raw Voronoi seed (`create.js:694`) with no preset shapes. Offer selectable template layouts (2-, 3-, 4-sided arenas and others) so creators aren't building geometry from scratch.
+- **AI toggle in Preview (default off).** Preview always fills bots via `fillGridWithBots` (`game.js:273,624`) with no control. Add a checkbox to enable/disable test AI in the preview, defaulting to **off**, so creators can sanity-check a map solo or with bots on demand.
 
 ### Performance
 
