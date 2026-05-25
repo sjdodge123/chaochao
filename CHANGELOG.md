@@ -10,7 +10,8 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+- End-of-game recap: the win screen now replays short highlight clips from the match — one per medal, zoomed in on the action.
 
 ## v0.6.3 — 2026-05-24
 
