@@ -1202,6 +1202,18 @@ class Trail {
 	update(currentPosition, player) {
 		var last = this.vertices.length > 0 ? this.vertices[this.vertices.length - 1] : null;
 		if (last != null && currentPosition.x == last.x && currentPosition.y == last.y) {
+			// Parked, so no new segment — but still repaint if the colour changed
+			// (e.g. toggling colour-blind assist while stationary), otherwise the
+			// cached strip stays two-toned until the kart next moves.
+			if (this.canvas != null && player != null && this.lastColor != null && this.lastColor !== player.color) {
+				var nvStill = player.notches == gameLength;
+				if (DEBUG_FORCE_NEAR_VICTORY && player.id == myID) {
+					nvStill = true;
+				}
+				this._redrawAll(player.color, nvStill);
+				this.wasNearVictory = nvStill;
+				this.lastColor = player.color;
+			}
 			return;
 		}
 		if (this.vertices.length > this.maxLength) {
