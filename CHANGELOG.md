@@ -13,9 +13,25 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 ### General
 
 - Other players' karts and trails now fade a little during a race, so your own kart stands out in a crowded pack (danger like fire and ability rings stays at full brightness).
-- Press attack while you're knocked out to ping the spot where you fell, making it easy to find where you died.
+- Other players' emote bubbles are fainter and fade away over a few seconds, so chat stops cluttering the action.
 - Kart colours are now chosen to be as visually distinct as possible, so you're far less likely to see two players in lookalike shades.
 - New colour-blind assist toggle in the top bar recolours every kart with a colour-blind-friendly palette.
+- Tile Swap's warning now reads as a calmer glow instead of an intense flicker.
+
+### When you're knocked out
+
+- Press attack while you're down to ping where players fell — it reveals every knocked-out player's spot at once, so you can read the whole board.
+- The skull markers left by knocked-out players now fade away after a few seconds so they stop cluttering the board (a ping brings them back).
+
+### Controller & couch co-op
+
+- Leaving the game on a controller now takes a deliberate button hold, so a mashed attack can't make you quit by accident.
+- In couch co-op, each player's on-screen controller guide (which pad you are, plus your buttons) now stays put instead of fading out.
+
+### Display
+
+- Fullscreen no longer stretches the game on non-16:9 screens — it fits with clean letterbox bars instead of looking squished.
+- On a phone held in portrait, a prompt now asks you to rotate to landscape (the game is built for a wide view).
 
 ## v0.7.0 — 2026-05-25
 
