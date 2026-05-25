@@ -29,6 +29,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ### Controller & couch co-op
 
+- [headline] Local co-op with controller support — up to 4 players on one screen (controllers plus one on keyboard/mouse), all in the same game as anyone online.
 - Leaving the game on a controller now takes a deliberate button hold, so a mashed attack can't make you quit by accident.
 - In couch co-op, each player's on-screen controller guide (which pad you are, plus your buttons) now stays put instead of fading out.
 
