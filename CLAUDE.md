@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **Start here:** [`ARCHITECTURE.md`](ARCHITECTURE.md) is the per-file index — purpose and contents of every server/client file, the networking/config contracts, the build/bundle model, and the file/function-size conventions. Read it first to locate code quickly.
+
 ## Commands
 
 - `npm install` — install dependencies (uses `package-lock.json`).
