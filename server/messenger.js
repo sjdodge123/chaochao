@@ -45,7 +45,8 @@ function checkForMail(client) {
 	client.emit("contentDelivery", JSON.stringify({ count: utils.getContentCount(), mapnames: utils.getMapListings(), soundnames: utils.getSoundListings(), imagenames: utils.getImageListings() }));
 
 	client.on("getMaps", function () {
-		client.emit("maplisting", utils.getMapListings());
+		// getMaps is the editor's listing request; hide lobbyOnly maps from it.
+		client.emit("maplisting", utils.getEditorMapListings());
 	});
 
 	client.on("getRooms", function () {
