@@ -32,6 +32,22 @@ class LobbyStartButton extends Circle {
 	}
 }
 
+// SPIKE: a walk-up lobby "hub" zone. Like LobbyStartButton it is a server-placed
+// Circle that joins the lobby collision set, but instead of a momentary "on it"
+// flag it feeds per-player ENTER/EXIT detection (see GameBoard.updateStationProximity).
+// `kind` selects the station's behaviour ("skin" = per-player, "ai" = room-wide).
+class LobbyStation extends Circle {
+	constructor(x, y, radius, id, kind, color) {
+		super(x, y, radius, color);
+		this.isStation = true;
+		this.stationId = id;
+		this.stationKind = kind;
+	}
+	handleHit(object) {
+
+	}
+}
+
 class Player extends Circle {
 	constructor(x, y, angle, color, id, roomSig) {
 		super(x, y, c.playerBaseRadius, color);
@@ -61,6 +77,11 @@ class Player extends Circle {
 
 		//Game Variables
 		this.hittingLobbyButton = false;
+		// SPIKE (lobby hub): touchingStation is set every tick a station is overlapped
+		// (reset after the proximity diff); nearStation latches the station the player
+		// is currently INSIDE, so enter/exit edges can be derived. See game.js.
+		this.touchingStation = null;
+		this.nearStation = null;
 		this.reachedGoal = false;
 		this.timeReached = null;
 		this.collapseMargin = null; // distance to the lava front while collapsing (for clutch-goal cheer)
@@ -471,6 +492,12 @@ class Player extends Circle {
 			this.hittingLobbyButton = true;
 			return;
 		}
+		if (object.isStation) {
+			// Just record overlap this tick; the enter/exit edge is derived once per
+			// tick in GameBoard.updateStationProximity (a player can only be inside one).
+			this.touchingStation = object.stationId;
+			return;
+		}
 		if (object.isPunch && object.ownerId != this.id) {
 			this.handlePunchHit(object);
 			return;
@@ -781,4 +808,4 @@ class Player extends Circle {
 	}
 }
 
-module.exports = { Player, LobbyStartButton };
+module.exports = { Player, LobbyStartButton, LobbyStation };

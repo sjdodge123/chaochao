@@ -11,7 +11,7 @@ var aiController = require('./aiController.js');
 var { emitBotEmote, botsCheerFor } = require('./botEmotes.js');
 var { Shape, Rect, Circle, Gate } = require('./entities/shapes.js');
 var { World } = require('./entities/world.js');
-var { Player, LobbyStartButton } = require('./entities/player.js');
+var { Player, LobbyStartButton, LobbyStation } = require('./entities/player.js');
 var { ExplosionAimer, SwapAimer } = require('./entities/aimers.js');
 var { Punch } = require('./entities/punch.js');
 var { HazardRail, Hazard, Bumper } = require('./entities/hazards.js');
@@ -134,6 +134,10 @@ class Game {
 		this.secondPlaceSig = null;
 		//AI racers: grid size is rolled once per game and held across rounds.
 		this.botTarget = null;
+		// SPIKE (lobby AI hub): a room-level override set from the lobby AI station.
+		// null = legacy behaviour (random botTarget). Otherwise { enabled, count } and
+		// fillGridWithBots honours it. Persists across games (a room setting, not per-game).
+		this.botOverride = null;
 
 		//Timers
 		this.lobbyWaitTime = c.lobbyWaitTime;
@@ -450,10 +454,21 @@ class Game {
 		if (humanCount === 0) {
 			return;
 		}
-		if (this.botTarget == null) {
-			this.botTarget = utils.getRandomInt(ai.minGrid, ai.maxGrid);
+		// SPIKE (lobby AI hub): a lobby-set override wins over the random grid roll.
+		// { enabled:false } => no bots at all; { enabled:true, count:N } => exactly N
+		// bots regardless of human count. null => legacy random-grid behaviour.
+		var desiredBots;
+		if (this.botOverride != null) {
+			if (!this.botOverride.enabled) {
+				return;
+			}
+			desiredBots = this.botOverride.count;
+		} else {
+			if (this.botTarget == null) {
+				this.botTarget = utils.getRandomInt(ai.minGrid, ai.maxGrid);
+			}
+			desiredBots = this.botTarget - humanCount;
 		}
-		var desiredBots = this.botTarget - humanCount;
 		if (desiredBots < 0) { desiredBots = 0; }
 		if (desiredBots <= botCount) {
 			return;
@@ -855,6 +870,9 @@ class GameBoard {
 		this.updateHazards(currentState);
 		if (currentState == c.stateMap.lobby) {
 			this.checkLobbyMapReset();
+			// SPIKE (lobby hub): runs AFTER checkCollisions so touchingStation reflects
+			// this tick's overlaps; emits per-player enter/exit edges.
+			this.updateStationProximity();
 		}
 	}
 	checkCollisions(currentState) {
@@ -921,6 +939,13 @@ class GameBoard {
 			objectArray.push(this.punchList[punchId]);
 		}
 		objectArray.push(this.lobbyStartButton);
+		// SPIKE (lobby hub): walk-up stations join the collision set so handleHit can
+		// stamp per-player overlap; the enter/exit edge is derived in updateStationProximity.
+		if (this.lobbyStations != null) {
+			for (var sIdx = 0; sIdx < this.lobbyStations.length; sIdx++) {
+				objectArray.push(this.lobbyStations[sIdx]);
+			}
+		}
 	}
 	collectGatedCollisionObjects(objectArray) {
 		for (var player in this.playerList) {
@@ -1508,12 +1533,74 @@ class GameBoard {
 			}
 		}
 		this.lobbyStartButton = new LobbyStartButton(this.world.center.x, this.world.center.y, 0, "red");
+		this.buildLobbyStations();
 		var lobbyMapID = (this.currentMap != null && this.currentMap.cells != null) ? this.currentMap.id : null;
 		messenger.messageRoomBySig(this.roomSig, "startLobby", compressor.sendLobbyStart(this.lobbyStartButton, lobbyMapID));
+		messenger.messageRoomBySig(this.roomSig, "lobbyStations", compressor.sendLobbyStations(this.lobbyStations));
 		// Deliver the lobby bumpers so the client creates them (gameUpdates only moves
 		// hazards the client already knows about; creation is via this applyHazards path,
 		// the same payload shape the newMap event uses for races).
 		messenger.messageRoomBySig(this.roomSig, "applyHazards", compressor.newHazards(this.hazardList));
+	}
+	// SPIKE (lobby hub): instantiate the walk-up stations for this lobby. Positions
+	// come from an optional map-JSON `stations` array (authored on safe terrain, like
+	// `spawnPad`); if the map omits it we fall back to code defaults positioned
+	// world-relative so the lobby always has stations even on a plain field. A real
+	// implementation would also carry per-station tuning (colors/labels) here.
+	buildLobbyStations() {
+		this.lobbyStations = [];
+		var R = 60; // station radius (a little smaller than the 75px start button)
+		var defaults = [
+			{ id: "skin", kind: "skin", cx: this.world.width * 0.5, cy: this.world.height * 0.78, color: "#36c" },
+			{ id: "ai", kind: "ai", cx: this.world.width * 0.5, cy: this.world.height * 0.22, color: "#3a3" }
+		];
+		var authored = (this.currentMap != null && Array.isArray(this.currentMap.stations))
+			? this.currentMap.stations
+			: null;
+		var src = authored || defaults;
+		for (var i = 0; i < src.length; i++) {
+			var s = src[i];
+			this.lobbyStations.push(new LobbyStation(s.cx, s.cy, s.r || R, s.id, s.kind, s.color || "#888"));
+		}
+	}
+	// SPIKE (lobby hub): once-per-tick enter/exit edge detection. handleHit stamps
+	// `touchingStation` on any player overlapping a station this tick; here we diff it
+	// against the latched `nearStation` to emit ENTER (newly inside) and EXIT (no longer
+	// inside) to that player's OWN socket — which is what makes the UI per-slot in local
+	// co-op (each local player has its own socket). Bots are skipped (no socket, no UI).
+	updateStationProximity() {
+		for (var id in this.playerList) {
+			var p = this.playerList[id];
+			if (p.isAI) {
+				p.touchingStation = null;
+				continue;
+			}
+			var now = p.touchingStation;   // station id this tick, or null
+			var was = p.nearStation;        // station id last tick, or null
+			if (now !== was) {
+				if (was != null) {
+					this.emitStationEdge(id, "stationExit", was);
+				}
+				if (now != null) {
+					this.emitStationEdge(id, "stationEnter", now);
+				}
+				p.nearStation = now;
+			}
+			p.touchingStation = null; // consumed; re-stamped next tick by handleHit
+		}
+	}
+	emitStationEdge(playerId, header, stationId) {
+		var station = null;
+		for (var i = 0; i < this.lobbyStations.length; i++) {
+			if (this.lobbyStations[i].stationId === stationId) {
+				station = this.lobbyStations[i];
+				break;
+			}
+		}
+		if (station == null || messenger.getClient(playerId) == null) {
+			return; // station gone, or no live socket for this player
+		}
+		messenger.messageClientBySig(playerId, header, { id: stationId, kind: station.stationKind });
 	}
 	// Place a player on the background spawn pad (used for the lobby start and for
 	// players who join mid-lobby). onSanctuary keeps them force-shielded on the pad.
