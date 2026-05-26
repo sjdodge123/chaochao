@@ -83,6 +83,20 @@ exports.submitPullRequest = async function (map) {
     if (author == '' || email == '' || mapName == '') {
         console.log("Can't submit to github; required info missing:" + author + ":" + email + ":" + mapName);
         returnToClient.status = false;
+        returnToClient.message = "Map name, author, and email are all required.";
+        return returnToClient;
+    }
+    // mapName is interpolated into a repo file path (client/maps/<name>.json) and
+    // into a git branch ref below, both written with the server's GitHub
+    // credentials. The submitter is untrusted, so reject anything that could
+    // escape the maps directory: path separators, leading dots (dotfiles / ".."),
+    // and control characters. Ordinary punctuation real map names use
+    // (apostrophes, "!") is left alone — only traversal-capable input is blocked.
+    // The length cap keeps the resulting filename and ref sane.
+    if (mapName.length > 64 || /[\\/\x00-\x1f]/.test(mapName) || mapName[0] === '.') {
+        console.log("Rejected map submission; unsafe map name: " + JSON.stringify(map.name));
+        returnToClient.status = false;
+        returnToClient.message = "Map name can't contain slashes or control characters, or start with a dot.";
         return returnToClient;
     }
     var branchName = "mapchange-" + mapName.toLowerCase() + "-" + getRandomBranchCode();
