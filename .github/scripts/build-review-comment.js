@@ -59,9 +59,8 @@ lines.push(result.overallPass
     ? '**✅ Automated checks passed.** Please still eyeball the rendered map below before merging.'
     : '**❌ Automated checks failed.** See the issues per map below.');
 lines.push('');
-lines.push('> 👀 **Manual review:** check the images for inappropriate imagery or profanity painted into the tiles. ' +
-    'The left image is rendered from the actual map data; the right is the editor\'s own capture. ' +
-    'A mismatch between them is itself a red flag.');
+lines.push('> 👀 **Manual review:** the image below is rendered from the actual painted tiles — ' +
+    'eyeball it for inappropriate imagery or profanity before merging.');
 lines.push('');
 
 for (const m of result.maps) {
@@ -79,9 +78,12 @@ for (const m of result.maps) {
         for (const w of m.warnings) { lines.push('- ⚠️ ' + w); }
     }
 
-    // Facts line.
+    // Facts line + the server-vs-submitted preview integrity PASS/FAIL.
     const facts = [];
     if (m.parTime) { facts.push('par ≈ ' + m.parTime.toFixed(1) + 's'); }
+    if (m.previewIntegrity) {
+        facts.push('preview integrity: ' + (m.previewIntegrity.pass ? '🟢 PASS' : '🔴 FAIL — ' + m.previewIntegrity.detail));
+    }
     if (m.sim && !m.sim.error) {
         facts.push(m.sim.scored
             ? 'sim: racer reached goal in ' + m.sim.seconds + 's (' + m.sim.bots + ' bots)'
@@ -89,25 +91,18 @@ for (const m of result.maps) {
     }
     if (facts.length) { lines.push(''); lines.push('_' + facts.join(' · ') + '_'); }
 
-    // Images side by side (HTML table renders in GitHub comments).
+    // Image 1 — the authoritative map render.
     const server = imgUrl(m.serverImage);
-    const thumb = imgUrl(m.thumbImage);
-    if (server || thumb) {
-        lines.push('');
-        lines.push('<table><tr>');
-        lines.push('<td align="center"><b>Server render (authoritative)</b><br>' +
-            (server ? '<img src="' + server + '" width="380">' : '<i>render unavailable</i>') + '</td>');
-        lines.push('<td align="center"><b>Editor thumbnail (submitted)</b><br>' +
-            (thumb ? '<img src="' + thumb + '" width="380">' : '<i>no thumbnail</i>') + '</td>');
-        lines.push('</tr></table>');
+    lines.push('');
+    if (server) {
+        lines.push('<b>Map</b> (rendered from the actual painted tiles)<br>');
+        lines.push('<img src="' + server + '" width="560">');
     } else {
-        lines.push('');
-        lines.push('_(no preview images available' +
-            (m.serverImage || m.thumbImage ? '; set IMAGE_BASE_URL to embed them' : '') + ')_');
+        lines.push('_(map render unavailable' + (m.serverImage ? '; set IMAGE_BASE_URL to embed it' : '') + ')_');
     }
 
-    // Competing lines: the routes the AI's own pathing finds, timed by the engine's
-    // physics-walk. The spread of times is the competitiveness read.
+    // Image 2 — competing racing lines (AI pathing, timed by the physics-walk).
+    // The table rows are colour-matched to the trails drawn on the image.
     if (Array.isArray(m.routes) && m.routes.length > 0) {
         lines.push('');
         lines.push('**Competing lines** — ' + competitiveness(m.routes));
@@ -117,10 +112,11 @@ for (const m of result.maps) {
             lines.push('<img src="' + routesImg + '" width="560">');
         }
         lines.push('');
-        lines.push('| Line | Time to goal |');
-        lines.push('| --- | --- |');
+        lines.push('| Line | Colour | Time to goal |');
+        lines.push('| --- | --- | --- |');
         for (const r of m.routes) {
-            lines.push('| ' + SWATCH[r.color] + ' ' + r.label + ' | ' + r.seconds.toFixed(1) + ' seconds |');
+            const swatch = SWATCH[r.color] || '▪️';
+            lines.push('| ' + r.label + ' | ' + swatch + ' ' + r.color + ' | ' + r.seconds.toFixed(1) + ' seconds |');
         }
     }
     lines.push('');

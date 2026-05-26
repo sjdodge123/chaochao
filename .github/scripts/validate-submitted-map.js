@@ -319,16 +319,56 @@ function safeName(file) {
     return path.basename(file).replace(/\.json$/i, '').replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
-function extractThumbnail(map, outBase) {
-    if (typeof map.thumbnail !== 'string') { return null; }
+// Read image dimensions from a PNG or JPEG buffer WITHOUT decoding it (no
+// dependency): PNG keeps w/h in the IHDR chunk; JPEG carries them in the SOFn
+// frame header, which we find by walking the marker segments.
+function imageDims(buf, fmt) {
+    try {
+        if (fmt === 'png') { return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) }; }
+        if (fmt === 'jpeg') {
+            let o = 2;
+            while (o + 9 < buf.length) {
+                if (buf[o] !== 0xFF) { o++; continue; }
+                const m = buf[o + 1];
+                // SOF0..SOF15 carry the frame size; skip DHT(C4)/JPG(C8)/DAC(CC).
+                if (m >= 0xC0 && m <= 0xCF && m !== 0xC4 && m !== 0xC8 && m !== 0xCC) {
+                    return { h: buf.readUInt16BE(o + 5), w: buf.readUInt16BE(o + 7) };
+                }
+                if (m === 0xD8 || m === 0xD9 || (m >= 0xD0 && m <= 0xD7)) { o += 2; continue; }
+                o += 2 + buf.readUInt16BE(o + 2);
+            }
+        }
+    } catch (e) { /* corrupt header — fall through to null */ }
+    return null;
+}
+
+// Server-vs-submitted preview integrity, dependency-free. The displayed map image
+// is the authoritative server render, so this just confirms the editor's embedded
+// thumbnail is a real, well-formed capture of THIS map: present, decodable, and
+// the same shape as the world (all 49 real maps are exactly the world aspect).
+// A missing / corrupt / wrong-shaped thumbnail flags a tampered or mismatched
+// submission. Informational (does not block the merge).
+function previewIntegrity(map) {
+    if (typeof map.thumbnail !== 'string') {
+        return { pass: false, detail: 'No embedded editor thumbnail.' };
+    }
     const m = map.thumbnail.match(/^data:image\/(png|jpeg|jpg|webp);base64,(.+)$/i);
-    if (!m) { return null; }
-    const ext = m[1].toLowerCase() === 'jpg' ? 'jpeg' : m[1].toLowerCase();
-    const buf = Buffer.from(m[2], 'base64');
-    if (buf.length === 0) { return null; }
-    const file = outBase + '.thumb.' + ext;
-    fs.writeFileSync(file, buf);
-    return path.basename(file);
+    if (!m) { return { pass: false, detail: 'Thumbnail is not a recognised image data-URI.' }; }
+    const fmt = m[1].toLowerCase() === 'jpg' ? 'jpeg' : m[1].toLowerCase();
+    let buf;
+    try { buf = Buffer.from(m[2], 'base64'); } catch (e) { return { pass: false, detail: 'Thumbnail base64 failed to decode.' }; }
+    if (buf.length < 500) { return { pass: false, detail: 'Thumbnail is suspiciously small (' + buf.length + ' bytes).' }; }
+    const dims = imageDims(buf, fmt);
+    if (dims == null || !dims.w || !dims.h) {
+        return { pass: false, detail: 'Could not read thumbnail dimensions (corrupt image?).' };
+    }
+    const worldAspect = config.worldWidth / config.worldHeight;
+    const drift = Math.abs(dims.w / dims.h - worldAspect) / worldAspect;
+    if (drift > 0.05) {
+        return { pass: false, detail: 'Thumbnail aspect ' + (dims.w / dims.h).toFixed(2) + ' ≠ map ' +
+            worldAspect.toFixed(2) + ' — possible mismatched/spoofed preview.' };
+    }
+    return { pass: true, detail: 'valid ' + dims.w + '×' + dims.h + ' capture matching the map shape.' };
 }
 
 // --- run --------------------------------------------------------------------
@@ -339,7 +379,7 @@ let hardFail = false;
 for (const entry of parsed) {
     const name = safeName(entry.file);
     const outBase = path.join(OUTPUT_DIR, name);
-    const result = { file: entry.file, mapName: null, verdict: 'reject', errors: [], warnings: [], parTime: 0, sim: null, serverImage: null, thumbImage: null, routes: [], routeImage: null };
+    const result = { file: entry.file, mapName: null, verdict: 'reject', errors: [], warnings: [], parTime: 0, sim: null, serverImage: null, previewIntegrity: null, routes: [], routeImage: null };
 
     if (entry.fatal) {
         result.errors.push(entry.fatal);
@@ -356,7 +396,7 @@ for (const entry of parsed) {
     result.warnings = dv.warnings;
     result.parTime = dv.parTime;
 
-    // Always render images, even on validation failure — the reviewer wants to
+    // Authoritative map image, rendered even on failure — the reviewer wants to
     // SEE a rejected map (e.g. to confirm it's spam/abuse, not a near-miss).
     try {
         const png = renderMapToPng(map, config, { width: 683 });
@@ -366,12 +406,8 @@ for (const entry of parsed) {
     } catch (e) {
         result.warnings.push('Server render failed: ' + e.message);
     }
-    try {
-        result.thumbImage = extractThumbnail(map, outBase);
-        if (result.thumbImage == null) { result.warnings.push('No usable embedded thumbnail.'); }
-    } catch (e) {
-        result.warnings.push('Thumbnail extraction failed: ' + e.message);
-    }
+    // Preview integrity (server-vs-submitted): a PASS/FAIL, not a second image.
+    result.previewIntegrity = previewIntegrity(map);
 
     // Competing-lines analysis + trail-overlay image (valid maps only — the routes
     // give a feel for how competitive the map is: tight times = many viable lines).
@@ -422,6 +458,12 @@ for (const r of results) {
     console.log('\n=== ' + r.file + ' (' + r.mapName + ') -> ' + r.verdict.toUpperCase() + ' ===');
     for (const e of r.errors) { console.log('::error file=' + r.file + '::' + e); }
     for (const w of r.warnings) { console.log('  warning: ' + w); }
+    if (r.previewIntegrity) {
+        console.log('  preview integrity: ' + (r.previewIntegrity.pass ? 'PASS' : 'FAIL') + ' — ' + r.previewIntegrity.detail);
+    }
+    if (r.routes && r.routes.length) {
+        console.log('  competing lines: ' + r.routes.map(x => x.label + ' ' + x.seconds + 's').join(', '));
+    }
     if (r.sim && !r.sim.error) {
         console.log('  sim: ' + (r.sim.scored ? ('racer reached goal in ' + r.sim.seconds + 's') : 'no score') +
             ' (' + r.sim.bots + ' bots, par ' + r.parTime.toFixed(1) + 's)');

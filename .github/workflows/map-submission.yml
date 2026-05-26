@@ -103,7 +103,7 @@ jobs:
           OUT: ${{ github.workspace }}/map-review-out
         run: |
           shopt -s nullglob
-          imgs=("$OUT"/*.png "$OUT"/*.thumb.*)
+          imgs=("$OUT"/*.png)   # .server.png (map) + .routes.png (competing lines)
           if [ ${#imgs[@]} -eq 0 ]; then
             echo "No preview images to publish."; echo "base_url=" >> "$GITHUB_OUTPUT"; exit 0
           fi
