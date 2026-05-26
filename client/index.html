@@ -66,7 +66,8 @@
     <script src="scripts/theme.js"></script>
     <!-- Auth: browser-safe Supabase config injected server-side; stripped when disabled. -->
     <!-- SUPABASE_CONFIG -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="scripts/auth.js"></script>
+    <!-- deferred (non-render-blocking); run in order before DOMContentLoaded. -->
+    <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script defer src="scripts/auth.js"></script>
   </body>
 </html>

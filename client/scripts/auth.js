@@ -61,8 +61,15 @@
 
     function applySession(session) {
         accessToken = (session && session.access_token) || null;
-        currentUser = (session && session.user) || null;
-        renderAuthUI();
+        var newUser = (session && session.user) || null;
+        // Only re-render (which collapses any open popover) when the signed-in
+        // identity actually changes — not on background TOKEN_REFRESHED events,
+        // which fire periodically and would otherwise snap an open menu shut.
+        var idChanged = (currentUser && currentUser.id) !== (newUser && newUser.id);
+        currentUser = newUser;
+        if (idChanged) {
+            renderAuthUI();
+        }
     }
 
     // Resolve the initial session once on load. `ready` lets callers await this,

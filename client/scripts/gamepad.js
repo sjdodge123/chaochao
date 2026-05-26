@@ -1189,9 +1189,15 @@ function moveSettingsFocus(delta) {
 }
 
 function openSettingsModal(lp) {
-    if (!settingsModalEl) {
-        buildSettingsModalUI();
+    // Rebuild each open so the account row(s) reflect CURRENT auth state. The row
+    // set and labels differ between signed-out ("Sign in with …") and signed-in
+    // ("Sign out"), and auth can resolve asynchronously after an OAuth return — a
+    // cached modal could otherwise show a stale "Sign in" row that now signs out.
+    if (settingsModalEl) {
+        settingsModalEl.remove();
+        settingsModalEl = null;
     }
+    buildSettingsModalUI();
     if (!settingsModalEl) {
         return;
     }
