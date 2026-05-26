@@ -36,7 +36,10 @@ function competitiveness(routes) {
     if (routes.length < 2) { return 'only one viable line found — likely a single dominant route.'; }
     const times = routes.map(r => r.seconds);
     const fast = Math.min(...times), slow = Math.max(...times);
-    const spread = fast > 0 ? (slow - fast) / fast : 0;
+    // A fastest line that rounds to 0s means the goal sits right at the start — a
+    // percentage spread is meaningless (and would divide by zero), so call it out.
+    if (fast <= 0) { return routes.length + ' near-instant lines — the goal sits right at the start gate.'; }
+    const spread = (slow - fast) / fast;
     if (spread < 0.15) { return routes.length + ' lines within ' + Math.round(spread * 100) + '% of each other — very competitive (many viable routes).'; }
     if (spread < 0.4) { return 'a clear fastest line with viable alternatives (' + Math.round(spread * 100) + '% slower).'; }
     return 'one line dominates (alternatives are ' + Math.round(spread * 100) + '% slower).';

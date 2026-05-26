@@ -86,7 +86,12 @@ messenger.build({ to() { return { emit() { } }; }, sockets: { emit() { } } });
 
 // --- helpers ----------------------------------------------------------------
 function effectiveStartEdges(map) {
-    // Mirror server/game.js resolveStartEdges: absent/empty => left.
+    // The edges to check reachability / sample origins from. deepValidate runs
+    // utils.validateMap FIRST and gates this on v.valid, so any malformed startEdges
+    // (bad length, unknown edge, repeat, non-opposite pair) has already been rejected
+    // by validateStartEdges — we only apply the absent/empty => ["left"] default that
+    // the engine's resolveStartEdges also applies. (We deliberately don't re-run the
+    // engine's sanitisation here; by this point the array is already known-valid.)
     return (Array.isArray(map.startEdges) && map.startEdges.length > 0) ? map.startEdges : ['left'];
 }
 
@@ -289,8 +294,9 @@ function playabilityAttempt(game, map, maxTicks) {
         }
         return { scored: scoredAt >= 0, seconds: scoredAt >= 0 ? +(scoredAt * DT).toFixed(1) : null, bots };
     } finally {
-        // The room is left in the hostess registry (no public deleteRoom), but it
-        // never ticks again — harmless for a short-lived CI process.
+        // game.getRoom() constructs a standalone Room — it is NOT added to the hostess
+        // registry — so dropping our reference is enough for GC; there's no cross-map
+        // room collision. We clear playerList defensively to release the bot objects.
         if (room) { try { for (const id in room.playerList) { delete room.playerList[id]; } } catch (e) { /* best effort */ } }
     }
 }
@@ -324,17 +330,28 @@ function safeName(file) {
 // frame header, which we find by walking the marker segments.
 function imageDims(buf, fmt) {
     try {
-        if (fmt === 'png') { return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) }; }
+        if (fmt === 'png') {
+            if (buf.length < 24) { return null; }
+            return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+        }
         if (fmt === 'jpeg') {
             let o = 2;
-            while (o + 9 < buf.length) {
+            while (o + 1 < buf.length) {
                 if (buf[o] !== 0xFF) { o++; continue; }
                 const m = buf[o + 1];
+                // 0xFF padding/fill byte before a real marker: advance one byte.
+                if (m === 0xFF) { o++; continue; }
+                // Standalone markers carry NO length payload: TEM(01), RST0-7(D0-D7),
+                // SOI(D8), EOI(D9). Skipping these (not treating their next bytes as a
+                // segment length) is what keeps the walk in sync.
+                if (m === 0x01 || (m >= 0xD0 && m <= 0xD9)) { o += 2; continue; }
                 // SOF0..SOF15 carry the frame size; skip DHT(C4)/JPG(C8)/DAC(CC).
                 if (m >= 0xC0 && m <= 0xCF && m !== 0xC4 && m !== 0xC8 && m !== 0xCC) {
+                    if (o + 9 > buf.length) { return null; }
                     return { h: buf.readUInt16BE(o + 5), w: buf.readUInt16BE(o + 7) };
                 }
-                if (m === 0xD8 || m === 0xD9 || (m >= 0xD0 && m <= 0xD7)) { o += 2; continue; }
+                // Any other marker is a length-prefixed segment; skip past it.
+                if (o + 4 > buf.length) { return null; }
                 o += 2 + buf.readUInt16BE(o + 2);
             }
         }
@@ -352,11 +369,15 @@ function previewIntegrity(map) {
     if (typeof map.thumbnail !== 'string') {
         return { pass: false, detail: 'No embedded editor thumbnail.' };
     }
-    const m = map.thumbnail.match(/^data:image\/(png|jpeg|jpg|webp);base64,(.+)$/i);
-    if (!m) { return { pass: false, detail: 'Thumbnail is not a recognised image data-URI.' }; }
+    // Only the formats imageDims can measure (and that the editor emits). A webp or
+    // other format is reported as unrecognised rather than mis-decoded into a false
+    // "corrupt"/aspect FAIL.
+    const m = map.thumbnail.match(/^data:image\/(png|jpeg|jpg);base64,(.+)$/i);
+    if (!m) { return { pass: false, detail: 'Thumbnail is missing or not a PNG/JPEG data-URI.' }; }
     const fmt = m[1].toLowerCase() === 'jpg' ? 'jpeg' : m[1].toLowerCase();
-    let buf;
-    try { buf = Buffer.from(m[2], 'base64'); } catch (e) { return { pass: false, detail: 'Thumbnail base64 failed to decode.' }; }
+    // Buffer.from(..,'base64') never throws — it silently drops invalid chars — so a
+    // garbage payload is caught by the length/dimension checks below, not here.
+    const buf = Buffer.from(m[2], 'base64');
     if (buf.length < 500) { return { pass: false, detail: 'Thumbnail is suspiciously small (' + buf.length + ' bytes).' }; }
     const dims = imageDims(buf, fmt);
     if (dims == null || !dims.w || !dims.h) {
@@ -377,7 +398,10 @@ const results = [];
 let hardFail = false;
 
 for (const entry of parsed) {
-    const name = safeName(entry.file);
+    // Prefix with the input index so two maps whose names collide after
+    // safeName() sanitisation (e.g. "cool map" vs "cool+map") still get distinct
+    // image files instead of silently overwriting each other.
+    const name = results.length + '-' + safeName(entry.file);
     const outBase = path.join(OUTPUT_DIR, name);
     const result = { file: entry.file, mapName: null, verdict: 'reject', errors: [], warnings: [], parTime: 0, sim: null, serverImage: null, previewIntegrity: null, routes: [], routeImage: null };
 
