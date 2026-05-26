@@ -953,7 +953,7 @@ function compareSite(siteA, siteB) {
 var exportStatusTimer = null;
 function showExportStatus(message, bg) {
     var el = $("#exportStatus");
-    el.children("span").text(message);
+    el.text(message); // same write pattern as #submitStatus (the span is just a placeholder)
     el.css({ "color": "white", "background-color": bg });
     el.show();
     if (exportStatusTimer) {
