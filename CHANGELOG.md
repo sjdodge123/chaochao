@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.9.0 — 2026-05-26
+
 ### General
 
 - Controllers can now open an in-game **Settings** menu (press Y / △) to change sound effects, music, dynamic camera, colour-blind assist, and the light/dark theme without reaching for the mouse. In local co-op, only Player 1 can open it — the settings are shared by everyone on the screen.
