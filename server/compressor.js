@@ -120,6 +120,19 @@ exports.sendLobbyStart = function (lobbyStartButton, lobbyMapID) {
 	packet = JSON.stringify(packet);
 	return packet;
 }
+// SPIKE (lobby hub): serialize the walk-up stations for client rendering. Static
+// for the lobby's lifetime, so sent once on startLobby (not per tick). Each entry:
+// [id, kind, x, y, radius, color].
+exports.sendLobbyStations = function (stations) {
+	var packet = [];
+	if (stations != null) {
+		for (var i = 0; i < stations.length; i++) {
+			var s = stations[i];
+			packet.push([s.stationId, s.stationKind, s.x, s.y, s.radius, s.color]);
+		}
+	}
+	return JSON.stringify(packet);
+}
 exports.gameState = function (game) {
 	var packet = [];
 	packet[0] = game.currentState;

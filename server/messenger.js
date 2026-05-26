@@ -235,6 +235,52 @@ function checkForMail(client) {
 		}
 	});
 
+	// SPIKE (lobby skin station): set this player's color from the curated palette.
+	// Lobby-only (a skin change mid-race would be confusing); validated against the
+	// palette and rejected if another player already holds the color (uniqueness is
+	// what keeps karts distinguishable). Broadcast on its own event because color is
+	// NOT part of the per-tick gameUpdates (it only ships in the spawn packet).
+	client.on('setSkin', function (payload) {
+		var room = hostess.getRoomBySig(roomMailList[client.id]);
+		if (room == undefined || room.game.currentState != c.stateMap.lobby) {
+			return;
+		}
+		var player = room.playerList[client.id];
+		if (player == null) {
+			return;
+		}
+		var color = payload && payload.color;
+		if (utils.getColorPalette().indexOf(color) === -1) {
+			return; // off-palette request
+		}
+		for (var pid in room.playerList) {
+			if (pid !== client.id && room.playerList[pid].color === color) {
+				client.emit("skinRejected", { color: color, reason: "taken" });
+				return;
+			}
+		}
+		player.color = color;
+		messageRoomBySig(room.sig, "playerSkinChanged", { id: client.id, color: color });
+	});
+
+	// SPIKE (lobby AI station): set the room-wide bot override. enabled:false => no
+	// bots next race; enabled:true + count => exactly `count` bots. Lobby-only;
+	// last-writer-wins; broadcast so every open AI panel reflects the live setting.
+	// Takes effect at the next startGated (fillGridWithBots reads game.botOverride).
+	client.on('setLobbyAI', function (payload) {
+		var room = hostess.getRoomBySig(roomMailList[client.id]);
+		if (room == undefined || room.game.currentState != c.stateMap.lobby) {
+			return;
+		}
+		var enabled = !!(payload && payload.enabled);
+		var count = (payload && typeof payload.count === "number") ? Math.floor(payload.count) : 0;
+		var max = (c.aiRacers && c.aiRacers.maxGrid) ? c.aiRacers.maxGrid : 10;
+		if (count < 0) { count = 0; }
+		if (count > max) { count = max; }
+		room.game.botOverride = { enabled: enabled, count: count };
+		messageRoomBySig(room.sig, "lobbyAIChanged", { enabled: enabled, count: count });
+	});
+
 
 }
 function messageRoomBySig(sig, header, payload) {

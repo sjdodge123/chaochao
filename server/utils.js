@@ -349,6 +349,16 @@ exports.getUniqueColor = function (usedColors) {
     return color;
 };
 
+// SPIKE (lobby skin station): the named-color palette as a plain array, for the
+// skin picker's choices and for server-side validation of a requested skin color.
+exports.getColorPalette = function () {
+    var out = [];
+    for (var name in Colors.names) {
+        out.push(Colors.names[name]);
+    }
+    return out;
+};
+
 exports.getDT = function () {
     var currentFrame = new Date();
     var dt = currentFrame - lastFrame;
