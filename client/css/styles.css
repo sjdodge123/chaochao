@@ -1007,6 +1007,98 @@ body.osk-open .gamepad-prompts {
     color: #fff;
 }
 
+/* in-game settings panel (controller-navigable; mirrors the navbar toggles).
+   Unlike the leave modal it does NOT dim the whole screen — in local co-op the
+   other players keep racing behind it, so only the panel card is interactive. */
+.settings-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    pointer-events: none;
+    z-index: 3000;
+}
+.settings-modal.hidden {
+    display: none;
+}
+.settings-dialog {
+    pointer-events: auto;
+    min-width: 260px;
+}
+.settings-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    width: 100%;
+    padding: 0.55rem 0.9rem;
+    font-size: 1rem;
+    font-weight: 600;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    cursor: pointer;
+}
+.settings-row .set-state {
+    min-width: 2.6rem;
+    text-align: right;
+    color: var(--muted, #999);
+}
+.settings-row.is-on .set-state {
+    color: #4caf50;
+}
+/* multi-state value (e.g. theme: Auto/Light/Dark) — a current selection, not On/Off */
+.settings-row .set-state.set-value {
+    color: var(--text);
+    font-weight: 600;
+}
+.settings-foot {
+    margin-top: 0.9rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.9rem;
+    font-size: 0.8rem;
+    color: var(--muted, #999);
+}
+/* Reuse the hint-bar chip look so the footer matches the rest of the game's
+   controller glyphs (the bare .gp-glyph rules are all parent-scoped). */
+.settings-foot .gp-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+}
+.settings-foot .gp-glyph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 5px;
+    border-radius: 11px;
+    background-color: #c87f8a;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+}
+.settings-foot .gp-glyph.gp-stick {
+    border-radius: 50%;
+    background-color: #555;
+}
+
 /* --- dark-mode overrides for Bootstrap-driven and map-editor surfaces ---
    These selectors carry extra specificity (or !important) so they win over
    Bootstrap utilities and the per-page inline styles in create.html. */

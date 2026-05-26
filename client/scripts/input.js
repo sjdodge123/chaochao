@@ -167,9 +167,13 @@ function movementActionFor(evt) {
     return null;
 }
 function keyDown(evt) {
-    // While the leave-game confirmation is up, don't let movement keys drive the
-    // player (gamepad.js owns that modal; openLeaveModal already stopped motion).
+    // While the leave-game confirmation or the settings panel is up, don't let
+    // movement keys drive the player (gamepad.js owns those overlays and already
+    // stopped motion).
     if (typeof leaveModalIsOpen === "function" && leaveModalIsOpen()) {
+        return;
+    }
+    if (typeof settingsModalIsOpen === "function" && settingsModalIsOpen()) {
         return;
     }
     if (movingByMouse) {
