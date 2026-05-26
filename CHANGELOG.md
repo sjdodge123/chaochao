@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.12.1 — 2026-05-26
+
 ### General
 
 - The maps got a visual refresh: terrain colours are re-graded into one cohesive palette so tiles no longer clash (the neon grass and washed-out ice are gone), every region now has a crisp edge so tiles read more clearly, the random tile is purple instead of harsh electric blue, bumpers and the goal sit better with everything else, and the arena has a subtle vignette around the edges.
