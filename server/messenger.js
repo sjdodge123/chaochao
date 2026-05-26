@@ -102,10 +102,14 @@ function checkForMail(client) {
 			return;
 		}
 		// Accept either a { map, enableAI } wrapper (current editor) or a raw map
-		// object (legacy payload). AI defaults off, so a preview is bot-free
-		// unless the editor explicitly opted in.
-		var previewMap = (parsed && parsed.map != null) ? parsed.map : parsed;
-		var enableAI = (parsed && parsed.enableAI === true);
+		// object (legacy payload). Detect the wrapper structurally — a non-array
+		// object that owns map/enableAI — rather than `parsed.map != null`, which
+		// misfires on arrays (Array.prototype.map is truthy) and odd payloads.
+		// AI defaults off, so a preview is bot-free unless explicitly opted in.
+		var isWrapper = parsed != null && typeof parsed === "object" && !Array.isArray(parsed) &&
+			(Object.prototype.hasOwnProperty.call(parsed, "map") || Object.prototype.hasOwnProperty.call(parsed, "enableAI"));
+		var previewMap = isWrapper ? parsed.map : parsed;
+		var enableAI = isWrapper && parsed.enableAI === true;
 		var result = utils.validateMap(previewMap, c);
 		if (!result.valid) {
 			client.emit("previewRejected", { reason: result.reason });

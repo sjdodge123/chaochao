@@ -214,7 +214,11 @@
       border-color: #2f8f4e;
       color: #fff;
     }
+    /* Recolour the whole keyboard focus ring (outline + halo) green so the
+       on-state button doesn't show the global pink .btn:focus-visible outline
+       around a green fill. Gamepad nav keeps the shared .gp-focus ring. */
     #controlPanel #enableAIButton.ai-on:focus-visible {
+      outline-color: #2f8f4e;
       box-shadow: 0 0 0 3px rgba(47, 143, 78, 0.5);
     }
 

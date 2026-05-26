@@ -31,6 +31,18 @@ const config = require(path.join(repoRoot, 'server', 'config.json'));
 const DT = config.serverTickSpeed / 1000;
 const MOVES = ['moveForward', 'moveBackward', 'turnLeft', 'turnRight', 'attack'];
 
+// Seeded PRNG (mulberry32) so the driven input/aim is reproducible run-to-run,
+// matching the repo's headless-test convention (CLAUDE.md). Override with
+// SEED=<n> to reproduce a specific sequence. Pass/fail here doesn't hinge on the
+// sequence, but determinism keeps coverage stable and any failure repeatable.
+let rngState = (parseInt(process.env.SEED, 10) || 0x9e3779b9) >>> 0;
+function rng() {
+    rngState |= 0; rngState = (rngState + 0x6D2B79F5) | 0;
+    let t = Math.imul(rngState ^ (rngState >>> 15), 1 | rngState);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
 let failures = 0;
 function fail(msg) { failures++; console.log('::error::' + msg); }
 function ok(msg) { console.log('  ok - ' + msg); }
@@ -57,7 +69,7 @@ const fakeIo = { to() { return { emit() { } }; }, sockets: { emit() { } } };
 
 function randomInput() {
     const p = { moveForward: false, moveBackward: false, turnLeft: false, turnRight: false, attack: false };
-    for (const m of MOVES) if (Math.random() < 0.5) p[m] = true;
+    for (const m of MOVES) if (rng() < 0.5) p[m] = true;
     return p;
 }
 
@@ -146,7 +158,7 @@ function phaseAOff(map) {
     room.game.startRace();
     for (let f = 0; f < 200; f++) {
         human.fire('movement', randomInput());
-        human.fire('mousemove', Math.random() * 360);
+        human.fire('mousemove', rng() * 360);
         hostess.updateRooms(DT);
         assertUpdatesWellFormed(room, 'Phase A racing frame ' + f);
         if (failures > 0) { teardown(boot); return; }
@@ -212,15 +224,21 @@ function phaseBOn(map) {
     if (room.game.gameBoard.previewAI !== true) {
         fail('Phase B: gameBoard.previewAI should be true, got ' + room.game.gameBoard.previewAI);
     }
+    // The AI-ON path can only be verified if AI racers exist globally. If that's
+    // ever disabled, "on -> bots" can't be distinguished from "toggle broken", so
+    // fail loudly rather than passing vacuously — whoever disables AI must update
+    // (or intentionally skip) this test.
+    if (!config.aiRacers || !config.aiRacers.enabled) {
+        fail('Phase B: config.aiRacers.enabled is false — cannot verify the AI-ON toggle. ' +
+            'Update this test if AI racers were intentionally disabled.');
+        teardown(boot);
+        return;
+    }
     room.game.startLobby();
     room.game.startGated();
     const pc = countPlayers(room);
-    if (config.aiRacers && config.aiRacers.enabled) {
-        if (pc.bots <= 0) fail('Phase B: expected bots to fill the grid, got ' + pc.bots);
-        else ok('bots filled the grid: ' + pc.bots + ' (humans ' + pc.humans + ')');
-    } else {
-        console.log('  note - config.aiRacers.enabled is false; no bots expected globally');
-    }
+    if (pc.bots <= 0) fail('Phase B: expected bots to fill the grid, got ' + pc.bots);
+    else ok('bots filled the grid: ' + pc.bots + ' (humans ' + pc.humans + ')');
 
     teardown(boot);
 }
@@ -251,12 +269,38 @@ function phaseCLegacy(map) {
     messenger.removeMailBox(editor.id);
 }
 
+// ---------------------------------------------------------------------------
+// Phase D: malformed payloads (array / primitive) must be rejected gracefully,
+// never mistaken for a { map, enableAI } wrapper and never creating a room.
+// Guards the structural wrapper-detection in messenger.js's createPreviewRoom.
+// ---------------------------------------------------------------------------
+function phaseDMalformed() {
+    console.log('Phase D: malformed payloads -> rejected, no room created');
+    const cases = ['[1,2,3]', '5', '"hello"', 'null'];
+    for (const body of cases) {
+        const editor = makeFakeSocket('D-' + body);
+        messenger.addMailBox(editor.id, editor);
+        editor.fire('createPreviewRoom', body);
+        const created = editor.lastEmit('previewRoomCreated');
+        const rejected = editor.lastEmit('previewRejected');
+        if (created != null) {
+            fail('Phase D: payload ' + body + ' wrongly created a room');
+        } else if (rejected == null) {
+            fail('Phase D: payload ' + body + ' was neither created nor rejected');
+        } else {
+            ok('payload ' + body + ' rejected: ' + (rejected.reason || ''));
+        }
+        messenger.removeMailBox(editor.id);
+    }
+}
+
 messenger.build(fakeIo);
 const map = loadAMap();
 try {
     phaseAOff(map);
     phaseBOn(map);
     phaseCLegacy(map);
+    phaseDMalformed();
 } catch (e) {
     fail('Unhandled exception: ' + e.message + '\n' + e.stack);
 }
