@@ -203,22 +203,19 @@
       border-top: thin solid #e6e6e6;
     }
 
-    /* "Enable AI racers" preview toggle. Label colour follows the theme via
-       --text (dark mode is handled by the shared styles.css vars); the box
-       itself uses a fixed brand green that reads on both light and dark. */
-    #enableAIRow {
-      text-align: left;
-      font-size: 0.85rem;
+    /* "AI racers" preview toggle, styled as a full-width action button so it's
+       a large touch target and is reachable by the editor gamepad nav (A ->
+       click), unlike a tiny DOM checkbox. Off looks like the other Actions
+       buttons; on gets a brand-green fill (with a matching focus ring) so the
+       state reads at a glance in both light and dark. Two IDs keep this above
+       the [data-theme="dark"] #controlPanel .btn-block rule's specificity. */
+    #controlPanel #enableAIButton.ai-on {
+      background-color: #2f8f4e;
+      border-color: #2f8f4e;
+      color: #fff;
     }
-    #enableAIRow .form-check-label {
-      color: var(--text);
-      cursor: pointer;
-      -webkit-user-select: none;
-      user-select: none;
-    }
-    #enableAICheckbox {
-      cursor: pointer;
-      accent-color: #2f8f4e;
+    #controlPanel #enableAIButton.ai-on:focus-visible {
+      box-shadow: 0 0 0 3px rgba(47, 143, 78, 0.5);
     }
 
     @media screen and (max-width:768px) {
@@ -292,11 +289,8 @@
               Actions
             </div>
             <hr />
-            <div id="enableAIRow" class="form-check mb-2"
-              title="Fill the grid with AI racers. Off = a solo, bot-free run of your map.">
-              <input type="checkbox" class="form-check-input" id="enableAICheckbox">
-              <label class="form-check-label" for="enableAICheckbox">Enable AI racers</label>
-            </div>
+            <button id="enableAIButton" class="btn btn-block" aria-pressed="false"
+              title="Fill the grid with AI racers. Off = a solo, bot-free run of your map."><i class="fa fa-square-o mr-2" aria-hidden="true"></i><span>AI racers: off</span></button>
             <button id="previewButton" class="btn btn-block">Preview / Playtest<i class="fa fa-play ml-2" aria-hidden="true"></i></button>
             <button id="previewStatus" class="btn btn-block" disabled style="display:none;"><span></span></button>
             <button id="exportButton" class="btn btn-block">Copy to Clipboard<i class="fa fa-clipboard ml-2" aria-hidden="true"></i></button>
