@@ -104,3 +104,8 @@ dist
 .tern-port
 .DS_Store
 client/_lobby_preview.html
+
+# Map-submission review workflow scratch (CI-generated, never committed)
+map-review-out/
+review-comment.md
+changed_maps.txt

@@ -1,0 +1,178 @@
+name: Map submission review
+
+# Dedicated review gate for the map JSON the in-browser editor submits. The editor
+# opens these as auto-PRs from `mapchange-*` branches (utils.submitPullRequest), so
+# this runs only when a PR touches client/maps/**. It is deliberately separate from
+# pr-validation.yml: that gates the whole repo on every PR; this does deep,
+# submission-specific work (goal-reachability, a playability sim, and a rendered
+# preview a human eyeballs for inappropriate imagery) and talks back on the PR.
+#
+# NOTE: comments + image publishing need a writable GITHUB_TOKEN, which PRs from
+# FORKS do not get. Editor submissions are same-repo branches, so this works for
+# them; a fork PR touching maps will still validate but skip the comment/images.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'client/maps/**'
+
+permissions:
+  contents: write       # push rendered previews to the map-previews branch
+  pull-requests: write  # post the sticky review comment
+
+concurrency:
+  group: map-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so we can diff against the merge base
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Determine which maps changed and whether this is an editor submission
+      # branch. All dynamic values come in via env (never inlined into the script)
+      # so an attacker-chosen branch name can't inject shell.
+      - name: Detect changed maps
+        id: detect
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          git fetch --no-tags --depth=200 origin "$BASE_SHA" 2>/dev/null || true
+          MB=$(git merge-base "$BASE_SHA" "$HEAD_SHA" 2>/dev/null || echo "$BASE_SHA")
+          ALL=$(git diff --name-only "$MB" "$HEAD_SHA")
+          echo "Changed files:"; echo "$ALL"
+          echo "$ALL" | grep -E '^client/maps/[^/]+\.json$' > changed_maps.txt || true
+          NONMAP=$(echo "$ALL" | grep -vE '^client/maps/[^/]+\.json$' || true)
+          MAP_COUNT=$(grep -c . changed_maps.txt || true); [ -z "$MAP_COUNT" ] && MAP_COUNT=0
+          if [ -n "$NONMAP" ]; then NONMAP_COUNT=$(printf '%s\n' "$NONMAP" | grep -c .); else NONMAP_COUNT=0; fi
+          echo "has_maps=$([ "$MAP_COUNT" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "nonmap_count=$NONMAP_COUNT" >> "$GITHUB_OUTPUT"
+          case "$HEAD_REF" in
+            mapchange-*) echo "is_submission=true"  >> "$GITHUB_OUTPUT" ;;
+            *)           echo "is_submission=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+          echo "Map files under review:"; cat changed_maps.txt || true
+
+      # Guard (option D): an editor submission PR must touch ONLY map JSON. If a
+      # `mapchange-*` PR changes anything else, the submission flow was tampered
+      # with — block it. Dev PRs (any other branch) are exempt: they legitimately
+      # bundle code + map edits and still get validated/previewed below.
+      - name: Guard — submission PRs may only touch map JSON
+        if: steps.detect.outputs.is_submission == 'true' && steps.detect.outputs.nonmap_count != '0'
+        run: |
+          echo "::error::This map-submission PR (mapchange-* branch) changes files outside client/maps/*.json."
+          echo "Editor submissions must only add/update a single map file. Review manually."
+          exit 1
+
+      - name: Validate submitted map(s)
+        id: validate
+        if: steps.detect.outputs.has_maps == 'true'
+        continue-on-error: true   # always reach the comment step; job is failed at the end
+        env:
+          MAP_REVIEW_OUTPUT: ${{ github.workspace }}/map-review-out
+        run: |
+          readarray -t MAPS < changed_maps.txt
+          node .github/scripts/validate-submitted-map.js "${MAPS[@]}"
+
+      # Publish the rendered preview + extracted thumbnail to a dedicated
+      # `map-previews` branch (kept off main so map PRs stay pure JSON — see the D
+      # guard), namespaced per PR, and expose the raw base URL for the comment.
+      - name: Publish preview images
+        id: publish
+        if: steps.detect.outputs.has_maps == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          OUT: ${{ github.workspace }}/map-review-out
+        run: |
+          shopt -s nullglob
+          imgs=("$OUT"/*.png "$OUT"/*.thumb.*)
+          if [ ${#imgs[@]} -eq 0 ]; then
+            echo "No preview images to publish."; echo "base_url=" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          WORK=$(mktemp -d)
+          AUTH="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+          if git clone --depth=1 --branch map-previews "$AUTH" "$WORK" 2>/dev/null; then
+            echo "Reusing existing map-previews branch."
+          else
+            echo "Creating map-previews branch (first run)."
+            git clone --depth=1 "$AUTH" "$WORK"
+            git -C "$WORK" checkout --orphan map-previews
+            git -C "$WORK" rm -rf . >/dev/null 2>&1 || true
+            printf '# Map submission preview images\n\nAuto-generated by the map-submission review workflow.\nSafe to prune old `pr-*` folders.\n' > "$WORK/README.md"
+          fi
+          mkdir -p "$WORK/pr-${PR}"
+          # Refresh this PR's folder so re-pushes replace stale renders.
+          rm -f "$WORK/pr-${PR}"/* 2>/dev/null || true
+          cp "${imgs[@]}" "$WORK/pr-${PR}/"
+          git -C "$WORK" add -A
+          git -C "$WORK" -c user.name="github-actions[bot]" \
+                         -c user.email="github-actions[bot]@users.noreply.github.com" \
+                         commit -m "map previews for PR #${PR}" >/dev/null 2>&1 || { echo "Nothing to commit."; }
+          PUSHED=0
+          for attempt in 1 2 3; do
+            if git -C "$WORK" push "$AUTH" HEAD:map-previews; then PUSHED=1; break; fi
+            echo "push rejected, rebasing (attempt $attempt)"
+            git -C "$WORK" pull --rebase "$AUTH" map-previews || true
+            sleep 3
+          done
+          if [ "$PUSHED" = "1" ]; then
+            echo "base_url=https://raw.githubusercontent.com/${REPO}/map-previews/pr-${PR}/" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Could not publish preview images (a fork PR has a read-only token, or branch contention). Comment will render without inline images."
+            echo "base_url=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build review comment
+        id: comment
+        if: steps.detect.outputs.has_maps == 'true'
+        env:
+          MAP_REVIEW_OUTPUT: ${{ github.workspace }}/map-review-out
+          IMAGE_BASE_URL: ${{ steps.publish.outputs.base_url }}
+        run: |
+          node .github/scripts/build-review-comment.js > review-comment.md
+          echo "Built comment ($(wc -l < review-comment.md) lines)."
+
+      - name: Upsert sticky PR comment
+        if: steps.detect.outputs.has_maps == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('review-comment.md', 'utf8');
+            const marker = '<!-- map-submission-review -->';
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number, per_page: 100 });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      # Reflect the validation verdict in the job status (the comment is posted
+      # either way above). continue-on-error on the validate step kept the run
+      # alive so the reviewer always gets the explanation + images.
+      - name: Fail if validation rejected the map
+        if: steps.detect.outputs.has_maps == 'true' && steps.validate.outcome == 'failure'
+        run: |
+          echo "::error::One or more submitted maps failed validation. See the PR comment for details."
+          exit 1
