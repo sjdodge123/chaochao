@@ -54,12 +54,15 @@
         // Fall back to the pad that just connected when there's no remembered match.
         var pads = navigator.getGamepads ? navigator.getGamepads() : [];
         var want = (typeof preferredPadIndexForSlot === "function") ? preferredPadIndexForSlot(pads, 0) : null;
-        padIndex = (want != null && pads[want]) ? want : e.gamepad.index;
+        var usedPreferred = (want != null && !!pads[want]);
+        padIndex = usedPreferred ? want : e.gamepad.index;
         var active = pads[padIndex];
         padType = detectType((active && active.id) || e.gamepad.id);
         prevButtons = [];
         needsBaseline = true; // re-baseline so a button held at connect isn't a press
-        if (typeof rememberPrimaryController === "function" && active) {
+        // Only re-affirm the stored host when we claimed it; a pad that merely
+        // connected first must not overwrite the remembered host identity.
+        if (usedPreferred && active && typeof rememberPrimaryController === "function") {
             rememberPrimaryController(active);
         }
         showPrompt(true);
@@ -91,20 +94,30 @@
         // No pad claimed yet (or the claimed one vanished): prefer the remembered
         // host controller, then fall back to the lowest connected index.
         var want = (typeof preferredPadIndexForSlot === "function") ? preferredPadIndexForSlot(pads, 0) : null;
-        var pick = (want != null && pads[want]) ? want : -1;
+        var matched = (want != null && !!pads[want]); // did we claim the remembered host?
+        var pick = matched ? want : -1;
         if (pick === -1) {
             for (var i = 0; i < pads.length; i++) {
                 if (pads[i]) { pick = i; break; }
             }
         }
         if (pick !== -1 && pads[pick]) {
+            if (pick !== padIndex) {
+                // (Re)claiming a different pad — re-baseline so a button held on it
+                // (e.g. across a mid-session pad swap) isn't read as a fresh press.
+                needsBaseline = true;
+            }
             padIndex = pick;
             if (!connected) {
                 connected = true;
                 padType = detectType(pads[pick].id);
                 showPrompt(true);
             }
-            if (typeof rememberPrimaryController === "function") {
+            // Re-affirm the persisted host ONLY when we actually matched it. A
+            // lowest-index fallback is a guess (the host pad just isn't enumerated on
+            // this page yet); writing it would overwrite the stored host and bring
+            // back the cross-page control-flip this feature exists to prevent.
+            if (matched && typeof rememberPrimaryController === "function") {
                 rememberPrimaryController(pads[pick]);
             }
             return pads[pick];

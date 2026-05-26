@@ -14,7 +14,7 @@ exports.getRooms = function () {
 	}
 	for (var sig in roomList) {
 		var room = roomList[sig];
-		// Preview rooms are private capacity-1 play-tests; never list them.
+		// Preview rooms are private local-co-op play-tests; never list them.
 		if (room.isPreview) {
 			continue;
 		}

@@ -61,12 +61,15 @@ function egOnConnect(e) {
     // pad that just connected when there's no remembered match.
     var pads = navigator.getGamepads ? navigator.getGamepads() : [];
     var want = (typeof preferredPadIndexForSlot === "function") ? preferredPadIndexForSlot(pads, 0) : null;
-    egIndex = (want != null && pads[want]) ? want : e.gamepad.index;
+    var usedPreferred = (want != null && !!pads[want]);
+    egIndex = usedPreferred ? want : e.gamepad.index;
     var active = pads[egIndex];
     egType = egDetectType((active && active.id) || e.gamepad.id);
     egPrevButtons = [];
     egNeedsBaseline = true; // re-baseline so a button held at connect isn't a press
-    if (typeof rememberPrimaryController === "function" && active) {
+    // Only re-affirm the stored host when we claimed it; a pad that merely connected
+    // first must not overwrite the remembered host identity.
+    if (usedPreferred && active && typeof rememberPrimaryController === "function") {
         rememberPrimaryController(active);
     }
     egShowPrompt(true);
@@ -99,20 +102,29 @@ function egGetPad() {
     // No pad claimed yet (or the claimed one vanished): prefer the remembered host
     // controller, then fall back to the lowest connected index.
     var want = (typeof preferredPadIndexForSlot === "function") ? preferredPadIndexForSlot(pads, 0) : null;
-    var pick = (want != null && pads[want]) ? want : -1;
+    var matched = (want != null && !!pads[want]); // did we claim the remembered host?
+    var pick = matched ? want : -1;
     if (pick === -1) {
         for (var i = 0; i < pads.length; i++) {
             if (pads[i]) { pick = i; break; }
         }
     }
     if (pick !== -1 && pads[pick]) {
+        if (pick !== egIndex) {
+            // (Re)claiming a different pad — re-baseline so a button held on it
+            // (e.g. across a mid-session pad swap) isn't read as a fresh press.
+            egNeedsBaseline = true;
+        }
         egIndex = pick;
         if (!egConnected) {
             egConnected = true;
             egType = egDetectType(pads[pick].id);
             egShowPrompt(true);
         }
-        if (typeof rememberPrimaryController === "function") {
+        // Re-affirm the persisted host ONLY when we actually matched it; a lowest-index
+        // fallback is a guess and must not overwrite the stored host identity (which
+        // would re-introduce the cross-page control-flip this feature prevents).
+        if (matched && typeof rememberPrimaryController === "function") {
             rememberPrimaryController(pads[pick]);
         }
         return pads[pick];
