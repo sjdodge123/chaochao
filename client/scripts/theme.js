@@ -87,6 +87,7 @@
         btn.id = 'themeToggle';
         btn.type = 'button';
         btn.className = 'theme-toggle';
+        btn.setAttribute('data-gp-nav', ''); // make the toggle reachable by gamepad menu nav
         btn.addEventListener('click', cycle);
         nav.appendChild(btn);
         updateButton(getPref());

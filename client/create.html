@@ -262,20 +262,20 @@
       <div id="mapEditor">
         <div id="controlPanel" class="bg-light">
           <div id="editorToolbar" class="d-flex align-items-center justify-content-between">
-            <button id="loadButton" class="btn bg-light p-0" title="Back to map list"><i class="fa fa-arrow-left fa-2x" aria-hidden="true"></i></button>
-            <button id="rebuildButton" class="btn bg-light p-0" title="Wipe map and start over"><i class="fa fa-trash fa-2x" aria-hidden="true"></i></button>
-            <button id="deleteSelectedButton" class="btn bg-light p-0" title="Delete selected hazard" disabled><i class="fa fa-times fa-2x" aria-hidden="true"></i></button>
-            <button id="rotateButton" class="btn bg-light p-0" title="Rotate selected hazard 15°"><i class="fa fa-rotate-right fa-2x" aria-hidden="true"></i></button>
-            <button id="mouseButton" class="btn bg-light p-0" title="Switch to selection cursor"><i class="fa fa-mouse-pointer fa-2x" aria-hidden="true"></i></button>
+            <button id="loadButton" data-gp-nav class="btn bg-light p-0" title="Back to map list"><i class="fa fa-arrow-left fa-2x" aria-hidden="true"></i></button>
+            <button id="rebuildButton" data-gp-nav class="btn bg-light p-0" title="Wipe map and start over"><i class="fa fa-trash fa-2x" aria-hidden="true"></i></button>
+            <button id="deleteSelectedButton" data-gp-nav class="btn bg-light p-0" title="Delete selected hazard" disabled><i class="fa fa-times fa-2x" aria-hidden="true"></i></button>
+            <button id="rotateButton" data-gp-nav class="btn bg-light p-0" title="Rotate selected hazard 15°"><i class="fa fa-rotate-right fa-2x" aria-hidden="true"></i></button>
+            <button id="mouseButton" data-gp-nav class="btn bg-light p-0" title="Switch to selection cursor"><i class="fa fa-mouse-pointer fa-2x" aria-hidden="true"></i></button>
           </div>
           <div id="inputBar" class="mb-3">
             <div class="h5">
               Details
             </div>
             <hr />
-            <input class="editor-inputs form-control" type="text" id="author" name="author" placeholder="Author" maxlength="15"></input>
-            <input class="editor-inputs form-control" type="text" id="name" name="name" placeholder="Map Name" maxlength="15"></input>
-            <input class="editor-inputs form-control" type="text" id="email" name="email" placeholder="Email" maxlength="50"></input>
+            <input class="editor-inputs form-control" data-gp-nav type="text" id="author" name="author" placeholder="Author" maxlength="15"></input>
+            <input class="editor-inputs form-control" data-gp-nav type="text" id="name" name="name" placeholder="Map Name" maxlength="15"></input>
+            <input class="editor-inputs form-control" data-gp-nav type="text" id="email" name="email" placeholder="Email" maxlength="50"></input>
           </div>
           <div class="palette mb-3">
             <div class="h5">
@@ -283,14 +283,14 @@
             </div>
             <hr />
             <div>
-              <button id="slowTileButton" style="background-color: #f6d7b0;" title="Sand" class="mapEditorTile"><span>Sand</span></button>
-              <button id="normalTileButton" style="background-color: #523A28" title="Dirt" class="mapEditorTile"><span>Dirt</span></button>
-              <button id="fastTileButton" style="background-color: #90ee90" title="Grass" class="mapEditorTile"><span>Grass</span></button>
-              <button id="lavaTileButton" style="background-color: #cf1020" title="Lava" class="mapEditorTile"><span>Lava</span></button>
-              <button id="iceTileButton" style="background-color: #A5F2F3" title="Ice" class="mapEditorTile"><span>Ice</span></button>
-              <button id="abilityTileButton" style="background-color: #C8C8C8" title="Ability" class="mapEditorTile"><span>Ability</span></button>
-              <button id="randomTileButton" style="background-color: #020DFE" title="Random" class="mapEditorTile"><span>Random</span></button>
-              <button id="goalTileButton" style="background-color: #FFD700" title="Goal" class="mapEditorTile"><span>Goal</span></button>
+              <button id="slowTileButton" data-gp-nav style="background-color: #f6d7b0;" title="Sand" class="mapEditorTile"><span>Sand</span></button>
+              <button id="normalTileButton" data-gp-nav style="background-color: #523A28" title="Dirt" class="mapEditorTile"><span>Dirt</span></button>
+              <button id="fastTileButton" data-gp-nav style="background-color: #90ee90" title="Grass" class="mapEditorTile"><span>Grass</span></button>
+              <button id="lavaTileButton" data-gp-nav style="background-color: #cf1020" title="Lava" class="mapEditorTile"><span>Lava</span></button>
+              <button id="iceTileButton" data-gp-nav style="background-color: #A5F2F3" title="Ice" class="mapEditorTile"><span>Ice</span></button>
+              <button id="abilityTileButton" data-gp-nav style="background-color: #C8C8C8" title="Ability" class="mapEditorTile"><span>Ability</span></button>
+              <button id="randomTileButton" data-gp-nav style="background-color: #020DFE" title="Random" class="mapEditorTile"><span>Random</span></button>
+              <button id="goalTileButton" data-gp-nav style="background-color: #FFD700" title="Goal" class="mapEditorTile"><span>Goal</span></button>
             </div>
           </div>
           <div class="palette mb-3">
@@ -299,8 +299,8 @@
             </div>
             <hr />
             <div>
-              <button id="bumperButton" style="background-color: orange" title="Bumper" class="mapEditorTile"><span>Bumper</span></button>
-              <button id="movingBumperButton" style="background-color: orange" title="Moving Bumper" class="mapEditorTile"><span>Moving Bumper</span></button>
+              <button id="bumperButton" data-gp-nav style="background-color: orange" title="Bumper" class="mapEditorTile"><span>Bumper</span></button>
+              <button id="movingBumperButton" data-gp-nav style="background-color: orange" title="Moving Bumper" class="mapEditorTile"><span>Moving Bumper</span></button>
             </div>
           </div>
           <div id="startEdgePalette" class="palette mb-3">
@@ -309,12 +309,12 @@
             </div>
             <hr />
             <div>
-              <button data-edges="left" class="mapEditorTile startEdgeButton"><span>Left</span></button>
-              <button data-edges="right" class="mapEditorTile startEdgeButton"><span>Right</span></button>
-              <button data-edges="top" class="mapEditorTile startEdgeButton"><span>Top</span></button>
-              <button data-edges="bottom" class="mapEditorTile startEdgeButton"><span>Bottom</span></button>
-              <button data-edges="left+right" class="mapEditorTile startEdgeButton"><span>Left + Right</span></button>
-              <button data-edges="top+bottom" class="mapEditorTile startEdgeButton"><span>Top + Bottom</span></button>
+              <button data-edges="left" data-gp-nav class="mapEditorTile startEdgeButton"><span>Left</span></button>
+              <button data-edges="right" data-gp-nav class="mapEditorTile startEdgeButton"><span>Right</span></button>
+              <button data-edges="top" data-gp-nav class="mapEditorTile startEdgeButton"><span>Top</span></button>
+              <button data-edges="bottom" data-gp-nav class="mapEditorTile startEdgeButton"><span>Bottom</span></button>
+              <button data-edges="left+right" data-gp-nav class="mapEditorTile startEdgeButton"><span>Left + Right</span></button>
+              <button data-edges="top+bottom" data-gp-nav class="mapEditorTile startEdgeButton"><span>Top + Bottom</span></button>
             </div>
           </div>
           <div id="actionsSection">
@@ -322,12 +322,13 @@
               Actions
             </div>
             <hr />
-            <button id="enableAIButton" class="btn btn-block" aria-pressed="false"
+            <button id="enableAIButton" data-gp-nav class="btn btn-block" aria-pressed="false"
               title="Fill the grid with AI racers. Off = a solo, bot-free run of your map."><i class="fa fa-square-o mr-2" aria-hidden="true"></i><span>AI racers: off</span></button>
-            <button id="previewButton" class="btn btn-block">Preview / Playtest<i class="fa fa-play ml-2" aria-hidden="true"></i></button>
+            <button id="previewButton" data-gp-nav class="btn btn-block">Preview / Playtest<i class="fa fa-play ml-2" aria-hidden="true"></i></button>
             <button id="previewStatus" class="btn btn-block" disabled style="display:none;"><span></span></button>
-            <button id="exportButton" class="btn btn-block">Copy to Clipboard<i class="fa fa-clipboard ml-2" aria-hidden="true"></i></button>
-            <button id="submitButton" class="btn btn-block">Upload to Github<i class="fa fa-cloud-upload ml-2"></i></button>
+            <button id="exportButton" data-gp-nav class="btn btn-block">Copy to Clipboard<i class="fa fa-clipboard ml-2" aria-hidden="true"></i></button>
+            <button id="exportStatus" class="btn btn-block" disabled style="display:none;"><span></span></button>
+            <button id="submitButton" data-gp-nav class="btn btn-block">Upload to Github<i class="fa fa-cloud-upload ml-2"></i></button>
             <button id="submitStatus" class="btn btn-block" disabled ><span>Submitting..</span></button>
           </div>
         </div>
@@ -352,7 +353,7 @@
     </div>
     <div id="loadWindow">
       <div class="map-image">
-        <button id="createNew"><img id="createNewImage" src="">
+        <button id="createNew" data-gp-nav><img id="createNewImage" src="">
           <div class="desc">Create a new map</div>
         </button>
       </div>
