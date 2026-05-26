@@ -51,7 +51,13 @@ function registerLobbyHubHandlers(server) {
 		}
 	});
 	server.on("lobbyAIChanged", function (payload) {
-		lobbyAISetting = payload;
+		// Ignore the echo of our own rapid local steps (it would reset the dial to a
+		// stale mid-burst value); our optimistic value already matches the server.
+		if (typeof lobbyAILocalAt !== "undefined" && (Date.now() - lobbyAILocalAt) < LOBBY_AI_ECHO_MS) {
+			return;
+		}
+		// { auto:true } means the override was cleared back to Auto (null).
+		lobbyAISetting = (payload != null && payload.auto) ? null : payload;
 	});
 	server.on("stationEnter", function (payload) {
 		if (payload != null && typeof setSlotNearStation === "function") {

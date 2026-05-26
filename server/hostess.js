@@ -23,20 +23,28 @@ exports.getRooms = function () {
 		// ("In progress") instead of having it silently vanish. Flag joinability
 		// explicitly (mirrors findARoom's matchmaking test).
 		var joinable = room.hasSpace() && !room.isLocked();
-		// AI hub: surface the room's bots. aiCount is the LIVE bot count (non-zero
-		// during a race); aiPlanned is the lobby AI-station setting that applies next
-		// race (null = Auto/random grid, 0 = off, N = N bots) so the join page can
-		// show "+N AI" even while a room is still in its lobby.
-		var aiCount = 0;
+		// AI hub: surface the room's bots so the join page shows them. aiCount is the
+		// LIVE bot count (non-zero during a race). aiPlanned is how many bots will
+		// actually spawn NEXT race for the current human count — computed for every
+		// mode (explicit count, Off, or Auto's autoTarget fill), clamped to room
+		// capacity — and aiAuto flags the Auto mode so the page can label it.
+		var humans = 0, aiCount = 0;
 		for (var pid in room.playerList) {
-			if (room.playerList[pid] != null && room.playerList[pid].isAI) {
-				aiCount++;
-			}
+			if (room.playerList[pid] == null) { continue; }
+			if (room.playerList[pid].isAI) { aiCount++; } else { humans++; }
 		}
-		var aiPlanned = null;
-		if (room.game.botOverride != null) {
+		var capLeft = (c.maxPlayersInRoom || 25) - humans;
+		if (capLeft < 0) { capLeft = 0; }
+		var aiAuto = (room.game.botOverride == null);
+		var aiPlanned;
+		if (aiAuto) {
+			var autoTarget = (c.aiRacers && c.aiRacers.autoTarget) ? c.aiRacers.autoTarget : 8;
+			aiPlanned = autoTarget - humans;
+			if (aiPlanned < 0) { aiPlanned = 0; }
+		} else {
 			aiPlanned = room.game.botOverride.enabled ? room.game.botOverride.count : 0;
 		}
+		if (aiPlanned > capLeft) { aiPlanned = capLeft; }
 		rooms[sig] = {
 			state: room.game.currentState,
 			round: room.game.gameBoard.round,
@@ -48,6 +56,7 @@ exports.getRooms = function () {
 			locked: room.isLocked(),
 			aiCount: aiCount,
 			aiPlanned: aiPlanned,
+			aiAuto: aiAuto,
 		}
 	}
 	return rooms;

@@ -142,11 +142,15 @@ function buildCard(room, maxPlayers) {
     return card;
 }
 
-// The "AI" card stat, or null to omit it. Live bots win (a real race in progress);
-// otherwise the lobby setting that applies next race: "Off" / "N next" / Auto(omit).
+// The "AI" card stat. Live bots win (a real race in progress); otherwise the lobby
+// setting that applies next race: "N (auto)" when auto-filling toward the target,
+// "N next" for an explicit count, or "Off" when bots are explicitly turned off.
 function aiStatLabel(room) {
     if (room.aiCount > 0) {
         return room.aiCount + (room.aiCount === 1 ? ' bot' : ' bots');
+    }
+    if (room.aiAuto) {
+        return (room.aiPlanned > 0) ? (room.aiPlanned + ' (auto)') : 'Off';
     }
     if (room.aiPlanned != null) {
         return room.aiPlanned <= 0 ? 'Off' : (room.aiPlanned + ' next');
