@@ -951,10 +951,10 @@ function dropLocalPlayer(slot) {
 	// nobody is controlling. A real keyboard/mouse player (kbmClaimedPrimary) or
 	// another controller still in the game keeps the session alive.
 	if (onlyPhantomPrimaryRemains()) {
-		// No real player left. In a preview, return to the editor; otherwise tear the
-		// tab down and go back to the menu (the last-player-leaving path).
+		// No real player left. In a preview, return to the editor (immediately — this
+		// is a deliberate leave); otherwise tear the tab down and go back to the menu.
 		if (previewMode) {
-			previewReturnToEditor();
+			previewReturnToEditor(true);
 			return;
 		}
 		try { server.disconnect(); } catch (e) { /* ignore */ }
@@ -986,9 +986,10 @@ function onlyPhantomPrimaryRemains() {
 function handlePrimaryLost() {
 	// A preview play-test lives entirely in the creator's editor tab. If the designer
 	// (P1) leaves or their socket drops, end the preview and go back to the editor
-	// rather than promoting a friend to primary or bailing to the menu.
+	// rather than promoting a friend to primary or bailing to the menu. Immediate:
+	// this is a deliberate leave, so don't sit on a blank screen for the result beat.
 	if (previewMode) {
-		previewReturnToEditor();
+		previewReturnToEditor(true);
 		return;
 	}
 	var survivor = null;
@@ -1047,18 +1048,20 @@ function clientSendStart(id) {
 	}
 }
 
-// In a preview session, the round ends when the solo creator dies or reaches
-// the goal (both surface as startOverview, plus startGameover on a win). After
-// a short beat to see the result, navigate back to the editor with the map
-// intact. The flag makes whichever trigger fires first win and dedupes the rest.
-function previewReturnToEditor() {
+// In a preview session, the round ends when a player dies or reaches the goal
+// (both surface as startOverview, plus startGameover on a win); after a short beat
+// to see the result we navigate back to the editor with the map intact. An explicit
+// LEAVE (`immediate`) skips that beat — the leave modal is already gone, so any delay
+// just reads as "it didn't work" and invites a second button press that lands on the
+// editor. The flag makes whichever trigger fires first win and dedupes the rest.
+function previewReturnToEditor(immediate) {
 	if (!previewMode || previewReturnScheduled) {
 		return;
 	}
 	previewReturnScheduled = true;
 	setTimeout(function () {
 		window.location = './create.html';
-	}, 1500);
+	}, immediate ? 0 : 1500);
 }
 
 function pingServer() {

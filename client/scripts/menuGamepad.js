@@ -32,6 +32,10 @@
     var lastStepAt = 0;
     var rafId = null;
     var promptEl = null;
+    // First poll after load/connect snapshots the pad's buttons without acting, so a
+    // button held across a page navigation (e.g. A or B from the game you just left)
+    // isn't read as a fresh press and doesn't instantly activate/back out of a menu.
+    var needsBaseline = true;
 
     function init() {
         window.addEventListener("gamepadconnected", onConnected, false);
@@ -54,6 +58,7 @@
         var active = pads[padIndex];
         padType = detectType((active && active.id) || e.gamepad.id);
         prevButtons = [];
+        needsBaseline = true; // re-baseline so a button held at connect isn't a press
         if (typeof rememberPrimaryController === "function" && active) {
             rememberPrimaryController(active);
         }
@@ -262,6 +267,15 @@
         rafId = window.requestAnimationFrame(loop);
         var pad = getPad();
         if (!pad) {
+            return;
+        }
+
+        // Take a clean button baseline on the first frame and skip actions for it, so
+        // a button held across the navigation into this menu can't immediately fire
+        // activate()/back().
+        if (needsBaseline) {
+            recordButtons(pad);
+            needsBaseline = false;
             return;
         }
 

@@ -17,6 +17,11 @@ var egIndex = null;
 var egType = "generic";
 var egMode = "panel"; // "panel" | "canvas"
 var egPrevButtons = [];
+// First poll after load/connect snapshots the pad's buttons WITHOUT acting, so a
+// button still held across a page navigation (e.g. the B that confirmed leaving a
+// preview) isn't read as a fresh press here and doesn't immediately back you out of
+// the map. Cleared once the baseline is taken; a real press must be a new edge.
+var egNeedsBaseline = true;
 var egFocusEl = null;
 var egCursorX = 683; // canvas/world coords (world is 1366 x 768)
 var egCursorY = 384;
@@ -60,6 +65,7 @@ function egOnConnect(e) {
     var active = pads[egIndex];
     egType = egDetectType((active && active.id) || e.gamepad.id);
     egPrevButtons = [];
+    egNeedsBaseline = true; // re-baseline so a button held at connect isn't a press
     if (typeof rememberPrimaryController === "function" && active) {
         rememberPrimaryController(active);
     }
@@ -135,6 +141,16 @@ function egRecord(pad) {
 function pollEditorGamepad() {
     var pad = egGetPad();
     if (!pad) {
+        return;
+    }
+
+    // Establish a clean button baseline on the first frame (page just loaded, or a
+    // pad just connected) and skip edge-triggered actions for it — so a button held
+    // across the navigation into the editor (notably B from a leave confirm) can't
+    // fire egBack and bounce you out of the map. Movement resumes next frame.
+    if (egNeedsBaseline) {
+        egRecord(pad);
+        egNeedsBaseline = false;
         return;
     }
 
