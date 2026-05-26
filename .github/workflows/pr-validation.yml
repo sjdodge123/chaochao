@@ -13,6 +13,13 @@ on:
   pull_request:
     branches: [main]
 
+# Adding Playwright as a devDep would otherwise make `npm ci` download browser
+# binaries on every job. Skip that globally; the Playwright jobs install the
+# browser explicitly (the CLI install ignores this flag), so the existing
+# dependency-light jobs stay as fast as before.
+env:
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -117,3 +124,142 @@ jobs:
 
       - name: Headless start-edges test (single edges + opposite-edge combos)
         run: node .github/scripts/start-edges-test.js
+
+  perf-tick-budget:
+    # Server-side worst-case load: a full 25-kart grid in a stacked brutal round.
+    # Proves one room still ticks well within the 30 Hz interval. Zero new deps —
+    # reuses the engine headlessly (seeded RNG + mock clock), like smoke-test.js.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Server tick-budget check
+        run: node .github/scripts/perf-tick-budget.js
+
+  button-lint:
+    # Static, browser-free button input-compliance lint (accessible name, known
+    # styling class, gamepad-reachability on the menu pages). Pure fs — no deps.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Static button lint
+        run: node .github/scripts/lint-button-input.js
+
+  button-gate:
+    # Runtime button gate on the LIVE DOM (incl. JS-injected controls): axe
+    # interactive-control rules + >=44px touch targets + gamepad-reachability.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Cache Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Runtime button gate
+        run: node .github/scripts/button-gate.js
+
+  client-perf:
+    # Client render-perf REGRESSION gate (relative, non-blocking). Measures the
+    # 25-kart brutal scenario's scripting ms/frame and compares it to main's
+    # baseline (a regression gate, NOT an iPad-FPS predictor — headless software
+    # raster; calibrate absolute mobile perf on a real iPad, see the calibration
+    # doc). continue-on-error keeps it advisory while CI variance is learned.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Cache Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Measure this PR
+        run: node .github/scripts/perf-client.js
+        env:
+          PERF_OUT_JSON: perf-pr.json
+      - name: Restore main baseline
+        uses: actions/cache/restore@v4
+        with:
+          path: perf-baseline.json
+          # The exact `key` is deliberately a value that never matches (run_id is
+          # unique per run) so the restore ALWAYS falls through to `restore-keys`,
+          # which prefix-matches the most recent `perf-client-baseline-<sha>` saved
+          # by perf-baseline.yml on main. Don't "fix" this to github.sha — that would
+          # only match the PR's own sha and never find main's baseline.
+          key: perf-client-baseline-${{ github.run_id }}
+          restore-keys: |
+            perf-client-baseline-
+      - name: Compare vs baseline
+        run: node .github/scripts/perf-compare.js perf-baseline.json perf-pr.json
+        env:
+          PERF_COMMENT_OUT: perf-comment.md
+          PERF_REGRESS_PCT: "15"
+      - name: Upload perf trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-trace
+          path: perf-trace.zip
+          if-no-files-found: ignore
+      - name: Upsert sticky PR comment
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            if (!fs.existsSync('perf-comment.md')) return;
+            const body = fs.readFileSync('perf-comment.md', 'utf8');
+            const marker = '<!-- chaochao-perf -->';
+            try {
+              // Paginate: the default page is 30 comments, so on a busy PR the marked
+              // comment could be missed and a duplicate posted every run.
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                ...context.repo, issue_number: context.issue.number, per_page: 100,
+              });
+              const existing = comments.find(c => c.body && c.body.includes(marker));
+              if (existing) {
+                await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body });
+              } else {
+                await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body });
+              }
+            } catch (e) {
+              // Fork PRs get a read-only token — posting will 403. Don't fail the step;
+              // the metrics are still in the job summary.
+              core.warning('Could not post perf comment (likely a fork PR with a read-only token): ' + e.message);
+            }
