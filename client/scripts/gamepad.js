@@ -1114,6 +1114,46 @@ function hintModeForPlayerCount(n) {
     return n >= 2 ? "blocks" : "bar";
 }
 
+// Persist the current local-player order (P1..Pn, primary first) as controller
+// identities, so the menus and the map editor can keep the host on the SAME
+// physical pad after a page change instead of grabbing whatever the browser
+// enumerates first. Change-detected because this runs every frame (via
+// onLocalPlayersChanged); only an actual order change touches localStorage. An
+// all-keyboard frame (no pad-driven slots) is skipped rather than written, so it
+// doesn't wipe a still-valid remembered controller.
+var lastPersistedControllerSig = null;
+function persistControllerOrder() {
+    if (typeof saveControllerOrder !== "function") {
+        return; // controllerIdentity.js not present (shouldn't happen in a real page)
+    }
+    var pads = (typeof navigator !== "undefined" && navigator.getGamepads) ? navigator.getGamepads() : [];
+    var slots = [];
+    if (typeof primarySlot === "number") {
+        slots.push(primarySlot); // P1 first
+    }
+    for (var s = 0; s < localPlayers.length; s++) {
+        if (s !== primarySlot) {
+            slots.push(s);
+        }
+    }
+    var order = [];
+    for (var k = 0; k < slots.length; k++) {
+        var lp = localPlayers[slots[k]];
+        if (lp && lp.padIndex != null && pads[lp.padIndex]) {
+            order.push({ id: pads[lp.padIndex].id || "", index: lp.padIndex });
+        }
+    }
+    if (order.length === 0) {
+        return; // no controller in play — keep the last remembered identity
+    }
+    var sig = JSON.stringify(order);
+    if (sig === lastPersistedControllerSig) {
+        return;
+    }
+    lastPersistedControllerSig = sig;
+    saveControllerOrder(order);
+}
+
 // Reconciles the in-game header each frame (and on join/drop). The per-player
 // header (top blocks) is shown for local co-op (2+ active local players); a single
 // player — keyboard, OR one controller bound to P1 — keeps the solo bottom bar.
@@ -1125,6 +1165,7 @@ function onLocalPlayersChanged() {
     var pads = (typeof navigator !== "undefined" && navigator.getGamepads) ? navigator.getGamepads() : [];
     var nLocal = (typeof liveLocalPlayerCount === "function") ? liveLocalPlayerCount() : 1;
     var showBlocks = (hintModeForPlayerCount(nLocal) === "blocks");
+    persistControllerOrder(); // keep the cross-page host-controller identity current
 
     if (!showBlocks) {
         if (hintUiMode === "blocks") {
