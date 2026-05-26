@@ -203,6 +203,24 @@
       border-top: thin solid #e6e6e6;
     }
 
+    /* "Enable AI racers" preview toggle. Label colour follows the theme via
+       --text (dark mode is handled by the shared styles.css vars); the box
+       itself uses a fixed brand green that reads on both light and dark. */
+    #enableAIRow {
+      text-align: left;
+      font-size: 0.85rem;
+    }
+    #enableAIRow .form-check-label {
+      color: var(--text);
+      cursor: pointer;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    #enableAICheckbox {
+      cursor: pointer;
+      accent-color: #2f8f4e;
+    }
+
     @media screen and (max-width:768px) {
       #controlPanel {
         display: none;
@@ -274,6 +292,11 @@
               Actions
             </div>
             <hr />
+            <div id="enableAIRow" class="form-check mb-2"
+              title="Fill the grid with AI racers. Off = a solo, bot-free run of your map.">
+              <input type="checkbox" class="form-check-input" id="enableAICheckbox">
+              <label class="form-check-label" for="enableAICheckbox">Enable AI racers</label>
+            </div>
             <button id="previewButton" class="btn btn-block">Preview / Playtest<i class="fa fa-play ml-2" aria-hidden="true"></i></button>
             <button id="previewStatus" class="btn btn-block" disabled style="display:none;"><span></span></button>
             <button id="exportButton" class="btn btn-block">Copy to Clipboard<i class="fa fa-clipboard ml-2" aria-hidden="true"></i></button>
