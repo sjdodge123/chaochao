@@ -549,6 +549,25 @@ class Game {
 		}
 		this.botTarget = null;
 	}
+	// Bots yield to humans: keep humans + bots within the room cap by despawning
+	// surplus bots. fillGridWithBots clamps bots at spawn, and the match lock blocks
+	// mid-race human joins today — but the cap must not depend on that timing (the
+	// determineGameState `racing` branch shows mid-race joins are a contemplated path).
+	// Called whenever a human joins; a no-op in normal flow (no bots while joinable),
+	// and a human is never refused a slot a bot is holding.
+	trimBotsToCapacity() {
+		var cap = c.maxPlayersInRoom || 25;
+		var humanCount = 0, botIds = [];
+		for (var id in this.playerList) {
+			if (this.playerList[id].isAI) { botIds.push(id); } else { humanCount++; }
+		}
+		var allowedBots = cap - humanCount;
+		if (allowedBots < 0) { allowedBots = 0; }
+		for (var i = allowedBots; i < botIds.length; i++) {
+			messenger.messageRoomBySig(this.roomSig, "playerLeft", botIds[i]);
+			delete this.playerList[botIds[i]];
+		}
+	}
 	// Schedule a fair, map-aware collapse for a solo player. Uses the Phase 0
 	// cell graph to find the goal nearest the player's current position and the
 	// shortest traversable distance to it, derives a "par time" from that
