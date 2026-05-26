@@ -472,6 +472,16 @@ exports.validateMap = function (vMap, config) {
         if (!startEdgeCheck.valid) {
             return startEdgeCheck;
         }
+        // Every start edge must have a goal reachable from it, or that side's
+        // racers can never finish (most likely on an opposite-edge combo with an
+        // off-center / walled-off goal). Server-only — the cell graph isn't in the
+        // editor bundle, so the editor surfaces this via the preview/submit
+        // rejection rather than inline.
+        for (var se = 0; se < vMap.startEdges.length; se++) {
+            if (!cellGraph.reachableFromEdge(vMap, vMap.startEdges[se])) {
+                return { valid: false, reason: "No goal is reachable from the " + vMap.startEdges[se] + " start." };
+            }
+        }
     }
     return { valid: true };
 }

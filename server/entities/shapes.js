@@ -134,6 +134,15 @@ class Gate extends Rect {
 			width: objW
 		};
 	}
+	// True-dimension counterpart to Rect.getRandomLoc (which treats width/height as
+	// far-corner coords); kept consistent with the overrides above so a non-origin
+	// gate doesn't hand back coordinates outside itself.
+	getRandomLoc() {
+		return {
+			x: Math.floor(Math.random() * this.width) + this.x,
+			y: Math.floor(Math.random() * this.height) + this.y
+		};
+	}
 	handleHit() {
 
 	}

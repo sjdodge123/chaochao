@@ -1115,7 +1115,7 @@ function steerGatedPhase(gameBoard) {
         var bot = playerList[pid];
         if (!bot.isAI || !bot.alive || bot.isSpectator) { continue; }
         var idx = bot.gateIndex || 0;
-        if (idx >= gateCtxs.length) { idx = 0; }
+        if (idx < 0 || idx >= gateCtxs.length) { idx = 0; }
         steerGated(bot, gateCtxs[idx]);
     }
 }

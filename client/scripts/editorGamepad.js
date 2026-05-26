@@ -361,7 +361,27 @@ function egActivate() {
     egShowPrompt(true);
 }
 
+// Track confirm-modal open/close so focus returns to whatever opened it (the
+// trash or a start-edge button) instead of jumping to the top of the panel.
+var egPrevModalOpen = false;
+var egPreModalFocus = null;
+function egModalOpen() {
+    var modal = document.getElementById("wipeConfirmModal");
+    return modal != null && (modal.offsetParent !== null || modal.getClientRects().length > 0);
+}
+function egTrackModalFocus() {
+    var open = egModalOpen();
+    if (open && !egPrevModalOpen) {
+        egPreModalFocus = egFocusEl; // remember the control that opened the modal
+    } else if (!open && egPrevModalOpen) {
+        if (egPreModalFocus) { egSetFocus(egPreModalFocus); }
+        egPreModalFocus = null;
+    }
+    egPrevModalOpen = open;
+}
+
 function egPollPanel(pad) {
+    egTrackModalFocus();
     if (egPressed(pad, EG_BTN_A)) {
         egActivate();
     }

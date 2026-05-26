@@ -450,6 +450,8 @@ function mapHasContent() {
 // to the modal's buttons while it's open) and run onConfirm if the user accepts.
 var wipeConfirmAction = null;
 function openWipeConfirm(message, onConfirm, confirmLabel) {
+    // Re-entrancy guard: if a confirm is already pending, don't clobber its action.
+    if (!$("#wipeConfirmModal").hasClass("hidden")) { return; }
     wipeConfirmAction = onConfirm || null;
     var msg = document.getElementById("wipeConfirmMessage");
     if (msg != null) { msg.textContent = message || "Are you sure?"; }

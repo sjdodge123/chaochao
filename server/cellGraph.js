@@ -382,30 +382,51 @@ function estimatePathTime(map, path) {
 // NOTE: a solo player spawns at a RANDOM y in the gate, so the live solo
 // collapse still pars from the player's actual spawn; this canonical value is
 // for map metadata and the volcano round's eruption timing.
+// Sample origin points spread along a start edge's inner row (the line racers
+// launch from), used both for par-time and for goal-reachability checks.
+function edgeSampleOrigins(edge) {
+    var W = c.worldWidth, H = c.worldHeight;
+    var pts = [];
+    if (edge === "top" || edge === "bottom") {
+        var fixedY = (edge === "top") ? 40 : H - 40;
+        var stepX = W / 10; if (stepX < 1) { stepX = 1; }
+        for (var x = 40; x < W; x += stepX) { pts.push({ x: x, y: fixedY }); }
+    } else {
+        var fixedX = (edge === "right") ? W - 40 : 40;
+        var stepY = H / 10; if (stepY < 1) { stepY = 1; }
+        for (var y = 40; y < H; y += stepY) { pts.push({ x: fixedX, y: y }); }
+    }
+    return pts;
+}
+
+// True if at least one goal is reachable from somewhere along the given start
+// edge. validateMap uses this to reject a map whose goal is walled off from a
+// gate (which would leave that side's racers unable to finish).
+function reachableFromEdge(map, edge) {
+    var samples = edgeSampleOrigins(edge);
+    for (var s = 0; s < samples.length; s++) {
+        if (findPathToNearestGoal(map, samples[s]) != null) { return true; }
+    }
+    return false;
+}
+
 function computeMapParTime(map) {
     if (!map || !Array.isArray(map.cells) || map.cells.length === 0) {
         return 0;
     }
-    var W = c.worldWidth, H = c.worldHeight;
-    // Sample along the start edge. Opposite-edge combos are symmetric about the
-    // world center, so either edge gives the same par — sample the first.
-    var edge = (Array.isArray(map.startEdges) && map.startEdges.length > 0) ? map.startEdges[0] : "left";
-    var samples = [];
-    if (edge === "top" || edge === "bottom") {
-        var fixedY = (edge === "top") ? 40 : H - 40;
-        var stepX = W / 10; if (stepX < 1) { stepX = 1; }
-        for (var x = 40; x < W; x += stepX) { samples.push({ x: x, y: fixedY }); }
-    } else {
-        var fixedX = (edge === "right") ? W - 40 : 40;
-        var stepY = H / 10; if (stepY < 1) { stepY = 1; }
-        for (var y = 40; y < H; y += stepY) { samples.push({ x: fixedX, y: y }); }
-    }
+    // Sample EVERY start edge (not just the first): opposite-edge combos with an
+    // off-center goal have genuinely different routes per side, so pool the
+    // path-times from all edges and take the median so par reflects both sides.
+    var edges = (Array.isArray(map.startEdges) && map.startEdges.length > 0) ? map.startEdges : ["left"];
     var pars = [];
-    for (var s = 0; s < samples.length; s++) {
-        var route = findPathToNearestGoal(map, samples[s]);
-        if (route != null) {
-            var par = estimatePathTime(map, route.path);
-            if (par > 0) { pars.push(par); }
+    for (var e = 0; e < edges.length; e++) {
+        var samples = edgeSampleOrigins(edges[e]);
+        for (var s = 0; s < samples.length; s++) {
+            var route = findPathToNearestGoal(map, samples[s]);
+            if (route != null) {
+                var par = estimatePathTime(map, route.path);
+                if (par > 0) { pars.push(par); }
+            }
         }
     }
     if (pars.length === 0) { return 0; }
@@ -418,6 +439,7 @@ module.exports = {
     buildAdjacency: buildAdjacency,
     findPathToNearestGoal: findPathToNearestGoal,
     reachableGoalExists: reachableGoalExists,
+    reachableFromEdge: reachableFromEdge,
     tileWeight: tileWeight,
     estimatePathTime: estimatePathTime,
     computeMapParTime: computeMapParTime
