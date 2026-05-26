@@ -8,7 +8,8 @@
 //   - left stick  -> the existing 4 movement booleans, quantized to 8-way
 //   - right stick -> the facing/aim angle (twin-stick), sent via 'mousemove'
 //   - A / right trigger -> attack (which also fires the held ability)
-//   - Start -> fullscreen
+//   - Start -> open the in-game settings panel (primary player only)
+//   - Y -> fullscreen (primary player only)
 //
 // The rest of the game is event-driven and only emits on input change, so the
 // poll loop here is careful to do the same: it diffs against the pad's own
@@ -32,9 +33,10 @@ var LEAVE_CONFIRM_TIMEOUT_MS = 8000; // idle auto-cancel of the "Leave?" confirm
 var GP_BTN_A = 0;     // attack / confirm
 var GP_BTN_B = 1;     // cancel (emoji wheel)
 var GP_BTN_EMOJI = 2; // X / Square -> open emoji wheel
+var GP_BTN_FULLSCREEN = 3; // Y / Triangle -> fullscreen (primary player only)
 var GP_BTN_RT = 7;    // right trigger (analog) -> attack
 var GP_BTN_SELECT = 8; // Select/Back/View -> restore faded hint bar
-var GP_BTN_START = 9; // fullscreen
+var GP_BTN_START = 9; // Start / Options -> open the in-game settings panel (primary player only)
 var GP_DPAD_UP = 12;
 var GP_DPAD_DOWN = 13;
 var GP_DPAD_LEFT = 14;
@@ -62,6 +64,11 @@ var leaveModalEl = null;
 var leaveFocusIdx = 1;   // 0 = Leave, 1 = Cancel (default to the safe choice)
 var gpLeaveStepAt = 0;
 
+// --- in-game settings panel (primary/P1 only; same four toggles as the navbar) ---
+var settingsModalEl = null;
+var settingsFocusIdx = 0;   // which row the d-pad focus ring is on
+var gpSettingsStepAt = 0;   // last stick step time (for repeat throttling)
+
 function initGamepad() {
     window.addEventListener("gamepadconnected", onGamepadConnected, false);
     window.addEventListener("gamepaddisconnected", onGamepadDisconnected, false);
@@ -75,6 +82,7 @@ function initGamepad() {
     window.addEventListener("touchstart", markTouchUsed, false);
     buildHintBar();
     buildLeaveModalUI();
+    buildSettingsModalUI();
     buildPadPlayersUI();
     // Start on the device's most likely method; live usage swaps it.
     setInputMethod((typeof isTouchScreen !== "undefined" && isTouchScreen) ? "touch" : "kbm");
@@ -105,6 +113,26 @@ function markTouchUsed() {
 }
 
 function onGamepadKeyDown(e) {
+    // The settings panel owns the keyboard while open: up/down (or W/S) move the
+    // focus ring, Enter/Space toggles the focused setting, Esc closes. Handle it
+    // BEFORE marking keyboard-in-use, so navigating a pad-opened panel with a stray
+    // keypress doesn't flip the hint bar's glyphs from controller to keyboard.
+    if (settingsModalIsOpen()) {
+        if (e.key === "Escape" || e.keyCode === 27) {
+            closeSettingsModal();
+        } else if (e.keyCode === 38 || e.keyCode === 87 || e.key === "ArrowUp") {
+            moveSettingsFocus(-1);
+            e.preventDefault();
+        } else if (e.keyCode === 40 || e.keyCode === 83 || e.key === "ArrowDown") {
+            moveSettingsFocus(1);
+            e.preventDefault();
+        } else if (e.keyCode === 13 || e.keyCode === 32 || e.key === "Enter" || e.key === " ") {
+            toggleSettingRow(settingsFocusIdx);
+            e.preventDefault();
+        }
+        return;
+    }
+
     setInputMethod("kbm"); // a key press means keyboard/mouse is in use
 
     // The centre leave modal (used when solo, or when the primary has no inline
@@ -468,7 +496,12 @@ function pollPadForSlot(pad, lp) {
         setInputMethod("pad");
     }
 
-    if (lp.leaveConfirm) {
+    if (lp.isPrimary && settingsModalIsOpen()) {
+        // P1 navigates the shared settings panel. Other local players are NOT in
+        // this branch (it's primary-only), so they keep racing while P1 adjusts
+        // settings — the panel just diverts the primary pad.
+        pollSettingsModal(pad, lp);
+    } else if (lp.leaveConfirm) {
         // Confirming leave inline: keep steering (movement isn't halted), but A
         // confirms and B cancels, so attack is suppressed while the prompt is up.
         pollAim(pad, lp);
@@ -487,12 +520,17 @@ function pollPadForSlot(pad, lp) {
         }
     } else if (!wheelOpen && buttonPressedThisFrame(pad, GP_BTN_EMOJI, lp)) {
         openEmojiFromPad(lp);
+    } else if (lp.isPrimary && !wheelOpen && buttonPressedThisFrame(pad, GP_BTN_START, lp)) {
+        // Settings change the one shared screen/speakers, so only the primary
+        // (Player 1) pad can open the panel — others keep racing. Start/Options is
+        // the conventional "menu" button.
+        openSettingsModal(lp);
     } else {
         // Normal play (also when another player owns the wheel).
         pollAim(pad, lp);
         pollMovementAndAttack(pad, lp);
         // Fullscreen is a shared-screen action — primary pad only.
-        if (lp.isPrimary && buttonPressedThisFrame(pad, GP_BTN_START, lp)) {
+        if (lp.isPrimary && buttonPressedThisFrame(pad, GP_BTN_FULLSCREEN, lp)) {
             goFullScreen();
         }
     }
@@ -907,6 +945,232 @@ function pollLeaveModal(pad, lp) {
     }
 }
 
+// --- in-game settings panel (primary/P1 only) ---
+//
+// A controller-navigable proxy for the four navbar toggles (sound effects, music,
+// dynamic camera, colour-blind assist). Each row simply .click()s the matching
+// navbar control so ALL of its existing behaviour — state, localStorage
+// persistence, and the navbar's own icon update — is reused unchanged. The four
+// settings affect the one shared screen/speakers, so only the primary (P1) pad can
+// open this; the other local players keep racing while it's up (§ P1-only).
+
+// Row definitions: the navbar control id to toggle, the icon/label to show, and a
+// reader for the current on/off state (the same globals the navbar toggles drive).
+function settingsRowDefs() {
+    return [
+        { id: "masterControl",     icon: "fa fa-gamepad", label: "Sound effects",  on: function () { return typeof masterVolume !== "undefined" && masterVolume > 0; } },
+        { id: "musicControl",      icon: "fas fa-music",  label: "Music",          on: function () { return typeof musicVolume !== "undefined" && musicVolume > 0; } },
+        { id: "cameraControl",     icon: "fas fa-video",  label: "Dynamic camera", on: function () { return typeof cameraZoomEnabled !== "undefined" && cameraZoomEnabled; } },
+        { id: "colorblindControl", icon: "fas fa-eye",    label: "Colour-blind",   on: function () { return typeof colorblindEnabled !== "undefined" && colorblindEnabled; } },
+        // Theme is tri-state (auto/light/dark) — A cycles it via theme.js's injected
+        // #themeToggle. `value` (vs `on`) makes the row show the mode instead of On/Off.
+        { id: "themeToggle",       icon: "fas fa-adjust", label: "Theme",          value: function () { return themePrefLabel(); } }
+    ];
+}
+
+// Current theme preference as a capitalized label (Auto / Light / Dark). Prefer
+// theme.js's live in-memory pref (window.getThemePref) so the label stays correct
+// even when localStorage writes are blocked (incognito); fall back to reading the
+// storage key directly if theme.js isn't present (older build / other page).
+function themePrefLabel() {
+    var p = null;
+    if (typeof window !== "undefined" && typeof window.getThemePref === "function") {
+        p = window.getThemePref();
+    }
+    if (p !== "light" && p !== "dark" && p !== "auto") {
+        p = "auto";
+        try {
+            var s = localStorage.getItem("themePref");
+            if (s === "light" || s === "dark" || s === "auto") {
+                p = s;
+            }
+        } catch (e) { /* storage disabled — assume auto */ }
+    }
+    return p.charAt(0).toUpperCase() + p.slice(1);
+}
+
+function buildSettingsModalUI() {
+    if (settingsModalEl || typeof document === "undefined" || !document.body) {
+        return;
+    }
+    var defs = settingsRowDefs();
+    var rows = "";
+    for (var i = 0; i < defs.length; i++) {
+        rows += '<button type="button" class="settings-row" data-idx="' + i + '">' +
+            '<span class="set-label"><i class="' + defs[i].icon + '" aria-hidden="true"></i> ' + defs[i].label + '</span>' +
+            '<span class="set-state"></span>' +
+            '</button>';
+    }
+    var el = document.createElement("div");
+    el.id = "settingsModal";
+    el.className = "settings-modal hidden";
+    el.innerHTML =
+        '<div class="confirm-dialog settings-dialog">' +
+        '<div class="confirm-title">Settings</div>' +
+        '<div class="settings-rows">' + rows + '</div>' +
+        '<div class="settings-foot"></div>' +
+        '</div>';
+    document.body.appendChild(el);
+    settingsModalEl = el;
+    // Mouse users can click a row directly.
+    var btns = el.querySelectorAll(".settings-row");
+    for (var j = 0; j < btns.length; j++) {
+        (function (idx) {
+            btns[idx].addEventListener("click", function () {
+                toggleSettingRow(idx);
+            });
+        })(j);
+    }
+}
+
+function settingsModalIsOpen() {
+    return !!settingsModalEl && settingsModalEl.classList.contains("visible");
+}
+
+function settingsRowEls() {
+    if (!settingsModalEl) {
+        return [];
+    }
+    return settingsModalEl.querySelectorAll(".settings-row");
+}
+
+// Reflect the current on/off state of every row from the live globals.
+function renderSettingsRows() {
+    if (!settingsModalEl) {
+        return;
+    }
+    var defs = settingsRowDefs();
+    var rows = settingsRowEls();
+    for (var i = 0; i < rows.length && i < defs.length; i++) {
+        var state = rows[i].querySelector(".set-state");
+        if (defs[i].value) {
+            // Multi-state row (theme): show the mode label, not On/Off.
+            if (state) {
+                state.textContent = defs[i].value();
+                state.classList.add("set-value");
+            }
+            rows[i].classList.remove("is-on");
+        } else {
+            var on = !!defs[i].on();
+            if (state) {
+                state.textContent = on ? "On" : "Off";
+                state.classList.remove("set-value");
+            }
+            if (on) {
+                rows[i].classList.add("is-on");
+            } else {
+                rows[i].classList.remove("is-on");
+            }
+        }
+    }
+}
+
+// Toggle a row by clicking its navbar control, so the navbar's own handler does
+// the work (flip state, persist, update its own icon); then re-render our rows.
+function toggleSettingRow(idx) {
+    var defs = settingsRowDefs();
+    if (idx < 0 || idx >= defs.length) {
+        return;
+    }
+    var ctrl = document.getElementById(defs[idx].id);
+    if (ctrl) {
+        ctrl.click();
+    }
+    renderSettingsRows();
+}
+
+function setSettingsFocus(idx) {
+    var rows = settingsRowEls();
+    if (rows.length === 0) {
+        return;
+    }
+    if (idx < 0) {
+        idx = rows.length - 1;
+    }
+    if (idx >= rows.length) {
+        idx = 0;
+    }
+    settingsFocusIdx = idx;
+    for (var i = 0; i < rows.length; i++) {
+        if (i === idx) {
+            rows[i].classList.add("gp-focus");
+            try { rows[i].focus(); } catch (e) { /* ignore */ }
+        } else {
+            rows[i].classList.remove("gp-focus");
+        }
+    }
+}
+
+function moveSettingsFocus(delta) {
+    var rows = settingsRowEls();
+    if (rows.length === 0) {
+        return;
+    }
+    setSettingsFocus((settingsFocusIdx + delta + rows.length) % rows.length);
+}
+
+function openSettingsModal(lp) {
+    if (!settingsModalEl) {
+        buildSettingsModalUI();
+    }
+    if (!settingsModalEl) {
+        return;
+    }
+    // Stop the primary player's kart while the panel is up — same as the emoji
+    // wheel — so they aren't driving blind. Other local players are untouched.
+    if (lp) {
+        if (typeof cancelMovementForSlot === "function") {
+            cancelMovementForSlot(lp);
+        }
+        lp.gp.hadMoveInput = false;
+        lp.gp.prevMove = { moveForward: false, moveBackward: false, turnLeft: false, turnRight: false, attack: false };
+    }
+    // Footer hints use the same chip markup as the hint bar / player blocks, and
+    // adapt to the pad type (Xbox A/B vs PlayStation cross/circle).
+    var foot = settingsModalEl.querySelector(".settings-foot");
+    if (foot) {
+        foot.innerHTML =
+            '<span class="gp-hint"><span class="gp-glyph gp-stick">L</span><span class="gp-glyph gp-dpad">✛</span>Move</span>' +
+            '<span class="gp-hint"><span class="gp-glyph gp-face">' + attackGlyph() + '</span>Toggle</span>' +
+            '<span class="gp-hint"><span class="gp-glyph gp-face">' + leaveGlyph() + '</span>Close</span>';
+    }
+    renderSettingsRows();
+    settingsModalEl.className = "settings-modal visible";
+    setSettingsFocus(0);
+}
+
+function closeSettingsModal() {
+    if (settingsModalEl) {
+        settingsModalEl.className = "settings-modal hidden";
+    }
+}
+
+function pollSettingsModal(pad, lp) {
+    // B (or Start again) closes the panel.
+    if (buttonPressedThisFrame(pad, GP_BTN_B, lp) || buttonPressedThisFrame(pad, GP_BTN_START, lp)) {
+        closeSettingsModal();
+        return;
+    }
+    // A toggles the focused setting.
+    if (buttonPressedThisFrame(pad, GP_BTN_A, lp)) {
+        toggleSettingRow(settingsFocusIdx);
+        return;
+    }
+    // D-pad / left stick up-down move the focus ring (stick is throttled).
+    if (buttonPressedThisFrame(pad, GP_DPAD_UP, lp)) {
+        moveSettingsFocus(-1);
+    } else if (buttonPressedThisFrame(pad, GP_DPAD_DOWN, lp)) {
+        moveSettingsFocus(1);
+    } else {
+        var ly = pad.axes[1] || 0;
+        var now = Date.now();
+        if (Math.abs(ly) > 0.5 && now - gpSettingsStepAt > 250) {
+            moveSettingsFocus(ly < 0 ? -1 : 1);
+            gpSettingsStepAt = now;
+        }
+    }
+}
+
 // --- input-method hint bar (one bar; glyphs swap to the active input) ---
 
 function buildHintBar() {
@@ -932,6 +1196,10 @@ function leaveGlyph() {
     return gamepadType === "playstation" ? "○" : "B"; // PlayStation circle vs Xbox B
 }
 
+function fullscreenGlyph() {
+    return gamepadType === "playstation" ? "△" : "Y"; // PlayStation triangle vs Xbox Y
+}
+
 function hintsForMethod(method) {
     if (method === "pad") {
         return '<span class="gp-toast">🎮 Controller</span>' +
@@ -939,8 +1207,9 @@ function hintsForMethod(method) {
             '<span class="gp-hint"><span class="gp-glyph gp-stick">R</span>Aim</span>' +
             '<span class="gp-hint"><span class="gp-glyph gp-face">' + attackGlyph() + '</span>/<span class="gp-glyph gp-trigger">RT</span>Attack</span>' +
             '<span class="gp-hint"><span class="gp-glyph gp-face">' + emojiGlyph() + '</span>Emoji</span>' +
+            '<span class="gp-hint"><span class="gp-glyph gp-menu">☰</span>Settings</span>' +
             '<span class="gp-hint"><span class="gp-glyph gp-face">' + leaveGlyph() + '</span>Leave</span>' +
-            '<span class="gp-hint"><span class="gp-glyph gp-menu">☰</span>Fullscreen</span>' +
+            '<span class="gp-hint"><span class="gp-glyph gp-face">' + fullscreenGlyph() + '</span>Fullscreen</span>' +
             '<span class="gp-hint"><span class="gp-glyph gp-menu">⧉</span>Hide</span>';
     }
     if (method === "touch") {

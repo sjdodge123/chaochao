@@ -44,6 +44,12 @@
         return (media && media.matches) ? 'dark' : 'light';
     }
 
+    // Expose the in-memory preference so other in-page UI (e.g. the controller
+    // settings panel) can label the current theme without re-reading localStorage —
+    // which would be stale where storage writes are blocked (incognito), since the
+    // live choice is held in `currentPref`, not necessarily persisted.
+    window.getThemePref = getPref;
+
     // Pull the canvas colours out of the CSS custom properties so draw.js reads
     // them as a cheap object lookup. Refreshed whenever the theme changes.
     function refreshPalette() {
