@@ -1855,21 +1855,34 @@ function drawAvatarSkin(player, sprite) {
     if (!entry || !entry.ready || entry.failed) {
         return; // fall back to the base kart until the image is ready
     }
+    // Sized off player.radius (the actual kart circle), NOT sprite.halfSize (=
+    // radius + 8px of shadow/stroke padding), so it never spills past the kart edge
+    // and inflates the apparent size. Skip entirely for a non-positive radius (a
+    // kart mid-collapse/shrink) so a falsy 0 can't fall back to a full-size overlay.
+    var r = player.radius;
+    if (!(r > 0)) {
+        return;
+    }
     var cx = player.x + camera.getCameraX();
     var cy = player.y + camera.getCameraY();
-    // Fill the kart circle with the picture. Sized off player.radius (the actual
-    // kart circle), NOT sprite.halfSize (= radius + 8px of shadow/stroke padding),
-    // so it never spills past the kart edge and inflates the apparent size. No
-    // frame border — at the correct kart size it left too little room to see the
-    // photo; a thin edge outline gives definition over busy backgrounds.
-    var r = player.radius || 20;
-    gameContext.save();
-    gameContext.beginPath();                       // clip to the kart circle
+    // Fill the kart circle with the picture. No frame border — at the correct kart
+    // size it left too little room to see the photo; a thin edge outline gives
+    // definition over busy backgrounds.
+    gameContext.save();                            // try/finally so a thrown drawImage
+    try {                                          // can't leak the clip onto later draws
+        gameContext.beginPath();                   // clip to the kart circle
+        gameContext.arc(cx, cy, r, 0, 2 * Math.PI);
+        gameContext.closePath();
+        gameContext.clip();
+        gameContext.drawImage(entry.img, cx - r, cy - r, r * 2, r * 2);
+    } finally {
+        gameContext.restore();
+    }
+    gameContext.save();                            // thin edge outline for definition
+    gameContext.beginPath();
     gameContext.arc(cx, cy, r, 0, 2 * Math.PI);
-    gameContext.closePath();
-    gameContext.clip();
-    gameContext.drawImage(entry.img, cx - r, cy - r, r * 2, r * 2);
-    gameContext.restore();
+    gameContext.lineWidth = 1.5;
+    gameContext.strokeStyle = "rgba(0,0,0,0.45)";
     gameContext.save();                            // thin edge outline for definition
     gameContext.beginPath();
     gameContext.arc(cx, cy, r, 0, 2 * Math.PI);

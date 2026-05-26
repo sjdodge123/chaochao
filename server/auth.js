@@ -50,18 +50,53 @@ if (enabled) {
 // projects always take) skip a Supabase round-trip, and caps how often the same
 // token re-hits the network. userId may be null (a verified-bad result is cached
 // briefly too, to blunt repeated bad tokens).
+// Short-lived cache of token -> { userId, expiresAt }. Lets repeated handshakes
+// for the same token (reconnects, and the network-verify path that asymmetric-key
+// projects always take) skip a Supabase round-trip. userId may be null when a token
+// is VERIFIED bad (so repeated identical bad tokens are cheap) — but transient
+// failures (timeout/exception) are NEVER cached, so a Supabase blip can't lock a
+// valid user out as a guest for the bad-TTL window.
 var tokenCache = new Map();
 var VERIFY_OK_TTL_MS = 60 * 1000;   // re-verify a good token at most once a minute
-var VERIFY_BAD_TTL_MS = 30 * 1000;  // remember a bad token briefly
+var VERIFY_BAD_TTL_MS = 30 * 1000;  // remember a verified-bad token briefly
 var VERIFY_TIMEOUT_MS = 4000;       // never let a hung getUser() stall the handshake
+var TOKEN_CACHE_MAX = 5000;
+
+// Read a JWT's `exp` (seconds) without verifying — for clamping the cache TTL so a
+// near-expiry token isn't honored long after it actually expires.
+function tokenExpSeconds(token) {
+    try {
+        var part = String(token).split('.')[1];
+        if (!part) { return null; }
+        var json = Buffer.from(part.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+        var payload = JSON.parse(json);
+        return (payload && typeof payload.exp === 'number') ? payload.exp : null;
+    } catch (e) {
+        return null;
+    }
+}
 
 function cachePut(token, userId, ttl) {
-    tokenCache.set(token, { userId: userId, expiresAt: Date.now() + ttl });
-    // Cheap cap so the cache can't grow without bound under random-token spam.
-    if (tokenCache.size > 5000) {
-        tokenCache.clear();
+    var expiresAt = Date.now() + ttl;
+    if (userId) {
+        // Never cache a good token past its own expiry.
+        var exp = tokenExpSeconds(token);
+        if (exp) { expiresAt = Math.min(expiresAt, exp * 1000); }
     }
+    // Bounded LRU-ish: drop the OLDEST entry rather than clearing the whole cache
+    // (a full wipe would force a thundering-herd re-verify of every live session).
+    if (tokenCache.size >= TOKEN_CACHE_MAX) {
+        var oldest = tokenCache.keys().next().value;
+        if (oldest !== undefined) { tokenCache.delete(oldest); }
+    }
+    tokenCache.set(token, { userId: userId, expiresAt: expiresAt });
     return userId;
+}
+
+function audIsAuthenticated(decoded) {
+    var aud = decoded && decoded.aud;
+    if (Array.isArray(aud)) { return aud.indexOf('authenticated') !== -1; }
+    return aud === 'authenticated' || (decoded && decoded.role === 'authenticated');
 }
 
 // Resolve an access token (Supabase JWT) to a user id, or null if invalid/absent.
@@ -80,30 +115,41 @@ async function verifyToken(token) {
     if (jwt && JWT_SECRET) {
         try {
             var decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
-            if (decoded && decoded.sub &&
-                (decoded.aud === 'authenticated' || decoded.role === 'authenticated')) {
+            if (decoded && decoded.sub && audIsAuthenticated(decoded)) {
                 return cachePut(token, decoded.sub, VERIFY_OK_TTL_MS);
             }
-            // Signed but not an authenticated user token (e.g. an API key JWT).
+            // Signed and valid, but not an authenticated user token (e.g. an API key JWT).
             return cachePut(token, null, VERIFY_BAD_TTL_MS);
         } catch (e) {
             // Fall through to network verification (covers asymmetric signing keys).
         }
     }
+    // Network verification, bounded by a timeout. A timeout or thrown error is
+    // TRANSIENT — return null WITHOUT caching, so a blip doesn't demote a valid user.
+    var timer = null;
     try {
+        var getUserP = supabase.auth.getUser(token);
+        getUserP.catch(function () { }); // swallow a late rejection after the race resolves
         var res = await Promise.race([
-            supabase.auth.getUser(token),
+            getUserP,
             new Promise(function (resolve) {
-                setTimeout(function () { resolve({ error: { message: 'verify timeout' } }); }, VERIFY_TIMEOUT_MS);
+                timer = setTimeout(function () { resolve(null); }, VERIFY_TIMEOUT_MS);
             })
         ]);
+        if (timer) { clearTimeout(timer); }
+        if (res === null) {
+            return null; // timed out — transient, not cached
+        }
         if (res && res.data && res.data.user && !res.error) {
             return cachePut(token, res.data.user.id, VERIFY_OK_TTL_MS);
         }
+        // getUser definitively returned no user → verified-bad, safe to cache briefly.
+        return cachePut(token, null, VERIFY_BAD_TTL_MS);
     } catch (e) {
-        console.log('[auth] verifyToken network fallback failed:', e.message);
+        if (timer) { clearTimeout(timer); }
+        console.log('[auth] verifyToken network verify failed (transient, not cached):', e.message);
+        return null;
     }
-    return cachePut(token, null, VERIFY_BAD_TTL_MS);
 }
 
 // Ensure a `progression` row exists for the user and record `deviceId` on it
