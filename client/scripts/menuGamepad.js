@@ -153,6 +153,19 @@
         return -1;
     }
 
+    // The navbar theme toggle is first in document order but is a utility control,
+    // not the primary action — don't make it the initial selection on page load.
+    // Prefer the first navigable control outside the navbar; the toggle is still
+    // reachable by navigating to it. Falls back to the first item.
+    function defaultFocus(items) {
+        for (var i = 0; i < items.length; i++) {
+            if (!items[i].closest || !items[i].closest("nav")) {
+                return items[i];
+            }
+        }
+        return items[0];
+    }
+
     function setFocus(el) {
         if (focusEl && focusEl !== el) {
             focusEl.classList.remove("gp-focus");
@@ -178,7 +191,7 @@
         }
         if (!focusEl || indexOfFocus(items) === -1) {
             // nothing focused yet (or it was re-rendered away) — land on the first
-            setFocus(items[0]);
+            setFocus(defaultFocus(items));
             return;
         }
         var f = center(focusEl);
@@ -211,7 +224,7 @@
     function activate() {
         var items = collectItems();
         if (indexOfFocus(items) === -1) {
-            setFocus(items[0]);
+            setFocus(defaultFocus(items));
             return;
         }
         if (!focusEl) {
