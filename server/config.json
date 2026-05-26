@@ -113,17 +113,17 @@
             "dragCoeff": 0.10,
             "acel": 450,
             "canBeRandomed": false,
-            "color": "#FFD700"
+            "color": "#FFCB30"
         },
         "bumper": {
             "id": 7,
             "canBeRandomed": false,
-            "color": "#FF7900"
+            "color": "#F07B36"
         },
         "random": {
             "id": 8,
             "canBeRandomed": false,
-            "color": "#020DFE"
+            "color": "#7E57C2"
         },
         "background": {
             "id": 9,
@@ -277,14 +277,14 @@
     "hazards": {
         "bumper": {
             "id": 900,
-            "color": "orange",
+            "color": "#F07B36",
             "attackRadius": 15,
             "radius": 10,
             "punchBonus": 10
         },
         "movingBumper": {
             "id": 901,
-            "color": "orange",
+            "color": "#F07B36",
             "speed": 2000,
             "width": 100,
             "height": 5,

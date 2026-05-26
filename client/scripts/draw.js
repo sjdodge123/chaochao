@@ -371,28 +371,42 @@ tileImagesReady.then(function () {
 });
 
 
+// Terrain texture colour grading (TILE_GRADE / gradeTexture) lives in
+// client/scripts/utils.js so both the game (this file) and the map editor
+// (create.js) grade from the same single source of truth.
+
 function loadPatterns() {
+    // Grade the terrain textures once into a shared palette (see TILE_GRADE),
+    // then build every pattern from the graded canvases so the board reads as
+    // one cohesive set (the dirt underlay for ability tiles included).
+    var gGrass = gradeTexture(grass, "grass");
+    var gDirt = gradeTexture(dirt, "dirt");
+    var gSand = gradeTexture(sand, "sand");
+    var gIce = gradeTexture(ice, "ice");
+    var gLava = gradeTexture(lava, "lava");
+    var gPoison = gradeTexture(poison, "poison");
+
     //Abilities
-    patterns[config.tileMap.abilities.blindfold.id] = makePattern(blindfoldIcon, makeSeamlessPattern(dirt));
-    patterns[config.tileMap.abilities.swap.id] = makePattern(transferIcon, makeSeamlessPattern(dirt));
-    patterns[config.tileMap.abilities.bomb.id] = makePattern(bombIcon, makeSeamlessPattern(dirt));
-    patterns[config.tileMap.abilities.speedBuff.id] = makePattern(windIcon, makeSeamlessPattern(dirt));
-    patterns[config.tileMap.abilities.speedDebuff.id] = makePattern(hourglassIcon, makeSeamlessPattern(dirt));
-    patterns[config.tileMap.abilities.tileSwap.id] = makePattern(copyIcon, makeSeamlessPattern(dirt));
-    patterns[config.tileMap.abilities.iceCannon.id] = makePattern(snowFlakeIcon, makeSeamlessPattern(dirt));
-    patterns[config.tileMap.abilities.cut.id] = makePattern(scissorsIcon, makeSeamlessPattern(dirt));
+    patterns[config.tileMap.abilities.blindfold.id] = makePattern(blindfoldIcon, makeSeamlessPattern(gDirt));
+    patterns[config.tileMap.abilities.swap.id] = makePattern(transferIcon, makeSeamlessPattern(gDirt));
+    patterns[config.tileMap.abilities.bomb.id] = makePattern(bombIcon, makeSeamlessPattern(gDirt));
+    patterns[config.tileMap.abilities.speedBuff.id] = makePattern(windIcon, makeSeamlessPattern(gDirt));
+    patterns[config.tileMap.abilities.speedDebuff.id] = makePattern(hourglassIcon, makeSeamlessPattern(gDirt));
+    patterns[config.tileMap.abilities.tileSwap.id] = makePattern(copyIcon, makeSeamlessPattern(gDirt));
+    patterns[config.tileMap.abilities.iceCannon.id] = makePattern(snowFlakeIcon, makeSeamlessPattern(gDirt));
+    patterns[config.tileMap.abilities.cut.id] = makePattern(scissorsIcon, makeSeamlessPattern(gDirt));
     patterns[config.brutalRounds.infection.id] = makePattern(infectionIcon, "red");
 
     //Tiles
     if (infection == true) {
-        patterns[config.tileMap.lava.id] = makeSeamlessPattern(poison);
+        patterns[config.tileMap.lava.id] = makeSeamlessPattern(gPoison);
     } else {
-        patterns[config.tileMap.lava.id] = makeSeamlessPattern(lava);
+        patterns[config.tileMap.lava.id] = makeSeamlessPattern(gLava);
     }
-    patterns[config.tileMap.ice.id] = makeSeamlessPattern(ice);
-    patterns[config.tileMap.fast.id] = makeSeamlessPattern(grass);
-    patterns[config.tileMap.normal.id] = makeSeamlessPattern(dirt);
-    patterns[config.tileMap.slow.id] = makeSeamlessPattern(sand);
+    patterns[config.tileMap.ice.id] = makeSeamlessPattern(gIce);
+    patterns[config.tileMap.fast.id] = makeSeamlessPattern(gGrass);
+    patterns[config.tileMap.normal.id] = makeSeamlessPattern(gDirt);
+    patterns[config.tileMap.slow.id] = makeSeamlessPattern(gSand);
 
 
 
@@ -564,6 +578,7 @@ function drawObjects(dt) {
         currentState == config.stateMap.collapsing) {
         drawGate();
         drawMap();
+        drawArenaVignette();
         drawPendingSwap();
         drawPingCircles();
         drawCollapseShockwaves();
@@ -2671,8 +2686,29 @@ function renderMapToCache() {
         mapCtx.fill();
         mapCtx.stroke();
     }
+    drawTileBorders(mapCtx);
     drawLavaBorders(mapCtx);
     mapCtx.restore();
+}
+
+// A subtle dark vignette over the play area, so the flat background reads as an
+// intentional frame rather than dead space. Drawn in world coords right after
+// the map (under players/FX) so it never dims karts. Cheap: one gradient fill.
+function drawArenaVignette() {
+    if (world == null) {
+        return;
+    }
+    var cx = world.x + world.width / 2;
+    var cy = world.y + world.height / 2;
+    var inner = Math.min(world.width, world.height) * 0.45;
+    var outer = Math.sqrt(world.width * world.width + world.height * world.height) / 2;
+    var g = gameContext.createRadialGradient(cx, cy, inner, cx, cy, outer);
+    g.addColorStop(0, "rgba(0, 0, 0, 0)");
+    g.addColorStop(1, "rgba(8, 6, 14, 0.26)");
+    gameContext.save();
+    gameContext.fillStyle = g;
+    gameContext.fillRect(world.x, world.y, world.width, world.height);
+    gameContext.restore();
 }
 
 // Trace a dark-red rim around every lava grouping. The map is a Voronoi diagram
@@ -2682,7 +2718,56 @@ function renderMapToCache() {
 // tiles. Runs only on cache rebuilds (map load / tile change), so it's free
 // per-frame. Keys off cell.id, so it tracks bombs/tileSwap/collapse and still
 // works when lava renders as poison in infection rounds.
-var lavaBorderColor = "#7a0000";
+// Outline every terrain region's perimeter with a subtle dark edge so tiles
+// read as crisp, designed shapes instead of soft Voronoi blobs. Like
+// drawLavaBorders, each Voronoi edge knows the two cells it separates, so we
+// stroke only edges where the tile TYPE changes (or the map/background edge) —
+// internal seams between same-type cells are skipped, avoiding a busy mesh.
+// Lava edges are left to drawLavaBorders (its red rim owns them). Runs only on
+// cache rebuilds, so it's free per-frame.
+var tileBorderColor = "rgba(18, 16, 24, 0.42)";
+function drawTileBorders(ctx) {
+    if (currentMap == null || currentMap.cells == null) {
+        return;
+    }
+    var cells = currentMap.cells;
+    var bgId = config.tileMap.background.id;
+    var lavaId = config.tileMap.lava.id;
+    var idByVoronoi = {};
+    for (var i = 0; i < cells.length; i++) {
+        idByVoronoi[cells[i].site.voronoiId] = cells[i].id;
+    }
+    ctx.save();
+    ctx.beginPath();
+    for (var c = 0; c < cells.length; c++) {
+        var cell = cells[c];
+        if (cell.id == bgId || cell.id == lavaId) {
+            continue; // background draws nothing; lava has its own rim
+        }
+        var halfedges = cell.halfedges;
+        for (var h = 0; h < halfedges.length; h++) {
+            var he = halfedges[h];
+            var neighbor = compareSite(he.edge.lSite, he.site) ? he.edge.rSite : he.edge.lSite;
+            var nid = neighbor != null ? idByVoronoi[neighbor.voronoiId] : null;
+            if (nid === cell.id || nid === lavaId) {
+                continue; // same-type internal seam, or lava's edge — skip
+            }
+            var sp = getStartpoint(he);
+            var ep = getEndpoint(he);
+            ctx.moveTo(sp.x, sp.y);
+            ctx.lineTo(ep.x, ep.y);
+        }
+    }
+    ctx.setLineDash([]);
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = tileBorderColor;
+    ctx.stroke();
+    ctx.restore();
+}
+
+var lavaBorderColor = "#7a1500";
 function drawLavaBorders(ctx) {
     if (currentMap == null || currentMap.cells == null) {
         return;
@@ -2731,10 +2816,11 @@ function drawHazard(hazard) {
     }
 }
 
+var bumperRingColor = "#E5392B";
 function drawBumper(x, y) {
     gameContext.save();
     gameContext.beginPath();
-    gameContext.strokeStyle = "red";
+    gameContext.strokeStyle = bumperRingColor;
     gameContext.lineWidth = 3;
     gameContext.arc(x, y, config.hazards.bumper.attackRadius, 0, 2 * Math.PI);
     gameContext.stroke();
@@ -2756,7 +2842,7 @@ function drawMovingBumper(x, y, railX, railY, angle) {
 
     gameContext.save();
     gameContext.beginPath();
-    gameContext.strokeStyle = "red";
+    gameContext.strokeStyle = bumperRingColor;
     gameContext.lineWidth = 3;
     gameContext.arc(x, y, config.hazards.movingBumper.attackRadius, 0, 2 * Math.PI);
     gameContext.stroke();

@@ -340,7 +340,7 @@ function lobbyProjectToScreen(wx, wy) {
 // (drawLobbyFloor), and the interactive accent is the game's goal gold — warm,
 // already part of the palette, and high-contrast on the green/brown/blue/ice map.
 // Walking into a zone lights it up gold (see the active state below).
-var HUB_ACCENT = "#FFD700"; // goal gold — the "interactive / active" accent
+var HUB_ACCENT = "#FFCB30"; // goal gold (matches config.tileMap.goal.color) — the "interactive / active" accent
 function hubInk() {
     return (typeof themeColor === "function") ? themeColor("ink", "#ffffff") : "#ffffff";
 }
