@@ -1,9 +1,24 @@
+// ============================================================================
+// Web Audio engine
+// ----------------------------------------------------------------------------
+// All game audio runs through a single AudioContext. Each "sound" is a small
+// descriptor (NOT an HTMLAudioElement) that lazily decodes its file into an
+// AudioBuffer once; every play spawns a fresh AudioBufferSourceNode, so:
+//   * overlap is free — a flurry of punches LAYERS instead of cutting itself off
+//     (the old single-shared-<audio> model restarted the clip on every trigger);
+//   * pitch jitter is exact (source.playbackRate shifts pitch with no time-stretch);
+//   * gain ramps give click-free fades, true music crossfades, and ducking.
+//
+// The public API (playSound / playSoundVaried / playSoundAfterFinish / stopSound /
+// stopAllSounds / volumeChange / setBackgroundMusic / setLobbySfxDampen /
+// playAudience / updateAudienceIntensity / pickCrowd*) is unchanged, and the sound
+// globals (meleeSound, lobbyMusic, …) are still passed around as opaque tokens, so
+// no call site in client.js / draw.js / gameboard.js / game.js had to change.
+// ============================================================================
+
 var gameMuted = false;
-var playingSounds = new Set();
-var fadeTimers = new Map();
-var masterVolume = 1,
-    effectsVolume = 1,
-    musicVolume = 1;
+var masterVolume = 1,        // master on/off toggle (navbar gamepad icon): 0 or 1
+    musicVolume = 1;         // music on/off toggle: 0 or 1
 // Lobby tutorial: all SFX play at this fraction of normal while in the lobby (1 = no
 // change). Toggled by setLobbySfxDampen() on lobby enter/exit; applied in volumeChange.
 var sfxVolumeScalar = 1;
@@ -13,16 +28,259 @@ function setLobbySfxDampen(on) {
     volumeChange();
 }
 
-function clearFade(sound) {
-    var timer = fadeTimers.get(sound);
-    if (timer != null) {
-        clearInterval(timer);
-        fadeTimers.delete(sound);
+// --- Engine state -----------------------------------------------------------
+var audioCtx = null;
+var sfxBus = null, musicBus = null, crowdBus = null, voiceBus = null;
+var activeVoices = new Set();   // every live voice: { sound, source, gain, sustained }
+var pendingSounds = new Set();  // sounds asked to play before the ctx was ready/unlocked
+var allSounds = [];             // every descriptor, for preload + live volume updates
+
+function getCtx() {
+    if (audioCtx == null) {
+        var AC = (typeof window !== "undefined") && (window.AudioContext || window.webkitAudioContext);
+        if (!AC) { return null; }
+        audioCtx = new AC();
+        sfxBus = audioCtx.createGain();
+        musicBus = audioCtx.createGain();
+        crowdBus = audioCtx.createGain();
+        voiceBus = audioCtx.createGain();
+        [sfxBus, musicBus, crowdBus, voiceBus].forEach(function (b) {
+            b.gain.value = 1;
+            b.connect(audioCtx.destination);
+        });
+    }
+    return audioCtx;
+}
+
+function busFor(s) {
+    switch (s.bus) {
+        case "music": return musicBus;
+        case "crowd": return crowdBus;
+        case "voice": return voiceBus;
+        default: return sfxBus;
     }
 }
 
-// Playlists are name-keyed maps (trackName -> Audio) so a server-sent track name
-// resolves to the exact same Audio instance that volumeChange() tunes.
+// A sound is a plain descriptor. `.volume` is the absolute 0..1 level set by
+// volumeChange(); the engine reads it when spawning each voice.
+function makeSound(src, opts) {
+    opts = opts || {};
+    var s = {
+        src: src,
+        bus: opts.bus || "sfx",
+        loop: !!opts.loop,
+        duck: !!opts.duck,          // when played, briefly dips the music bus
+        volume: 1,
+        targetVolume: 1,
+        audienceBaseVolume: null,   // crowd clips: pre-intensity base level
+        trackName: null,            // background tracks: name the server addresses
+        buffer: null,
+        loading: false,
+        voice: null,                // sustained voice handle (music / looping lobby)
+        pendingPlay: false,
+        pendingOpt: null,
+        pendingAt: 0,               // wall-clock time a one-shot was deferred (staleness)
+        maxVoices: opts.maxVoices || 6,
+        playing: 0                  // live voice count (caps runaway stacking)
+    };
+    allSounds.push(s);
+    return s;
+}
+
+function loadSound(s) {
+    if (s.buffer || s.loading) { return; }
+    var ctx = getCtx();
+    if (!ctx) { return; }
+    s.loading = true;
+    fetch(s.src)
+        .then(function (r) { return r.arrayBuffer(); })
+        .then(function (buf) { return ctx.decodeAudioData(buf); })
+        .then(function (decoded) {
+            s.buffer = decoded;
+            s.loading = false;
+            drainPending();
+        })
+        .catch(function () { s.loading = false; });
+}
+
+// Kick off decoding for every sound up front so the first punch/explosion isn't
+// silent while its buffer decodes. decodeAudioData works on a suspended context.
+function preloadAllSounds() {
+    if (!getCtx()) { return; }
+    for (var i = 0; i < allSounds.length; i++) { loadSound(allSounds[i]); }
+}
+
+// Core playback: spawn one voice. Returns the voice handle (or undefined if it
+// couldn't start yet — deferred until decode/unlock, for sustained sounds).
+function startSound(s, opt) {
+    opt = opt || {};
+    var ctx = getCtx();
+    if (!ctx || gameMuted) { return; }
+
+    var sustained = s.loop || !!opt.sustained;
+
+    // Fully muted: a one-shot is a true no-op — don't allocate a voice or burn a slot
+    // of the cap. Sustained sounds (music, lobby loop) still start, silently, so
+    // unmuting can ramp them up live via applyLiveVolumes().
+    if (!sustained && masterVolume === 0) { return; }
+
+    // Not ready yet (still decoding, or autoplay-blocked). Sustained sounds (music,
+    // lobby loop) are remembered and started by drainPending() once ready. A one-shot
+    // is deferred ONLY when the context is already running (i.e. just mid-decode), and
+    // drainPending drops it if its buffer takes too long (a late cue is worse than a
+    // missed one); a one-shot fired while still suspended (pre-gesture) is dropped now.
+    if (!s.buffer || ctx.state === "suspended") {
+        loadSound(s);
+        if (sustained) {
+            s.pendingPlay = true;
+            s.pendingOpt = opt;
+            pendingSounds.add(s);
+        } else if (ctx.state === "running" && !s.buffer) {
+            s.pendingPlay = true;
+            s.pendingOpt = opt;
+            s.pendingAt = Date.now();
+            pendingSounds.add(s);
+        }
+        return;
+    }
+
+    // Don't stack a sustained sound on itself (e.g. re-entering the lobby while its
+    // music already loops).
+    if (sustained && s.voice && !opt.restart) { return; }
+    // Cap simultaneous one-shots so a mass lava collapse doesn't sum into a wall of
+    // clipping (and to bound CPU); drop the newest over the cap.
+    if (!sustained && s.playing >= s.maxVoices) { return; }
+
+    var source = ctx.createBufferSource();
+    source.buffer = s.buffer;
+    source.loop = s.loop;
+    if (opt.rate) { source.playbackRate.value = opt.rate; }
+
+    var g = ctx.createGain();
+    var vol = (opt.volume != null) ? opt.volume : s.volume;
+    // Loops/music get a short fade-in by default so they wash in rather than snap.
+    var fadeIn = (opt.fadeIn != null) ? opt.fadeIn : (s.loop ? 0.4 : 0);
+    var now = ctx.currentTime;
+    if (fadeIn > 0) {
+        g.gain.setValueAtTime(0.0001, now);
+        g.gain.linearRampToValueAtTime(Math.max(0.0001, vol), now + fadeIn);
+    } else {
+        g.gain.value = vol;
+    }
+
+    source.connect(g);
+    g.connect(busFor(s));
+
+    var voice = { sound: s, source: source, gain: g, sustained: sustained, stopped: false };
+    activeVoices.add(voice);
+    s.playing++;
+    source.onended = function () {
+        activeVoices.delete(voice);
+        s.playing = Math.max(0, s.playing - 1);
+        if (s.voice === voice) { s.voice = null; }
+        // Only a NATURAL end notifies the server "track finished" (so it queues the
+        // next track). A deliberate stop (crossfade / stopSound / stopAllSounds) sets
+        // voice.stopped and must NOT — otherwise stopping music spuriously tells the
+        // server to start a new track.
+        if (!voice.stopped && opt.onended) { opt.onended(); }
+    };
+
+    try {
+        source.start();
+    } catch (e) {
+        // start() can throw (e.g. InvalidStateError if the context state churned).
+        // onended won't fire for a node that never started, so undo the bookkeeping
+        // here — otherwise s.playing leaks and the sound wedges at its voice cap (goes
+        // permanently silent) after maxVoices such failures.
+        activeVoices.delete(voice);
+        s.playing = Math.max(0, s.playing - 1);
+        try { source.disconnect(); } catch (e2) {}
+        return;
+    }
+    if (sustained) { s.voice = voice; }
+    if (s.duck) { duckMusic(); }
+    return voice;
+}
+
+// Start anything that was requested before the engine was ready. Safe to call
+// repeatedly (on each buffer decode and on unlock).
+function drainPending() {
+    var ctx = getCtx();
+    if (!ctx || ctx.state !== "running") { return; }
+    var nowMs = Date.now();
+    pendingSounds.forEach(function (s) {
+        if (!s.buffer) { return; }
+        pendingSounds.delete(s);
+        s.pendingPlay = false;
+        var opt = s.pendingOpt || {};
+        s.pendingOpt = null;
+        var sus = s.loop || !!opt.sustained;
+        // Drop a one-shot whose buffer took too long to decode — firing a stale cue
+        // late is worse than skipping it. Sustained sounds always start once ready.
+        if (!sus && s.pendingAt && (nowMs - s.pendingAt) > 1500) { return; }
+        startSound(s, opt);
+    });
+}
+
+// Pin an AudioParam to its CURRENT rendered value before re-automating it. Plain
+// `.value` returns the last *set* value, not the live ramped one, so re-ramping
+// mid-fade would snap/pump. cancelAndHoldAtTime captures the live value where
+// supported; otherwise fall back to a best-effort hold.
+function holdParamNow(param, now) {
+    if (param.cancelAndHoldAtTime) {
+        param.cancelAndHoldAtTime(now);
+    } else {
+        param.cancelScheduledValues(now);
+        param.setValueAtTime(param.value, now);
+    }
+}
+
+function fadeOutVoice(voice, dur) {
+    if (!voice) { return; }
+    var ctx = getCtx();
+    activeVoices.delete(voice);
+    // Mark as deliberately stopped (so its onended won't report a natural track-end)
+    // and clear the descriptor's live-voice pointer NOW, rather than waiting for the
+    // async onended — otherwise guards that read sound.voice see a stale "still
+    // playing" during the fade and can refuse to restart the same track.
+    voice.stopped = true;
+    if (voice.sound.voice === voice) { voice.sound.voice = null; }
+    if (!ctx) {
+        try { voice.source.stop(); } catch (e) {}
+        voice.sound.playing = Math.max(0, voice.sound.playing - 1);
+        return;
+    }
+    var now = ctx.currentTime;
+    try {
+        holdParamNow(voice.gain.gain, now);
+        voice.gain.gain.linearRampToValueAtTime(0.0001, now + dur);
+        voice.source.stop(now + dur + 0.03);
+    } catch (e) {
+        try { voice.source.stop(); } catch (e2) {}
+    }
+}
+
+// --- Ducking ----------------------------------------------------------------
+// When an announcer line (or the brutal-round stinger) plays, dip the music bus a
+// few dB and ramp it back, so the call-out sits clearly over the track. Crowd and
+// other SFX are left alone (a kill cue and its crowd cheer should land together).
+function duckMusic() {
+    var ctx = getCtx();
+    if (!ctx) { return; }
+    var now = ctx.currentTime;
+    try {
+        // Hold the live level first so back-to-back ducks (a multi-kill announcer
+        // chain) re-dip smoothly from the current value instead of snapping/pumping.
+        holdParamNow(musicBus.gain, now);
+        musicBus.gain.linearRampToValueAtTime(0.4, now + 0.08);  // dip fast
+        musicBus.gain.linearRampToValueAtTime(1.0, now + 0.7);   // recover gently
+    } catch (e) {}
+}
+
+// ----------------------------------------------------------------------------
+// Background music registry. Playlists are name-keyed (trackName -> Sound) so a
+// server-sent {mood, track} resolves to the exact descriptor the engine plays.
+// ----------------------------------------------------------------------------
 var calmBackgroundMusicList = {};
 var excitingBackgroundMusicList = {};
 var brutalBackgroundMusicList = {};
@@ -33,51 +291,51 @@ var backgroundBuildTimer = null;
 // when one finishes so background music stays continuous and in sync.
 var musicTrackEndedHandler = null;
 
-var playerJoinSound = new Audio("./assets/sounds/pleasing-bell.mp3");
-var playerDiedSound = new Audio("./assets/sounds/TailWhip.mp3");
-var countDownA = new Audio("./assets/sounds/countdown-a.mp3");
-var countDownB = new Audio("./assets/sounds/countdown-b.mp3");
-var lavaCollapse = new Audio("./assets/sounds/doomed.mp3");
-var meleeSound = new Audio("./assets/sounds/melee-sound.mp3");
-var meleeHitSound = new Audio("./assets/sounds/bing.mp3");
-var gameOverSound = new Audio("./assets/sounds/gameover.mp3");
-var collectItem = new Audio("./assets/sounds/collectitem.mp3");
-var playerFinished = new Audio("./assets/sounds/playerfinished.mp3");
-var bombShot = new Audio("./assets/sounds/bomb-shot.mp3");
-var bombExplosion = new Audio("./assets/sounds/bomb-explosion.mp3");
-var bombBounce = new Audio("./assets/sounds/bomb-bounce.mp3");
-var blindSound = new Audio("./assets/sounds/blind.mp3");
-var abilityFizzle = new Audio("./assets/sounds/fizzle.mp3");
-var teleportSound = new Audio("./assets/sounds/teleport.mp3");
-var teleportWarnSound = new Audio("./assets/sounds/teleport_warn.mp3");
-var brutalRoundSound = new Audio("./assets/sounds/brutalround.mp3");
-var volcanoErupt = new Audio("./assets/sounds/volcano-erupt.mp3");
-var speedBuff = new Audio("./assets/sounds/speedBuff.mp3");
-var speedDebuff = new Audio("./assets/sounds/speed_downgrade.mp3");
-var tileSwap = new Audio("./assets/sounds/tileswap.mp3");
-var iceCannon = new Audio("./assets/sounds/iceCannon.mp3");
-var iceExplosion = new Audio("./assets/sounds/iceExplosion.mp3");
-var lavaExplosion = new Audio("./assets/sounds/lavaExplosion.mp3");
-var cutSound = new Audio("./assets/sounds/thwack.mp3");
-var bumperSound = new Audio("./assets/sounds/bumper.mp3");
-var blackoutSound = new Audio("./assets/sounds/blackout.mp3");
+// --- Sound descriptors (replaces the old `new Audio(...)` globals) ----------
+var playerJoinSound = makeSound("./assets/sounds/pleasing-bell.mp3");
+var playerDiedSound = makeSound("./assets/sounds/TailWhip.mp3");
+var countDownA = makeSound("./assets/sounds/countdown-a.mp3");
+var countDownB = makeSound("./assets/sounds/countdown-b.mp3");
+var lavaCollapse = makeSound("./assets/sounds/doomed.mp3");
+var meleeSound = makeSound("./assets/sounds/melee-sound.mp3");
+var meleeHitSound = makeSound("./assets/sounds/bing.mp3");
+var gameOverSound = makeSound("./assets/sounds/gameover.mp3");
+var collectItem = makeSound("./assets/sounds/collectitem.mp3");
+var playerFinished = makeSound("./assets/sounds/playerfinished.mp3");
+var bombShot = makeSound("./assets/sounds/bomb-shot.mp3");
+var bombExplosion = makeSound("./assets/sounds/bomb-explosion.mp3");
+var bombBounce = makeSound("./assets/sounds/bomb-bounce.mp3");
+var blindSound = makeSound("./assets/sounds/blind.mp3");
+var abilityFizzle = makeSound("./assets/sounds/fizzle.mp3");
+var teleportSound = makeSound("./assets/sounds/teleport.mp3");
+var teleportWarnSound = makeSound("./assets/sounds/teleport_warn.mp3");
+var brutalRoundSound = makeSound("./assets/sounds/brutalround.mp3", { duck: true });
+var volcanoErupt = makeSound("./assets/sounds/volcano-erupt.mp3");
+var speedBuff = makeSound("./assets/sounds/speedBuff.mp3");
+var speedDebuff = makeSound("./assets/sounds/speed_downgrade.mp3");
+var tileSwap = makeSound("./assets/sounds/tileswap.mp3");
+var iceCannon = makeSound("./assets/sounds/iceCannon.mp3");
+var iceExplosion = makeSound("./assets/sounds/iceExplosion.mp3");
+var lavaExplosion = makeSound("./assets/sounds/lavaExplosion.mp3");
+var cutSound = makeSound("./assets/sounds/thwack.mp3");
+var bumperSound = makeSound("./assets/sounds/bumper.mp3");
+var blackoutSound = makeSound("./assets/sounds/blackout.mp3");
 
-var newZombie = new Audio("./assets/sounds/newzombie.mp3");
-var zombieHit = new Audio("./assets/sounds/zombiehit.mp3");
-var zombieSwing = new Audio("./assets/sounds/zombieswing.mp3");
+var newZombie = makeSound("./assets/sounds/newzombie.mp3");
+var zombieHit = makeSound("./assets/sounds/zombiehit.mp3");
+var zombieSwing = makeSound("./assets/sounds/zombieswing.mp3");
 
-var nearVictorySound = new Audio("./assets/sounds/rise.mp3");
-var fallFromVictorySound = new Audio("./assets/sounds/reverserise.mp3");
+var nearVictorySound = makeSound("./assets/sounds/rise.mp3");
+var fallFromVictorySound = makeSound("./assets/sounds/reverserise.mp3");
 
-
-//Anouncer
-var firstBlood = new Audio("./assets/sounds/firstBlood.mp3");
-var doubleKill = new Audio("./assets/sounds/doubleKill.mp3");
-var tripleKill = new Audio("./assets/sounds/tripleKill.mp3");
-var megaKill = new Audio("./assets/sounds/megaKill.mp3");
-var killingSpree = new Audio("./assets/sounds/killingSpree.mp3");
-var rampage = new Audio("./assets/sounds/rampage.mp3");
-var godLike = new Audio("./assets/sounds/godLike.mp3");
+// Announcer — routed through the voice bus and flagged to duck the music under them.
+var firstBlood = makeSound("./assets/sounds/firstBlood.mp3", { bus: "voice", duck: true });
+var doubleKill = makeSound("./assets/sounds/doubleKill.mp3", { bus: "voice", duck: true });
+var tripleKill = makeSound("./assets/sounds/tripleKill.mp3", { bus: "voice", duck: true });
+var megaKill = makeSound("./assets/sounds/megaKill.mp3", { bus: "voice", duck: true });
+var killingSpree = makeSound("./assets/sounds/killingSpree.mp3", { bus: "voice", duck: true });
+var rampage = makeSound("./assets/sounds/rampage.mp3", { bus: "voice", duck: true });
+var godLike = makeSound("./assets/sounds/godLike.mp3", { bus: "voice", duck: true });
 
 // Audience — a stadium crowd layered under the action that reacts to tense and
 // amazing plays (big kills, fight flurries, narrow lava escapes, clutch goals).
@@ -86,49 +344,48 @@ var godLike = new Audio("./assets/sounds/godLike.mp3");
 // Each reaction rotates through interchangeable clips (and gets a small random
 // pitch shift per play, see playAudience) so repeats never sound identical.
 var crowdCheerBigVariants = [                            // amazing plays / clutch finishes
-    new Audio("./assets/sounds/crowd-cheer-big.mp3"),
-    new Audio("./assets/sounds/crowd-cheer-big-2.mp3"),
-    new Audio("./assets/sounds/crowd-cheer-big-3.mp3")
+    makeSound("./assets/sounds/crowd-cheer-big.mp3", { bus: "crowd" }),
+    makeSound("./assets/sounds/crowd-cheer-big-2.mp3", { bus: "crowd" }),
+    makeSound("./assets/sounds/crowd-cheer-big-3.mp3", { bus: "crowd" })
 ];
 var crowdCheerVariants = [                               // a single kill
-    new Audio("./assets/sounds/crowd-cheer.mp3"),
-    new Audio("./assets/sounds/crowd-cheer-2.mp3"),
-    new Audio("./assets/sounds/crowd-cheer-3.mp3")
+    makeSound("./assets/sounds/crowd-cheer.mp3", { bus: "crowd" }),
+    makeSound("./assets/sounds/crowd-cheer-2.mp3", { bus: "crowd" }),
+    makeSound("./assets/sounds/crowd-cheer-3.mp3", { bus: "crowd" })
 ];
 var crowdOohVariants = [                                 // tension: fight flurries / near-burn escapes
-    new Audio("./assets/sounds/crowd-ooh.mp3"),
-    new Audio("./assets/sounds/crowd-ooh-2.mp3"),
-    new Audio("./assets/sounds/crowd-ooh-3.mp3")
+    makeSound("./assets/sounds/crowd-ooh.mp3", { bus: "crowd" }),
+    makeSound("./assets/sounds/crowd-ooh-2.mp3", { bus: "crowd" }),
+    makeSound("./assets/sounds/crowd-ooh-3.mp3", { bus: "crowd" })
 ];
 
-var lobbyMusic = new Audio("./assets/sounds/lobbymusic.mp3");
-var gameStart = new Audio("./assets/sounds/gamestart.mp3");
+var lobbyMusic = makeSound("./assets/sounds/lobbymusic.mp3", { bus: "music", loop: true });
+var gameStart = makeSound("./assets/sounds/gamestart.mp3");
 
-var slowstride = new Audio("./assets/sounds/slowstride.mp3");
-var slowpipes = new Audio("./assets/sounds/slow-pipes.mp3");
+var slowstride = makeSound("./assets/sounds/slowstride.mp3", { bus: "music" });
+var slowpipes = makeSound("./assets/sounds/slow-pipes.mp3", { bus: "music" });
 
-var therush = new Audio("./assets/sounds/the-rush.mp3");
-var beastv2 = new Audio("./assets/sounds/beastv2.mp3");
-var mindInMotion = new Audio("./assets/sounds/mind_in_motion.mp3");
-var bumpinbits1 = new Audio("./assets/sounds/bumpinbits1.mp3");
-var bumpinbits2 = new Audio("./assets/sounds/bumpinbits2.mp3");
-var bumpinbits3 = new Audio("./assets/sounds/bumpinbits3.mp3");
-var bumpinbits4 = new Audio("./assets/sounds/bumpinbits4.mp3");
-var bumpinbits5 = new Audio("./assets/sounds/bumpinbits5.mp3");
+var therush = makeSound("./assets/sounds/the-rush.mp3", { bus: "music" });
+var beastv2 = makeSound("./assets/sounds/beastv2.mp3", { bus: "music" });
+var mindInMotion = makeSound("./assets/sounds/mind_in_motion.mp3", { bus: "music" });
+var bumpinbits1 = makeSound("./assets/sounds/bumpinbits1.mp3", { bus: "music" });
+var bumpinbits2 = makeSound("./assets/sounds/bumpinbits2.mp3", { bus: "music" });
+var bumpinbits3 = makeSound("./assets/sounds/bumpinbits3.mp3", { bus: "music" });
+var bumpinbits4 = makeSound("./assets/sounds/bumpinbits4.mp3", { bus: "music" });
+var bumpinbits5 = makeSound("./assets/sounds/bumpinbits5.mp3", { bus: "music" });
 
-var heavyfabric = new Audio("./assets/sounds/heavyfabric.mp3");
-var desperationSetsIn = new Audio("./assets/sounds/DesperationSetsIn.mp3");
-var horrorLoop = new Audio("./assets/sounds/HorrorLoop.mp3");
-var depthOfDespair = new Audio("./assets/sounds/depthOfDespair.mp3");
+var heavyfabric = makeSound("./assets/sounds/heavyfabric.mp3", { bus: "music" });
+var desperationSetsIn = makeSound("./assets/sounds/DesperationSetsIn.mp3", { bus: "music" });
+var horrorLoop = makeSound("./assets/sounds/HorrorLoop.mp3", { bus: "music" });
+var depthOfDespair = makeSound("./assets/sounds/depthOfDespair.mp3", { bus: "music" });
 
 // Register a track under a mood. Keys MUST match the names in config.json "music"
-// so a server-sent {mood, track} resolves here. trackName is stamped on the Audio
-// so the "ended" listener can report which track finished back to the server.
+// so a server-sent {mood, track} resolves here. trackName is stamped on the sound
+// so the engine can report which track finished back to the server.
 function registerBackgroundTrack(playlist, mood, name, sound) {
-	sound.trackName = name;
-	playlist[name] = sound;
-	sound.addEventListener("ended", handleBackgroundTrackEnded);
-	backgroundMusicLists[mood] = playlist;
+    sound.trackName = name;
+    playlist[name] = sound;
+    backgroundMusicLists[mood] = playlist;
 }
 
 registerBackgroundTrack(calmBackgroundMusicList, "calm", "slowstride", slowstride);
@@ -150,11 +407,13 @@ registerBackgroundTrack(brutalBackgroundMusicList, "brutal", "heavyfabric", heav
 
 
 function volumeChange() {
-    // Single lobby SFX scalar: dampens every sound effect uniformly while in the
-    // lobby tutorial (so it reads as practice, not a live round). Music is untouched
-    // — only lines that used "* masterVolume;" (SFX) became "* sfx;". sfxVolumeScalar
-    // is 1 everywhere except the lobby (see setLobbySfxDampen).
+    // `.volume` is the absolute level the engine applies per voice. SFX fold in the
+    // master toggle + the lobby dampen scalar (1 except in the lobby tutorial, so it
+    // reads as practice). Music folds in the master + music toggles. These coefficients
+    // are NOT perceived loudness — the source files are mastered at very different
+    // levels — they were tuned against a per-file loudness measurement.
     var sfx = masterVolume * sfxVolumeScalar;
+    playerJoinSound.volume = .6 * sfx;   // join chime — must scale with the slider (historically it didn't)
     blackoutSound.volume = .35 * sfx;
     bumperSound.volume = .25 * sfx;
     cutSound.volume = .15 * sfx;
@@ -171,13 +430,13 @@ function volumeChange() {
     lavaExplosion.volume = .75 * sfx;
     iceExplosion.volume = .25 * sfx;
     iceCannon.volume = .25 * sfx;
-    tileSwap.volume = .5 * sfx;
+    tileSwap.volume = .32 * sfx;       // file has the hottest transient peak in the game (~-6 dBFS); tame the spike
     speedBuff.volume = 0.25 * sfx;
     speedDebuff.volume = 0.05 * sfx;
     volcanoErupt.volume = 0.05 * sfx;
     brutalRoundSound.volume = 0.35 * sfx;
-    bombBounce.volume = 0.75 * sfx;
-    abilityFizzle.volume = .65 * sfx;
+    bombBounce.volume = 0.22 * sfx;    // a ricochet must sit under the bomb's own shot/explosion (.2)
+    abilityFizzle.volume = .15 * sfx;  // a whiffed-ability "nope" — keep it well below the action
     teleportWarnSound.volume = .025 * sfx;
     countDownA.volume = .05 * sfx;
     countDownB.volume = .05 * sfx;
@@ -187,7 +446,7 @@ function volumeChange() {
     gameOverSound.volume = .5 * sfx;
     nearVictorySound.volume = .3 * sfx;
     fallFromVictorySound.volume = .15 * sfx;
-    collectItem.volume = .4 * sfx;
+    collectItem.volume = .75 * sfx;    // pickup source is very quiet; was buried near the noise floor
     bombShot.volume = .2 * sfx;
     bombExplosion.volume = .2 * sfx;
     playerFinished.volume = .3 * sfx;
@@ -197,141 +456,129 @@ function volumeChange() {
     newZombie.volume = .65 * sfx;
     zombieHit.volume = .25 * sfx;
     zombieSwing.volume = .35 * sfx;
-
-    lobbyMusic.volume = .05 * masterVolume * musicVolume;
-    lobbyMusic.loop = true;
     gameStart.volume = .2 * sfx;
 
-    heavyfabric.volume = .030 * masterVolume * musicVolume;
-    heavyfabric.targetVolume = heavyfabric.volume;
+    var music = masterVolume * musicVolume;
+    lobbyMusic.volume = .05 * music;
+    heavyfabric.volume = .030 * music;
+    slowpipes.volume = .015 * music;
+    slowstride.volume = .05 * music;
+    therush.volume = .025 * music;
+    beastv2.volume = .035 * music;
+    mindInMotion.volume = .035 * music;
+    desperationSetsIn.volume = .015 * music;
+    horrorLoop.volume = .015 * music;
+    bumpinbits1.volume = .05 * music;
+    bumpinbits2.volume = .05 * music;
+    bumpinbits3.volume = .05 * music;
+    bumpinbits4.volume = .05 * music;
+    bumpinbits5.volume = .05 * music;
+    depthOfDespair.volume = .20 * music;
 
-    slowpipes.volume = .015 * masterVolume * musicVolume;
-    slowpipes.targetVolume = slowpipes.volume;
+    applyLiveVolumes();
+}
 
-    slowstride.volume = .05 * masterVolume * musicVolume;
-    slowstride.targetVolume = slowstride.volume;
-
-    therush.volume = .025 * masterVolume * musicVolume;
-    therush.targetVolume = therush.volume;
-
-    beastv2.volume = .035 * masterVolume * musicVolume;
-    beastv2.targetVolume = beastv2.volume;
-
-    mindInMotion.volume = .035 * masterVolume * musicVolume;
-    mindInMotion.targetVolume = mindInMotion.volume;
-
-    desperationSetsIn.volume = .015 * masterVolume * musicVolume;
-    desperationSetsIn.targetVolume = desperationSetsIn.volume;
-
-    horrorLoop.volume = .015 * masterVolume * musicVolume;
-    horrorLoop.targetVolume = horrorLoop.volume;
-
-    bumpinbits1.volume = .05 * masterVolume * musicVolume;
-    bumpinbits1.targetVolume = bumpinbits1.volume;
-
-    bumpinbits2.volume = .05 * masterVolume * musicVolume;
-    bumpinbits2.targetVolume = bumpinbits2.volume;
-
-    bumpinbits3.volume = .05 * masterVolume * musicVolume;
-    bumpinbits3.targetVolume = bumpinbits3.volume;
-
-    bumpinbits4.volume = .05 * masterVolume * musicVolume;
-    bumpinbits4.targetVolume = bumpinbits4.volume;
-
-    bumpinbits5.volume = .05 * masterVolume * musicVolume;
-    bumpinbits5.targetVolume = bumpinbits5.volume;
-
-    depthOfDespair.volume = .20 * masterVolume * musicVolume;
-    depthOfDespair.targetVolume = depthOfDespair.volume;
+// Push the freshly-computed levels onto anything currently sustained (music, the
+// looping lobby track) so muting/unmuting takes effect immediately mid-playback.
+function applyLiveVolumes() {
+    var ctx = getCtx();
+    if (!ctx) { return; }
+    activeVoices.forEach(function (v) {
+        if (v.sustained && v.gain) {
+            try {
+                var t = ctx.currentTime;
+                // Glide to the new level from wherever the gain actually is right now,
+                // so a volume toggle landing mid-crossfade doesn't click or jump the
+                // music straight to full.
+                holdParamNow(v.gain.gain, t);
+                v.gain.gain.setTargetAtTime(v.sound.volume, t, 0.05);
+            } catch (e) {}
+        }
+    });
 }
 
 
+// ----------------------------------------------------------------------------
+// Public play helpers (API preserved from the old HTMLAudio implementation).
+// ----------------------------------------------------------------------------
 function playSound(sound) {
-    playingSounds.add(sound);
-    if (!gameMuted) {
-        if (sound.currentTime > 0) {
-            sound.currentTime = 0;
-        }
-        // play() rejects if the browser hasn't seen a user gesture yet (autoplay
-        // policy). Swallow it — unlockAudio() resumes looping music on first input.
-        var p = sound.play();
-        if (p && p.catch) { p.catch(function () { }); }
-    }
+    startSound(sound, {});
 }
 
+// Per-play pitch jitter for frequently-repeated impact SFX (punches, bounces, hits,
+// burns) so a flurry doesn't read as the identical click looped. `variance` is the ±
+// fraction of normal speed (.1 = ±10%); a smaller value keeps weighty one-shots' body.
+function playSoundVaried(sound, variance) {
+    var v = (variance == null) ? 0.08 : variance;
+    startSound(sound, { rate: 1 + (Math.random() * 2 - 1) * v });
+}
+
+// "Play unless already playing" — used for the looping lobby track. With the engine,
+// startSound already refuses to stack a sustained sound on itself.
+function playSoundAfterFinish(sound) {
+    startSound(sound, {});
+}
+
+// Stop every live voice of this sound (sustained or one-shot) with a quick fade so
+// it doesn't click off. Used for the lobby loop and the collapse rumble.
 function stopSound(sound) {
-    playingSounds.delete(sound);
-    if (!gameMuted) {
-        sound.pause();
-        if (sound.currentTime > 0) {
-            sound.currentTime = 0;
-        }
-    }
+    var toStop = [];
+    activeVoices.forEach(function (v) { if (v.sound === sound) { toStop.push(v); } });
+    for (var i = 0; i < toStop.length; i++) { fadeOutVoice(toStop[i], 0.25); }
+    pendingSounds.delete(sound);
+    sound.pendingPlay = false;
+    sound.voice = null;
 }
 
 function stopAllSounds() {
-    playingSounds.forEach(function (sound) {
-        sound.pause();
-    });
-    playingSounds.clear();
+    var all = [];
+    activeVoices.forEach(function (v) { all.push(v); });
+    for (var i = 0; i < all.length; i++) { fadeOutVoice(all[i], 0.2); }
+    pendingSounds.forEach(function (s) { s.pendingPlay = false; s.pendingOpt = null; });
+    pendingSounds.clear();
+    // The match's music was just stopped; forget it so the next setBackgroundMusic
+    // starts cleanly (and the fading music voice can't report a track-end either).
+    currentBackgroundMusic = null;
 }
 
-function playSoundAfterFinish(sound) {
-    playingSounds.add(sound);
-    if (!gameMuted) {
-        if (sound.currentTime > 0 && !sound.ended) {
-            return;
-        } else {
-            sound.currentTime = 0;
-        }
-        var p = sound.play();
-        if (p && p.catch) { p.catch(function () { }); }
-    }
-}
-
-// Browser autoplay policy blocks sound.play() until the user interacts with the
-// page, so background music requested on the waiting/lobby screen (before any
-// click/keypress) silently fails. On the first user gesture, resume any looping
-// music that was requested but blocked (lobby music loops; one-shot SFX are left
-// alone). Fires once, then detaches.
+// Browser autoplay policy keeps the AudioContext "suspended" until the user
+// interacts with the page, so anything requested on the waiting/lobby screen
+// (before any click/keypress) can't be heard. On the first user gesture, resume the
+// context and start anything that was deferred (the lobby loop, pending music).
+// Fires once, then detaches.
 var audioUnlocked = false;
 function unlockAudio() {
-    if (audioUnlocked) {
-        return;
-    }
+    if (audioUnlocked) { return; }
     audioUnlocked = true;
     ["mousedown", "pointerdown", "keydown", "touchstart"].forEach(function (evt) {
         window.removeEventListener(evt, unlockAudio);
     });
-    if (gameMuted) {
-        return;
+    var ctx = getCtx();
+    if (!ctx) { return; }
+    var resume = ctx.resume ? ctx.resume() : null;
+    if (resume && resume.then) {
+        resume.then(drainPending).catch(function () {});
+    } else {
+        drainPending();
     }
-    playingSounds.forEach(function (sound) {
-        if (sound.loop && sound.paused) {
-            var p = sound.play();
-            if (p && p.catch) { p.catch(function () { }); }
-        }
-    });
 }
 if (typeof window !== "undefined") {
     ["mousedown", "pointerdown", "keydown", "touchstart"].forEach(function (evt) {
         window.addEventListener(evt, unlockAudio, { passive: true });
     });
+    // Begin decoding everything immediately so gameplay sounds are ready on first use.
+    preloadAllSounds();
 }
 
-// All audience reactions share one channel so a chaotic moment yields a single
-// crowd reaction instead of a pile-up. A higher-priority reaction (a big cheer)
-// cuts in over a lower one already playing; within audienceCooldownMs nothing of
-// equal-or-lower priority retriggers. Priorities: 1 = light cheer / tension "ooh",
-// 2 = big eruption (multi-kills, sprees, clutch finishes).
+// ----------------------------------------------------------------------------
+// Audience reactions (unchanged behaviour: one shared crowd voice, priority +
+// cooldown gating, intensity that escalates over the match, per-play pitch shift).
+// ----------------------------------------------------------------------------
 var audienceCooldownMs = 1800;
 var audienceReactionUntil = 0;
 var audienceCurrentSound = null;
+var audienceCurrentVoice = null;
 var audienceCurrentPriority = 0;
-// Audience intensity escalates over a match: tame in the early rounds, on the
-// edge of their seats once someone nears the win. Driven by the leader's notches
-// vs the win target (see updateAudienceIntensity), it both scales reaction volume
-// and gates which reactions fire (early = exceptional plays only).
 var audienceIntensity = 0;     // 0 (match start) .. 1 (someone one notch from winning)
 var audienceVolScale = 0.5;    // volume multiplier derived from intensity
 var audienceMinPriority = 2;   // lowest priority allowed to fire now (early: 2 = exceptional only)
@@ -378,13 +625,12 @@ function pickCrowdBig() { return pickVariant(crowdCheerBigVariants, "big"); }
 function pickCrowdCheer() { return pickVariant(crowdCheerVariants, "cheer"); }
 function pickCrowdOoh() { return pickVariant(crowdOohVariants, "ooh"); }
 
-// Small per-play pitch shift (±audiencePitchVariance) so even the same clip
-// sounds slightly different each time. preservesPitch must be off or the browser
-// would time-stretch instead of changing pitch.
+// Small per-play pitch shift (±audiencePitchVariance) so even the same clip sounds
+// slightly different each time.
 var audiencePitchVariance = 0.06;
 function playAudience(sound, priority) {
-    // Early in a match the crowd only stirs for exceptional plays; minor
-    // reactions unlock as someone approaches the win (see audienceMinPriority).
+    // Early in a match the crowd only stirs for exceptional plays; minor reactions
+    // unlock as someone approaches the win (see audienceMinPriority).
     if (priority < audienceMinPriority) {
         return;
     }
@@ -393,25 +639,29 @@ function playAudience(sound, priority) {
     if (now < audienceReactionUntil && priority <= audienceCurrentPriority) {
         return;
     }
-    // One crowd voice: stop whatever clip is still playing before the next one
-    // starts, so reactions never pile up (clips run 2.5-4s, longer than the
-    // cooldown, so a lapsed-cooldown reaction would otherwise overlap the last).
-    if (audienceCurrentSound != null && audienceCurrentSound !== sound) {
-        stopSound(audienceCurrentSound);
+    // One crowd voice: fade out whatever clip is still playing before the next one
+    // starts, so reactions never pile up.
+    if (audienceCurrentVoice != null) {
+        fadeOutVoice(audienceCurrentVoice, 0.15);
+        audienceCurrentVoice = null;
     }
-    sound.preservesPitch = false;
-    sound.mozPreservesPitch = false;
-    sound.webkitPreservesPitch = false;
-    sound.playbackRate = 1 + (Math.random() * 2 - 1) * audiencePitchVariance;
-    sound.volume = (sound.audienceBaseVolume != null ? sound.audienceBaseVolume : sound.volume) * audienceVolScale;
+    var rate = 1 + (Math.random() * 2 - 1) * audiencePitchVariance;
+    var vol = (sound.audienceBaseVolume != null ? sound.audienceBaseVolume : sound.volume) * audienceVolScale;
+    var voice = startSound(sound, { rate: rate, volume: vol });
+    // If the clip couldn't actually start (ctx suspended / buffer not yet decoded /
+    // muted), don't arm the cooldown — otherwise a reaction nobody heard would gate
+    // genuine reactions for the next ~1.8s.
+    if (voice == null) { return; }
     audienceCurrentSound = sound;
     audienceCurrentPriority = priority;
     audienceReactionUntil = now + audienceCooldownMs;
-    playSound(sound);
+    audienceCurrentVoice = voice;
 }
 
-// Server-authoritative: play the exact mood+track the server told us to. The
-// server decides what everyone hears; the client only obeys.
+// ----------------------------------------------------------------------------
+// Background music — server-authoritative. The server tells everyone the exact
+// mood+track; the client crossfades to it.
+// ----------------------------------------------------------------------------
 function setBackgroundMusic(mood, trackName) {
     if (mood == null || trackName == null) {
         return;
@@ -426,58 +676,32 @@ function setBackgroundMusic(mood, trackName) {
         console.warn("setBackgroundMusic: track '" + trackName + "' not registered for mood '" + mood + "' (config.json/audio.js mismatch?) — no music change");
         return;
     }
-    //Already playing this exact track — leave it (and its fade) alone.
-    if (currentBackgroundMusic === track && !track.paused && !track.ended) {
+    // Already playing this exact track — leave it (and its fade) alone.
+    if (currentBackgroundMusic === track && track.voice != null) {
         return;
     }
-    //Fade out whatever else is playing before switching.
+    // Crossfade: fade the old track out while the new one fades in.
     if (currentBackgroundMusic != null && currentBackgroundMusic !== track) {
-        fadeSoundOut(currentBackgroundMusic);
+        if (currentBackgroundMusic.voice != null) {
+            fadeOutVoice(currentBackgroundMusic.voice, 1.2);
+        }
+        currentBackgroundMusic.voice = null;
+        pendingSounds.delete(currentBackgroundMusic);
+        currentBackgroundMusic.pendingPlay = false;
     }
     currentBackgroundMusic = track;
-    fadeSoundIn(track);
-    playSound(track);
-}
-
-// Background tracks don't loop. When the active one finishes, tell the server so
-// it can pick the next track for everyone — keeps music continuous and in sync.
-function handleBackgroundTrackEnded(event) {
-    var sound = event.target;
-    if (sound !== currentBackgroundMusic) {
-        return;
-    }
-    if (musicTrackEndedHandler != null) {
-        musicTrackEndedHandler(sound.trackName);
-    }
-}
-
-function fadeSoundIn(sound) {
-    clearFade(sound);
-    sound.volume = .001 * masterVolume;
-    var timer = setInterval(function () {
-        if (sound.volume < sound.targetVolume) {
-            sound.volume = sound.volume * 1.2 * masterVolume * musicVolume;
-        } else {
-            sound.volume = sound.targetVolume;
-            clearInterval(timer);
-            fadeTimers.delete(sound);
+    startSound(track, {
+        sustained: true,
+        fadeIn: 1.2,
+        // Background tracks don't loop; when the active one finishes, tell the server
+        // so it can pick the next track for everyone (keeps music continuous + in sync).
+        onended: function () {
+            if (currentBackgroundMusic === track) {
+                track.voice = null;
+                if (musicTrackEndedHandler != null) {
+                    musicTrackEndedHandler(track.trackName);
+                }
+            }
         }
-    }, 500);
-    fadeTimers.set(sound, timer);
+    });
 }
-
-function fadeSoundOut(sound) {
-    if (sound == null) return;
-    clearFade(sound);
-    var timer = setInterval(function () {
-        if (sound.volume > 0.0025) {
-            sound.volume *= .95;
-        } else {
-            stopSound(sound);
-            clearInterval(timer);
-            fadeTimers.delete(sound);
-        }
-    }, 500);
-    fadeTimers.set(sound, timer);
-}
-
