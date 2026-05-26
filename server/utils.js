@@ -11,6 +11,36 @@ var c = require('./config.json');
 var cellGraph = require('./cellGraph.js');
 c.port = process.env.PORT || c.port;
 
+// Test-only config override seam (CI perf harness). When CHAO_PERF_OVERRIDE is a
+// JSON object, deep-merge it over the loaded config so a separate-process server
+// can boot into a deterministic worst-case load scenario (e.g. forced grid size +
+// brutal round) WITHOUT editing config.json. No effect in normal runs — nothing
+// sets this env var outside the perf test.
+// Never apply in production — even if the var somehow leaks into a prod env, the
+// live game keeps its committed config.
+if (process.env.CHAO_PERF_OVERRIDE && process.env.NODE_ENV !== 'production') {
+    try {
+        var __override = JSON.parse(process.env.CHAO_PERF_OVERRIDE);
+        (function deepMerge(dst, src) {
+            for (var k in src) {
+                // Own keys only, and never prototype keys — guards against
+                // prototype pollution from a stray __proto__/constructor in the JSON.
+                if (!Object.prototype.hasOwnProperty.call(src, k)) continue;
+                if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+                if (src[k] && typeof src[k] === 'object' && !Array.isArray(src[k]) &&
+                    dst[k] && typeof dst[k] === 'object' && !Array.isArray(dst[k])) {
+                    deepMerge(dst[k], src[k]);
+                } else {
+                    dst[k] = src[k];
+                }
+            }
+        })(c, __override);
+        console.log('[perf-override] applied config override keys:', Object.keys(__override).join(', '));
+    } catch (e) {
+        console.error('[perf-override] invalid CHAO_PERF_OVERRIDE JSON:', e.message);
+    }
+}
+
 let octokitInstance;
 async function getOctokit() {
     if (!octokitInstance) {
