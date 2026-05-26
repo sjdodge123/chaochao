@@ -287,7 +287,39 @@ function checkForMail(client) {
 			}
 		}
 		player.color = color;
+		// Picking a colour skin clears any equipped avatar skin (and its name); the
+		// client drops the avatar when it sees playerSkinChanged.
+		player.avatarUrl = null;
+		player.name = null;
 		messageRoomBySig(room.sig, "playerSkinChanged", { id: client.id, color: color });
+	});
+
+	// Opt-in avatar skin: a SIGNED-IN player equips their Discord/Google picture
+	// (+ display name) as their kart skin, shown to everyone. Gated on client.userId
+	// (resolved by the io.use auth middleware) so a guest can't spoof a name/avatar.
+	client.on('setAvatarSkin', function (payload) {
+		var room = hostess.getRoomBySig(roomMailList[client.id]);
+		if (room == undefined || room.game.currentState != c.stateMap.lobby) {
+			return;
+		}
+		if (client.userId == null) {
+			return; // only signed-in players may use the avatar skin
+		}
+		var player = room.playerList[client.id];
+		if (player == null) {
+			return;
+		}
+		var url = (payload && typeof payload.url === "string") ? payload.url : null;
+		var name = (payload && typeof payload.name === "string") ? payload.name : null;
+		if (url == null || !/^https:\/\//.test(url) || url.length > 512) {
+			return; // require a sane https image URL
+		}
+		if (name != null) {
+			name = name.replace(/[\x00-\x1f]/g, "").trim().slice(0, 24); // strip control chars, cap length
+		}
+		player.avatarUrl = url;
+		player.name = (name && name.length) ? name : null;
+		messageRoomBySig(room.sig, "playerAvatarChanged", { id: client.id, avatarUrl: player.avatarUrl, name: player.name });
 	});
 
 	// Lobby AI station: set the room-wide bot override. { auto:true } => clear the

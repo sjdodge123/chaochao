@@ -223,6 +223,7 @@ function createPlayer(dataArray) {
 	playerList[index].angle = dataArray[9];
 	playerList[index].name = dataArray[10] || null;   // AI racer identity (humans: null)
 	playerList[index].title = dataArray[11] || null;
+	playerList[index].avatarUrl = dataArray[12] || null;   // opt-in avatar skin (else null = colour skin)
 	playerList[index].deathMessage = null;
 	playerList[index].trail = new Trail({ x: dataArray[1], y: dataArray[2] });
 	playerList[index].fizzle = function () {

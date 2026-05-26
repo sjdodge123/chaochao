@@ -171,6 +171,10 @@ class Player extends Circle {
 		this.name = null;
 		this.title = null;
 		this.personality = null;
+		// Opt-in avatar skin: a signed-in player who equips it in the lobby hub gets
+		// their Discord/Google picture (and `name`) shown on their kart for everyone.
+		// null = default colour skin, nameless. Set/cleared via messenger setAvatarSkin/setSkin.
+		this.avatarUrl = null;
 		this.profile = null;
 		this.emoteReadyAt = 0;
 		//Steering outputs the engine's isAI branch reads each tick.

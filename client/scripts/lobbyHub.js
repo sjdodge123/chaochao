@@ -101,11 +101,15 @@ function openStationPanel(lp) {
     }
     var cursor = 0;
     if (st.kind === "skin") {
-        // Start the cursor on the player's current colour so the picker opens "here".
-        var pal = skinPalette();
-        var cur = skinCurrentColor(lp);
-        var idx = pal.indexOf(cur);
-        cursor = (idx >= 0) ? idx : 0;
+        // Open the picker "here": on the avatar cell if it's equipped, else on the
+        // player's current colour.
+        if (playerHasAvatarSkin(lp) && avatarSkinProfile(lp)) {
+            cursor = skinPalette().length;
+        } else {
+            var pal = skinPalette();
+            var idx = pal.indexOf(skinCurrentColor(lp));
+            cursor = (idx >= 0) ? idx : 0;
+        }
     }
     lp.stationPanel = { id: st.id, kind: st.kind, cursor: cursor };
     // Stop driving while configuring (mirrors the emoji-wheel open), and emit the
@@ -134,14 +138,14 @@ function stationPanelNav(lp, dx, dy) {
         return;
     }
     if (lp.stationPanel.kind === "skin") {
-        var pal = skinPalette();
-        if (!pal.length) {
+        var count = skinOptionCount(lp);
+        if (!count) {
             return;
         }
         var i = lp.stationPanel.cursor || 0;
         i += dx + dy * SKIN_COLS;
         if (i < 0) { i = 0; }
-        if (i > pal.length - 1) { i = pal.length - 1; }
+        if (i > count - 1) { i = count - 1; }
         lp.stationPanel.cursor = i;
     }
 }
@@ -150,8 +154,13 @@ function stationPanelNav(lp, dx, dy) {
 // dismisses; for the skin picker it commits the colour under the cursor.
 function stationPanelConfirm(lp) {
     if (lp && lp.stationPanel && lp.stationPanel.kind === "skin") {
-        var pal = skinPalette();
-        stationPickSkin(lp, pal[lp.stationPanel.cursor || 0]);
+        var cur = lp.stationPanel.cursor || 0;
+        if (isAvatarIndex(lp, cur)) {
+            stationPickAvatar(lp);
+        } else {
+            var pal = skinPalette();
+            stationPickSkin(lp, pal[cur]);
+        }
         return;
     }
     closeStationPanel(lp);
@@ -165,6 +174,8 @@ function stationPanelAction(lp, action) {
         stationPanelNav(lp, -1, 0);
     } else if (action === "close") {
         closeStationPanel(lp);
+    } else if (action === "pickAvatar") {
+        stationPickAvatar(lp);
     } else if (action != null && action.indexOf("pick:") === 0) {
         stationPickSkin(lp, action.slice(5));
     }
@@ -318,6 +329,44 @@ function flagSkinRejected(slot, color) {
     if (lp) {
         lp._skinRejectAt = Date.now();
     }
+}
+
+// --- avatar skin option ------------------------------------------------------
+// The signed-in player's Discord/Google picture, offered as an extra skin in the
+// station. Only the PRIMARY local seat carries the account (other seats are
+// guests), so the option only shows there. Returns { name, avatarUrl } or null.
+function avatarSkinProfile(lp) {
+    if (!lp || !lp.isPrimary) {
+        return null;
+    }
+    var auth = (typeof window !== "undefined") ? window.chaochaoAuth : null;
+    if (!auth || typeof auth.isSignedIn !== "function" || !auth.isSignedIn()) {
+        return null;
+    }
+    var profile = (typeof auth.getProfile === "function") ? auth.getProfile() : null;
+    return (profile && profile.avatarUrl) ? profile : null;
+}
+// Selectable options = colour swatches + (the avatar option, when available). The
+// avatar lives at grid index === palette length (one past the last colour).
+function skinOptionCount(lp) {
+    return skinPalette().length + (avatarSkinProfile(lp) ? 1 : 0);
+}
+function isAvatarIndex(lp, i) {
+    return !!avatarSkinProfile(lp) && i === skinPalette().length;
+}
+// Is this player currently wearing the avatar skin? (server-set avatarUrl).
+function playerHasAvatarSkin(lp) {
+    var p = (lp && lp.myID != null && typeof playerList !== "undefined" && playerList) ? playerList[lp.myID] : null;
+    return !!(p && p.avatarUrl);
+}
+// Commit the avatar skin: emit on this slot's own socket (the server attributes
+// it to the emitting, signed-in socket). The change lands via playerAvatarChanged.
+function stationPickAvatar(lp) {
+    var profile = avatarSkinProfile(lp);
+    if (!profile || !lp.socket) {
+        return;
+    }
+    lp.socket.emit("setAvatarSkin", { url: profile.avatarUrl, name: profile.name });
 }
 
 // --- rendering ---------------------------------------------------------------
@@ -618,7 +667,7 @@ function drawStationPanel(lp, sp) {
     var w = 250;
     var h = 132;
     if (kind === "skin") {
-        var rows = Math.max(1, Math.ceil(skinPalette().length / SKIN_COLS));
+        var rows = Math.max(1, Math.ceil(skinOptionCount(lp) / SKIN_COLS));
         w = 272;
         h = 78 + rows * 34;
     }
@@ -698,6 +747,7 @@ function drawSkinPanelBody(lp, x, y, w, h, hit) {
     }
     var taken = skinTakenColors(lp);
     var current = skinCurrentColor(lp);
+    var hasAvatar = playerHasAvatarSkin(lp); // wearing the avatar skin → no colour is "current"
     var cursor = lp.stationPanel.cursor || 0;
     var pad = 14;
     var gap = 6;
@@ -716,7 +766,7 @@ function drawSkinPanelBody(lp, x, y, w, h, hit) {
         lhRoundRect(gameContext, sx, sy, cell, cell, 5);
         gameContext.fill();
         gameContext.globalAlpha = 1;
-        if (col === current) {
+        if (col === current && !hasAvatar) {
             gameContext.fillStyle = "#000";
             gameContext.textAlign = "center";
             gameContext.textBaseline = "middle";
@@ -740,6 +790,52 @@ function drawSkinPanelBody(lp, x, y, w, h, hit) {
         // Taken swatches aren't pickable, but still consume the tap so it doesn't
         // fall through and dismiss the panel.
         hit.options.push({ rect: rect, action: isTaken ? "noop" : ("pick:" + col) });
+    }
+    // Avatar skin option (signed-in primary only): one extra cell at index ===
+    // palette length, the player's picture in the same gold frame used in-game.
+    var avProfile = avatarSkinProfile(lp);
+    if (avProfile) {
+        var ai = pal.length;
+        var asx = x + pad + (ai % SKIN_COLS) * (cell + gap);
+        var asy = top + Math.floor(ai / SKIN_COLS) * (cell + gap);
+        var arect = { x: asx, y: asy, w: cell, h: cell };
+        gameContext.fillStyle = "#f4c542"; // the "external skin" border colour
+        lhRoundRect(gameContext, asx, asy, cell, cell, 5);
+        gameContext.fill();
+        var inset = 3;
+        var av = (typeof preloadAvatarImage === "function") ? preloadAvatarImage(avProfile.avatarUrl) : null;
+        if (av && av.ready && !av.failed) {
+            gameContext.save();
+            lhRoundRect(gameContext, asx + inset, asy + inset, cell - inset * 2, cell - inset * 2, 4);
+            gameContext.clip();
+            gameContext.drawImage(av.img, asx + inset, asy + inset, cell - inset * 2, cell - inset * 2);
+            gameContext.restore();
+        } else {
+            gameContext.fillStyle = "#222";
+            gameContext.textAlign = "center";
+            gameContext.textBaseline = "middle";
+            gameContext.font = "16px sans-serif";
+            gameContext.fillText("👤", asx + cell / 2, asy + cell / 2 + 1);
+        }
+        if (hasAvatar) { // equipped — small check badge, top-right
+            var bx = asx + cell - 8, by = asy + 8;
+            gameContext.beginPath();
+            gameContext.arc(bx, by, 7, 0, 2 * Math.PI);
+            gameContext.fillStyle = "rgba(0,0,0,0.7)";
+            gameContext.fill();
+            gameContext.fillStyle = "#fff";
+            gameContext.textAlign = "center";
+            gameContext.textBaseline = "middle";
+            gameContext.font = "bold 10px sans-serif";
+            gameContext.fillText("✓", bx, by + 0.5);
+        }
+        if (cursor === ai) {
+            gameContext.strokeStyle = "#fff";
+            gameContext.lineWidth = 3;
+            lhRoundRect(gameContext, asx - 1, asy - 1, cell + 2, cell + 2, 6);
+            gameContext.stroke();
+        }
+        hit.options.push({ rect: arect, action: "pickAvatar" });
     }
     // "Taken!" flash after a rejected pick.
     if (lp._skinRejectAt && (Date.now() - lp._skinRejectAt) < 1500) {
