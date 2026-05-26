@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- The lobby's skin and AI stations swapped sides — the skin station is now on the left, the AI station on the right.
 
 ## v0.12.1 — 2026-05-26
 
