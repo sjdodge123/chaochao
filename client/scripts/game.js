@@ -196,7 +196,25 @@ var then = Date.now(),
     dt;
 
 $(function () {
-    server = clientConnect();
+    // Wait for the Supabase session to settle before opening the socket, so a
+    // freshly-signed-in token rides the FIRST handshake. The post-OAuth redirect
+    // establishes the session asynchronously (a network code-exchange), so
+    // connecting immediately would hand the server a tokenless (guest) handshake
+    // even though the user just signed in. Cap the wait at 2s so a slow or
+    // blocked auth init can never stall the game — we just connect as a guest.
+    var auth = window.chaochaoAuth;
+    if (auth && auth.ready && typeof auth.ready.then === "function") {
+        var connected = false;
+        var go = function () {
+            if (connected) { return; }
+            connected = true;
+            server = clientConnect();
+        };
+        auth.ready.then(go, go);
+        setTimeout(go, 2000);
+    } else {
+        server = clientConnect();
+    }
 })
 
 function setupPage() {
