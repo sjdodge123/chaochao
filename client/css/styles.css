@@ -309,9 +309,25 @@ canvas {
 }
 #mapContainer {
     /* Sized by resize() to match the fitted canvas dimensions. The
-       gameWindow flex container centres us in the available space. */
+       gameWindow flex container centres us in the available space.
+       z-index keeps it above the audience canvas behind it. */
     position: relative;
     margin: 0;
+    z-index: 1;
+}
+/* Live crowd canvas: fills the whole #gameWindow and sits BEHIND the centred
+   play canvas, so the stadium of fans renders in the letterbox bars without
+   touching the play area. Absolutely positioned so it stays out of the flex
+   flow (it doesn't affect the centring of #mapContainer). Sized by
+   resizeAudience() in audience.js; never receives input. */
+#audienceCanvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    pointer-events: none;
 }
 /* Rotate-to-play overlay. The game is a fixed 16:9 landscape arena, so rather
    than squeeze it into a portrait sliver we cover the screen on touch devices
