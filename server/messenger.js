@@ -58,11 +58,27 @@ function checkForMail(client) {
 	});
 
 	client.on('submitNewMap', function (package) {
-		var vMap = JSON.parse(package);
-		if (vMap.thumbnail == null ||
+		var vMap;
+		try {
+			vMap = JSON.parse(package);
+		} catch (e) {
+			client.emit("githubFailure", "Could not read map data.");
+			return;
+		}
+		if (vMap == null ||
+			vMap.thumbnail == null ||
 			vMap.id == null ||
 			vMap.author == null ||
 			vMap.name == null) {
+			client.emit("githubFailure", "Map is missing required info (name, author, thumbnail).");
+			return;
+		}
+		// Structural validation at the trust boundary — the same check the
+		// preview path runs — so a crafted, non-map payload can never reach the
+		// GitHub API (and the server's credentials) with the submitter's data.
+		var validation = utils.validateMap(vMap, c);
+		if (!validation.valid) {
+			client.emit("githubFailure", validation.reason);
 			return;
 		}
 
@@ -165,7 +181,13 @@ function checkForMail(client) {
 			return;
 		}
 		var room = hostess.getRoomBySig(roomMailList[client.id]);
+		if (room == undefined) {
+			return;
+		}
 		var player = room.playerList[client.id];
+		if (player == null) {
+			return;
+		}
 		if (player.chatCoolDownTimer != null) {
 			return;
 		}
