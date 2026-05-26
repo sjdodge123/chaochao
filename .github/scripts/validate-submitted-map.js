@@ -40,6 +40,18 @@ const SIM_MAX_SECONDS = 90;      // playability sim budget ceiling (per attempt)
 const SIM_ATTEMPTS = 3;          // retry with fresh bot RNG before giving up (AI is chaotic)
 const PAR_MISMATCH_FRAC = 0.5;   // warn if embedded parTime drifts >50% from recompute
 
+// Competing-lines analysis — uses the SAME pathing the AI racers use
+// (server/aiController.js): cellGraph.findPathToNearestGoal with a per-racer
+// noiseSeed for route diversity, a skill-derived noiseAmount, and a hazard-cell
+// penalty set. We fix the seeds (the AI randomises them per bot) so the review
+// artifact is reproducible across re-pushes.
+const MAX_ROUTES = 3;
+const AI_HAZARD_PENALTY = 12;                       // aiController HAZARD_PATH_PENALTY
+const AI_SKILL = 0.7;                               // aiController default skill
+const AI_NOISE = 0.15 + (1 - AI_SKILL) * 0.2;       // aiController noiseAmount formula
+const ROUTE_SEEDS = [101, 211, 337, 449, 577, 691]; // fixed per-racer route-diversity seeds
+const ROUTE_DEDUPE_OVERLAP = 0.6;                   // two routes sharing >60% of cells are "the same line"
+
 const inputFiles = process.argv.slice(2).filter(f => f.endsWith('.json'));
 
 function ensureDir(d) { fs.mkdirSync(d, { recursive: true }); }
@@ -64,7 +76,7 @@ const utils = require(path.join(repoRoot, 'server', 'utils.js'));
 const cellGraph = require(path.join(repoRoot, 'server', 'cellGraph.js'));
 const config = require(path.join(repoRoot, 'server', 'config.json'));
 const messenger = require(path.join(repoRoot, 'server', 'messenger.js'));
-const { renderMapToPng } = require(path.join(__dirname, 'lib', 'render-map.js'));
+const { renderMapToPng, ROUTE_COLORS } = require(path.join(__dirname, 'lib', 'render-map.js'));
 
 const DT = config.serverTickSpeed / 1000;
 
@@ -79,6 +91,96 @@ function effectiveStartEdges(map) {
 }
 
 function isFiniteNum(n) { return typeof n === 'number' && isFinite(n); }
+
+// Sample a handful of start positions along an edge's gate (inset from the edge
+// and its ends), mirroring where racers actually gate. ~half of GATE_DEPTH in.
+function gateOrigins(edge) {
+    const W = config.worldWidth, H = config.worldHeight, IN = 40, N = 6;
+    const lin = (a, b) => { const out = []; for (let i = 0; i < N; i++) { out.push(a + (b - a) * (i / (N - 1))); } return out; };
+    switch (edge) {
+        case 'right':  return lin(IN, H - IN).map(y => ({ x: W - IN, y }));
+        case 'top':    return lin(IN, W - IN).map(x => ({ x, y: IN }));
+        case 'bottom': return lin(IN, W - IN).map(x => ({ x, y: H - IN }));
+        case 'left':
+        default:       return lin(IN, H - IN).map(y => ({ x: IN, y }));
+    }
+}
+
+// Cells holding a hazard, penalised in pathing exactly as the AI does (the
+// nearest cell to each hazard — aiController's static-bumper branch). Returns a
+// Set of voronoiIds, or null if the map has no hazards.
+function buildHazardCells(map) {
+    if (!Array.isArray(map.hazards) || map.hazards.length === 0) { return null; }
+    const set = new Set();
+    for (const hz of map.hazards) {
+        if (!hz || !isFiniteNum(hz.x) || !isFiniteNum(hz.y)) { continue; }
+        let bestI = -1, bestD = Infinity;
+        for (let i = 0; i < map.cells.length; i++) {
+            const c = map.cells[i];
+            if (!c || !c.site) { continue; }
+            const dx = c.site.x - hz.x, dy = c.site.y - hz.y, d = dx * dx + dy * dy;
+            if (d < bestD) { bestD = d; bestI = i; }
+        }
+        if (bestI >= 0) { set.add(map.cells[bestI].site.voronoiId); }
+    }
+    return set.size ? set : null;
+}
+
+// A few DISTINCT competing lines a racer would take, using the AI's own path
+// planner + cost model, each timed by the engine's physics-walk (estimatePathTime,
+// the same routine that produces par time). Returns up to MAX_ROUTES, fastest
+// first: [{ label, seconds, color, points:[{x,y}] }].
+function competingPaths(map) {
+    if (!Array.isArray(map.cells) || map.cells.length === 0) { return []; }
+    const hazardCells = buildHazardCells(map);
+    const siteById = {};
+    for (const c of map.cells) { if (c && c.site) { siteById[c.site.voronoiId] = { x: c.site.x, y: c.site.y }; } }
+
+    const origins = [];
+    for (const edge of effectiveStartEdges(map)) { origins.push(...gateOrigins(edge)); }
+
+    const cands = [];
+    for (let i = 0; i < origins.length; i++) {
+        let route;
+        try {
+            route = cellGraph.findPathToNearestGoal(map, origins[i], {
+                noiseSeed: ROUTE_SEEDS[i % ROUTE_SEEDS.length],
+                noiseAmount: AI_NOISE,
+                penaltySet: hazardCells || undefined,
+                penaltyMult: hazardCells ? AI_HAZARD_PENALTY : 1
+            });
+        } catch (e) { route = null; }
+        if (route && Array.isArray(route.path) && route.path.length >= 2) {
+            let secs = 0;
+            try { secs = cellGraph.estimatePathTime(map, route.path) || 0; } catch (e) { secs = 0; }
+            if (secs > 0) { cands.push({ path: route.path, seconds: secs }); }
+        }
+    }
+
+    // Keep the fastest, then add only lines that are spatially distinct from the
+    // ones already chosen (so we show genuinely different routes, not 6 near-copies).
+    cands.sort((a, b) => a.seconds - b.seconds);
+    const chosen = [];
+    for (const c of cands) {
+        const setC = new Set(c.path);
+        let dup = false;
+        for (const ch of chosen) {
+            let inter = 0;
+            for (const v of setC) { if (ch.set.has(v)) { inter++; } }
+            const uni = setC.size + ch.set.size - inter;
+            if (uni > 0 && inter / uni > ROUTE_DEDUPE_OVERLAP) { dup = true; break; }
+        }
+        if (!dup) { chosen.push({ path: c.path, seconds: c.seconds, set: setC }); }
+        if (chosen.length >= MAX_ROUTES) { break; }
+    }
+
+    return chosen.map((c, i) => ({
+        label: i === 0 ? 'Fastest line' : 'Alt ' + String.fromCharCode(64 + i), // Alt A, Alt B…
+        seconds: +c.seconds.toFixed(1),
+        color: ROUTE_COLORS[i % ROUTE_COLORS.length].name,
+        points: c.path.map(id => siteById[id]).filter(Boolean)
+    }));
+}
 
 function deepValidate(map) {
     const errors = [];
@@ -237,7 +339,7 @@ let hardFail = false;
 for (const entry of parsed) {
     const name = safeName(entry.file);
     const outBase = path.join(OUTPUT_DIR, name);
-    const result = { file: entry.file, mapName: null, verdict: 'reject', errors: [], warnings: [], parTime: 0, sim: null, serverImage: null, thumbImage: null };
+    const result = { file: entry.file, mapName: null, verdict: 'reject', errors: [], warnings: [], parTime: 0, sim: null, serverImage: null, thumbImage: null, routes: [], routeImage: null };
 
     if (entry.fatal) {
         result.errors.push(entry.fatal);
@@ -269,6 +371,28 @@ for (const entry of parsed) {
         if (result.thumbImage == null) { result.warnings.push('No usable embedded thumbnail.'); }
     } catch (e) {
         result.warnings.push('Thumbnail extraction failed: ' + e.message);
+    }
+
+    // Competing-lines analysis + trail-overlay image (valid maps only — the routes
+    // give a feel for how competitive the map is: tight times = many viable lines).
+    if (result.errors.length === 0) {
+        try {
+            const routes = competingPaths(map);
+            result.routes = routes.map(r => ({ label: r.label, seconds: r.seconds, color: r.color }));
+            if (routes.length > 0) {
+                // Draw slowest-first so the fastest line ends up on top.
+                const overlay = routes.slice().reverse().map(r => {
+                    const col = ROUTE_COLORS.find(c => c.name === r.color) || ROUTE_COLORS[0];
+                    return { points: r.points, rgb: col.rgb };
+                });
+                const png = renderMapToPng(map, config, { width: 683, routes: overlay });
+                const f = outBase + '.routes.png';
+                fs.writeFileSync(f, png);
+                result.routeImage = path.basename(f);
+            }
+        } catch (e) {
+            result.warnings.push('Competing-paths analysis failed: ' + e.message);
+        }
     }
 
     // Playability sim only when static validation passed (no point racing a map
