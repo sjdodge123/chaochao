@@ -27,6 +27,21 @@ function imgUrl(name) {
     return BASE && BASE !== '/' ? BASE + encodeURIComponent(name) : null;
 }
 
+// Emoji swatches roughly matching render-map.js ROUTE_COLORS (the overlay image
+// is the precise reference; these just help line up table rows to trails).
+const SWATCH = { magenta: '🟣', cyan: '🔵', white: '⚪', purple: '🟪' };
+
+// One-line read on how competitive the map is, from the spread of line times.
+function competitiveness(routes) {
+    if (routes.length < 2) { return 'only one viable line found — likely a single dominant route.'; }
+    const times = routes.map(r => r.seconds);
+    const fast = Math.min(...times), slow = Math.max(...times);
+    const spread = fast > 0 ? (slow - fast) / fast : 0;
+    if (spread < 0.15) { return routes.length + ' lines within ' + Math.round(spread * 100) + '% of each other — very competitive (many viable routes).'; }
+    if (spread < 0.4) { return 'a clear fastest line with viable alternatives (' + Math.round(spread * 100) + '% slower).'; }
+    return 'one line dominates (alternatives are ' + Math.round(spread * 100) + '% slower).';
+}
+
 let result;
 try {
     result = JSON.parse(fs.readFileSync(path.join(OUTPUT_DIR, 'result.json'), 'utf8'));
@@ -89,6 +104,24 @@ for (const m of result.maps) {
         lines.push('');
         lines.push('_(no preview images available' +
             (m.serverImage || m.thumbImage ? '; set IMAGE_BASE_URL to embed them' : '') + ')_');
+    }
+
+    // Competing lines: the routes the AI's own pathing finds, timed by the engine's
+    // physics-walk. The spread of times is the competitiveness read.
+    if (Array.isArray(m.routes) && m.routes.length > 0) {
+        lines.push('');
+        lines.push('**Competing lines** — ' + competitiveness(m.routes));
+        const routesImg = imgUrl(m.routeImage);
+        if (routesImg) {
+            lines.push('');
+            lines.push('<img src="' + routesImg + '" width="560">');
+        }
+        lines.push('');
+        lines.push('| Line | Time to goal |');
+        lines.push('| --- | --- |');
+        for (const r of m.routes) {
+            lines.push('| ' + SWATCH[r.color] + ' ' + r.label + ' | ' + r.seconds.toFixed(1) + ' seconds |');
+        }
     }
     lines.push('');
 }
