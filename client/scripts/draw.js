@@ -476,6 +476,11 @@ function makeComplexPattern(ids) {
 
 var notchDistanceApart = 0,
     decodedColorName = '';
+// Timestamp (ms) of the most recent overview entry, so the per-player notch-delta
+// floats ("+2"/"+1"/"−1") can pop and fade off a wall-clock timer that's re-armed
+// each round (in calculateNotchMoveAmt) and never replays once the window passes.
+var notchFloatStart = null;
+var NOTCH_FLOAT_DURATION = 1200; // ms — quick pop, in step with the notch-fill anim
 
 function drawObjects(dt) {
     if (config == null) {
@@ -3036,6 +3041,7 @@ function drawOldNotches() {
         drawPlayerIcon(playerList[player], notchDistanceApart);
         drawGoalPost(playerList[player], notchDistanceApart);
         drawEmoji(playerList[player]);
+        drawNotchDeltaFloat(playerList[player]);
         gameContext.translate(0, config.playerBaseRadius * distanceApart);
     }
     gameContext.restore();
@@ -3202,6 +3208,60 @@ function drawGoalPost(player, distanceApart) {
 
 }
 
+// Small rising/fading "+2"/"+1"/"−1" above a player's notch icon on the standings
+// board, showing how their score changed this round. Drawn in the same translated
+// row space as drawPlayerIcon (so player.x is the icon's current track position),
+// after the icon/emoji so it sits on top. Driven off notchFloatStart, set on
+// overview entry; once the window elapses nothing draws, so a resize/redraw of the
+// board won't replay it and it resets cleanly each round.
+function drawNotchDeltaFloat(player) {
+    var delta = player.deltaNotches;
+    // !delta rejects 0, NaN, null and undefined in one go — NaN can slip in if a
+    // playerList id is missing from the round's notchUpdates (a join/leave race),
+    // and rendering "−NaN" would be worse than just skipping the float.
+    if (!delta || notchFloatStart == null) {
+        return;
+    }
+    var elapsed = Date.now() - notchFloatStart;
+    if (elapsed < 0 || elapsed > NOTCH_FLOAT_DURATION) {
+        return;
+    }
+    var t = elapsed / NOTCH_FLOAT_DURATION; // 0..1 across the float's lifetime
+
+    // Pop in fast, hold, then fade — so it reads as a quick celebratory cue.
+    var alpha;
+    if (t < 0.15) {
+        alpha = t / 0.15;
+    } else if (t > 0.6) {
+        alpha = Math.max(0, (1 - t) / 0.4);
+    } else {
+        alpha = 1;
+    }
+
+    // Ease-out rise above the icon, tracking it as the notch-fill animates.
+    var rise = 34 * (1 - Math.pow(1 - t, 2));
+    var baseY = -(config.playerBaseRadius * 2 + 8) - rise;
+
+    var label = (delta > 0 ? "+" : "−") + Math.abs(delta);
+    // +2 = gold (the round win), +1 = green, a lost notch = red.
+    var fill = delta < 0 ? "#ff5a5a" : (delta >= 2 ? "#ffd54a" : "#5be36a");
+
+    gameContext.save();
+    gameContext.globalAlpha = alpha;
+    gameContext.font = "bold 26px Arial";
+    gameContext.textAlign = "center";
+    gameContext.textBaseline = "middle";
+    // Dark outline + matching glow so it stays legible on the black overview backdrop.
+    gameContext.lineWidth = 4;
+    gameContext.strokeStyle = "rgba(0, 0, 0, 0.85)";
+    gameContext.shadowColor = fill;
+    gameContext.shadowBlur = 8;
+    gameContext.strokeText(label, player.x, baseY);
+    gameContext.fillStyle = fill;
+    gameContext.fillText(label, player.x, baseY);
+    gameContext.restore();
+}
+
 function createFirstRankSymbol(playerid) {
     var player = playerList[playerid];
     player.firstPlace = true;
@@ -3241,6 +3301,8 @@ function calculateNotchMoveAmt() {
         playerList[id].distanceToMove = playerList[id].deltaNotches * notchDistanceApart;
         playerList[id].distanceTraveled = 0;
     }
+    // Arm the rising "+N"/"−1" floats for this round's standings board.
+    notchFloatStart = Date.now();
 }
 function getBbox(cell) {
     var halfedges = cell.halfedges,
