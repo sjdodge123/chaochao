@@ -8,9 +8,16 @@
 // Decoded station zones for the current lobby: [{id, kind, x, y, radius, color}].
 // Static for the lobby's life (sent once on startLobby / in the mid-join snapshot).
 var lobbyStations = [];
-// Room-wide AI override mirrored from the server: null = Auto (random grid),
+// Room-wide AI override mirrored from the server: null = Auto (fill toward target),
 // {enabled:false} = off, {enabled:true, count:N} = exactly N bots next race.
 var lobbyAISetting = null;
+// When WE last stepped the dial locally. The lobbyAIChanged broadcast echoes our own
+// emits back a few ms later; without this, an echo of an earlier step can land
+// mid-burst and reset the dial to a stale value (so 4 quick steps net only 2). We
+// ignore broadcasts within this window of a local change — our optimistic value is
+// authoritative while actively stepping, and the server agrees (last-writer-wins).
+var lobbyAILocalAt = 0;
+var LOBBY_AI_ECHO_MS = 600;
 // Per-slot HUD hit areas, rebuilt every frame in drawLobbyHubHud (logical coords).
 // slot -> { prompt: rect|null, options: [{rect, action}], close: rect|null }.
 var stationHudHit = {};
@@ -208,24 +215,38 @@ function aiLevelLabel() {
     }
     return lvl + (lvl === 1 ? " bot" : " bots");
 }
-// Step the dial and push the new setting to the server on this slot's socket.
-// Last-writer-wins; the lobbyAIChanged broadcast re-syncs every open panel, but we
-// also update locally so the change reads instantly.
+// The dial is an ordered scale so every state is reachable by stepping left/right:
+//   index 0 = Auto, 1 = Off, 2 = 1 bot, 3 = 2 bots, … (max+2 positions total).
+// This is what lets a player return to Auto after picking a number.
+function aiDialIndex() {
+    var lvl = currentAILevel(); // null = Auto, 0 = Off, N = N bots
+    if (lvl == null) { return 0; }   // Auto
+    if (lvl <= 0) { return 1; }      // Off
+    return lvl + 1;                  // N bots
+}
+// Step the dial and push the resulting setting to the server on this slot's socket.
+// Last-writer-wins; the lobbyAIChanged broadcast re-syncs every open panel + the
+// join page, but we also update locally so the change reads instantly.
 function adjustAILevel(lp, dir) {
     var max = aiMaxBots();
-    var lvl = currentAILevel();
-    if (lvl == null) {
-        lvl = (dir > 0) ? 1 : 0; // from Auto: right -> 1 bot, left -> Off
+    var idx = aiDialIndex() + dir;
+    if (idx < 0) { idx = 0; }
+    if (idx > max + 1) { idx = max + 1; } // Auto, Off, then 1..max
+    var payload;
+    if (idx === 0) {
+        payload = { auto: true };                          // Auto
+        lobbyAISetting = null;
+    } else if (idx === 1) {
+        payload = { enabled: false, count: 0 };            // Off
+        lobbyAISetting = payload;
     } else {
-        lvl += dir;
+        payload = { enabled: true, count: idx - 1 };       // N bots
+        lobbyAISetting = payload;
     }
-    // Clamp to what the room can actually hold (max can be 0 when the lobby is full).
-    if (lvl < 0) { lvl = 0; }
-    if (lvl > max) { lvl = max; }
-    lobbyAISetting = (lvl <= 0) ? { enabled: false, count: 0 } : { enabled: true, count: lvl };
+    lobbyAILocalAt = Date.now(); // mark a local change so the echo doesn't reset us
     var sock = (lp && lp.socket) ? lp.socket : (typeof server !== "undefined" ? server : null);
     if (sock) {
-        sock.emit("setLobbyAI", lobbyAISetting);
+        sock.emit("setLobbyAI", payload);
     }
 }
 

@@ -190,6 +190,23 @@ check(botCount() === 3, 'fillGridWithBots spawns exactly 3 bots when count=3 (go
 const listing = hostess.getRooms()[sig];
 check(listing != null && listing.aiCount === 3, 'getRooms reports the live bot count (aiCount=3)');
 check(listing != null && listing.aiPlanned === 3, 'getRooms reports the planned AI setting (aiPlanned=3)');
+check(listing != null && listing.aiAuto === false, 'getRooms flags an explicit override as not-auto');
+
+// Toggle back to Auto: setLobbyAI {auto:true} clears the override, so the next race
+// fills toward autoTarget again and getRooms reports the auto fill count.
+game.removeBots();
+game.startLobby();
+sock.fire('setLobbyAI', { auto: true });
+check(game.botOverride == null, 'setLobbyAI {auto:true} clears the override back to Auto (null)');
+const autoListing = hostess.getRooms()[sig];
+const autoTarget = (config.aiRacers && config.aiRacers.autoTarget) ? config.aiRacers.autoTarget : 8;
+const humansNow = Object.keys(room.playerList).filter(id => !room.playerList[id].isAI).length;
+check(autoListing != null && autoListing.aiAuto === true, 'getRooms flags Auto mode (aiAuto=true)');
+check(autoListing != null && autoListing.aiPlanned === Math.max(0, autoTarget - humansNow),
+    'getRooms reports the Auto fill count (autoTarget - humans = ' + autoListing.aiPlanned + ')');
+game.startGated();
+check(botCount() === Math.max(0, autoTarget - humansNow),
+    'Auto fills toward autoTarget after toggling back (got ' + botCount() + ')');
 
 // --- result ------------------------------------------------------------------
 hostess.kickFromRoom(sock.id);

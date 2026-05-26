@@ -275,13 +275,20 @@ function checkForMail(client) {
 		messageRoomBySig(room.sig, "playerSkinChanged", { id: client.id, color: color });
 	});
 
-	// SPIKE (lobby AI station): set the room-wide bot override. enabled:false => no
-	// bots next race; enabled:true + count => exactly `count` bots. Lobby-only;
-	// last-writer-wins; broadcast so every open AI panel reflects the live setting.
+	// Lobby AI station: set the room-wide bot override. { auto:true } => clear the
+	// override back to Auto (fill toward autoTarget); enabled:false => no bots next
+	// race; enabled:true + count => exactly `count` bots. Lobby-only; last-writer-
+	// wins; broadcast so every open AI panel + the join page reflect the live setting.
 	// Takes effect at the next startGated (fillGridWithBots reads game.botOverride).
 	client.on('setLobbyAI', function (payload) {
 		var room = hostess.getRoomBySig(roomMailList[client.id]);
 		if (room == undefined || room.game.currentState != c.stateMap.lobby) {
+			return;
+		}
+		// Auto: drop the override so the grid auto-fills toward autoTarget again.
+		if (payload && payload.auto) {
+			room.game.botOverride = null;
+			messageRoomBySig(room.sig, "lobbyAIChanged", { auto: true });
 			return;
 		}
 		var enabled = !!(payload && payload.enabled);
