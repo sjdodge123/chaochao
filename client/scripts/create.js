@@ -195,14 +195,15 @@ function tryStart() {
 
 function loadPatterns() {
 
-    //Tiles
-    patterns[config.tileMap.lava.id] = makeSeamlessPattern(lava);
-    patterns[config.tileMap.ice.id] = makeSeamlessPattern(ice);
-    patterns[config.tileMap.fast.id] = makeSeamlessPattern(grass);
-    patterns[config.tileMap.normal.id] = makeSeamlessPattern(dirt);
-    patterns[config.tileMap.slow.id] = makeSeamlessPattern(sand);
+    //Tiles — grade the terrain textures through the shared palette (utils.js)
+    // so the editing surface matches the in-game look.
+    patterns[config.tileMap.lava.id] = makeSeamlessPattern(gradeTexture(lava, "lava"));
+    patterns[config.tileMap.ice.id] = makeSeamlessPattern(gradeTexture(ice, "ice"));
+    patterns[config.tileMap.fast.id] = makeSeamlessPattern(gradeTexture(grass, "grass"));
+    patterns[config.tileMap.normal.id] = makeSeamlessPattern(gradeTexture(dirt, "dirt"));
+    patterns[config.tileMap.slow.id] = makeSeamlessPattern(gradeTexture(sand, "sand"));
     patterns[config.tileMap.random.id] = makePattern(random, config.tileMap.random.color);
-    patterns[config.tileMap.ability.id] = makePattern(bombIcon, makeSeamlessPattern(dirt));
+    patterns[config.tileMap.ability.id] = makePattern(bombIcon, makeSeamlessPattern(gradeTexture(dirt, "dirt")));
 
     brushColor = patterns[config.tileMap.normal.id];
 }
