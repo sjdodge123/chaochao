@@ -208,6 +208,24 @@ game.startGated();
 check(botCount() === Math.max(0, autoTarget - humansNow),
     'Auto fills toward autoTarget after toggling back (got ' + botCount() + ')');
 
+// --- bots yield to humans: humans + bots never exceed the room cap ------------
+// Stuff the room past capacity with bots, then add humans directly (bypassing the
+// match lock that blocks this in normal flow) and confirm trimBotsToCapacity keeps
+// total <= cap while preserving every human.
+game.removeBots();
+const cap = config.maxPlayersInRoom;
+const botIdentity = { id: 'racer', name: 'Racer', title: 'Racer' };
+for (let b = 0; b < cap; b++) { room.playerList['fakebot-' + b] = room.world.createNewBot('fakebot-' + b, botIdentity); }
+const humanIds = [sock.id];
+for (let hn = 0; hn < 8; hn++) { var hid = 'fakehuman-' + hn; room.playerList[hid] = room.world.createNewPlayer(hid); humanIds.push(hid); }
+game.trimBotsToCapacity();
+function totalCounts() { let h = 0, b = 0; for (const id in room.playerList) { if (room.playerList[id].isAI) b++; else h++; } return { h, b, total: h + b }; }
+const tc = totalCounts();
+check(tc.total <= cap, 'trimBotsToCapacity keeps humans+bots within cap (' + tc.total + ' <= ' + cap + ')');
+check(humanIds.every(id => room.playerList[id] != null), 'trimBotsToCapacity never despawns a human (' + tc.h + ' humans kept)');
+// Clean up the synthetic players.
+for (const id in room.playerList) { if (id !== sock.id) { delete room.playerList[id]; } }
+
 // --- result ------------------------------------------------------------------
 hostess.kickFromRoom(sock.id);
 messenger.removeMailBox(sock.id);

@@ -146,6 +146,9 @@ function checkForMail(client) {
 		//Spawn a player for the new player
 		room.playerList[client.id] = room.world.createNewPlayer(client.id);
 		room.game.determineGameState(room.playerList[client.id]);
+		// Bots yield to the joining human so humans + bots can never exceed the room
+		// cap (no-op in normal flow — there are no bots while a room is joinable).
+		room.game.trimBotsToCapacity();
 
 		//Send the current gamestate to the new player
 		var worldData = compressor.worldResize(room.world);
