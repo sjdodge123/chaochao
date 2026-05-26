@@ -1828,16 +1828,23 @@ class GameBoard {
 	// malformed) default to a single left gate, so behaviour is unchanged for
 	// every committed map that predates this field.
 	resolveStartEdges() {
-		var KNOWN = { left: 1, right: 1, top: 1, bottom: 1 };
+		var OPPOSITE = { left: "right", right: "left", top: "bottom", bottom: "top" };
 		var se = (this.currentMap != null) ? this.currentMap.startEdges : null;
 		if (!Array.isArray(se) || se.length === 0) {
 			return ["left"];
 		}
 		var edges = [];
 		for (var i = 0; i < se.length && edges.length < 2; i++) {
-			if (KNOWN[se[i]] && edges.indexOf(se[i]) === -1) {
+			if (OPPOSITE[se[i]] && edges.indexOf(se[i]) === -1) {
 				edges.push(se[i]);
 			}
+		}
+		// Only opposite pairs (left+right / top+bottom) are valid two-gate combos.
+		// validateMap enforces this at submit, but library maps load without
+		// re-validation, so drop a second ADJACENT edge here too — a hand-edited
+		// map can't spawn two adjacent gates (an untested layout).
+		if (edges.length === 2 && OPPOSITE[edges[0]] !== edges[1]) {
+			edges = [edges[0]];
 		}
 		return edges.length > 0 ? edges : ["left"];
 	}
@@ -2044,9 +2051,10 @@ class GameBoard {
 	}
 	gatePlayer(player, gateIndex) {
 		if (gateIndex == null) { gateIndex = this.leastPopulatedGateIndex(player); }
-		if (gateIndex >= this.startingGates.length) { gateIndex = 0; }
+		if (gateIndex < 0 || gateIndex >= this.startingGates.length) { gateIndex = 0; }
 		player.gateIndex = gateIndex;
 		var gate = this.startingGates[gateIndex];
+		if (gate == null) { return; } // no gate built yet (shouldn't happen post-setupMap)
 		var loc = gate.findFreeLoc(player);
 		player.x = loc.x;
 		player.y = loc.y;
