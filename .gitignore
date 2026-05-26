@@ -110,3 +110,8 @@ perf-pr.json
 perf-baseline.json
 perf-comment.md
 perf-trace.zip
+
+# Map-submission review workflow scratch (CI-generated, never committed)
+map-review-out/
+review-comment.md
+changed_maps.txt

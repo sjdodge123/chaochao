@@ -21,7 +21,9 @@ client/               static client (3 HTML entry pages + their scripts)
   scripts/            per-file client scripts (served raw in dev, bundled in prod)
   maps/*.json         canonical maps, loaded at server boot
   assets/{img,sounds} streamed to clients via manifests built in utils.js
-.github/scripts/      smoke-test.js + validate-content.js (CI gates), release tooling
+.github/scripts/      smoke-test.js + validate-content.js (CI gates), map-submission
+                      review (validate-submitted-map.js + lib/render-map.js +
+                      build-review-comment.js), release tooling
 ```
 
 ---
@@ -139,6 +141,15 @@ it's shipped to the client via the `config` event. Don't fork tuning values.
 - `node .github/scripts/smoke-test.js` — boots the real server + messenger handlers
   and ticks the engine through every state on all maps. Primary regression gate.
 - `node .github/scripts/validate-content.js` — validates `config.json` + every map.
+- `.github/workflows/map-submission.yml` — runs only when a PR touches `client/maps/**`
+  (the in-browser editor opens these from `mapchange-*` branches). It deep-validates
+  the *changed* map(s) via `validate-submitted-map.js` (goal-reachability from the
+  default left start — which `utils.validateMap` skips when `startEdges` is unset —
+  plus bounds, finiteness, a cell cap, and a real AI playability sim), renders the map
+  from authoritative cells (`lib/render-map.js`, zero-dep PNG) alongside the editor's
+  embedded thumbnail, and posts both side-by-side in a sticky PR comment for a human
+  to eyeball for inappropriate imagery. Submission (`mapchange-*`) PRs that touch
+  anything outside `client/maps/*.json` are blocked.
 - `npm run build` needs `esbuild` (a devDependency installed at deploy via
   `heroku-postbuild`); it is not present in a fresh/dev checkout, which serves raw
   scripts instead. Use `node --check <file>` for local client syntax validation.
