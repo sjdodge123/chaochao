@@ -342,16 +342,15 @@ function setupPage() {
         previewMap();
         return false;
     });
-    // Remember the "Enable AI racers" preview choice across sessions. Default
-    // off: a missing/garbled value leaves the box unchecked. Wrapped in try/catch
-    // so a disabled localStorage (private mode) just falls back to the default.
-    try {
-        $("#enableAICheckbox").prop("checked", localStorage.getItem("previewEnableAI") === "true");
-    } catch (e) { }
-    $("#enableAICheckbox").on("change", function () {
-        try {
-            localStorage.setItem("previewEnableAI", $(this).is(":checked") ? "true" : "false");
-        } catch (e) { }
+    // "AI racers" is a full-width toggle button (not a DOM checkbox) so it's a
+    // big touch target and the editor gamepad nav can flip it via A -> click.
+    // Restore the saved choice (default off), then toggle + persist on click.
+    var savedAI = false;
+    try { savedAI = localStorage.getItem("previewEnableAI") === "true"; } catch (e) { }
+    setPreviewAI(savedAI);
+    $("#enableAIButton").on("click", function () {
+        setPreviewAI($(this).attr("aria-pressed") !== "true");
+        return false;
     });
     $("#exportButton").on("click", function () {
         exportToJSON();
@@ -928,11 +927,32 @@ function previewMap() {
     // object goes to the server so both sides resolve the same id.
     var json = JSON.stringify(vMap);
     sessionStorage.setItem('previewMap', json);
-    // Default off: preview a bot-free solo run unless the editor ticked the box.
+    // Default off: preview a bot-free solo run unless the editor toggled it on.
     // sessionStorage.previewMap stays the raw map (the play page reads it from
     // there); only the socket payload carries the { map, enableAI } wrapper.
-    var enableAI = $("#enableAICheckbox").is(":checked");
+    var enableAI = $("#enableAIButton").attr("aria-pressed") === "true";
     server.emit('createPreviewRoom', JSON.stringify({ map: vMap, enableAI: enableAI }));
+}
+
+// Reflect the "AI racers" toggle state onto its button (pressed attr for
+// assistive tech + gamepad, .ai-on for the green fill, icon + label) and
+// persist it. Driven on load (restore) and on every click.
+function setPreviewAI(on) {
+    var btn = document.getElementById("enableAIButton");
+    if (btn == null) {
+        return;
+    }
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    btn.classList.toggle("ai-on", on);
+    var icon = btn.querySelector("i");
+    if (icon != null) {
+        icon.className = "fa mr-2 " + (on ? "fa-check-square" : "fa-square-o");
+    }
+    var label = btn.querySelector("span");
+    if (label != null) {
+        label.textContent = on ? "AI racers: on" : "AI racers: off";
+    }
+    try { localStorage.setItem("previewEnableAI", on ? "true" : "false"); } catch (e) { }
 }
 
 function basicSanitize() {
