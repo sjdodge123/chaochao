@@ -12,6 +12,7 @@ const bundles = {
         'client/scripts/draw.js',
         'client/scripts/gameboard.js',
         'client/scripts/lobbyHub.js',
+        'client/scripts/audience.js',
         'client/scripts/recap.js',
         'client/scripts/joystick.js',
         'client/scripts/utils.js'

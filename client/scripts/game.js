@@ -374,6 +374,8 @@ function gameLoop(dt) {
     pollGamepad(dt);
     drawObjects(dt);
     updateGameboard(dt);
+    // Crowd in the letterbox (own canvas; no-op until audience.js is loaded).
+    if (typeof drawAudience === "function") { drawAudience(dt); }
 }
 
 
@@ -530,6 +532,8 @@ function resize() {
 
         },
     }
+    // Refit the letterbox crowd canvas to the new window/arena dimensions.
+    if (typeof resizeAudience === "function") { resizeAudience(); }
 }
 
 // Reflect the dynamic-camera on/off state in the navbar toggle (matches the
