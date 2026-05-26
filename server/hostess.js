@@ -23,6 +23,20 @@ exports.getRooms = function () {
 		// ("In progress") instead of having it silently vanish. Flag joinability
 		// explicitly (mirrors findARoom's matchmaking test).
 		var joinable = room.hasSpace() && !room.isLocked();
+		// AI hub: surface the room's bots. aiCount is the LIVE bot count (non-zero
+		// during a race); aiPlanned is the lobby AI-station setting that applies next
+		// race (null = Auto/random grid, 0 = off, N = N bots) so the join page can
+		// show "+N AI" even while a room is still in its lobby.
+		var aiCount = 0;
+		for (var pid in room.playerList) {
+			if (room.playerList[pid] != null && room.playerList[pid].isAI) {
+				aiCount++;
+			}
+		}
+		var aiPlanned = null;
+		if (room.game.botOverride != null) {
+			aiPlanned = room.game.botOverride.enabled ? room.game.botOverride.count : 0;
+		}
 		rooms[sig] = {
 			state: room.game.currentState,
 			round: room.game.gameBoard.round,
@@ -32,6 +46,8 @@ exports.getRooms = function () {
 			playerColors: room.game.getPlayerColors(),
 			joinable: joinable,
 			locked: room.isLocked(),
+			aiCount: aiCount,
+			aiPlanned: aiPlanned,
 		}
 	}
 	return rooms;

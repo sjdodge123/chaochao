@@ -138,6 +138,12 @@ function makeLocalPlayer(slot, socket, isPrimary) {
         reconnectTimer: null,     // grace timer started on a transient disconnect
         leaveConfirm: false,      // showing the inline "leave?" confirm in this player's block
         leaveConfirmTimer: null,  // auto-cancel timer for the inline leave confirm
+        // Lobby hub stations: nearStation is the zone this slot is currently inside
+        // (set by the per-socket stationEnter/stationExit edges); stationPanel is the
+        // open panel for this slot ({ id, kind, cursor }) or null. Per-slot so two
+        // local players can configure two stations at once. See lobbyHub.js.
+        nearStation: null,
+        stationPanel: null,
         // pad mapping (null for the keyboard/primary slot)
         padIndex: null,
         padType: "generic",

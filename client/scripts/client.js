@@ -37,6 +37,55 @@ function registerPrimaryHandlers(server) {
 	registerCombatHandlers(server);
 	registerAbilityHandlers(server);
 	registerEffectHandlers(server);
+	registerLobbyHubHandlers(server);
+}
+// Lobby hub stations. `lobbyStations`/`lobbyAIChanged` are ROOM broadcasts handled
+// only on the primary (every socket gets them; rendering/state lives on the
+// primary). `stationEnter`/`stationExit` are per-PLAYER edges delivered to each
+// player's OWN socket, so the primary's handler drives the primary slot and the
+// secondary handler (registerSecondaryHandlers) drives each pad slot.
+function registerLobbyHubHandlers(server) {
+	server.on("lobbyStations", function (payload) {
+		if (typeof applyLobbyStations === "function") {
+			applyLobbyStations(payload);
+		}
+	});
+	server.on("lobbyAIChanged", function (payload) {
+		lobbyAISetting = payload;
+	});
+	server.on("stationEnter", function (payload) {
+		if (payload != null && typeof setSlotNearStation === "function") {
+			setSlotNearStation(primarySlot, payload.id);
+		}
+	});
+	server.on("stationExit", function (payload) {
+		if (typeof clearSlotNearStation === "function") {
+			clearSlotNearStation(primarySlot, payload != null ? payload.id : null);
+		}
+	});
+	// A player changed skin (room broadcast — color isn't in the per-tick updates).
+	// Keep the authoritative server colour in _serverColor so the colour-blind remap
+	// (syncColorblind) stays correct; apply it to the live colour only when assist is
+	// off (when on, the kart keeps its CVD-distinct colour, which is the point).
+	server.on("playerSkinChanged", function (payload) {
+		if (payload == null) {
+			return;
+		}
+		var p = playerList[payload.id];
+		if (p == null) {
+			return;
+		}
+		p._serverColor = payload.color;
+		if (typeof colorblindEnabled === "undefined" || !colorblindEnabled) {
+			p.color = payload.color;
+		}
+	});
+	// The primary's skin request was rejected (color taken). Flash the picker.
+	server.on("skinRejected", function (payload) {
+		if (typeof flagSkinRejected === "function") {
+			flagSkinRejected(primarySlot, payload != null ? payload.color : null);
+		}
+	});
 }
 function registerConnectionHandlers(server) {
 	server.on('welcome', function (id) {
@@ -100,6 +149,13 @@ function registerConnectionHandlers(server) {
 			setBackgroundMusic(gameState.music.mood, gameState.music.track);
 		}
 		setupEmojiWheel();
+		// Mid-join rehydration of the lobby hub: a player who joins mid-lobby missed
+		// the startLobby `lobbyStations` broadcast, so the snapshot carries them (plus
+		// the live room AI setting) here. Null/absent outside the lobby.
+		if (typeof applyLobbyStations === "function") {
+			applyLobbyStations(gameState.lobbyStations);
+		}
+		lobbyAISetting = (gameState.lobbyAI != null) ? gameState.lobbyAI : null;
 		// Refresh the hint UI now the primary has joined (solo bottom bar by
 		// default; switches to per-player blocks once a 2nd local player joins).
 		if (typeof onLocalPlayersChanged === "function") {
@@ -266,6 +322,9 @@ function registerStateHandlers(server) {
 	server.on("startWaiting", function (packet) {
 		debugLog("startWaiting");
 		setLobbySfxDampen(false); // lobby emptied back to waiting — restore full SFX
+		if (typeof lobbyHubReset === "function") {
+			lobbyHubReset();
+		}
 		currentState = config.stateMap.waiting;
 		playSoundAfterFinish(lobbyMusic);
 	});
@@ -293,6 +352,10 @@ function registerStateHandlers(server) {
 		setLobbySfxDampen(false); // restore full SFX before the game-start cue
 		stopSound(lobbyMusic);
 		playSound(gameStart);
+		// Match starting — force-close any open hub panel + drop the zones/prompts.
+		if (typeof lobbyHubReset === "function") {
+			lobbyHubReset();
+		}
 		currentState = config.stateMap.gated;
 	});
 	server.on("startRace", function (packet) {
@@ -845,6 +908,24 @@ function registerSecondaryHandlers(sock, slot) {
 			sock.emit('enterGame', gameID);
 		}
 	});
+	// Lobby hub enter/exit edges arrive on THIS pad player's own socket, so they
+	// route to this slot — that is what makes a panel per-slot in local co-op.
+	sock.on('stationEnter', function (payload) {
+		if (payload != null && typeof setSlotNearStation === "function") {
+			setSlotNearStation(slot, payload.id);
+		}
+	});
+	sock.on('stationExit', function (payload) {
+		if (typeof clearSlotNearStation === "function") {
+			clearSlotNearStation(slot, payload != null ? payload.id : null);
+		}
+	});
+	// This pad player's skin request was rejected — flash its own picker.
+	sock.on('skinRejected', function (payload) {
+		if (typeof flagSkinRejected === "function") {
+			flagSkinRejected(slot, payload != null ? payload.color : null);
+		}
+	});
 	sock.on('roomNotFound', function () {
 		debugLog("[localmp] slot", slot, "roomNotFound — dropping slot, tab kept alive");
 		dropLocalPlayer(slot);
@@ -932,6 +1013,12 @@ function dropLocalPlayer(slot) {
 		typeof closeEmojiWindow === "function") {
 		closeEmojiWindow("cancel");
 	}
+	// Close this slot's hub panel + clear its proximity latch so a leaving player
+	// can't strand an open panel / stale prompt for the slot.
+	if (lp.stationPanel && typeof closeStationPanel === "function") {
+		closeStationPanel(lp);
+	}
+	lp.nearStation = null;
 	// The controller that drove this player must release its buttons before it can
 	// (re)join, so the press that confirmed leaving doesn't instantly re-join them.
 	if (lp.padIndex != null && typeof markPadNeedsRelease === "function") {

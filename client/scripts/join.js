@@ -111,6 +111,13 @@ function buildCard(room, maxPlayers) {
     info.appendChild(buildStat('Round', room.round));
     info.appendChild(buildStat('Map', room.currentMap || 'Lobby'));
     info.appendChild(buildStat('Players', room.players + '/' + maxPlayers));
+    // AI hub: show the bots a room has. Prefer the live count (mid-race); otherwise
+    // fall back to the lobby AI-station setting that applies next race. Hidden when
+    // there are none and the setting is Auto/unset, to keep cards uncluttered.
+    var aiLabel = aiStatLabel(room);
+    if (aiLabel != null) {
+        info.appendChild(buildStat('AI', aiLabel));
+    }
 
     // A full or already-started room is surfaced (so it doesn't silently
     // vanish) but can't be joined: grey the card and disable its button.
@@ -133,6 +140,18 @@ function buildCard(room, maxPlayers) {
     card.appendChild(info);
     card.appendChild(joinBtn);
     return card;
+}
+
+// The "AI" card stat, or null to omit it. Live bots win (a real race in progress);
+// otherwise the lobby setting that applies next race: "Off" / "N next" / Auto(omit).
+function aiStatLabel(room) {
+    if (room.aiCount > 0) {
+        return room.aiCount + (room.aiCount === 1 ? ' bot' : ' bots');
+    }
+    if (room.aiPlanned != null) {
+        return room.aiPlanned <= 0 ? 'Off' : (room.aiPlanned + ' next');
+    }
+    return null;
 }
 
 function buildStat(label, value) {

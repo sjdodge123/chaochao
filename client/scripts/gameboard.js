@@ -353,6 +353,12 @@ function checkGameState(payload) {
 		gate.width = payload[3];
 		gate.height = payload[4];
 	}
+	// Force-close any lobby hub panel + drop the zones once we leave the lobby
+	// (startGated etc.), so a panel open at match start can't survive into the race.
+	if (currentState != config.stateMap.lobby && typeof lobbyHubReset === "function" &&
+		typeof lobbyStations !== "undefined" && lobbyStations.length > 0) {
+		lobbyHubReset();
+	}
 
 }
 
