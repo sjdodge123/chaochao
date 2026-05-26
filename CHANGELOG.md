@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.11.0 — 2026-05-26
+
 ### General
 
 - A live crowd now fills the empty space around the arena on wider/taller screens — a stadium of fans that bobs along with the audience and leaps up, waves, and throws confetti on big plays. (On a perfectly 16:9 screen there's no empty space, so no crowd.)
