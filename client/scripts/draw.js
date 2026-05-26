@@ -1678,6 +1678,10 @@ function drawPlayer(player, dt) {
         }
     }
 
+    // Opt-in avatar skin: the player's picture, shrunk inside a distinct border,
+    // overlaid on the kart so it reads as an external (not earned) skin.
+    drawAvatarSkin(player, sprite);
+
     if (player.ability != null) {
         drawAbilityIndicator(player.x, player.y, player);
     }
@@ -1816,6 +1820,64 @@ function drawEmoji(player) {
         gameContext.fillText(player.chatMessage, player.x + 8, player.y - 18);
         gameContext.restore();
     }
+}
+
+// --- avatar skin (opt-in) ----------------------------------------------------
+// A signed-in player who equips the avatar skin in the lobby hub shows their
+// Discord/Google picture on their kart for everyone. It's drawn SHRUNK inside a
+// distinct gold border so it's visually obvious the skin is external — not an
+// earned/purchased in-game skin (prevents using an avatar to fake a real skin).
+// Images load async and are cached per URL; until one is ready (or if it fails
+// CORS/404) the kart just shows its base colour.
+var AVATAR_BORDER_COLOR = "#f4c542";
+var avatarImageCache = {};
+function preloadAvatarImage(url) {
+    if (!url) {
+        return null;
+    }
+    if (avatarImageCache[url] !== undefined) {
+        return avatarImageCache[url];
+    }
+    var entry = { img: new Image(), ready: false, failed: false };
+    // No crossOrigin: the game canvas is never read back (no getImageData/toDataURL),
+    // so a tainted canvas is harmless — and this avoids the avatar failing to load
+    // if an avatar CDN omits CORS headers.
+    entry.img.onload = function () { entry.ready = true; };
+    entry.img.onerror = function () { entry.failed = true; };
+    entry.img.src = url;
+    avatarImageCache[url] = entry;
+    return entry;
+}
+function drawAvatarSkin(player, sprite) {
+    if (!player || !player.avatarUrl) {
+        return;
+    }
+    var entry = preloadAvatarImage(player.avatarUrl);
+    if (!entry || !entry.ready || entry.failed) {
+        return; // fall back to the base kart until the image is ready
+    }
+    var cx = player.x + camera.getCameraX();
+    var cy = player.y + camera.getCameraY();
+    // Shrink the picture well within the kart so the border frame stays visible.
+    var r = (sprite && sprite.halfSize ? sprite.halfSize : 20) * 0.62;
+    gameContext.save();
+    gameContext.beginPath();                       // border frame (the "not earned" marker)
+    gameContext.arc(cx, cy, r + 2.5, 0, 2 * Math.PI);
+    gameContext.fillStyle = AVATAR_BORDER_COLOR;
+    gameContext.fill();
+    gameContext.beginPath();                       // clip to a circle and draw the avatar inside
+    gameContext.arc(cx, cy, r, 0, 2 * Math.PI);
+    gameContext.closePath();
+    gameContext.clip();
+    gameContext.drawImage(entry.img, cx - r, cy - r, r * 2, r * 2);
+    gameContext.restore();
+    gameContext.save();                            // thin inner outline for definition
+    gameContext.beginPath();
+    gameContext.arc(cx, cy, r, 0, 2 * Math.PI);
+    gameContext.lineWidth = 1.5;
+    gameContext.strokeStyle = "rgba(0,0,0,0.45)";
+    gameContext.stroke();
+    gameContext.restore();
 }
 
 // AI racers carry a visible name below the kart so each personality is

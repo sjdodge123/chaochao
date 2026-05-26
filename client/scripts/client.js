@@ -97,6 +97,25 @@ function registerLobbyHubHandlers(server) {
 		if (typeof colorblindEnabled === "undefined" || !colorblindEnabled) {
 			p.color = payload.color;
 		}
+		// A colour skin replaces any avatar skin (the server cleared it too).
+		p.avatarUrl = null;
+		p.name = null;
+	});
+	// A player equipped the opt-in avatar skin: show their picture on the kart
+	// (drawn shrunk inside a border) and their name below it, for everyone.
+	server.on("playerAvatarChanged", function (payload) {
+		if (payload == null) {
+			return;
+		}
+		var p = playerList[payload.id];
+		if (p == null) {
+			return;
+		}
+		p.avatarUrl = payload.avatarUrl || null;
+		p.name = payload.name || null;
+		if (p.avatarUrl && typeof preloadAvatarImage === "function") {
+			preloadAvatarImage(p.avatarUrl);
+		}
 	});
 	// The primary's skin request was rejected (color taken). Flash the picker.
 	server.on("skinRejected", function (payload) {
