@@ -44,9 +44,19 @@
 
     function onConnected(e) {
         connected = true;
-        padIndex = e.gamepad.index;
-        padType = detectType(e.gamepad.id);
+        // Prefer the controller the player was last using (persisted across pages by
+        // controllerIdentity.js) over whichever pad merely fired 'connected' first, so
+        // the menu cursor stays on the host's pad instead of jumping to another one.
+        // Fall back to the pad that just connected when there's no remembered match.
+        var pads = navigator.getGamepads ? navigator.getGamepads() : [];
+        var want = (typeof preferredPadIndexForSlot === "function") ? preferredPadIndexForSlot(pads, 0) : null;
+        padIndex = (want != null && pads[want]) ? want : e.gamepad.index;
+        var active = pads[padIndex];
+        padType = detectType((active && active.id) || e.gamepad.id);
         prevButtons = [];
+        if (typeof rememberPrimaryController === "function" && active) {
+            rememberPrimaryController(active);
+        }
         showPrompt(true);
     }
 
@@ -73,16 +83,26 @@
         if (padIndex != null && pads[padIndex]) {
             return pads[padIndex];
         }
-        for (var i = 0; i < pads.length; i++) {
-            if (pads[i]) {
-                padIndex = i;
-                if (!connected) {
-                    connected = true;
-                    padType = detectType(pads[i].id);
-                    showPrompt(true);
-                }
-                return pads[i];
+        // No pad claimed yet (or the claimed one vanished): prefer the remembered
+        // host controller, then fall back to the lowest connected index.
+        var want = (typeof preferredPadIndexForSlot === "function") ? preferredPadIndexForSlot(pads, 0) : null;
+        var pick = (want != null && pads[want]) ? want : -1;
+        if (pick === -1) {
+            for (var i = 0; i < pads.length; i++) {
+                if (pads[i]) { pick = i; break; }
             }
+        }
+        if (pick !== -1 && pads[pick]) {
+            padIndex = pick;
+            if (!connected) {
+                connected = true;
+                padType = detectType(pads[pick].id);
+                showPrompt(true);
+            }
+            if (typeof rememberPrimaryController === "function") {
+                rememberPrimaryController(pads[pick]);
+            }
+            return pads[pick];
         }
         return null;
     }

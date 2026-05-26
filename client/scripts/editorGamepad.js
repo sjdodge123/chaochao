@@ -50,9 +50,19 @@ function initEditorGamepad() {
 
 function egOnConnect(e) {
     egConnected = true;
-    egIndex = e.gamepad.index;
-    egType = egDetectType(e.gamepad.id);
+    // Prefer the controller the player was last using (persisted across pages by
+    // controllerIdentity.js) so opening the editor doesn't hand control to a
+    // different physical pad than the one driving everything else. Fall back to the
+    // pad that just connected when there's no remembered match.
+    var pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    var want = (typeof preferredPadIndexForSlot === "function") ? preferredPadIndexForSlot(pads, 0) : null;
+    egIndex = (want != null && pads[want]) ? want : e.gamepad.index;
+    var active = pads[egIndex];
+    egType = egDetectType((active && active.id) || e.gamepad.id);
     egPrevButtons = [];
+    if (typeof rememberPrimaryController === "function" && active) {
+        rememberPrimaryController(active);
+    }
     egShowPrompt(true);
 }
 
@@ -80,16 +90,26 @@ function egGetPad() {
     if (egIndex != null && pads[egIndex]) {
         return pads[egIndex];
     }
-    for (var i = 0; i < pads.length; i++) {
-        if (pads[i]) {
-            egIndex = i;
-            if (!egConnected) {
-                egConnected = true;
-                egType = egDetectType(pads[i].id);
-                egShowPrompt(true);
-            }
-            return pads[i];
+    // No pad claimed yet (or the claimed one vanished): prefer the remembered host
+    // controller, then fall back to the lowest connected index.
+    var want = (typeof preferredPadIndexForSlot === "function") ? preferredPadIndexForSlot(pads, 0) : null;
+    var pick = (want != null && pads[want]) ? want : -1;
+    if (pick === -1) {
+        for (var i = 0; i < pads.length; i++) {
+            if (pads[i]) { pick = i; break; }
         }
+    }
+    if (pick !== -1 && pads[pick]) {
+        egIndex = pick;
+        if (!egConnected) {
+            egConnected = true;
+            egType = egDetectType(pads[pick].id);
+            egShowPrompt(true);
+        }
+        if (typeof rememberPrimaryController === "function") {
+            rememberPrimaryController(pads[pick]);
+        }
+        return pads[pick];
     }
     return null;
 }
