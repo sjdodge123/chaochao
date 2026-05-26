@@ -150,7 +150,10 @@ function aiStatLabel(room) {
         return room.aiCount + (room.aiCount === 1 ? ' bot' : ' bots');
     }
     if (room.aiAuto) {
-        return (room.aiPlanned > 0) ? (room.aiPlanned + ' (auto)') : 'Off';
+        // Auto mode: show the count it'll fill, or "Auto" when the lobby is already
+        // at/over the target (0 bots now) — NOT "Off", since bots return automatically
+        // as humans leave (distinct from an explicit Off override below).
+        return (room.aiPlanned > 0) ? (room.aiPlanned + ' (auto)') : 'Auto';
     }
     if (room.aiPlanned != null) {
         return room.aiPlanned <= 0 ? 'Off' : (room.aiPlanned + ' next');

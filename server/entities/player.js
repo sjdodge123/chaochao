@@ -493,9 +493,13 @@ class Player extends Circle {
 			return;
 		}
 		if (object.isStation) {
-			// Just record overlap this tick; the enter/exit edge is derived once per
-			// tick in GameBoard.updateStationProximity (a player can only be inside one).
-			this.touchingStation = object.stationId;
+			// Record overlap this tick; the enter/exit edge is derived once per tick in
+			// GameBoard.updateStationProximity. First-overlap wins (don't overwrite) so a
+			// player straddling two authored, overlapping zones latches one stably
+			// instead of flickering between whichever the QuadTree visited last.
+			if (this.touchingStation == null) {
+				this.touchingStation = object.stationId;
+			}
 			return;
 		}
 		if (object.isPunch && object.ownerId != this.id) {

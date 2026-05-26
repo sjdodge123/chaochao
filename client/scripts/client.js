@@ -51,12 +51,10 @@ function registerLobbyHubHandlers(server) {
 		}
 	});
 	server.on("lobbyAIChanged", function (payload) {
-		// Ignore the echo of our own rapid local steps (it would reset the dial to a
-		// stale mid-burst value); our optimistic value already matches the server.
-		if (typeof lobbyAILocalAt !== "undefined" && (Date.now() - lobbyAILocalAt) < LOBBY_AI_ECHO_MS) {
-			return;
-		}
-		// { auto:true } means the override was cleared back to Auto (null).
+		// Always apply — this is how every client (and our own slots) stay in sync with
+		// the room-wide setting. Rapid local stepping is de-raced by debouncing the
+		// EMIT (lobbyHub.adjustAILevel), not by suppressing this broadcast, so another
+		// player's change is never dropped. { auto:true } => Auto (null).
 		lobbyAISetting = (payload != null && payload.auto) ? null : payload;
 	});
 	server.on("stationEnter", function (payload) {
@@ -1128,6 +1126,11 @@ function promoteToPrimary(lp) {
 		lp.socket.off('serverKick');
 		lp.socket.off('disconnect');
 		lp.socket.off('connect'); // drop the secondary reconnect-rejoin handler too
+		// Drop the secondary lobby-hub listeners too, else registerPrimaryHandlers
+		// (-> registerLobbyHubHandlers) double-binds them on the promoted socket.
+		lp.socket.off('stationEnter');
+		lp.socket.off('stationExit');
+		lp.socket.off('skinRejected');
 	} catch (e) { /* ignore */ }
 	registerPrimaryHandlers(lp.socket); // resume render/audio/state handlers
 	if (typeof onLocalPlayersChanged === "function") {

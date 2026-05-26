@@ -1572,9 +1572,11 @@ class GameBoard {
 			var s = src[i];
 			this.lobbyStations.push(new LobbyStation(s.cx, s.cy, s.r || R, s.id, s.kind, s.color || "#888"));
 		}
-		// Risk §9.3: a player standing in a zone when the lobby map idle-resets (this
-		// runs again) would otherwise diff against a stale nearStation and emit a
-		// spurious exit. Clear proximity latches whenever the stations are rebuilt.
+		// Reset every player's proximity latch whenever stations are (re)built, so a
+		// stale nearStation from a previous lobby can't diff into a spurious exit. This
+		// runs on each Game.startLobby (players are on the spawn pad, away from any
+		// zone); the periodic lobby-map idle-reset (restoreLobbyMap) only restores
+		// tiles and does NOT rebuild stations, so it never disturbs an open panel.
 		for (var id in this.playerList) {
 			this.playerList[id].nearStation = null;
 			this.playerList[id].touchingStation = null;

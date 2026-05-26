@@ -11,13 +11,12 @@ var lobbyStations = [];
 // Room-wide AI override mirrored from the server: null = Auto (fill toward target),
 // {enabled:false} = off, {enabled:true, count:N} = exactly N bots next race.
 var lobbyAISetting = null;
-// When WE last stepped the dial locally. The lobbyAIChanged broadcast echoes our own
-// emits back a few ms later; without this, an echo of an earlier step can land
-// mid-burst and reset the dial to a stale value (so 4 quick steps net only 2). We
-// ignore broadcasts within this window of a local change — our optimistic value is
-// authoritative while actively stepping, and the server agrees (last-writer-wins).
-var lobbyAILocalAt = 0;
-var LOBBY_AI_ECHO_MS = 600;
+// Rapid dial steps update lobbyAISetting locally (optimistic) but COALESCE into a
+// single debounced emit once stepping settles. That way the server sees one change
+// per burst and its echo can't race the dial back to a stale mid-burst value — while
+// incoming lobbyAIChanged is ALWAYS applied, so another player's change shows at once.
+var aiEmitTimer = null;
+var aiEmitSock = null;
 // Per-slot HUD hit areas, rebuilt every frame in drawLobbyHubHud (logical coords).
 // slot -> { prompt: rect|null, options: [{rect, action}], close: rect|null }.
 var stationHudHit = {};
@@ -224,30 +223,37 @@ function aiDialIndex() {
     if (lvl <= 0) { return 1; }      // Off
     return lvl + 1;                  // N bots
 }
-// Step the dial and push the resulting setting to the server on this slot's socket.
-// Last-writer-wins; the lobbyAIChanged broadcast re-syncs every open panel + the
-// join page, but we also update locally so the change reads instantly.
+// Step the dial and update the room-wide setting (optimistic local + debounced emit).
 function adjustAILevel(lp, dir) {
     var max = aiMaxBots();
-    var idx = aiDialIndex() + dir;
+    // Clamp the CURRENT position into range first, so stepping stays monotonic even
+    // when the room filled up since the value was chosen (aiMaxBots can shrink below
+    // the current count). Without this, a 'right' press on an over-cap value would
+    // jump down to Off.
+    var cur = aiDialIndex();
+    if (cur > max + 1) { cur = max + 1; }
+    var idx = cur + dir;
     if (idx < 0) { idx = 0; }
     if (idx > max + 1) { idx = max + 1; } // Auto, Off, then 1..max
-    var payload;
     if (idx === 0) {
-        payload = { auto: true };                          // Auto
-        lobbyAISetting = null;
+        lobbyAISetting = null;                              // Auto
     } else if (idx === 1) {
-        payload = { enabled: false, count: 0 };            // Off
-        lobbyAISetting = payload;
+        lobbyAISetting = { enabled: false, count: 0 };      // Off
     } else {
-        payload = { enabled: true, count: idx - 1 };       // N bots
-        lobbyAISetting = payload;
+        lobbyAISetting = { enabled: true, count: idx - 1 }; // N bots
     }
-    lobbyAILocalAt = Date.now(); // mark a local change so the echo doesn't reset us
-    var sock = (lp && lp.socket) ? lp.socket : (typeof server !== "undefined" ? server : null);
-    if (sock) {
-        sock.emit("setLobbyAI", payload);
-    }
+    // AI is room-wide, so the global `server` fallback is fine (attribution doesn't
+    // matter); emit is debounced so a key burst sends one change, not one per step.
+    aiEmitSock = (lp && lp.socket) ? lp.socket : (typeof server !== "undefined" ? server : null);
+    if (aiEmitTimer) { clearTimeout(aiEmitTimer); }
+    aiEmitTimer = setTimeout(flushLobbyAIEmit, 140);
+}
+// Send the settled dial value once stepping stops (see adjustAILevel).
+function flushLobbyAIEmit() {
+    aiEmitTimer = null;
+    if (!aiEmitSock) { return; }
+    var payload = (lobbyAISetting == null) ? { auto: true } : lobbyAISetting;
+    aiEmitSock.emit("setLobbyAI", payload);
 }
 
 // --- skin station model ------------------------------------------------------
@@ -299,9 +305,11 @@ function stationPickSkin(lp, color) {
         flagSkinRejected(lp.slot, color); // locally taken — flash without a round-trip
         return;
     }
-    var sock = (lp.socket) ? lp.socket : (typeof server !== "undefined" ? server : null);
-    if (sock) {
-        sock.emit("setSkin", { color: color });
+    // Skin is per-player, so it MUST go out on this slot's own socket (the server
+    // attributes setSkin to the emitting socket id). No primary-socket fallback — that
+    // would recolour the wrong player; if this slot has no live socket, drop it.
+    if (lp.socket) {
+        lp.socket.emit("setSkin", { color: color });
     }
 }
 // Flash a "taken" note on a slot's open skin panel for a short beat.
@@ -352,7 +360,10 @@ function stationOccupied(s) {
         if (p == null || p.x == null) { continue; }
         var pr = (p.radius != null) ? p.radius : 12;
         var dx = p.x - s.x, dy = p.y - s.y;
-        if (dx * dx + dy * dy <= (s.radius + pr * 0.5) * (s.radius + pr * 0.5)) {
+        // Full radius sum, matching the server's circle-overlap enter/exit test, so the
+        // gold "lit" state and the "press to open" prompt toggle at the same distance.
+        var reach = s.radius + pr;
+        if (dx * dx + dy * dy <= reach * reach) {
             return true;
         }
     }

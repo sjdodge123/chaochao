@@ -266,7 +266,7 @@ function checkForMail(client) {
 			return; // off-palette request
 		}
 		for (var pid in room.playerList) {
-			if (pid !== client.id && room.playerList[pid].color === color) {
+			if (pid !== client.id && room.playerList[pid] != null && room.playerList[pid].color === color) {
 				client.emit("skinRejected", { color: color, reason: "taken" });
 				return;
 			}
