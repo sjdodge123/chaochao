@@ -472,14 +472,14 @@ function registerCombatHandlers(server) {
 		spawnPunchEffect(punch);
 		var owner = playerList[punch.ownerId];
 		if (owner != null && owner.infected) {
-			playSound(zombieSwing);
+			playSoundVaried(zombieSwing, 0.1);
 			return;
 		}
 		if (punch.type == "player") {
-			playSound(meleeSound);
+			playSoundVaried(meleeSound, 0.1);
 		}
 		if (punch.type == "bumper") {
-			playSound(bumperSound);
+			playSoundVaried(bumperSound, 0.08);
 		}
 
 	});
@@ -541,11 +541,11 @@ function registerCombatHandlers(server) {
 			playAudience(pickCrowdOoh(), 1);
 		}
 		if (playerList[owner] == null) {
-			playSound(meleeHitSound);
+			playSoundVaried(meleeHitSound, 0.1);
 			return;
 		}
 		if (playerList[owner].infected) {
-			playSound(zombieHit);
+			playSoundVaried(zombieHit, 0.1);
 		}
 	});
 	server.on("terminatePunch", function (id) {
@@ -572,7 +572,7 @@ function registerCombatHandlers(server) {
 				recapMarkEffect("explosion", center.x, center.y, { radius: config.tileMap.abilities.bomb.explosionRadius, color: "#ff7a18" });
 			}
 			if (typeof recapMarkMapDirty === "function") { recapMarkMapDirty(); } // exploded tiles -> recap re-snapshots
-			playSound(bombExplosion);
+			playSoundVaried(bombExplosion, 0.05);
 			addTrauma(0.5);
 		}
 	});
@@ -593,7 +593,7 @@ function registerCombatHandlers(server) {
 				spawnExplosion(ex, ey, config.tileMap.abilities.iceCannon.explosionRadius, "#9fe8ff");
 				recapMarkEffect("explosion", ex, ey, { radius: config.tileMap.abilities.iceCannon.explosionRadius, color: "#9fe8ff" });
 			}
-			playSound(iceExplosion);
+			playSoundVaried(iceExplosion, 0.05);
 			addTrauma(0.45);
 		}
 	});
@@ -676,7 +676,7 @@ function registerAbilityHandlers(server) {
 	});
 	server.on("abilityAcquired", function (payload) {
 		playerPickedUpAbility(payload);
-		playSound(collectItem);
+		playSoundVaried(collectItem, 0.06);
 	});
 	// Late-join seed of invuln state so already-protected players flash on this client.
 	server.on("lobbyInvulnStates", function (states) {
@@ -727,7 +727,7 @@ function registerAbilityHandlers(server) {
 
 	server.on("projBounced", function () {
 		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing || currentState == config.stateMap.lobby) {
-			playSound(bombBounce);
+			playSoundVaried(bombBounce, 0.1);
 		}
 	});
 	server.on("blindfoldUsed", function (owner) {
@@ -750,7 +750,7 @@ function registerAbilityHandlers(server) {
 		}, 2500);
 	});
 	server.on("cutUsed", function (owner) {
-		playSound(cutSound);
+		playSoundVaried(cutSound, 0.08);
 		var cutter = playerList[owner];
 		if (cutter != null) {
 			spawnSlashEffect(cutter.x, cutter.y, cutter.angle, cutter.color);
@@ -783,7 +783,7 @@ function registerAbilityHandlers(server) {
 function registerEffectHandlers(server) {
 	server.on("lavaExplosion", function () {
 		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
-			playSound(lavaExplosion);
+			playSoundVaried(lavaExplosion, 0.05);
 			spawnScreenFlash("#ff5a1a", 0.3, 300);
 			addTrauma(0.5);
 		}
