@@ -1081,10 +1081,12 @@ function ensureJoinPrompt(idx, type) {
         '<span class="pp-join">press to join</span>';
     padPlayersEl.appendChild(el);
     joinPromptBlocks[idx] = el;
-    // A new controller just got an invitation — make sure the header is visible and
-    // restart the fade timer (which now pins the header while the prompt is up), in
-    // case the bottom bar had already faded before the pad was plugged in.
-    scheduleHintFade();
+    // Make sure the header is visible (it may have faded before this pad was plugged
+    // in). Un-fade ONLY the header — don't call scheduleHintFade(), which would also
+    // un-fade the solo bottom bar and reset ITS countdown, letting an unrelated
+    // controller hot-plug keep the bar from ever fading. The pending fade timer (armed
+    // by setInputMethod) already pins the header while a prompt is up.
+    padPlayersEl.classList.remove("faded");
 }
 function removeJoinPrompt(idx) {
     var el = joinPromptBlocks[idx];
@@ -1234,16 +1236,20 @@ function onLocalPlayersChanged() {
     // it gets no prompt (keeps the solo bottom-bar behaviour).
     if (nControllers >= 2) {
         for (var j = 0; j < pads.length; j++) {
-            if (!pads[j] || localPlayerForPadIndex(j)) {
-                continue; // empty slot, or this pad has already joined
+            if (!pads[j] || localPlayerForPadIndex(j) || padNeedsRelease[j]) {
+                // empty slot, already joined, or a pad that just left and must release
+                // all buttons before it can (re)join — pollGamepad ignores its input
+                // until then, so don't invite a press that would do nothing yet.
+                continue;
             }
             ensureJoinPrompt(j, detectGamepadType(pads[j].id));
         }
     }
-    // Drop prompts for controllers that joined, vanished, or once we're back under 2.
+    // Drop prompts for controllers that joined, vanished, entered the must-release
+    // state, or once we're back under 2 connected pads.
     for (var key in joinPromptBlocks) {
         var idx = parseInt(key, 10);
-        if (nControllers < 2 || !pads[idx] || localPlayerForPadIndex(idx)) {
+        if (nControllers < 2 || !pads[idx] || localPlayerForPadIndex(idx) || padNeedsRelease[idx]) {
             removeJoinPrompt(idx);
         }
     }
