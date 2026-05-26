@@ -189,6 +189,21 @@
       padding: 3px 7px;
       min-width: 50px;
     }
+    /* Compact the Start-edge picker so all six options fit in two rows (4 single
+       edges + 2 combos) and the section doesn't push the last row under the sticky
+       Actions footer. */
+    #controlPanel .startEdgeButton {
+      min-width: 0;
+      padding: 2px 6px;
+      font-size: 0.78rem;
+      margin: 0 3px 2px 0;
+    }
+    #startEdgePalette {
+      margin-bottom: 0.25rem !important;
+    }
+    #startEdgePalette .h5 {
+      margin: 0.25rem 0 0.2rem;
+    }
 
     /* Pin the Actions section to the bottom of the panel — together
        with the sticky toolbar, this guarantees the user can always
@@ -288,20 +303,19 @@
               <button id="movingBumperButton" style="background-color: orange" title="Moving Bumper" class="mapEditorTile"><span>Moving Bumper</span></button>
             </div>
           </div>
-          <div class="palette mb-3">
+          <div id="startEdgePalette" class="palette mb-3">
             <div class="h5">
               Start edge
             </div>
             <hr />
             <div>
-              <button data-edges="left" title="Players start on the left" class="mapEditorTile startEdgeButton"><span>Left</span></button>
-              <button data-edges="right" title="Players start on the right" class="mapEditorTile startEdgeButton"><span>Right</span></button>
-              <button data-edges="top" title="Players start at the top" class="mapEditorTile startEdgeButton"><span>Top</span></button>
-              <button data-edges="bottom" title="Players start at the bottom" class="mapEditorTile startEdgeButton"><span>Bottom</span></button>
-              <button data-edges="left+right" title="Players split across left & right" class="mapEditorTile startEdgeButton"><span>Left + Right</span></button>
-              <button data-edges="top+bottom" title="Players split across top & bottom" class="mapEditorTile startEdgeButton"><span>Top + Bottom</span></button>
+              <button data-edges="left" class="mapEditorTile startEdgeButton"><span>Left</span></button>
+              <button data-edges="right" class="mapEditorTile startEdgeButton"><span>Right</span></button>
+              <button data-edges="top" class="mapEditorTile startEdgeButton"><span>Top</span></button>
+              <button data-edges="bottom" class="mapEditorTile startEdgeButton"><span>Bottom</span></button>
+              <button data-edges="left+right" class="mapEditorTile startEdgeButton"><span>Left + Right</span></button>
+              <button data-edges="top+bottom" class="mapEditorTile startEdgeButton"><span>Top + Bottom</span></button>
             </div>
-            <small id="startEdgeHint" style="display:none; color:#555;">Two-sided maps play fairest with a goal near the center.</small>
           </div>
           <div id="actionsSection">
             <div class="h5">
@@ -321,6 +335,19 @@
       <main>
         <div id="canvasWindow"><canvas id="createCanvas" width="1366" height="768"></canvas></div>
       </main>
+      <!-- Controller-friendly confirm dialog (replaces native confirm(), which a
+           gamepad can't operate). Shares the leave-game modal's .confirm-* styling
+           (see styles.css). The editor gamepad traps focus to these buttons while
+           the modal is open. -->
+      <div id="wipeConfirmModal" class="confirm-modal hidden">
+        <div class="confirm-dialog">
+          <div class="confirm-title" id="wipeConfirmMessage">Are you sure?</div>
+          <div class="confirm-buttons">
+            <button type="button" id="wipeConfirmYes" class="confirm-btn confirm-leave">Delete</button>
+            <button type="button" id="wipeConfirmCancel" class="confirm-btn confirm-cancel">Cancel</button>
+          </div>
+        </div>
+      </div>
     </div>
     </div>
     <div id="loadWindow">

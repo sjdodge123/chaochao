@@ -245,10 +245,28 @@ function setupPage() {
         showEditor();
     });
     $("#rebuildButton").on("click", function () {
-        if (confirmWipeIfDirty()) {
+        if (mapHasContent()) {
+            openWipeConfirm("Are you sure you want to delete this map?", rebuild);
+        } else {
             rebuild();
         }
         return false;
+    });
+    $("#wipeConfirmYes").on("click", function () {
+        var action = wipeConfirmAction;
+        closeWipeConfirm();
+        if (typeof action === "function") { action(); }
+        return false;
+    });
+    $("#wipeConfirmCancel").on("click", function () {
+        closeWipeConfirm();
+        return false;
+    });
+    // Escape cancels (keyboard parity with the native confirm it replaced).
+    $(document).on("keydown", function (e) {
+        if ((e.key === "Escape" || e.keyCode === 27) && $("#wipeConfirmModal").is(":visible")) {
+            closeWipeConfirm();
+        }
     });
 
     $("#deleteSelectedButton").on("click", function () {
@@ -416,22 +434,33 @@ function setSelectedObject(obj) {
     dirty = true;
 }
 
-function confirmWipeIfDirty() {
-    var cells = vMap.cells;
-    var needsConfirm = false;
-    for (var i = 0; i < cells.length; i++) {
-        if (cells[i].id != config.tileMap.normal.id) {
-            needsConfirm = true;
-            break;
-        }
+// True if the map has any author work worth confirming before a wipe/reshape:
+// a non-default tile painted, or a hazard placed.
+function mapHasContent() {
+    if (vMap == null || !Array.isArray(vMap.cells)) { return false; }
+    for (var i = 0; i < vMap.cells.length; i++) {
+        if (vMap.cells[i].id != config.tileMap.normal.id) { return true; }
     }
-    if (!needsConfirm && vMap.hazards && vMap.hazards.length > 0) {
-        needsConfirm = true;
-    }
-    if (needsConfirm) {
-        return confirm("Are you sure you want to delete this map?");
-    }
-    return true;
+    if (vMap.hazards && vMap.hazards.length > 0) { return true; }
+    return false;
+}
+
+// Controller-friendly replacement for the old native confirm(): show an in-editor
+// modal (navigable by the editor gamepad — see editorGamepad.js, which traps focus
+// to the modal's buttons while it's open) and run onConfirm if the user accepts.
+var wipeConfirmAction = null;
+function openWipeConfirm(message, onConfirm, confirmLabel) {
+    wipeConfirmAction = onConfirm || null;
+    var msg = document.getElementById("wipeConfirmMessage");
+    if (msg != null) { msg.textContent = message || "Are you sure?"; }
+    var yes = document.getElementById("wipeConfirmYes");
+    if (yes != null) { yes.textContent = confirmLabel || "Delete"; }
+    // Shares the leave-game modal's .confirm-modal styling: toggle .hidden.
+    $("#wipeConfirmModal").removeClass("hidden");
+}
+function closeWipeConfirm() {
+    wipeConfirmAction = null;
+    $("#wipeConfirmModal").addClass("hidden");
 }
 
 function validateEmail(mail) {
@@ -552,14 +581,37 @@ function recomputeStartLayout() {
     map = { x: xl, y: yt, width: xr, height: yb };
 }
 
-// Apply a new start-edge selection from the picker. Writes it onto the working
-// map immediately so a Preview/Upload right after picking carries it.
+// Apply a new start-edge selection from the picker. Changing the start edge
+// reshapes the arena — the playable surface shrinks away from the gate strip(s) —
+// so the cells are regenerated to fit the new region. That clears painted tiles
+// and hazards, so confirm first (via the controller-friendly modal) when the map
+// already has author work. No-op when the selection is unchanged.
 function setStartEdges(edges) {
+    if (sameEdgeSet(edges, startEdges)) { return; }
+    if (mapReady && mapHasContent()) {
+        openWipeConfirm("Changing the start edge reshapes the map and clears your tiles. Continue?", function () {
+            applyStartEdges(edges);
+        }, "Reshape");
+        return;
+    }
+    applyStartEdges(edges);
+}
+function applyStartEdges(edges) {
     startEdges = edges.slice();
     recomputeStartLayout();
+    // Regenerate the playable cells in the new (gate-reserving) region so the
+    // surface reshapes instead of overlapping the relocated gate.
+    if (mapReady && vMap != null) {
+        setSelectedObject(null);
+        vMap = generateVMap();
+    }
     if (vMap != null) { vMap.startEdges = startEdges.slice(); }
     updateStartEdgeButtons();
     dirty = true;
+}
+function sameEdgeSet(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) { return false; }
+    return a.slice().sort().join("+") === b.slice().sort().join("+");
 }
 
 // Sync the picker to whatever start edges the loaded/restored map declares
@@ -572,9 +624,8 @@ function syncStartEdgesFromMap() {
     updateStartEdgeButtons();
 }
 
-// Highlight the active picker button and toggle the "centered goal" combo hint.
-// Matches on the sorted edge set, so button order (e.g. "top+bottom") doesn't
-// have to match the stored order.
+// Highlight the active picker button. Matches on the sorted edge set, so button
+// order (e.g. "top+bottom") doesn't have to match the stored order.
 function updateStartEdgeButtons() {
     var activeKey = startEdges.slice().sort().join("+");
     $(".startEdgeButton").each(function () {
@@ -585,11 +636,6 @@ function updateStartEdgeButtons() {
             $(this).removeClass("active-edge").css("outline", "");
         }
     });
-    if (startEdges.length === 2) {
-        $("#startEdgeHint").show();
-    } else {
-        $("#startEdgeHint").hide();
-    }
 }
 
 function drawGate() {

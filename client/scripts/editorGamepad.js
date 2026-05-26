@@ -249,6 +249,19 @@ function egSetMode(mode) {
 // --- panel (DOM control) navigation ---
 
 function egItems() {
+    // While the confirm modal is open, trap navigation to ITS buttons only, so a
+    // gamepad can answer the dialog (and can't drive the panel behind it).
+    var modal = document.getElementById("wipeConfirmModal");
+    if (modal != null && (modal.offsetParent !== null || modal.getClientRects().length > 0)) {
+        var mbtns = modal.querySelectorAll("button:not([disabled])");
+        var mout = [];
+        for (var m = 0; m < mbtns.length; m++) {
+            mout.push(mbtns[m]);
+        }
+        if (mout.length) {
+            return mout;
+        }
+    }
     var all = document.querySelectorAll(EG_NAV_SELECTOR);
     var out = [];
     for (var i = 0; i < all.length; i++) {
