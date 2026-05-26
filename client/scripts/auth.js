@@ -219,9 +219,45 @@
         buildControl();
     }
 
+    // --- Scoreboard login nudge ---------------------------------------------
+    // A transient, dismissible toast reminding a NOT-signed-in player to log in
+    // to save progress and earn skins. Fired from the game-over/scoreboard
+    // screen (client.js). No-op when auth is unavailable or already signed in.
+    var toastEl = null, toastTimer = null;
+    function buildToast() {
+        if (toastEl || !document.body) { return; }
+        toastEl = document.createElement('div');
+        toastEl.className = 'cc-toast';
+        toastEl.setAttribute('role', 'status');
+        toastEl.innerHTML =
+            '<span class="cc-toast-msg">Sign in to save your progress and earn skins.</span>' +
+            '<button class="cc-toast-action" type="button">Log in</button>' +
+            '<button class="cc-toast-close" type="button" aria-label="Dismiss">×</button>';
+        document.body.appendChild(toastEl);
+        toastEl.querySelector('.cc-toast-action').addEventListener('click', function () {
+            hideToast();
+            var login = document.getElementById('authLogin');
+            if (login) { login.click(); } // open the navbar sign-in popover
+        });
+        toastEl.querySelector('.cc-toast-close').addEventListener('click', hideToast);
+    }
+    function hideToast() {
+        if (toastEl) { toastEl.classList.remove('visible'); }
+        if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+    }
+    function showLoginNudge() {
+        if (!sb || currentUser) { return; } // only signed-out players, auth on
+        buildToast();
+        if (!toastEl) { return; }
+        toastEl.classList.add('visible');
+        if (toastTimer) { clearTimeout(toastTimer); }
+        toastTimer = setTimeout(hideToast, 9000);
+    }
+
     window.chaochaoAuth = {
         ready: ready,
         available: !!sb,   // Supabase configured + CDN loaded (auth actually usable)
+        showLoginNudge: showLoginNudge,
         deviceId: deviceId,
         getHandshake: getHandshake,
         getProfile: getProfile,

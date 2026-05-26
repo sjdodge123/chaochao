@@ -445,6 +445,11 @@ function registerStateHandlers(server) {
 			: "";
 		currentState = config.stateMap.gameOver;
 		trackEvent('match_end', { won: (packet.winner === myID) });
+		// Nudge signed-out players to log in (save progress / earn skins). No-op
+		// when auth is off or already signed in. Primary screen only.
+		if (window.chaochaoAuth && typeof window.chaochaoAuth.showLoginNudge === "function") {
+			window.chaochaoAuth.showLoginNudge();
+		}
 	});
 	server.on("startCollapse", function (info) {
 		currentState = config.stateMap.collapsing;

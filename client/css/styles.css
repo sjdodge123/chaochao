@@ -221,6 +221,56 @@ nav .auth-control ~ .theme-toggle {
     box-shadow: 0 0 0 2px rgba(200, 127, 138, 0.5);
 }
 
+/* transient login nudge shown on the game-over/scoreboard screen (auth.js) */
+.cc-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%) translateY(20px);
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: 92vw;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: var(--navbar-bg);
+    color: var(--navbar-text);
+    border: 1px solid var(--navbar-control-border);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s, transform 0.25s;
+}
+.cc-toast.visible {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+    pointer-events: auto;
+}
+.cc-toast-msg { font-size: 14px; }
+.cc-toast-action {
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 15px;
+    border: 1px solid var(--navbar-control-border);
+    background: transparent;
+    color: var(--navbar-text);
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.cc-toast-action:hover { background: var(--navbar-control-hover); }
+.cc-toast-close {
+    background: transparent;
+    border: none;
+    color: inherit;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.7;
+}
+.cc-toast-close:hover { opacity: 1; }
+
   section {
     /* navbar offset comes from body { padding-top } so margins don't
        collapse out and inflate the page height. `dvh` mirrors html/body. */
