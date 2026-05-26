@@ -1825,12 +1825,10 @@ function drawEmoji(player) {
 
 // --- avatar skin (opt-in) ----------------------------------------------------
 // A signed-in player who equips the avatar skin in the lobby hub shows their
-// Discord/Google picture on their kart for everyone. It's drawn SHRUNK inside a
-// distinct gold border so it's visually obvious the skin is external — not an
-// earned/purchased in-game skin (prevents using an avatar to fake a real skin).
-// Images load async and are cached per URL; until one is ready (or if it fails
-// CORS/404) the kart just shows its base colour.
-var AVATAR_BORDER_COLOR = "#f4c542";
+// Discord/Google picture on their kart for everyone. The picture fills the kart
+// circle (it reads as an external skin simply by being a photo rather than a
+// solid colour). Images load async and are cached per URL; until one is ready
+// (or if it fails CORS/404) the kart just shows its base colour.
 var avatarImageCache = {};
 function preloadAvatarImage(url) {
     if (!url) {
@@ -1859,25 +1857,20 @@ function drawAvatarSkin(player, sprite) {
     }
     var cx = player.x + camera.getCameraX();
     var cy = player.y + camera.getCameraY();
-    // Size off the kart's actual circle radius (player.radius), NOT sprite.halfSize
-    // (= radius + 8px of shadow/stroke padding) — otherwise the avatar + border
-    // spills past the kart edge and makes the kart look bigger. The avatar sits
-    // shrunk inside the kart with the kart's colour ring still visible around the
-    // gold border (which marks it as an external, not-earned skin).
-    var kartR = player.radius || 20;
-    var r = kartR * 0.6;
+    // Fill the kart circle with the picture. Sized off player.radius (the actual
+    // kart circle), NOT sprite.halfSize (= radius + 8px of shadow/stroke padding),
+    // so it never spills past the kart edge and inflates the apparent size. No
+    // frame border — at the correct kart size it left too little room to see the
+    // photo; a thin edge outline gives definition over busy backgrounds.
+    var r = player.radius || 20;
     gameContext.save();
-    gameContext.beginPath();                       // border frame (the "not earned" marker)
-    gameContext.arc(cx, cy, r + 2, 0, 2 * Math.PI);
-    gameContext.fillStyle = AVATAR_BORDER_COLOR;
-    gameContext.fill();
-    gameContext.beginPath();                       // clip to a circle and draw the avatar inside
+    gameContext.beginPath();                       // clip to the kart circle
     gameContext.arc(cx, cy, r, 0, 2 * Math.PI);
     gameContext.closePath();
     gameContext.clip();
     gameContext.drawImage(entry.img, cx - r, cy - r, r * 2, r * 2);
     gameContext.restore();
-    gameContext.save();                            // thin inner outline for definition
+    gameContext.save();                            // thin edge outline for definition
     gameContext.beginPath();
     gameContext.arc(cx, cy, r, 0, 2 * Math.PI);
     gameContext.lineWidth = 1.5;
