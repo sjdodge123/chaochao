@@ -3,8 +3,15 @@ name: Game mechanic changes need release notes
 on:
   pull_request:
     branches: [main]
+    # Map JSON is already release-notes-exempt (this check only fires on
+    # config.json/game.js/engine.js), so a pure map submission would pass trivially.
+    # Skip it outright so map PRs don't carry an irrelevant check.
+    paths-ignore:
+      - 'client/maps/**'
   push:
     branches: [main]
+    paths-ignore:
+      - 'client/maps/**'
 
 jobs:
   check-release-notes:
