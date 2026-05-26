@@ -1034,11 +1034,14 @@ function scheduleHintFade() {
     clearTimeout(gpFadeTimer);
     gpFadeTimer = setTimeout(function () {
         var e = hintFadeEls();
+        // Keep the top header (padPlayersEl) up permanently while it carries co-op
+        // blocks OR an active "press A to join" invitation — each player needs to see
+        // which controller they are, and a friend needs the standing join prompt.
+        // Only the solo bottom bar auto-fades.
+        var pinHeader = (hintUiMode === "blocks") ||
+            (Object.keys(joinPromptBlocks).length > 0);
         for (var j = 0; j < e.length; j++) {
-            // In local co-op the per-player blocks stay up permanently so each
-            // player can always see which controller they are and their controls
-            // (slot + colour dot + glyphs). Only the solo bottom bar auto-fades.
-            if (hintUiMode === "blocks" && e[j] === padPlayersEl) {
+            if (e[j] === padPlayersEl && pinHeader) {
                 continue;
             }
             e[j].classList.add("faded");
@@ -1078,6 +1081,10 @@ function ensureJoinPrompt(idx, type) {
         '<span class="pp-join">press to join</span>';
     padPlayersEl.appendChild(el);
     joinPromptBlocks[idx] = el;
+    // A new controller just got an invitation — make sure the header is visible and
+    // restart the fade timer (which now pins the header while the prompt is up), in
+    // case the bottom bar had already faded before the pad was plugged in.
+    scheduleHintFade();
 }
 function removeJoinPrompt(idx) {
     var el = joinPromptBlocks[idx];
@@ -1089,12 +1096,6 @@ function removeJoinPrompt(idx) {
     }
     delete joinPromptBlocks[idx];
 }
-function removeAllJoinPrompts() {
-    for (var k in joinPromptBlocks) {
-        removeJoinPrompt(k);
-    }
-}
-
 function buildPadPlayersUI() {
     if (padPlayersEl || typeof document === "undefined" || !document.body) {
         return;
@@ -1154,85 +1155,95 @@ function persistControllerOrder() {
     saveControllerOrder(order);
 }
 
-// Reconciles the in-game header each frame (and on join/drop). The per-player
-// header (top blocks) is shown for local co-op (2+ active local players); a single
-// player — keyboard, OR one controller bound to P1 — keeps the solo bottom bar.
-// A lone connected controller IS P1 (one local player), so it must show the bottom
-// bar; counting connected pads here is what wrongly forced blocks for one pad.
-// In header mode it also renders a "press A to join" prompt per connected controller
-// that hasn't joined yet (the prompt becomes a mini-controls block when it joins).
+// Reconciles the in-game header each frame (and on join/drop). Three states:
+//   1. Solo, <2 controllers  -> bottom bar (keyboard, or one controller = P1).
+//   2. Solo, 2+ controllers  -> bottom bar PLUS a "press A to join" prompt at the
+//      top for each unjoined controller (the invitation to start local co-op).
+//   3. 2+ joined local players -> per-player glyph blocks (bottom bar hidden), with
+//      a join prompt for any still-unjoined controller.
+// Bar-vs-blocks is driven by JOINED player count (so a lone controller stays on the
+// bottom bar — the Bug-A fix); the join prompts are driven independently by how many
+// controllers are CONNECTED, so the invitation shows while you're still solo and the
+// view only flips to the co-op glyph blocks once a 2nd player actually presses join.
 function onLocalPlayersChanged() {
     var pads = (typeof navigator !== "undefined" && navigator.getGamepads) ? navigator.getGamepads() : [];
     var nLocal = (typeof liveLocalPlayerCount === "function") ? liveLocalPlayerCount() : 1;
+    var nControllers = 0;
+    for (var i = 0; i < pads.length; i++) {
+        if (pads[i]) {
+            nControllers++;
+        }
+    }
     var showBlocks = (hintModeForPlayerCount(nLocal) === "blocks");
     persistControllerOrder(); // keep the cross-page host-controller identity current
 
-    if (!showBlocks) {
-        if (hintUiMode === "blocks") {
-            // No controllers and solo — restore the bottom bar.
-            hintUiMode = "bar";
-            // Clear any in-progress inline leave-confirm (flag + timer) before
-            // their blocks are removed, so nothing lingers with no visible UI.
-            for (var c = 0; c < localPlayers.length; c++) {
-                if (localPlayers[c]) {
-                    if (localPlayers[c].leaveConfirmTimer) {
-                        clearTimeout(localPlayers[c].leaveConfirmTimer);
-                        localPlayers[c].leaveConfirmTimer = null;
-                    }
-                    localPlayers[c].leaveConfirm = false;
-                }
+    // --- bottom bar vs per-player blocks (driven by JOINED player count) ---
+    if (showBlocks) {
+        if (hintUiMode !== "blocks") {
+            hintUiMode = "blocks";
+            if (hintBarEl) {
+                hintBarEl.className = "gamepad-prompts hidden"; // bottom bar off when the header is up
             }
-            removeAllBlocks();
-            removeAllJoinPrompts();
-            var method = activeInputMethod || "kbm";
-            activeInputMethod = null; // force setInputMethod to rebuild + show the bar
-            setInputMethod(method);
+            scheduleHintFade();
         }
-        return;
+        // A block per joined local player; drop blocks for slots that are gone.
+        for (var s = 0; s < localPlayers.length; s++) {
+            var lp = localPlayers[s];
+            if (!lp) {
+                continue;
+            }
+            // Don't show a phantom kb/m "P1" block when no one is actually using the
+            // keyboard/mouse — so a controller-only player just sees their controller
+            // (which becomes P1 when they press A). Once kb/m is used (kbmClaimedPrimary)
+            // or a controller binds to P1, the block appears.
+            if (lp.isPrimary && lp.padIndex == null && !kbmClaimedPrimary) {
+                removeBlock(s);
+                continue;
+            }
+            ensureBlock(lp);
+        }
+        for (var slot in padBlocks) {
+            if (!localPlayers[slot]) {
+                removeBlock(slot);
+            }
+        }
+    } else if (hintUiMode === "blocks") {
+        // Dropped back below 2 joined players — restore the bottom bar.
+        hintUiMode = "bar";
+        // Clear any in-progress inline leave-confirm (flag + timer) before their
+        // blocks are removed, so nothing lingers with no visible UI.
+        for (var c = 0; c < localPlayers.length; c++) {
+            if (localPlayers[c]) {
+                if (localPlayers[c].leaveConfirmTimer) {
+                    clearTimeout(localPlayers[c].leaveConfirmTimer);
+                    localPlayers[c].leaveConfirmTimer = null;
+                }
+                localPlayers[c].leaveConfirm = false;
+            }
+        }
+        removeAllBlocks();
+        var method = activeInputMethod || "kbm";
+        activeInputMethod = null; // force setInputMethod to rebuild + show the bar
+        setInputMethod(method);
     }
 
-    if (hintUiMode !== "blocks") {
-        hintUiMode = "blocks";
-        if (hintBarEl) {
-            hintBarEl.className = "gamepad-prompts hidden"; // bottom bar off when the header is up
-        }
-        scheduleHintFade();
-    }
-    // A block per joined local player; drop blocks for slots that are gone.
-    for (var s = 0; s < localPlayers.length; s++) {
-        var lp = localPlayers[s];
-        if (!lp) {
-            continue;
-        }
-        // Don't show a phantom kb/m "P1" block when no one is actually using the
-        // keyboard/mouse — so a controller-only player just sees their controller
-        // (which becomes P1 when they press A). Once kb/m is used (kbmClaimedPrimary)
-        // or a controller binds to P1, the block appears.
-        if (lp.isPrimary && lp.padIndex == null && !kbmClaimedPrimary) {
-            removeBlock(s);
-            continue;
-        }
-        ensureBlock(lp);
-    }
-    for (var slot in padBlocks) {
-        if (!localPlayers[slot]) {
-            removeBlock(slot);
-        }
-    }
-    // A "press A to join" prompt per connected controller that hasn't joined.
-    for (var j = 0; j < pads.length; j++) {
-        if (!pads[j]) {
-            continue;
-        }
-        if (localPlayerForPadIndex(j)) {
-            removeJoinPrompt(j); // joined now — its mini-controls block takes over
-        } else {
+    // --- "press A to join" prompts (driven by CONNECTED controller count) ---
+    // Show an invitation for every unjoined connected controller whenever 2+ pads
+    // are plugged in — independent of bar/blocks mode, so a friend sees how to join
+    // while you're still solo on the bottom bar. A single controller is just P1, so
+    // it gets no prompt (keeps the solo bottom-bar behaviour).
+    if (nControllers >= 2) {
+        for (var j = 0; j < pads.length; j++) {
+            if (!pads[j] || localPlayerForPadIndex(j)) {
+                continue; // empty slot, or this pad has already joined
+            }
             ensureJoinPrompt(j, detectGamepadType(pads[j].id));
         }
     }
+    // Drop prompts for controllers that joined, vanished, or once we're back under 2.
     for (var key in joinPromptBlocks) {
         var idx = parseInt(key, 10);
-        if (!pads[idx] || localPlayerForPadIndex(idx)) {
+        if (nControllers < 2 || !pads[idx] || localPlayerForPadIndex(idx)) {
             removeJoinPrompt(idx);
         }
     }
