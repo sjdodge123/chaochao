@@ -3,6 +3,7 @@ var mousex,
 	mousey,
 	lobbyStartButton,
 	gate,
+	gates = [],
 	world,
 	mapID,
 	gameID,
@@ -347,11 +348,17 @@ function checkGameState(payload) {
 	}
 	if (currentState == config.stateMap.gated || currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
 		lobbyStartButton = null;
-		gate = {};
-		gate.x = payload[1];
-		gate.y = payload[2];
-		gate.width = payload[3];
-		gate.height = payload[4];
+		// payload[1] is an array of gates [x, y, width, height, edge] (one for a
+		// single-edge map, two for an opposite-edge combo) — mirrors
+		// compressor.gameState. `gate` keeps pointing at gate 0 for any reader that
+		// still wants "the gate".
+		gates = [];
+		var gateData = payload[1] || [];
+		for (var gi = 0; gi < gateData.length; gi++) {
+			var gd = gateData[gi];
+			gates.push({ x: gd[0], y: gd[1], width: gd[2], height: gd[3], edge: gd[4] });
+		}
+		gate = gates.length > 0 ? gates[0] : null;
 	}
 
 }

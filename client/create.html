@@ -288,6 +288,21 @@
               <button id="movingBumperButton" style="background-color: orange" title="Moving Bumper" class="mapEditorTile"><span>Moving Bumper</span></button>
             </div>
           </div>
+          <div class="palette mb-3">
+            <div class="h5">
+              Start edge
+            </div>
+            <hr />
+            <div>
+              <button data-edges="left" title="Players start on the left" class="mapEditorTile startEdgeButton"><span>Left</span></button>
+              <button data-edges="right" title="Players start on the right" class="mapEditorTile startEdgeButton"><span>Right</span></button>
+              <button data-edges="top" title="Players start at the top" class="mapEditorTile startEdgeButton"><span>Top</span></button>
+              <button data-edges="bottom" title="Players start at the bottom" class="mapEditorTile startEdgeButton"><span>Bottom</span></button>
+              <button data-edges="left+right" title="Players split across left & right" class="mapEditorTile startEdgeButton"><span>Left + Right</span></button>
+              <button data-edges="top+bottom" title="Players split across top & bottom" class="mapEditorTile startEdgeButton"><span>Top + Bottom</span></button>
+            </div>
+            <small id="startEdgeHint" style="display:none; color:#555;">Two-sided maps play fairest with a goal near the center.</small>
+          </div>
           <div id="actionsSection">
             <div class="h5">
               Actions

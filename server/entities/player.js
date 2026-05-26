@@ -61,6 +61,10 @@ class Player extends Circle {
 
 		//Game Variables
 		this.hittingLobbyButton = false;
+		// Which starting gate this player is held in / launches from. Maps with
+		// opposite-edge starts (e.g. left+right) split players across two gates;
+		// single-edge maps keep everyone at gate 0.
+		this.gateIndex = 0;
 		this.reachedGoal = false;
 		this.timeReached = null;
 		this.collapseMargin = null; // distance to the lava front while collapsing (for clutch-goal cheer)

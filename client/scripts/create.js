@@ -21,12 +21,16 @@ var server,
     newWidth = 0,
     newHeight = 0,
     world = { x: 0, y: 0, width: 1366, height: 768 },
-    gate = { x: 0, y: 0, width: 75, height: world.height },
+    startEdges = ["left"],
+    gates = [],
     map = { x: 75, y: 0, width: world.width, height: world.height },
     canvasWindow = document.getElementById("canvasWindow"),
     createContext;
 
 var scale = 0.035;
+// Gate strip depth (px), matching server/game.js GATE_DEPTH so the previewed gate
+// lines up with where the server actually holds players.
+var GATE_DEPTH = 75;
 
 // Tile textures. Attach load + error BEFORE setting src so cached images
 // still fire and a missing/broken asset can't hang the gate forever.
@@ -91,6 +95,7 @@ window.onload = function () {
     }
     if (restored != null) {
         vMap = restored;
+        syncStartEdgesFromMap();
         $('#author').val(vMap.author);
         $('#name').val(vMap.name);
         mapReady = true;
@@ -164,6 +169,7 @@ function clientConnect() {
                     for (var j = 0; j < maps.length; j++) {
                         if (maps[j].id == this.id) {
                             vMap = JSON.parse(JSON.stringify(maps[j]));
+                            syncStartEdgesFromMap();
                             $('#author').val(vMap.author);
                             $('#name').val(vMap.name);
                             showEditor();
@@ -326,6 +332,11 @@ function setupPage() {
         drawObject = null;
         return false;
     });
+    $(".startEdgeButton").on("click", function () {
+        var edges = ($(this).attr("data-edges") || "left").split("+");
+        setStartEdges(edges);
+        return false;
+    });
     $("#bumperButton").on("click", function () {
         drawBrushAimer = false;
         drawObject = null;
@@ -442,6 +453,8 @@ function rebuild() {
 
 function init() {
     initEditorGamepad();
+    recomputeStartLayout();
+    updateStartEdgeButtons();
     animloop();
 }
 
@@ -508,16 +521,91 @@ function drawWorld() {
         createContext.restore();
     }
 }
-function drawGate() {
-    if (gate != null) {
-        createContext.save();
-        createContext.beginPath();
-        createContext.lineWidth = 5;
-        createContext.rect(gate.x, gate.y, gate.width, gate.height);
-        createContext.fillStyle = "grey";
-        createContext.fill();
-        createContext.restore();
+// Rebuild the drawn gate(s) and the cell-generation region from the chosen start
+// edges. Mirrors server/game.js buildStartingGates so the previewed/submitted gate
+// matches where the server holds players. Cells are kept off the gate strip(s) so
+// spawns don't land under a gate.
+function recomputeStartLayout() {
+    var W = world.width, H = world.height, D = GATE_DEPTH;
+    var rects = {
+        left: { x: 0, y: 0, width: D, height: H },
+        right: { x: W - D, y: 0, width: D, height: H },
+        top: { x: 0, y: 0, width: W, height: D },
+        bottom: { x: 0, y: H - D, width: W, height: D }
+    };
+    gates = [];
+    for (var i = 0; i < startEdges.length; i++) {
+        var r = rects[startEdges[i]];
+        if (r != null) {
+            gates.push({ x: r.x, y: r.y, width: r.width, height: r.height, edge: startEdges[i] });
+        }
     }
+    // Cell region as a far-corner box {x, y, width(=xr), height(=yb)}: reserve a
+    // strip on each selected edge.
+    var xl = 0, yt = 0, xr = W, yb = H;
+    for (var j = 0; j < startEdges.length; j++) {
+        if (startEdges[j] === "left") { xl = Math.max(xl, D); }
+        else if (startEdges[j] === "right") { xr = Math.min(xr, W - D); }
+        else if (startEdges[j] === "top") { yt = Math.max(yt, D); }
+        else if (startEdges[j] === "bottom") { yb = Math.min(yb, H - D); }
+    }
+    map = { x: xl, y: yt, width: xr, height: yb };
+}
+
+// Apply a new start-edge selection from the picker. Writes it onto the working
+// map immediately so a Preview/Upload right after picking carries it.
+function setStartEdges(edges) {
+    startEdges = edges.slice();
+    recomputeStartLayout();
+    if (vMap != null) { vMap.startEdges = startEdges.slice(); }
+    updateStartEdgeButtons();
+    dirty = true;
+}
+
+// Sync the picker to whatever start edges the loaded/restored map declares
+// (legacy maps without the field default to a single left gate).
+function syncStartEdgesFromMap() {
+    var se = (vMap != null && Array.isArray(vMap.startEdges) && vMap.startEdges.length > 0) ? vMap.startEdges : ["left"];
+    startEdges = se.slice();
+    recomputeStartLayout();
+    if (vMap != null) { vMap.startEdges = startEdges.slice(); }
+    updateStartEdgeButtons();
+}
+
+// Highlight the active picker button and toggle the "centered goal" combo hint.
+// Matches on the sorted edge set, so button order (e.g. "top+bottom") doesn't
+// have to match the stored order.
+function updateStartEdgeButtons() {
+    var activeKey = startEdges.slice().sort().join("+");
+    $(".startEdgeButton").each(function () {
+        var edges = ($(this).attr("data-edges") || "").split("+").sort().join("+");
+        if (edges === activeKey) {
+            $(this).addClass("active-edge").css("outline", "3px solid #1e90ff");
+        } else {
+            $(this).removeClass("active-edge").css("outline", "");
+        }
+    });
+    if (startEdges.length === 2) {
+        $("#startEdgeHint").show();
+    } else {
+        $("#startEdgeHint").hide();
+    }
+}
+
+function drawGate() {
+    if (gates == null || gates.length === 0) {
+        return;
+    }
+    createContext.save();
+    createContext.lineWidth = 5;
+    createContext.fillStyle = "grey";
+    for (var i = 0; i < gates.length; i++) {
+        var g = gates[i];
+        createContext.beginPath();
+        createContext.rect(g.x, g.y, g.width, g.height);
+        createContext.fill();
+    }
+    createContext.restore();
 }
 function drawMap() {
     if (map != null) {
@@ -691,12 +779,16 @@ function generateVMap() {
     var margin = 0.07;
     var localbbox = { xl: map.x, xr: map.width, yt: map.y, yb: map.height };
 
-    var xmargin = map.width * margin,
-        ymargin = map.height * margin,
-        xo = xmargin,
-        dx = map.width - xmargin * 2,
-        yo = ymargin,
-        dy = map.height - ymargin * 2;
+    // Span of the cell region (map.width/height are far-corner coords), so sites
+    // honor the reserved gate strip(s) on whichever edge(s) were chosen.
+    var spanX = map.width - map.x,
+        spanY = map.height - map.y;
+    var xmargin = spanX * margin,
+        ymargin = spanY * margin,
+        xo = map.x + xmargin,
+        dx = spanX - xmargin * 2,
+        yo = map.y + ymargin,
+        dy = spanY - ymargin * 2;
 
     for (var i = 0; i < siteNum; i++) {
         sites.push({ x: Math.round((xo + Math.random() * dx) * 10) / 10, y: Math.round((yo + Math.random() * dy) * 10) / 10 });
@@ -708,6 +800,7 @@ function generateVMap() {
         cells[iCells].id = 1;
     }
     localMap.hazards = [];
+    localMap.startEdges = startEdges.slice();
     return localMap;
 }
 
@@ -884,6 +977,33 @@ function validateMap(map) {
                 typeof hazard.angle !== "number") {
                 return { valid: false, reason: "Map has a moving bumper with no direction." };
             }
+        }
+    }
+    if (map.startEdges != null) {
+        var startEdgeCheck = validateStartEdges(map.startEdges);
+        if (!startEdgeCheck.valid) {
+            return startEdgeCheck;
+        }
+    }
+    return { valid: true };
+}
+// Mirror of server/utils.js validateStartEdges — one edge, or an opposite pair.
+function validateStartEdges(startEdges) {
+    var OPPOSITE = { left: "right", right: "left", top: "bottom", bottom: "top" };
+    if (!Array.isArray(startEdges) || startEdges.length < 1 || startEdges.length > 2) {
+        return { valid: false, reason: "startEdges must list 1 or 2 edges." };
+    }
+    for (var i = 0; i < startEdges.length; i++) {
+        if (OPPOSITE[startEdges[i]] == null) {
+            return { valid: false, reason: "startEdges has an unknown edge." };
+        }
+    }
+    if (startEdges.length === 2) {
+        if (startEdges[0] === startEdges[1]) {
+            return { valid: false, reason: "startEdges can't repeat the same edge." };
+        }
+        if (OPPOSITE[startEdges[0]] !== startEdges[1]) {
+            return { valid: false, reason: "Two start edges must be opposite (left+right or top+bottom)." };
         }
     }
     return { valid: true };
