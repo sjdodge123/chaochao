@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.8.3 — 2026-05-26
+
 - Playtest maps with friends: local co-op now works in the editor's Preview — extra players can press to join during the countdown, and the designer (or any player) can leave anytime to head back to the editor.
 
 ## v0.8.2 — 2026-05-25
