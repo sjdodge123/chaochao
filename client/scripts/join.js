@@ -126,6 +126,7 @@ function buildCard(room, maxPlayers) {
     if (joinable) {
         joinBtn.href = './play.html?gameid=' + encodeURIComponent(room.gameID);
         joinBtn.className = 'btn btn-outline-info join-btn';
+        joinBtn.setAttribute('data-gp-nav', ''); // joinable rooms only; locked/full cards stay unfocusable
         joinBtn.textContent = 'Join';
     } else {
         // Not joinable: a started match reads "In progress"; a room that's merely

@@ -164,7 +164,7 @@ function clientConnect() {
         for (var i = 0; i < mapnames.length; i++) {
             $.getJSON("../maps/" + mapnames[i], function (data) {
                 maps.push(data);
-                $("#loadWindow").append('<div class="map-image"><button id="' + data.id + '"><img src="' + data.thumbnail + '"><div class="desc">' + data.name + ' | ' + data.author + '</div></button></div>');
+                $("#loadWindow").append('<div class="map-image"><button id="' + data.id + '" data-gp-nav><img src="' + data.thumbnail + '"><div class="desc">' + data.name + ' | ' + data.author + '</div></button></div>');
                 $("#" + data.id).on("click", function () {
                     for (var j = 0; j < maps.length; j++) {
                         if (maps[j].id == this.id) {
@@ -241,7 +241,7 @@ function makeSeamlessPattern(image) {
 
 function setupPage() {
     $("#createNew").on("click", function () {
-        $("#submitStatus").hide();
+        $("#submitStatus, #exportStatus").hide();
         showEditor();
     });
     $("#rebuildButton").on("click", function () {
@@ -393,7 +393,7 @@ function setupPage() {
     $("#loadButton").on("click", function () {
         setSelectedObject(null);
         $("#createNewImage").attr("src", createCanvas.toDataURL("image/jpeg", 0.1));
-        $("#submitStatus").hide();
+        $("#submitStatus, #exportStatus").hide();
         showLoadWindow();
 
         window.removeEventListener("mousemove", cellUnderMouse, false);
@@ -473,7 +473,7 @@ function validateEmail(mail) {
 }
 
 function rebuild() {
-    $("#submitStatus").hide();
+    $("#submitStatus, #exportStatus").hide();
     setSelectedObject(null);
     vMap = generateVMap();
     $('#author').val("");
@@ -947,13 +947,27 @@ function compareSite(siteA, siteB) {
     }
     return true;
 }
+// Transient feedback for the Export button. A native alert() steals focus and a
+// gamepad can't dismiss it, so write to the inline #exportStatus readout instead
+// (mirrors the #submitStatus pattern) and auto-hide after a moment.
+var exportStatusTimer = null;
+function showExportStatus(message, bg) {
+    var el = $("#exportStatus");
+    el.children("span").text(message);
+    el.css({ "color": "white", "background-color": bg });
+    el.show();
+    if (exportStatusTimer) {
+        clearTimeout(exportStatusTimer);
+    }
+    exportStatusTimer = setTimeout(function () { el.hide(); }, 2500);
+}
 function exportToJSON() {
     basicSanitize();
     navigator.clipboard.writeText(JSON.stringify(vMap)).then(function () {
-        alert("Copied to Clipboard!");
+        showExportStatus("Copied to clipboard!", "green");
     }, function (err) {
         console.log(err);
-        alert("Export failed");
+        showExportStatus("Copy failed — try again", "red");
     });
 }
 
@@ -966,7 +980,13 @@ function submitViaEmail() {
 function submitToGithub() {
     var email = $("#email").val();
     if (!validateEmail(email)) {
-        alert("You must enter a valid email address to submit to GitHub");
+        // Inline feedback instead of a focus-stealing alert() the gamepad can't close.
+        var submitStatus = $("#submitStatus");
+        submitStatus.show();
+        submitStatus.css("color", "white");
+        submitStatus.css("background-color", "red");
+        submitStatus.text("Enter a valid email to submit");
+        $("#email").focus();
         return false;
     }
     basicSanitize();

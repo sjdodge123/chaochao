@@ -8,10 +8,14 @@
 (function () {
     "use strict";
 
-    // Actionable elements, in document order. Covers the landing buttons, the
-    // join page's refresh / join-by-id / start-new controls, and the dynamically
-    // rendered room "Join" buttons (a.join-btn is also a.btn).
-    var NAV_SELECTOR = "a.btn, button.btn, input.form-control";
+    // Single source of truth for gamepad-navigable controls: every such control
+    // carries the data-gp-nav attribute. It's set in the page HTML and on the
+    // dynamically created elements (the theme toggle in theme.js, the room "Join"
+    // buttons in join.js). Decoupling navigability from styling classes is what
+    // lets the navbar theme toggle be reachable without abusing .btn, and makes
+    // "is this control reachable by a pad?" a single explicit, lintable contract.
+    // Disabled controls are skipped here; collectItems() also drops hidden ones.
+    var NAV_SELECTOR = "[data-gp-nav]:not([disabled])";
 
     var MOVE_DEADZONE = 0.5;   // stick must be pushed clearly to step focus
     var REPEAT_DELAY = 250;    // ms between focus steps while a direction is held

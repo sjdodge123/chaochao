@@ -42,10 +42,15 @@ var EG_DPAD_DOWN = 13;
 var EG_DPAD_LEFT = 14;
 var EG_DPAD_RIGHT = 15;
 
-// Every actionable control in whichever window is visible. Hidden ones (the
-// editor while the load grid is up, and vice versa) are filtered out by
-// egItems() via offsetParent, so the same selector serves both screens.
-var EG_NAV_SELECTOR = "#controlPanel button:not([disabled]), #controlPanel input, #loadWindow button:not([disabled])";
+// Single source of truth for gamepad-navigable editor controls: every such control
+// carries the data-gp-nav attribute (the toolbar, the tile/hazard/start-edge
+// palettes, the detail inputs, the action buttons, the map-list tiles, and the
+// navbar theme toggle). The disabled status readouts (#previewStatus/#submitStatus)
+// and the wipe-confirm modal buttons deliberately omit it — the latter are driven by
+// the modal focus trap, not this scan. Hidden controls (whichever window isn't
+// showing) are filtered out by egItems() via offsetParent, so one selector serves
+// both the editor and the load grid.
+var EG_NAV_SELECTOR = "[data-gp-nav]:not([disabled])";
 
 function initEditorGamepad() {
     window.addEventListener("gamepadconnected", egOnConnect, false);
