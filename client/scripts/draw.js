@@ -512,6 +512,9 @@ function drawObjects(dt) {
         drawMap();
         drawLobbyArrows();
         drawLobbyStartButton();
+        if (typeof drawLobbyStationZones === "function") {
+            drawLobbyStationZones();
+        }
     }
     if (currentState == config.stateMap.gated ||
         currentState == config.stateMap.racing ||
@@ -543,6 +546,9 @@ function drawObjects(dt) {
     drawHUD();
     drawMouseDriveIndicator();
     drawOffscreenGoalIndicator();
+    if (typeof drawLobbyHubHud === "function") {
+        drawLobbyHubHud();
+    }
 
     if (currentState == config.stateMap.gameOver) {
         drawGameOverScreen(dt);

@@ -135,6 +135,15 @@ function onGamepadKeyDown(e) {
 
     setInputMethod("kbm"); // a key press means keyboard/mouse is in use
 
+    // A lobby hub panel open on the primary owns Esc/Enter/arrows (handled in
+    // input.js keyDown -> lobbyHubHandlePrimaryKey). Yield so Esc closes the panel
+    // instead of also opening the leave modal/confirm (priority: stationPanel before
+    // a fresh leave prompt; a leave modal already up still takes over below).
+    var primaryHub = (typeof localPlayers !== "undefined") ? localPlayers[primarySlot] : null;
+    if (((primaryHub && primaryHub.stationPanel) || e.defaultPrevented) && !leaveModalIsOpen()) {
+        return;
+    }
+
     // The centre leave modal (used when solo, or when the primary has no inline
     // block) owns the keyboard while open, in any mode: arrows / A-D move between
     // Leave and Cancel, Enter or Space confirms, Esc closes.
@@ -510,6 +519,10 @@ function pollPadForSlot(pad, lp) {
     } else if (!blocks && lp.isPrimary && leaveModalIsOpen()) {
         // Solo: navigate the centre leave modal.
         pollLeaveModal(pad, lp);
+    } else if (lp.stationPanel) {
+        // Lobby hub panel (per-slot): higher priority than the wheel, lower than the
+        // leave confirm. Movement stays halted (it was stopped on open).
+        pollStationPanel(pad, lp);
     } else if (iOwnWheel) {
         pollEmojiWheel(pad, lp);
     } else if (!wheelOpen && buttonPressedThisFrame(pad, GP_BTN_B, lp)) {
@@ -525,6 +538,11 @@ function pollPadForSlot(pad, lp) {
         // (Player 1) pad can open the panel — others keep racing. Start/Options is
         // the conventional "menu" button.
         openSettingsModal(lp);
+    } else if (!wheelOpen && lp.nearStation && buttonPressedThisFrame(pad, GP_BTN_A, lp) &&
+        typeof openStationPanel === "function") {
+        // Parked on a station: A opens its panel (the press is consumed here, so it
+        // doesn't also register as an attack this frame).
+        openStationPanel(lp);
     } else {
         // Normal play (also when another player owns the wheel).
         pollAim(pad, lp);
@@ -825,6 +843,51 @@ function highlightEmoji(items, idx) {
 function clearEmojiHighlight(items) {
     for (var i = 0; i < items.length; i++) {
         items[i].classList.remove("gp-emoji-focus");
+    }
+}
+
+// --- lobby hub station panel (per-pad) ---
+
+// Drive one pad player's open station panel. Navigate with the d-pad or left
+// stick, A confirms (dismisses — changes apply live as you step), B / emoji
+// closes. Per-slot, so two pads can configure two panels simultaneously. The
+// open/nav/confirm/close logic itself lives in lobbyHub.js (input-agnostic).
+function pollStationPanel(pad, lp) {
+    if (typeof stationPanelNav !== "function") {
+        return;
+    }
+    if (buttonPressedThisFrame(pad, GP_BTN_B, lp) || buttonPressedThisFrame(pad, GP_BTN_EMOJI, lp)) {
+        closeStationPanel(lp);
+        return;
+    }
+    if (buttonPressedThisFrame(pad, GP_BTN_A, lp)) {
+        stationPanelConfirm(lp);
+        return;
+    }
+    if (buttonPressedThisFrame(pad, GP_DPAD_LEFT, lp)) { stationPanelNav(lp, -1, 0); return; }
+    if (buttonPressedThisFrame(pad, GP_DPAD_RIGHT, lp)) { stationPanelNav(lp, 1, 0); return; }
+    if (buttonPressedThisFrame(pad, GP_DPAD_UP, lp)) { stationPanelNav(lp, 0, -1); return; }
+    if (buttonPressedThisFrame(pad, GP_DPAD_DOWN, lp)) { stationPanelNav(lp, 0, 1); return; }
+    // Left stick: one step per push, with a repeat throttle so a held stick doesn't
+    // race through the values.
+    var lx = pad.axes[0] || 0;
+    var ly = pad.axes[1] || 0;
+    var THRESH = 0.6;
+    var ddx = 0, ddy = 0;
+    if (Math.abs(lx) > Math.abs(ly)) {
+        if (lx > THRESH) { ddx = 1; } else if (lx < -THRESH) { ddx = -1; }
+    } else {
+        if (ly > THRESH) { ddy = 1; } else if (ly < -THRESH) { ddy = -1; }
+    }
+    if (ddx === 0 && ddy === 0) {
+        lp._panelStickActive = false;
+        return;
+    }
+    var now = Date.now();
+    if (!lp._panelStickActive || (now - (lp._panelStickAt || 0)) > 250) {
+        stationPanelNav(lp, ddx, ddy);
+        lp._panelStickActive = true;
+        lp._panelStickAt = now;
     }
 }
 

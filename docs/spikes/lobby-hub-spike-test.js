@@ -92,6 +92,26 @@ board.collectLobbyCollisionObjects(config.stateMap.lobby, collisionArr);
 const stationsInCollision = collisionArr.filter(o => o && o.isStation).length;
 check(stationsInCollision === stationIds.length, 'all stations join the lobby collision set (' + stationsInCollision + ')');
 
+// Phase 0 (§9.1): the lobby map authors stations[] on verified-clear ground, so the
+// stations come from the map JSON, not the code defaults.
+const aiStation = board.lobbyStations.find(s => s.stationId === 'ai');
+check(aiStation != null && aiStation.x === 450 && aiStation.y === 384,
+    'ai station uses the authored map position (450,384), not the code default');
+
+// Mid-join rehydration (§9.2): a player joining mid-lobby gets the stations + the
+// live AI setting in the gameState snapshot, not just via the startLobby broadcast.
+const sock2 = makeRecordingSocket('spike-p1');
+messenger.addMailBox(sock2.id, sock2);
+sock2.fire('enterGame', sig);
+const gs2 = sock2.lastOf('gameState');
+check(gs2 != null && gs2.lobbyStations != null, 'mid-join gameState carries lobbyStations');
+const decoded = gs2 ? JSON.parse(gs2.lobbyStations) : [];
+check(decoded.length === stationIds.length && decoded.some(s => s[0] === 'ai'),
+    'mid-join lobbyStations decode to the same station set');
+check(gs2 != null && 'lobbyAI' in gs2, 'mid-join gameState carries the lobbyAI setting field');
+hostess.kickFromRoom(sock2.id);
+messenger.removeMailBox(sock2.id);
+
 // --- 2. Per-player ENTER / EXIT edges to the player's own socket -------------
 const player = room.playerList[sock.id];
 const skin = board.lobbyStations.find(s => s.stationId === 'skin');
@@ -165,6 +185,11 @@ sock.fire('setLobbyAI', { enabled: true, count: 3 });
 check(game.botOverride.enabled === true && game.botOverride.count === 3, 'setLobbyAI stored {enabled:true, count:3}');
 game.startGated();
 check(botCount() === 3, 'fillGridWithBots spawns exactly 3 bots when count=3 (got ' + botCount() + ')');
+
+// AI hub listing: getRooms surfaces the bots so the join page can show "+N AI".
+const listing = hostess.getRooms()[sig];
+check(listing != null && listing.aiCount === 3, 'getRooms reports the live bot count (aiCount=3)');
+check(listing != null && listing.aiPlanned === 3, 'getRooms reports the planned AI setting (aiPlanned=3)');
 
 // --- result ------------------------------------------------------------------
 hostess.kickFromRoom(sock.id);

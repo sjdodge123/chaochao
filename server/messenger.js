@@ -1,6 +1,10 @@
 var utils = require('./utils.js');
 var hostess = require('./hostess.js');
 var c = utils.loadConfig();
+// Skin station: expose the curated named-color palette to the client (via the
+// config payload that already ships to every client) so the skin picker's swatches
+// and its "is this color taken?" preview match the server's validation set.
+c.colorPalette = utils.getColorPalette();
 var compressor = require('./compressor.js');
 var debug = require('./debug.js');
 var mailBoxList = {},
@@ -157,7 +161,15 @@ function checkForMail(client) {
 			myID: client.id,
 			gameID: roomSig,
 			world: worldData,
-			music: room.game.currentMusic
+			music: room.game.currentMusic,
+			// Mid-join rehydration (§9.2): a player who joins mid-lobby gets the
+			// walk-up stations here too (startLobby's lobbyStations event already
+			// fired before they were in the room). Null outside the lobby.
+			lobbyStations: (room.game.currentState == c.stateMap.lobby)
+				? compressor.sendLobbyStations(room.game.gameBoard.lobbyStations)
+				: null,
+			// Live AI override so a late joiner's AI panel reflects the room setting.
+			lobbyAI: room.game.botOverride
 		};
 		client.emit("gameState", gameState);
 		//Update all existing players with the new player's info

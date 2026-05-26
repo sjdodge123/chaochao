@@ -95,6 +95,17 @@ function primaryOwnsWheel() {
 function handleClick(event) {
     switch (event.which) {
         case 1: {
+            // Lobby hub: a left click on the primary's prompt/panel opens it, hits a
+            // control, or dismisses it — consume the click before it becomes an attack.
+            if (typeof lobbyHubHandlePrimaryPointer === "function") {
+                var rect = gameCanvas.getBoundingClientRect();
+                var lx = ((event.clientX - rect.left) / newWidth) * LOGICAL_WIDTH;
+                var ly = ((event.clientY - rect.top) / newHeight) * LOGICAL_HEIGHT;
+                if (lobbyHubHandlePrimaryPointer(lx, ly)) {
+                    event.preventDefault();
+                    break;
+                }
+            }
             // Suppress attack only while the PRIMARY's own wheel is up — a pad
             // player's wheel must not freeze the mouse player's attack.
             if (!primaryOwnsWheel()) {
@@ -174,6 +185,16 @@ function keyDown(evt) {
         return;
     }
     if (typeof settingsModalIsOpen === "function" && settingsModalIsOpen()) {
+        return;
+    }
+    // Lobby hub: opening/navigating the primary's station panel consumes the key
+    // (E/Enter to open, arrows/WASD to step, Esc to close) so it never leaks to
+    // movement. preventDefault also signals the separate leave-modal keydown handler
+    // (gamepad.js) to skip, so Esc closes the panel without also opening "Leave?".
+    if (typeof lobbyHubHandlePrimaryKey === "function" && lobbyHubHandlePrimaryKey(evt)) {
+        if (evt.preventDefault) {
+            evt.preventDefault();
+        }
         return;
     }
     if (movingByMouse) {
@@ -389,6 +410,13 @@ function onTouchStart(evt) {
     var touch = evt.changedTouches[0];
     var touchX = (((touch.pageX - rect.left) / newWidth) * LOGICAL_WIDTH);
     var touchY = (((touch.pageY - rect.top) / newHeight) * LOGICAL_HEIGHT);
+    // Lobby hub taps win over the movement/attack tap regions so the prompt/panel
+    // is usable even where it overlaps a control zone (primary slot only).
+    if (typeof config !== "undefined" && config && currentState === config.stateMap.lobby &&
+        typeof lobbyHubHandlePrimaryPointer === "function" && lobbyHubHandlePrimaryPointer(touchX, touchY)) {
+        evt.preventDefault();
+        return;
+    }
     for (var i = 0; i < virtualButtonList.length; i++) {
         if (virtualButtonList[i].bound.pointInRect(touchX, touchY)) {
             var button = virtualButtonList[i].button;

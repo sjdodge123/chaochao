@@ -1542,17 +1542,17 @@ class GameBoard {
 		// the same payload shape the newMap event uses for races).
 		messenger.messageRoomBySig(this.roomSig, "applyHazards", compressor.newHazards(this.hazardList));
 	}
-	// SPIKE (lobby hub): instantiate the walk-up stations for this lobby. Positions
-	// come from an optional map-JSON `stations` array (authored on safe terrain, like
-	// `spawnPad`); if the map omits it we fall back to code defaults positioned
-	// world-relative so the lobby always has stations even on a plain field. A real
-	// implementation would also carry per-station tuning (colors/labels) here.
+	// Instantiate the walk-up hub stations for this lobby. Positions come from an
+	// optional map-JSON `stations` array (authored on verified-clear ground, like
+	// `spawnPad` — see _lobbyTutorial.json); if the map omits it we fall back to code
+	// defaults that flank the central start button on the center row, so the lobby
+	// always has reachable stations even on a plain field.
 	buildLobbyStations() {
 		this.lobbyStations = [];
 		var R = 60; // station radius (a little smaller than the 75px start button)
 		var defaults = [
-			{ id: "skin", kind: "skin", cx: this.world.width * 0.5, cy: this.world.height * 0.78, color: "#36c" },
-			{ id: "ai", kind: "ai", cx: this.world.width * 0.5, cy: this.world.height * 0.22, color: "#3a3" }
+			{ id: "ai", kind: "ai", cx: this.world.width * 0.33, cy: this.world.height * 0.5, color: "#3ad17a" },
+			{ id: "skin", kind: "skin", cx: this.world.width * 0.67, cy: this.world.height * 0.5, color: "#4aa3ff" }
 		];
 		var authored = (this.currentMap != null && Array.isArray(this.currentMap.stations))
 			? this.currentMap.stations
@@ -1561,6 +1561,13 @@ class GameBoard {
 		for (var i = 0; i < src.length; i++) {
 			var s = src[i];
 			this.lobbyStations.push(new LobbyStation(s.cx, s.cy, s.r || R, s.id, s.kind, s.color || "#888"));
+		}
+		// Risk §9.3: a player standing in a zone when the lobby map idle-resets (this
+		// runs again) would otherwise diff against a stale nearStation and emit a
+		// spurious exit. Clear proximity latches whenever the stations are rebuilt.
+		for (var id in this.playerList) {
+			this.playerList[id].nearStation = null;
+			this.playerList[id].touchingStation = null;
 		}
 	}
 	// SPIKE (lobby hub): once-per-tick enter/exit edge detection. handleHit stamps

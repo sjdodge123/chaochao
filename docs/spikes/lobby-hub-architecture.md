@@ -1,10 +1,13 @@
 # Spike: lobby "hub station" architecture (walk-up zones)
 
-Status: **spike complete.** Server vertical slice built + headless-validated on
-branch `spike/lobby-hub-architecture` (based on `db85e0f`, ahead of `origin/main`
-@ `f21ffc5` / v0.8.2). Client cross-input UI is **designed but not built** (see
-§7 — it needs manual multi-input + multi-controller validation a headless harness
-can't provide). Not pushed. This doc is the handoff for production implementation.
+Status: **IMPLEMENTED** (Phases 0–3). The server vertical slice was built first on
+branch `spike/lobby-hub-architecture`; production then added the client cross-input
+UI (`client/scripts/lobbyHub.js` + wiring), Phase-0 safe station placement (authored
+`stations[]` in `_lobbyTutorial.json`), mid-join rehydration, the AI station +
+`getRooms` "+N AI", and the skin station. Keyboard + mouse were live-validated in a
+browser; **touch + multi-controller still need a manual hardware pass** (the one
+matrix a headless/automated harness can't cover). The sections below are the design
+of record. Original spike status: server slice headless-validated, client UI designed.
 
 Backlog stories this enables: `backlog.md` → Lobby → Features: *"AI hub — toggle
 bots and surface their count"* and (greenfield) skin selection. Related prior
