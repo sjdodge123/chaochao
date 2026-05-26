@@ -245,7 +245,7 @@ function egSetMode(mode) {
     } else {
         var items = egItems();
         if (items.length) {
-            egSetFocus(egIndexOf(items) === -1 ? items[0] : egFocusEl);
+            egSetFocus(egIndexOf(items) === -1 ? egDefaultFocus(items) : egFocusEl);
         }
     }
     egShowPrompt(true);
@@ -288,6 +288,19 @@ function egIndexOf(items) {
     return -1;
 }
 
+// The navbar (brand link + theme toggle) is first in document order but isn't the
+// primary action — don't make it the initial selection. Prefer the first navigable
+// control outside the navbar; those controls stay reachable by navigating up to
+// them. Falls back to the first item (e.g. inside the modal trap, none are in a nav).
+function egDefaultFocus(items) {
+    for (var i = 0; i < items.length; i++) {
+        if (!items[i].closest || !items[i].closest("nav")) {
+            return items[i];
+        }
+    }
+    return items[0];
+}
+
 function egSetFocus(el) {
     if (egFocusEl && egFocusEl !== el) {
         egFocusEl.classList.remove("gp-focus");
@@ -313,7 +326,7 @@ function egMove(dir) {
         return;
     }
     if (!egFocusEl || egIndexOf(items) === -1) {
-        egSetFocus(items[0]);
+        egSetFocus(egDefaultFocus(items));
         return;
     }
     var f = egCenter(egFocusEl);
@@ -346,7 +359,7 @@ function egMove(dir) {
 function egActivate() {
     var items = egItems();
     if (egIndexOf(items) === -1) {
-        egSetFocus(items[0]);
+        egSetFocus(egDefaultFocus(items));
         return;
     }
     if (!egFocusEl) {
