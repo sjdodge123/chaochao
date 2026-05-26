@@ -1020,7 +1020,7 @@ function pollLeaveModal(pad, lp) {
 // Row definitions: the navbar control id to toggle, the icon/label to show, and a
 // reader for the current on/off state (the same globals the navbar toggles drive).
 function settingsRowDefs() {
-    return [
+    var defs = [
         { id: "masterControl",     icon: "fa fa-gamepad", label: "Sound effects",  on: function () { return typeof masterVolume !== "undefined" && masterVolume > 0; } },
         { id: "musicControl",      icon: "fas fa-music",  label: "Music",          on: function () { return typeof musicVolume !== "undefined" && musicVolume > 0; } },
         { id: "cameraControl",     icon: "fas fa-video",  label: "Dynamic camera", on: function () { return typeof cameraZoomEnabled !== "undefined" && cameraZoomEnabled; } },
@@ -1029,6 +1029,22 @@ function settingsRowDefs() {
         // #themeToggle. `value` (vs `on`) makes the row show the mode instead of On/Off.
         { id: "themeToggle",       icon: "fas fa-adjust", label: "Theme",          value: function () { return themePrefLabel(); } }
     ];
+    // Account row(s) — controller parity for the navbar login control, which the
+    // in-game pad can't reach. Each .click()s the matching (hidden) auth-control
+    // button, reusing its handler. Only shown when auth is actually configured.
+    // Sign-in redirects and sign-out reloads, so auth state is stable within a
+    // page load and these rows don't need live rebuilding.
+    var auth = (typeof window !== "undefined") ? window.chaochaoAuth : null;
+    if (auth && auth.available) {
+        var profile = typeof auth.getProfile === "function" ? auth.getProfile() : null;
+        if (profile) {
+            defs.push({ id: "signOut", icon: "fas fa-user", label: "Sign out", value: function () { var p = auth.getProfile(); return p ? p.name : ""; } });
+        } else {
+            defs.push({ id: "signInGoogle",  icon: "fas fa-user", label: "Sign in with Google",  value: function () { return ""; } });
+            defs.push({ id: "signInDiscord", icon: "fas fa-user", label: "Sign in with Discord", value: function () { return ""; } });
+        }
+    }
+    return defs;
 }
 
 // Current theme preference as a capitalized label (Auto / Light / Dark). Prefer

@@ -221,6 +221,7 @@
 
     window.chaochaoAuth = {
         ready: ready,
+        available: !!sb,   // Supabase configured + CDN loaded (auth actually usable)
         deviceId: deviceId,
         getHandshake: getHandshake,
         getProfile: getProfile,
