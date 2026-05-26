@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.9.1 — 2026-05-26
+
 ### General
 
 - The lobby now has walk-up "hub" stations: drive onto the **AI Bots** pad to choose how many bots join the next race (or turn them off), and the **Skins** pad to recolour your kart from the palette. Open a station's panel with E / a tap / the A button, and each couch player can set their own station at the same time. By default the grid auto-fills toward ~8 racers, so bots make up the difference as players join and leave — and the current setting is shown to the whole lobby.
