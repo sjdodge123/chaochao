@@ -12,6 +12,14 @@ name: PR validation
 on:
   pull_request:
     branches: [main]
+    # Pure map submissions (only client/maps/** changed) are validated by
+    # map-submission.yml instead — it runs utils.validateMap on the new map AND
+    # ticks it through the real engine, so these code-oriented checks (bundle
+    # build, JS syntax) add nothing. A mixed code+map PR still has non-map files,
+    # so paths-ignore does NOT skip it and these checks run as normal. Safe to skip
+    # because main has no required status checks (only a code-owner review gates merge).
+    paths-ignore:
+      - 'client/maps/**'
 
 # Adding Playwright as a devDep would otherwise make `npm ci` download browser
 # binaries on every job. Skip that globally; the Playwright jobs install the
