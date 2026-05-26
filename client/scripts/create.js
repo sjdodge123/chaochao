@@ -342,6 +342,17 @@ function setupPage() {
         previewMap();
         return false;
     });
+    // Remember the "Enable AI racers" preview choice across sessions. Default
+    // off: a missing/garbled value leaves the box unchecked. Wrapped in try/catch
+    // so a disabled localStorage (private mode) just falls back to the default.
+    try {
+        $("#enableAICheckbox").prop("checked", localStorage.getItem("previewEnableAI") === "true");
+    } catch (e) { }
+    $("#enableAICheckbox").on("change", function () {
+        try {
+            localStorage.setItem("previewEnableAI", $(this).is(":checked") ? "true" : "false");
+        } catch (e) { }
+    });
     $("#exportButton").on("click", function () {
         exportToJSON();
         return false;
@@ -917,7 +928,11 @@ function previewMap() {
     // object goes to the server so both sides resolve the same id.
     var json = JSON.stringify(vMap);
     sessionStorage.setItem('previewMap', json);
-    server.emit('createPreviewRoom', json);
+    // Default off: preview a bot-free solo run unless the editor ticked the box.
+    // sessionStorage.previewMap stays the raw map (the play page reads it from
+    // there); only the socket payload carries the { map, enableAI } wrapper.
+    var enableAI = $("#enableAICheckbox").is(":checked");
+    server.emit('createPreviewRoom', JSON.stringify({ map: vMap, enableAI: enableAI }));
 }
 
 function basicSanitize() {

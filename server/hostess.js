@@ -118,14 +118,17 @@ var PREVIEW_COOP_CAP = 4;
 // play-test of the unsaved map. isPreview keeps it private: getRooms never lists
 // it and findARoom never matchmakes into it, so no stranger is placed here even
 // though capacity is now > 1. The map is injected onto this room's gameBoard only
-// — never the shared map library.
-exports.createPreviewRoom = function (previewMap) {
+// — never the shared map library. enableAI defaults off, so the play-test runs
+// bot-free unless the editor opted in.
+exports.createPreviewRoom = function (previewMap, enableAI) {
 	var sig = generateRoomSig();
 	var room = game.getRoom(sig, PREVIEW_COOP_CAP);
 	room.isPreview = true;
 	room.game.locked = true;
 	room.game.gameBoard.isPreview = true;
 	room.game.gameBoard.previewMap = previewMap;
+	// Default off: a preview is a solo, bot-free run unless the editor opted in.
+	room.game.gameBoard.previewAI = enableAI === true;
 	roomList[sig] = room;
 	// Safety net: if the creator's play page never connects (abandoned launch),
 	// reclaim the empty room so it can't linger. A joined room is left alone.

@@ -94,19 +94,24 @@ function checkForMail(client) {
 	});
 
 	client.on('createPreviewRoom', function (package) {
-		var previewMap;
+		var parsed;
 		try {
-			previewMap = JSON.parse(package);
+			parsed = JSON.parse(package);
 		} catch (e) {
 			client.emit("previewRejected", { reason: "Could not read map data." });
 			return;
 		}
+		// Accept either a { map, enableAI } wrapper (current editor) or a raw map
+		// object (legacy payload). AI defaults off, so a preview is bot-free
+		// unless the editor explicitly opted in.
+		var previewMap = (parsed && parsed.map != null) ? parsed.map : parsed;
+		var enableAI = (parsed && parsed.enableAI === true);
 		var result = utils.validateMap(previewMap, c);
 		if (!result.valid) {
 			client.emit("previewRejected", { reason: result.reason });
 			return;
 		}
-		var sig = hostess.createPreviewRoom(previewMap);
+		var sig = hostess.createPreviewRoom(previewMap, enableAI);
 		client.emit("previewRoomCreated", { gameID: sig });
 	});
 
