@@ -2238,35 +2238,56 @@ function drawLobbyStartButton() {
     }
 }
 function drawGate() {
-    if (gate != null) {
-        gameContext.save();
-        gameContext.beginPath();
-        gameContext.lineWidth = 5;
-        gameContext.rect(gate.x, gate.y, gate.width, gate.height);
-        if (brutalRound == false) {
-            gameContext.fillStyle = "grey";
-        } else {
-            gameContext.fillStyle = brutalPatterns[brutalRoundConfig.brutalTypes.toString()];
-        }
-        if (currentState == config.stateMap.collapsing) {
-            gameContext.fillStyle = patterns[config.tileMap.lava.id];
-        }
-        gameContext.fill();
-        gameContext.restore();
+    if (gates == null || gates.length == 0) {
+        return;
     }
+    gameContext.save();
+    gameContext.lineWidth = 5;
+    if (brutalRound == false) {
+        gameContext.fillStyle = "grey";
+    } else {
+        gameContext.fillStyle = brutalPatterns[brutalRoundConfig.brutalTypes.toString()];
+    }
+    if (currentState == config.stateMap.collapsing) {
+        gameContext.fillStyle = patterns[config.tileMap.lava.id];
+    }
+    for (var i = 0; i < gates.length; i++) {
+        var g = gates[i];
+        gameContext.beginPath();
+        gameContext.rect(g.x, g.y, g.width, g.height);
+        gameContext.fill();
+    }
+    gameContext.restore();
 }
 
 function drawGateLine() {
-    if (gate != null) {
-        gameContext.save();
-        gameContext.beginPath();
-        gameContext.moveTo(gate.x + gate.width, gate.y);
-        gameContext.lineTo(gate.x + gate.width, gate.y + gate.height);
-        gameContext.lineWidth = 5;
-        gameContext.strokeStyle = "red";
-        gameContext.stroke();
-        gameContext.restore();
+    if (gates == null || gates.length == 0) {
+        return;
     }
+    gameContext.save();
+    gameContext.lineWidth = 5;
+    gameContext.strokeStyle = "red";
+    for (var i = 0; i < gates.length; i++) {
+        var g = gates[i];
+        gameContext.beginPath();
+        // Release line on the gate's INNER edge (the side players launch toward).
+        if (g.edge == "right") {
+            gameContext.moveTo(g.x, g.y);
+            gameContext.lineTo(g.x, g.y + g.height);
+        } else if (g.edge == "top") {
+            gameContext.moveTo(g.x, g.y + g.height);
+            gameContext.lineTo(g.x + g.width, g.y + g.height);
+        } else if (g.edge == "bottom") {
+            gameContext.moveTo(g.x, g.y);
+            gameContext.lineTo(g.x + g.width, g.y);
+        } else {
+            // left (default): inner edge is the right side of the strip.
+            gameContext.moveTo(g.x + g.width, g.y);
+            gameContext.lineTo(g.x + g.width, g.y + g.height);
+        }
+        gameContext.stroke();
+    }
+    gameContext.restore();
 }
 function drawPingCircles() {
     if (pingCircles.length == 0) {

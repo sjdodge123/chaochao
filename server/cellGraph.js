@@ -386,12 +386,23 @@ function computeMapParTime(map) {
     if (!map || !Array.isArray(map.cells) || map.cells.length === 0) {
         return 0;
     }
-    var H = c.worldHeight;
-    var step = H / 10;
-    if (step < 1) { step = 1; }
+    var W = c.worldWidth, H = c.worldHeight;
+    // Sample along the start edge. Opposite-edge combos are symmetric about the
+    // world center, so either edge gives the same par — sample the first.
+    var edge = (Array.isArray(map.startEdges) && map.startEdges.length > 0) ? map.startEdges[0] : "left";
+    var samples = [];
+    if (edge === "top" || edge === "bottom") {
+        var fixedY = (edge === "top") ? 40 : H - 40;
+        var stepX = W / 10; if (stepX < 1) { stepX = 1; }
+        for (var x = 40; x < W; x += stepX) { samples.push({ x: x, y: fixedY }); }
+    } else {
+        var fixedX = (edge === "right") ? W - 40 : 40;
+        var stepY = H / 10; if (stepY < 1) { stepY = 1; }
+        for (var y = 40; y < H; y += stepY) { samples.push({ x: fixedX, y: y }); }
+    }
     var pars = [];
-    for (var y = 40; y < H; y += step) {
-        var route = findPathToNearestGoal(map, { x: 40, y: y });
+    for (var s = 0; s < samples.length; s++) {
+        var route = findPathToNearestGoal(map, samples[s]);
         if (route != null) {
             var par = estimatePathTime(map, route.path);
             if (par > 0) { pars.push(par); }

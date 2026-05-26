@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### Map editor
+
+- Map makers can now pick which edge the race starts from — left, right, top, or bottom — instead of always starting on the left. You can also choose a two-sided start (left + right, or top + bottom) that splits the racers across opposite edges for a head-on dash to the middle. The editor draws the start gate(s) where you picked so you can line up your goal; two-sided maps play fairest with a goal near the center.
 
 ## v0.9.1 — 2026-05-26
 

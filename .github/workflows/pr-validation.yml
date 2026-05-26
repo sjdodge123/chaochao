@@ -114,3 +114,6 @@ jobs:
 
       - name: Headless game-loop smoke test
         run: node .github/scripts/smoke-test.js
+
+      - name: Headless start-edges test (single edges + opposite-edge combos)
+        run: node .github/scripts/start-edges-test.js

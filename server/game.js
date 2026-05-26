@@ -26,6 +26,11 @@ exports.getRoom = function (sig, size) {
 // so they never collide with socket ids (which key human players in playerList).
 var botSeq = 0;
 
+// Depth (px) of a starting gate measured inward from its world edge. The gate
+// spans the full extent of the perpendicular axis. Matches the editor's gate
+// strip width so the previewed gate lines up with the server's.
+var GATE_DEPTH = 75;
+
 class Room {
 	constructor(sig, size) {
 		this.sig = sig;
@@ -851,7 +856,11 @@ class GameBoard {
 		this.lobbyStartButton;
 		this.alivePlayerCount = 0;
 		this.sleepingPlayerCount = 0;
-		this.startingGate = null;
+		// One gate per start edge: single-edge maps have one, opposite-edge combos
+		// (left+right / top+bottom) have two. Built in setupMap from the map's
+		// startEdges. The `startingGate` getter below returns gate 0 so older
+		// single-gate readers keep working.
+		this.startingGates = [];
 		var allMaps = utils.loadMaps();
 		// lobbyOnly maps (e.g. the lobby tutorial islands) are kept out of the race
 		// rotation; the lobby loads its map from lobbyMaps separately.
@@ -882,6 +891,11 @@ class GameBoard {
 		// at most once per audienceNearBurnCooldown, no matter how many racers
 		// are skating the lava edge at once.
 		this.nextNearBurnTime = 0;
+	}
+	// Back-compat alias: most of the codebase only ever needs "the gate", which is
+	// gate 0. Opposite-edge maps add a second gate read through startingGates[].
+	get startingGate() {
+		return this.startingGates.length > 0 ? this.startingGates[0] : null;
 	}
 	update(currentState, playerAliveCount, sleepingPlayerCount, dt) {
 		this.alivePlayerCount = playerAliveCount;
@@ -982,7 +996,11 @@ class GameBoard {
 				continue;
 			}
 			_engine.preventEscape(this.playerList[player], this.world);
-			_engine.preventEscape(this.playerList[player], this.startingGate);
+			// Clamp each player to THEIR gate (opposite-edge maps hold two groups).
+			var gate = this.startingGates[this.playerList[player].gateIndex] || this.startingGates[0];
+			if (gate != null) {
+				_engine.preventEscape(this.playerList[player], gate);
+			}
 			objectArray.push(this.playerList[player]);
 		}
 		for (var punchId in this.punchList) {
@@ -990,12 +1008,15 @@ class GameBoard {
 		}
 	}
 	collectRaceCollisionObjects(currentState, objectArray) {
+		// During collapse every gate becomes a lava wall players are crushed into.
+		if (currentState == this.stateMap.collapsing) {
+			for (var g = 0; g < this.startingGates.length; g++) {
+				objectArray.push(this.startingGates[g]);
+			}
+		}
 		for (var player in this.playerList) {
 			if (!this.playerList[player].alive) {
 				continue;
-			}
-			if (currentState == this.stateMap.collapsing) {
-				objectArray.push(this.startingGate);
 			}
 			_engine.preventEscape(this.playerList[player], this.world);
 			_engine.checkCollideCells(this.playerList[player], this.currentMap);
@@ -1800,8 +1821,51 @@ class GameBoard {
 		this.resetPlayers(currentState);
 		this.loadNextMap(currentState);
 		this.checkApplyBrutalConfig();
-		this.startingGate = new Gate(0, 0, 75, this.world.height);
+		this.startingGates = this.buildStartingGates(this.resolveStartEdges());
 		this.gatePlayers();
+	}
+	// The edges players start from for the current map. Legacy maps (and anything
+	// malformed) default to a single left gate, so behaviour is unchanged for
+	// every committed map that predates this field.
+	resolveStartEdges() {
+		var KNOWN = { left: 1, right: 1, top: 1, bottom: 1 };
+		var se = (this.currentMap != null) ? this.currentMap.startEdges : null;
+		if (!Array.isArray(se) || se.length === 0) {
+			return ["left"];
+		}
+		var edges = [];
+		for (var i = 0; i < se.length && edges.length < 2; i++) {
+			if (KNOWN[se[i]] && edges.indexOf(se[i]) === -1) {
+				edges.push(se[i]);
+			}
+		}
+		return edges.length > 0 ? edges : ["left"];
+	}
+	// One Gate per start edge. The gate hugs its edge with a fixed depth (GATE_DEPTH)
+	// and spans the full width/height of the opposite axis. Gate stores true
+	// dimensions, so these rects are correct on any edge.
+	buildStartingGates(startEdges) {
+		var W = this.world.width, H = this.world.height, D = GATE_DEPTH;
+		var rects = {
+			left: [0, 0, D, H],
+			right: [W - D, 0, D, H],
+			top: [0, 0, W, D],
+			bottom: [0, H - D, W, D]
+		};
+		var gates = [];
+		for (var i = 0; i < startEdges.length; i++) {
+			var r = rects[startEdges[i]];
+			if (r == null) { continue; }
+			var gate = new Gate(r[0], r[1], r[2], r[3]);
+			gate.edge = startEdges[i];
+			gates.push(gate);
+		}
+		if (gates.length === 0) {
+			var fallback = new Gate(0, 0, D, H);
+			fallback.edge = "left";
+			gates.push(fallback);
+		}
+		return gates;
 	}
 	startCollapse(loc) {
 		this.collapseLoc = loc;
@@ -1952,12 +2016,38 @@ class GameBoard {
 		this.resetPlayers(currentState);
 	}
 	gatePlayers() {
+		// Balanced alternating split: with two gates (opposite-edge maps), even
+		// spawn-order players go to gate 0 and odd to gate 1, so neither edge is
+		// stacked. Single-gate maps put everyone at gate 0.
+		var i = 0;
+		var gateCount = this.startingGates.length || 1;
 		for (var playerID in this.playerList) {
-			this.gatePlayer(this.playerList[playerID]);
+			this.gatePlayer(this.playerList[playerID], i % gateCount);
+			i++;
 		}
 	}
-	gatePlayer(player) {
-		var loc = this.startingGate.findFreeLoc(player);
+	// Pick the gate currently holding the fewest players, so mid-sequence joins
+	// (the AI grid fill happens AFTER gatePlayers, and late human joins arrive via
+	// determineGameState) keep opposite-edge maps balanced. `exclude` skips the
+	// player being placed so it doesn't count its own stale default gate.
+	leastPopulatedGateIndex(exclude) {
+		var counts = [];
+		for (var i = 0; i < this.startingGates.length; i++) { counts.push(0); }
+		for (var pid in this.playerList) {
+			if (this.playerList[pid] === exclude) { continue; }
+			var gi = this.playerList[pid].gateIndex || 0;
+			if (gi >= 0 && gi < counts.length) { counts[gi]++; }
+		}
+		var best = 0;
+		for (var k = 1; k < counts.length; k++) { if (counts[k] < counts[best]) { best = k; } }
+		return best;
+	}
+	gatePlayer(player, gateIndex) {
+		if (gateIndex == null) { gateIndex = this.leastPopulatedGateIndex(player); }
+		if (gateIndex >= this.startingGates.length) { gateIndex = 0; }
+		player.gateIndex = gateIndex;
+		var gate = this.startingGates[gateIndex];
+		var loc = gate.findFreeLoc(player);
 		player.x = loc.x;
 		player.y = loc.y;
 		// Sync the engine's integration position too. The engine advances newX/newY

@@ -143,10 +143,16 @@ exports.gameState = function (game) {
 		packet[4] = game.gameBoard.lobbyStartButton.color;
 	}
 	if (game.currentState == game.stateMap.gated || game.currentState == game.stateMap.racing || game.currentState == game.stateMap.collapsing) {
-		packet[1] = game.gameBoard.startingGate.x;
-		packet[2] = game.gameBoard.startingGate.y;
-		packet[3] = game.gameBoard.startingGate.width;
-		packet[4] = game.gameBoard.startingGate.height;
+		// One or two starting gates (opposite-edge maps have two). Each gate is
+		// [x, y, width, height, edge]; width/height are true dimensions. The client
+		// decoder in gameboard.js#checkGameState mirrors this shape (lockstep rule).
+		var gates = game.gameBoard.startingGates || [];
+		var gatePackets = [];
+		for (var gi = 0; gi < gates.length; gi++) {
+			var g = gates[gi];
+			gatePackets.push([g.x, g.y, g.width, g.height, g.edge || "left"]);
+		}
+		packet[1] = gatePackets;
 	}
 	packet = JSON.stringify(packet);
 	return packet;

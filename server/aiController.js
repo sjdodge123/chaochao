@@ -993,48 +993,91 @@ function steerBot(bot, ctx, dt) {
     decideAttack(bot, ctx, { sharpTurn: sharpTurn, lavaAhead: fl.brake, braking: braking });
 }
 
-// The non-lava launch lanes along the gate's front row: the Y positions where a
-// bot can stand (and be released) onto solid ground, not lava. On a lava-walled
-// map only a few exist, so bots contest them — like real players fighting over
-// the safe spots — instead of spreading evenly onto the lava.
-function computeSafeLanes(ctx, gate, standX) {
+// Per-gate launch geometry, agnostic to which edge the gate hugs. A gate is thin
+// on one axis: left/right gates are vertical (lanes run along Y, bots launch
+// along X); top/bottom gates are horizontal (lanes run along X, launch along Y).
+//   launchPos  — the inner-edge coordinate on the launch axis (release line)
+//   launchDir  — +1 / -1 sign of the launch direction along that axis
+//   standPos   — coordinate on the launch axis where a held bot actually stands
+//   laneMin/Max— span on the lane (perpendicular) axis, inset off the corners
+function gateGeometry(gate) {
+    var vertical = gate.width < gate.height; // left/right are thin in width
+    var edge = gate.edge || (vertical
+        ? (gate.x <= 0 ? "left" : "right")
+        : (gate.y <= 0 ? "top" : "bottom"));
+    var g;
+    if (vertical) {
+        var innerX = (edge === "left") ? gate.x + gate.width : gate.x;
+        g = {
+            vertical: true,
+            launchPos: innerX,
+            launchDir: (edge === "left") ? 1 : -1,
+            standPos: innerX + ((edge === "left") ? -10 : 10),
+            laneMin: gate.y + 16,
+            laneMax: gate.y + gate.height - 16,
+            penMin: gate.y, penMax: gate.y + gate.height
+        };
+    } else {
+        var innerY = (edge === "top") ? gate.y + gate.height : gate.y;
+        g = {
+            vertical: false,
+            launchPos: innerY,
+            launchDir: (edge === "top") ? 1 : -1,
+            standPos: innerY + ((edge === "top") ? -10 : 10),
+            laneMin: gate.x + 16,
+            laneMax: gate.x + gate.width - 16,
+            penMin: gate.x, penMax: gate.x + gate.width
+        };
+    }
+    return g;
+}
+
+// The non-lava launch lanes along the gate's front row: positions on the lane
+// axis where a bot can stand (and be released) onto solid ground, not lava. On a
+// lava-walled map only a few exist, so bots contest them — like real players
+// fighting over the safe spots — instead of spreading evenly onto the lava.
+function computeSafeLanes(ctx, geo) {
     var lanes = [];
-    var topY = gate.y + 16, botY = gate.y + gate.height - 16;
-    for (var y = topY; y <= botY; y += 20) {
-        if (!isLavaAt(ctx, standX, y)) { lanes.push(y); }
+    for (var p = geo.laneMin; p <= geo.laneMax; p += 20) {
+        var x = geo.vertical ? geo.standPos : p;
+        var y = geo.vertical ? p : geo.standPos;
+        if (!isLavaAt(ctx, x, y)) { lanes.push(p); }
     }
     return lanes;
 }
 
-// Gated phase: bots aren't racing yet (held inside the start gate). They press to
-// the front row, target a SAFE (non-lava) launch lane so they don't drive into
+// Gated phase: bots aren't racing yet (held inside their start gate). They press
+// to the front row, target a SAFE (non-lava) launch lane so they don't drive into
 // lava the instant the gate opens, and bursty-punch to contest a lane. Everyone
 // converges on the safe lanes, so they jostle for them. preventEscape keeps them
 // in the gate; lava can't kill here, only once racing starts.
-function steerGated(bot, ctx, dt) {
+function steerGated(bot, ctx) {
     var ai = bot.ai || (bot.ai = newBotState(bot.profile));
-    var gate = ctx.gate;
-    var frontX = (gate ? gate.x + gate.width : 75) - bot.radius - 3;
-    var topY = (gate ? gate.y : 0) + bot.radius + 4;
-    var botYmax = (gate ? gate.y + gate.height : c.worldHeight) - bot.radius - 4;
-    var ty;
+    var geo = ctx.geo;
+    // Stand just behind the release line, inside the gate.
+    var front = geo.launchPos - geo.launchDir * (bot.radius + 3);
+    var perpMin = geo.penMin + bot.radius + 4;
+    var perpMax = geo.penMax - bot.radius - 4;
+    var tperp;
     if (ctx.safeLanes && ctx.safeLanes.length > 0) {
         // Each bot is assigned a safe lane by its seed so the field SPREADS across
         // the available lanes (route diversity) instead of all converging on the
         // nearest one. When safe lanes are scarce (lava-walled gate) several bots
         // share a lane and jostle for it. Sticky per-bot jitter avoids exact stacks.
         if (ai.gateJitter == null) { ai.gateJitter = (Math.random() - 0.5) * 16; }
-        ty = ctx.safeLanes[ai.pathSeed % ctx.safeLanes.length] + ai.gateJitter;
+        tperp = ctx.safeLanes[ai.pathSeed % ctx.safeLanes.length] + ai.gateJitter;
     } else {
         // No safe-lane reading: gentle shuffle along the gate (fallback).
-        if (ai.gateY == null) { ai.gateY = bot.y; }
+        if (ai.gateY == null) { ai.gateY = geo.vertical ? bot.y : bot.x; }
         ai.gateY += (Math.random() - 0.5) * 12;
-        if (ai.gateY < topY) { ai.gateY = topY; }
-        if (ai.gateY > botYmax) { ai.gateY = botYmax; }
-        ty = ai.gateY;
+        if (ai.gateY < perpMin) { ai.gateY = perpMin; }
+        if (ai.gateY > perpMax) { ai.gateY = perpMax; }
+        tperp = ai.gateY;
     }
-    if (ty < topY) { ty = topY; } else if (ty > botYmax) { ty = botYmax; }
-    var dx = frontX - bot.x, dy = ty - bot.y;
+    if (tperp < perpMin) { tperp = perpMin; } else if (tperp > perpMax) { tperp = perpMax; }
+    var tx = geo.vertical ? front : tperp;
+    var ty = geo.vertical ? tperp : front;
+    var dx = tx - bot.x, dy = ty - bot.y;
     var m = mag(dx, dy) || 1;
     bot.targetDirX = (dx / m) * 0.75; // press to the front, not flat out
     bot.targetDirY = (dy / m) * 0.75;
@@ -1048,24 +1091,32 @@ function steerGatedPhase(gameBoard) {
     var hasBot = false;
     for (var id in playerList) { if (playerList[id].isAI && playerList[id].alive) { hasBot = true; break; } }
     if (!hasBot) { return; }
-    var gate = gameBoard.startingGate;
-    var ctx = {
-        map: gameBoard.currentMap,
-        lavaId: c.tileMap.lava.id,
-        players: playerList,
-        projectileList: gameBoard.projectileList,
-        gate: gate,
-        infection: false, hockey: false, cloudy: false, lightning: false,
-        puck: null, clouds: [], blackoutActive: false, visionBlockedUntil: 0
-    };
-    // Where a gated bot ends up standing (front row, inside the gate); the lava
-    // check uses that X so a "safe lane" is one the bot can actually launch from.
-    var standX = gate ? gate.x + gate.width - 10 : 65;
-    ctx.safeLanes = gate ? computeSafeLanes(ctx, gate, standX) : [];
+    var gates = gameBoard.startingGates || [];
+    if (gates.length === 0) { return; }
+    // Build a per-gate steering context once (geometry + safe lanes for that gate),
+    // so each bot is steered toward the gate it was assigned (player.gateIndex).
+    var gateCtxs = [];
+    for (var gi = 0; gi < gates.length; gi++) {
+        var geo = gateGeometry(gates[gi]);
+        var ctx = {
+            map: gameBoard.currentMap,
+            lavaId: c.tileMap.lava.id,
+            players: playerList,
+            projectileList: gameBoard.projectileList,
+            gate: gates[gi],
+            geo: geo,
+            infection: false, hockey: false, cloudy: false, lightning: false,
+            puck: null, clouds: [], blackoutActive: false, visionBlockedUntil: 0
+        };
+        ctx.safeLanes = computeSafeLanes(ctx, geo);
+        gateCtxs.push(ctx);
+    }
     for (var pid in playerList) {
         var bot = playerList[pid];
         if (!bot.isAI || !bot.alive || bot.isSpectator) { continue; }
-        steerGated(bot, ctx);
+        var idx = bot.gateIndex || 0;
+        if (idx >= gateCtxs.length) { idx = 0; }
+        steerGated(bot, gateCtxs[idx]);
     }
 }
 

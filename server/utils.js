@@ -464,8 +464,40 @@ exports.validateMap = function (vMap, config) {
             }
         }
     }
+    // startEdges: optional; absent => default ["left"] (legacy maps). One edge for
+    // a single start, or an OPPOSITE pair (left+right / top+bottom) for a two-sided
+    // start. Adjacent pairs (e.g. left+top) and repeats are rejected.
+    if (vMap.startEdges != null) {
+        var startEdgeCheck = validateStartEdges(vMap.startEdges);
+        if (!startEdgeCheck.valid) {
+            return startEdgeCheck;
+        }
+    }
     return { valid: true };
 }
+// Shared start-edge rule used by validateMap on both sides. Kept as a standalone
+// so the client editor can mirror it exactly.
+function validateStartEdges(startEdges) {
+    var OPPOSITE = { left: "right", right: "left", top: "bottom", bottom: "top" };
+    if (!Array.isArray(startEdges) || startEdges.length < 1 || startEdges.length > 2) {
+        return { valid: false, reason: "startEdges must list 1 or 2 edges." };
+    }
+    for (var i = 0; i < startEdges.length; i++) {
+        if (OPPOSITE[startEdges[i]] == null) {
+            return { valid: false, reason: "startEdges has an unknown edge." };
+        }
+    }
+    if (startEdges.length === 2) {
+        if (startEdges[0] === startEdges[1]) {
+            return { valid: false, reason: "startEdges can't repeat the same edge." };
+        }
+        if (OPPOSITE[startEdges[0]] !== startEdges[1]) {
+            return { valid: false, reason: "Two start edges must be opposite (left+right or top+bottom)." };
+        }
+    }
+    return { valid: true };
+}
+exports.validateStartEdges = validateStartEdges;
 exports.getContentCount = function () {
     return mapListing.length + soundListing.length + imgListing.length;
 }
