@@ -45,39 +45,78 @@ if (enabled) {
     console.log('[auth] Supabase env vars absent — auth DISABLED, all clients are guests.');
 }
 
+// Short-lived cache of token -> { userId, expiresAt }. Lets repeated handshakes
+// for the same token (reconnects, and the network-verify path that asymmetric-key
+// projects always take) skip a Supabase round-trip, and caps how often the same
+// token re-hits the network. userId may be null (a verified-bad result is cached
+// briefly too, to blunt repeated bad tokens).
+var tokenCache = new Map();
+var VERIFY_OK_TTL_MS = 60 * 1000;   // re-verify a good token at most once a minute
+var VERIFY_BAD_TTL_MS = 30 * 1000;  // remember a bad token briefly
+var VERIFY_TIMEOUT_MS = 4000;       // never let a hung getUser() stall the handshake
+
+function cachePut(token, userId, ttl) {
+    tokenCache.set(token, { userId: userId, expiresAt: Date.now() + ttl });
+    // Cheap cap so the cache can't grow without bound under random-token spam.
+    if (tokenCache.size > 5000) {
+        tokenCache.clear();
+    }
+    return userId;
+}
+
 // Resolve an access token (Supabase JWT) to a user id, or null if invalid/absent.
 // Prefers local HS256 verification with the JWT secret (no round-trip per
 // connection); falls back to supabase.auth.getUser() when the secret is missing
-// or the local verify fails (e.g. asymmetric signing keys).
+// or the local verify fails (e.g. asymmetric signing keys). Verifies the token is
+// an actual user token (aud/role 'authenticated'), not an API key or other JWT.
 async function verifyToken(token) {
     if (!enabled || !token) {
         return null;
     }
+    var hit = tokenCache.get(token);
+    if (hit && hit.expiresAt > Date.now()) {
+        return hit.userId;
+    }
     if (jwt && JWT_SECRET) {
         try {
             var decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
-            if (decoded && decoded.sub) {
-                return decoded.sub;
+            if (decoded && decoded.sub &&
+                (decoded.aud === 'authenticated' || decoded.role === 'authenticated')) {
+                return cachePut(token, decoded.sub, VERIFY_OK_TTL_MS);
             }
+            // Signed but not an authenticated user token (e.g. an API key JWT).
+            return cachePut(token, null, VERIFY_BAD_TTL_MS);
         } catch (e) {
-            // Fall through to network verification below.
+            // Fall through to network verification (covers asymmetric signing keys).
         }
     }
     try {
-        var res = await supabase.auth.getUser(token);
+        var res = await Promise.race([
+            supabase.auth.getUser(token),
+            new Promise(function (resolve) {
+                setTimeout(function () { resolve({ error: { message: 'verify timeout' } }); }, VERIFY_TIMEOUT_MS);
+            })
+        ]);
         if (res && res.data && res.data.user && !res.error) {
-            return res.data.user.id;
+            return cachePut(token, res.data.user.id, VERIFY_OK_TTL_MS);
         }
     } catch (e) {
         console.log('[auth] verifyToken network fallback failed:', e.message);
     }
-    return null;
+    return cachePut(token, null, VERIFY_BAD_TTL_MS);
 }
 
 // Ensure a `progression` row exists for the user and record `deviceId` on it
 // (dedup). Never resets existing progress — only creates the row if missing and
 // appends the device id. Account-linking merges of guest progress happen later
 // when progression mechanics exist; for now we just stamp the device.
+//
+// NOTE: this read-then-write isn't atomic — two simultaneous first-connections for
+// the same user could both insert, or two new devices could race the append and
+// drop one. It's benign (only device_ids dedup, and it self-heals on the next
+// connect) and only touched off the gameplay path. The fully-atomic fix is a
+// Postgres RPC doing `array_append` + dedup in one statement; left for when
+// device tracking actually matters.
 async function ensureProgressionRow(userId, deviceId) {
     if (!enabled || !userId) {
         return;
@@ -130,12 +169,17 @@ exports.enabled = enabled;
 exports.supabase = supabase;
 exports.verifyToken = verifyToken;
 exports.ensureProgressionRow = ensureProgressionRow;
-// Public, browser-safe config to inject into served pages. Returns null when
-// auth is disabled OR the anon key is absent so the client also treats everyone
-// as a guest. NEVER includes the service-role key or the JWT secret.
+// Public, browser-safe config to inject into served pages. Returns null unless
+// the server is fully able to VERIFY tokens (`enabled`) AND the anon key is
+// present — otherwise the client would show a login UI and mint tokens the
+// server silently can't validate, demoting every signed-in user to a guest. Tied
+// to `enabled` so both sides agree. NEVER includes the service-role key or JWT secret.
 exports.getPublicConfig = function () {
     var anonKey = process.env.SUPABASE_ANON_KEY || null;
-    if (!SUPABASE_URL || !anonKey) {
+    if (!enabled || !anonKey) {
+        if (anonKey && !enabled) {
+            console.log('[auth] SUPABASE_ANON_KEY is set but auth is DISABLED (missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY) — hiding client login so users are not silently treated as guests.');
+        }
         return null;
     }
     return { url: SUPABASE_URL, anonKey: anonKey };

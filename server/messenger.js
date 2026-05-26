@@ -56,6 +56,29 @@ exports.getTotalPlayers = function () {
 	return count;
 }
 
+// Avatar-skin URLs must be https images on a known provider CDN (Discord/Google).
+// A signed-in player picks their avatar client-side, but the server can't trust the
+// supplied URL — without a host allowlist, a player could broadcast an arbitrary
+// host that every peer's browser then fetches (tracking-pixel / IP-leak vector).
+function isAllowedAvatarUrl(url) {
+	if (typeof url !== "string" || url.length > 512) {
+		return false;
+	}
+	var parsed;
+	try {
+		parsed = new URL(url);
+	} catch (e) {
+		return false;
+	}
+	if (parsed.protocol !== "https:") {
+		return false;
+	}
+	var host = parsed.hostname.toLowerCase();
+	return host === "cdn.discordapp.com" ||
+		host === "media.discordapp.net" ||
+		host.endsWith(".googleusercontent.com"); // lh3.googleusercontent.com etc.
+}
+
 function checkForMail(client) {
 	client.emit("welcome", client.id);
 	client.emit("contentDelivery", JSON.stringify({ count: utils.getContentCount(), mapnames: utils.getMapListings(), soundnames: utils.getSoundListings(), imagenames: utils.getImageListings() }));
@@ -311,11 +334,14 @@ function checkForMail(client) {
 		}
 		var url = (payload && typeof payload.url === "string") ? payload.url : null;
 		var name = (payload && typeof payload.name === "string") ? payload.name : null;
-		if (url == null || !/^https:\/\//.test(url) || url.length > 512) {
-			return; // require a sane https image URL
+		if (!isAllowedAvatarUrl(url)) {
+			return; // must be an https image on a known provider CDN (Discord/Google)
 		}
 		if (name != null) {
-			name = name.replace(/[\x00-\x1f]/g, "").trim().slice(0, 24); // strip control chars, cap length
+			// Strip control + bidi/zero-width/format chars (canvas name-spoofing), then
+			// cap length by CODE POINT so we never split a surrogate pair (emoji names).
+			name = name.replace(/[\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/g, "").trim();
+			name = Array.from(name).slice(0, 24).join("");
 		}
 		player.avatarUrl = url;
 		player.name = (name && name.length) ? name : null;

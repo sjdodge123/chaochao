@@ -28,7 +28,14 @@ function supabaseConfigTag() {
     if (!cfg) {
         return '';
     }
-    return '<script>window.__SUPABASE__ = ' + JSON.stringify(cfg) + ';</script>';
+    // Escape characters that could break out of the inline <script> or terminate
+    // the script element early (defense-in-depth — the values are operator-set env
+    // vars, but never inline unescaped JSON into HTML).
+    var json = JSON.stringify(cfg)
+        .replace(/</g, '\\u003c')
+        .replace(/\u2028/g, '\\u2028')
+        .replace(/\u2029/g, '\\u2029');
+    return '<script>window.__SUPABASE__ = ' + json + ';</script>';
 }
 
 // Inject the running server's version and the latest release headline into
@@ -166,20 +173,52 @@ server.listen(c.port, () => {
   messenger.build(io);
 });
 
+// Accept only a sane deviceId from the handshake (an opaque client UUID): a
+// string of bounded length. Rejects junk/oversized values that would otherwise
+// be persisted into the progression row's device_ids array.
+function sanitizeDeviceId(raw) {
+    if (typeof raw !== 'string') return null;
+    if (raw.length < 8 || raw.length > 64) return null;
+    if (!/^[A-Za-z0-9_-]+$/.test(raw)) return null;
+    return raw;
+}
+
+// Lightweight per-IP token-verification throttle so a client spamming
+// connections with bogus tokens can't amplify into unbounded Supabase getUser()
+// calls. Sliding 60s window; over the cap we skip verification (treat as guest)
+// rather than reject — guests always connect.
+var verifyHits = new Map();
+var VERIFY_WINDOW_MS = 60 * 1000;
+var VERIFY_MAX_PER_WINDOW = 60;
+function allowVerify(ip) {
+    var now = Date.now();
+    var rec = verifyHits.get(ip);
+    if (!rec || now - rec.start > VERIFY_WINDOW_MS) {
+        verifyHits.set(ip, { start: now, count: 1 });
+        if (verifyHits.size > 10000) { verifyHits.clear(); }
+        return true;
+    }
+    rec.count++;
+    return rec.count <= VERIFY_MAX_PER_WINDOW;
+}
+
 // Resolve every Socket.IO handshake to a Supabase user id when an access token
 // is supplied, otherwise leave the connection as a guest. We NEVER reject here —
 // anonymous play must keep working exactly as before. A valid token also ensures
 // the user's durable `progression` row exists and records this device.
 io.use(async (socket, next) => {
     var handshake = socket.handshake.auth || {};
-    socket.deviceId = handshake.deviceId || null;
+    socket.deviceId = sanitizeDeviceId(handshake.deviceId);
     socket.userId = null;
-    if (handshake.token) {
+    if (handshake.token && allowVerify(socket.handshake.address)) {
         try {
             var userId = await auth.verifyToken(handshake.token);
             if (userId) {
                 socket.userId = userId;
-                await auth.ensureProgressionRow(userId, socket.deviceId);
+                // Fire-and-forget: recording the row must NOT block/stall the
+                // handshake on Supabase latency — guests and gameplay don't wait on it.
+                Promise.resolve(auth.ensureProgressionRow(userId, socket.deviceId))
+                    .catch(function (e) { console.log('[auth] ensureProgressionRow failed:', e.message); });
                 console.log('[auth] socket', socket.id, 'resolved to user', userId,
                     socket.deviceId ? '(device ' + socket.deviceId + ')' : '');
             }

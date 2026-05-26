@@ -75,10 +75,13 @@
         <!-- Browser-safe Supabase config (URL + anon key); injected server-side,
              stripped when auth is disabled. Must precede auth.js in the bundle. -->
         <!-- SUPABASE_CONFIG -->
-        <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+        <!-- supabase-js + auth.js are deferred (non-render-blocking) and run in order
+             before DOMContentLoaded; auth.js is standalone (not bundled) since it
+             only defines window.chaochaoAuth, used by the bundle at runtime. -->
+        <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+        <script defer src="scripts/auth.js"></script>
         <!-- BUILD: bundle-start -->
         <script src="scripts/game.js"></script>
-        <script src="scripts/auth.js"></script>
         <script src="scripts/client.js"></script>
         <script src="scripts/audio.js"></script>
         <script src="scripts/input.js"></script>

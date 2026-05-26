@@ -1669,6 +1669,11 @@ function drawPlayer(player, dt) {
             player.x + camera.getCameraX() - sprite.halfSize,
             player.y + camera.getCameraY() - sprite.halfSize
         );
+        // Opt-in avatar skin: the player's picture, shrunk inside a distinct border,
+        // overlaid on the kart so it reads as an external (not earned) skin. Drawn
+        // INSIDE the dim/immune alpha scope so it fades/flashes with the kart body
+        // (non-local karts dim during a race; immune karts pulse) instead of popping.
+        drawAvatarSkin(player, sprite);
     } finally {
         if (dimKart) {
             gameContext.restore();
@@ -1677,10 +1682,6 @@ function drawPlayer(player, dt) {
             gameContext.restore();
         }
     }
-
-    // Opt-in avatar skin: the player's picture, shrunk inside a distinct border,
-    // overlaid on the kart so it reads as an external (not earned) skin.
-    drawAvatarSkin(player, sprite);
 
     if (player.ability != null) {
         drawAbilityIndicator(player.x, player.y, player);
@@ -1884,11 +1885,11 @@ function drawAvatarSkin(player, sprite) {
 // recognizable. Aligned with the sprite's camera convention (camera offset is 0
 // in the default desktop view). Humans have no name.
 function drawBotName(player) {
-    // Use the same raw-coord convention as the emote/chat bubble (drawEmoji) so the
-    // name and the bubble stay attached to each other. camera.getCameraX/Y is 0 in
-    // the default desktop view, so this also aligns with the kart there.
-    var x = player.x;
-    var y = player.y + player.radius + 12;
+    // Match the kart sprite / avatar / emote convention (player position + camera
+    // offset) so the label stays attached to the kart in dynamic-camera/zoom mode
+    // too. (getCameraX/Y is 0 in the default desktop view; non-zero on touch zoom.)
+    var x = player.x + camera.getCameraX();
+    var y = player.y + camera.getCameraY() + player.radius + 12;
     gameContext.save();
     gameContext.textAlign = "center";
     // Kept translucent so the labels read without obscuring the action underneath.

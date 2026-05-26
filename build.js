@@ -5,7 +5,6 @@ const path = require('path');
 const bundles = {
     'play.bundle.min.js': [
         'client/scripts/game.js',
-        'client/scripts/auth.js',
         'client/scripts/client.js',
         'client/scripts/audio.js',
         'client/scripts/input.js',
@@ -19,7 +18,6 @@ const bundles = {
         'client/scripts/utils.js'
     ],
     'create.bundle.min.js': [
-        'client/scripts/auth.js',
         'client/scripts/rhill-voronoi-core.js',
         'client/scripts/create.js',
         'client/scripts/osk.js',
@@ -28,7 +26,6 @@ const bundles = {
         'client/scripts/controllerHeader.js'
     ],
     'join.bundle.min.js': [
-        'client/scripts/auth.js',
         'client/scripts/join.js',
         'client/scripts/osk.js',
         'client/scripts/menuGamepad.js',
