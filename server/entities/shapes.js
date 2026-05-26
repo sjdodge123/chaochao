@@ -99,10 +99,40 @@ class Rect extends Shape {
 	}
 }
 
+// A Gate is the start-pen players are held in before the race. Unlike the base
+// Rect (whose width/height double as the far-corner coordinates and so only
+// line up with true dimensions when x=y=0), a Gate can sit on ANY edge of the
+// world (left/right/top/bottom), so it stores width/height as TRUE dimensions
+// and overrides the two Rect methods that assumed far-corner coords. With this,
+// preventEscape (bound.x + bound.width), the gate-line render (gate.x+width),
+// and getSafeLoc all compute the correct edges for a non-origin gate.
 class Gate extends Rect {
 	constructor(x, y, width, height) {
 		super(x, y, width, height, 0, "grey");
 		this.isGate = true;
+		// Which world edge this gate hugs ("left"/"right"/"top"/"bottom"); set by
+		// the GameBoard when it builds the gate from the map's startEdges. Used by
+		// the client to draw the release line on the gate's inner edge.
+		this.edge = null;
+	}
+	getVertices() {
+		var x2 = this.x + this.width,
+			y2 = this.y + this.height;
+		return [
+			{ x: this.x, y: this.y },
+			{ x: x2, y: this.y },
+			{ x: x2, y: y2 },
+			{ x: this.x, y: y2 }
+		];
+	}
+	getSafeLoc(size) {
+		var objW = size + 5 + c.playerBaseRadius * 2;
+		var objH = size + 5 + c.playerBaseRadius * 2;
+		return {
+			x: Math.floor(Math.random() * (this.width - 2 * objW)) + this.x + objW,
+			y: Math.floor(Math.random() * (this.height - 2 * objH)) + this.y + objH,
+			width: objW
+		};
 	}
 	handleHit() {
 

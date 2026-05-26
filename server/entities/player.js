@@ -82,6 +82,10 @@ class Player extends Circle {
 		// is currently INSIDE, so enter/exit edges can be derived. See game.js.
 		this.touchingStation = null;
 		this.nearStation = null;
+		// Which starting gate this player is held in / launches from. Maps with
+		// opposite-edge starts (e.g. left+right) split players across two gates;
+		// single-edge maps keep everyone at gate 0.
+		this.gateIndex = 0;
 		this.reachedGoal = false;
 		this.timeReached = null;
 		this.collapseMargin = null; // distance to the lava front while collapsing (for clutch-goal cheer)
