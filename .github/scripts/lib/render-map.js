@@ -125,6 +125,71 @@ function fillPolygon(buf, W, H, pts, rgb) {
     }
 }
 
+// Stamp a solid pixel (used by the line/dot routines below).
+function setPx(buf, W, H, x, y, rgb) {
+    if (x < 0 || y < 0 || x >= W || y >= H) { return; }
+    const o = (y * W + x) * 4;
+    buf[o] = rgb[0]; buf[o + 1] = rgb[1]; buf[o + 2] = rgb[2]; buf[o + 3] = 255;
+}
+
+// Thick line segment: fill every pixel within `halfW` of the segment (a→b).
+function drawThickSegment(buf, W, H, ax, ay, bx, by, rgb, halfW) {
+    const minX = Math.max(0, Math.floor(Math.min(ax, bx) - halfW));
+    const maxX = Math.min(W - 1, Math.ceil(Math.max(ax, bx) + halfW));
+    const minY = Math.max(0, Math.floor(Math.min(ay, by) - halfW));
+    const maxY = Math.min(H - 1, Math.ceil(Math.max(ay, by) + halfW));
+    const dx = bx - ax, dy = by - ay;
+    const len2 = dx * dx + dy * dy || 1;
+    const r2 = halfW * halfW;
+    for (let y = minY; y <= maxY; y++) {
+        for (let x = minX; x <= maxX; x++) {
+            let t = ((x - ax) * dx + (y - ay) * dy) / len2;
+            if (t < 0) { t = 0; } else if (t > 1) { t = 1; }
+            const px = ax + t * dx, py = ay + t * dy;
+            const ddx = x - px, ddy = y - py;
+            if (ddx * ddx + ddy * ddy <= r2) { setPx(buf, W, H, x, y, rgb); }
+        }
+    }
+}
+
+// Filled disc marker (route start/end).
+function drawDisc(buf, W, H, cx, cy, rgb, radius) {
+    const r2 = radius * radius;
+    for (let y = Math.floor(cy - radius); y <= Math.ceil(cy + radius); y++) {
+        for (let x = Math.floor(cx - radius); x <= Math.ceil(cx + radius); x++) {
+            const ddx = x - cx, ddy = y - cy;
+            if (ddx * ddx + ddy * ddy <= r2) { setPx(buf, W, H, x, y, rgb); }
+        }
+    }
+}
+
+// Draw a route (array of {x,y} world points) as a trail: a dark casing under a
+// coloured core so it stays legible over any tile colour, plus end markers.
+function drawRoute(buf, W, H, pts, rgb, scale, coreHalf) {
+    if (!Array.isArray(pts) || pts.length < 2) { return; }
+    const sp = pts.map(p => ({ x: p.x * scale, y: p.y * scale }));
+    for (let i = 0; i + 1 < sp.length; i++) {
+        drawThickSegment(buf, W, H, sp[i].x, sp[i].y, sp[i + 1].x, sp[i + 1].y, [20, 20, 20], coreHalf + 2);
+    }
+    for (let i = 0; i + 1 < sp.length; i++) {
+        drawThickSegment(buf, W, H, sp[i].x, sp[i].y, sp[i + 1].x, sp[i + 1].y, rgb, coreHalf);
+    }
+    drawDisc(buf, W, H, sp[0].x, sp[0].y, [255, 255, 255], coreHalf + 3);
+    drawDisc(buf, W, H, sp[0].x, sp[0].y, rgb, coreHalf + 1);
+    const last = sp[sp.length - 1];
+    drawDisc(buf, W, H, last.x, last.y, [255, 255, 255], coreHalf + 3);
+    drawDisc(buf, W, H, last.x, last.y, rgb, coreHalf + 1);
+}
+
+// High-contrast trail colours, kept distinct from the map palette (brown/green/
+// orange/blue/tan/gold). Exposed so the comment table can label-match them.
+const ROUTE_COLORS = [
+    { name: 'magenta', rgb: [255, 0, 200] },
+    { name: 'cyan', rgb: [0, 220, 255] },
+    { name: 'white', rgb: [245, 245, 245] },
+    { name: 'purple', rgb: [150, 80, 255] }
+];
+
 // Box-downsample an RGBA buffer by integer factor `f` (cheap antialiasing).
 function downsample(src, W, H, f) {
     const w = Math.floor(W / f), h = Math.floor(H / f);
@@ -213,8 +278,17 @@ function renderMapToPng(map, config, opts) {
         const poly = cellPolygon(cell).map(p => ({ x: p.x * scale, y: p.y * scale }));
         fillPolygon(buf, W, H, poly, rgb);
     }
+    // Optional route trails, drawn slowest-first so the fastest line sits on top.
+    if (Array.isArray(opts.routes)) {
+        const coreHalf = Math.max(2, Math.round(2.5 * SS));
+        for (const route of opts.routes) {
+            if (route && Array.isArray(route.points)) {
+                drawRoute(buf, W, H, route.points, route.rgb || [255, 255, 255], scale, coreHalf);
+            }
+        }
+    }
     const ds = downsample(buf, W, H, SS);
     return encodePng(ds.buf, ds.w, ds.h);
 }
 
-module.exports = { renderMapToPng, parseColor };
+module.exports = { renderMapToPng, parseColor, ROUTE_COLORS };
