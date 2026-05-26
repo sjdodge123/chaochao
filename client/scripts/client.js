@@ -252,7 +252,9 @@ function registerScoreHandlers(server) {
 		var id = (packet != null && packet.id != null) ? packet.id : packet;
 		if (playerList[id] != null) {
 			playerList[id].alive = false;
+			playerList[id].recapState = RECAP_SCORED; // recap: vanish with a goal poof, not hover the goal
 		}
+		recapMarkHighlight('goal', [id]); // flag a scoring moment for the recap
 		playSound(playerFinished);
 		// Lava was chasing when they crossed the line — the crowd erupts.
 		if (packet != null && packet.clutch) {
@@ -265,6 +267,7 @@ function registerScoreHandlers(server) {
 		playerAbilityUsed(id);
 		if (playerList[id] != null) {
 			playerList[id].alive = false;
+			playerList[id].recapState = RECAP_DIED; // recap: vanish with a death poof, not hover the lava
 			playerList[id].onFire = 0;
 			playerList[id].deathMessage = '💀';
 			// Remember where/when they fell: a dead local player can press attack
@@ -289,6 +292,7 @@ function registerScoreHandlers(server) {
 	});
 	server.on("playerInfected", function (id) {
 		playerList[id].alive = true;
+		playerList[id].recapState = RECAP_ALIVE; // revived as a zombie — back in play for the recap
 		playerList[id].deathMessage = null;
 		// Revived as a zombie — clear the death spot so no stale skull/ping data
 		// lingers on a now-alive player (keeps the death-state guards consistent
@@ -325,6 +329,7 @@ function registerScoreHandlers(server) {
 function registerStateHandlers(server) {
 	server.on("startWaiting", function (packet) {
 		debugLog("startWaiting");
+		recapNewMatch(); // a fresh match is forming — drop last game's recap clips
 		setLobbySfxDampen(false); // lobby emptied back to waiting — restore full SFX
 		if (typeof lobbyHubReset === "function") {
 			lobbyHubReset();
@@ -334,6 +339,7 @@ function registerStateHandlers(server) {
 	});
 	server.on("startLobby", function (packet) {
 		debugLog("startLobby, packet=", packet);
+		recapNewMatch(); // a fresh match is forming — drop last game's recap clips
 		// Set state first so loadNewMap doesn't run its gated-only goal-ping branch.
 		currentState = config.stateMap.lobby;
 		spawnLobbyStartButton(packet);
@@ -380,8 +386,12 @@ function registerStateHandlers(server) {
 		}
 	});
 	server.on("startOverview", function (packet) {
-		// Round ended (solo death or goal reached) — schedule the editor return
-		// first, so a throw in the rendering calls below can't strand the creator.
+		// Round ended (solo death or goal reached) — harvest this round's best clips
+		// into the cross-round recap archive (uses the buffer + map snapshot captured
+		// during the round, so it's safe to run before resetRound clears live state).
+		recapHarvestRound();
+		// Schedule the editor return first, so a throw in the rendering calls below
+		// can't strand the creator.
 		previewReturnToEditor();
 		resetRound();
 		stopSound(lavaCollapse);
@@ -400,7 +410,8 @@ function registerStateHandlers(server) {
 		previewReturnToEditor();
 		playerWon = packet.winner;
 		achievements = packet.achievements;
-		recapBuild(achievements); // assemble the recap montage from the buffer
+		recapHarvestRound();      // fold the final round's clips into the archive first
+		recapBuild(achievements); // then assemble the montage from the whole-match archive
 		stopAllSounds();
 		playSound(gameOverSound);
 		// Decode the SERVER colour (not the live .color, which colour-blind assist
@@ -540,6 +551,7 @@ function registerCombatHandlers(server) {
 		$.when.apply($, promises).then(function () {
 			collapseCells(cells);
 		});
+		if (typeof recapMarkMapDirty === "function") { recapMarkMapDirty(); } // map changed -> recap re-snapshots
 	});
 	server.on('explodedCells', function (cells) {
 		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing || currentState == config.stateMap.lobby) {
@@ -547,7 +559,9 @@ function registerCombatHandlers(server) {
 			explodedCells(cells);
 			if (center != null) {
 				spawnExplosion(center.x, center.y, config.tileMap.abilities.bomb.explosionRadius);
+				recapMarkEffect("explosion", center.x, center.y, { radius: config.tileMap.abilities.bomb.explosionRadius, color: "#ff7a18" });
 			}
+			if (typeof recapMarkMapDirty === "function") { recapMarkMapDirty(); } // exploded tiles -> recap re-snapshots
 			playSound(bombExplosion);
 			addTrauma(0.5);
 		}
@@ -567,6 +581,7 @@ function registerCombatHandlers(server) {
 			}
 			if (ex != null && ey != null) {
 				spawnExplosion(ex, ey, config.tileMap.abilities.iceCannon.explosionRadius, "#9fe8ff");
+				recapMarkEffect("explosion", ex, ey, { radius: config.tileMap.abilities.iceCannon.explosionRadius, color: "#9fe8ff" });
 			}
 			playSound(iceExplosion);
 			addTrauma(0.45);
@@ -681,6 +696,7 @@ function registerAbilityHandlers(server) {
 			var tileChanges = JSON.parse(payload);
 			changeTilesBulk(tileChanges);
 		});
+		if (typeof recapMarkMapDirty === "function") { recapMarkMapDirty(); } // tile-swap -> recap re-snapshots
 	});
 	// The tiles a tileSwap is about to flip — clients pulse/flicker them for the
 	// (random 3-6s) warn-up before the swap actually lands.

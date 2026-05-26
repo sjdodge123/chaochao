@@ -136,6 +136,9 @@ function updatePingCircles(dt) {
 // the server startCollapse).
 function spawnCollapseShockwave(x, y) {
 	collapseShockwaves.push({ x: x, y: y, radius: 0, maxRadius: 650, pass: 0 });
+	if (typeof recapMarkEffect === "function") {
+		recapMarkEffect("shockwave", x, y, {});
+	}
 }
 function updateCollapseShockwaves(dt) {
 	if (collapseShockwaves.length == 0) { return; }
@@ -953,6 +956,9 @@ function fireMuzzleFlash(owner, color) {
 	}
 	var front = pos({ x: p.x, y: p.y }, p.radius, p.angle);
 	spawnMuzzleFlash(front.x, front.y, p.angle, color);
+	if (typeof recapMarkEffect === "function") {
+		recapMarkEffect("muzzle", front.x, front.y, { angle: p.angle, color: color });
+	}
 	if (isLocalId(owner)) {
 		addTrauma(0.18);
 	}

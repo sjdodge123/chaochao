@@ -1,49 +1,125 @@
-// recap.js — End-of-game recap montage (client-only, MVP / Option A).
+// recap.js — End-of-game recap montage (client-only, no GIF encoding).
 //
-// Instead of capturing pixels or encoding real GIFs, we buffer the lightweight
-// per-tick player positions the client already decodes every server tick
-// (updatePlayerList), then on gameOver we replay short windows of that buffer
-// into a small framed window — cycling one clip per achievement, credits style.
+// We buffer the lightweight per-tick player state the client already decodes
+// every server tick, then replay short windows of it into a small framed
+// window on the gameOver screen — cycling one clip per highlight, credits style.
 //
-// Why this is cheap: the in-game camera is inactive (camera.active === false),
-// so world coordinates map 1:1 onto gameCanvas. A clip renders by blitting the
-// already-cached map (mapCanvas) and the buffered player dots through a single
-// uniform scale into the recap window rect — no camera math, no per-frame
-// pixel storage, no encoder. The whole buffer is just numbers.
+// Why this is cheap: the in-game camera is inactive on the gameOver screen, so
+// the FX helpers (drawFire / drawAbilityIndicator / the kart sprite) all draw at
+// raw world coordinates with a zero camera offset. A clip renders by setting up
+// a single world->window transform (zoom + follow), blitting that round's baked
+// map snapshot, and re-drawing the buffered karts through the SAME helpers the
+// live game uses — so a clip looks like the real game (rotation-aware flames,
+// ability aimers, infection auras), not a field of dots. The buffer is numbers
+// plus one cached map image per round.
 //
-// Highlight moments are derived from events the client already receives
-// (deaths, multi-kills, sprees) so no server changes are needed; tying a clip
-// to the *exact* play behind an achievement would need server-side timestamps
-// and is left as a follow-up.
+// Variety across rounds: a single round's buffer would only ever hold the FINAL
+// round (each race resets the buffer), so instead we HARVEST the best clips of
+// every round into a persistent archive (recapArchive) as each round ends, each
+// paired with a clean pre-collapse snapshot of that round's map. At gameOver we
+// pick a spread of clips across rounds / subjects / highlight types.
+//
+// Highlight moments are derived from events the client already receives (deaths,
+// goals, multi-kills, sprees) — no server changes needed.
 
 // --- tuning ---------------------------------------------------------------
-var RECAP_BUFFER_MS = 14000;   // rolling history kept during the final round
-var RECAP_CLIP_MS = 3000;      // playback length of each replayed clip
-var RECAP_PRE_MS = 1200;       // portion of the clip BEFORE the highlight moment
-var RECAP_DISPLAY_MS = 3500;   // how long each achievement + clip stays on screen
+var RECAP_BUFFER_MS = 14000;   // rolling per-round history kept while racing
+var RECAP_CLIP_MS = 3000;      // length of real footage captured per clip (the slice window)
+var RECAP_SLOWMO = 1.3;        // playback time-stretch: >1 = cinematic slow-mo, 1.0 = real-time
+var RECAP_PLAY_MS = RECAP_CLIP_MS * RECAP_SLOWMO; // on-screen playback duration of one clip (slowed)
+var RECAP_PRE_MS = 1400;       // portion of the captured footage BEFORE the highlight moment
+var RECAP_DISPLAY_MS = RECAP_PLAY_MS; // hold each clip for one full (slowed) playthrough
 var RECAP_MAX_CLIPS = 4;       // keep the montage short within gameOverTime (20s)
+var RECAP_PER_ROUND = 2;       // most clips harvested from any single round (leave room for variety)
 var RECAP_ZOOM = 2.4;          // camera zoom over fit-to-window (higher = tighter on the action)
 var RECAP_CAM_LERP = 0.12;     // how fast the follow-cam glides toward the action each frame
-var RECAP_WIN_W = 400;         // clip window width (logical px) — centred under the headline winner
+var RECAP_WIN_W = 620;         // clip window width (logical px) — centred under the headline winner
+var RECAP_HEADER_GAP = 84;     // headline baseline -> clip window top; the caption + player chips live here
+var RECAP_EXIT_FX_MS = 750;    // how long a death/goal poof lingers before the kart vanishes
+var RECAP_EXPLOSION_MS = 430;  // explosion effect lifetime (matches spawnExplosion's maxAge)
+var RECAP_MUZZLE_MS = 160;     // muzzle-flash lifetime (matches spawnMuzzleFlash's maxAge)
+var RECAP_SHOCKWAVE_MS = 1100; // one collapse-shockwave ring pass (600px/s out to ~650px)
+var RECAP_MAP_SNAP_MS = 450;   // min gap between dynamic-map snapshots (collapse/explosion/swap)
+var RECAP_MAP_SCALE = 0.6;     // downscale map snapshots (clips are small) to bound memory
+var RECAP_MAP_MAX = 28;        // cap rolling map snapshots per round (downscaled, so cheap)
 
-// multi-kill achievement key -> the marker type recorded for it
+// per-player frame tuple: [id, x, y, angle, velX, velY, state, onFire, ability, infected, emote, speedFx]
+// emote = active emoji string or null; speedFx = 0 none / 1 buff / 2 debuff
+var RF_ID = 0, RF_X = 1, RF_Y = 2, RF_ANGLE = 3, RF_VX = 4, RF_VY = 5, RF_STATE = 6, RF_FIRE = 7, RF_ABILITY = 8, RF_INFECTED = 9, RF_EMOTE = 10, RF_SPEEDFX = 11;
+// per-frame screen-effect flag bit (blindfold ability — shown as a corner badge, not rendered)
+var RFX_BLIND = 1;
+// projectile tuple: [type, x, y, color, radius]; hazard tuple: [id, x, y, angle, railX, railY]
+var RP_TYPE = 0, RP_X = 1, RP_Y = 2, RP_COLOR = 3, RP_RADIUS = 4;
+var RH_ID = 0, RH_X = 1, RH_Y = 2, RH_ANGLE = 3, RH_RAILX = 4, RH_RAILY = 5;
+// player.recapState values (also the RF_STATE values captured per frame)
+var RECAP_ALIVE = 0, RECAP_DIED = 1, RECAP_SCORED = 2;
+
+// Brutal-round captions: a themed tag prefixed onto a clip's title when the
+// round it came from was a brutal round. Spatial brutal elements (pucks, bombs,
+// clouds, zombies) are replayed; whole-screen effects (blackout) are not.
+// Blindfold is an ABILITY (room-wide blind), not a brutal round — its icon badge
+// is drawn separately. Other full-screen effects (cloudy/blackout) ARE brutal
+// rounds, so their icons come from the brutal-round set (brutalRoundImages).
+var RECAP_BLIND_ABILITY = "blind";
+
+// Highlight-type metadata: caption shown over the clip + a selection priority
+// (higher = more interesting, picked first) used to spread the montage.
+var RECAP_TYPE_INFO = {
+	mega: { title: "Mega Kill!", priority: 7 },
+	triple: { title: "Triple Kill!", priority: 6 },
+	double: { title: "Double Kill!", priority: 5 },
+	godlike: { title: "Godlike!", priority: 5 },
+	rampage: { title: "Rampage!", priority: 4 },
+	spree: { title: "Killing Spree!", priority: 3 },
+	goal: { title: "Goal!", priority: 2 },
+	death: { title: "Eliminated", priority: 1 }
+};
+// multi-kill achievement key -> the marker type recorded for it (title refinement)
 var RECAP_TYPE_FOR_KEY = { doubleKill: "double", tripleKill: "triple", megaKill: "mega" };
 
-// --- capture state --------------------------------------------------------
-var recapFrames = [];   // [{ t, players: [[id, x, y, alive], ...] }]
-var recapMarkers = [];  // [{ t, type, ids: [...] }] highlight moments
+// --- per-round capture state ----------------------------------------------
+var recapFrames = [];          // [{ t, players, projs, hazards }] for the CURRENT round
+var recapMarkers = [];         // [{ t, type, ids: [...] }] highlight moments this round
+var recapEffects = [];         // [{ t, type, x, y, params }] one-shot FX (explosions) this round
+var recapMeta = {};            // id -> { color, radius, name }; survives playerList being cleared
+var recapMaps = [];            // [{ t, image, pad, world, scale }] time-stamped map snapshots (dynamic map state)
+var recapMapDirty = false;     // a map-mutating event fired -> take a fresh snapshot soon
+var recapLastMapSnap = 0;      // throttle clock for map snapshots
+// --- cross-round archive --------------------------------------------------
+var recapArchive = [];         // [{ title, type, priority, ids, frames, map, exits }] harvested clips
 // --- playback state -------------------------------------------------------
-var recapSequence = null; // [{ title, ids, frames, clipMs }] built at gameOver
+var recapSequence = null;      // [{ title, ids, frames, map, exits }] built at gameOver
 var recapIndex = 0;
-var recapElapsed = 0;     // ms spent on the current sequence item
-var recapCamX = null;     // smoothed follow-camera centre (world coords); null = snap next frame
+var recapElapsed = 0;          // ms spent on the current sequence item
+var recapCamX = null;          // smoothed follow-camera centre (world coords); null = snap next frame
 var recapCamY = null;
 
-// Clear all recap state. Called at the start of every race so the buffer only
-// ever holds frames from the CURRENT map (the one a clip is rendered against).
+// Clear the per-round buffer. Called at the start of every race so capture only
+// holds frames from the CURRENT round — the cross-round archive is left intact
+// (that's what gives the montage clips from earlier rounds). Also re-arms each
+// known player's recap state, since a new round revives everyone.
 function recapReset() {
 	recapFrames = [];
 	recapMarkers = [];
+	recapEffects = [];
+	recapMaps = [];
+	recapMapDirty = false;
+	recapLastMapSnap = 0;
+	if (typeof playerList !== "undefined" && playerList != null) {
+		for (var id in playerList) {
+			if (playerList[id] != null) {
+				playerList[id].recapState = RECAP_ALIVE;
+			}
+		}
+	}
+}
+
+// Clear EVERYTHING for a brand-new match (called when the lobby/waiting screen
+// comes up). Otherwise last game's clips would carry into the next montage.
+function recapNewMatch() {
+	recapReset();
+	recapArchive = [];
+	recapMeta = {};
 	recapSequence = null;
 	recapIndex = 0;
 	recapElapsed = 0;
@@ -51,116 +127,437 @@ function recapReset() {
 	recapCamY = null;
 }
 
-// Snapshot the current player positions. Called once per server tick from the
+// Snapshot the current player state. Called once per server tick from the
 // gameUpdates handler while racing/collapsing. Trims anything older than the
 // rolling window so memory stays bounded regardless of round length.
 function recapCaptureFrame() {
 	if (playerList == null) {
 		return;
 	}
+	// Snapshot the map's CURRENT appearance (re-snapshotting as collapse lava /
+	// exploded tiles / tile-swaps change it) so a clip replays the board as it looked
+	// at that moment — not a single clean or all-lava image.
+	recapCaptureMap();
 	var now = Date.now();
+	var nowMs = now;
 	var players = [];
 	for (var id in playerList) {
 		var p = playerList[id];
 		if (p == null || p.x == null) {
 			continue;
 		}
-		players.push([p.id, p.x, p.y, p.alive !== false]);
+		// Liveness comes from the authoritative live flag each frame; recapState only
+		// supplies the died-vs-scored flavour — so a stale recapState on a late-joining
+		// or re-added player can't leave an alive kart poofed/invisible in the clip.
+		var state = RECAP_ALIVE;
+		if (p.alive === false) { state = (p.recapState === RECAP_SCORED) ? RECAP_SCORED : RECAP_DIED; }
+		var speedFx = 0;
+		if (p.speedBuffUntil != null && nowMs < p.speedBuffUntil) { speedFx = 1; }
+		else if (p.speedDebuffUntil != null && nowMs < p.speedDebuffUntil) { speedFx = 2; }
+		// Emote: capture [msg, ageMs, durationMs] so the bubble can fade in the replay
+		// (drawEmoji needs chatMessageAt/Duration). Plain string is tolerated too (demo).
+		var emote = (p.chatMessage != null)
+			? [p.chatMessage, now - (p.chatMessageAt || now), p.chatMessageDuration || 4000]
+			: null;
+		players.push([p.id, p.x, p.y, p.angle, p.velX, p.velY, state,
+			(p.onFire != null ? p.onFire : 0), (p.ability != null ? p.ability : null), p.infected === true,
+			emote, speedFx]);
+		// Keep the static per-player look so a clip can render even after the live
+		// playerList drops bots at the gameOver->waiting transition.
+		recapMeta[p.id] = {
+			color: p.color,
+			radius: (p.radius != null) ? p.radius : 12,
+			name: p.name || null
+		};
 	}
 	if (players.length === 0) {
 		return;
 	}
-	recapFrames.push({ t: now, players: players });
+	// Blindfold ability active this frame — shown later as a corner icon badge, not
+	// rendered (it'd just blind the clip). Blackout/cloudy are brutal rounds, so
+	// their icon badges come from the brutal-round set instead.
+	var fx = 0;
+	if (typeof blindfold !== "undefined" && blindfold != null && blindfold.color != null) { fx |= RFX_BLIND; }
+	// Also snapshot the brutal-round world objects (pucks/bombs/clouds + bumpers),
+	// the active targeting aimers, and the current screen-shake so the clip can
+	// replay them — not just the karts.
+	recapFrames.push({
+		t: now, players: players, projs: recapCaptureProjs(), hazards: recapCaptureHazards(),
+		aimers: recapCaptureAimers(),
+		trauma: (typeof shakeTrauma !== "undefined" && shakeTrauma > 0) ? shakeTrauma : 0,
+		fx: fx
+	});
 	var cutoff = now - RECAP_BUFFER_MS;
 	while (recapFrames.length > 0 && recapFrames[0].t < cutoff) {
 		recapFrames.shift();
 	}
+	while (recapEffects.length > 0 && recapEffects[0].t < cutoff) {
+		recapEffects.shift(); // keep the one-shot FX log bounded too
+	}
+	// Keep ONE map snapshot from before the window (a baseline for clips at the
+	// window's leading edge), drop older ones.
+	while (recapMaps.length > 1 && recapMaps[1].t < cutoff) {
+		recapMaps.shift();
+	}
+}
+
+// Called from the map-mutating event handlers (collapse / explosion / tile-swap)
+// so the next captured frame grabs a fresh map snapshot reflecting the change.
+function recapMarkMapDirty() {
+	recapMapDirty = true;
+}
+
+// Snapshot the live map cache (downscaled) when there's none yet, or when the map
+// just changed (throttled). Re-snapshotting as collapse/explosions/swaps mutate
+// the board gives the clip the right terrain at every moment — not a stale clean
+// image (which hid the lava) nor the final all-lava image.
+function recapCaptureMap() {
+	if (typeof mapCanvas === "undefined" || mapCanvas == null || world == null || world.width == null) {
+		return;
+	}
+	var now = Date.now();
+	var first = recapMaps.length === 0;
+	if (!first && !(recapMapDirty && now - recapLastMapSnap >= RECAP_MAP_SNAP_MS)) {
+		return;
+	}
+	var scale = RECAP_MAP_SCALE;
+	var snap = document.createElement("canvas");
+	snap.width = Math.max(1, Math.round(mapCanvas.width * scale));
+	snap.height = Math.max(1, Math.round(mapCanvas.height * scale));
+	snap.getContext("2d").drawImage(mapCanvas, 0, 0, snap.width, snap.height);
+	recapMaps.push({
+		t: now, image: snap, scale: scale,
+		pad: (typeof mapCanvasPad !== "undefined") ? mapCanvasPad : 8,
+		world: { x: world.x, y: world.y, width: world.width, height: world.height }
+	});
+	recapMapDirty = false;
+	recapLastMapSnap = now;
+	while (recapMaps.length > RECAP_MAP_MAX) {
+		recapMaps.shift();
+	}
+}
+
+// The map snapshot to render for a given clip time: the latest captured at or
+// before frameT (fall back to the earliest).
+function recapMapAt(maps, frameT) {
+	if (maps == null || maps.length === 0) {
+		return null;
+	}
+	var best = maps[0];
+	for (var i = 1; i < maps.length; i++) {
+		if (maps[i].t <= frameT) { best = maps[i]; } else { break; }
+	}
+	return best;
+}
+
+// Snapshot live projectiles (bomb / puck / cloud / snowFlake). These are decoded
+// every tick into projectileList; we keep just what the replay renderer needs.
+function recapCaptureProjs() {
+	var out = [];
+	if (typeof projectileList === "undefined" || projectileList == null) {
+		return out;
+	}
+	for (var pid in projectileList) {
+		var pr = projectileList[pid];
+		if (pr == null || pr.x == null) {
+			continue;
+		}
+		out.push([pr.type, pr.x, pr.y, pr.color || null, (pr.radius != null ? pr.radius : 0)]);
+	}
+	return out;
+}
+
+// Snapshot live hazards (static + moving bumpers). railX/railY are static (the
+// bumper's rail anchor); angle animates, so it's captured per frame.
+function recapCaptureHazards() {
+	var out = [];
+	if (typeof hazardList === "undefined" || hazardList == null) {
+		return out;
+	}
+	for (var hid in hazardList) {
+		var h = hazardList[hid];
+		if (h == null || h.x == null) {
+			continue;
+		}
+		out.push([h.id, h.x, h.y, (h.angle != null ? h.angle : 0),
+			(h.railX != null ? h.railX : h.x), (h.railY != null ? h.railY : h.y)]);
+	}
+	return out;
+}
+
+// Snapshot active targeting aimers that are mid-countdown (swap / explosion warn
+// reticles). The per-tick aimer packet lacks the countdown flags, so we read them
+// off the live aimer object here: [x, y, radius, kind(0=swap,1=explosion), progress, color].
+function recapCaptureAimers() {
+	var out = [];
+	if (typeof aimerList === "undefined" || aimerList == null) {
+		return out;
+	}
+	for (var id in aimerList) {
+		var a = aimerList[id];
+		if (a == null || a.x == null || a.hide === true) {
+			continue;
+		}
+		var prog = (typeof aimerCountdownProgress === "function") ? aimerCountdownProgress(a) : 0;
+		if (a.startExplosionCountDown) {
+			out.push([a.x, a.y, a.radius, 1, prog, a.color || "#ff8c3a"]);
+		} else if (a.startSwapCountDown) {
+			out.push([a.x, a.y, a.radius, 0, prog, "black"]);
+		}
+	}
+	return out;
 }
 
 // Record a highlight moment (from an existing client event). `ids` are the
-// players the moment involves, used to bias a clip toward the right achievement.
+// players the moment involves, used to caption + focus the clip.
 function recapMarkHighlight(type, ids) {
 	recapMarkers.push({ t: Date.now(), type: type, ids: ids || [] });
 }
 
-// Build the montage at gameOver: pick up to RECAP_MAX_CLIPS achievements that
-// actually have winners and pair each with the most relevant buffered clip.
+// Record a one-shot world effect (an explosion) so the clip can replay it in the
+// effects layer — the live game draws these above projectiles, and they're what
+// makes a bomb "go off". `params` carries the look (radius, color).
+function recapMarkEffect(type, x, y, params) {
+	if (x == null || y == null) {
+		return;
+	}
+	recapEffects.push({ t: Date.now(), type: type, x: x, y: y, params: params || {} });
+}
+
+function recapSliceEffects(startT, endT) {
+	var out = [];
+	for (var i = 0; i < recapEffects.length; i++) {
+		if (recapEffects[i].t >= startT && recapEffects[i].t <= endT) {
+			out.push(recapEffects[i]);
+		}
+	}
+	return out;
+}
+
+// Map snapshots a clip needs: those inside its window, plus the latest one BEFORE
+// the window (the baseline the clip opens on).
+function recapMapsForWindow(startT, endT) {
+	var out = [];
+	var baseline = null;
+	for (var i = 0; i < recapMaps.length; i++) {
+		var m = recapMaps[i];
+		if (m.t < startT) { baseline = m; }
+		else if (m.t <= endT) { out.push(m); }
+	}
+	if (baseline != null) { out.unshift(baseline); }
+	// If every in-window snapshot was evicted (a very long, mutation-heavy round),
+	// fall back to the EARLIEST surviving snapshot (least-collapsed), not the latest
+	// — using the latest would replay the clip over the end-of-round lava field.
+	if (out.length === 0 && recapMaps.length > 0) { out.push(recapMaps[0]); }
+	return out;
+}
+
+// Did the blindfold ability fire during this clip? (Brutal rounds — incl. cloudy
+// and blackout — are badged from clip.brutal, so only this ability is tracked here.)
+function recapBlindInFrames(frames) {
+	for (var i = 0; i < frames.length; i++) {
+		if ((frames[i].fx || 0) & RFX_BLIND) { return true; }
+	}
+	return false;
+}
+
+// Ids of the players involved in markers near time `t` (within half a clip) — used
+// to give a subject to markers that carry none (multi-kills: the server event has
+// only a count, so we borrow the nearby death markers' victim ids).
+function recapInferIds(t) {
+	var out = [];
+	for (var i = 0; i < recapMarkers.length; i++) {
+		var mk = recapMarkers[i];
+		if (mk.ids == null || mk.ids.length === 0) { continue; }
+		if (Math.abs(mk.t - t) > RECAP_CLIP_MS / 2) { continue; }
+		for (var j = 0; j < mk.ids.length; j++) {
+			if (out.indexOf(mk.ids[j]) === -1) { out.push(mk.ids[j]); }
+		}
+	}
+	return out;
+}
+
+// Round ended: bake the best clips of THIS round into the archive, each paired
+// with the round's clean map snapshot. Called from startOverview (a normal round
+// end) and startGameover (the final round) while currentMap is still this round's.
+function recapHarvestRound() {
+	if (recapFrames.length === 0 || recapMaps.length === 0) {
+		return;
+	}
+	var endT = recapFrames[recapFrames.length - 1].t;
+	// The brutal mode (if any) this round was played under — tags the clip's caption.
+	var brutal = (typeof brutalRoundConfig !== "undefined" && brutalRoundConfig != null &&
+		brutalRoundConfig.brutalTypes != null) ? brutalRoundConfig.brutalTypes.slice() : null;
+	// Rank this round's markers by how interesting they are, newest-first on ties.
+	var ranked = recapMarkers.slice();
+	ranked.sort(function (a, b) {
+		var pa = (RECAP_TYPE_INFO[a.type] || {}).priority || 0;
+		var pb = (RECAP_TYPE_INFO[b.type] || {}).priority || 0;
+		if (pb !== pa) { return pb - pa; }
+		return b.t - a.t;
+	});
+	var taken = 0;
+	var takenTimes = []; // times of markers already taken — dedup against ALL of them
+	for (var i = 0; i < ranked.length && taken < RECAP_PER_ROUND; i++) {
+		var mk = ranked[i];
+		// Skip a near-duplicate of ANY already-taken moment (markers are iterated in
+		// priority order, so comparing only against the previous one would dedup
+		// time-unrelated markers — check every taken time instead).
+		var tooClose = false;
+		for (var d = 0; d < takenTimes.length; d++) {
+			if (Math.abs(mk.t - takenTimes[d]) < RECAP_CLIP_MS / 2) { tooClose = true; break; }
+		}
+		if (tooClose) {
+			continue;
+		}
+		var startT = mk.t - RECAP_PRE_MS;
+		var frames = recapSliceFrames(startT, startT + RECAP_CLIP_MS);
+		if (frames.length === 0) {
+			continue;
+		}
+		// Some markers (multi-kills) carry no ids — the server event has only a count.
+		// Borrow the ids of nearby markers (e.g. the victims' death markers) so the
+		// clip still has a subject to frame, chip, and vary on.
+		var ids = mk.ids.slice();
+		if (ids.length === 0) { ids = recapInferIds(mk.t); }
+		var info = RECAP_TYPE_INFO[mk.type] || { title: "Highlight", priority: 0 };
+		recapArchive.push({
+			title: info.title,
+			type: mk.type,
+			priority: info.priority,
+			ids: ids,
+			focusIds: mk.focusIds ? mk.focusIds.slice() : null,
+			frames: frames,
+			maps: recapMapsForWindow(startT, startT + RECAP_CLIP_MS),
+			brutal: brutal,
+			blind: recapBlindInFrames(frames),
+			effects: recapSliceEffects(startT, startT + RECAP_CLIP_MS),
+			exits: recapComputeExits(frames)
+		});
+		takenTimes.push(mk.t);
+		taken++;
+	}
+	// If the round produced no usable markers, keep a "final moments" clip so a
+	// quiet round still contributes something to the montage.
+	if (taken === 0) {
+		var tailFrames = recapSliceFrames(endT - RECAP_CLIP_MS, endT);
+		if (tailFrames.length > 0) {
+			recapArchive.push({
+				title: "Final Moments", type: "tail", priority: 0, ids: [],
+				frames: tailFrames, maps: recapMapsForWindow(endT - RECAP_CLIP_MS, endT), brutal: brutal,
+				blind: recapBlindInFrames(tailFrames),
+				effects: recapSliceEffects(endT - RECAP_CLIP_MS, endT), exits: recapComputeExits(tailFrames)
+			});
+		}
+	}
+}
+
+// For each player, the first frame in this clip where they leave play (died or
+// scored): { t, x, y, state }. Used to play a one-shot poof at that spot, then
+// stop drawing the kart — so dead/scored karts don't hover over lava/goal for the clip.
+function recapComputeExits(frames) {
+	var exits = {};
+	for (var f = 0; f < frames.length; f++) {
+		var ps = frames[f].players;
+		for (var i = 0; i < ps.length; i++) {
+			var pr = ps[i];
+			if (pr[RF_STATE] !== RECAP_ALIVE && exits[pr[RF_ID]] == null) {
+				exits[pr[RF_ID]] = { t: frames[f].t, x: pr[RF_X], y: pr[RF_Y], state: pr[RF_STATE] };
+			}
+		}
+	}
+	return exits;
+}
+
+function recapSliceFrames(startT, endT) {
+	var out = [];
+	for (var i = 0; i < recapFrames.length; i++) {
+		if (recapFrames[i].t >= startT && recapFrames[i].t <= endT) {
+			out.push(recapFrames[i]);
+		}
+	}
+	return out;
+}
+
+// Build the montage at gameOver. The current (final) round was already harvested
+// by the startGameover handler, so we select a varied spread from the archive:
+// prefer high-priority moments, but penalise repeating a subject or a type so the
+// montage isn't four clips of the winner doing the same thing.
 function recapBuild(achievementSet) {
 	recapSequence = null;
 	recapIndex = 0;
 	recapElapsed = 0;
 	recapCamX = null;
 	recapCamY = null;
-	if (recapFrames.length === 0 || achievementSet == null) {
-		return; // nothing was captured (e.g. an instant finish) — skip the montage
+
+	if (recapArchive.length === 0) {
+		return; // nothing captured (e.g. an instant finish) — skip the montage
 	}
 
-	var earned = [];
-	for (var key in achievementSet) {
-		var a = achievementSet[key];
-		if (a == null || a.ids == null || a.ids.length === 0) {
-			continue;
+	var usedSubject = {};   // id -> times already featured
+	var usedType = {};      // type -> times already featured
+	var chosen = [];
+	var remaining = recapArchive.slice();
+	while (chosen.length < RECAP_MAX_CLIPS && remaining.length > 0) {
+		var bestIdx = -1, bestScore = -Infinity;
+		for (var i = 0; i < remaining.length; i++) {
+			var clip = remaining[i];
+			var score = (clip.priority || 0) * 4;
+			score -= (usedType[clip.type] || 0) * 3;        // discourage repeating a type
+			if (clip.brutal && clip.brutal.length) { score += 2; } // brutal moments are eye-catching
+			for (var k = 0; k < clip.ids.length; k++) {     // discourage repeating a subject
+				score -= (usedSubject[clip.ids[k]] || 0) * 2;
+			}
+			if (score > bestScore) {
+				bestScore = score;
+				bestIdx = i;
+			}
 		}
-		earned.push({ key: key, title: a.title, ids: a.ids });
-		if (earned.length >= RECAP_MAX_CLIPS) {
+		if (bestIdx === -1) {
 			break;
 		}
-	}
-	if (earned.length === 0) {
-		return;
+		var pick = remaining.splice(bestIdx, 1)[0];
+		usedType[pick.type] = (usedType[pick.type] || 0) + 1;
+		for (var j = 0; j < pick.ids.length; j++) {
+			usedSubject[pick.ids[j]] = (usedSubject[pick.ids[j]] || 0) + 1;
+		}
+		// Build a shallow COPY for the sequence and refine its caption there, so the
+		// archived clip is never mutated — recapBuild stays idempotent if it re-runs
+		// (e.g. a re-entered gameOver) without a recapNewMatch in between.
+		var seqItem = {};
+		for (var key in pick) { seqItem[key] = pick[key]; }
+		seqItem.title = recapTitleFor(pick, achievementSet);
+		chosen.push(seqItem);
 	}
 
-	var usedMarker = {}; // index -> true, so clips don't all show the same moment
-	var sequence = [];
-	for (var i = 0; i < earned.length; i++) {
-		var marker = recapPickMarker(earned[i], usedMarker);
-		// Center the clip on the marker moment; with no marker, fall back to the
-		// final moments of the round (the last RECAP_CLIP_MS of the buffer).
-		var endT = recapFrames[recapFrames.length - 1].t;
-		var startT = endT - RECAP_CLIP_MS;
-		if (marker != null) {
-			startT = marker.t - RECAP_PRE_MS;
-		}
-		var frames = recapSliceFrames(startT, startT + RECAP_CLIP_MS);
-		if (frames.length === 0) {
-			frames = recapSliceFrames(endT - RECAP_CLIP_MS, endT);
-		}
-		sequence.push({ title: earned[i].title, ids: earned[i].ids, frames: frames });
-	}
-	recapSequence = sequence.length > 0 ? sequence : null;
+	// Replay roughly in the order the moments happened across the match.
+	chosen.sort(function (a, b) {
+		var ta = a.frames.length ? a.frames[0].t : 0;
+		var tb = b.frames.length ? b.frames[0].t : 0;
+		return ta - tb;
+	});
+	recapSequence = chosen.length > 0 ? chosen : null;
 }
 
-// Choose the best unused marker for an achievement: prefer a type match (the
-// multi-kill medals), then a player-id overlap, then the most recent leftover.
-function recapPickMarker(earned, usedMarker) {
-	var wantType = RECAP_TYPE_FOR_KEY[earned.key];
-	var best = -1;
-	// newest-first so a tie picks the most recent moment
-	for (var pass = 0; pass < 3 && best === -1; pass++) {
-		for (var m = recapMarkers.length - 1; m >= 0; m--) {
-			if (usedMarker[m]) {
+// Prefer an earned-achievement title whose winners overlap this clip's subjects;
+// otherwise keep the highlight's own caption.
+function recapTitleFor(clip, achievementSet) {
+	if (achievementSet != null && clip.ids.length > 0) {
+		for (var key in achievementSet) {
+			var a = achievementSet[key];
+			if (a == null || a.ids == null || a.ids.length === 0 || a.title == null) {
 				continue;
 			}
-			var mk = recapMarkers[m];
-			var hit = false;
-			if (pass === 0) {
-				hit = wantType != null && mk.type === wantType;
-			} else if (pass === 1) {
-				hit = recapIdsOverlap(mk.ids, earned.ids);
-			} else {
-				hit = true;
+			// A multi-kill marker maps directly to its medal key.
+			if (RECAP_TYPE_FOR_KEY[key] === clip.type) {
+				return a.title;
 			}
-			if (hit) {
-				best = m;
-				break;
+			if (recapIdsOverlap(a.ids, clip.ids)) {
+				return a.title;
 			}
 		}
 	}
-	if (best === -1) {
-		return null;
-	}
-	usedMarker[best] = true;
-	return recapMarkers[best];
+	return clip.title;
 }
 
 function recapIdsOverlap(a, b) {
@@ -177,18 +574,14 @@ function recapIdsOverlap(a, b) {
 	return false;
 }
 
-function recapSliceFrames(startT, endT) {
-	var out = [];
-	for (var i = 0; i < recapFrames.length; i++) {
-		if (recapFrames[i].t >= startT && recapFrames[i].t <= endT) {
-			out.push(recapFrames[i]);
-		}
-	}
-	return out;
-}
-
 function recapActive() {
 	return recapSequence != null && recapSequence.length > 0;
+}
+
+// Caption for a clip: just the highlight title. The brutal-round / effect context
+// is conveyed by the in-game icon badges (recapDrawBadges), not text.
+function recapCaption(item) {
+	return item.title;
 }
 
 // Logical canvas dims (the gameOver screen runs in LOGICAL space under
@@ -202,12 +595,24 @@ function recapLogicalH() {
 	return (typeof gameCanvas !== "undefined" && gameCanvas) ? gameCanvas.height : 768;
 }
 
-// Clip window height — derived from the world aspect, capped. Shared so draw.js
-// can size the centred header/clip block consistently with recapDraw.
+// Clip window height — derived from the active clip's world aspect, capped. Falls
+// back to the live world or a default so the header layout is stable even before
+// a clip's map is known. Shared so draw.js sizes the header/clip block to match.
 function recapWindowHeight() {
-	var winW = Math.min(RECAP_WIN_W, recapLogicalW() * 0.42);
-	var aspect = (world != null && world.width > 0) ? (world.height / world.width) : 0.6;
-	return Math.min(winW * aspect, recapLogicalH() * 0.42);
+	var winW = Math.min(RECAP_WIN_W, recapLogicalW() * 0.52);
+	var w = recapActiveWorld();
+	var aspect = (w != null && w.width > 0) ? (w.height / w.width) : 0.6;
+	return Math.min(winW * aspect, recapLogicalH() * 0.58);
+}
+
+// The world rect the current clip renders against (its baked map snapshot), or
+// the live world as a fallback.
+function recapActiveWorld() {
+	if (recapActive() && recapSequence[recapIndex] != null) {
+		var maps = recapSequence[recapIndex].maps;
+		if (maps != null && maps.length > 0) { return maps[0].world; }
+	}
+	return (typeof world !== "undefined") ? world : null;
 }
 
 // Baseline for the gameOver header so the header + caption + clip-window block
@@ -220,8 +625,7 @@ function recapHeaderBaseline() {
 		return (CH + 48) / 2; // no montage — leave the header where it always was
 	}
 	var headerCapTop = 38; // header text rises ~38px above its baseline (48px serif)
-	var gap = 56;          // header baseline -> clip window top (caption lives here)
-	var blockH = headerCapTop + gap + recapWindowHeight();
+	var blockH = headerCapTop + RECAP_HEADER_GAP + recapWindowHeight();
 	return Math.round((CH - blockH) / 2 + headerCapTop);
 }
 
@@ -231,7 +635,11 @@ function recapDraw(dt) {
 	if (!recapActive()) {
 		return;
 	}
-	recapElapsed += dt;
+	// Clamp per-frame advance: a single huge dt (first frame after the gameOver
+	// screen is entered cold, or a backgrounded/refocused tab) must not blow past a
+	// whole clip's display time and skip it. Capping at 100ms (> a frame, < a clip)
+	// keeps the montage smooth and guarantees every clip gets its turn.
+	recapElapsed += Math.min(dt, 100);
 	if (recapElapsed >= RECAP_DISPLAY_MS && recapIndex < recapSequence.length - 1) {
 		recapIndex++;
 		recapElapsed = 0;
@@ -242,18 +650,16 @@ function recapDraw(dt) {
 
 	// Draw in LOGICAL (1366x768) space: the gameOver screen runs under
 	// applyCanvasTransform(), so the winner text/medals are in logical units.
-	// gameCanvas.width/height is the device backing store (logical * DPR), so
-	// using it here would push the panel off-position on high-DPR phones.
-	var CW = (typeof LOGICAL_WIDTH !== "undefined" && LOGICAL_WIDTH > 0) ? LOGICAL_WIDTH : gameCanvas.width;
-	var CH = (typeof LOGICAL_HEIGHT !== "undefined" && LOGICAL_HEIGHT > 0) ? LOGICAL_HEIGHT : gameCanvas.height;
+	var CW = recapLogicalW();
+	var CH = recapLogicalH();
 
 	// Window geometry: sit it directly under the headline winner text, centred on
 	// that text. The header + caption + window block is centred vertically on the
 	// page (see recapHeaderBaseline, shared with draw.js). Caption fills the gap.
-	var winW = Math.min(RECAP_WIN_W, CW * 0.42);
+	var winW = Math.min(RECAP_WIN_W, CW * 0.52);
 	var winH = recapWindowHeight();
 	var headlineBaseline = recapHeaderBaseline();
-	var winY = Math.round(headlineBaseline + 56); // leave room for the caption above
+	var winY = Math.round(headlineBaseline + RECAP_HEADER_GAP); // leave room for caption + chips above
 
 	// The headline is drawn left-aligned at CW/2-400 (see drawGameOverScreen), so
 	// its visual centre is offset from screen centre — measure it and align to it.
@@ -275,15 +681,15 @@ function recapDraw(dt) {
 	gameContext.fillStyle = "black";
 	gameContext.font = "20px serif";
 	gameContext.textAlign = "center";
-	gameContext.fillText("Recap " + (recapIndex + 1) + "/" + recapSequence.length + " — " + item.title, winCX, winY - 14);
+	gameContext.fillText("Recap " + (recapIndex + 1) + "/" + recapSequence.length + " — " + recapCaption(item), winCX, winY - 14);
 	gameContext.textAlign = "left";
-	// involved player color chips, centred as a row above the caption
+	// involved player colour chips, centred as a row above the caption
 	var nChips = Math.min(item.ids.length, 6);
 	var chipStartX = winCX - (nChips * 24) / 2 + 12;
 	for (var c = 0; c < nChips; c++) {
-		var who = (playerList != null) ? playerList[item.ids[c]] : null;
+		var who = recapMeta[item.ids[c]];
 		gameContext.beginPath();
-		gameContext.arc(chipStartX + c * 24, winY - 38, 9, 0, 2 * Math.PI);
+		gameContext.arc(chipStartX + c * 24, winY - 48, 9, 0, 2 * Math.PI);
 		gameContext.fillStyle = (who != null) ? who.color : "grey";
 		gameContext.strokeStyle = "black";
 		gameContext.lineWidth = 2;
@@ -305,40 +711,97 @@ function recapDraw(dt) {
 	gameContext.rect(winX, winY, winW, winH);
 	gameContext.clip();
 
-	recapRenderClip(item, winX, winY, winW, winH);
+	// try/finally so a throw inside the clip render can never leave this clip + its
+	// save on the context stack — that would clip/scale the medals/headline on every
+	// subsequent gameOver frame.
+	try {
+		recapRenderClip(item, winX, winY, winW, winH);
+		recapDrawBadges(item, winX, winY);
+	} finally {
+		gameContext.restore();
+	}
+}
+
+// Corner icon badges using the game's established iconography: one per active
+// brutal round (brutalRoundImages[id] — puck for hockey, cloud for cloudy, moon
+// for blackout, etc.) plus the blindfold ability if it fired. Full-screen effects
+// (cloudy/blackout/blindfold) are badged, never rendered — they'd obscure the clip.
+function recapDrawBadges(item, winX, winY) {
+	// Collect the icon images to show: brutal-round icons + blindfold.
+	var icons = [];
+	if (item.brutal != null && typeof brutalRoundImages !== "undefined" && brutalRoundImages != null) {
+		for (var i = 0; i < item.brutal.length; i++) {
+			var img = brutalRoundImages[item.brutal[i]];
+			if (img != null) { icons.push(img); }
+		}
+	}
+	if (item.blind && typeof blindfoldIcon !== "undefined" && blindfoldIcon != null) {
+		icons.push(blindfoldIcon);
+	}
+	if (icons.length === 0) {
+		return;
+	}
+	var bw = 28, bh = 26, gap = 4;
+	gameContext.save();
+	for (var k = 0; k < icons.length; k++) {
+		var bx = winX + 6 + k * (bw + gap);
+		var by = winY + 6;
+		// Light tile so the dark game icons read (they're black silhouettes).
+		gameContext.fillStyle = "rgba(255,255,255,0.82)";
+		gameContext.fillRect(bx, by, bw, bh);
+		gameContext.strokeStyle = "rgba(0,0,0,0.55)";
+		gameContext.lineWidth = 1.5;
+		gameContext.strokeRect(bx, by, bw, bh);
+		var ic = icons[k];
+		if (ic.complete !== false && (ic.naturalWidth == null || ic.naturalWidth > 0)) {
+			try {
+				var ratio = (ic.width && ic.height) ? (ic.height / ic.width) : 0.88;
+				var iw = bw - 8;
+				var ih = iw * ratio;
+				if (ih > bh - 6) { ih = bh - 6; iw = ih / ratio; }
+				gameContext.drawImage(ic, bx + (bw - iw) / 2, by + (bh - ih) / 2, iw, ih);
+			} catch (e) { /* icon not decoded — skip, badge tile still flags it */ }
+		}
+	}
 	gameContext.restore();
 }
 
-// Render the current frame of `item`'s clip with a zoom-and-follow camera, so
-// the action fills the window instead of showing the whole map shrunk down.
+// Render the current frame of `item`'s clip with a zoom-and-follow camera, using
+// the SAME map snapshot + kart/FX helpers as the live game so the replay carries
+// the real flames, ability aimers and infection auras — not flat dots.
 function recapRenderClip(item, winX, winY, winW, winH) {
-	if (world == null || world.width == null) {
+	if (item.maps == null || item.maps.length === 0 || item.maps[0].world == null || item.maps[0].world.width == null) {
 		return;
 	}
-	// Loop the clip: map elapsed time onto clip progress and pick the frame.
 	var frame = recapFrameAt(item.frames, recapElapsed);
 	if (frame == null) {
 		return;
 	}
+	var frameT = frame.t;
+	// The map as it looked at this clip moment (collapse lava / swaps evolve). Use
+	// THIS snapshot's own world rect for placement + camera math so they can't
+	// disagree with the blitted image.
+	var map = recapMapAt(item.maps, frameT);
+	var w = (map != null && map.world != null) ? map.world : item.maps[0].world;
 
 	// Scale: start from fit-to-window, then zoom in on the action.
-	var fit = Math.min(winW / world.width, winH / world.height);
+	var fit = Math.min(winW / w.width, winH / w.height);
 	var s = fit * RECAP_ZOOM;
 
 	// Follow target: the involved players (centroid), clamped so the zoomed view
 	// stays inside the map (no empty gutters). Smoothed so the cam glides.
-	var focus = recapFocusCenter(item, frame);
+	var focus = recapFocusCenter(item, frame, w);
 	var halfW = (winW / 2) / s;
 	var halfH = (winH / 2) / s;
-	if (world.width > 2 * halfW) {
-		focus.x = Math.max(world.x + halfW, Math.min(world.x + world.width - halfW, focus.x));
+	if (w.width > 2 * halfW) {
+		focus.x = Math.max(w.x + halfW, Math.min(w.x + w.width - halfW, focus.x));
 	} else {
-		focus.x = world.x + world.width / 2;
+		focus.x = w.x + w.width / 2;
 	}
-	if (world.height > 2 * halfH) {
-		focus.y = Math.max(world.y + halfH, Math.min(world.y + world.height - halfH, focus.y));
+	if (w.height > 2 * halfH) {
+		focus.y = Math.max(w.y + halfH, Math.min(w.y + w.height - halfH, focus.y));
 	} else {
-		focus.y = world.y + world.height / 2;
+		focus.y = w.y + w.height / 2;
 	}
 	if (recapCamX == null || recapCamY == null) {
 		recapCamX = focus.x;
@@ -348,68 +811,520 @@ function recapRenderClip(item, winX, winY, winW, winH) {
 		recapCamY += (focus.y - recapCamY) * RECAP_CAM_LERP;
 	}
 
-	// world coord -> screen: window centre + (world - camera) * scale
+	// One world->window transform: screen = winCentre + (world - camera) * scale.
+	// Every draw below is in world coordinates. The FX helpers add the live camera
+	// offset internally, but it's zero on the gameOver screen, so they line up.
+	// A captured impact's screen-shake jitters the whole clip view (screen-space,
+	// before the scale), mirroring the live preShake — magnitude scales with trauma².
 	var screenCX = winX + winW / 2;
 	var screenCY = winY + winH / 2;
-
-	// Blit the cached map (built during the final round) under the camera.
-	if (typeof mapCanvas !== "undefined" && mapCanvas != null) {
-		var destX = screenCX + (world.x - mapCanvasPad - recapCamX) * s;
-		var destY = screenCY + (world.y - mapCanvasPad - recapCamY) * s;
-		gameContext.drawImage(mapCanvas, destX, destY, mapCanvas.width * s, mapCanvas.height * s);
+	// Combine the captured per-frame trauma with a contribution from any explosion
+	// playing right now — the explosion's own addTrauma can land between server
+	// ticks and be missed by the per-tick trauma sample, so derive shake from the
+	// effect too, guaranteeing a blast actually shakes the clip.
+	var trauma = frame.trauma || 0;
+	if (item.effects != null) {
+		for (var se = 0; se < item.effects.length; se++) {
+			var ef = item.effects[se];
+			if (ef.type !== "explosion") { continue; }
+			var eage = frameT - ef.t;
+			if (eage >= 0 && eage < 350) { trauma = Math.max(trauma, 0.55 * (1 - eage / 350)); }
+		}
 	}
+	var shakeDx = 0, shakeDy = 0;
+	if (trauma > 0) {
+		var maxOff = (typeof maxShakeOffset !== "undefined") ? maxShakeOffset : 18;
+		var mag = maxOff * trauma * trauma;
+		shakeDx = (Math.random() * 2 - 1) * mag;
+		shakeDy = (Math.random() * 2 - 1) * mag;
+	}
+	// Slow the flame sprite animation to match the clip's slow-mo (drawFire reads the
+	// global dt). Saved + restored in the finally so a throw can't leave it scaled.
+	var savedDt = (typeof dt !== "undefined") ? dt : null;
+	if (savedDt != null && RECAP_SLOWMO > 0) { dt = savedDt / RECAP_SLOWMO; }
+	gameContext.save();
+	// try/finally: ANY helper below can throw (it reuses live draw code); the
+	// finally guarantees the transform/clip save is popped, so a single bad frame
+	// can't leave the whole gameOver screen clipped/zoomed on later frames.
+	try {
+		gameContext.translate(screenCX + shakeDx, screenCY + shakeDy);
+		gameContext.scale(s, s);
+		gameContext.translate(-recapCamX, -recapCamY);
 
-	for (var i = 0; i < frame.players.length; i++) {
-		var pr = frame.players[i];      // [id, x, y, alive]
-		var live = playerList != null ? playerList[pr[0]] : null;
-		var radius = (live != null && live.radius != null) ? live.radius : 12;
+		// Blit this clip-moment's map snapshot under the camera.
+		if (map != null && map.image != null) {
+			// Snapshots are downscaled to save memory; blit back up to full world size.
+			var mscale = (map.scale != null && map.scale > 0) ? map.scale : 1;
+			var fullW = map.image.width / mscale;
+			var fullH = map.image.height / mscale;
+			gameContext.drawImage(map.image, w.x - map.pad, w.y - map.pad, fullW, fullH);
+		}
+
+		// Match the live draw order: hazards, then trails, then karts, then projectiles.
+		if (frame.hazards != null) {
+			for (var h = 0; h < frame.hazards.length; h++) { recapDrawHazard(frame.hazards[h]); }
+		}
+		recapDrawTrails(item, frameT);
+		for (var i = 0; i < frame.players.length; i++) {
+			recapDrawCar(frame.players[i], item.exits, frameT);
+		}
+		if (frame.projs != null) {
+			for (var pj = 0; pj < frame.projs.length; pj++) { recapDrawProjectile(frame.projs[pj]); }
+		}
+		// Effects layer sits ABOVE projectiles (matches the live draw order): movement
+		// dust + burn embers per kart, one-shot FX (explosions/muzzle/shockwaves), then
+		// the targeting-aimer reticles.
+		for (var pe = 0; pe < frame.players.length; pe++) {
+			recapDrawKartParticles(frame.players[pe], frameT);
+		}
+		if (item.effects != null) {
+			for (var e = 0; e < item.effects.length; e++) { recapDrawEffect(item.effects[e], frameT); }
+		}
+		if (frame.aimers != null) {
+			for (var am = 0; am < frame.aimers.length; am++) { recapDrawAimer(frame.aimers[am], frameT); }
+		}
+	} finally {
+		gameContext.restore();
+		if (savedDt != null) { dt = savedDt; }
+	}
+}
+
+// Kart trails: reproduce the live colored trail line by stroking each kart's
+// buffered path up to the current clip time (grows as the clip plays, loops with
+// it). Mirrors the live Trail look (width 5, soft black shadow, kart colour).
+// The path ends where a kart died/scored. Whole-round trails aren't available —
+// only the clip's buffered window — so it's the recent path, not the full lap.
+function recapDrawTrails(item, frameT) {
+	var frames = item.frames;
+	var tracks = {}; // id -> flat [x0,y0,x1,y1,...]
+	var order = [];
+	for (var fi = 0; fi < frames.length; fi++) {
+		var f = frames[fi];
+		if (f.t > frameT) {
+			break;
+		}
+		var ps = f.players;
+		for (var pi = 0; pi < ps.length; pi++) {
+			var pr = ps[pi];
+			if (pr[RF_STATE] !== RECAP_ALIVE) {
+				continue; // trail stops where the kart left play
+			}
+			var id = pr[RF_ID];
+			if (tracks[id] == null) { tracks[id] = []; order.push(id); }
+			tracks[id].push(pr[RF_X], pr[RF_Y]);
+		}
+	}
+	for (var oi = 0; oi < order.length; oi++) {
+		var pts = tracks[order[oi]];
+		if (pts.length < 4) {
+			continue;
+		}
+		var meta = recapMeta[order[oi]] || { color: "grey" };
+		gameContext.save();
+		gameContext.lineWidth = 5;
+		gameContext.lineCap = "round";
+		gameContext.lineJoin = "round";
+		gameContext.shadowBlur = 3;
+		gameContext.shadowColor = "black";
+		gameContext.strokeStyle = meta.color;
 		gameContext.beginPath();
-		gameContext.arc(screenCX + (pr[1] - recapCamX) * s, screenCY + (pr[2] - recapCamY) * s,
-			Math.max(2, radius * s), 0, 2 * Math.PI);
-		gameContext.globalAlpha = pr[3] ? 1 : 0.35; // dim eliminated players
-		gameContext.fillStyle = (live != null) ? live.color : "grey";
-		gameContext.strokeStyle = "black";
-		gameContext.lineWidth = 1;
-		gameContext.fill();
+		gameContext.moveTo(pts[0], pts[1]);
+		for (var k = 2; k < pts.length; k += 2) {
+			gameContext.lineTo(pts[k], pts[k + 1]);
+		}
 		gameContext.stroke();
+		gameContext.restore();
+	}
+}
+
+// Procedural movement dust + burn embers for one kart, driven purely by the
+// buffered state (velocity / onFire) and the clip clock — no persistent particle
+// list needed, and it loops cleanly with the clip. Skips exited karts.
+function recapDrawKartParticles(pr, frameT) {
+	if (pr[RF_STATE] !== RECAP_ALIVE) {
+		return;
+	}
+	var x = pr[RF_X], y = pr[RF_Y];
+	var meta = recapMeta[pr[RF_ID]] || { radius: 12 };
+	var rad = meta.radius || 12;
+	// Burn embers: a few rising, cooling sparks while on fire.
+	if (pr[RF_FIRE] > 0) {
+		for (var k = 0; k < 4; k++) {
+			var ph = (((frameT + k * 150) % 600) / 600);
+			var ex = x + Math.sin(k * 1.7 + frameT / 180) * rad * 0.5;
+			var ey = y - ph * (rad * 1.8 + 8);
+			gameContext.save();
+			gameContext.globalAlpha = (1 - ph) * 0.9;
+			gameContext.fillStyle = "hsl(" + (18 + k * 9) + ", 100%, " + (62 - 22 * ph) + "%)";
+			gameContext.beginPath();
+			gameContext.arc(ex, ey, 2.5 * (1 - ph) + 0.6, 0, 2 * Math.PI);
+			gameContext.fill();
+			gameContext.restore();
+		}
+	}
+	// Movement dust: puffs kicked out behind a kart that's actually moving.
+	var sp = Math.sqrt(pr[RF_VX] * pr[RF_VX] + pr[RF_VY] * pr[RF_VY]);
+	var walk = (typeof config !== "undefined" && config != null && config.playerMaxSpeed) ? config.playerMaxSpeed * 0.18 : 1.2;
+	if (sp > walk) {
+		var dir = Math.atan2(pr[RF_VY], pr[RF_VX]);
+		for (var d = 0; d < 3; d++) {
+			var dph = (((frameT + d * 130) % 420) / 420);
+			var dist = rad + dph * 16;
+			var jit = (d - 1) * rad * 0.4;
+			var px = x - Math.cos(dir) * dist - Math.sin(dir) * jit;
+			var py = y - Math.sin(dir) * dist + Math.cos(dir) * jit;
+			gameContext.save();
+			gameContext.globalAlpha = (1 - dph) * 0.5;
+			gameContext.fillStyle = "rgba(190,175,150,1)";
+			gameContext.beginPath();
+			gameContext.arc(px, py, 2.6 * (1 - dph) + 0.8, 0, 2 * Math.PI);
+			gameContext.fill();
+			gameContext.restore();
+		}
 	}
 	gameContext.globalAlpha = 1;
 }
 
-// Where the camera should look this frame: the centroid of the achievement's
+// Replay a one-shot effect at the clip's current footage time. The clip loops, so
+// frameT cycles and the effect re-fires each loop. Slow-mo applies for free (it's
+// driven by the footage timeline, which the playback window stretches).
+function recapDrawEffect(ef, frameT) {
+	var age = frameT - ef.t;
+	if (age < 0) {
+		return;
+	}
+	if (ef.type === "explosion") {
+		if (age <= RECAP_EXPLOSION_MS) {
+			recapDrawExplosion(ef.x, ef.y, ef.params.radius || 70, ef.params.color || "#ff7a18", age / RECAP_EXPLOSION_MS);
+		}
+	} else if (ef.type === "muzzle") {
+		if (age <= RECAP_MUZZLE_MS) {
+			recapDrawMuzzle(ef.x, ef.y, ef.params.angle || 0, ef.params.color || "#ffcf8f", age / RECAP_MUZZLE_MS);
+		}
+	} else if (ef.type === "shockwave") {
+		if (age <= RECAP_SHOCKWAVE_MS) {
+			recapDrawShockwave(ef.x, ef.y, age / RECAP_SHOCKWAVE_MS);
+		}
+	}
+}
+
+// Muzzle flash: a short flash cone + white streaks in the firing direction.
+// Mirrors draw.js spawnMuzzleFlash; t is 0..1 over its lifetime.
+function recapDrawMuzzle(x, y, angleDeg, color, t) {
+	var a = angleDeg * Math.PI / 180;
+	var p = 1 - Math.pow(1 - t, 3); // easeOutCubic
+	var reach = 8 + 20 * p;
+	var spread = 6 * (1 - t) + 3;
+	gameContext.save();
+	gameContext.translate(x, y);
+	gameContext.rotate(a);
+	gameContext.globalAlpha = (1 - t) * 0.9;
+	gameContext.fillStyle = color;
+	gameContext.beginPath();
+	gameContext.moveTo(0, 0);
+	gameContext.lineTo(reach, -spread);
+	gameContext.lineTo(reach + 6, 0);
+	gameContext.lineTo(reach, spread);
+	gameContext.closePath();
+	gameContext.fill();
+	gameContext.globalAlpha = (1 - t);
+	gameContext.strokeStyle = "white";
+	gameContext.lineCap = "round";
+	gameContext.lineWidth = 2 * (1 - t) + 0.5;
+	for (var i = -1; i <= 1; i++) {
+		gameContext.beginPath();
+		gameContext.moveTo(2, i * 3);
+		gameContext.lineTo(reach * 0.8, i * 4);
+		gameContext.stroke();
+	}
+	gameContext.restore();
+	gameContext.globalAlpha = 1;
+}
+
+// Collapse shockwave: an expanding fading ring (one pass of the live telegraph).
+function recapDrawShockwave(x, y, t) {
+	var radius = 600 * (t * RECAP_SHOCKWAVE_MS / 1000); // 600 px/s, same as the live ring
+	gameContext.save();
+	gameContext.globalAlpha = (1 - t) * 0.6;
+	gameContext.strokeStyle = "rgba(255,120,40,1)";
+	gameContext.lineWidth = 4 * (1 - t) + 1;
+	gameContext.beginPath();
+	gameContext.arc(x, y, radius, 0, 2 * Math.PI);
+	gameContext.stroke();
+	gameContext.restore();
+	gameContext.globalAlpha = 1;
+}
+
+// Targeting-aimer reticle (swap / explosion countdown), driven by the captured
+// countdown progress. Mirrors draw.js drawAimer's look with a clip-clock pulse.
+function recapDrawAimer(a, frameT) {
+	var x = a[0], y = a[1], radius = a[2], kind = a[3], prog = a[4], color = a[5];
+	var phase = (frameT / 1000) * (2 + 5 * prog) * Math.PI * 2;
+	var pulse = 0.5 + 0.5 * Math.sin(phase);
+	gameContext.save();
+	gameContext.beginPath();
+	gameContext.arc(x, y, radius, 0, 2 * Math.PI);
+	if (kind === 1) { // explosion warn: fill swells as it charges
+		gameContext.fillStyle = color;
+		gameContext.globalAlpha = (0.12 + 0.5 * prog) * pulse;
+		gameContext.fill();
+		gameContext.globalAlpha = 1;
+		gameContext.setLineDash([15, 3, 3, 3]);
+		gameContext.lineWidth = 2 + 5 * pulse;
+		gameContext.strokeStyle = color;
+	} else { // swap countdown: dashed ring that reddens as it nears
+		gameContext.setLineDash([15, 3, 3, 3]);
+		gameContext.lineWidth = 2 + 8 * (pulse * (0.4 + 0.6 * prog));
+		gameContext.strokeStyle = prog > 0.66 ? "red" : "black";
+		gameContext.globalAlpha = 0.45 + 0.55 * pulse;
+	}
+	gameContext.stroke();
+	gameContext.restore();
+	gameContext.globalAlpha = 1;
+}
+
+// Bloom-and-fade explosion, mirrored from draw.js spawnExplosion so a replayed
+// detonation looks like the real one. World coords; t is 0..1 over its lifetime.
+function recapDrawExplosion(x, y, radius, color, t) {
+	var p = 1 - Math.pow(1 - t, 3); // easeOutCubic
+	gameContext.save();
+	gameContext.translate(x, y);
+	var coreR = radius * (0.4 + 0.9 * p);
+	var grad = gameContext.createRadialGradient(0, 0, 0, 0, 0, coreR);
+	grad.addColorStop(0, "rgba(255,245,200," + (1 - t) + ")");
+	grad.addColorStop(0.5, color);
+	grad.addColorStop(1, "rgba(0,0,0,0)");
+	gameContext.globalAlpha = (1 - t) * 0.85;
+	gameContext.fillStyle = grad;
+	gameContext.beginPath();
+	gameContext.arc(0, 0, coreR, 0, 2 * Math.PI);
+	gameContext.fill();
+	gameContext.globalAlpha = (1 - t);
+	gameContext.strokeStyle = "rgba(255,255,255,0.9)";
+	gameContext.lineWidth = 3 * (1 - t) + 1;
+	gameContext.beginPath();
+	gameContext.arc(0, 0, radius * (0.6 + 1.0 * p), 0, 2 * Math.PI);
+	gameContext.stroke();
+	gameContext.fillStyle = color;
+	for (var i = 0; i < 10; i++) {
+		var a = (i / 10) * Math.PI * 2 + 0.2;
+		var r = radius * (0.3 + 1.1 * p);
+		gameContext.globalAlpha = (1 - t);
+		gameContext.beginPath();
+		gameContext.arc(Math.cos(a) * r, Math.sin(a) * r, 2.5 * (1 - t) + 0.5, 0, 2 * Math.PI);
+		gameContext.fill();
+	}
+	gameContext.restore();
+	gameContext.globalAlpha = 1;
+}
+
+// Draw one buffered kart at its world position. Alive -> the real sprite plus any
+// flame / ability indicator / infection aura. Dead or scored -> a brief poof at
+// the exit spot, then nothing (so it doesn't hover over lava/goal for the clip).
+function recapDrawCar(pr, exits, frameT) {
+	var id = pr[RF_ID];
+	var meta = recapMeta[id] || { color: "grey", radius: 12 };
+	if (pr[RF_STATE] !== RECAP_ALIVE) {
+		var ex = (exits != null) ? exits[id] : null;
+		if (ex == null) {
+			return;
+		}
+		var since = frameT - ex.t;
+		if (since < 0 || since > RECAP_EXIT_FX_MS) {
+			return; // exited before this frame's poof window, or already faded — gone
+		}
+		recapDrawExitFx(ex, since / RECAP_EXIT_FX_MS, meta.color);
+		return;
+	}
+
+	// A synthetic player object the live FX helpers understand. World coords; the
+	// helpers' internal camera offset is zero on the gameOver screen.
+	var p = {
+		id: id, x: pr[RF_X], y: pr[RF_Y], angle: pr[RF_ANGLE],
+		velX: pr[RF_VX], velY: pr[RF_VY], color: meta.color,
+		radius: meta.radius, onFire: pr[RF_FIRE], ability: pr[RF_ABILITY],
+		name: meta.name,
+		// rebuild the buff/debuff window flags drawSpeedFx checks (future expiry = active)
+		speedBuffUntil: pr[RF_SPEEDFX] === 1 ? Date.now() + 99999 : null,
+		speedDebuffUntil: pr[RF_SPEEDFX] === 2 ? Date.now() + 99999 : null
+	};
+	// Emote: captured as [msg, ageMs, durationMs] (or a plain string from the demo).
+	// Reconstruct chatMessageAt so drawEmoji applies its normal fade-out instead of a
+	// static full-strength bubble for the whole looped clip.
+	var em = pr[RF_EMOTE];
+	if (em != null) {
+		if (typeof em === "string") {
+			p.chatMessage = em;
+		} else {
+			p.chatMessage = em[0];
+			p.chatMessageAt = Date.now() - (em[1] || 0);
+			p.chatMessageDuration = em[2] || 4000;
+		}
+	}
+
+	// Speed buff/debuff streaks — reuse the live helper (needs velX/velY + radius).
+	if (typeof drawSpeedFx === "function") {
+		drawSpeedFx(p);
+	}
+
+	// Infection aura (matches drawPlayer's infected ring) if this kart is a zombie.
+	if (pr[RF_INFECTED] && typeof config !== "undefined" && config != null && config.brutalRounds != null &&
+		config.brutalRounds.infection != null && typeof patterns !== "undefined" &&
+		patterns != null && patterns[config.brutalRounds.infection.id] != null) {
+		gameContext.save();
+		gameContext.beginPath();
+		gameContext.lineWidth = 1;
+		gameContext.arc(p.x, p.y, config.brutalRounds.infection.radius, 0, 2 * Math.PI);
+		gameContext.fillStyle = patterns[config.brutalRounds.infection.id];
+		gameContext.fill();
+		gameContext.strokeStyle = "green";
+		gameContext.stroke();
+		gameContext.restore();
+	}
+
+	if (p.onFire > 0 && typeof drawFire === "function") {
+		drawFire(p);
+	}
+
+	// The cached kart sprite (a coloured disc), blitted at world coords.
+	if (typeof getPlayerSprite === "function") {
+		var sprite = getPlayerSprite(p.color, p.radius, "black");
+		try {
+			gameContext.drawImage(sprite, p.x - sprite.halfSize, p.y - sprite.halfSize);
+		} catch (e) { /* an undecoded sprite — skip this kart, keep the montage alive */ }
+	}
+
+	if (p.ability != null && typeof drawAbilityIndicator === "function") {
+		drawAbilityIndicator(p.x, p.y, p);
+	}
+	// Emote bubble + name label (reuse the live helpers; world coords).
+	if (p.chatMessage != null && typeof drawEmoji === "function") {
+		drawEmoji(p);
+	}
+	if (p.name != null && typeof drawBotName === "function") {
+		drawBotName(p);
+	}
+}
+
+// One-shot exit flourish: a quick expanding ring + a rising marker (skull for a
+// death, star for a goal) that fades over RECAP_EXIT_FX_MS. Drawn in world coords.
+function recapDrawExitFx(ex, t, color) {
+	var alpha = 1 - t;
+	gameContext.save();
+	gameContext.globalAlpha = alpha;
+	gameContext.beginPath();
+	gameContext.arc(ex.x, ex.y, 6 + t * 18, 0, 2 * Math.PI);
+	gameContext.strokeStyle = (ex.state === RECAP_SCORED) ? "gold" : (color || "white");
+	gameContext.lineWidth = 2;
+	gameContext.stroke();
+	gameContext.font = "18px serif";
+	gameContext.textAlign = "center";
+	gameContext.fillStyle = (ex.state === RECAP_SCORED) ? "gold" : "white"; // set explicitly so the glyph isn't drawn in leftover fill
+	gameContext.fillText(ex.state === RECAP_SCORED ? "⭐" : "💀", ex.x, ex.y - 6 - t * 14);
+	gameContext.textAlign = "left";
+	gameContext.restore();
+	gameContext.globalAlpha = 1;
+}
+
+// Replay one buffered projectile. Mirrors drawProjectiles, but spins from the
+// wall clock (the live per-object rotation isn't buffered) — close enough for a
+// short clip. World coords; wrapped so a missing/undecoded image can't break it.
+function recapDrawProjectile(pr) {
+	var type = pr[RP_TYPE], x = pr[RP_X], y = pr[RP_Y];
+	if (x == null) {
+		return;
+	}
+	if (type === "cloud") {
+		return; // cloudy is a vision effect — shown as a corner badge, not rendered (would obscure the clip)
+	}
+	var rot = (Date.now() * 0.02) % 360 * (Math.PI / 180); // shared gentle spin
+	try {
+		if (type === "puck") {
+			gameContext.save();
+			gameContext.beginPath();
+			gameContext.fillStyle = pr[RP_COLOR] || "black";
+			gameContext.arc(x, y, (pr[RP_RADIUS] > 0 ? pr[RP_RADIUS] : 8), 0, 2 * Math.PI);
+			gameContext.fill();
+			gameContext.restore();
+		} else if (type === "bomb" && typeof bombImage !== "undefined" && bombImage) {
+			var bs = (typeof bombScale !== "undefined") ? bombScale : 0.025;
+			gameContext.save();
+			gameContext.translate(x, y);
+			gameContext.rotate(rot);
+			gameContext.scale(bs, bs);
+			gameContext.drawImage(bombImage, -bombImage.width * 2, -bombImage.height * 2);
+			gameContext.restore();
+		} else if (type === "snowFlake" && typeof snowFlakeImage !== "undefined" && snowFlakeImage) {
+			gameContext.save();
+			gameContext.translate(x, y);
+			gameContext.rotate(rot);
+			gameContext.scale(snowFlakeImage.scale || 0.05, snowFlakeImage.scale || 0.05);
+			gameContext.drawImage(snowFlakeImage, -snowFlakeImage.width / 2, -snowFlakeImage.height / 2);
+			gameContext.restore();
+		} else if (type === "cloud" && typeof cloudImage !== "undefined" && cloudImage) {
+			gameContext.save();
+			gameContext.translate(x, y);
+			gameContext.rotate(rot);
+			gameContext.scale(cloudImage.scale || 1, cloudImage.scale || 1);
+			gameContext.drawImage(cloudImage, -cloudImage.width / 2, -cloudImage.height / 2);
+			gameContext.restore();
+		}
+	} catch (e) { /* undecoded image — skip this prop, keep the montage alive */ }
+}
+
+// Replay one buffered hazard (static / moving bumper) via the live draw helpers.
+function recapDrawHazard(h) {
+	if (typeof config === "undefined" || config == null || config.hazards == null || h[RH_X] == null) {
+		return;
+	}
+	try {
+		if (config.hazards.bumper != null && h[RH_ID] === config.hazards.bumper.id && typeof drawBumper === "function") {
+			drawBumper(h[RH_X], h[RH_Y]);
+		} else if (config.hazards.movingBumper != null && h[RH_ID] === config.hazards.movingBumper.id && typeof drawMovingBumper === "function") {
+			drawMovingBumper(h[RH_X], h[RH_Y], h[RH_RAILX], h[RH_RAILY], h[RH_ANGLE]);
+		}
+	} catch (e) { /* defensive — never let a prop break gameOver */ }
+}
+
+// Where the camera should look this frame: the centroid of the highlight's
 // involved players, falling back to all live players, then the map centre.
-function recapFocusCenter(item, frame) {
+function recapFocusCenter(item, frame, w) {
 	var sumX = 0, sumY = 0, n = 0;
-	var ids = (item != null && item.ids != null) ? item.ids : [];
+	// focusIds (if set) drives the camera independently of the subject ids that
+	// caption/chips use — lets a clip frame extra karts (e.g. nearby zombies)
+	// without changing whose moment it is.
+	var ids = (item != null && item.focusIds != null) ? item.focusIds
+		: ((item != null && item.ids != null) ? item.ids : []);
 	for (var i = 0; i < frame.players.length; i++) {
 		var pr = frame.players[i];
 		for (var k = 0; k < ids.length; k++) {
-			if (pr[0] === ids[k]) {
-				sumX += pr[1]; sumY += pr[2]; n++;
+			if (pr[RF_ID] === ids[k]) {
+				sumX += pr[RF_X]; sumY += pr[RF_Y]; n++;
 				break;
 			}
 		}
 	}
 	if (n === 0) { // no involved players in this frame — track the survivors
 		for (var j = 0; j < frame.players.length; j++) {
-			if (frame.players[j][3]) {
-				sumX += frame.players[j][1]; sumY += frame.players[j][2]; n++;
+			if (frame.players[j][RF_STATE] === RECAP_ALIVE) {
+				sumX += frame.players[j][RF_X]; sumY += frame.players[j][RF_Y]; n++;
 			}
 		}
 	}
 	if (n === 0) { // everyone gone — track all captured dots
 		for (var m = 0; m < frame.players.length; m++) {
-			sumX += frame.players[m][1]; sumY += frame.players[m][2]; n++;
+			sumX += frame.players[m][RF_X]; sumY += frame.players[m][RF_Y]; n++;
 		}
 	}
 	if (n === 0) {
-		return { x: world.x + world.width / 2, y: world.y + world.height / 2 };
+		return { x: w.x + w.width / 2, y: w.y + w.height / 2 };
 	}
 	return { x: sumX / n, y: sumY / n };
 }
 
 // Pick the frame for the current loop position. The clip loops every
-// RECAP_CLIP_MS; we map progress onto the frames' own timestamps.
+// RECAP_PLAY_MS (the slow-mo-stretched window); we map progress onto the frames'
+// own timestamps, so the captured footage replays slower than real-time.
 function recapFrameAt(frames, elapsedMs) {
 	if (frames == null || frames.length === 0) {
 		return null;
@@ -421,7 +1336,9 @@ function recapFrameAt(frames, elapsedMs) {
 	if (span <= 0) {
 		return frames[0];
 	}
-	var progress = (elapsedMs % RECAP_CLIP_MS) / RECAP_CLIP_MS; // 0..1, loops
+	// Stretch playback: the captured span (~RECAP_CLIP_MS of real footage) is mapped
+	// onto a longer RECAP_PLAY_MS window, so the action replays in slow motion.
+	var progress = (elapsedMs % RECAP_PLAY_MS) / RECAP_PLAY_MS; // 0..1, loops
 	var targetT = frames[0].t + progress * span;
 	// frames are time-ordered; linear scan (a clip is only ~90 frames)
 	var best = frames[0];
