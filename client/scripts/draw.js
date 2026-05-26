@@ -261,14 +261,57 @@ function getPlayerSprite(color, radius, strokeColor) {
     canvas.height = size;
     var ctx = canvas.getContext("2d");
     ctx.translate(size / 2, size / 2);
+
+    // Base disc with a soft same-colour glow so the kart reads against dark tiles.
     ctx.shadowColor = color;
-    ctx.shadowBlur = 3;
+    ctx.shadowBlur = 4;
     ctx.beginPath();
     ctx.arc(0, 0, radius, 0, 2 * Math.PI);
     ctx.fillStyle = color;
     ctx.fill();
+    ctx.shadowBlur = 0; // overlays below must not re-cast the glow
+
+    // Shade the flat disc into a glossy sphere. Every overlay is pure white/black
+    // alpha, so this works for ANY kart colour — including the colour-blind remaps
+    // that mutate player.color — without ever parsing the colour string. Light is
+    // fixed to the upper-left: the sprite is blitted un-rotated, so the highlight
+    // stays put every frame instead of spinning with the kart.
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, 2 * Math.PI);
+    ctx.clip();
+
+    // Body gradient: lit cap (upper-left) -> untouched base colour -> dark rim (AO).
+    var body = ctx.createRadialGradient(
+        -radius * 0.35, -radius * 0.40, radius * 0.10,
+        -radius * 0.10, -radius * 0.10, radius * 1.25
+    );
+    body.addColorStop(0.00, "rgba(255,255,255,0.60)");
+    body.addColorStop(0.30, "rgba(255,255,255,0.00)");
+    body.addColorStop(0.62, "rgba(0,0,0,0.00)");
+    body.addColorStop(1.00, "rgba(0,0,0,0.55)");
+    ctx.fillStyle = body;
+    ctx.fillRect(-radius, -radius, radius * 2, radius * 2);
+
+    // Specular reflection orb (echoes the favicon's gloss dot).
+    var sx = -radius * 0.34, sy = -radius * 0.42, sr = radius * 0.40;
+    var spec = ctx.createRadialGradient(sx, sy, 0, sx, sy, sr);
+    spec.addColorStop(0.00, "rgba(255,255,255,0.95)");
+    spec.addColorStop(0.35, "rgba(255,255,255,0.45)");
+    spec.addColorStop(1.00, "rgba(255,255,255,0.00)");
+    ctx.fillStyle = spec;
+    ctx.beginPath();
+    ctx.arc(sx, sy, sr, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.restore();
+
+    // Rim outline — also the "you are being targeted" tell (red + thicker).
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, 2 * Math.PI);
+    ctx.lineWidth = (strokeColor === "red") ? 2.5 : 1.25;
     ctx.strokeStyle = strokeColor;
     ctx.stroke();
+
     canvas.halfSize = size / 2;
     playerSpriteCache[key] = canvas;
     return canvas;
