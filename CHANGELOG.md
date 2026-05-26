@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- The end-of-game recap is a real highlight reel now: clips are pulled from across the whole match (not just the final round), feature different players and moments instead of only the winner, and replay over the map as it looked during the action instead of a field of lava. Karts show their flames, ability aimers and zombie auras, brutal-round props like pucks, bombs and clouds replay too, karts leave their coloured trails and name labels, throw their emotes, and show speed-boost streaks, the map itself evolves as it did during the round (lava spreading in, tiles flipping), and the full effects layer comes along for the ride — bomb/ice explosions, muzzle flashes, rising embers off burning karts, dust kicked up behind movers, collapse shockwaves, charging ability reticles and the screen-shake of a blast. The clip window is larger now, the brutal round and any vision effects (blindfold/blackout/cloudy) are shown with their familiar in-game icons in the corner rather than covering the clip, the action replays in a slight slow-motion for a more cinematic feel, and players who get eliminated or score now go out with a quick poof instead of hovering in place.
 
 ## v0.11.0 — 2026-05-26
 
