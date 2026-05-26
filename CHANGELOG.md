@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.8.4 — 2026-05-26
+
 ### Map editor
 
 - Previews now run solo by default — it's just you and your map, no bots. Flip the new "AI racers" button on before hitting Preview / Playtest to fill the grid with AI opponents like before. Your choice is remembered for next time.
