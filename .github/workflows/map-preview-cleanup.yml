@@ -1,0 +1,38 @@
+name: Map preview cleanup
+
+# Deletes the per-PR preview branch that map-submission.yml created
+# (map-previews-pr-<N>) once the PR is closed or merged, so those throwaway image
+# branches don't accumulate. Runs on EVERY PR close and simply no-ops when there's
+# no preview branch for that PR (i.e. the PR never touched client/maps/**).
+#
+# Trade-off: the inline images in the review comment 404 after the PR closes — by
+# design (they're a during-review artifact; the merged map itself lives in the repo).
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write   # delete the preview branch
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete this PR's preview branch (if any)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          BRANCH="map-previews-pr-${PR}"
+          AUTH="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+          if git ls-remote --exit-code --heads "$AUTH" "$BRANCH" >/dev/null 2>&1; then
+            if git push -q "$AUTH" --delete "$BRANCH"; then
+              echo "Deleted $BRANCH."
+            else
+              echo "::warning::Could not delete $BRANCH (fork PR read-only token?)."
+            fi
+          else
+            echo "No preview branch ($BRANCH) for PR #${PR}; nothing to clean up."
+          fi

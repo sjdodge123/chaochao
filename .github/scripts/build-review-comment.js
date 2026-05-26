@@ -9,7 +9,7 @@
 // Env:
 //   MAP_REVIEW_OUTPUT  dir holding result.json (default ./map-review-out)
 //   IMAGE_BASE_URL     raw base URL the images were published under, e.g.
-//                      https://raw.githubusercontent.com/<owner>/<repo>/map-previews/pr-123/
+//                      https://raw.githubusercontent.com/<owner>/<repo>/map-previews-pr-123/
 //                      (trailing slash optional). If unset, image filenames are
 //                      shown as plain text so the comment still renders.
 //
