@@ -464,8 +464,12 @@ class Game {
 			}
 			desiredBots = this.botOverride.count;
 		} else {
+			// Auto (no override): fill the grid toward a target TOTAL of ~autoTarget
+			// players, so the bot count rises and falls as humans join/leave between
+			// matches. Held across rounds within a match (so a mid-match human join
+			// doesn't despawn a bot — desiredBots only ever tops up below).
 			if (this.botTarget == null) {
-				this.botTarget = utils.getRandomInt(ai.minGrid, ai.maxGrid);
+				this.botTarget = ai.autoTarget || 8;
 			}
 			desiredBots = this.botTarget - humanCount;
 		}
