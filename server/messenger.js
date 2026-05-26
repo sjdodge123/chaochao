@@ -319,6 +319,7 @@ function checkForMail(client) {
 		}
 		player.avatarUrl = url;
 		player.name = (name && name.length) ? name : null;
+		console.log('[skin] avatar skin equipped: socket', client.id, 'user', client.userId, 'name', player.name);
 		messageRoomBySig(room.sig, "playerAvatarChanged", { id: client.id, avatarUrl: player.avatarUrl, name: player.name });
 	});
 
