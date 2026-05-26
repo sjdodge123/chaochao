@@ -216,7 +216,10 @@ function registerScoreHandlers(server) {
 		}
 		recapMarkHighlight('death', [id]); // flag an elimination moment for the recap
 		createDownRankSymbol(id);
-		if (id == myID) {
+		// Solo preview pops back to the editor the instant the creator dies. In a co-op
+		// preview (2+ local players) one death shouldn't yank everyone out — let the round
+		// play on; the round-end handler (startOverview) returns to the editor instead.
+		if (id == myID && (typeof liveLocalPlayerCount !== "function" || liveLocalPlayerCount() <= 1)) {
 			previewReturnToEditor();
 		}
 		// A player-caused kill (not someone driving into the lava) gets a cheer.
@@ -884,21 +887,12 @@ function addLocalPlayer(slot, padIndex) {
 	if (localPlayers[slot]) {
 		return localPlayers[slot];
 	}
-	// Local co-op is NOT available in the editor's Preview/Playtest. Preview runs a
-	// single-human room (play.html?preview=1) and previewReturnToEditor only tracks
-	// the primary slot, so a second hot-joining pad would break the return-to-editor
-	// flow. Refuse the extra join here (this is the single funnel for every spawn
-	// path: the pad hot-join in tryClaimPadSlot AND the keyboard-bump re-home in
-	// claimPrimaryForKbm) and tell the player. NOTE: full co-op-in-preview support is
-	// a deferred follow-up — it needs server-side preview-room changes (createPreviewRoom
-	// accepting a second socket), which the server batch owns, so it's out of scope here.
-	if (previewMode) {
-		if (typeof showPadToast === "function") {
-			showPadToast("Local co-op isn't available in Preview", 3500);
-		}
-		debugLog("[localmp] blocked add in preview — co-op unsupported in Preview");
-		return null;
-	}
+	// Local co-op IS supported in the editor's Preview/Playtest. The preview room is
+	// created with co-op capacity (server hostess.createPreviewRoom → PREVIEW_COOP_CAP),
+	// so a second+ local player joins by the same preview gameID exactly like a normal
+	// couch player — the creator (P1) designs the map and friends press to join during
+	// gated. The only preview-specific wrinkle is the exit: handlePrimaryLost and the
+	// round-end handlers send the session back to the editor (create.html), not the menu.
 	if (gameID == null) {
 		return null; // primary hasn't confirmed a room yet
 	}
@@ -957,8 +951,12 @@ function dropLocalPlayer(slot) {
 	// nobody is controlling. A real keyboard/mouse player (kbmClaimedPrimary) or
 	// another controller still in the game keeps the session alive.
 	if (onlyPhantomPrimaryRemains()) {
-		// No real player left — tear the tab down and go back to the menu, same as
-		// the last-player-leaving path in handlePrimaryLost().
+		// No real player left. In a preview, return to the editor; otherwise tear the
+		// tab down and go back to the menu (the last-player-leaving path).
+		if (previewMode) {
+			previewReturnToEditor();
+			return;
+		}
 		try { server.disconnect(); } catch (e) { /* ignore */ }
 		window.location.href = "./index.html";
 		return;
@@ -986,6 +984,13 @@ function onlyPhantomPrimaryRemains() {
 // the game, promote the lowest surviving slot to primary so the couch session and
 // its rendering continue; only when no local players remain do we leave the page.
 function handlePrimaryLost() {
+	// A preview play-test lives entirely in the creator's editor tab. If the designer
+	// (P1) leaves or their socket drops, end the preview and go back to the editor
+	// rather than promoting a friend to primary or bailing to the menu.
+	if (previewMode) {
+		previewReturnToEditor();
+		return;
+	}
 	var survivor = null;
 	for (var s = 0; s < localPlayers.length; s++) {
 		if (localPlayers[s] && !localPlayers[s].isPrimary) {

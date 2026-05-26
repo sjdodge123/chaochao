@@ -43,7 +43,11 @@ exports.findARoom = function (clientID) {
 		return sig;
 	}
 	for (var sig2 in roomList) {
-		if (roomList[sig2].hasSpace() && !roomList[sig2].isLocked()) {
+		// Never matchmake a stranger into a preview play-test room. Preview rooms now
+		// hold several local-co-op players (capacity > 1), and they get unlocked at
+		// game-over (resetGame), so the old "locked + capacity 1" implicit guard no
+		// longer keeps them private — exclude them explicitly here.
+		if (roomList[sig2].hasSpace() && !roomList[sig2].isLocked() && !roomList[sig2].isPreview) {
 			return sig2;
 		}
 	}
@@ -64,8 +68,11 @@ exports.joinARoom = function (sig, clientID) {
 	if (room == null) {
 		return false;
 	}
-	// A preview room is a private capacity-1 play-test; never let a second
-	// client (e.g. a guessed ?gameid= link) in once the creator has joined.
+	// A preview room is a private local-co-op play-test (capacity PREVIEW_COOP_CAP):
+	// the creator's extra local players join here by its exact sig. Only reject once
+	// it's full. It's never advertised (getRooms skips isPreview) nor matchmade into
+	// (findARoom skips isPreview), so the only outside vector is a correctly-guessed
+	// sig during the short preview window — acceptable for a play-test tool.
 	if (room.isPreview && !room.hasSpace()) {
 		return false;
 	}
@@ -102,14 +109,19 @@ exports.updateRooms = function (dt) {
 exports.getRoomBySig = function (sig) {
 	return roomList[sig];
 }
-// Create an isolated, single-player room running an unsaved (injected) map for
-// the editor's play-test. Capacity 1 + isPreview + locked keep matchmaking from
-// ever placing a stranger here (findARoom skips isLocked; getRooms skips
-// isPreview; once the creator joins hasSpace() is false anyway). The map is
-// injected onto this room's gameBoard only — never the shared map library.
+// Local co-op cap for a preview play-test, mirroring the client's LOCAL_PLAYER_CAP
+// (client/scripts/game.js). Keep the two in lockstep if either changes.
+var PREVIEW_COOP_CAP = 4;
+// Create an isolated room running an unsaved (injected) map for the editor's
+// play-test. The creator (P1) designs the map, launches the preview, and up to
+// PREVIEW_COOP_CAP local players can press to join during gated — a local couch
+// play-test of the unsaved map. isPreview keeps it private: getRooms never lists
+// it and findARoom never matchmakes into it, so no stranger is placed here even
+// though capacity is now > 1. The map is injected onto this room's gameBoard only
+// — never the shared map library.
 exports.createPreviewRoom = function (previewMap) {
 	var sig = generateRoomSig();
-	var room = game.getRoom(sig, 1);
+	var room = game.getRoom(sig, PREVIEW_COOP_CAP);
 	room.isPreview = true;
 	room.game.locked = true;
 	room.game.gameBoard.isPreview = true;
