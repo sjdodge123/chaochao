@@ -111,57 +111,119 @@
         return { token: accessToken, deviceId: deviceId };
     }
 
-    // Minimal sign-in UI wiring. All elements are optional — pages without the
-    // auth controls (or with auth disabled) simply skip this.
-    function renderAuthUI() {
-        var signedOut = document.getElementById('authSignedOut');
-        var signedIn = document.getElementById('authSignedIn');
-        if (!signedOut || !signedIn) {
-            return;
+    // The signed-in profile other client code can read (e.g. the skin station):
+    // display name + avatar URL, or null when not signed in.
+    function getProfile() {
+        if (!currentUser) {
+            return null;
         }
-        if (currentUser) {
-            signedOut.style.display = 'none';
-            signedIn.style.display = '';
-            var meta = currentUser.user_metadata || {};
-            var name = meta.full_name || meta.name || meta.user_name || currentUser.email || 'Player';
-            var nameEl = document.getElementById('authName');
-            if (nameEl) nameEl.textContent = name;
-            var avatarEl = document.getElementById('authAvatar');
-            if (avatarEl) {
-                if (meta.avatar_url) {
-                    avatarEl.src = meta.avatar_url;
-                    avatarEl.style.display = '';
-                } else {
-                    avatarEl.style.display = 'none';
-                }
-            }
-        } else {
-            signedIn.style.display = 'none';
-            // Only advertise sign-in when auth is actually available.
-            signedOut.style.display = sb ? '' : 'none';
-        }
+        var meta = currentUser.user_metadata || {};
+        return {
+            name: meta.full_name || meta.name || meta.user_name || currentUser.email || 'Player',
+            avatarUrl: meta.avatar_url || null
+        };
     }
 
-    function wireButtons() {
-        var g = document.getElementById('signInGoogle');
-        if (g) g.addEventListener('click', function () { signIn('google'); });
-        var d = document.getElementById('signInDiscord');
-        if (d) d.addEventListener('click', function () { signIn('discord'); });
-        var o = document.getElementById('signOut');
-        if (o) o.addEventListener('click', function () { signOut(); });
+    // --- Header auth control -------------------------------------------------
+    // auth.js injects this into <nav> on every page (one definition → identical
+    // everywhere), positioned immediately LEFT of the theme toggle and matching
+    // the navbar-control styling. Signed out: a "Log in" pill that opens a
+    // Google/Discord popover. Signed in: avatar + name that opens a Sign-out
+    // popover. Everything carries data-gp-nav so the controller menu nav (the
+    // project standard, NAV_SELECTOR="[data-gp-nav]") can reach it.
+    var ctrl = null, menu = null;
+
+    // Let the controller reach the popover's items only while it's open (and
+    // skip hidden ones), so the focus ring never lands on an invisible button.
+    function setMenuItemsNav(on) {
+        if (!menu) { return; }
+        var items = menu.querySelectorAll('.auth-menu-item');
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].hidden) { continue; }
+            if (on) { items[i].setAttribute('data-gp-nav', ''); }
+            else { items[i].removeAttribute('data-gp-nav'); }
+        }
+    }
+    function openMenu() { if (menu) { menu.hidden = false; setMenuItemsNav(true); } }
+    function closeMenu() { if (menu) { menu.hidden = true; setMenuItemsNav(false); } }
+    function toggleMenu() { if (menu.hidden) { openMenu(); } else { closeMenu(); } }
+
+    function buildControl() {
+        // Only inject when auth is actually available — guests on an
+        // auth-disabled server see no login affordance at all.
+        if (ctrl || !sb) { return; }
+        var nav = document.querySelector('nav');
+        if (!nav) { return; }
+
+        ctrl = document.createElement('div');
+        ctrl.className = 'auth-control';
+        ctrl.innerHTML =
+            '<button class="navbar-ctrl auth-trigger" id="authLogin" type="button" data-gp-nav aria-haspopup="true">Log in</button>' +
+            '<button class="navbar-ctrl auth-trigger" id="authUser" type="button" data-gp-nav aria-haspopup="true" hidden>' +
+                '<img class="auth-avatar" id="authAvatar" alt="" hidden />' +
+                '<span id="authName"></span>' +
+                '<span class="auth-caret" aria-hidden="true">▾</span>' +
+            '</button>' +
+            '<div class="auth-menu" id="authMenu" role="menu" hidden>' +
+                '<button class="auth-menu-item" id="signInGoogle" type="button" role="menuitem">Continue with Google</button>' +
+                '<button class="auth-menu-item" id="signInDiscord" type="button" role="menuitem">Continue with Discord</button>' +
+                '<button class="auth-menu-item" id="signOut" type="button" role="menuitem" hidden>Sign out</button>' +
+            '</div>';
+
+        // Place it left of the theme toggle regardless of which script injected
+        // first (theme.js always appends #themeToggle at the nav's end).
+        var themeBtn = document.getElementById('themeToggle');
+        if (themeBtn) { nav.insertBefore(ctrl, themeBtn); }
+        else { nav.appendChild(ctrl); }
+
+        menu = ctrl.querySelector('#authMenu');
+        ctrl.querySelector('#authLogin').addEventListener('click', toggleMenu);
+        ctrl.querySelector('#authUser').addEventListener('click', toggleMenu);
+        ctrl.querySelector('#signInGoogle').addEventListener('click', function () { signIn('google'); });
+        ctrl.querySelector('#signInDiscord').addEventListener('click', function () { signIn('discord'); });
+        ctrl.querySelector('#signOut').addEventListener('click', function () { signOut(); });
+        document.addEventListener('click', function (e) {
+            if (ctrl && !ctrl.contains(e.target)) { closeMenu(); }
+        });
+
         renderAuthUI();
     }
 
+    function renderAuthUI() {
+        if (!ctrl) { return; }
+        var profile = getProfile();
+        var loginBtn = ctrl.querySelector('#authLogin');
+        var userBtn = ctrl.querySelector('#authUser');
+        var google = ctrl.querySelector('#signInGoogle');
+        var discord = ctrl.querySelector('#signInDiscord');
+        var out = ctrl.querySelector('#signOut');
+        if (profile) {
+            loginBtn.hidden = true;
+            userBtn.hidden = false;
+            ctrl.querySelector('#authName').textContent = profile.name;
+            var avatarEl = ctrl.querySelector('#authAvatar');
+            if (profile.avatarUrl) { avatarEl.src = profile.avatarUrl; avatarEl.hidden = false; }
+            else { avatarEl.hidden = true; }
+            google.hidden = true; discord.hidden = true; out.hidden = false;
+        } else {
+            loginBtn.hidden = false;
+            userBtn.hidden = true;
+            google.hidden = false; discord.hidden = false; out.hidden = true;
+        }
+        closeMenu(); // collapse the popover on any auth-state change
+    }
+
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', wireButtons);
+        document.addEventListener('DOMContentLoaded', buildControl);
     } else {
-        wireButtons();
+        buildControl();
     }
 
     window.chaochaoAuth = {
         ready: ready,
         deviceId: deviceId,
         getHandshake: getHandshake,
+        getProfile: getProfile,
         signIn: signIn,
         signOut: signOut,
         isSignedIn: function () { return !!currentUser; }

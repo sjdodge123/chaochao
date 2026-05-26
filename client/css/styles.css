@@ -142,6 +142,85 @@ nav {
     box-shadow: 0 0 0 3px rgba(200, 127, 138, 0.4);
 }
 
+/* sign-in control injected into the navbar by auth.js, sitting immediately to
+   the LEFT of the theme toggle. The control owns the margin-left:auto that
+   pushes the group right; the sibling rule below stops the theme toggle's own
+   auto-margin from splitting the two apart. */
+.auth-control {
+    margin-left: auto;
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+nav .auth-control ~ .theme-toggle {
+    margin-left: 8px;
+}
+/* pill-shaped navbar control (Log in / signed-in user), styled like .theme-toggle */
+.navbar-ctrl {
+    height: 34px;
+    padding: 0 12px;
+    border-radius: 17px;
+    border: 1px solid var(--navbar-control-border);
+    background: transparent;
+    color: var(--navbar-text);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: background 0.2s, border-color 0.2s;
+}
+.navbar-ctrl[hidden] { display: none; }
+.navbar-ctrl:hover { background: var(--navbar-control-hover); }
+.navbar-ctrl:focus {
+    outline: none;
+    border-color: #c87f8a;
+    box-shadow: 0 0 0 3px rgba(200, 127, 138, 0.4);
+}
+.auth-avatar {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+.auth-avatar[hidden] { display: none; }
+.auth-caret { font-size: 10px; opacity: 0.8; }
+/* popover anchored under the control */
+.auth-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 184px;
+    background: var(--navbar-bg);
+    border: 1px solid var(--navbar-control-border);
+    border-radius: 8px;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    z-index: 1000;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+}
+.auth-menu[hidden] { display: none; }
+.auth-menu-item {
+    text-align: left;
+    padding: 8px 10px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--navbar-text);
+    font-size: 14px;
+    cursor: pointer;
+}
+.auth-menu-item[hidden] { display: none; }
+.auth-menu-item:hover { background: var(--navbar-control-hover); }
+.auth-menu-item:focus {
+    outline: none;
+    background: var(--navbar-control-hover);
+    box-shadow: 0 0 0 2px rgba(200, 127, 138, 0.5);
+}
+
   section {
     /* navbar offset comes from body { padding-top } so margins don't
        collapse out and inflate the page height. `dvh` mirrors html/body. */
