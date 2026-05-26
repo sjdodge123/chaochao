@@ -470,6 +470,12 @@ class Game {
 			desiredBots = this.botTarget - humanCount;
 		}
 		if (desiredBots < 0) { desiredBots = 0; }
+		// Never let bots overflow the room: humans + bots must fit maxPlayersInRoom.
+		// A lobby AI override can ask for more bots than there's room for once the
+		// lobby fills up, so clamp it authoritatively here at spawn time.
+		var botCapacity = (c.maxPlayersInRoom || 25) - humanCount;
+		if (botCapacity < 0) { botCapacity = 0; }
+		if (desiredBots > botCapacity) { desiredBots = botCapacity; }
 		if (desiredBots <= botCount) {
 			return;
 		}

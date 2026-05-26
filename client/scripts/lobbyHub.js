@@ -166,9 +166,27 @@ function stationPanelAction(lp, action) {
 
 // --- AI station model --------------------------------------------------------
 
+// Count the humans currently in the room (the lobby has no bots yet — they spawn
+// at the race start — but exclude any named/AI entry defensively).
+function lobbyHumanCount() {
+    var n = 0;
+    if (typeof playerList !== "undefined" && playerList) {
+        for (var id in playerList) {
+            if (playerList[id] && !playerList[id].isAI) { n++; }
+        }
+    }
+    return n;
+}
+// Most bots you can request right now: the AI grid cap, but never more than the
+// room has space for (humans + bots must fit maxPlayersInRoom). The server clamps
+// the same way at spawn, so this just keeps the picker honest.
 function aiMaxBots() {
-    return (typeof config !== "undefined" && config && config.aiRacers && config.aiRacers.maxGrid)
+    var hard = (typeof config !== "undefined" && config && config.aiRacers && config.aiRacers.maxGrid)
         ? config.aiRacers.maxGrid : 10;
+    var cap = (typeof config !== "undefined" && config && config.maxPlayersInRoom) ? config.maxPlayersInRoom : 25;
+    var room = cap - lobbyHumanCount();
+    if (room < 0) { room = 0; }
+    return Math.min(hard, room);
 }
 // Current dial position: null = Auto (untouched), 0 = Off, N = N bots.
 function currentAILevel() {
@@ -200,9 +218,10 @@ function adjustAILevel(lp, dir) {
         lvl = (dir > 0) ? 1 : 0; // from Auto: right -> 1 bot, left -> Off
     } else {
         lvl += dir;
-        if (lvl < 0) { lvl = 0; }
-        if (lvl > max) { lvl = max; }
     }
+    // Clamp to what the room can actually hold (max can be 0 when the lobby is full).
+    if (lvl < 0) { lvl = 0; }
+    if (lvl > max) { lvl = max; }
     lobbyAISetting = (lvl <= 0) ? { enabled: false, count: 0 } : { enabled: true, count: lvl };
     var sock = (lp && lp.socket) ? lp.socket : (typeof server !== "undefined" ? server : null);
     if (sock) {
@@ -287,6 +306,13 @@ function lobbyProjectToScreen(wx, wy) {
     return { x: wx, y: wy };
 }
 
+// One consistent high-contrast colour for every hub ring. The lobby map is greens,
+// browns, blue water, white ice, orange lava and tan sand — a vivid magenta sits
+// outside that whole range, so the rings read as deliberate UI no matter what
+// terrain they sit on. Which station is which is conveyed by the glyph + label, not
+// the colour. Used for the rings AND the prompt/panel accents for a consistent look.
+var HUB_RING_COLOR = "#ff2bd6";
+
 function stationTitle(kind) {
     if (kind === "ai") { return "AI Bots"; }
     if (kind === "skin") { return "Skins"; }
@@ -316,26 +342,45 @@ function drawLobbyStationZones() {
         var cy = s.y + camera.getCameraY();
         gameContext.save();
         // Soft filled disc so the zone reads as walk-up ground, not a wall.
-        gameContext.globalAlpha = 0.16;
-        gameContext.fillStyle = s.color;
+        gameContext.globalAlpha = 0.14;
+        gameContext.fillStyle = HUB_RING_COLOR;
         gameContext.beginPath();
         gameContext.arc(cx, cy, s.radius, 0, 2 * Math.PI);
         gameContext.fill();
-        // Pulsing ring.
-        gameContext.globalAlpha = 0.9;
-        gameContext.lineWidth = 3;
-        gameContext.strokeStyle = s.color;
+        // Distinct style: a glowing "marching-dashes" ring (dash offset animates so it
+        // rotates) — clearly reads as an interactive station, not a plain circle, and
+        // the glow lifts it off busy terrain. Consistent magenta on every station.
+        gameContext.globalAlpha = 1;
+        gameContext.shadowColor = HUB_RING_COLOR;
+        gameContext.shadowBlur = 14;
+        gameContext.strokeStyle = HUB_RING_COLOR;
+        gameContext.lineWidth = 4;
+        gameContext.setLineDash([16, 11]);
+        gameContext.lineDashOffset = -(t * 26) % 27;
         gameContext.beginPath();
-        gameContext.arc(cx, cy, s.radius + 3 * Math.sin(t * 2 + i), 0, 2 * Math.PI);
+        gameContext.arc(cx, cy, s.radius, 0, 2 * Math.PI);
         gameContext.stroke();
-        // Centre glyph + label.
+        // Thin solid white inner ring (no glow) so the shape stays crisp and high-
+        // contrast even where the magenta glow meets a bright tile.
+        gameContext.setLineDash([]);
+        gameContext.shadowBlur = 0;
+        gameContext.globalAlpha = 0.9;
+        gameContext.strokeStyle = "#ffffff";
+        gameContext.lineWidth = 1.5;
+        gameContext.beginPath();
+        gameContext.arc(cx, cy, s.radius - 7, 0, 2 * Math.PI);
+        gameContext.stroke();
+        // Centre glyph + label (a dark halo keeps the white label legible on any tile).
         gameContext.globalAlpha = 1;
         gameContext.textAlign = "center";
         gameContext.textBaseline = "middle";
         gameContext.font = "26px sans-serif";
         gameContext.fillText(stationGlyph(s.kind), cx, cy - 8);
-        gameContext.fillStyle = "#fff";
         gameContext.font = "bold 15px sans-serif";
+        gameContext.lineWidth = 3;
+        gameContext.strokeStyle = "rgba(0,0,0,0.65)";
+        gameContext.strokeText(stationTitle(s.kind), cx, cy + 18);
+        gameContext.fillStyle = "#ffffff";
         gameContext.fillText(stationTitle(s.kind), cx, cy + 18);
         gameContext.restore();
     }
@@ -367,6 +412,46 @@ function drawLobbyHubHud() {
             drawStationPrompt(lp, sp);
         }
     }
+    // The AI setting is room-wide, so show it persistently to the whole lobby (not
+    // just inside an open panel) — everyone sees a change before the race starts.
+    drawLobbyAIStatus();
+}
+
+// A fixed top-centre banner showing the live room-wide AI setting during the lobby.
+// Synced to every client via lobbyAIChanged / the gameState snapshot, so all
+// players read the same value. Effective count is clamped to room capacity so it
+// reflects what will actually spawn.
+function drawLobbyAIStatus() {
+    var lvl = currentAILevel();
+    var text;
+    if (lvl == null) {
+        text = "🤖 AI bots next race: Auto";
+    } else if (lvl <= 0) {
+        text = "🤖 AI bots next race: Off";
+    } else {
+        var eff = Math.min(lvl, aiMaxBots());
+        text = "🤖 AI bots next race: " + eff + (eff === 1 ? " bot" : " bots");
+    }
+    gameContext.save();
+    gameContext.font = "bold 16px sans-serif";
+    var tw = gameContext.measureText(text).width;
+    var w = tw + 28;
+    var h = 32;
+    var x = (LOGICAL_WIDTH - w) / 2;
+    var y = 92; // just under the GameID/Players/Round info row
+    gameContext.globalAlpha = 0.9;
+    gameContext.fillStyle = "rgba(18,20,26,0.88)";
+    lhRoundRect(gameContext, x, y, w, h, 9);
+    gameContext.fill();
+    gameContext.lineWidth = 2;
+    gameContext.strokeStyle = HUB_RING_COLOR;
+    gameContext.stroke();
+    gameContext.globalAlpha = 1;
+    gameContext.fillStyle = "#fff";
+    gameContext.textAlign = "center";
+    gameContext.textBaseline = "middle";
+    gameContext.fillText(text, LOGICAL_WIDTH / 2, y + h / 2);
+    gameContext.restore();
 }
 
 function lhRoundRect(ctx, x, y, w, h, r) {
@@ -384,9 +469,30 @@ function lhClamp(v, lo, hi) {
 function lhPointIn(r, x, y) {
     return r != null && x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
 }
-// The open hint for the primary's current input method.
-function primaryOpenHint() {
-    return (typeof isTouchScreen !== "undefined" && isTouchScreen) ? "Tap" : "Press E";
+// The confirm-button glyph for a given pad type (Xbox A / PlayStation cross),
+// reusing gamepad.js's mapping when present.
+function padConfirmGlyph(type) {
+    if (typeof attackGlyphFor === "function") {
+        return attackGlyphFor(type);
+    }
+    return type === "playstation" ? "✕" : "A";
+}
+// The open hint for a slot, matched to the input method it's actually using:
+// a controller shows its face-button glyph, touch shows "Tap", keyboard "Press E".
+function slotOpenHint(lp) {
+    var padActive = (typeof activeInputMethod !== "undefined" && activeInputMethod === "pad");
+    // Non-primary slots are always pad players; the primary follows the live method.
+    if (!lp.isPrimary || padActive) {
+        var type = (lp && lp.padType) ? lp.padType : (typeof gamepadType !== "undefined" ? gamepadType : "generic");
+        return padConfirmGlyph(type);
+    }
+    if (typeof activeInputMethod !== "undefined" && activeInputMethod === "touch") {
+        return "Tap";
+    }
+    if (typeof isTouchScreen !== "undefined" && isTouchScreen) {
+        return "Tap";
+    }
+    return "Press E";
 }
 
 function drawStationPrompt(lp, sp) {
@@ -394,7 +500,7 @@ function drawStationPrompt(lp, sp) {
     if (!st) {
         return;
     }
-    var hint = lp.isPrimary ? primaryOpenHint() : "Ⓐ";
+    var hint = slotOpenHint(lp);
     var label = hint + "  •  " + stationTitle(st.kind);
     gameContext.save();
     gameContext.font = "bold 15px sans-serif";
@@ -408,7 +514,7 @@ function drawStationPrompt(lp, sp) {
     lhRoundRect(gameContext, x, y, w, h, 8);
     gameContext.fill();
     gameContext.lineWidth = 2;
-    gameContext.strokeStyle = st.color;
+    gameContext.strokeStyle = HUB_RING_COLOR;
     gameContext.stroke();
     gameContext.globalAlpha = 1;
     gameContext.fillStyle = "#fff";
