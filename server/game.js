@@ -621,7 +621,12 @@ class Game {
 		this.gameBoard.setupMap(this.currentState);
 		// Fill the grid with AI racers after the map (and starting gate) are laid
 		// out, so each bot can be placed at the gate via determineGameState.
-		this.fillGridWithBots();
+		// Preview rooms only fill when the editor opted in (previewAI); default
+		// off gives the creator a solo, bot-free run of their map. Non-preview
+		// rooms are unaffected (isPreview is false -> always fill, as before).
+		if (!this.gameBoard.isPreview || this.gameBoard.previewAI) {
+			this.fillGridWithBots();
+		}
 		messenger.messageRoomBySig(this.roomSig, "startGated", null);
 	}
 	startRace() {
@@ -816,6 +821,9 @@ class GameBoard {
 		// NEVER push it into the shared this.maps array.
 		this.isPreview = false;
 		this.previewMap = null;
+		// Preview-only: whether the editor asked to fill the grid with AI racers.
+		// Default off, so a preview is a solo, bot-free run unless opted in.
+		this.previewAI = false;
 
 		this.allAbilityIDs = this.indexAbilities();
 		this.collapseLoc = {};
