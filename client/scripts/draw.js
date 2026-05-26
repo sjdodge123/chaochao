@@ -1859,11 +1859,16 @@ function drawAvatarSkin(player, sprite) {
     }
     var cx = player.x + camera.getCameraX();
     var cy = player.y + camera.getCameraY();
-    // Shrink the picture well within the kart so the border frame stays visible.
-    var r = (sprite && sprite.halfSize ? sprite.halfSize : 20) * 0.62;
+    // Size off the kart's actual circle radius (player.radius), NOT sprite.halfSize
+    // (= radius + 8px of shadow/stroke padding) — otherwise the avatar + border
+    // spills past the kart edge and makes the kart look bigger. The avatar sits
+    // shrunk inside the kart with the kart's colour ring still visible around the
+    // gold border (which marks it as an external, not-earned skin).
+    var kartR = player.radius || 20;
+    var r = kartR * 0.6;
     gameContext.save();
     gameContext.beginPath();                       // border frame (the "not earned" marker)
-    gameContext.arc(cx, cy, r + 2.5, 0, 2 * Math.PI);
+    gameContext.arc(cx, cy, r + 2, 0, 2 * Math.PI);
     gameContext.fillStyle = AVATAR_BORDER_COLOR;
     gameContext.fill();
     gameContext.beginPath();                       // clip to a circle and draw the avatar inside
