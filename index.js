@@ -183,34 +183,22 @@ function sanitizeDeviceId(raw) {
     return raw;
 }
 
-// Lightweight per-IP token-verification throttle so a client spamming
-// connections with bogus tokens can't amplify into unbounded Supabase getUser()
-// calls. Sliding 60s window; over the cap we skip verification (treat as guest)
-// rather than reject — guests always connect.
-var verifyHits = new Map();
-var VERIFY_WINDOW_MS = 60 * 1000;
-var VERIFY_MAX_PER_WINDOW = 60;
-function allowVerify(ip) {
-    var now = Date.now();
-    var rec = verifyHits.get(ip);
-    if (!rec || now - rec.start > VERIFY_WINDOW_MS) {
-        verifyHits.set(ip, { start: now, count: 1 });
-        if (verifyHits.size > 10000) { verifyHits.clear(); }
-        return true;
-    }
-    rec.count++;
-    return rec.count <= VERIFY_MAX_PER_WINDOW;
-}
-
 // Resolve every Socket.IO handshake to a Supabase user id when an access token
 // is supplied, otherwise leave the connection as a guest. We NEVER reject here —
 // anonymous play must keep working exactly as before. A valid token also ensures
 // the user's durable `progression` row exists and records this device.
+//
+// No per-IP throttle here: behind Heroku's router socket.handshake.address is the
+// PROXY ip shared by every client, so an IP throttle would be a global throttle
+// that silently demotes all signed-in users to guests under normal load. Repeated
+// tokens (good or verified-bad) are already cheap via auth.js's token cache, and
+// each network verify is bounded by a timeout; a global cap can be added at the
+// infra layer if abuse is ever observed.
 io.use(async (socket, next) => {
     var handshake = socket.handshake.auth || {};
     socket.deviceId = sanitizeDeviceId(handshake.deviceId);
     socket.userId = null;
-    if (handshake.token && allowVerify(socket.handshake.address)) {
+    if (handshake.token) {
         try {
             var userId = await auth.verifyToken(handshake.token);
             if (userId) {

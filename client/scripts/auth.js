@@ -59,15 +59,22 @@
         }
     }
 
+    // A stable key for what the navbar actually shows (identity + name + avatar), so
+    // we re-render on sign-in/out AND on a profile change (USER_UPDATED), but NOT on a
+    // bare TOKEN_REFRESHED (same key), which fires periodically and would otherwise
+    // snap an open popover shut.
+    function navKey(user) {
+        if (!user) { return ''; }
+        var m = user.user_metadata || {};
+        return user.id + '|' + (m.full_name || m.name || m.user_name || user.email || '') + '|' + (m.avatar_url || '');
+    }
+
     function applySession(session) {
         accessToken = (session && session.access_token) || null;
         var newUser = (session && session.user) || null;
-        // Only re-render (which collapses any open popover) when the signed-in
-        // identity actually changes — not on background TOKEN_REFRESHED events,
-        // which fire periodically and would otherwise snap an open menu shut.
-        var idChanged = (currentUser && currentUser.id) !== (newUser && newUser.id);
+        var changed = navKey(currentUser) !== navKey(newUser);
         currentUser = newUser;
-        if (idChanged) {
+        if (changed) {
             renderAuthUI();
         }
     }

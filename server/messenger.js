@@ -76,7 +76,10 @@ function isAllowedAvatarUrl(url) {
 	var host = parsed.hostname.toLowerCase();
 	return host === "cdn.discordapp.com" ||
 		host === "media.discordapp.net" ||
-		host.endsWith(".googleusercontent.com"); // lh3.googleusercontent.com etc.
+		// Google avatars live on lh3/lh4/lh5/... .googleusercontent.com. Match that
+		// specific pattern rather than any *.googleusercontent.com subdomain (some of
+		// which can host user-controllable content).
+		/^lh[0-9]+\.googleusercontent\.com$/.test(host);
 }
 
 function checkForMail(client) {
@@ -340,7 +343,7 @@ function checkForMail(client) {
 		if (name != null) {
 			// Strip control + bidi/zero-width/format chars (canvas name-spoofing), then
 			// cap length by CODE POINT so we never split a surrogate pair (emoji names).
-			name = name.replace(/[\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/g, "").trim();
+			name = name.replace(/[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060\u2066-\u2069\ufeff]/g, "").trim();
 			name = Array.from(name).slice(0, 24).join("");
 		}
 		player.avatarUrl = url;
