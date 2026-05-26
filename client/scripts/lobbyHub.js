@@ -306,12 +306,37 @@ function lobbyProjectToScreen(wx, wy) {
     return { x: wx, y: wy };
 }
 
-// One consistent high-contrast colour for every hub ring. The lobby map is greens,
-// browns, blue water, white ice, orange lava and tan sand — a vivid magenta sits
-// outside that whole range, so the rings read as deliberate UI no matter what
-// terrain they sit on. Which station is which is conveyed by the glyph + label, not
-// the colour. Used for the rings AND the prompt/panel accents for a consistent look.
-var HUB_RING_COLOR = "#ff2bd6";
+// Hub styling reuses the game's OWN visual language instead of a foreign neon:
+// the idle ring echoes the lobby's theme-ink dashed "practice area" frame
+// (drawLobbyFloor), and the interactive accent is the game's goal gold — warm,
+// already part of the palette, and high-contrast on the green/brown/blue/ice map.
+// Walking into a zone lights it up gold (see the active state below).
+var HUB_ACCENT = "#FFD700"; // goal gold — the "interactive / active" accent
+function hubInk() {
+    return (typeof themeColor === "function") ? themeColor("ink", "#ffffff") : "#ffffff";
+}
+function hubInkOutline() {
+    return (typeof themeColor === "function") ? themeColor("inkOutline", "#000000") : "#000000";
+}
+function hubSurface() {
+    return (typeof themeColor === "function") ? themeColor("surface", "#101216") : "#101216";
+}
+// True when any player is standing in the zone — drives the "lights up" feedback.
+function stationOccupied(s) {
+    if (typeof playerList === "undefined" || !playerList) {
+        return false;
+    }
+    for (var id in playerList) {
+        var p = playerList[id];
+        if (p == null || p.x == null) { continue; }
+        var pr = (p.radius != null) ? p.radius : 12;
+        var dx = p.x - s.x, dy = p.y - s.y;
+        if (dx * dx + dy * dy <= (s.radius + pr * 0.5) * (s.radius + pr * 0.5)) {
+            return true;
+        }
+    }
+    return false;
+}
 
 function stationTitle(kind) {
     if (kind === "ai") { return "AI Bots"; }
@@ -340,48 +365,61 @@ function drawLobbyStationZones() {
         }
         var cx = s.x + camera.getCameraX();
         var cy = s.y + camera.getCameraY();
+        var active = stationOccupied(s);
+        var ink = hubInk();
+        var outline = hubInkOutline();
         gameContext.save();
-        // Soft filled disc so the zone reads as walk-up ground, not a wall.
-        gameContext.globalAlpha = 0.14;
-        gameContext.fillStyle = HUB_RING_COLOR;
+        // Filled disc: the panel surface tint at idle (reads as a defined area), warm
+        // gold when a player is standing in it.
+        gameContext.globalAlpha = active ? 0.22 : 0.10;
+        gameContext.fillStyle = active ? HUB_ACCENT : hubSurface();
         gameContext.beginPath();
         gameContext.arc(cx, cy, s.radius, 0, 2 * Math.PI);
         gameContext.fill();
-        // Distinct style: a glowing "marching-dashes" ring (dash offset animates so it
-        // rotates) — clearly reads as an interactive station, not a plain circle, and
-        // the glow lifts it off busy terrain. Consistent magenta on every station.
+        // Ring. Idle: a theme-ink "marching-dashes" ring that matches the lobby's
+        // dashed practice-area frame (so it reads as part of the room, not a UI
+        // sticker). Active: a solid, glowing gold ring — the zone clearly lights up
+        // the moment a player steps in.
         gameContext.globalAlpha = 1;
-        gameContext.shadowColor = HUB_RING_COLOR;
-        gameContext.shadowBlur = 14;
-        gameContext.strokeStyle = HUB_RING_COLOR;
-        gameContext.lineWidth = 4;
-        gameContext.setLineDash([16, 11]);
-        gameContext.lineDashOffset = -(t * 26) % 27;
+        if (active) {
+            gameContext.shadowColor = HUB_ACCENT;
+            gameContext.shadowBlur = 18;
+            gameContext.strokeStyle = HUB_ACCENT;
+            gameContext.lineWidth = 5;
+            gameContext.setLineDash([]);
+        } else {
+            gameContext.shadowColor = outline;
+            gameContext.shadowBlur = 6;
+            gameContext.strokeStyle = ink;
+            gameContext.lineWidth = 3.5;
+            gameContext.setLineDash([14, 10]);
+            gameContext.lineDashOffset = -(t * 22) % 24;
+        }
         gameContext.beginPath();
         gameContext.arc(cx, cy, s.radius, 0, 2 * Math.PI);
         gameContext.stroke();
-        // Thin solid white inner ring (no glow) so the shape stays crisp and high-
-        // contrast even where the magenta glow meets a bright tile.
         gameContext.setLineDash([]);
         gameContext.shadowBlur = 0;
-        gameContext.globalAlpha = 0.9;
-        gameContext.strokeStyle = "#ffffff";
-        gameContext.lineWidth = 1.5;
-        gameContext.beginPath();
-        gameContext.arc(cx, cy, s.radius - 7, 0, 2 * Math.PI);
-        gameContext.stroke();
-        // Centre glyph + label (a dark halo keeps the white label legible on any tile).
+        // Centre glyph — gently hovers (bobs) so it reads as a beckoning marker; a
+        // wider bob + a soft gold under-glow when active. Label sits below, in the
+        // game's ink/ink-outline text treatment (matches other on-board labels).
+        var bob = Math.sin(t * 2.4 + i * 0.8) * (active ? 5 : 3);
         gameContext.globalAlpha = 1;
         gameContext.textAlign = "center";
         gameContext.textBaseline = "middle";
-        gameContext.font = "26px sans-serif";
-        gameContext.fillText(stationGlyph(s.kind), cx, cy - 8);
+        if (active) {
+            gameContext.shadowColor = HUB_ACCENT;
+            gameContext.shadowBlur = 10;
+        }
+        gameContext.font = "27px sans-serif";
+        gameContext.fillText(stationGlyph(s.kind), cx, cy - 8 + bob);
+        gameContext.shadowBlur = 0;
         gameContext.font = "bold 15px sans-serif";
         gameContext.lineWidth = 3;
-        gameContext.strokeStyle = "rgba(0,0,0,0.65)";
-        gameContext.strokeText(stationTitle(s.kind), cx, cy + 18);
-        gameContext.fillStyle = "#ffffff";
-        gameContext.fillText(stationTitle(s.kind), cx, cy + 18);
+        gameContext.strokeStyle = outline;
+        gameContext.strokeText(stationTitle(s.kind), cx, cy + 20);
+        gameContext.fillStyle = ink;
+        gameContext.fillText(stationTitle(s.kind), cx, cy + 20);
         gameContext.restore();
     }
 }
@@ -417,37 +455,52 @@ function drawLobbyHubHud() {
     drawLobbyAIStatus();
 }
 
+// The grid total Auto fills toward (humans + bots ≈ autoTarget).
+function aiAutoTarget() {
+    return (typeof config !== "undefined" && config && config.aiRacers && config.aiRacers.autoTarget)
+        ? config.aiRacers.autoTarget : 8;
+}
+// How many bots Auto will actually spawn for the current human count (what the
+// banner shows so players see the count rise/fall as people join and leave).
+function autoEffectiveBots() {
+    var n = aiAutoTarget() - lobbyHumanCount();
+    if (n < 0) { n = 0; }
+    return Math.min(n, aiMaxBots());
+}
+
 // A fixed top-centre banner showing the live room-wide AI setting during the lobby.
-// Synced to every client via lobbyAIChanged / the gameState snapshot, so all
-// players read the same value. Effective count is clamped to room capacity so it
-// reflects what will actually spawn.
+// Synced to every client (lobbyAIChanged / the gameState snapshot), so all players
+// read the same value. Styled with the game's own panel theme (surface + ink) so it
+// sits in the world rather than reading as a foreign UI sticker.
 function drawLobbyAIStatus() {
     var lvl = currentAILevel();
     var text;
     if (lvl == null) {
-        text = "🤖 AI bots next race: Auto";
+        var auto = autoEffectiveBots();
+        text = "🤖 AI bots next race: " + auto + (auto === 1 ? " bot" : " bots") + " (auto)";
     } else if (lvl <= 0) {
         text = "🤖 AI bots next race: Off";
     } else {
         var eff = Math.min(lvl, aiMaxBots());
         text = "🤖 AI bots next race: " + eff + (eff === 1 ? " bot" : " bots");
     }
+    var ink = hubInk();
     gameContext.save();
     gameContext.font = "bold 16px sans-serif";
     var tw = gameContext.measureText(text).width;
-    var w = tw + 28;
+    var w = tw + 30;
     var h = 32;
     var x = (LOGICAL_WIDTH - w) / 2;
     var y = 92; // just under the GameID/Players/Round info row
-    gameContext.globalAlpha = 0.9;
-    gameContext.fillStyle = "rgba(18,20,26,0.88)";
+    gameContext.globalAlpha = 0.92;
+    gameContext.fillStyle = hubSurface();
     lhRoundRect(gameContext, x, y, w, h, 9);
     gameContext.fill();
-    gameContext.lineWidth = 2;
-    gameContext.strokeStyle = HUB_RING_COLOR;
-    gameContext.stroke();
     gameContext.globalAlpha = 1;
-    gameContext.fillStyle = "#fff";
+    gameContext.lineWidth = 2;
+    gameContext.strokeStyle = ink;
+    gameContext.stroke();
+    gameContext.fillStyle = ink;
     gameContext.textAlign = "center";
     gameContext.textBaseline = "middle";
     gameContext.fillText(text, LOGICAL_WIDTH / 2, y + h / 2);
@@ -514,7 +567,7 @@ function drawStationPrompt(lp, sp) {
     lhRoundRect(gameContext, x, y, w, h, 8);
     gameContext.fill();
     gameContext.lineWidth = 2;
-    gameContext.strokeStyle = HUB_RING_COLOR;
+    gameContext.strokeStyle = HUB_ACCENT;
     gameContext.stroke();
     gameContext.globalAlpha = 1;
     gameContext.fillStyle = "#fff";

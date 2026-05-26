@@ -24,6 +24,7 @@
         "enabled": true,
         "minGrid": 6,
         "maxGrid": 10,
+        "autoTarget": 8,
         "rubberBandStrength": 0.18,
         "_traits": "skill 0..1 (speed+precision+reaction); aggression 0..1 (punch); tempo 0..1 (spend vs hoard abilities); risk 0..1 (tight lava lines / corner-cut); focus race|combat|human|chaos; tilt rage = reckless when behind",
         "cast": [
