@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.18.0 — 2026-05-27
+
 ### Map editor
 
 - The map editor has been rebuilt with an MS-Paint-style layout: a top action bar, a left tool rail (Select, Eraser, tiles, hazards, start edge), and the canvas filling the rest. On phones and tablets it reflows to a top tool strip and a bottom action bar, and — for the first time — the editor is fully usable by **touch** (the tools used to disappear entirely on small screens).
