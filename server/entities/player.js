@@ -987,7 +987,17 @@ class Player extends Circle {
 		// on the new map instead of steering toward old-map coordinates. Identity,
 		// personality knobs and the emote cooldown live on the Player/profile and
 		// are intentionally preserved.
-		if (this.ai != null) { this.ai.waypoints = null; this.ai.repathTimer = 0; this.ai.punchHoldUntil = null; this.ai.punchAngle = 0; }
+		if (this.ai != null) {
+			this.ai.waypoints = null; this.ai.repathTimer = 0; this.ai.punchHoldUntil = null; this.ai.punchAngle = 0;
+			// Clear the anti-stuck/escape state too. It persists on bot.ai across rounds, and
+			// the headwayAt "continuous-stuck" clock is stale from the previous round — if the
+			// bot's new-round spawn happens to fall within STUCK_RADIUS of its old anchor (the
+			// corner-stuck bots end near the gate and respawn there), a stale headwayAt would
+			// trip the avoidance-off beeline on the very first racing tick and fling it off the
+			// line. Reset so the first tick re-anchors fresh.
+			this.ai.progressAnchor = null; this.ai.progressAt = 0; this.ai.headwayAt = null;
+			this.ai.escapeUntil = 0; this.ai.escapeStage = 0; this.ai.lastEscapeAt = 0;
+		}
 		this.x = this.initialLoc.x;
 		this.y = this.initialLoc.y;
 		this.newX = this.x;
