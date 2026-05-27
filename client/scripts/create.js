@@ -1375,21 +1375,26 @@ function renderHazards() {
 
 // Render a map to an offscreen canvas and return a JPEG data URL, for the
 // load-list previews. Thumbnails are no longer stored/shipped with maps, so the
-// editor regenerates them on demand from the (reconstructed) geometry. A flat
-// tile-colour fill is enough for a small picker thumbnail. Cached in-session by
-// map id so re-opening the load window doesn't re-render.
+// editor regenerates them on demand from the (reconstructed) geometry. Uses the
+// SAME textured tile patterns the editor canvas does (renderCell) so previews
+// match the in-game look instead of the flat config colours. Rendered at world
+// resolution (the load-list <img> is CSS-downscaled), cached in-session by map id
+// — but only once patterns are loaded, so an early call before loadPatterns()
+// falls back to flat colours without caching and re-renders textured next time.
 var thumbnailCache = {};
 function renderMapThumbnail(map) {
     if (map == null || !Array.isArray(map.cells)) { return ""; }
     if (map.id != null && thumbnailCache[map.id] != null) { return thumbnailCache[map.id]; }
-    var scale = 320 / world.width;
+    var patternsReady = patterns[config.tileMap.normal.id] != null;
+    var tileFill = function (id) {
+        return (patterns[id] != null) ? patterns[id] : (locateColor(id) || '#888');
+    };
     var cv = document.createElement('canvas');
-    cv.width = Math.round(world.width * scale);
-    cv.height = Math.round(world.height * scale);
+    cv.width = world.width;
+    cv.height = world.height;
     var ctx = cv.getContext('2d');
-    ctx.fillStyle = locateColor(config.tileMap.normal.id) || '#000';
+    ctx.fillStyle = tileFill(config.tileMap.normal.id);
     ctx.fillRect(0, 0, cv.width, cv.height);
-    ctx.scale(scale, scale);
     for (var i = 0; i < map.cells.length; i++) {
         var cell = map.cells[i];
         var hes = cell.halfedges;
@@ -1399,11 +1404,11 @@ function renderMapThumbnail(map) {
         ctx.moveTo(v.x, v.y);
         for (var h = 0; h < hes.length; h++) { v = getEndpoint(hes[h]); ctx.lineTo(v.x, v.y); }
         ctx.closePath();
-        ctx.fillStyle = locateColor(cell.id) || '#888';
+        ctx.fillStyle = tileFill(cell.id);
         ctx.fill();
     }
-    var url = cv.toDataURL("image/jpeg", 0.5);
-    if (map.id != null) { thumbnailCache[map.id] = url; }
+    var url = cv.toDataURL("image/jpeg", 0.7);
+    if (map.id != null && patternsReady) { thumbnailCache[map.id] = url; }
     return url;
 }
 function renderCell(cell) {

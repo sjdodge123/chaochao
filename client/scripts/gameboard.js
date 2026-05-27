@@ -502,8 +502,11 @@ function loadMapPreview(id) {
 	// just like an Image.
 	nextMapThumbnail = (nextMapPreview != null) ? buildMapThumbnailCanvas(nextMapPreview) : null;
 }
-// Flat tile-colour render of a map for the next-map preview window. Colours come
-// from config.tileMap; geometry uses the shared getStartpoint/getEndpoint.
+// Textured render of a map for the next-map preview window, using the SAME tile
+// patterns the live map renders with (renderMapToCache) so the preview matches
+// the in-game look. Falls back to the tile's flat config colour for any id without
+// a pattern. Rendered at world resolution; drawImage downscales it to the preview
+// box. Patterns are loaded long before any next-map preview appears mid-game.
 function thumbnailTileColor(id) {
 	for (var type in config.tileMap) {
 		var t = config.tileMap[type];
@@ -511,16 +514,17 @@ function thumbnailTileColor(id) {
 	}
 	return '#888';
 }
+function thumbnailTileFill(id) {
+	return (typeof patterns !== 'undefined' && patterns[id] != null) ? patterns[id] : thumbnailTileColor(id);
+}
 function buildMapThumbnailCanvas(map) {
 	var cv = document.createElement('canvas');
 	if (map == null || !Array.isArray(map.cells)) { return cv; }
-	var scale = 320 / world.width;
-	cv.width = Math.round(world.width * scale);
-	cv.height = Math.round(world.height * scale);
+	cv.width = world.width;
+	cv.height = world.height;
 	var ctx = cv.getContext('2d');
-	ctx.fillStyle = thumbnailTileColor(config.tileMap.normal.id);
+	ctx.fillStyle = thumbnailTileFill(config.tileMap.normal.id);
 	ctx.fillRect(0, 0, cv.width, cv.height);
-	ctx.scale(scale, scale);
 	for (var i = 0; i < map.cells.length; i++) {
 		var cell = map.cells[i];
 		var hes = cell.halfedges;
@@ -530,7 +534,7 @@ function buildMapThumbnailCanvas(map) {
 		ctx.moveTo(v.x, v.y);
 		for (var h = 0; h < hes.length; h++) { v = getEndpoint(hes[h]); ctx.lineTo(v.x, v.y); }
 		ctx.closePath();
-		ctx.fillStyle = thumbnailTileColor(cell.id);
+		ctx.fillStyle = thumbnailTileFill(cell.id);
 		ctx.fill();
 	}
 	return cv;
