@@ -30,6 +30,7 @@ const game = require(path.join(repoRoot, 'server', 'game.js'));
 const compressor = require(path.join(repoRoot, 'server', 'compressor.js'));
 const utils = require(path.join(repoRoot, 'server', 'utils.js'));
 const config = require(path.join(repoRoot, 'server', 'config.json'));
+const mapFormat = require(path.join(repoRoot, 'server', 'mapFormat.js'));
 
 const DT = config.serverTickSpeed / 1000; // same fixed step the live loop uses
 const MOVES = ['moveForward', 'moveBackward', 'turnLeft', 'turnRight', 'attack'];
@@ -163,7 +164,11 @@ function sessionEveryMap() {
     let ran = 0;
 
     for (const file of files) {
-        const map = JSON.parse(fs.readFileSync(path.join(mapsDir, file), 'utf8'));
+        let map = JSON.parse(fs.readFileSync(path.join(mapsDir, file), 'utf8'));
+        // Maps are stored in compact sites-only form; the editor/server hold the
+        // full reconstructed geometry, so rebuild it here to feed the engine the
+        // same full map a real play-test would.
+        if (mapFormat.isSitesOnly(map)) { map = mapFormat.reconstruct(map); }
         const sig = 'smoke-map-' + ran;
         const room = game.getRoom(sig, 4);
 
