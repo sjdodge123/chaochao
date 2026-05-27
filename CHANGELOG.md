@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.17.0 — 2026-05-27
+
 ### General
 
 - Touch: the camera now follows you in the lobby (like it does during a race), instead of showing the whole lobby zoomed out — so you're not a tiny dot on a phone screen while walking to a station.
