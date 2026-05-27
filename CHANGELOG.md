@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+### General
+
+- AI racers handle ice a lot better. They now slow down before sliding onto an icy stretch and look much farther ahead while on it, so they curve around lava instead of skating straight into it — they make it across slippery, lava-lined maps far more often than before.
+
 ### Bug fixes
 
 - AI racers no longer sit frozen forever in a lava-walled corner. A bot that gets wedged with no way forward — most often boxed in near the starting edge — now commits straight toward the goal to break out instead of loitering in one spot for the whole race (it either threads back onto the track or goes down trying).
