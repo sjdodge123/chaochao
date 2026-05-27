@@ -144,11 +144,10 @@ function checkForMail(client) {
 			return;
 		}
 		if (vMap == null ||
-			vMap.thumbnail == null ||
 			vMap.id == null ||
 			vMap.author == null ||
 			vMap.name == null) {
-			client.emit("githubFailure", "Map is missing required info (name, author, thumbnail).");
+			client.emit("githubFailure", "Map is missing required info (name, author).");
 			return;
 		}
 		// Structural validation at the trust boundary — the same check the

@@ -497,8 +497,43 @@ function loadMapPreview(id) {
 			break;
 		}
 	}
-	nextMapThumbnail = new Image();
-	nextMapThumbnail.src = nextMapPreview.thumbnail;
+	// Maps no longer ship a thumbnail; render one on demand from the (already
+	// reconstructed) geometry into an offscreen canvas, which drawImage accepts
+	// just like an Image.
+	nextMapThumbnail = (nextMapPreview != null) ? buildMapThumbnailCanvas(nextMapPreview) : null;
+}
+// Flat tile-colour render of a map for the next-map preview window. Colours come
+// from config.tileMap; geometry uses the shared getStartpoint/getEndpoint.
+function thumbnailTileColor(id) {
+	for (var type in config.tileMap) {
+		var t = config.tileMap[type];
+		if (t && t.id === id && t.color) { return t.color; }
+	}
+	return '#888';
+}
+function buildMapThumbnailCanvas(map) {
+	var cv = document.createElement('canvas');
+	if (map == null || !Array.isArray(map.cells)) { return cv; }
+	var scale = 320 / world.width;
+	cv.width = Math.round(world.width * scale);
+	cv.height = Math.round(world.height * scale);
+	var ctx = cv.getContext('2d');
+	ctx.fillStyle = thumbnailTileColor(config.tileMap.normal.id);
+	ctx.fillRect(0, 0, cv.width, cv.height);
+	ctx.scale(scale, scale);
+	for (var i = 0; i < map.cells.length; i++) {
+		var cell = map.cells[i];
+		var hes = cell.halfedges;
+		if (!hes || hes.length === 0) { continue; }
+		ctx.beginPath();
+		var v = getStartpoint(hes[0]);
+		ctx.moveTo(v.x, v.y);
+		for (var h = 0; h < hes.length; h++) { v = getEndpoint(hes[h]); ctx.lineTo(v.x, v.y); }
+		ctx.closePath();
+		ctx.fillStyle = thumbnailTileColor(cell.id);
+		ctx.fill();
+	}
+	return cv;
 }
 function applyAbilites(abilities) {
 	if (abilities.length == 0) {

@@ -221,13 +221,17 @@ function clientConnect() {
         }
         for (var i = 0; i < mapnames.length; i++) {
             $.getJSON("../maps/" + mapnames[i], function (data) {
-                maps.push(data);
+                // Maps ship in compact sites-only form; rebuild full geometry so the
+                // editor can render/edit them, and generate the load-list thumbnail on
+                // demand (no thumbnail is stored or shipped anymore).
+                var loaded = reconstructSitesOnlyMap(data);
+                maps.push(loaded);
                 // Fully escape name/author before interpolating into innerHTML (both
                 // the data-search attribute and the visible caption) — quotes alone
                 // left & and < to corrupt the markup.
-                var nm = escapeHtml(data.name), au = escapeHtml(data.author);
-                $("#loadWindow").append('<div class="map-image" data-search="' + nm + ' ' + au + '"><button id="' + data.id + '" data-gp-nav><img src="' + data.thumbnail + '"><div class="desc">' + nm + ' | ' + au + '</div></button></div>');
-                $("#" + data.id).on("click", function () {
+                var nm = escapeHtml(loaded.name), au = escapeHtml(loaded.author);
+                $("#loadWindow").append('<div class="map-image" data-search="' + nm + ' ' + au + '"><button id="' + loaded.id + '" data-gp-nav><img src="' + renderMapThumbnail(loaded) + '"><div class="desc">' + nm + ' | ' + au + '</div></button></div>');
+                $("#" + loaded.id).on("click", function () {
                     var id = this.id;
                     // Loading a different map replaces the in-memory map, so warn first
                     // if there are unsaved edits (controller-friendly modal).
@@ -1369,6 +1373,39 @@ function renderHazards() {
     }
 }
 
+// Render a map to an offscreen canvas and return a JPEG data URL, for the
+// load-list previews. Thumbnails are no longer stored/shipped with maps, so the
+// editor regenerates them on demand from the (reconstructed) geometry. A flat
+// tile-colour fill is enough for a small picker thumbnail. Cached in-session by
+// map id so re-opening the load window doesn't re-render.
+var thumbnailCache = {};
+function renderMapThumbnail(map) {
+    if (map == null || !Array.isArray(map.cells)) { return ""; }
+    if (map.id != null && thumbnailCache[map.id] != null) { return thumbnailCache[map.id]; }
+    var scale = 320 / world.width;
+    var cv = document.createElement('canvas');
+    cv.width = Math.round(world.width * scale);
+    cv.height = Math.round(world.height * scale);
+    var ctx = cv.getContext('2d');
+    ctx.fillStyle = locateColor(config.tileMap.normal.id) || '#000';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.scale(scale, scale);
+    for (var i = 0; i < map.cells.length; i++) {
+        var cell = map.cells[i];
+        var hes = cell.halfedges;
+        if (!hes || hes.length === 0) { continue; }
+        ctx.beginPath();
+        var v = getStartpoint(hes[0]);
+        ctx.moveTo(v.x, v.y);
+        for (var h = 0; h < hes.length; h++) { v = getEndpoint(hes[h]); ctx.lineTo(v.x, v.y); }
+        ctx.closePath();
+        ctx.fillStyle = locateColor(cell.id) || '#888';
+        ctx.fill();
+    }
+    var url = cv.toDataURL("image/jpeg", 0.5);
+    if (map.id != null) { thumbnailCache[map.id] = url; }
+    return url;
+}
 function renderCell(cell) {
     if (!cell) { return; }
     // edges
@@ -1641,7 +1678,8 @@ function basicSanitize() {
     }
     selectedObject = null;
     drawEditor(null);
-    vMap.thumbnail = createCanvas.toDataURL("image/jpeg", 0.1);
+    // No thumbnail is stored or shipped with maps anymore — the editor's load-list
+    // regenerates previews on demand (renderMapThumbnail).
     vMap.id = makeid(32);
     vMap.author = author.substring(0, 15);
     vMap.name = name.substring(0, 15);
