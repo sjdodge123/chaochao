@@ -43,6 +43,13 @@ var touchActive = false;
 // Accumulates the cell changes of the in-progress paint/erase stroke so the whole
 // stroke collapses to one undo step (beginStroke/recordCellChange/commitStroke).
 var strokeChanges = null;
+// Graded terrain textures (keyed by tile type), cached at loadPatterns() so the
+// tile palette swatches can show the real painted texture, not a flat colour.
+var gradedTex = {};
+// True once the user has made an undoable edit (or a reshape) since the current
+// map was loaded/created/restored. Used to warn before loading a *different* map
+// (which would discard the in-progress work). Reset by load/rebuild.
+var mapModified = false;
 
 var scale = 0.035;
 // Gate strip depth (px), matching server/game.js GATE_DEPTH so the previewed gate
@@ -116,6 +123,7 @@ window.onload = function () {
         $('#author').val(vMap.author);
         $('#name').val(vMap.name);
         mapReady = true;
+        mapModified = true; // returning from preview = unsaved work to protect
         showEditor();
     } else {
         rebuild();
@@ -157,6 +165,25 @@ function openDetailsPanel() { var p = document.getElementById("detailsPanel"); i
 function closeDetailsPanel() { var p = document.getElementById("detailsPanel"); if (p) { p.classList.remove("open"); } }
 function toggleDetailsPanel() { var p = document.getElementById("detailsPanel"); if (p) { p.classList.toggle("open"); } }
 
+// Load a saved map into the editor (replacing the in-memory map). Starts a fresh
+// undo history and clears the modified flag — the caller confirms first if there
+// were unsaved edits to discard.
+function loadMapById(id) {
+    for (var j = 0; j < maps.length; j++) {
+        if (maps[j].id == id) {
+            vMap = JSON.parse(JSON.stringify(maps[j]));
+            syncStartEdgesFromMap();
+            $('#author').val(vMap.author);
+            $('#name').val(vMap.name);
+            setSelectedObject(null);
+            clearHistory();
+            mapModified = false;
+            showEditor();
+            return;
+        }
+    }
+}
+
 function clientConnect() {
     var server = io();
 
@@ -197,15 +224,14 @@ function clientConnect() {
                 var searchAttr = ((data.name || "") + ' ' + (data.author || "")).replace(/"/g, '&quot;');
                 $("#loadWindow").append('<div class="map-image" data-search="' + searchAttr + '"><button id="' + data.id + '" data-gp-nav><img src="' + data.thumbnail + '"><div class="desc">' + data.name + ' | ' + data.author + '</div></button></div>');
                 $("#" + data.id).on("click", function () {
-                    for (var j = 0; j < maps.length; j++) {
-                        if (maps[j].id == this.id) {
-                            vMap = JSON.parse(JSON.stringify(maps[j]));
-                            syncStartEdgesFromMap();
-                            $('#author').val(vMap.author);
-                            $('#name').val(vMap.name);
-                            showEditor();
-                            return;
-                        }
+                    var id = this.id;
+                    // Loading a different map replaces the in-memory map, so warn first
+                    // if there are unsaved edits (controller-friendly modal).
+                    if (mapModified) {
+                        openWipeConfirm("Loading this map will discard the edits you haven't saved. Continue?",
+                            function () { loadMapById(id); }, "Discard & load");
+                    } else {
+                        loadMapById(id);
                     }
                 })
             });
@@ -226,14 +252,20 @@ function tryStart() {
 function loadPatterns() {
 
     //Tiles — grade the terrain textures through the shared palette (utils.js)
-    // so the editing surface matches the in-game look.
-    patterns[config.tileMap.lava.id] = makeSeamlessPattern(gradeTexture(lava, "lava"));
-    patterns[config.tileMap.ice.id] = makeSeamlessPattern(gradeTexture(ice, "ice"));
-    patterns[config.tileMap.fast.id] = makeSeamlessPattern(gradeTexture(grass, "grass"));
-    patterns[config.tileMap.normal.id] = makeSeamlessPattern(gradeTexture(dirt, "dirt"));
-    patterns[config.tileMap.slow.id] = makeSeamlessPattern(gradeTexture(sand, "sand"));
+    // so the editing surface matches the in-game look. Cache the graded canvases
+    // in gradedTex so the palette swatches can show the real texture too.
+    gradedTex.lava = gradeTexture(lava, "lava");
+    gradedTex.ice = gradeTexture(ice, "ice");
+    gradedTex.grass = gradeTexture(grass, "grass");
+    gradedTex.dirt = gradeTexture(dirt, "dirt");
+    gradedTex.sand = gradeTexture(sand, "sand");
+    patterns[config.tileMap.lava.id] = makeSeamlessPattern(gradedTex.lava);
+    patterns[config.tileMap.ice.id] = makeSeamlessPattern(gradedTex.ice);
+    patterns[config.tileMap.fast.id] = makeSeamlessPattern(gradedTex.grass);
+    patterns[config.tileMap.normal.id] = makeSeamlessPattern(gradedTex.dirt);
+    patterns[config.tileMap.slow.id] = makeSeamlessPattern(gradedTex.sand);
     patterns[config.tileMap.random.id] = makePattern(random, config.tileMap.random.color);
-    patterns[config.tileMap.ability.id] = makePattern(bombIcon, makeSeamlessPattern(gradeTexture(dirt, "dirt")));
+    patterns[config.tileMap.ability.id] = makePattern(bombIcon, makeSeamlessPattern(gradedTex.dirt));
 
     brushColor = patterns[config.tileMap.normal.id];
 }
@@ -268,6 +300,92 @@ function makeSeamlessPattern(image) {
     canvasPattern.height = iconHeight;
     ctxPattern.drawImage(image, 0, 0, iconWidth, iconHeight);
     return createContext.createPattern(canvasPattern, 'repeat');
+}
+
+// --- textured palette swatches ------------------------------------------------
+// Render each tile/hazard button to show what it actually paints (the graded
+// terrain texture, or the hazard's in-game look) rather than a flat colour —
+// mirroring the lobby skin picker. The button's title carries the name (hover).
+function buildSwatchDataURL(opts) {
+    var size = 96;
+    var c = document.createElement("canvas");
+    c.width = size;
+    c.height = size;
+    var ctx = c.getContext("2d");
+    if (opts.texture) {
+        ctx.drawImage(opts.texture, 0, 0, size, size);
+    } else if (opts.color) {
+        ctx.fillStyle = opts.color;
+        ctx.fillRect(0, 0, size, size);
+    }
+    if (opts.icon) {
+        var iw = opts.icon.width || 1, ih = opts.icon.height || 1;
+        var s = (size * 0.62) / Math.max(iw, ih);
+        var w = iw * s, h = ih * s;
+        ctx.drawImage(opts.icon, (size - w) / 2, (size - h) / 2, w, h);
+    }
+    return c.toDataURL();
+}
+// A hazard swatch draws the in-game look (orange disc + red attack ring; the
+// moving bumper adds its black rail) over a dirt ground — like a bumper sitting on
+// terrain — so it contrasts in both themes and reads as "what you'll place".
+function buildHazardSwatchDataURL(kind) {
+    var size = 96;
+    var c = document.createElement("canvas");
+    c.width = size;
+    c.height = size;
+    var ctx = c.getContext("2d");
+    if (gradedTex.dirt) {
+        ctx.drawImage(gradedTex.dirt, 0, 0, size, size);
+    } else {
+        ctx.fillStyle = "#7a5b3a";
+        ctx.fillRect(0, 0, size, size);
+    }
+    var cx = size / 2, cy = size / 2;
+    if (kind === "movingBumper") {
+        ctx.strokeStyle = "#111";
+        ctx.lineWidth = 10;
+        ctx.beginPath();
+        ctx.moveTo(16, cy);
+        ctx.lineTo(size - 16, cy);
+        ctx.stroke();
+    }
+    ctx.strokeStyle = "red";
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 28, 0, 2 * Math.PI);
+    ctx.stroke();
+    ctx.fillStyle = "orange";
+    ctx.beginPath();
+    ctx.arc(cx, cy, 19, 0, 2 * Math.PI);
+    ctx.fill();
+    return c.toDataURL();
+}
+function applyTileSwatches() {
+    if (config == null) { return; }
+    var tiles = [
+        ["slowTileButton", { texture: gradedTex.sand }],
+        ["normalTileButton", { texture: gradedTex.dirt }],
+        ["fastTileButton", { texture: gradedTex.grass }],
+        ["lavaTileButton", { texture: gradedTex.lava }],
+        ["iceTileButton", { texture: gradedTex.ice }],
+        ["abilityTileButton", { texture: gradedTex.dirt, icon: bombIcon }],
+        ["randomTileButton", { color: config.tileMap.random.color, icon: random }],
+        ["goalTileButton", { color: config.tileMap.goal.color }]
+    ];
+    for (var i = 0; i < tiles.length; i++) {
+        var el = document.getElementById(tiles[i][0]);
+        if (el == null) { continue; }
+        el.classList.add("swatch");
+        el.style.backgroundImage = "url(" + buildSwatchDataURL(tiles[i][1]) + ")";
+    }
+    var hazards = [["bumperButton", "bumper"], ["movingBumperButton", "movingBumper"]];
+    for (var h = 0; h < hazards.length; h++) {
+        var hb = document.getElementById(hazards[h][0]);
+        if (hb == null) { continue; }
+        hb.classList.add("swatch");
+        hb.style.backgroundImage = "url(" + buildHazardSwatchDataURL(hazards[h][1]) + ")";
+    }
 }
 
 
@@ -477,6 +595,7 @@ function rebuild() {
     setSelectedObject(null);
     vMap = generateVMap();
     clearHistory(); // a fresh map starts with an empty undo history
+    mapModified = false;
     $('#author').val("");
     $('#name').val("");
     $("#createNewImage").attr("src", createCanvas.toDataURL("image/jpeg", 0.1));
@@ -488,6 +607,7 @@ function init() {
     initEditorGamepad();
     installEditorShortcuts();
     installMapSearch();
+    applyTileSwatches();
     recomputeStartLayout();
     updateStartEdgeButtons();
     setTool({ kind: "select" }); // sensible default; pick a tile/hazard to start painting
@@ -622,6 +742,7 @@ function applyStartEdges(edges) {
         setSelectedObject(null);
         vMap = generateVMap();
         clearHistory(); // the reshape replaced every cell — old undo steps are stale
+        mapModified = true; // a reshape is itself an unsaved edit
     }
     if (vMap != null) { vMap.startEdges = startEdges.slice(); }
     updateStartEdgeButtons();
