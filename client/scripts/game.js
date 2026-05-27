@@ -330,7 +330,7 @@ function enterLobby() {
         var saved = sessionStorage.getItem('previewMap');
         if (saved != null) {
             try {
-                var pMap = JSON.parse(saved);
+                var pMap = reconstructSitesOnlyMap(JSON.parse(saved));
                 var alreadyLoaded = false;
                 for (var i = 0; i < maps.length; i++) {
                     if (maps[i].id === pMap.id) { alreadyLoaded = true; break; }

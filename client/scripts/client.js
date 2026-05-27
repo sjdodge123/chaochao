@@ -250,7 +250,7 @@ function registerConnectionHandlers(server) {
 	server.on("maplisting", function (mapnames) {
 		for (var i = 0; i < mapnames.length; i++) {
 			promises.push($.getJSON("../maps/" + mapnames[i], function (data) {
-				maps.push(data);
+				maps.push(reconstructSitesOnlyMap(data));
 			}));
 		}
 	});
@@ -264,7 +264,7 @@ function registerConnectionHandlers(server) {
 		}
 		for (var i = 0; i < mapnames.length; i++) {
 			promises.push($.getJSON("../maps/" + mapnames[i], function (data) {
-				maps.push(data);
+				maps.push(reconstructSitesOnlyMap(data));
 			}));
 		}
 		for (var i = 0; i < soundnames.length; i++) {

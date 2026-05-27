@@ -179,7 +179,12 @@ exports.submitPullRequest = async function (map) {
         if (map.parTime == null) {
             map.parTime = cellGraph.computeMapParTime(map);
         }
-        var bufferObj = Buffer.from(JSON.stringify(map, null, 2), 'utf8');
+        // Commit in the compact sites-only format (full geometry is regenerated
+        // on load), dropping the bulky voronoi diagram + thumbnail. The editor
+        // sends full geometry; reduce it here so the on-disk map is ~16 KB, not
+        // ~1.3 MB. parTime/metadata are carried through.
+        var stored = mapFormat.isSitesOnly(map) ? map : mapFormat.toSitesOnly(map);
+        var bufferObj = Buffer.from(JSON.stringify(stored, null, 2), 'utf8');
         var base64String = bufferObj.toString("base64");
         var title = 'INSERT - ' + map.name + "/" + map.author + " from " + email;
         if (insertion == false) {

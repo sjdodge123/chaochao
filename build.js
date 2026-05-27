@@ -4,6 +4,7 @@ const path = require('path');
 
 const bundles = {
     'play.bundle.min.js': [
+        'client/scripts/rhill-voronoi-core.js',
         'client/scripts/game.js',
         'client/scripts/perf.js',
         'client/scripts/client.js',

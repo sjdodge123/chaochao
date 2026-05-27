@@ -4,6 +4,37 @@ function getRandomInt(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+// Maps are stored/shipped in the compact sites-only format ({bbox, sites:[{x,y,id}]}
+// + metadata); the full voronoi geometry (cells/halfedges/edges) is regenerated on
+// the client the same deterministic way the server does it (server/mapFormat.js).
+// Both the play and create bundles include rhill-voronoi-core.js, so Voronoi is a
+// global here. Legacy full-geometry maps pass through unchanged.
+function mapIsSitesOnly(map) {
+    return map != null && Array.isArray(map.sites) && !Array.isArray(map.cells);
+}
+function reconstructSitesOnlyMap(map) {
+    if (!mapIsSitesOnly(map)) { return map; }
+    var siteObjs = new Array(map.sites.length);
+    for (var i = 0; i < map.sites.length; i++) {
+        siteObjs[i] = { x: map.sites[i].x, y: map.sites[i].y };
+    }
+    var diagram = new Voronoi().compute(siteObjs, map.bbox);
+    for (var j = 0; j < map.sites.length; j++) {
+        var vid = siteObjs[j].voronoiId;
+        if (vid == null || diagram.cells[vid] == null) { continue; }
+        diagram.cells[vid].id = map.sites[j].id;
+    }
+    diagram.hazards = map.hazards || [];
+    if (map.startEdges != null) { diagram.startEdges = map.startEdges; }
+    if (map.parTime != null) { diagram.parTime = map.parTime; }
+    if (map.lobbyOnly) { diagram.lobbyOnly = map.lobbyOnly; }
+    if (map.name != null) { diagram.name = map.name; }
+    if (map.author != null) { diagram.author = map.author; }
+    if (map.id != null) { diagram.id = map.id; }
+    if (map.email != null) { diagram.email = map.email; }
+    return diagram;
+}
+
 Colors = {};
 Colors.names = {
     Red: '#e6194B',
