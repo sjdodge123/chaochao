@@ -25,7 +25,10 @@ const repoRoot = path.join(__dirname, '..', '..');
 const clientDir = path.join(repoRoot, 'client');
 
 const MENU_PAGES = new Set(['index.html', 'join.html']); // load menuGamepad (global selector)
-const KNOWN_CLASSES = ['btn', 'mapEditorTile', 'nav-toggle', 'form-control', 'confirm-btn'];
+const KNOWN_CLASSES = ['btn', 'mapEditorTile', 'nav-toggle', 'form-control', 'confirm-btn',
+    // Map-editor rebuild styling classes (create.html): topbar icon/action buttons
+    // and the tool-rail Select/Eraser tools.
+    'ed-icon-btn', 'ed-btn', 'ed-tool'];
 
 // Allowlist: pre-existing controls that intentionally skip a rule. Each entry
 // documents WHY. New controls are not allowlisted — they must comply.

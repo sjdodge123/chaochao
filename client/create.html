@@ -441,14 +441,11 @@
       font-size: 0.95rem;
       outline: none;
     }
+    /* Uses .ed-icon-btn for a 40x40 hit target (clears the 24px WCAG floor) +
+       shared styling; only the muted glyph colour differs here. */
     #mapSearchClear {
-      border: 0;
-      background: transparent;
       color: var(--text-muted);
-      font-size: 1.1rem;
-      cursor: pointer;
-      padding: 4px 6px;
-      line-height: 1;
+      font-size: 1.2rem;
     }
     #mapSearchClear:hover {
       color: var(--text);
@@ -683,7 +680,7 @@
         <div class="map-search">
           <i class="fa fa-search" aria-hidden="true"></i>
           <input id="mapSearch" data-gp-nav type="text" placeholder="Search maps by name or author…" autocomplete="off">
-          <button id="mapSearchClear" data-gp-nav title="Clear search">&times;</button>
+          <button id="mapSearchClear" data-gp-nav class="ed-icon-btn" title="Clear search">&times;</button>
         </div>
       </div>
       <div class="map-image" data-keep="1">
