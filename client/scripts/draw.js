@@ -545,6 +545,13 @@ function drawObjects(dt) {
     }
     syncColorblind();
 
+    // Ease entity render positions toward their latest 30Hz server targets, so
+    // motion is smooth at 60fps instead of stepping at the tick rate. Runs before
+    // the camera so it tracks the smoothed local kart. (see gameboard.js)
+    if (typeof smoothEntities === "function") {
+        smoothEntities(dt);
+    }
+
     updateWorldCamera(dt);
     applyCanvasTransform();
     drawBackground(dt);

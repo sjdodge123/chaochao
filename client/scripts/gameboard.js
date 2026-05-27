@@ -212,6 +212,8 @@ function createPlayer(dataArray) {
 	playerList[index].id = dataArray[0];
 	playerList[index].x = dataArray[1];
 	playerList[index].y = dataArray[2];
+	playerList[index].tx = dataArray[1];   // seed render-smoothing target (see smoothEntities)
+	playerList[index].ty = dataArray[2];
 	playerList[index].color = dataArray[3];
 	playerList[index].alive = dataArray[4];
 	playerList[index].notches = dataArray[5];
@@ -234,6 +236,61 @@ function createPlayer(dataArray) {
 	};
 }
 
+// --- Client-side motion smoothing -------------------------------------------
+// The server ticks positions at 30Hz (serverTickSpeed 33.33ms); without this,
+// entities snap to those 30Hz positions and visibly STEP at 60fps render (the
+// "bumper jumping frames", and choppy motion overall — most obvious on a crisp/
+// high-refresh display). Each frame we ease the RENDER position (x/y) toward the
+// latest server target (tx/ty): the local kart eases fast (snappy controls),
+// remote karts and hazards ease slower (smooth). A jump larger than
+// SMOOTH_SNAP_DIST (respawn, swap-teleport, inactive park at -100,-100) snaps
+// instantly instead of sliding across the map. Easing (not velocity
+// extrapolation) is deliberate: the sim is server-authoritative and
+// collision-heavy, so extrapolating would overshoot into walls/bumpers and
+// rubber-band. Always on — a universal smoothness win, independent of the perf
+// profile. A kart travels <=~27px per 30Hz tick (playerMaxSpeed), so 120px
+// cleanly separates real motion from a teleport.
+var SMOOTH_TAU_LOCAL = 22;    // ms — local kart catches up in ~2-3 frames
+var SMOOTH_TAU_REMOTE = 60;   // ms — remote karts / hazards glide over ~5 frames
+var SMOOTH_SNAP_DIST = 120;   // px — beyond this is a teleport, not motion → snap
+function smoothPos(o, tau, dt) {
+	if (o == null || o.tx == null) {
+		return;
+	}
+	if (o.x == null || o.y == null) {   // first sight: snap onto the target
+		o.x = o.tx; o.y = o.ty;
+		return;
+	}
+	var dx = o.tx - o.x, dy = o.ty - o.y;
+	if (dx * dx + dy * dy > SMOOTH_SNAP_DIST * SMOOTH_SNAP_DIST) {
+		o.x = o.tx; o.y = o.ty;          // teleport/respawn/park → snap, don't slide
+		return;
+	}
+	var a = 1 - Math.exp(-dt / tau);     // dt>>tau (tab refocus) → a→1 → full snap, no overshoot
+	o.x += dx * a;
+	o.y += dy * a;
+}
+// Ease every moving entity toward its latest server target. Called once per
+// render frame, BEFORE drawing (and before the camera reads the local kart).
+function smoothEntities(dt) {
+	if (!(dt > 0)) {
+		return;
+	}
+	var id;
+	for (id in playerList) {
+		var p = playerList[id];
+		if (p == null) {
+			continue;
+		}
+		smoothPos(p, isLocalId(id) ? SMOOTH_TAU_LOCAL : SMOOTH_TAU_REMOTE, dt);
+	}
+	if (typeof hazardList !== "undefined" && hazardList) {
+		for (id in hazardList) {
+			smoothPos(hazardList[id], SMOOTH_TAU_REMOTE, dt);
+		}
+	}
+}
+
 function updatePlayerList(packet) {
 	if (packet == null) {
 		return;
@@ -242,8 +299,11 @@ function updatePlayerList(packet) {
 		var player = packet[i];
 		if (playerList[player[0]] != null) {
 			playerList[player[0]].id = player[0];
-			playerList[player[0]].x = player[1];
-			playerList[player[0]].y = player[2];
+			// Server position is the SMOOTHING TARGET (tx/ty); smoothEntities eases
+			// the render position (x/y) toward it each frame so 30Hz ticks don't
+			// render as visible stepping. (See smoothEntities.)
+			playerList[player[0]].tx = player[1];
+			playerList[player[0]].ty = player[2];
 			playerList[player[0]].velX = player[3];
 			playerList[player[0]].velY = player[4];
 			playerList[player[0]].angle = player[5];
@@ -303,8 +363,10 @@ function updateHazardList(packet) {
 	for (var i = 0; i < packet.length; i++) {
 		var hazard = packet[i];
 		if (hazardList[hazard[0]] != null) {
-			hazardList[hazard[0]].x = hazard[1];
-			hazardList[hazard[0]].y = hazard[2];
+			// Smoothing target (eased toward in smoothEntities) — stops moving
+			// bumpers from stepping at the 30Hz tick rate.
+			hazardList[hazard[0]].tx = hazard[1];
+			hazardList[hazard[0]].ty = hazard[2];
 		}
 	}
 }
@@ -463,6 +525,8 @@ function applyHazards(payload) {
 		hazardList[hazard[0]].id = hazard[1];
 		hazardList[hazard[0]].x = hazard[2];
 		hazardList[hazard[0]].y = hazard[3];
+		hazardList[hazard[0]].tx = hazard[2];   // seed render-smoothing target (see smoothEntities)
+		hazardList[hazard[0]].ty = hazard[3];
 		hazardList[hazard[0]].angle = hazard[4];
 
 		hazardList[hazard[0]].railX = hazardList[hazard[0]].x;

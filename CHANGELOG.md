@@ -13,6 +13,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 ### General
 
 - The game now picks a graphics-detail level to match your device, dialing back heavy effects (particles, glows, the crowd, trail length) on phones and small or low-powered screens so it runs smoother — desktops keep the full show. A new "Graphics detail" control in the top bar (and in the controller Settings panel) lets you override it: Auto, High, Balanced, or Low. Your choice is remembered.
+- Movement is smoother across the board — karts, bumpers and other moving things now glide between updates instead of stepping, so motion looks fluid even on high-refresh and mobile screens.
 
 ## v0.15.0 — 2026-05-27
 
