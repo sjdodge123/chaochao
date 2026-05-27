@@ -24,6 +24,9 @@ function pushCommand(cmd) {
         edUndoStack.shift();
     }
     edRedoStack = []; // a fresh action invalidates the redo branch
+    // Any undoable action is an unsaved edit — used to warn before loading another
+    // map (create.js owns the flag; shared global scope).
+    if (typeof mapModified !== "undefined") { mapModified = true; }
     updateUndoRedoButtons();
 }
 

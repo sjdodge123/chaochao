@@ -19,6 +19,8 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 - **Right-click** a hazard to delete it, or right-drag to erase tiles back to dirt.
 - The map list now has a **search box** to filter by name or author, a responsive grid, and the "Create a new map" tile is relabelled **"Continue editing"** while you have an in-progress map.
 - Copy/Upload now tell you when the author or map name is missing (they used to silently fall back to "anonymous"/"unknown"), and status messages clear themselves instead of lingering.
+- The tile and hazard buttons now show the **actual texture** they paint (grass, lava, ice, dirt, sand, the bomb tile, etc.) instead of flat colours — the tile's name shows on hover.
+- Opening a different map while you have **unsaved edits** now asks for confirmation first, so you can't lose your work by clicking back and picking another map.
 
 ## v0.17.0 — 2026-05-27
 
