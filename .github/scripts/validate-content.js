@@ -66,6 +66,7 @@ done();
 
 // --- Phase 2: structural checks (safe to load the server's own validator) ---
 const utils = require(path.join(repoRoot, 'server', 'utils.js'));
+const mapFormat = require(path.join(repoRoot, 'server', 'mapFormat.js'));
 
 // config.json keys read unconditionally in game.js / engine.js / validateMap;
 // if any go missing or change type, the server breaks on the first tick.
@@ -115,7 +116,16 @@ if (config.hazards == null || config.hazards.movingBumper == null ||
 }
 
 for (const { file, map } of parsedMaps) {
-    const result = utils.validateMap(map, config);
+    // Maps are stored sites-only; rebuild full geometry (cells) so validateMap can
+    // check it, exactly as loadMaps does at boot.
+    let full = map;
+    try {
+        full = mapFormat.hydrate(map);
+    } catch (e) {
+        fail('client/maps/' + file + ': could not reconstruct geometry — ' + e.message);
+        continue;
+    }
+    const result = utils.validateMap(full, config);
     if (!result.valid) {
         fail('client/maps/' + file + ': ' + result.reason);
     }

@@ -70,6 +70,7 @@ function advanceClock(ms) {
 
 const messenger = require(path.join(repoRoot, 'server', 'messenger.js'));
 const game = require(path.join(repoRoot, 'server', 'game.js'));
+const mapFormat = require(path.join(repoRoot, 'server', 'mapFormat.js'));
 
 const DT = config.serverTickSpeed / 1000;
 const TICK_MS = config.serverTickSpeed;                 // 33.33 ms @ 30 Hz
@@ -101,7 +102,7 @@ function summary(lines) {
 }
 
 const mapFile = pickMap();
-const map = JSON.parse(fs.readFileSync(path.join(repoRoot, 'client', 'maps', mapFile), 'utf8'));
+const map = mapFormat.hydrate(JSON.parse(fs.readFileSync(path.join(repoRoot, 'client', 'maps', mapFile), 'utf8')));
 console.log(`Tick-budget scenario: 25-kart grid + forced brutal on "${mapFile}".`);
 
 const room = game.getRoom('perf-tick', 30);

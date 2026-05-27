@@ -81,12 +81,9 @@ for (const m of result.maps) {
         for (const w of m.warnings) { lines.push('- ⚠️ ' + w); }
     }
 
-    // Facts line + the server-vs-submitted preview integrity PASS/FAIL.
+    // Facts line.
     const facts = [];
     if (m.parTime) { facts.push('par ≈ ' + m.parTime.toFixed(1) + 's'); }
-    if (m.previewIntegrity) {
-        facts.push('preview integrity: ' + (m.previewIntegrity.pass ? '🟢 PASS' : '🔴 FAIL — ' + m.previewIntegrity.detail));
-    }
     if (m.sim && !m.sim.error) {
         facts.push(m.sim.scored
             ? 'sim: racer reached goal in ' + m.sim.seconds + 's (' + m.sim.bots + ' bots)'

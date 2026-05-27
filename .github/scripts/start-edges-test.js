@@ -24,6 +24,7 @@ const game = require(path.join(repoRoot, 'server', 'game.js'));
 const compressor = require(path.join(repoRoot, 'server', 'compressor.js'));
 const aiController = require(path.join(repoRoot, 'server', 'aiController.js'));
 const config = require(path.join(repoRoot, 'server', 'config.json'));
+const mapFormat = require(path.join(repoRoot, 'server', 'mapFormat.js'));
 
 const DT = config.serverTickSpeed / 1000;
 const LAVA = config.tileMap.lava.id;
@@ -81,7 +82,7 @@ function decodeGates(serialized) {
 // safe-lane steering has something to dodge.
 const sampleMapFile = fs.readdirSync(path.join(repoRoot, 'client', 'maps'))
     .filter(f => f.endsWith('.json') && !f.startsWith('_'))[0];
-const baseMap = JSON.parse(fs.readFileSync(path.join(repoRoot, 'client', 'maps', sampleMapFile), 'utf8'));
+const baseMap = mapFormat.hydrate(JSON.parse(fs.readFileSync(path.join(repoRoot, 'client', 'maps', sampleMapFile), 'utf8')));
 
 function makeMap(startEdges, lavaEdge) {
     const map = JSON.parse(JSON.stringify(baseMap));
