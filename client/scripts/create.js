@@ -40,6 +40,7 @@ var erasing = false;
 var rotatingHandle = false;
 var rotateStartAngle = 0;
 var touchActive = false;
+var touchId = null; // identifier of the finger currently driving a touch stroke
 // Accumulates the cell changes of the in-progress paint/erase stroke so the whole
 // stroke collapses to one undo step (beginStroke/recordCellChange/commitStroke).
 var strokeChanges = null;
@@ -221,8 +222,11 @@ function clientConnect() {
         for (var i = 0; i < mapnames.length; i++) {
             $.getJSON("../maps/" + mapnames[i], function (data) {
                 maps.push(data);
-                var searchAttr = ((data.name || "") + ' ' + (data.author || "")).replace(/"/g, '&quot;');
-                $("#loadWindow").append('<div class="map-image" data-search="' + searchAttr + '"><button id="' + data.id + '" data-gp-nav><img src="' + data.thumbnail + '"><div class="desc">' + data.name + ' | ' + data.author + '</div></button></div>');
+                // Fully escape name/author before interpolating into innerHTML (both
+                // the data-search attribute and the visible caption) — quotes alone
+                // left & and < to corrupt the markup.
+                var nm = escapeHtml(data.name), au = escapeHtml(data.author);
+                $("#loadWindow").append('<div class="map-image" data-search="' + nm + ' ' + au + '"><button id="' + data.id + '" data-gp-nav><img src="' + data.thumbnail + '"><div class="desc">' + nm + ' | ' + au + '</div></button></div>');
                 $("#" + data.id).on("click", function () {
                     var id = this.id;
                     // Loading a different map replaces the in-memory map, so warn first
@@ -742,7 +746,10 @@ function applyStartEdges(edges) {
         setSelectedObject(null);
         vMap = generateVMap();
         clearHistory(); // the reshape replaced every cell — old undo steps are stale
-        mapModified = true; // a reshape is itself an unsaved edit
+        // The reshaped surface is blank again (no painted tiles/hazards), so there's
+        // nothing unsaved to warn about — matches a fresh map. Painting after this
+        // re-sets mapModified via pushCommand.
+        mapModified = false;
     }
     if (vMap != null) { vMap.startEdges = startEdges.slice(); }
     updateStartEdgeButtons();
@@ -769,11 +776,9 @@ function updateStartEdgeButtons() {
     var activeKey = startEdges.slice().sort().join("+");
     $(".startEdgeButton").each(function () {
         var edges = ($(this).attr("data-edges") || "").split("+").sort().join("+");
-        if (edges === activeKey) {
-            $(this).addClass("active-edge").css("outline", "3px solid #1e90ff");
-        } else {
-            $(this).removeClass("active-edge").css("outline", "");
-        }
+        // Use the shared .tool-active ring (same as tiles/hazards/tools) instead of a
+        // separate inline-blue outline, so the editor has one selection visual.
+        $(this).toggleClass("tool-active", edges === activeKey);
     });
 }
 
@@ -855,6 +860,7 @@ function drawMovingBumper(x, y, angle) {
 function handleClick(event) {
     switch (event.which) {
         case 1: {
+            if (erasing) { break; } // don't start a paint while a right-erase is in progress
             // On-canvas hazard handles take priority over painting/selecting.
             if (selectedObject != null) {
                 if (overDeleteHandle(mousex, mousey)) { removeSelectedObject(); break; }
@@ -870,6 +876,7 @@ function handleClick(event) {
             break;
         }
         case 3: {
+            if (brushing || rotatingHandle) { break; } // don't erase while painting/rotating
             // Right button: delete a hazard under the cursor, else erase to dirt
             // (right-drag keeps erasing). Backlog UX item.
             if (hazardUnderPoint(mousex, mousey)) {
@@ -903,18 +910,32 @@ function handleUnClick(event) {
 }
 
 // --- touch input --------------------------------------------------------------
+// Single-touch only: track the first finger's identifier and ignore extra fingers,
+// so a stray second touch can't snap the cursor or restart/commit the stroke.
 function canvasPointFromTouch(touch) {
     var rect = createCanvas.getBoundingClientRect();
+    // Map through the *live* displayed size, not the cached newWidth/newHeight which
+    // are 0 until a successful resize() — a tap during the first/reflow layout would
+    // otherwise divide by 0 and map to Infinity.
+    if (rect.width === 0 || rect.height === 0) { return { x: mousex, y: mousey }; }
     return {
-        x: ((touch.clientX - rect.left) / newWidth) * createCanvas.width,
-        y: ((touch.clientY - rect.top) / newHeight) * createCanvas.height
+        x: ((touch.clientX - rect.left) / rect.width) * createCanvas.width,
+        y: ((touch.clientY - rect.top) / rect.height) * createCanvas.height
     };
 }
+function findTrackedTouch(list) {
+    for (var i = 0; i < list.length; i++) {
+        if (list[i].identifier === touchId) { return list[i]; }
+    }
+    return null;
+}
 function handleTouchStart(event) {
-    if (event.touches.length === 0) { return; }
+    if (touchActive || event.changedTouches.length === 0) { return; } // ignore extra fingers
     event.preventDefault();
     touchActive = true;
-    var p = canvasPointFromTouch(event.touches[0]);
+    var t = event.changedTouches[0];
+    touchId = t.identifier;
+    var p = canvasPointFromTouch(t);
     setMousePos(p.x, p.y);
     // Resolve the touched cell up front so the first paint lands immediately
     // (the animloop's per-frame recompute hasn't run yet for this point).
@@ -922,16 +943,21 @@ function handleTouchStart(event) {
     handleClick({ which: 1 });
 }
 function handleTouchMove(event) {
-    if (!touchActive || event.touches.length === 0) { return; }
+    if (!touchActive) { return; }
+    var t = findTrackedTouch(event.touches);
+    if (t == null) { return; }
     event.preventDefault();
-    var p = canvasPointFromTouch(event.touches[0]);
+    var p = canvasPointFromTouch(t);
     setMousePos(p.x, p.y);
     dirty = true;
 }
 function handleTouchEnd(event) {
     if (!touchActive) { return; }
+    // End only when OUR finger lifts; touchcancel always ends the stroke.
+    if (event.type !== "touchcancel" && findTrackedTouch(event.changedTouches) == null) { return; }
     if (event.cancelable) { event.preventDefault(); }
     touchActive = false;
+    touchId = null;
     handleUnClick({ which: 1 });
 }
 
@@ -957,7 +983,14 @@ function setTool(tool) {
     dirty = true;
 }
 function editorSelectTool(kind) {
-    setTool({ kind: kind === "eraser" ? "eraser" : "select" });
+    // The eraser needs config (it paints the default tile id); guard like the
+    // tile/hazard selectors do. Select needs no config.
+    if (kind === "eraser") {
+        if (config == null) { return; }
+        setTool({ kind: "eraser" });
+        return;
+    }
+    setTool({ kind: "select" });
 }
 function editorSelectTile(typeName) {
     if (config == null) { return; }
@@ -1021,7 +1054,9 @@ function activeToolButtonId() {
 }
 
 // --- paint-stroke undo grouping ----------------------------------------------
-function beginStroke() { strokeChanges = {}; }
+// Idempotent: a second begin (e.g. button chording) must not clobber the
+// in-progress stroke's accumulated diff.
+function beginStroke() { if (strokeChanges == null) { strokeChanges = {}; } }
 function recordCellChange(idx, from, to) {
     if (strokeChanges == null) { return; }
     if (!Object.prototype.hasOwnProperty.call(strokeChanges, idx)) {
@@ -1105,7 +1140,12 @@ function rotateHandlePos() {
 }
 function deleteHandlePos() {
     var d = selectedObject.radius + 28;
-    return { x: selectedObject.x + d, y: selectedObject.y - d };
+    // Clamp inside the canvas so a hazard near the top-right edge still shows a
+    // clickable ✕ (the draw + hit-test both call this, so they stay in sync).
+    var m = 16;
+    var x = Math.max(m, Math.min(createCanvas.width - m, selectedObject.x + d));
+    var y = Math.max(m, Math.min(createCanvas.height - m, selectedObject.y - d));
+    return { x: x, y: y };
 }
 function overRotateHandle(x, y) {
     if (selectedObject == null) { return false; }
@@ -1175,7 +1215,11 @@ function requireDetails() {
     return ok;
 }
 var submitStatusTimer = null;
+// True between clicking Upload and the server's success/failure reply — so an
+// input-change reset doesn't wipe the in-flight "Submitting.." indicator.
+var submitPending = false;
 function showSubmitStatus(message, bg, color) {
+    submitPending = false; // a terminal status (success/failure/validation) clears pending
     var el = $("#submitStatus");
     el.text(message);
     el.css({ "color": color || "white", "background-color": bg });
@@ -1184,8 +1228,11 @@ function showSubmitStatus(message, bg, color) {
     submitStatusTimer = setTimeout(function () { el.hide(); }, 4000);
 }
 function resetStatuses() {
-    $("#submitStatus, #exportStatus, #previewStatus").hide();
-    if (submitStatusTimer) { clearTimeout(submitStatusTimer); submitStatusTimer = null; }
+    $("#exportStatus, #previewStatus").hide();
+    if (!submitPending) { // don't hide an in-flight upload
+        $("#submitStatus").hide();
+        if (submitStatusTimer) { clearTimeout(submitStatusTimer); submitStatusTimer = null; }
+    }
     if (exportStatusTimer) { clearTimeout(exportStatusTimer); exportStatusTimer = null; }
 }
 
@@ -1435,6 +1482,7 @@ function submitToGithub() {
     submitStatus.css("color", "black");
     submitStatus.css("background-color", "#ADD8E6");
     submitStatus.text("Submitting..");
+    submitPending = true; // protect this indicator from input-change resets until the reply
     server.emit('submitNewMap', JSON.stringify(vMap));
 }
 // Mirror of server/utils.js validateMap — gives fast inline feedback in the
@@ -1573,7 +1621,7 @@ function setPreviewAI(on) {
     btn.classList.toggle("ai-on", on);
     var icon = btn.querySelector("i");
     if (icon != null) {
-        icon.className = "fa mr-2 " + (on ? "fa-check-square" : "fa-square-o");
+        icon.className = "fa " + (on ? "fa-check-square" : "fa-square-o");
     }
     var label = btn.querySelector("span");
     if (label != null) {
@@ -1597,6 +1645,17 @@ function basicSanitize() {
     vMap.id = makeid(32);
     vMap.author = author.substring(0, 15);
     vMap.name = name.substring(0, 15);
+}
+
+// Escape HTML-significant chars before interpolating untrusted text (map name /
+// author) into innerHTML, for both attribute and element-content contexts.
+function escapeHtml(s) {
+    return String(s == null ? "" : s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
 }
 
 function makeid(length) {
