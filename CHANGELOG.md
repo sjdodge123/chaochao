@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.12.3 — 2026-05-27
+
 ### Bug fixes
 
 - Fixed a bug where being knocked onto an ability tile at the same time as another player (by an explosion or a punch) could hand the single pickup to both of you.
