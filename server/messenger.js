@@ -99,6 +99,24 @@ function checkForMail(client) {
 		client.emit("config", c);
 	});
 
+	// Diagnostic only: a client running with ?diag=1 streams render-perf samples
+	// (frame times, phase split, device class, game-state counts) so a stutter on
+	// a real device can be diagnosed from server logs. Untrusted input — accept
+	// only a small object, log one compact line, never act on it or echo it.
+	client.on("clientPerfDiag", function (payload) {
+		try {
+			var d = (typeof payload === "string") ? JSON.parse(payload) : payload;
+			if (d == null || typeof d !== "object") {
+				return;
+			}
+			var s = JSON.stringify(d);
+			if (s.length > 4000) {
+				s = s.slice(0, 4000) + "…";
+			}
+			console.log("[perf-diag] " + client.id + " " + s);
+		} catch (e) { /* ignore malformed diag payloads */ }
+	});
+
 	client.on('submitNewMap', function (package) {
 		var vMap;
 		try {

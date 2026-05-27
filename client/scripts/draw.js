@@ -718,7 +718,9 @@ function drawOffscreenGoalIndicator() {
     gameContext.rotate(ang);                            // tip (+x) points outward toward the goal
     gameContext.translate(bob, 0);                      // local +x = toward the goal, so it bobs along the aim
     gameContext.shadowColor = goalColor;
-    gameContext.shadowBlur = 12 + 12 * pulse;
+    // Skip the per-frame glow on profiles that disable it (the arrow still reads
+    // via its bright fill + dark outline).
+    gameContext.shadowBlur = (typeof perfGlow !== "function" || perfGlow()) ? (12 + 12 * pulse) : 0;
     // Same chunky block arrow as the lobby arrows, tip at origin pointing +x.
     gameContext.beginPath();
     gameContext.moveTo(0, 0);
@@ -1264,7 +1266,7 @@ function spawnSlashEffect(x, y, angleDeg, color) {
             ctx.strokeStyle = color || "white";
             ctx.lineWidth = (10 * (1 - t)) + 2;
             ctx.shadowColor = color || "white";
-            ctx.shadowBlur = 12 * (1 - t);
+            ctx.shadowBlur = (typeof perfGlow !== "function" || perfGlow()) ? (12 * (1 - t)) : 0;
             ctx.beginPath();
             ctx.moveTo(x - dx, y - dy);
             ctx.lineTo(x + dx, y + dy);
@@ -1313,10 +1315,11 @@ function spawnExplosion(x, y, radius, color) {
             ctx.beginPath();
             ctx.arc(0, 0, radius * (0.6 + 1.0 * p), 0, 2 * Math.PI);
             ctx.stroke();
-            // Debris sparks.
+            // Debris sparks — count scales with the performance profile.
             ctx.fillStyle = color;
-            for (var i = 0; i < 10; i++) {
-                var a = (i / 10) * Math.PI * 2 + 0.2;
+            var sparks = (typeof perfExplosionSparks === "function") ? perfExplosionSparks() : 10;
+            for (var i = 0; i < sparks; i++) {
+                var a = (i / sparks) * Math.PI * 2 + 0.2;
                 var r = radius * (0.3 + 1.1 * p);
                 ctx.globalAlpha = (1 - t);
                 ctx.beginPath();
@@ -1333,6 +1336,7 @@ function spawnExplosion(x, y, radius, color) {
 function spawnScreenFlash(color, peakAlpha, maxAge) {
     addEffect({
         screen: true,
+        keep: true,   // gameplay telegraph (e.g. brutal-round start) — never evicted by the perf cap
         x: 0,
         y: 0,
         maxAge: maxAge || 250,
@@ -2337,7 +2341,7 @@ function drawCutAimer(x, y, angle, color) {
         gameContext.strokeStyle = color;
     }
     gameContext.shadowColor = color;
-    gameContext.shadowBlur = 12;
+    gameContext.shadowBlur = (typeof perfGlow !== "function" || perfGlow()) ? 12 : 0;
     gameContext.lineWidth = 4;
     gameContext.beginPath();
     gameContext.moveTo(bwd.x, bwd.y);
@@ -2392,15 +2396,48 @@ function drawArmedRing(x, y, color, radius) {
 }
 
 function drawTrail(player) {
-    if (player.trail.canvas != null) {
-        // Fade other players' trails so your own line stays legible in the pack.
+    var trail = player.trail;
+    if (trail == null) {
+        return;
+    }
+    // Direct trail mode (low-end profile): stroke the capped recent tail straight
+    // onto the main canvas. The vertices are world coords (same space as the
+    // canvas blit's origin), so this aligns identically under the world pass —
+    // but with no per-kart world-sized texture to re-upload to the GPU each frame.
+    if ((typeof perfTrailDirect === "function") && perfTrailDirect()) {
+        var verts = trail.vertices;
+        if (verts == null || verts.length < 2) {
+            return;
+        }
+        var maxN = (typeof perfTrailDirectMax === "function") ? perfTrailDirectMax() : 240;
+        var start = Math.max(0, verts.length - maxN);
         var dim = !isLocalId(player.id);
+        gameContext.save();
         if (dim) {
+            gameContext.globalAlpha = NONLOCAL_TRAIL_ALPHA;
+        }
+        gameContext.strokeStyle = player.color;
+        gameContext.lineWidth = 5;
+        gameContext.lineCap = "round";
+        gameContext.lineJoin = "round";
+        gameContext.beginPath();
+        gameContext.moveTo(verts[start].x, verts[start].y);
+        for (var i = start + 1; i < verts.length; i++) {
+            gameContext.lineTo(verts[i].x, verts[i].y);
+        }
+        gameContext.stroke();
+        gameContext.restore();
+        return;
+    }
+    if (trail.canvas != null) {
+        // Fade other players' trails so your own line stays legible in the pack.
+        var dimC = !isLocalId(player.id);
+        if (dimC) {
             gameContext.save();
             gameContext.globalAlpha = NONLOCAL_TRAIL_ALPHA;
         }
-        gameContext.drawImage(player.trail.canvas, player.trail.canvasOriginX, player.trail.canvasOriginY);
-        if (dim) {
+        gameContext.drawImage(trail.canvas, trail.canvasOriginX, trail.canvasOriginY);
+        if (dimC) {
             gameContext.restore();
         }
     }
@@ -2421,6 +2458,7 @@ var DEATH_SKULL_FADE_MS = 4000;
 function spawnDeathPingEffect(x, y, color) {
     var ringColor = color || "rgb(255, 215, 0)";
     addEffect({
+        keep: true,   // deliberate death-spot reveal — never evicted by the perf cap
         x: x,
         y: y,
         maxAge: 1100,
