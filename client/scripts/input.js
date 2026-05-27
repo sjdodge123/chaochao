@@ -48,7 +48,32 @@ function initEventHandlers() {
 
 }
 
+// Map a viewport client X/Y to the canvas' logical 1366x768 space using the
+// canvas' ACTUAL rendered size (rect.width/height) — which is what the drawing
+// transform scales into — so touch/mouse hit-tests line up with where controls
+// are actually drawn. Dividing by the computed newWidth/newHeight instead skews
+// the mapping whenever the rendered size differs from it (iOS visual-viewport
+// scaling, sub-pixel rounding, a resize that ran against a stale viewport): the
+// skew is ~0 at the left/top edge and grows toward the right/bottom, so a
+// top-right control can miss while a top-left one is dead-on.
+function canvasClientToLogicalX(clientX, rect) {
+    var w = (rect && rect.width) || newWidth || LOGICAL_WIDTH;
+    return ((clientX - rect.left) / w) * LOGICAL_WIDTH;
+}
+function canvasClientToLogicalY(clientY, rect) {
+    var h = (rect && rect.height) || newHeight || LOGICAL_HEIGHT;
+    return ((clientY - rect.top) / h) * LOGICAL_HEIGHT;
+}
+
 function calcMousePos(evt) {
+    // Touch devices synthesize mouse events from taps (mousemove/mousedown/
+    // click/dblclick), which would drive the DESKTOP mouse controls in parallel
+    // with the touch handlers. Ignore them on touch-first devices so a tap can't
+    // fire a synthetic mousedown->attack or a double-tap->mouse-drive. See the
+    // same guard in handleClick/handleUnClick/handleDblClick.
+    if (isTouchScreen) {
+        return;
+    }
     // Only suppress the default (text selection / drag) when the pointer is over
     // the game canvas, so selecting text elsewhere on the page isn't broken by
     // the global mousemove listener (item 8).
@@ -59,9 +84,11 @@ function calcMousePos(evt) {
     }
     if (myPlayer != null) {
         var rect = gameCanvas.getBoundingClientRect();
-        // screen -> logical (the un-zoomed 1366x768 canvas space)
-        var lx = ((evt.pageX - rect.left) / newWidth) * LOGICAL_WIDTH;
-        var ly = ((evt.pageY - rect.top) / newHeight) * LOGICAL_HEIGHT;
+        // screen -> logical (the un-zoomed 1366x768 canvas space). Client coords
+        // are viewport-relative, matching getBoundingClientRect and handleClick;
+        // map against the canvas' actual rendered size (see canvasClientToLogical*).
+        var lx = canvasClientToLogicalX(evt.clientX, rect);
+        var ly = canvasClientToLogicalY(evt.clientY, rect);
         // logical -> world: invert the dynamic-camera transform so aiming points
         // at the world spot under the cursor even while zoomed. No-op (identity)
         // when the camera isn't zoomed (worldView centre = LOGICAL/2, scale 1).
@@ -93,6 +120,12 @@ function primaryOwnsWheel() {
         (typeof emojiOwnerSlot === "undefined" || emojiOwnerSlot === primarySlot);
 }
 function handleClick(event) {
+    // Synthetic mouse event from a tap on a touch device — the touch handlers
+    // already handled it. Without this, every tap fires a mousedown->attack
+    // (e.g. tapping the fullscreen button also punched). See calcMousePos.
+    if (isTouchScreen) {
+        return;
+    }
     switch (event.which) {
         case 1: {
             // Lobby hub: a left click on the primary's prompt/panel opens it, hits a
@@ -136,6 +169,9 @@ function handleClick(event) {
     event.preventDefault();
 }
 function handleUnClick(event) {
+    if (isTouchScreen) {
+        return; // synthetic mouseup from a tap; touch handlers own input
+    }
     switch (event.which) {
         case 1: {
             if (!primaryOwnsWheel()) {
@@ -150,6 +186,12 @@ function handleUnClick(event) {
     }
 }
 function handleDblClick(event) {
+    // A double-TAP on a touch device fires a synthetic dblclick; without this it
+    // would toggle the desktop "mouse-drive" mode and send the kart driving on
+    // its own (often to its death). Mouse-drive is desktop-only. See calcMousePos.
+    if (isTouchScreen) {
+        return;
+    }
     claimPrimaryForKbm(); // mouse-move play claims P1 -> controllers are P2+
     if (movingByMouse) {
         cancelMovement(event);
@@ -316,15 +358,24 @@ function setupVirtualbuttons() {
 
     virtualButtonList = [];
     joystickMovement = new Joystick(0, 0, false, false);
-    attackButton = new Button(0, 0, 0, 0, 0, true, false);
+    // Attack is now a PERSISTENT, VISIBLE button (autoHide=false, visible=true).
+    // It used to be invisible, so on big-screen tablets — where the old centred
+    // hit-circle shrank to the screen middle — players had no on-screen target
+    // and tapping the natural lower-right thumb spot missed entirely (punch never
+    // fired on iPad). The hit target is now the whole right region; see onTouchStart.
+    attackButton = new Button(0, 0, 0, 0, 0, false, true);
     // radius is set in layoutTouchControls (single source of truth); no dead 12.5.
     exitButton = new Button(0, 0, 0, 0, 0, false);
     chatButton = new Button(0, 0, 0, 0, 0, false);
 
+    // Hit-test ORDER matters: onTouchStart claims the first control whose bound
+    // contains the touch, so the small top-corner icons (emoji/fullscreen) must
+    // come BEFORE the large move/attack regions they overlap — otherwise the
+    // right-side attack region would swallow taps on the fullscreen icon.
+    virtualButtonList.push({ button: chatButton, bound: upperLeftRect });
+    virtualButtonList.push({ button: exitButton, bound: upperRightRect });
     virtualButtonList.push({ button: joystickMovement, bound: leftRect });
     virtualButtonList.push({ button: attackButton, bound: rightRect });
-    virtualButtonList.push({ button: exitButton, bound: upperRightRect });
-    virtualButtonList.push({ button: chatButton, bound: upperLeftRect });
 
     layoutTouchControls();
 }
@@ -352,20 +403,44 @@ function layoutTouchControls() {
     joystickMovement.maxPullRadius = cssToLogical(45);
     joystickMovement.deadzone = cssToLogical(5);
 
-    // Attack: keep a large right-side tap circle, sized in physical units.
+    // Attack: a thumb-sized button drawn in the LOWER-right corner (where a
+    // thumb naturally rests). This circle is only the visible AFFORDANCE — the
+    // actual hit target is the whole right tap region (see onTouchStart) — so it
+    // no longer matters that a fixed physical radius looks small on a big tablet
+    // (that shrinking centre circle is what made punch impossible to land there).
     if (attackButton) {
-        attackButton.radius = cssToLogical(150);
+        attackButton.radius = cssToLogical(78);
     }
 
-    // Top-corner icon buttons: >=44px square tap zones matching the drawn icon,
-    // inset from the edges and dropped below the top strip (URL bar / notch).
-    var hit = Math.max(cssToLogical(52), 44);   // tap zone side (logical)
-    var icon = cssToLogical(34);                // drawn icon size (logical)
-    var margin = cssToLogical(12);
-    var topInset = cssToLogical(14);
+    // Top-corner icon buttons: generous tap zones (the fullscreen icon shares the
+    // top edge with the right-side attack region, so a small target was easy to
+    // miss into a punch — corner buttons are hit-tested first, see onTouchStart,
+    // and now get a comfortable thumb-sized zone + a visible button backing).
+    var hit = Math.max(cssToLogical(72), 48);   // tap zone side (logical)
+    var icon = cssToLogical(38);                // drawn icon size (logical)
+    var margin = cssToLogical(16);
+    var topInset = cssToLogical(16);
     // chat (emoji) -> top-left; exit (fullscreen) -> top-right.
     sizeCornerButton(chatButton, margin + hit / 2, topInset + hit / 2, hit, icon);
     sizeCornerButton(exitButton, world.width - margin - hit / 2, topInset + hit / 2, hit, icon);
+
+    // Reserve the top strip for the corner icons: drop the TOP of the move/attack
+    // regions below the corner buttons (+ a little buffer). Without this the attack
+    // region reaches all the way into the top-right corner, so a tap aimed at the
+    // fullscreen icon that lands even slightly off it throws a punch instead. Now
+    // the strip around the corner icons is a no-punch zone — the icon (or nothing).
+    var regionTop = topInset + hit + cssToLogical(10);
+    for (var t = 0; t < virtualButtonList.length; t++) {
+        var entry = virtualButtonList[t];
+        if (entry.button === joystickMovement || entry.button === attackButton) {
+            var r = entry.bound;
+            var keepBottom = r.y + r.height;
+            r.y = regionTop;
+            r.top = regionTop;
+            r.height = keepBottom - regionTop;
+            r.bottom = keepBottom;
+        }
+    }
 
     // Centre each button in its bound rect (the joystick base is overridden on
     // touch-down; this fixes the static buttons' positions).
@@ -376,6 +451,16 @@ function layoutTouchControls() {
         b.stickX = b.baseX;
         b.baseY = bound.y + bound.height / 2 - b.height / 2;
         b.stickY = b.baseY;
+    }
+
+    // Anchor the visible attack button in the lower-right thumb zone (the centring
+    // loop above left it at the region's vertical middle). The bottom margin leaves
+    // room for the "Attack" caption so it never clips off the bottom edge.
+    if (attackButton) {
+        attackButton.baseX = world.width - cssToLogical(28) - attackButton.radius;
+        attackButton.baseY = world.height - cssToLogical(48) - attackButton.radius;
+        attackButton.stickX = attackButton.baseX;
+        attackButton.stickY = attackButton.baseY;
     }
 }
 
@@ -414,10 +499,21 @@ function onTouchStart(evt) {
     }
     var rect = gameCanvas.getBoundingClientRect();
     var touch = evt.changedTouches[0];
-    var touchX = (((touch.pageX - rect.left) / newWidth) * LOGICAL_WIDTH);
-    var touchY = (((touch.pageY - rect.top) / newHeight) * LOGICAL_HEIGHT);
+    // Map against the canvas' ACTUAL on-screen box (getBoundingClientRect) using
+    // viewport-relative client coords. We divide by rect.width/height, NOT the
+    // computed newWidth/newHeight: if the canvas ever renders at a size that
+    // differs from newWidth (CSS, a stale resize, sub-pixel rounding), dividing
+    // by newWidth skews the mapping — and the skew grows toward the right/bottom
+    // edge while the left/top stay accurate (which is exactly how a top-right
+    // button can miss while a top-left one is fine).
+    var touchX = canvasClientToLogicalX(touch.clientX, rect);
+    var touchY = canvasClientToLogicalY(touch.clientY, rect);
     // Lobby hub taps win over the movement/attack tap regions so the prompt/panel
-    // is usable even where it overlaps a control zone (primary slot only).
+    // is usable even where it overlaps a control zone (primary slot only). Pass the
+    // SCREEN-logical touch coords directly: the hub HUD is drawn in screen space and
+    // its hit rects come from lobbyProjectToScreen() (which already bakes in the
+    // dynamic-camera zoom/pan), so no world conversion is needed — and adding one
+    // would offset hits once the lobby follow-camera zooms in on touch.
     if (typeof config !== "undefined" && config && currentState === config.stateMap.lobby &&
         typeof lobbyHubHandlePrimaryPointer === "function" && lobbyHubHandlePrimaryPointer(touchX, touchY)) {
         evt.preventDefault();
@@ -431,14 +527,19 @@ function onTouchStart(evt) {
                 button.onDown(touchX, touchY);
 
                 if (button == attackButton) {
-                    if (button.pressed) {
-                        attack = true;
-                        server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
-                    }
+                    // The ENTIRE right tap region punches (not just the drawn
+                    // circle), so a thumb anywhere on the right reliably attacks
+                    // on every screen size.
+                    button.pressed = true;
+                    attack = true;
+                    server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
                 }
-                if (button == exitButton) {
-                    goFullScreen();
-                }
+                // NOTE: fullscreen (exitButton) is requested in onTouchEnd, NOT
+                // here. requestFullscreen() needs "transient activation", which
+                // browsers grant on the gesture-COMPLETING event (touchend), not
+                // on touchstart — calling it here rejects with "Cannot request
+                // fullscreen without transient activation." The touch is still
+                // claimed above (touchIdx + break), so onTouchEnd can act on it.
                 if (button == chatButton) {
                     if (menuOpen) {
                         closeEmojiWindow();
@@ -447,6 +548,11 @@ function onTouchStart(evt) {
                         openEmojiWindow(window.innerWidth / 2, window.innerHeight / 2);
                     }
                 }
+                // One touch claims exactly one control (priority order set in
+                // setupVirtualbuttons), so overlapping bounds — e.g. the
+                // fullscreen icon sitting inside the right attack region — can't
+                // fire two actions from a single tap.
+                break;
             }
         }
 
@@ -468,6 +574,12 @@ function onTouchEnd(evt) {
                     attack = false;
                     server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
                 }
+                if (button == exitButton) {
+                    // Fire fullscreen on finger-UP: touchend carries the transient
+                    // activation that requestFullscreen() requires (touchstart does
+                    // not). This is what makes the fullscreen button actually work.
+                    goFullScreen();
+                }
                 button.touchIdx = null;
                 button.onUp();
             }
@@ -486,8 +598,10 @@ function onTouchMove(evt) {
     var touch, touchX, touchY;
     for (var i = 0; i < touchList.length; i++) {
         touch = touchList[i];
-        var touchX = (((touch.pageX - rect.left) / newWidth) * LOGICAL_WIDTH);
-        var touchY = (((touch.pageY - rect.top) / newHeight) * LOGICAL_HEIGHT);
+        // Map against the canvas' actual rendered size (see onTouchStart / the
+        // canvasClientToLogical* helpers) so drags track the finger exactly.
+        var touchX = canvasClientToLogicalX(touch.clientX, rect);
+        var touchY = canvasClientToLogicalY(touch.clientY, rect);
         for (var j = 0; j < virtualButtonList.length; j++) {
             var button = virtualButtonList[j].button;
             if (touch.identifier == button.touchIdx) {

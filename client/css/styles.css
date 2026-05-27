@@ -1218,6 +1218,50 @@ body.osk-open .gamepad-prompts {
     font-size: 0.8rem;
     color: var(--muted, #999);
 }
+/* Touch-only "Done" button in the settings footer (touch can't press a pad's B
+   to close, and the modal's transparent backdrop passes taps through). */
+.settings-foot .settings-done {
+    pointer-events: auto;
+    padding: 0.5rem 1.4rem;
+    font-size: 1rem;
+    font-weight: 700;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    cursor: pointer;
+}
+/* Translucent settings (gear) button — shown only on touch while in fullscreen,
+   where the navbar (and its settings controls) is hidden and there's no pad
+   Start button. Sits above the settings modal so it can also toggle it closed. */
+#touchSettingsBtn {
+    position: fixed;
+    top: max(8px, env(safe-area-inset-top));
+    left: 50%;
+    transform: translateX(-50%);
+    width: 48px;
+    height: 48px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    font-size: 22px;
+    line-height: 1;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 50%;
+    cursor: pointer;
+    z-index: 3001;            /* above .settings-modal (3000) so it can close it */
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+}
+#touchSettingsBtn.visible {
+    display: inline-flex;
+}
+#touchSettingsBtn:active {
+    background: rgba(0, 0, 0, 0.62);
+}
 /* Reuse the hint-bar chip look so the footer matches the rest of the game's
    controller glyphs (the bare .gp-glyph rules are all parent-scoped). */
 .settings-foot .gp-hint {

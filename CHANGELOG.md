@@ -10,7 +10,19 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- Touch: the camera now follows you in the lobby (like it does during a race), instead of showing the whole lobby zoomed out — so you're not a tiny dot on a phone screen while walking to a station.
+- Touch: a translucent settings (gear) button now appears at the top of the screen while you're in fullscreen, opening the same Settings panel the controller's Start button does (sound, music, camera, colour-blind, theme) — tap a row to change it and **Done** to close. Previously fullscreen touch players had no way to reach Settings.
+
+### Bug fixes
+
+- Touch: the Fullscreen button now actually enters fullscreen. It was firing the request the instant your finger touched down, which browsers reject (fullscreen must be requested as your finger lifts) — so it silently did nothing. It now triggers on release.
+- Touch: tapping the screen no longer fires a phantom punch, and double-tapping no longer flips on the desktop "mouse-drive" mode (which could send your kart driving off on its own to its death). Tablets/phones were quietly delivering simulated mouse clicks on top of every tap, so taps — including on the Fullscreen button — were also registering as clicks.
+- Touch: the on-screen buttons now line up exactly with where you tap, even when the browser renders the play area at a slightly different size than expected (which made the top-right Fullscreen button especially easy to miss into a punch on iPad).
+- Touch: punching now works on tablets and iPads. There's a clear **Attack** button in the lower-right corner that lights up when you press it, and tapping anywhere on the right side of the screen throws a punch — previously the punch target was a small invisible circle stuck in the screen's middle, so on bigger screens a thumb resting in the corner missed it every time.
+- Touch: the top-corner Fullscreen and Emoji buttons are bigger and have a visible backing, and tapping near them no longer throws a punch by mistake.
+- Touch: the on-screen controls no longer vanish during the Blackout brutal round — they now stay visible on top of the darkness.
 
 ## v0.16.0 — 2026-05-27
 

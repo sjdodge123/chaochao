@@ -835,12 +835,17 @@ function computeWorldViewTarget(dt) {
         worldViewFocusedElapsed = 0;
         return wholeMap;
     }
-    // Focus once the round is live (gate countdown + race);
-    // lobby / overview / game-over keep the whole map so the goal + player and
-    // the arena are all visible at the start.
+    // Focus once the round is live (gate countdown + race); plus the LOBBY on
+    // touch, where the whole-map view leaves the player a tiny dot on a phone —
+    // a follow camera keeps them readable while they walk to a station. (Desktop
+    // lobby stays whole-map; touch lobby taps are inverse-mapped through the zoom
+    // in onTouchStart so station hit-testing still lines up.)
+    var inLobbyTouch = (currentState === config.stateMap.lobby &&
+        typeof isTouchScreen !== "undefined" && isTouchScreen);
     var focused = (currentState === config.stateMap.gated ||
         currentState === config.stateMap.racing ||
-        currentState === config.stateMap.collapsing);
+        currentState === config.stateMap.collapsing ||
+        inLobbyTouch);
     if (!focused) {
         worldViewFocusedElapsed = 0;
         return wholeMap;
@@ -3303,10 +3308,15 @@ function drawVirtualButtons() {
     }
 }
 
-function drawTouchControls() {
+function drawTouchControls(ctx) {
     if (isTouchScreen == false) {
         return;
     }
+    // Draw on the OVERLAY canvas (top layer) by default so the controls sit ABOVE
+    // everything the game draws — including the blackout brutal round, which fills
+    // the overlay with darkness. The control UI must never be hidden by a gameplay
+    // effect. (Both canvases share the same transform; see applyCanvasTransform.)
+    ctx = ctx || overlayContext;
 
     var exitToUse = exitIcon;
     var fullScreenToUse = fullscreenIcon;
@@ -3326,77 +3336,77 @@ function drawTouchControls() {
 
 
     if (joystickMovement != null && joystickMovement.isVisible()) {
-        gameContext.save();
-        gameContext.beginPath();
-        gameContext.lineWidth = 3;
-        gameContext.strokeStyle = themeColor('ink', 'black');
-        gameContext.arc(joystickMovement.baseX, joystickMovement.baseY, joystickMovement.baseRadius, 0, Math.PI * 2, false);
-        gameContext.stroke();
-        gameContext.beginPath();
-        gameContext.arc(joystickMovement.baseX, joystickMovement.baseY, joystickMovement.stickRadius, 0, Math.PI * 2, false);
-        gameContext.stroke();
+        ctx.save();
+        ctx.beginPath();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = themeColor('ink', 'black');
+        ctx.arc(joystickMovement.baseX, joystickMovement.baseY, joystickMovement.baseRadius, 0, Math.PI * 2, false);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(joystickMovement.baseX, joystickMovement.baseY, joystickMovement.stickRadius, 0, Math.PI * 2, false);
+        ctx.stroke();
 
 
-        gameContext.beginPath();
-        gameContext.arc(joystickMovement.stickX, joystickMovement.stickY, joystickMovement.stickRadius, 0, Math.PI * 2, true);
-        gameContext.fillStyle = "rgba(255, 0, 0, 0.2)";
-        gameContext.fill();
-        gameContext.stroke();
-        gameContext.restore();
-        drawTouchLabel("Move", joystickMovement.baseX, joystickMovement.baseY + joystickMovement.baseRadius + 20);
+        ctx.beginPath();
+        ctx.arc(joystickMovement.stickX, joystickMovement.stickY, joystickMovement.stickRadius, 0, Math.PI * 2, true);
+        ctx.fillStyle = "rgba(255, 0, 0, 0.2)";
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+        drawTouchLabel("Move", joystickMovement.baseX, joystickMovement.baseY + joystickMovement.baseRadius + 20, ctx);
     }
     if (joystickCamera != null && joystickCamera.isVisible()) {
-        gameContext.save();
+        ctx.save();
 
-        gameContext.beginPath();
-        gameContext.lineWidth = 3;
-        gameContext.strokeStyle = themeColor('ink', 'black');
-        gameContext.arc(joystickCamera.baseX, joystickCamera.baseY, joystickCamera.baseRadius, 0, Math.PI * 2, false);
-        gameContext.stroke();
-        gameContext.beginPath();
-        gameContext.arc(joystickCamera.baseX, joystickCamera.baseY, joystickCamera.stickRadius, 0, Math.PI * 2, false);
-        gameContext.stroke();
+        ctx.beginPath();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = themeColor('ink', 'black');
+        ctx.arc(joystickCamera.baseX, joystickCamera.baseY, joystickCamera.baseRadius, 0, Math.PI * 2, false);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(joystickCamera.baseX, joystickCamera.baseY, joystickCamera.stickRadius, 0, Math.PI * 2, false);
+        ctx.stroke();
 
-        gameContext.beginPath();
-        gameContext.fillStyle = "rgba(0, 255, 0, 0.2)";
-        gameContext.arc(joystickCamera.stickX, joystickCamera.stickY, joystickCamera.stickRadius, 0, Math.PI * 2, true);
-        gameContext.fill();
-        gameContext.stroke();
-        gameContext.restore();
+        ctx.beginPath();
+        ctx.fillStyle = "rgba(0, 255, 0, 0.2)";
+        ctx.arc(joystickCamera.stickX, joystickCamera.stickY, joystickCamera.stickRadius, 0, Math.PI * 2, true);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
     }
     if (attackButton != null && attackButton.isVisible()) {
-        gameContext.save();
-        gameContext.beginPath();
-        gameContext.lineWidth = 1;
-        gameContext.strokeStyle = themeColor('ink', 'black');
-        gameContext.fillStyle = "rgba(0, 0, 255, 0.2)";
-
-        //gameContext.rect(attackButton.baseX, attackButton.baseY, attackButton.width, attackButton.height);
-        gameContext.arc(attackButton.baseX, attackButton.baseY, attackButton.radius, 0, Math.PI * 2, true);
-        gameContext.fill();
-        gameContext.stroke();
-        gameContext.restore();
-        drawTouchLabel("Attack", attackButton.baseX, attackButton.baseY + attackButton.radius + 20);
+        ctx.save();
+        ctx.beginPath();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = themeColor('ink', 'black');
+        // Punch-red so it reads as the attack control (mirrors the move ring on
+        // the left); brighten the fill while held for tap/charge feedback.
+        ctx.fillStyle = attackButton.pressed ? "rgba(255, 72, 56, 0.5)" : "rgba(255, 72, 56, 0.26)";
+        ctx.arc(attackButton.baseX, attackButton.baseY, attackButton.radius, 0, Math.PI * 2, false);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+        drawTouchLabel("Attack", attackButton.baseX, attackButton.baseY + attackButton.radius + 20, ctx);
     }
     if (exitButton != null && exitButton.isVisible() && fullscreenSupported()) {
         var exitSize = exitButton.iconSize || 34;
         if (window.document.fullscreenElement) {
-            gameContext.save();
-            gameContext.drawImage(exitToUse, exitButton.baseX - exitSize / 2, exitButton.baseY - exitSize / 2, exitSize, exitSize);
-            gameContext.restore();
+            ctx.save();
+            ctx.drawImage(exitToUse, exitButton.baseX - exitSize / 2, exitButton.baseY - exitSize / 2, exitSize, exitSize);
+            ctx.restore();
         } else {
-            gameContext.save();
-            gameContext.drawImage(fullScreenToUse, exitButton.baseX - exitSize / 2, exitButton.baseY - exitSize / 2, exitSize, exitSize);
-            gameContext.restore();
+            ctx.save();
+            ctx.drawImage(fullScreenToUse, exitButton.baseX - exitSize / 2, exitButton.baseY - exitSize / 2, exitSize, exitSize);
+            ctx.restore();
         }
-        drawTouchLabel(window.document.fullscreenElement ? "Exit" : "Fullscreen", exitButton.baseX, exitButton.baseY + exitSize / 2 + 16);
+        drawTouchLabel(window.document.fullscreenElement ? "Exit" : "Fullscreen", exitButton.baseX, exitButton.baseY + exitSize / 2 + 16, ctx);
     }
     if (chatButton != null && chatButton.isVisible()) {
         var chatSize = chatButton.iconSize || 34;
-        gameContext.save();
-        gameContext.drawImage(chatToUse, chatButton.baseX - chatSize / 2, chatButton.baseY - chatSize / 2, chatSize, chatSize);
-        gameContext.restore();
-        drawTouchLabel("Emoji", chatButton.baseX, chatButton.baseY + chatSize / 2 + 16);
+        ctx.save();
+        ctx.drawImage(chatToUse, chatButton.baseX - chatSize / 2, chatButton.baseY - chatSize / 2, chatSize, chatSize);
+        ctx.restore();
+        drawTouchLabel("Emoji", chatButton.baseX, chatButton.baseY + chatSize / 2 + 16, ctx);
     }
 }
 
@@ -3420,23 +3430,24 @@ function drawMouseDriveIndicator() {
 }
 
 // Small caption under a touch control so mobile players know what it does.
-function drawTouchLabel(text, x, y) {
-    gameContext.save();
+function drawTouchLabel(text, x, y, ctx) {
+    ctx = ctx || overlayContext;
+    ctx.save();
     // The 1366x768 logical space is scaled down a lot on a phone, so a fixed
     // 16px label would render only a few CSS px tall. Size up as the fit ratio
     // shrinks to hold a roughly constant physical size (~15 CSS px), clamped so
     // it never goes below the original 16px or balloons on large displays.
     var fontPx = Math.round(Math.max(16, Math.min(40, 15 / (fitRatio || 1))));
-    gameContext.font = "bold " + fontPx + "px Arial";
-    gameContext.textAlign = "center";
-    gameContext.lineWidth = 4;
+    ctx.font = "bold " + fontPx + "px Arial";
+    ctx.textAlign = "center";
+    ctx.lineWidth = 4;
     // Theme-aware so the captions read correctly on the dark board too (matches
     // the rest of the renderer + the adjacent touch-control rings).
-    gameContext.strokeStyle = themeColor('inkOutline', 'white');
-    gameContext.fillStyle = themeColor('ink', 'black');
-    gameContext.strokeText(text, x, y);
-    gameContext.fillText(text, x, y);
-    gameContext.restore();
+    ctx.strokeStyle = themeColor('inkOutline', 'white');
+    ctx.fillStyle = themeColor('ink', 'black');
+    ctx.strokeText(text, x, y);
+    ctx.fillText(text, x, y);
+    ctx.restore();
 }
 
 function drawTitle() {
