@@ -1701,3 +1701,10 @@ Voronoi.prototype.compute = function(sites, bbox) {
 
     return diagram;
     };
+
+// Make the library requireable in Node (server-side voronoi reconstruction of
+// sites-only maps) without changing browser behavior: in a browser there is no
+// `module`, so this is a no-op and `Voronoi` stays a global as before.
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = Voronoi;
+    }
