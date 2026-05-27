@@ -64,6 +64,16 @@ var ESCAPE_ESCALATE_WINDOW = 4000; // ms: re-trigger within this counts as a rep
 var ESCAPE_COMMIT_THROTTLE = 0.75; // stage-2 committed throttle floor
 var ESCAPE_COMMIT_FEELER = 0.3;    // stage-2: shrink the feeler PUSH so the bot drives toward the
                                    // route exit (carrot) instead of being bent back into the pocket
+// Last-resort "give up" beeline: when a bot has made NO real headway (continuous,
+// reset only by actually breaking STUCK_RADIUS) for this long, neither the soft
+// escape nor a committed thread freed it — it's genuinely sealed/wedged. The worst
+// offender is a bot pinned in a lava-walled corner or in the start-gate margin
+// OUTSIDE the terrain, where it's even immune to lava death (off every cell -> no
+// hit) and so orbits one spot for the whole race. When this fires, the steer below
+// abandons the path and drives STRAIGHT at the nearest goal with ALL avoidance OFF:
+// it either threads back onto terrain, or drives onto the lava that's walling it in
+// and dies, clearing the clog. Strictly a bot that's been frozen seconds already.
+var BEELINE_AFTER_MS = 4500;       // ms continuously stuck before the avoidance-off beeline
 // Steering low-pass. In a narrow lava-walled corridor the feeler + lava-field push
 // flips side every tick; undamped, that vibration grows until the momentum car
 // clips a wall (death) or cancels its own forward motion (the "stuck" crawl). We
@@ -95,6 +105,9 @@ function newBotState(profile) {
         gateY: null,       // gated-phase vertical jockey target
         progressAnchor: null,// {x,y}: spot the bot last made real headway from (anti-stuck)
         progressAt: 0,     // ms: when it last re-anchored there
+        headwayAt: null,   // ms: last time it broke STUCK_RADIUS (real headway). MONOTONIC —
+                           // unlike progressAt it is NOT reset when an escape fires or a route
+                           // momentarily vanishes, so now-headwayAt is true continuous-stuck time.
         prevSx: null,      // steering low-pass: previous tick's (unnormalized) steer vector
         prevSy: null,
         escapeUntil: 0,    // ms: end of an active stuck-escape (relax soft fields)
@@ -854,17 +867,19 @@ function steerBot(bot, ctx, dt) {
     // while the hard ray-sampled feeler brake still guards against driving INTO lava.
     // (Zombies skip this — they ignore the goal and chase prey.) ---
     var nowProbe = Date.now();
-    var escaping = false, committed = false;
+    var escaping = false, committed = false, beelining = false;
     if (!bot.isZombie) {
+        if (ai.headwayAt == null) { ai.headwayAt = nowProbe; }
         if (ai.progressAnchor == null || mag(bot.x - ai.progressAnchor.x, bot.y - ai.progressAnchor.y) > STUCK_RADIUS) {
             ai.progressAnchor = { x: bot.x, y: bot.y };
             ai.progressAt = nowProbe;
+            ai.headwayAt = nowProbe; // real headway -> reset the continuous-stuck clock
             ai.escapeUntil = 0; ai.escapeStage = 0; ai.lastEscapeAt = 0; // real headway -> escape over
         } else if ((nowProbe - ai.progressAt) / 1000 >= STUCK_TRIGGER && nowProbe >= ai.escapeUntil) {
             // Re-triggering after a previous escape that real progress never cleared
-            // means the gentle approach didn't free it -> escalate to a committed
-            // thread-or-die push (keyed off lastEscapeAt, which only survives if no
-            // re-anchor reset it — so a different, freshly-reached pinch starts at 1).
+            // means the gentle approach didn't free it -> escalate the push (keyed off
+            // lastEscapeAt, which only survives if no re-anchor reset it — so a different,
+            // freshly-reached pinch starts at 1). 1 gentle -> 2 committed -> stays 2.
             ai.escapeStage = (nowProbe - ai.lastEscapeAt) <= ESCAPE_ESCALATE_WINDOW ? 2 : 1;
             ai.lastEscapeAt = nowProbe;
             ai.escapeUntil = nowProbe + ESCAPE_MS;
@@ -873,6 +888,10 @@ function steerBot(bot, ctx, dt) {
         }
         escaping = nowProbe < ai.escapeUntil;
         committed = escaping && ai.escapeStage === 2;
+        // Final ladder rung: stuck (no real headway) past BEELINE_AFTER_MS regardless of
+        // the soft/committed escape — it's sealed in. The steer below abandons the path
+        // and beelines the nearest goal with avoidance off (thread out, or die clearing it).
+        beelining = (nowProbe - ai.headwayAt) >= BEELINE_AFTER_MS;
     }
 
     // --- Re-path on a throttle (and immediately if we have no path) ---
@@ -952,11 +971,21 @@ function steerBot(bot, ctx, dt) {
         // A zombie with no reachable goal path (it's lava-immune and often sits on
         // lava) still HUNTS — fall through to the intercept override below, which
         // sets desired toward the prey. Don't freeze in the no-path hold.
+    } else if (beelining && ctx.goalTiles && ctx.goalTiles.length > 0) {
+        // No path AND stuck for BEELINE_AFTER_MS: it's sealed off (the goal is lava-walled
+        // from here and a re-path will keep returning null). Don't keep holding — that's
+        // exactly the off-terrain corner freeze where the bot never moves and never dies.
+        // Beeline the nearest goal with avoidance off (below) to thread out or die clearing it.
+        var ngz = nearestGoalPoint(bot.x, bot.y, ctx.goalTiles);
+        var gzx = ngz.x - bot.x, gzy = ngz.y - bot.y, gzm = mag(gzx, gzy) || 1;
+        desiredX = gzx / gzm; desiredY = gzy / gzm;
     } else {
         // No path and not collapsing: hold position (don't drive blindly). A walled
         // bot isn't "stuck at a pinch", so clear any charging escape and re-anchor
         // here — otherwise it would silently escalate to a committed launch the
         // instant a route reappears, firing it off a standstill with brakes off.
+        // (headwayAt is left alone — it's the monotonic clock that eventually trips
+        // the beeline above for a bot that's genuinely sealed in here.)
         ai.escapeUntil = 0; ai.escapeStage = 0; ai.lastEscapeAt = 0;
         ai.progressAnchor = { x: bot.x, y: bot.y }; ai.progressAt = nowProbe;
         bot.targetDirX = 0; bot.targetDirY = 0; bot.braking = true; bot.attack = false;
@@ -1019,16 +1048,26 @@ function steerBot(bot, ctx, dt) {
     // Risk: tighter lines hug the lava (corner-cutting); cautious bots keep clear.
     ctx.riskMult = 1 - 0.45 * ai.risk;
 
+    // A last-resort beeline overrides the path/carrot heading and points STRAIGHT at the
+    // nearest goal, so a bot sealed in a corner drives decisively out (or into the walling
+    // lava). Avoidance is turned off just below so nothing bends it back into the pocket.
+    if (beelining && ctx.goalTiles && ctx.goalTiles.length > 0) {
+        var ngb = nearestGoalPoint(bot.x, bot.y, ctx.goalTiles);
+        var bgx = ngb.x - bot.x, bgy = ngb.y - bot.y, bgm = mag(bgx, bgy) || 1;
+        desiredX = bgx / bgm; desiredY = bgy / bgm;
+    }
+
     // --- Avoidance: predictive feelers (primary) + soft fields (secondary) ---
     // Heading the feelers look along: actual velocity when moving, else desired.
     var headX = desiredX, headY = desiredY;
     if (speed > 5) { headX = bot.velX / speed; headY = bot.velY / speed; }
 
-    // Zombies don't die on lava (and ignore the collapse) — they cut straight
-    // across it to chase prey, so a zombie bot turns OFF all lava avoidance.
-    var ignoreLava = bot.isZombie === true;
+    // Zombies don't die on lava (and ignore the collapse) — they cut straight across it
+    // to chase prey, so a zombie turns OFF all lava avoidance. A beelining bot likewise
+    // wants no avoidance bending its decisive line (it has been frozen for seconds).
+    var ignoreLava = bot.isZombie === true || beelining;
     var fl = ignoreLava ? { x: 0, y: 0, brake: false } : feelerAvoid(bot, ctx, headX, headY, speed);
-    var hz = hazardRepulsion(bot, ctx.hazardList);
+    var hz = beelining ? { x: 0, y: 0 } : hazardRepulsion(bot, ctx.hazardList);
     var lv = ignoreLava ? { x: 0, y: 0 } : lavaRepulsion(bot, ctx.lavaCells);
 
     // Lava dead ahead means the current line is bad — re-path next tick to find a
@@ -1067,9 +1106,9 @@ function steerBot(bot, ctx, dt) {
         // the stored history so a zombie->racer revert (infection round end) doesn't
         // blend in a stale pre-zombie vector.
         ai.prevSx = null; ai.prevSy = null;
-    } else if (committed) {
-        // A committed (thread-or-die) escape wants its decisive line undiluted, so
-        // snap the filter to it instead of blending in the pre-escape pocket vector.
+    } else if (committed || beelining) {
+        // A committed (thread-or-die) escape or last-resort beeline wants its decisive line
+        // undiluted, so snap the filter to it instead of blending the pre-escape pocket vector.
         ai.prevSx = sx; ai.prevSy = sy;
     } else {
         if (ai.prevSx == null) { ai.prevSx = sx; ai.prevSy = sy; }
@@ -1126,6 +1165,9 @@ function steerBot(bot, ctx, dt) {
         if (throttle < ESCAPE_COMMIT_THROTTLE) { throttle = ESCAPE_COMMIT_THROTTLE; }
         braking = false;
     }
+    // Last-resort beeline: full throttle, no brake, no lava crawl — drive the decisive
+    // line out of the pocket (avoidance is already off, so fl.brake never fires here).
+    if (beelining) { throttle = Math.max(throttle, 1.0); braking = false; }
 
     // A hunting zombie commits fully: it ignores lava and only wants to catch prey,
     // so skip the cautious governor, rubber-band easing, and braking — full chase.
