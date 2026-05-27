@@ -20,8 +20,12 @@
 
 var Voronoi = require('../client/scripts/rhill-voronoi-core.js');
 
+// "Sites-only" = has a sites array and NO full geometry. The `!cells` check keeps
+// this identical to the client's mapIsSitesOnly: a map carrying both must be
+// treated as full-geometry on both sides, never reconstructed on one and passed
+// through on the other.
 function isSitesOnly(map) {
-    return map != null && Array.isArray(map.sites);
+    return map != null && Array.isArray(map.sites) && !Array.isArray(map.cells);
 }
 
 // The bbox is recoverable from a full map's clipped polygon vertices: voronoi

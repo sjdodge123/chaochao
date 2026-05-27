@@ -140,6 +140,19 @@ function showLoadWindow() {
     document.getElementById('createWindow').classList.add('editor-hidden');
     document.body.classList.remove('editor-open');
     updateContinueTile();
+    // (Re)generate load-list thumbnails now that the window is open — by here
+    // config + textured patterns are loaded, so any card whose thumbnail was
+    // rendered blank/flat earlier (map fetched before config/patterns) upgrades
+    // to the textured version. renderMapThumbnail caches, so this is cheap.
+    for (var i = 0; i < maps.length; i++) {
+        var m = maps[i];
+        if (m == null || m.id == null) { continue; }
+        var btn = document.getElementById(m.id);
+        var img = btn ? btn.querySelector('img') : null;
+        if (img == null) { continue; }
+        var url = renderMapThumbnail(m);
+        if (url) { img.src = url; }
+    }
 }
 
 function showEditor() {
@@ -1383,7 +1396,10 @@ function renderHazards() {
 // falls back to flat colours without caching and re-renders textured next time.
 var thumbnailCache = {};
 function renderMapThumbnail(map) {
-    if (map == null || !Array.isArray(map.cells)) { return ""; }
+    // config arrives async (socket event) and the map-list getJSON callbacks can
+    // resolve first; bail until it's here (showLoadWindow re-renders thumbnails
+    // once it's loaded) rather than dereferencing config.tileMap and throwing.
+    if (map == null || !Array.isArray(map.cells) || config == null) { return ""; }
     if (map.id != null && thumbnailCache[map.id] != null) { return thumbnailCache[map.id]; }
     var patternsReady = patterns[config.tileMap.normal.id] != null;
     var tileFill = function (id) {
