@@ -9,6 +9,7 @@ var imgListing = [];
 
 var c = require('./config.json');
 var cellGraph = require('./cellGraph.js');
+var mapFormat = require('./mapFormat.js');
 c.port = process.env.PORT || c.port;
 
 // Test-only config override seam (CI perf harness). When CHAO_PERF_OVERRIDE is a
@@ -580,6 +581,13 @@ function loadMaps() {
         if (file != ".DS_Store") {
             mapListing.push(file);
             var loadedMap = require("../client/maps/" + file);
+            // Compact sites-only maps store only voronoi sites + bbox; rebuild the
+            // full diagram (cells/edges/geometry) before anything downstream — par-time,
+            // adjacency, the engine and the renderer all expect full geometry. Legacy
+            // full-geometry maps pass through unchanged.
+            if (mapFormat.isSitesOnly(loadedMap)) {
+                loadedMap = mapFormat.reconstruct(loadedMap);
+            }
             // Par-time is a fixed property of a map's geometry; compute it once
             // at boot for any map lacking it (submitted maps embed it). Deep
             // copies (currentMap) preserve the number.
