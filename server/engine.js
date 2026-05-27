@@ -644,6 +644,17 @@ function checkCollideCells(player, map) {
 			mapCell.voronoiId = cell.site.voronoiId;
 			mapCell.isMapCell = true;
 			player.handleHit(mapCell);
+			// Ability pickup is a check-then-act split across two tick phases: the
+			// ability is acquired here (checkCollisions), but the tile isn't rewritten
+			// to normal ground until updatePlayers' changeTile runs later this tick.
+			// Two karts knocked onto the same ability tile in one tick would each
+			// acquire from it before it's consumed — a duplication. Consume it the
+			// instant it's claimed so any other player resolving this same cell this
+			// tick sees plain ground. The deferred changeTile still runs (now a no-op
+			// re-set) to broadcast the tile change and schedule the lobby respawn.
+			if (player.acquiredAbility != null && player.acquiredAbility.mapID === cell.site.voronoiId) {
+				cell.id = c.tileMap.normal.id;
+			}
 			return; // a point lies in exactly one Voronoi cell
 		}
 	}

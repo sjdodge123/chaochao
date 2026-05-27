@@ -133,6 +133,9 @@ jobs:
       - name: Headless start-edges test (single edges + opposite-edge combos)
         run: node .github/scripts/start-edges-test.js
 
+      - name: Headless ability-tile duplication regression test
+        run: node .github/scripts/ability-dupe-test.js
+
   perf-tick-budget:
     # Server-side worst-case load: a full 25-kart grid in a stacked brutal round.
     # Proves one room still ticks well within the 30 Hz interval. Zero new deps —
