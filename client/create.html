@@ -142,6 +142,15 @@
       border-color: rgba(207, 16, 32, 0.4);
       color: #cf1020;
     }
+    /* Rotate buttons use full-circle Unicode arrows (↺ ↻) so they read as
+       "rotate", clearly distinct from the undo/redo reply-style arrows — FA 4.7
+       aliases fa-rotate-left/right straight onto fa-undo/fa-repeat, so they'd
+       otherwise be the same glyph. */
+    .ed-rot-glyph {
+      font-size: 1.5rem;
+      line-height: 1;
+      font-weight: 700;
+    }
 
     /* Text action buttons (Details / Preview / Copy / Upload / AI). */
     .ed-btn {
@@ -588,8 +597,8 @@
           </div>
           <div class="ed-bar-divider"></div>
           <div class="ed-bar-group">
-            <button id="rotateLeftButton" data-gp-nav class="ed-icon-btn" title="Rotate selected hazard -15° (Shift+R)"><i class="fa fa-rotate-left" aria-hidden="true"></i></button>
-            <button id="rotateButton" data-gp-nav class="ed-icon-btn" title="Rotate selected hazard +15° (R)"><i class="fa fa-rotate-right" aria-hidden="true"></i></button>
+            <button id="rotateLeftButton" data-gp-nav class="ed-icon-btn" title="Rotate selected hazard -15° (Shift+R)"><span class="ed-rot-glyph" aria-hidden="true">↺</span></button>
+            <button id="rotateButton" data-gp-nav class="ed-icon-btn" title="Rotate selected hazard +15° (R)"><span class="ed-rot-glyph" aria-hidden="true">↻</span></button>
             <button id="deleteSelectedButton" data-gp-nav class="ed-icon-btn danger" title="Delete selected hazard (Del)" disabled><i class="fa fa-times" aria-hidden="true"></i></button>
           </div>
 
