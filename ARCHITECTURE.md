@@ -39,12 +39,13 @@ demand → each `Room` owns a `Game` + `GameBoard` + `World` + `Engine`.
 |---|---|---|
 | `game.js` | ~2.3k | Core orchestrators only: **`Room`** (per-room registry of player/projectile/aimer/hazard lists), **`Game`** (the state machine over `c.stateMap`: waiting→lobby→overview→gated→racing→collapsing→gameOver; round/brutal/scoring rules; bot fill), **`GameBoard`** (per-tick collision/ability/map driving, brutal-round config, map lifecycle). Music & achievement methods are mixed into `Game.prototype` from `music.js`/`achievements.js`. Exports only `getRoom(sig,size)`. |
 | `engine.js` | ~730 | Physics & collision. Per-tick updates hazards/projectiles/players; `QuadTree` broadphase against active map tiles. Helpers used from game.js/entities: `preventEscape`, `checkCollideCells`, `punchPlayer`, `puckPlayer`, `explosion`, `bounceOffBoundry`, … |
-| `utils.js` | ~500 | Central config loader (`loadConfig()` returns cached `config.json`, `PORT` override), `dt` clock, math/RNG helpers; scans `client/{maps,assets}` at boot to build the `contentDelivery` manifests; `submitPullRequest()` (octokit) that turns an editor-submitted map into a GitHub PR; shared `validateMap()`. |
+| `utils.js` | ~500 | Central config loader (`loadConfig()` returns cached `config.json`, `PORT` override), `dt` clock, math/RNG helpers; scans `client/{maps,assets}` at boot to build the `contentDelivery` manifests; `loadMaps()` reconstructs sites-only maps to full geometry (`mapFormat`); `submitPullRequest()` (octokit) reduces an editor-submitted map to sites-only and opens a GitHub PR; shared `validateMap()`. |
 | `messenger.js` | ~210 | Socket.IO wrapper. Owns mailbox (client id→socket) and room-mailbox (id→room sig). `checkForMail()` registers every per-client handler (`enterGame`, `joinARoom`, `submitNewMap`, input events). The single place socket events are wired. |
 | `hostess.js` | ~140 | Room registry. Creates `Room`s on demand, matchmakes clients into rooms with space, drives `room.update(dt)` each tick, deletes empty rooms. |
 | `compressor.js` | ~230 | Serializes per-tick state into compact positional arrays (e.g. `[id,x,y,velX,velY,angle]`) before `gameUpdates`. **Edit client decoders in `client/scripts/client.js` in lockstep with any layout change.** |
 | `aiController.js` | ~1.1k | AI racer brain: A\*-over-cells + feeler steering (`steerBot`), ability/punch policy, brutal-mode fairness, personalities + rubber-banding. Drives bot `Player`s via `targetDirX/Y/braking`. |
 | `cellGraph.js` | ~410 | Cell adjacency graph + pathfinding over a map's Voronoi cells (`findPathToNearestGoal`, …). Used by `aiController`. |
+| `mapFormat.js` | ~110 | Compact **sites-only** map format ↔ full Voronoi geometry. `toSitesOnly()` reduces a full map to `{bbox, sites:[{x,y,id}], hazards, …}`; `reconstruct()`/`hydrate()` recompute the diagram (via `rhill-voronoi-core.js`, now required server-side) deterministically so cells/adjacency/par-time/geometry match what the editor produced. Used by `loadMaps()` and the submit boundary. |
 | `music.js` | ~85 | **Mixin** of music-mood/track-selection methods (`computeMusicMood`, `pickMusicTrack`, `rotateMusicTrack`, …). `Object.assign`ed onto `Game.prototype`; methods use `this`. |
 | `achievements.js` | ~75 | **Mixin** of end-of-match medal tallying (`gatherAchievements`, `checkForNewMedalHolder`). `Object.assign`ed onto `Game.prototype`. |
 | `botEmotes.js` | ~40 | Neutral helper (`emitBotEmote`, `botsCheerFor`) so `game.js` and `entities/player.js` can broadcast bot chat-wheel emotes without a require cycle. |
@@ -96,8 +97,8 @@ block. Dev (`npm start`) serves the raw `<script>` tags; prod swaps in the bundl
 
 | File | Lines | Purpose / contents |
 |---|---|---|
-| `create.js` | ~1.1k | Assembles map JSON from Voronoi cells, validates, POSTs via `submitNewMap` (→ GitHub PR in `utils.submitPullRequest`). |
-| `rhill-voronoi-core.js` | ~1.7k | **Third-party** Voronoi cell generation (leave as-is). |
+| `create.js` | ~1.1k | Assembles a map from Voronoi cells, validates, POSTs via `submitNewMap` (server reduces to sites-only → GitHub PR in `utils.submitPullRequest`). Reconstructs sites-only maps on load (`reconstructSitesOnlyMap`) and renders load-list thumbnails on demand (`renderMapThumbnail`). |
+| `rhill-voronoi-core.js` | ~1.7k | **Third-party** Voronoi cell generation (leave as-is). Now in the **play** bundle too (client reconstructs sites-only maps); a browser-safe `module.exports` shim lets `server/mapFormat.js` require it. |
 | `editorGamepad.js` | ~460 | Controller support specific to the editor page (owns the pad; does not load `menuGamepad.js`). |
 
 **`join.html` → `join.bundle.min.js`**: `join.js` (~150) — standalone room-join page.
@@ -128,6 +129,17 @@ collision behavior is keyed on the current state (see `checkCollisions` →
 
 **Config is the single source of truth:** `server/config.json` tunes both sides;
 it's shipped to the client via the `config` event. Don't fork tuning values.
+
+**Map format (sites-only):** `client/maps/*.json` are stored compact —
+`{bbox, sites:[{x,y,id}], hazards, startEdges, parTime, name, author, id}`, no
+`cells`/`edges`/`thumbnail` (~16 KB vs ~1.3 MB). Full Voronoi geometry is
+reconstructed deterministically on load — server in `loadMaps()` via
+`server/mapFormat.js`, client in `reconstructSitesOnlyMap()` (`client/scripts/utils.js`,
+both bundles include `rhill-voronoi-core.js`). **Lockstep rule:** keep these two
+reconstructors in sync. Thumbnails are rendered on demand, not stored. The
+full-geometry originals are frozen in `maps-archive/` (outside `client/maps/`, so
+`loadMaps` ignores them and nothing ships to the browser). Loaders accept legacy
+full-geometry maps unchanged.
 
 **Adding code:**
 - *New server module:* just `require`/`module.exports` — the server isn't bundled,
