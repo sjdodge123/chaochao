@@ -42,6 +42,19 @@ var FEELER_AVOID_STRENGTH = 3.0;// weight of the predictive feeler push (stronge
 var FEELER_STEP = 13;           // px between samples along a feeler (catch thin lava fingers)
 var FEELER_MAX_SAMPLES = 8;     // cap samples per feeler so isLavaAt cost stays bounded at high speed
 var FEELER_BOXED_NEAR = 0.6;    // both-sides "boxed in" brakes only when lava is this near (frac of side reach)
+// ICE: on a slippery tile a kart can barely brake (0.0001 vs 0.235) OR steer (accel 15
+// vs 300), so its stopping/steering distance balloons — a normal-length feeler spots the
+// lava far too late to curve the glide away, and the bot skates straight in. Look much
+// farther ahead on ice (and allow more samples + a bigger cap so the long ray still
+// catches lava) so the perpendicular push starts curving the slide while there's room.
+var ICE_FEELER_MULT = 2.6;      // feeler reach/cap multiplier while on ice
+var ICE_FEELER_SAMPLES = 16;    // more ray samples on ice so the longer feeler doesn't step over lava
+// Pre-ice speed control: a kart can only brake on a GRIPPY tile (ice brake is 0.0001),
+// so the time to bleed speed for the ice is BEFORE crossing onto it. When grippy and ice
+// is imminent dead ahead, brake down to a controllable entry speed so the weak ice-steering
+// can still follow the path across instead of skating straight off into the lava.
+var ICE_ENTRY_LOOKAHEAD = 46;   // px ahead (plus a speed term) to sniff for upcoming ice
+var ICE_ENTRY_SPEED = 42;       // px/s: target speed to be at or below when entering ice
 // Anti-stuck escape: in a tight/looping corridor (sidewinder) over-cautious
 // soft-field repulsion can stall a momentum car at a narrow gap — it crawls or
 // slowly orbits one spot ("line up at the 1px pinch and wait"). When a bot loiters
@@ -265,9 +278,8 @@ function lavaRepulsion(bot, lavaCells) {
     return { x: rx, y: ry };
 }
 
-// True if the Voronoi cell containing (x,y) — the nearest site — is lava. Used by
-// the predictive feelers to catch a momentum car about to slide off the path.
-function isLavaAt(ctx, x, y) {
+// Tile id of the Voronoi cell containing (x,y) — i.e. the nearest site's id.
+function nearestTileId(ctx, x, y) {
     var cells = ctx.map.cells;
     var best = Infinity, bestId = -1;
     for (var i = 0; i < cells.length; i++) {
@@ -277,8 +289,11 @@ function isLavaAt(ctx, x, y) {
         var d = dx * dx + dy * dy;
         if (d < best) { best = d; bestId = cells[i].id; }
     }
-    return bestId === ctx.lavaId;
+    return bestId;
 }
+// True if the cell containing (x,y) is lava. Used by the predictive feelers to catch a
+// momentum car about to slide off the path.
+function isLavaAt(ctx, x, y) { return nearestTileId(ctx, x, y) === ctx.lavaId; }
 
 function rotate(x, y, deg) {
     var r = deg * Math.PI / 180, cs = Math.cos(r), sn = Math.sin(r);
@@ -291,10 +306,11 @@ function rotate(x, y, deg) {
 // thin lava fingers narrower than the feeler (so the bot drove straight into them);
 // stepping along the ray catches them, and the fraction lets callers tell "lava
 // right here" from "lava far down the feeler".
-function rayLavaFrac(bot, ctx, dirX, dirY, reach) {
+function rayLavaFrac(bot, ctx, dirX, dirY, reach, maxSamples) {
     var steps = Math.ceil(reach / FEELER_STEP);
     if (steps < 1) { steps = 1; }
-    if (steps > FEELER_MAX_SAMPLES) { steps = FEELER_MAX_SAMPLES; }
+    var cap = maxSamples || FEELER_MAX_SAMPLES;
+    if (steps > cap) { steps = cap; }
     for (var i = 1; i <= steps; i++) {
         var t = i / steps;
         if (isLavaAt(ctx, bot.x + dirX * reach * t, bot.y + dirY * reach * t)) { return t; }
@@ -307,23 +323,27 @@ function rayLavaFrac(bot, ctx, dirX, dirY, reach) {
 // and flag a hard brake. Returns { x, y, brake } where x/y is a steer push.
 function feelerAvoid(bot, ctx, headX, headY, speed) {
     var reach = FEELER_BASE + speed * FEELER_SPEED_K;
+    var cap = FEELER_MAX;
+    // On ice the kart can't brake or steer hard, so it needs to see lava much farther out.
+    var onIce = bot.brakeCoeff < c.playerBrakeCoeff;
+    var samples = onIce ? ICE_FEELER_SAMPLES : FEELER_MAX_SAMPLES;
+    if (onIce) { reach *= ICE_FEELER_MULT; cap *= ICE_FEELER_MULT; }
     // Lightning round speeds everyone up — look farther ahead to keep control.
-    if (ctx.lightning) { reach *= LIGHTNING_FEELER_MULT; }
-    var cap = FEELER_MAX * (ctx.lightning ? LIGHTNING_FEELER_MULT : 1);
+    if (ctx.lightning) { reach *= LIGHTNING_FEELER_MULT; cap *= LIGHTNING_FEELER_MULT; }
     if (reach > cap) { reach = cap; }
     // Risk: high-risk personalities use shorter feelers, cutting closer to lava.
     if (ctx.riskMult != null) { reach *= ctx.riskMult; }
     var px = 0, py = 0, brake = false;
     // Center feeler — lava anywhere ahead (within stopping distance) means slow down.
-    if (rayLavaFrac(bot, ctx, headX, headY, reach) < 1) {
+    if (rayLavaFrac(bot, ctx, headX, headY, reach, samples) < 1) {
         brake = true;
     }
     // Side feelers, slightly shorter. Lava on one side pushes toward the other.
     var sd = reach * 0.8;
     var lDir = rotate(headX, headY, FEELER_SIDE_DEG);
     var rDir = rotate(headX, headY, -FEELER_SIDE_DEG);
-    var lFrac = rayLavaFrac(bot, ctx, lDir.x, lDir.y, sd);
-    var rFrac = rayLavaFrac(bot, ctx, rDir.x, rDir.y, sd);
+    var lFrac = rayLavaFrac(bot, ctx, lDir.x, lDir.y, sd, samples);
+    var rFrac = rayLavaFrac(bot, ctx, rDir.x, rDir.y, sd, samples);
     var lLava = lFrac < 1, rLava = rFrac < 1;
     // Perpendicular to heading: right = (headY, -headX), left = (-headY, headX).
     if (lLava && !rLava) { px += headY; py += -headX; }        // push right
@@ -1133,12 +1153,31 @@ function steerBot(bot, ctx, dt) {
     // crawl, so it never builds the momentum to thread. A real lava-DEAD-AHEAD brake
     // (fl.brake) still bites, so this doesn't drive it straight into lava.
     if (escaping) { lavaField *= ESCAPE_LAVA_RELAX; }
-    if (fl.brake || lavaField > 1.2) {
+    // On ice the throttle IS the bot's steering authority (the engine scales accel by the
+    // targetDir magnitude, and accel is only 15 on ice) — and braking does nothing. So the
+    // usual "crawl when lava is ahead" makes an ice slide WORSE: it cuts the very accel the
+    // bot needs to curve its momentum off the lava. Keep throttle up on ice and lean on the
+    // longer ice feeler (steer away early) + the emergency punch-brake (kill a bad slide).
+    var onIce = bot.brakeCoeff < c.playerBrakeCoeff;
+    if ((fl.brake || lavaField > 1.2) && !onIce) {
         throttle = 0.42;
         if (speed > BRAKE_SPEED_MIN) { braking = true; }
     } else if (sharpTurn || lavaField > 0.6) {
-        throttle = 0.7;
-        if (sharpTurn && speed > BRAKE_SPEED_MIN * 1.3) { braking = true; }
+        if (!onIce) { throttle = 0.7; }
+        if (sharpTurn && !onIce && speed > BRAKE_SPEED_MIN * 1.3) { braking = true; }
+    }
+    // Pre-ice braking: bleed speed on the grippy approach so we enter the ice slow enough
+    // to actually steer across it. Only when grippy now (braking works), ice is imminent
+    // dead ahead, and we're carrying too much speed; skip during a beeline/escape (those
+    // deliberately commit) and when fleeing a collapse.
+    if (!onIce && !beelining && !escaping && !ctx.collapsing &&
+        speed > ICE_ENTRY_SPEED) {
+        var look = ICE_ENTRY_LOOKAHEAD + speed * 0.45;
+        var hX = headX, hY = headY; // heading already computed above for the feelers
+        if (nearestTileId(ctx, bot.x + hX * look, bot.y + hY * look) === ctx.iceId) {
+            braking = true;
+            if (throttle > 0.5) { throttle = 0.5; }
+        }
     }
     // Blinded racers feel their way forward more tentatively.
     if (blinded) { throttle *= BLIND_THROTTLE; }
@@ -1437,6 +1476,7 @@ function update(gameBoard, currentState, dt) {
     var ctx = {
         map: map,
         lavaId: LAVA,
+        iceId: c.tileMap.ice.id,
         siteById: buildSiteIndex(map),
         lavaCells: lavaCells,
         goalTiles: goalTiles, // for zombie intercept (prey are racing to a goal)
