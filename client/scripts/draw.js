@@ -2639,18 +2639,61 @@ function traceCellPath(ctx, cell) {
     return true;
 }
 
-// Tile-swap telegraph flicker tuning. The per-frame chance of a gentle dim
-// ramps from BASE to BASE+RAMP as the swap nears, and a dim frame multiplies
-// brightness by DIM (closer to 1.0 = calmer). Kept deliberately low so the
-// warn-up reads as a calm electric glow rather than a harsh strobe.
-var SWAP_FLICKER_BASE = 0.01;   // base per-frame dim chance (was 0.03)
-var SWAP_FLICKER_RAMP = 0.03;   // extra chance at full progress (was 0.07)
-var SWAP_FLICKER_DIM = 0.8;     // brightness on a dim frame (was 0.6)
+// --- Tile-swap telegraph (destination "ghost") ---
+// pendingSwapCells marks every fast/ice tile the moment a tileSwap is queued, for
+// the random 3-6s warn-up before they flip. Each tile crossfades in the texture it
+// is about to BECOME (fast<->ice), so players can read the pending change. It fades
+// in smoothly with no early pulse; only in the final phase before the swap does a
+// slow pulse ramp in, so it never strobes. The pending region is outlined along its
+// silhouette only (perimeter edges, like drawLavaBorders) — internal cell seams and
+// fast<->ice boundaries are left undrawn. See markPendingSwap / tileSwapLanded
+// (gameboard.js) for the lifecycle.
+var SWAP_WARN_COLOR = "#ffcf57"; // fallback tint if a destination texture isn't decoded yet
 
-// Overlay drawn on top of the cached map: the tiles a tileSwap is about to flip
-// pulse (a global sine that speeds up as the swap nears) with a brief random
-// flicker per cell, plus a brightening yellow edge. Cleared as tiles flip (see
-// changeTilesBulk) and self-expires if the swap never lands.
+function drawSwapTelegraphTile(cell, prog, now) {
+    var ctx = gameContext;
+    var fastId = config.tileMap.fast.id, iceId = config.tileMap.ice.id;
+    var destId = (cell.id === fastId) ? iceId : (cell.id === iceId ? fastId : null);
+    var pat = (destId != null) ? patterns[destId] : null;
+    // 0 until the last ~40%, then ramps to 1 — gates how much the slow pulse shows.
+    var lastPhase = clamp01((prog - 0.6) / 0.4);
+    var pulse = 0.5 + 0.5 * Math.sin((now / 1000) * 0.6 * Math.PI * 2); // slow, ~1.7s
+    var pulseMul = 1 - lastPhase * 0.45 * (1 - pulse); // steady early, gently throbs late
+    ctx.save();
+    if (!traceCellPath(ctx, cell)) { ctx.restore(); return; }
+    // Fill the tile with the destination texture, ramping in as the swap nears.
+    ctx.globalAlpha = (0.1 + 0.45 * prog) * pulseMul;
+    ctx.fillStyle = (pat != null) ? pat : SWAP_WARN_COLOR;
+    ctx.fill();
+    // Outline only the PERIMETER of the pending region (like drawLavaBorders): skip
+    // any edge whose neighbour is also pending, so internal seams (incl. fast<->ice
+    // boundaries) aren't drawn — only the silhouette. Each perimeter edge has exactly
+    // one pending owner, so the translucent line never doubles up.
+    var set = pendingSwapCells.set;
+    var hes = cell.halfedges;
+    ctx.beginPath();
+    for (var h = 0; h < hes.length; h++) {
+        var he = hes[h];
+        var neighbor = compareSite(he.edge.lSite, he.site) ? he.edge.rSite : he.edge.lSite;
+        if (neighbor != null && set[neighbor.voronoiId] != null) {
+            continue; // internal seam between two pending tiles
+        }
+        var sp = getStartpoint(he), ep = getEndpoint(he);
+        ctx.moveTo(sp.x, sp.y);
+        ctx.lineTo(ep.x, ep.y);
+    }
+    // Lower-opacity line styled in the destination texture, grows slightly.
+    ctx.globalAlpha = (0.15 + 0.2 * prog) * pulseMul;
+    ctx.lineWidth = 2 + 4 * prog;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = (pat != null) ? pat : SWAP_WARN_COLOR;
+    ctx.stroke();
+    ctx.restore();
+}
+
+// Overlay drawn on top of the cached map. Cleared as tiles flip (see changeTilesBulk
+// / tileSwapLanded) and self-expires if the swap never lands.
 function drawPendingSwap() {
     if (pendingSwapCells == null || currentMap == null || currentMap.cells == null) {
         return;
@@ -2673,20 +2716,7 @@ function drawPendingSwap() {
         // Per-tile progress so overlapping swaps each ramp on their own clock.
         var span = tile.end - tile.start;
         var prog = span > 0 ? clamp01((now - tile.start) / span) : 1;
-        var pulse = 0.5 + 0.5 * Math.sin((now / 1000) * (2 + 3 * prog) * Math.PI * 2);
-        // Occasional, gentle dim frames (rarer and shallower than a hard strobe)
-        // so the warn-up reads as a calm electric glow, not an intense flicker.
-        var flicker = Math.random() < (SWAP_FLICKER_BASE + SWAP_FLICKER_RAMP * prog) ? SWAP_FLICKER_DIM : 1.0;
-        var alpha = (0.15 + 0.32 * pulse) * flicker;
-        if (!traceCellPath(gameContext, cell)) {
-            continue;
-        }
-        gameContext.globalAlpha = alpha;
-        gameContext.fillStyle = "#ffffff";
-        gameContext.fill();
-        gameContext.lineWidth = 2 + 3 * prog;
-        gameContext.strokeStyle = "#ffff66";
-        gameContext.stroke();
+        drawSwapTelegraphTile(cell, prog, now);
     }
     gameContext.restore();
     // Once every tile has flipped/cleared/expired, drop the telegraph.
