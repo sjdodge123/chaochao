@@ -30,6 +30,7 @@ var PERF_PROFILES = {
         explosionSparks: 10,     // debris sparks per explosion
         audience: true,          // letterbox crowd
         trailDirect: false,      // false = full per-kart offscreen trail canvas; true = stroke a capped tail straight to the main canvas (avoids re-uploading a world-sized texture/kart/frame on weak GPUs)
+        mapScale: 1,             // resolution of the cached map texture (1 = full); <1 shrinks it so each re-upload on a tile change moves fewer bytes (the GPU-paint stutter on weak GPUs)
         dprCap: 2                // device-pixel-ratio ceiling for the backing store
     },
     // Tablets / small desktop windows: trim particle volume, keep the glow and
@@ -43,6 +44,7 @@ var PERF_PROFILES = {
         explosionSparks: 7,
         audience: true,
         trailDirect: false,
+        mapScale: 1,
         dprCap: 2
     },
     // Phones / low-end: shed the fill-rate-heavy work — glow passes, the crowd,
@@ -57,6 +59,7 @@ var PERF_PROFILES = {
         explosionSparks: 4,
         audience: false,
         trailDirect: true,
+        mapScale: 0.6,
         dprCap: 1.5
     }
 };
@@ -174,6 +177,11 @@ function applyPerfProfile() {
     if (PERF.dprCap !== prevDprCap && typeof resize === "function") {
         try { resize(); } catch (e) { /* canvas not ready yet */ }
     }
+    // The map cache resolution (mapScale) is baked in; force a rebuild so a tier
+    // change re-bakes it at the new resolution instead of waiting for a tile change.
+    if (typeof invalidateMapCache === "function") {
+        invalidateMapCache();
+    }
     updatePerformanceToggleUI();
     if (typeof renderSettingsRows === "function") {
         try { renderSettingsRows(); } catch (e) { /* settings panel not open */ }
@@ -229,6 +237,7 @@ function perfGlow() { return !!PERF.glow; }
 function perfEmbers() { return !!PERF.embers; }
 function perfTrailDirect() { return !!PERF.trailDirect; }
 function perfTrailDirectMax() { return PERF_TRAIL_DIRECT_MAX; }
+function perfMapScale() { return PERF.mapScale || 1; }
 function perfExplosionSparks() { return PERF.explosionSparks; }
 function perfMaxEffects() { return PERF.maxEffects; }
 function perfDprCap() { return PERF.dprCap; }
@@ -294,7 +303,7 @@ var pdWinStart = 0, pdLastSpikeEmit = 0, pdLoaf = [];
 var PD_WINDOW_MS = 3000, PD_SPIKE_MS = 60, PD_SPIKE_EMIT_GAP = 1500;
 // Bump this whenever the perf code changes meaningfully, so a device reporting an
 // old value tells us it loaded a stale (cached) bundle rather than the new fix.
-var PERF_DIAG_VERSION = "td1";
+var PERF_DIAG_VERSION = "td2";
 
 function perfDiagEnabled() {
     if (perfDiagOn === null) {
@@ -353,6 +362,7 @@ function perfDiagEmit(reason) {
         tier: perfTier, pref: getPerfPref(),
         v: PERF_DIAG_VERSION,                                   // build marker: confirms the device ran THIS code (not a cached old bundle)
         td: (typeof perfTrailDirect === "function") ? perfTrailDirect() : null, // is the direct-trail fix active this frame?
+        ms: (typeof perfMapScale === "function") ? perfMapScale() : null,       // map-cache resolution scale (1 = full, <1 = reduced)
         st: (typeof currentState !== "undefined") ? currentState : null,
         karts: (typeof playerList !== "undefined") ? perfDiagCount(playerList) : 0,
         fx: (typeof effectsList !== "undefined") ? perfDiagCount(effectsList) : 0,
