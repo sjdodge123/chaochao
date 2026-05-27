@@ -83,6 +83,7 @@ function initGamepad() {
     buildHintBar();
     buildLeaveModalUI();
     buildSettingsModalUI();
+    buildTouchSettingsButton();
     buildPadPlayersUI();
     // Start on the device's most likely method; live usage swaps it.
     setInputMethod((typeof isTouchScreen !== "undefined" && isTouchScreen) ? "touch" : "kbm");
@@ -1092,7 +1093,9 @@ function buildSettingsModalUI() {
         '<div class="settings-rows">' + rows + '</div>' +
         '<div class="settings-foot"></div>' +
         '</div>';
-    document.body.appendChild(el);
+    // Append inside #gameWindow so the panel is visible when opened in fullscreen
+    // (the fullscreen element only renders its own subtree); falls back to <body>.
+    (document.getElementById("gameWindow") || document.body).appendChild(el);
     settingsModalEl = el;
     // Mouse users can click a row directly.
     var btns = el.querySelectorAll(".settings-row");
@@ -1217,10 +1220,20 @@ function openSettingsModal(lp) {
     // adapt to the pad type (Xbox A/B vs PlayStation cross/circle).
     var foot = settingsModalEl.querySelector(".settings-foot");
     if (foot) {
-        foot.innerHTML =
-            '<span class="gp-hint"><span class="gp-glyph gp-stick">L</span><span class="gp-glyph gp-dpad">✛</span>Move</span>' +
-            '<span class="gp-hint"><span class="gp-glyph gp-face">' + attackGlyph() + '</span>Toggle</span>' +
-            '<span class="gp-hint"><span class="gp-glyph gp-face">' + leaveGlyph() + '</span>Close</span>';
+        if (typeof isTouchScreen !== "undefined" && isTouchScreen) {
+            // Touch: tap a row to toggle it; an explicit Done button closes the
+            // panel (the controller glyph hints below are meaningless on touch).
+            foot.innerHTML = '<button type="button" id="settingsDoneBtn" class="settings-done">Done</button>';
+            var done = foot.querySelector("#settingsDoneBtn");
+            if (done) {
+                done.addEventListener("click", function () { closeSettingsModal(); });
+            }
+        } else {
+            foot.innerHTML =
+                '<span class="gp-hint"><span class="gp-glyph gp-stick">L</span><span class="gp-glyph gp-dpad">✛</span>Move</span>' +
+                '<span class="gp-hint"><span class="gp-glyph gp-face">' + attackGlyph() + '</span>Toggle</span>' +
+                '<span class="gp-hint"><span class="gp-glyph gp-face">' + leaveGlyph() + '</span>Close</span>';
+        }
     }
     renderSettingsRows();
     settingsModalEl.className = "settings-modal visible";
@@ -1231,6 +1244,62 @@ function closeSettingsModal() {
     if (settingsModalEl) {
         settingsModalEl.className = "settings-modal hidden";
     }
+}
+
+// --- Touch settings (gear) button --------------------------------------------
+// On touch in fullscreen the navbar (and its settings controls) is hidden and
+// there's no pad Start button, so touch players had no way to reach Settings.
+// This translucent gear at the top opens the same panel and, because the panel's
+// backdrop is click-through (co-op keeps racing), also toggles it closed.
+var touchSettingsBtnEl = null;
+
+function inFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement ||
+        document.mozFullScreenElement || document.msFullscreenElement);
+}
+
+function buildTouchSettingsButton() {
+    if (touchSettingsBtnEl || typeof document === "undefined" || !document.body) {
+        return;
+    }
+    var b = document.createElement("button");
+    b.id = "touchSettingsBtn";
+    b.type = "button";
+    b.setAttribute("aria-label", "Settings");
+    b.innerHTML = '<i class="fas fa-cog" aria-hidden="true"></i>';
+    b.addEventListener("click", function (e) {
+        if (e && e.preventDefault) { e.preventDefault(); }
+        toggleTouchSettings();
+    });
+    // Append INSIDE #gameWindow (the element that goes fullscreen), not <body>:
+    // in fullscreen the browser only renders the fullscreen element's subtree, so
+    // a button on <body> would be invisible exactly when this button is needed.
+    (document.getElementById("gameWindow") || document.body).appendChild(b);
+    touchSettingsBtnEl = b;
+    updateTouchSettingsButtonVisibility();
+    document.addEventListener("fullscreenchange", updateTouchSettingsButtonVisibility, false);
+    document.addEventListener("webkitfullscreenchange", updateTouchSettingsButtonVisibility, false);
+}
+
+// Show the gear only on a touch device AND while in fullscreen (otherwise the
+// navbar already exposes every setting). Called on fullscreen change.
+function updateTouchSettingsButtonVisibility() {
+    if (!touchSettingsBtnEl) {
+        return;
+    }
+    var touch = (typeof isTouchScreen !== "undefined" && isTouchScreen);
+    touchSettingsBtnEl.classList.toggle("visible", !!(touch && inFullscreen()));
+}
+
+function toggleTouchSettings() {
+    if (settingsModalIsOpen()) {
+        closeSettingsModal();
+        return;
+    }
+    // Settings affect the one shared screen/speakers, so they belong to the
+    // primary (P1) slot — same rule as the pad Start button.
+    var lp = (typeof localPlayers !== "undefined") ? localPlayers[primarySlot] : null;
+    openSettingsModal(lp);
 }
 
 function pollSettingsModal(pad, lp) {
