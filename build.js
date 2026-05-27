@@ -21,6 +21,7 @@ const bundles = {
     'create.bundle.min.js': [
         'client/scripts/rhill-voronoi-core.js',
         'client/scripts/create.js',
+        'client/scripts/editorTools.js',
         'client/scripts/osk.js',
         'client/scripts/editorGamepad.js',
         'client/scripts/utils.js',

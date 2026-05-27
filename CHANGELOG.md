@@ -10,7 +10,15 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### Map editor
+
+- The map editor has been rebuilt with an MS-Paint-style layout: a top action bar, a left tool rail (Select, Eraser, tiles, hazards, start edge), and the canvas filling the rest. On phones and tablets it reflows to a top tool strip and a bottom action bar, and — for the first time — the editor is fully usable by **touch** (the tools used to disappear entirely on small screens).
+- Added **Undo/Redo** (Ctrl+Z / Ctrl+Shift+Z) covering tile painting, hazard placement, deletion, and rotation.
+- Added **keyboard shortcuts**: `S` select, `E` eraser, `1`–`8` tiles, `B`/`M` hazards, `R` / `Shift+R` rotate, `Delete` to remove a selected hazard.
+- Selected hazards now show on-canvas handles you can grab to **rotate** (any angle) or **delete**, plus toolbar buttons to rotate in 15° steps either direction (it only rotated one way before).
+- **Right-click** a hazard to delete it, or right-drag to erase tiles back to dirt.
+- The map list now has a **search box** to filter by name or author, a responsive grid, and the "Create a new map" tile is relabelled **"Continue editing"** while you have an in-progress map.
+- Copy/Upload now tell you when the author or map name is missing (they used to silently fall back to "anonymous"/"unknown"), and status messages clear themselves instead of lingering.
 
 ## v0.17.0 — 2026-05-27
 

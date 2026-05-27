@@ -56,7 +56,7 @@ Tracked work that is known and intentionally deferred. The currently-in-progress
 
 ### Bugs
 
-- **Duplicate-hazard selection collisions.** `updateSelectedObject` and `removeSelectedObject` match by `id + x + y`, so two same-type hazards stacked at identical coordinates can only be edited/deleted as the first one found. Track the array index of the selected hazard instead.
+<!-- ✅ RESOLVED (editor rebuild) — selection now tracks the hazard's array index, not `id + x + y`. `locateObject`/`hazardIndexUnderPoint` store `selectedObject.index`, and `updateSelectedObject`/`removeSelectedObject` act on that index, so stacked duplicates at identical coords are no longer ambiguous. Original: - **Duplicate-hazard selection collisions.** `updateSelectedObject` and `removeSelectedObject` match by `id + x + y`, so two same-type hazards stacked at identical coordinates can only be edited/deleted as the first one found. Track the array index of the selected hazard instead. -->
 - **Map JSON is larger than it needs to be.** `vMap.cells` is the raw voronoi structure with `edge` objects shared (and serialized) twice per pair of cells, plus per-halfedge `angle`. Existing maps in `client/maps/` are hundreds of KB largely from this. A minimal export — site coords + tile id, with the voronoi recomputed on load (or just edge endpoints stored once) — would shrink JSON dramatically.
 <!-- ✅ RESOLVED — validated headlessly (real getMaps handler via a fake socket): added `utils.getEditorMapListings()` (filters `lobbyOnly` maps out, lockstep with `mapListing`/`maps`) and the `getMaps` handler now emits that instead of the full list. `contentDelivery` still sends the full list so the play client preloads the lobby map for rendering, and the lobby still loads it via `loadMaps()`→`lobbyOnly` filter. Asserted: editor listing excludes `_lobbyTutorial.json`; full listing still includes it; lobby still resolves LobbyTutorial. Original: - **Lobby/tutorial map shows up in the editor's map list.** `loadMaps` (`utils.js:474`) returns every file in `client/maps/` — including `_lobbyTutorial.json` — and `messenger.js:47` (`getMaps`) hands that raw list to the editor (`create.js:155`). The `lobbyOnly` filter only applies to the race rotation (`game.js:809`), not to the listing the editor receives. Filter `lobbyOnly` maps out of the editor list. -->
 - **Preview/Playtest breaks with local co-op (2+ controllers).** Preview launches a single-human room (`play.html?preview=1`); `previewReturnToEditor` only tracks the primary slot, and a second hot-joining gamepad (`addLocalPlayer`, `client.js:871`) isn't accounted for, so co-op preview is effectively unsupported. Either wire local co-op into the preview game or block extra pads from joining while previewing. <!-- PENDING OPERATOR CONTROLLER TEST: FULL co-op-in-preview now implemented on branch batch/controller-coop-fixes (superseded the earlier client-only block). Server: `createPreviewRoom` capacity 1→4 (PREVIEW_COOP_CAP) + `findARoom` now skips `isPreview` so the room is never matchmade into even after game-over unlock. Client: removed the `addLocalPlayer` preview block (pads hot-join during gated like a normal couch game); preview returns to the editor after each round, and P1 leaving (or any teardown) routes to create.html instead of the menu; per-player B→leave drops just that player. Validated headlessly (4 join, 5th rejected, matchmaking-privacy, gated→race tick). Awaiting 2+ controller validation before resolving. -->
@@ -64,13 +64,22 @@ Tracked work that is known and intentionally deferred. The currently-in-progress
 
 ### UX
 
+<!-- ✅ ALL RESOLVED in the map-editor rebuild (MS-Paint-style responsive layout + unified tool model + touch support + styling pass; new `editorTools.js` module). Browser-verified on desktop + phone-width, light + dark themes.
+  - No feedback for missing inputs → `requireDetails()` gates Copy/Upload on author+name, flags the empty fields (`.field-required`), and auto-opens the Details panel; email still validated inline at upload.
+  - Submit status never resets → `showSubmitStatus()` auto-hides after 4s and `resetStatuses()` clears all status toasts on any Details input change.
+  - Rotate fixed at +15° → Rotate−/Rotate+ buttons (15° each way, `editorRotateSelected`), `R`/`Shift+R` shortcuts, and a drag-anywhere on-canvas rotate knob (free angle).
+  - No undo → generic command stack in `editorTools.js` (`pushCommand`/`editorUndo`/`editorRedo`, Ctrl+Z / Ctrl+Shift+Z); covers paint strokes (one step per stroke), hazard add/remove, and rotation. Destructive wipe/reshape clear history by design.
+  - No keyboard shortcuts → `installEditorShortcuts()`: S select, E eraser, 1–8 tiles, B/M hazards, R/Shift+R rotate, Delete, Esc.
+  - Right-click does nothing → right-click a hazard deletes it; right-drag erases tiles to dirt (`handleClick` case 3 + `erasing` stroke).
+  - No map-list search → `installMapSearch()` filters tiles by name/author (`data-search`); pinned New/Continue tile (`data-keep`) always shown; grid is now responsive.
+  Original items:
 - **No feedback for missing inputs.** Copy-to-clipboard silently substitutes `"anonymous"`/`"unknown"` for empty author/name. Email is only validated at submit time. Highlight required fields before allowing export.
 - **Submit status button never resets.** "Submitting…"/"Success"/"Failed" lingers indefinitely. Reset on any input change, on a fresh submit attempt, or after a short timeout.
 - **Rotate is fixed at +15° clockwise.** No counter-rotation, no finer step. Cheap upgrade: shift-click for -15°, or a number input for absolute angle.
 - **No undo.** A full undo stack across tile paints would be expensive, but at minimum "undo last hazard placement" is trivial and would prevent a lot of frustration.
 - **No keyboard shortcuts** for switching brushes/tools. Purely mouse-driven editing slows experienced users.
 - **Right-click is suppressed but does nothing useful.** Common expectation: right-click on a hazard deletes it; right-click drag erases to default tile.
-- **No search/filter for the map list.** The editor loads every map but offers no way to search or filter them; a filter input would scale as the library grows (pairs with the keyboard-shortcuts item).
+- **No search/filter for the map list.** The editor loads every map but offers no way to search or filter them; a filter input would scale as the library grows (pairs with the keyboard-shortcuts item). -->
 
 ### Features
 
