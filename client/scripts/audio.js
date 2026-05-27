@@ -299,6 +299,7 @@ var countDownB = makeSound("./assets/sounds/countdown-b.mp3");
 var lavaCollapse = makeSound("./assets/sounds/doomed.mp3");
 var meleeSound = makeSound("./assets/sounds/melee-sound.mp3");
 var meleeHitSound = makeSound("./assets/sounds/bing.mp3");
+var chargedHitSound = makeSound("./assets/sounds/thwack.mp3");
 var gameOverSound = makeSound("./assets/sounds/gameover.mp3");
 var collectItem = makeSound("./assets/sounds/collectitem.mp3");
 var playerFinished = makeSound("./assets/sounds/playerfinished.mp3");
@@ -443,6 +444,7 @@ function volumeChange() {
     lavaCollapse.volume = .1 * sfx;
     meleeSound.volume = .05 * sfx;
     meleeHitSound.volume = .016 * sfx;
+    chargedHitSound.volume = .5 * sfx;
     gameOverSound.volume = .5 * sfx;
     nearVictorySound.volume = .3 * sfx;
     fallFromVictorySound.volume = .15 * sfx;

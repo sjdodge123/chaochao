@@ -136,6 +136,9 @@ jobs:
       - name: Headless ability-tile duplication regression test
         run: node .github/scripts/ability-dupe-test.js
 
+      - name: Headless punch-rework test (momentum, stamina, clash reflect)
+        run: node .github/scripts/punch-rework-test.js
+
   perf-tick-budget:
     # Server-side worst-case load: a full 25-kart grid in a stacked brutal round.
     # Proves one room still ticks well within the 30 Hz interval. Zero new deps —

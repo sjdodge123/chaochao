@@ -1079,6 +1079,16 @@ function spawnPunchEffect(punch) {
     var owner = playerList[punch.ownerId];
     var infected = owner != null && owner.infected === true;
     var baseRadius = infected ? config.brutalRounds.infection.punchRadius : punch.radius;
+    // Scale the impact FX by the punch's momentum bonus so a hard, committed punch
+    // visibly reads bigger than a standing tap (matches the server knockback). Maps
+    // the floor..ceil bonus range onto ~0.8x..1.45x of the base hit. Only directional
+    // player punches ride the momentum scale; bumper/radial punches carry an unrelated
+    // bonus and keep their base FX size.
+    if (punch.directional && punch.bonus != null && config.punchMomentum != null) {
+        var pm = config.punchMomentum;
+        var power = (pm.ceil > pm.floor) ? clamp01((punch.bonus - pm.floor) / (pm.ceil - pm.floor)) : 0;
+        baseRadius *= 0.8 + 0.65 * power;
+    }
     var color = infected ? "#7CFC00" : punch.color;
     // Derive the swing direction from where the server actually placed the
     // punch hitbox (offset punchReach in front of the player at throw time),
@@ -1129,6 +1139,48 @@ function spawnPunchEffect(punch) {
     });
 }
 
+// Parry "clang" when two punches clash — a bright gold star-burst plus a double
+// shockwave at the midpoint, so a successful counter reads distinctly from a
+// normal landed hit (which is a single white ring via spawnHitEffect).
+function spawnClashEffect(x, y) {
+    addEffect({
+        x: x,
+        y: y,
+        maxAge: 320,
+        draw: function (ctx, t) {
+            var p = easeOutCubic(t);
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.lineCap = "round";
+            // Two expanding rings, offset in time, gold over white.
+            ctx.globalAlpha = (1 - t) * 0.9;
+            ctx.strokeStyle = "#ffd34d";
+            ctx.lineWidth = 3 * (1 - t) + 1.5;
+            ctx.beginPath();
+            ctx.arc(0, 0, 4 + 26 * p, 0, 2 * Math.PI);
+            ctx.stroke();
+            ctx.globalAlpha = (1 - t) * 0.7;
+            ctx.strokeStyle = "white";
+            ctx.lineWidth = 2 * (1 - t) + 1;
+            ctx.beginPath();
+            ctx.arc(0, 0, 2 + 16 * p, 0, 2 * Math.PI);
+            ctx.stroke();
+            // Four-point spark star that snaps out and fades.
+            ctx.globalAlpha = (1 - t);
+            ctx.strokeStyle = "#fff4c2";
+            ctx.lineWidth = 2 * (1 - t) + 1;
+            var reach = 8 + 20 * p;
+            for (var i = 0; i < 4; i++) {
+                var a = (Math.PI / 4) + i * (Math.PI / 2);
+                ctx.beginPath();
+                ctx.moveTo(Math.cos(a) * reach * 0.35, Math.sin(a) * reach * 0.35);
+                ctx.lineTo(Math.cos(a) * reach, Math.sin(a) * reach);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+    });
+}
 // Burst at the point of contact when a punch connects — a white flash ring
 // plus radiating sparks, so a landed hit has a visible payoff.
 function spawnHitEffect(x, y, color) {
@@ -1593,7 +1645,11 @@ function drawPlayer(player, dt) {
     // slot — so you can always find yourself in a crowded pack.
     if (isLocalId(player.id)) {
         drawLocalPlayerHighlight(player);
+        drawStaminaMeter(player);
     }
+    // Charge "fist": a telegraph on every winding-up kart (so you can see a haymaker
+    // coming), plus a momentum self-preview on your own idle kart.
+    drawPunchCharge(player);
 
     var playerStrokeColor = "black";
     for (var aimerID in aimerList) {
@@ -1753,6 +1809,145 @@ function drawLocalPlayerHighlight(player) {
     gameContext.save();
     gameContext.globalAlpha = 0.6 + 0.35 * pulse;
     gameContext.drawImage(halo, x - w / 2, y - h / 2, w, h);
+    gameContext.restore();
+}
+
+// White -> orange -> red as punch charge rises, so the colour itself reads "how
+// hard". frac 0..1.
+// Cached by quantized level (11 buckets) so the per-frame telegraph never allocates a
+// fresh "rgb(...)" string for every charging kart (hot path with 25 karts on screen).
+var _punchChargeColorCache = [];
+function punchChargeColor(frac) {
+    var key = frac < 0 ? 0 : (frac > 1 ? 10 : Math.round(frac * 10));
+    var cached = _punchChargeColorCache[key];
+    if (cached) { return cached; }
+    var f = key / 10, out;
+    if (f < 0.5) {
+        var t = f / 0.5;               // white -> orange
+        out = "rgb(255," + Math.round(255 - 90 * t) + "," + Math.round(255 - 235 * t) + ")";
+    } else {
+        var t2 = (f - 0.5) / 0.5;      // orange -> red
+        out = "rgb(255," + Math.round(165 - 110 * t2) + ",20)";
+    }
+    _punchChargeColorCache[key] = out;
+    return out;
+}
+
+// The "fist" in front of a kart along its facing. Two roles:
+//  - While CHARGING (player.charge > 0, sent for every player): a growing, brightening
+//    telegraph so opponents can SEE a haymaker winding up and dodge/counter it.
+//  - On your OWN idle kart: a preview of how hard you'd hit right now from your momentum
+//    toward your aim (greys out when you're too tired to punch). Local-only, since other
+//    players' momentum potential would just be noise.
+function drawPunchCharge(player) {
+    var chargeLevel = player.charge || 0;
+    var ocLevel = player.overcharge || 0;
+    var isCharging = chargeLevel > 0.001;
+    var isLocal = isLocalId(player.id);
+    // Fast path: a non-charging REMOTE kart has nothing to show. In a 25-kart race this
+    // bails almost everyone before any state check or canvas work. Only your own kart
+    // (preview + charge shake) and karts actively winding up (telegraph) do work.
+    if (!isCharging && !isLocal) { return; }
+    if (config.punchMomentum == null) { return; }
+    if (currentState != config.stateMap.racing && currentState != config.stateMap.collapsing
+        && currentState != config.stateMap.gated && currentState != config.stateMap.lobby) { return; }
+    // Slight screenshake while YOU charge, escalating into the dark-red overcharge danger.
+    // The moment you tip into exhaustion (overcharge present but no longer charging = the
+    // locked penalty), cut the shake dead instead of decaying through the lesser shakes.
+    if (isLocal) {
+        var ocBuilding = isCharging && ocLevel > 0.001;
+        var ocLocked = !isCharging && ocLevel > 0.001;
+        if (ocBuilding) { chargeRumble(0.18 + 0.3 * ocLevel); }
+        else if (isCharging) { chargeRumble(0.1 + 0.14 * chargeLevel); }
+        if (ocLocked && !player._wasOcLocked) {
+            shakeTrauma = 0;
+            shakeSustainUntil = 0;
+            shakeSustainFloor = 0;
+        }
+        player._wasOcLocked = ocLocked;
+    }
+    var level, exhausted = false;
+    if (isCharging) {
+        level = chargeLevel; // telegraph (all players)
+    } else if (isLocal && player.ability == null) {
+        var rad0 = (player.angle || 0) * Math.PI / 180;
+        var st = (player.velX || 0) * Math.cos(rad0) + (player.velY || 0) * Math.sin(rad0);
+        if (st < 0) { st = 0; }
+        var refSpeed = config.playerMaxSpeed * config.punchMomentum.refFrac;
+        level = refSpeed > 0 ? clamp01(st / refSpeed) : 0;
+        if (level < 0.08) { return; } // barely moving -> no preview worth a per-frame draw
+        exhausted = player._tired === true;
+    } else {
+        return; // local kart that's exhausted-locked / holding an ability -> nothing
+    }
+    var rad = (player.angle || 0) * Math.PI / 180;
+    var x = player.x + camera.getCameraX();
+    var y = player.y + camera.getCameraY();
+    var grow = isCharging ? (0.3 + 0.45 * level) : (0.35 + 0.35 * level);
+    var reach = player.radius + (config.punchReach || 14) * grow;
+    var color = exhausted ? "rgb(150,150,150)" : punchChargeColor(level);
+    gameContext.save();
+    gameContext.lineCap = "round";
+    // The forward "fist" arc — the primary tell, drawn for everyone winding up.
+    gameContext.globalAlpha = (isCharging ? 0.32 : 0.16) + 0.55 * level;
+    gameContext.strokeStyle = color;
+    gameContext.lineWidth = 1.5 + (isCharging ? 1.5 : 1.2) * level;
+    gameContext.beginPath();
+    gameContext.arc(x, y, reach, rad - 0.4, rad + 0.4);
+    gameContext.stroke();
+    // A small knuckle glow — only on YOUR kart, so a crowd of charging bots stays cheap.
+    if (isLocal && !exhausted) {
+        gameContext.globalAlpha = 0.2 + 0.6 * level;
+        gameContext.fillStyle = color;
+        gameContext.beginPath();
+        gameContext.arc(x + Math.cos(rad) * reach, y + Math.sin(rad) * reach, 2 + 4 * level, 0, 2 * Math.PI);
+        gameContext.fill();
+    }
+    gameContext.restore();
+}
+
+// Stamina meter: a curved bar hugging the bottom of your kart. Hidden when full
+// (i.e. you've recovered), it appears the moment a punch drains it, shrinks as
+// stamina drops, and shifts green -> yellow -> red so "getting tired" is legible.
+function drawStaminaMeter(player) {
+    if (config.punchStamina == null || player.stamina == null) { return; }
+    if (currentState != config.stateMap.racing && currentState != config.stateMap.collapsing
+        && currentState != config.stateMap.gated && currentState != config.stateMap.lobby) { return; }
+    var max = config.punchStamina.max;
+    var oc = player.overcharge || 0;
+    // Normal stamina meter is hidden when full; the overcharge danger meter always shows.
+    if (oc <= 0.001 && player.stamina >= max) { return; }
+    var x = player.x + camera.getCameraX();
+    var y = player.y + camera.getCameraY();
+    var r = player.radius + 6;
+    var span = Math.PI * 0.95;             // ~170deg arc, centred at the bottom
+    var startA = Math.PI / 2 - span / 2;
+    var fillFrac, color;
+    if (oc > 0.001) {
+        // Overcharge / lock: a dark-red bar that fills as you over-hold and drains over
+        // the forced-exhaustion penalty — distinct from the normal green->red meter.
+        fillFrac = clamp01(oc);
+        color = "#7a0b0b";
+    } else {
+        fillFrac = clamp01(player.stamina / max);
+        color = fillFrac > 0.5 ? "#43d676" : (fillFrac > 0.25 ? "#f2c14e" : "#e2533b");
+    }
+    gameContext.save();
+    gameContext.lineCap = "round";
+    // Faint full-width track.
+    gameContext.globalAlpha = 0.3;
+    gameContext.strokeStyle = "rgba(0,0,0,0.7)";
+    gameContext.lineWidth = 4.5;
+    gameContext.beginPath();
+    gameContext.arc(x, y, r, startA, startA + span);
+    gameContext.stroke();
+    // Filled portion.
+    gameContext.globalAlpha = 0.95;
+    gameContext.strokeStyle = color;
+    gameContext.lineWidth = 3.5;
+    gameContext.beginPath();
+    gameContext.arc(x, y, r, startA, startA + span * fillFrac);
+    gameContext.stroke();
     gameContext.restore();
 }
 

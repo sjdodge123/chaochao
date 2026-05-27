@@ -10,7 +10,13 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- Punching is about timing and positioning now, not mashing. Your punch hits as hard as the speed you carry into it — a standing tap barely nudges, but driving into someone at full speed lands a real shove. A glow in front of your kart previews how hard you'd hit right now.
+- Hold the punch button to charge a heavier hit: the longer you hold, the more of your stamina bar you pour in and the harder it lands (force = your speed × your charge). A fist winds up in front of your kart as you charge — and everyone can see it coming, so a big haymaker can be dodged or beaten to the punch. A full charge empties your bar. Landing a fully-charged punch connects with a meaty *thwack* and a real screen-kick, and your view rumbles while you wind one up.
+- Don't hold a charge too long: past a few seconds a dark-red "overcharge" meter fills around your kart, and if you don't let go in time the charge fizzles out and you're left winded — stuck moving slow for a few seconds with nothing to show for it.
+- Punching draws from a stamina meter that wraps around your kart: you get a couple of taps (or one big charge) before you run dry, then have to let it recharge a bit before you can punch again, so spamming punch no longer pays off. While you're winded you move a little slower until you've recovered a punch's worth. The meter only shows up once you've started punching and fades away once you've recovered.
+- Head-on punches clash. If two players punch into each other at the same moment while facing off, an evenly-matched pair both get flung back — hardest on whoever committed the most force — but a clearly stronger punch (like a charged one) bowls straight through a weak one. So you can counter an incoming punch by swinging back at the right time, and over-committing a big charge into someone who counters can backfire and send you flying.
 
 ## v0.12.3 — 2026-05-27
 

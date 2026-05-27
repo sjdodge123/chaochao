@@ -926,6 +926,15 @@ class GameBoard {
 			}
 			return;
 		}
+		// Resolve mutual counter-punches BEFORE knockback lands: if two players are
+		// punching each other while facing each other, neither hit connects (the punches
+		// are flagged clashed so handlePunchHit skips them) and each is flung back by
+		// their own momentum below. Race-only: the clash reflect is a combat mechanic, and
+		// letting it fling players around during pre-race gate jostling (or the lobby
+		// tutorial) just knocks them into the start-line lava.
+		if (currentState == this.stateMap.racing || currentState == this.stateMap.collapsing) {
+			this.resolvePunchClashes();
+		}
 		if (currentState == this.stateMap.lobby) {
 			this.collectLobbyCollisionObjects(currentState, objectArray);
 		}
@@ -936,6 +945,77 @@ class GameBoard {
 			this.collectRaceCollisionObjects(currentState, objectArray);
 		}
 		this.engine.broadBase(objectArray);
+	}
+	// Counter/parry: two players punching each other while facing each other clash.
+	// Punches live ~100ms in punchList, so two thrown within that window coexist here.
+	// A clash denies both hits (clashed flag, read by handlePunchHit) and flings each
+	// owner back proportional to THEIR OWN momentum — so charging in heavy and getting
+	// countered backfires hardest on the aggressor. clashResolved guards against
+	// re-firing the same clash on later ticks while the punches linger.
+	resolvePunchClashes() {
+		var cfg = c.punchClash;
+		var ids = Object.keys(this.punchList);
+		for (var i = 0; i < ids.length; i++) {
+			var pa = this.punchList[ids[i]];
+			if (!this.clashEligible(pa)) { continue; }
+			var ownerA = this.playerList[pa.ownerId];
+			if (ownerA == null || !ownerA.alive || ownerA.isInvuln()) { continue; }
+			for (var j = i + 1; j < ids.length; j++) {
+				var pb = this.punchList[ids[j]];
+				if (!this.clashEligible(pb)) { continue; }
+				var ownerB = this.playerList[pb.ownerId];
+				if (ownerB == null || !ownerB.alive || ownerB.isInvuln()) { continue; }
+				if (!this.isPunchClash(ownerA, pa, ownerB, pb, cfg)) { continue; }
+				var bonusA = pa.getBonus(), bonusB = pb.getBonus();
+				if (Math.abs(bonusA - bonusB) <= cfg.tieMargin) {
+					// Standoff: forces are close, so neither lands — both are consumed and
+					// flung back by their OWN momentum, hardest on whoever charged heaviest.
+					pa.clashed = true; pb.clashed = true;
+					pa.clashResolved = true; pb.clashResolved = true;
+					_engine.reflectPunch(ownerA, ownerB.x, ownerB.y, cfg.reflectKick * bonusA);
+					_engine.reflectPunch(ownerB, ownerA.x, ownerA.y, cfg.reflectKick * bonusB);
+					messenger.messageRoomBySig(this.roomSig, "punchClash", {
+						x: (ownerA.x + ownerB.x) / 2,
+						y: (ownerA.y + ownerB.y) / 2
+					});
+				} else if (bonusA > bonusB) {
+					// A wins: the weaker punch is cancelled+consumed; A's punch is left live
+					// (and NOT marked resolved) so it still lands AND can still be contested
+					// by a third player's counter in a multi-punch scrum.
+					pb.clashed = true; pb.clashResolved = true;
+				} else {
+					pa.clashed = true; pa.clashResolved = true;
+				}
+				break; // ownerA's punch is spent on this contest
+			}
+		}
+	}
+	// Only real, aimed, still-pending player punches can clash. Excludes: empty slots,
+	// bumper/hazard punches (mapOwned), already-resolved clashes, punches that already
+	// landed a normal hit (so only same-tick simultaneous punches clash, never a punch
+	// retroactively after it connected), non-directional swats (hockey / survivor-vs-
+	// zombie radial punches have no meaningful aim), and zombie bites (ownerInfected) —
+	// a clash must never deny an infection.
+	clashEligible(p) {
+		return p != null && !p.mapOwned && !p.clashResolved && !p.landed
+			&& p.directional && !p.ownerInfected;
+	}
+	// A clash needs the owners close (range) AND each facing roughly toward the other
+	// (facingDot). Uses each punch's stored aim angle so it matches what was thrown.
+	isPunchClash(ownerA, pa, ownerB, pb, cfg) {
+		var dx = ownerB.x - ownerA.x;
+		var dy = ownerB.y - ownerA.y;
+		var dist = utils.getMag(dx, dy);
+		if (dist > cfg.range) { return false; }
+		// Exactly overlapping (e.g. a swap teleport onto another kart): no meaningful
+		// facing, so don't force a clash — let the punches resolve normally.
+		if (dist == 0) { return false; }
+		var ux = dx / dist, uy = dy / dist;
+		var ra = pa.angle * Math.PI / 180;
+		if (Math.cos(ra) * ux + Math.sin(ra) * uy < cfg.facingDot) { return false; }
+		var rb = pb.angle * Math.PI / 180;
+		if (Math.cos(rb) * (-ux) + Math.sin(rb) * (-uy) < cfg.facingDot) { return false; }
+		return true;
 	}
 	// Interactive lobby: curated abilities are live, so projectiles/hazards/aimers
 	// and the start button all join the collision set as teaching props.

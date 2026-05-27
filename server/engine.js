@@ -21,6 +21,9 @@ exports.checkCollideCells = function (player, map) {
 exports.punchPlayer = function (player, punch) {
 	punchPlayer(player, punch);
 }
+exports.reflectPunch = function (player, fromX, fromY, kick) {
+	reflectPunch(player, fromX, fromY, kick);
+}
 exports.puckPlayer = function (puck, player) {
 	puckPlayer(puck, player);
 }
@@ -104,14 +107,18 @@ class Engine {
 					braking = true;
 				}
 			}
-			var punchingSlowDown = 1;
-			if (player.attack && player.ability == null) {
-				punchingSlowDown = c.playerPunchSlowAmt;
+			// Depleted stamina = a little sluggish: cut drive (and thus top speed) while
+			// exhausted, until the bar recharges. This is the punch's commitment cost now
+			// — holding to charge doesn't brake you (so you keep the momentum that powers
+			// the hit), but emptying your bar on a big charge leaves you slow afterward.
+			var driveMult = 1;
+			if (player.staminaExhausted && c.punchStamina != null) {
+				driveMult = c.punchStamina.exhaustedMoveFactor;
 			}
 
 			var newVelX, newVelY, newVel, newDirX, newDirY;
-			newVelX = punchingSlowDown * player.velX + (player.acel + player.getSpeedBonus()) * dirX * this.dt;
-			newVelY = punchingSlowDown * player.velY + (player.acel + player.getSpeedBonus()) * dirY * this.dt;
+			newVelX = player.velX + (player.acel + player.getSpeedBonus()) * driveMult * dirX * this.dt;
+			newVelY = player.velY + (player.acel + player.getSpeedBonus()) * driveMult * dirY * this.dt;
 
 			if (braking) {
 				newVelX -= player.brakeCoeff * player.velX;
@@ -445,9 +452,39 @@ function bounceOffBoundry(obj, bound) {
 
 function punchPlayer(player, punch) {
 	var distance = utils.getMag(punch.x - player.x, punch.y - player.y);
+	if (punch.directional && punch.angle != null) {
+		// Directional punch: shove the victim along the AIM direction (where the puncher
+		// is facing), keeping the same inverse-square magnitude as before. The hitbox sits
+		// punchReach in FRONT of the puncher, so radial "away from the hitbox center" points
+		// the wrong way (back toward the puncher) when the target is closer than that reach
+		// — a point-blank shove would fling them backward. Locking knockback to the aim
+		// makes them always go where you pointed.
+		if (distance < 1) { distance = 1; }
+		var force = (forceConstant / (distance * distance)) * punch.getBonus();
+		var rad = punch.angle * Math.PI / 180;
+		player.velX += Math.cos(rad) * force;
+		player.velY += Math.sin(rad) * force;
+		return;
+	}
 	var velCont = _calcVelCont(distance, player, punch.x, punch.y);
 	player.velX += velCont.velContX * punch.getBonus();
 	player.velY += velCont.velContY * punch.getBonus();
+}
+// Clash recoil: a flat velocity kick of magnitude `kick` directed from (fromX,fromY)
+// toward the player (i.e. away from the rival they clashed with). Distance-independent
+// — unlike punchPlayer's inverse-square falloff — so the backfire is predictable and
+// scales only with the puncher's own momentum (caller passes reflectKick * bonus).
+function reflectPunch(player, fromX, fromY, kick) {
+	var dx = player.x - fromX;
+	var dy = player.y - fromY;
+	var d = utils.getMag(dx, dy);
+	if (d == 0) {
+		dx = utils.getRandomInt(-4, 4);
+		dy = utils.getRandomInt(-4, 4);
+		d = utils.getMag(dx, dy) || 1;
+	}
+	player.velX += (dx / d) * kick;
+	player.velY += (dy / d) * kick;
 }
 function punchPuck(puck, punch) {
 	var angle = utils.angle(punch.x, punch.y, puck.x, puck.y);
