@@ -63,43 +63,27 @@
                 {
                     id: "winning", name: "Winning a Match", icon: swatch("#FFD700"), anim: "goalRun",
                     blurb: "Reach the goal to score — first to enough wins.",
-                    detail: [
-                        "Every round is a dash to the glowing goal zone. Cross into it and you bank a notch — your tally of round wins. String enough notches together before anyone else and you take the whole match.",
-                        "The more racers in the room, the fewer notches it takes, so a packed lobby crowns a champion faster than a quiet one. And being the one everybody's chasing is dangerous: fall just short of the win and rivals will gun for you, hungry to knock the leader down a peg."
-                    ]
+                    detail: "Every round is a dash to the glowing goal zone — cross into it and you bank a notch toward the match win. The more racers in the room, the fewer notches it takes, and leading is dangerous: fall just short and rivals gun for you, eager to knock the leader down."
                 },
                 {
                     id: "collapse", name: "The Collapse", icon: tex("lava.png"), anim: "collapse",
                     blurb: "The floor turns to lava and squeezes everyone inward.",
-                    detail: [
-                        "Once the front-runners are home, the arena starts turning to lava from the edges inward, shrinking the safe ground and herding everyone toward the middle. Linger too long and you'll be swimming in fire.",
-                        "It's the game's clock — it guarantees every round ends and turns the final moments into a frantic scramble for solid footing. When a single racer is all that's left, the lava eases up to give them a fair shot at the goal."
-                    ]
+                    detail: "Once the front-runners are home, the arena turns to lava from the edges inward, shrinking the safe ground and herding everyone toward the middle. It's the round's clock — but when one racer is left, the lava eases up to give them a fair shot at the goal."
                 },
                 {
                     id: "punching", name: "Punching", icon: emoji("👊"), anim: "punch",
                     blurb: "Timing and positioning, not mashing.",
-                    detail: [
-                        "Punching is about how you commit, not how fast you tap. A standing tap barely nudges someone; driving into them at full speed lands a real shove — your punch hits as hard as the speed you carry into it. A glow in front of your kart previews how hard you'd connect right now.",
-                        "Hold the button to wind up a heavier hit: a fist rears back in front of you and your view rumbles. Everyone can see the haymaker coming, so a big one can be dodged or beaten to the punch. Hold too long, though, and you overcharge and fizzle — left winded and sluggish with nothing to show for it.",
-                        "Every punch draws from a stamina ring around your kart. Spam it and you run dry, then have to recover before you can swing again, so mashing no longer pays off. And punches clash: swing back into an incoming fist at the right moment and an even match sends both of you flying — but a clearly stronger punch bowls straight through a weak one, so over-committing a charge can backfire spectacularly."
-                    ]
+                    detail: "Punching is about commitment, not how fast you tap — your hit lands as hard as the speed you carry into it, and a glow previews the force. Hold the button to wind up a heavier, telegraphed haymaker, but overcharge and it fizzles, leaving you winded. Every swing drains a stamina ring, so mashing runs you dry, and punches clash: an even match sends both flying, while a clearly stronger punch bowls straight through a weak one."
                 },
                 {
                     id: "fire", name: "Fire & Killstreaks", icon: tex("redFire.png"), anim: "fire",
                     blurb: "Kills set you ablaze and hit harder.",
-                    detail: [
-                        "Knock a rival into the lava and you catch fire — flames trail your kart and your hits land meaner. Keep the kills coming without cooling off and the whole arena hears about it: a Killing Spree, then a Rampage, then truly Godlike.",
-                        "Fire makes you faster and deadlier, but the flames paint a target on your back — every burning streak invites someone to put you out."
-                    ]
+                    detail: "Knock a rival into the lava and you catch fire — flames trail your kart, your hits land meaner, and you move faster. Keep the streak alive and the arena escalates the call-out from Killing Spree to Rampage to Godlike, but the flames paint a target on your back."
                 },
                 {
                     id: "pickups", name: "Ability Pickups", icon: svg("toolbox-solid.svg"), anim: "pickup",
                     blurb: "Roll over a pad to pocket a single-use power.",
-                    detail: [
-                        "Some maps scatter ability pads around the track. Roll over one and you pocket a single-use power — anything from a lobbed bomb to a blinding fog to a swap of places with a rival.",
-                        "You hold one at a time, so grabbing a new pad means committing to what you're carrying. Save it for the perfect moment, or burn it to bail yourself out of trouble. A pad goes quiet for a bit after someone takes it, then re-arms."
-                    ]
+                    detail: "Some maps scatter ability pads around the track; roll over one to pocket a single-use power, from a lobbed bomb to a blinding fog to a swap with a rival. You hold one at a time, so save it for the perfect moment or burn it to escape trouble — a used pad goes quiet briefly, then re-arms."
                 }
             ]
         },
@@ -118,7 +102,7 @@
                   detail: "Sand grabs at your wheels and bleeds off speed the moment you touch it. Plowing through a patch costs you, so it's often worth the longer line around it." },
                 { id: "tile-ice", name: "Ice", icon: tex("ice.png"), anim: "terrainIce",
                   blurb: "Almost no grip — you keep sliding.",
-                  detail: "Ice barely bites. You keep gliding long after you ease off, steering only suggests where you'd like to go, and any shove sends you skating helplessly. It turns precise driving into a guessing game." },
+                  detail: "Ice barely bites — you keep gliding long after you ease off, steering only suggests where you'd like to go, and any shove sends you skating helplessly." },
                 { id: "tile-lava", name: "Lava", icon: tex("lava.png"), anim: "lavaBurn",
                   blurb: "Touch it and you burn out of the round.",
                   detail: "A fiery dunk and you're done — burned out and respawned, out of the round. The collapse turns the whole arena into this, and a well-aimed punch can post a rival straight into it." },
@@ -130,7 +114,7 @@
                   detail: "A pickup pad. Roll across it to grab a random single-use power. It goes dormant briefly after someone claims it, then lights back up for the next racer." },
                 { id: "tile-bumper", name: "Bumpers", icon: art("bumper"), anim: "bumper",
                   blurb: "Springy obstacles that fling you back.",
-                  detail: "Bump a bumper and you're flung away from it — maddening when you're in a hurry, but a clever way to launch a chasing rival clean off their line. Some maps add moving bumpers that sweep across the track like windscreen wipers, so the safe lane keeps shifting." },
+                  detail: "Bump one and you're flung away — maddening in a hurry, but a clever way to launch a chasing rival off their line. Some maps add moving bumpers that sweep across the track, so the safe lane keeps shifting." },
                 { id: "tile-random", name: "Random Ground", icon: swatch("#7c3aed"), anim: "randomTile",
                   blurb: "A wildcard disguised as another surface.",
                   detail: "A trickster tile. It masquerades as one of the ordinary surfaces, so you won't know whether you're about to hit speedy grass or draggy sand until you're already committed to it." }
@@ -145,10 +129,10 @@
                   detail: "Drops a blackout over everyone's view except your own. For a few seconds the entire room is driving blind while you see just fine — pure chaos when you spring it right before the goal." },
                 { id: "ability-swap", name: "Swap", icon: svg("random.svg"), anim: "swap",
                   blurb: "Trade places with a nearby racer.",
-                  detail: "Marks the ground with a growing ring everyone can see, then trades your position with a racer caught inside it. Steal a leader's safe spot at the last instant, or yank yourself out of the lava's path and dump someone else into it." },
+                  detail: "Marks the ground with a growing ring everyone can see, then trades your position with a racer caught inside it. Steal a leader's safe spot at the last instant, or escape the lava by dumping someone else into it." },
                 { id: "ability-bomb", name: "Bomb", icon: svg("bomb.svg"), anim: "bomb",
                   blurb: "Lob an explosive that flings karts.",
-                  detail: "Lobs an explosive that sits for a short fuse and then erupts, flinging every kart caught in the blast — including you, if you hang around. Wherever it goes off it scorches the ground into a patch of slow, draggy sand, so it both clears a crowd off the goal and gums up the spot they were fighting for." },
+                  detail: "Lobs an explosive on a short fuse that flings every kart caught in the blast — including you, if you linger. Where it lands it scorches the ground into draggy sand, clearing a crowd off the goal and gumming up the spot they were fighting for." },
                 { id: "ability-speedbuff", name: "Speed Burst", icon: svg("wind-solid.svg"), anim: "speedBurst",
                   blurb: "A burst of extra speed for you.",
                   detail: "A shot of extra pace for a short while. Pop it to run down a leader, outrun the closing lava, or simply blitz a long straightaway before anyone reacts." },
@@ -157,13 +141,13 @@
                   detail: "Saps the speed of every other racer at once, miring the whole pack in molasses while you carry on at full clip. Drop it as you make your break and watch the field bog down behind you." },
                 { id: "ability-tileswap", name: "Tile Swap", icon: svg("copy-regular.svg"), anim: "tileSwap",
                   blurb: "Flips the fast and icy patches.",
-                  detail: "After a wind-up everyone can see, the arena's fast lanes and icy patches trade places — the speedy grass you were counting on turns to treacherous ice, and vice versa. Time it to flip a rival's safe line out from under them as they commit." },
+                  detail: "After a telegraphed wind-up, the arena's fast lanes and icy patches trade places — the grass you were counting on turns to treacherous ice, and vice versa. Time it to flip a rival's line out from under them." },
                 { id: "ability-icecannon", name: "Ice Cannon", icon: svg("snowflake-solid.svg"), anim: "iceCannon",
                   blurb: "Freeze the ground where it lands.",
                   detail: "Fires a frozen shot that turns the patch where it lands into slick ice. Lay a trap on a tight corner and watch chasers skate helplessly off the track." },
                 { id: "ability-cut", name: "Cut", icon: svg("scissors-solid.svg"), anim: "cut",
                   blurb: "A short-range swipe that shoves rivals aside.",
-                  detail: "A quick, close-range swipe that carves a line through the pack and flings every nearby racer away from that line — anyone on one side is thrown one way, anyone on the other side the opposite way. No wind-up and no aiming, just an instant shove to clear bodies off you or fling a clinging rival off course." }
+                  detail: "A quick, close-range swipe with no wind-up or aiming: it carves a line through the pack and flings nearby racers away from it, throwing those on each side opposite ways. An instant shove to clear bodies off you or fling a clinging rival off course." }
             ]
         },
         {
@@ -172,34 +156,28 @@
             entries: [
                 { id: "brutal-what", name: "What Is a Brutal Round?", icon: emoji("🔥"), anim: "brutalIntro",
                   blurb: "Special rounds where the arena turns nasty.",
-                  detail: [
-                      "Now and then a round goes brutal: the arena bends a rule, throws a twist into the mix, and dares everyone to survive it. The music shifts, the icon flashes up, and the usual race becomes a fight to last.",
-                      "The closer the match is to ending, the more likely a brutal round is to appear — and sometimes several twists stack on the same round. Here's what each one does."
-                  ] },
+                  detail: "Now and then a round goes brutal: the arena bends a rule and dares everyone to survive it. The music shifts, an icon flashes up, and the race becomes a fight to last. The closer the match is to ending, the likelier these are — and sometimes several twists stack on one round." },
                 { id: "brutal-ability", name: "Ability", icon: svg("toolbox-solid.svg"), anim: "abilityRain",
                   blurb: "Every racer starts holding an ability.",
-                  detail: "Every racer starts the round already holding a random ability, so powers come flying from the opening moment instead of having to be hunted down. Expect bombs, blinds, swaps and freezes going off back to back — it's an instant free-for-all of effects." },
+                  detail: "Every racer starts already holding a random ability, so powers fly from the opening moment instead of having to be hunted down. Bombs, blinds, swaps and freezes go off back to back — an instant free-for-all of effects." },
                 { id: "brutal-cloudy", name: "Cloudy", icon: svg("cloud-solid.svg"), anim: "cloudy",
                   blurb: "Drifting clouds hide the track.",
                   detail: "Banks of cloud roll across the arena, blotting out patches of the track as they drift. Hazards and rivals vanish into the fog and reappear without warning — you're racing half-blind through the gaps." },
                 { id: "brutal-lightning", name: "Lightning", icon: svg("bolt-solid.svg"), anim: "lightning",
                   blurb: "Every racer is sped up.",
-                  detail: "Everyone gets a jolt: every racer is given a big speed boost for the whole round, and the hazards whip around faster too. You cover ground in a blink, so the pace turns twitchy and unforgiving — there's far less time to read the track and react before you've overshot it." },
+                  detail: "Everyone gets a jolt: every racer is sped up for the whole round and the hazards whip around faster too. The pace turns twitchy and unforgiving, with far less time to read the track before you overshoot it." },
                 { id: "brutal-volcano", name: "Volcano", icon: svg("volcano-solid.svg"), anim: "volcano",
                   blurb: "The ground erupts mid-round.",
                   detail: "Partway through, the arena erupts — lava blooms out and floods inward with only a brief warning before it blows. Read the rumble, get clear of where it's about to open, and ride out the eruption to claim the goal." },
                 { id: "brutal-infection", name: "Infection", icon: svg("biohazard-solid.svg"), anim: "infection",
                   blurb: "Get tagged and you join the horde.",
-                  detail: [
-                      "One racer starts infected, and their touch spreads it. Get tagged and you turn too, joining a horde that hunts down whoever's left. The last clean racer standing wins the round.",
-                      "Once you're infected there's no winning the round — your only job is to drag everyone else down with you. So survivors run and scatter while the horde closes in."
-                  ] },
+                  detail: "One racer starts infected and their touch spreads it — get tagged and you turn too, joining a horde that hunts whoever's left. The last clean racer wins; once infected, there's no winning, so your only job is to drag everyone else down with you." },
                 { id: "brutal-hockey", name: "Air Hockey", icon: svg("hockey-puck-solid.svg"), anim: "hockey",
                   blurb: "A puck rockets around, launching karts.",
-                  detail: "A giant puck ricochets around the arena, picking up frightening speed with every wall it slams into. Get clipped and you're launched across the map. Smack it to redirect it into rivals — and stay well clear of its line, because it only gets faster." },
+                  detail: "A giant puck ricochets around the arena, gaining speed with every wall it slams into. Get clipped and you're launched across the map; smack it to redirect it into rivals, but stay clear of its line because it only gets faster." },
                 { id: "brutal-explosive", name: "Explosive", icon: svg("explosion-solid.svg"), anim: "explosive",
                   blurb: "Every death blasts a crater of lava.",
-                  detail: "Every kart is a walking powder keg. When a racer goes down, the spot they died swells with a warning and then detonates — flinging everyone nearby and scorching the ground around it into lava. Each death eats away the safe floor and can chain into the next, so a crowded scramble can erupt into a string of blasts that leaves the arena pocked with fire." },
+                  detail: "Every kart is a walking powder keg. When a racer goes down, the spot swells with a warning and detonates — flinging everyone nearby and scorching the ground into lava. Deaths chain, so a crowded scramble can erupt into a string of blasts that pocks the arena with fire." },
                 { id: "brutal-blackout", name: "Blackout", icon: svg("moon-solid.svg"), anim: "blackout",
                   blurb: "The lights go out.",
                   detail: "The arena goes dark and you can only see a small pool of light around your own kart. The goal, the lava and your rivals all lurk in the black until you're nearly on top of them — every move is a gamble into the unknown." },
