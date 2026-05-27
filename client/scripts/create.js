@@ -27,6 +27,23 @@ var server,
     canvasWindow = document.getElementById("canvasWindow"),
     createContext;
 
+// Unified tool model. Every input method (mouse, touch, keyboard, gamepad) sets
+// `activeTool` through setTool(); the legacy render flags (drawBrushAimer/
+// drawObject/brushID/brushColor) are *derived* from it so the existing draw + paint
+// paths are unchanged. kind: 'select' | 'eraser' | 'tile' | 'hazard'.
+var activeTool = { kind: "select" };
+// Right-button erase-to-default stroke, kept distinct from a left-button paint.
+var erasing = false;
+// On-canvas hazard rotate handle: while dragging it the selected hazard's angle
+// tracks the cursor; rotateStartAngle keeps the pre-drag value to record one undo
+// command on release. touchActive guards the window-level touch move/end handlers.
+var rotatingHandle = false;
+var rotateStartAngle = 0;
+var touchActive = false;
+// Accumulates the cell changes of the in-progress paint/erase stroke so the whole
+// stroke collapses to one undo step (beginStroke/recordCellChange/commitStroke).
+var strokeChanges = null;
+
 var scale = 0.035;
 // Gate strip depth (px), matching server/game.js GATE_DEPTH so the previewed gate
 // lines up with where the server actually holds players.
@@ -106,21 +123,39 @@ window.onload = function () {
     }
 }
 
+// Visibility is toggled by class (not jQuery show/hide) so the load grid keeps its
+// CSS `display:grid` and the editor keeps its `display:grid` instead of jQuery
+// forcing them back to `block`.
 function showLoadWindow() {
-    $('#loadWindow').show();
-    $('#createWindow').hide();
+    document.getElementById('loadWindow').classList.remove('editor-hidden');
+    document.getElementById('createWindow').classList.add('editor-hidden');
     document.body.classList.remove('editor-open');
+    updateContinueTile();
 }
 
 function showEditor() {
-    $('#loadWindow').hide();
-    $('#createWindow').show();
+    document.getElementById('loadWindow').classList.add('editor-hidden');
+    document.getElementById('createWindow').classList.remove('editor-hidden');
     document.body.classList.add('editor-open');
-    var cp = document.getElementById('controlPanel');
-    if (cp != null) cp.scrollTop = 0;
+    closeDetailsPanel();
+    var rail = document.getElementById('toolRail');
+    if (rail != null) rail.scrollTop = 0;
     resize();
     addListeners();
 }
+
+// The pinned map-list tile doubles as "your work in progress" once a map has any
+// author work, so label it accordingly (non-destructive: clicking it re-enters the
+// in-memory map; only the wipe button clears it).
+function updateContinueTile() {
+    var desc = document.querySelector('#createNew .desc');
+    if (desc == null) { return; }
+    desc.textContent = mapHasContent() ? "Continue editing" : "Create a new map";
+}
+
+function openDetailsPanel() { var p = document.getElementById("detailsPanel"); if (p) { p.classList.add("open"); } }
+function closeDetailsPanel() { var p = document.getElementById("detailsPanel"); if (p) { p.classList.remove("open"); } }
+function toggleDetailsPanel() { var p = document.getElementById("detailsPanel"); if (p) { p.classList.toggle("open"); } }
 
 function clientConnect() {
     var server = io();
@@ -131,18 +166,12 @@ function clientConnect() {
     });
 
     server.on('githubFailure', function (error) {
-        var submitStatus = $("#submitStatus");
-        submitStatus.css("color", "white");
-        submitStatus.css("background-color", "red");
         console.log(error);
-        submitStatus.text("Failed");
+        showSubmitStatus("Upload failed — try again", "red", "white");
     });
     server.on('githubSuccess', function (url) {
         console.log(url);
-        var submitStatus = $("#submitStatus");
-        submitStatus.css("color", "white");
-        submitStatus.css("background-color", "green");
-        submitStatus.text("Success");
+        showSubmitStatus("Uploaded! Thanks 🎉", "green", "white");
         trackEvent('map_submitted');
     });
 
@@ -165,7 +194,8 @@ function clientConnect() {
         for (var i = 0; i < mapnames.length; i++) {
             $.getJSON("../maps/" + mapnames[i], function (data) {
                 maps.push(data);
-                $("#loadWindow").append('<div class="map-image"><button id="' + data.id + '" data-gp-nav><img src="' + data.thumbnail + '"><div class="desc">' + data.name + ' | ' + data.author + '</div></button></div>');
+                var searchAttr = ((data.name || "") + ' ' + (data.author || "")).replace(/"/g, '&quot;');
+                $("#loadWindow").append('<div class="map-image" data-search="' + searchAttr + '"><button id="' + data.id + '" data-gp-nav><img src="' + data.thumbnail + '"><div class="desc">' + data.name + ' | ' + data.author + '</div></button></div>');
                 $("#" + data.id).on("click", function () {
                     for (var j = 0; j < maps.length; j++) {
                         if (maps[j].id == this.id) {
@@ -243,7 +273,7 @@ function makeSeamlessPattern(image) {
 
 function setupPage() {
     $("#createNew").on("click", function () {
-        $("#submitStatus, #exportStatus").hide();
+        resetStatuses();
         showEditor();
     });
     $("#rebuildButton").on("click", function () {
@@ -272,103 +302,46 @@ function setupPage() {
     });
 
     $("#deleteSelectedButton").on("click", function () {
-        if (selectedObject != null) {
-            removeSelectedObject();
-        }
+        editorDeleteSelected();
         return false;
     });
-
     $("#rotateButton").on("click", function () {
-        drawObject = null;
-        drawBrushAimer = false;
-        if (selectedObject != null) {
-            selectedObject.angle += 15;
-            updateSelectedObject();
-            dirty = true;
-        }
+        editorRotateSelected(15);
         return false;
+    });
+    $("#rotateLeftButton").on("click", function () {
+        editorRotateSelected(-15);
+        return false;
+    });
+    $("#undoButton").on("click", function () { editorUndo(); return false; });
+    $("#redoButton").on("click", function () { editorRedo(); return false; });
+
+    $("#selectToolButton").on("click", function () { editorSelectTool("select"); return false; });
+    $("#eraserToolButton").on("click", function () { editorSelectTool("eraser"); return false; });
+
+    $("#detailsToggle").on("click", function () { toggleDetailsPanel(); return false; });
+    // Clear status toasts + field-required highlights as soon as the user edits any
+    // detail, so stale "Failed"/"required" feedback never lingers (backlog UX item).
+    $("#author, #name, #email").on("input", function () {
+        clearFieldErrors();
+        resetStatuses();
     });
 
-    $("#mouseButton").on("click", function () {
-        drawBrushAimer = false;
-        drawObject = null;
-        dirty = true;
-        return false;
-    });
-
-    $("#slowTileButton").on("click", function () {
-        brushID = config.tileMap.slow.id;
-        brushColor = patterns[config.tileMap.slow.id];
-        drawBrushAimer = true;
-        drawObject = null;
-        return false;
-    });
-    $("#normalTileButton").on("click", function () {
-        brushID = config.tileMap.normal.id;
-        brushColor = patterns[config.tileMap.normal.id];
-        drawBrushAimer = true;
-        drawObject = null;
-        return false;
-    });
-    $("#fastTileButton").on("click", function () {
-        brushID = config.tileMap.fast.id;
-        brushColor = patterns[config.tileMap.fast.id];
-        drawBrushAimer = true;
-        drawObject = null;
-        return false;
-    });
-    $("#lavaTileButton").on("click", function () {
-        brushID = config.tileMap.lava.id;
-        brushColor = patterns[config.tileMap.lava.id];
-        drawBrushAimer = true;
-        drawObject = null;
-        return false;
-    });
-    $("#iceTileButton").on("click", function () {
-        brushID = config.tileMap.ice.id;
-        brushColor = patterns[config.tileMap.ice.id];
-        drawBrushAimer = true;
-        drawObject = null;
-        return false;
-    });
-    $("#abilityTileButton").on("click", function () {
-        brushID = config.tileMap.ability.id;
-        brushColor = patterns[config.tileMap.ability.id];
-        drawBrushAimer = true;
-        drawObject = null;
-        return false;
-    });
-    $("#randomTileButton").on("click", function () {
-        brushID = config.tileMap.random.id;
-        brushColor = patterns[config.tileMap.random.id];
-        drawBrushAimer = true;
-        drawObject = null;
-        return false;
-    });
-    $("#goalTileButton").on("click", function () {
-        brushID = config.tileMap.goal.id;
-        brushColor = config.tileMap.goal.color;
-        drawBrushAimer = true;
-        drawObject = null;
-        return false;
-    });
+    $("#slowTileButton").on("click", function () { editorSelectTile("slow"); return false; });
+    $("#normalTileButton").on("click", function () { editorSelectTile("normal"); return false; });
+    $("#fastTileButton").on("click", function () { editorSelectTile("fast"); return false; });
+    $("#lavaTileButton").on("click", function () { editorSelectTile("lava"); return false; });
+    $("#iceTileButton").on("click", function () { editorSelectTile("ice"); return false; });
+    $("#abilityTileButton").on("click", function () { editorSelectTile("ability"); return false; });
+    $("#randomTileButton").on("click", function () { editorSelectTile("random"); return false; });
+    $("#goalTileButton").on("click", function () { editorSelectTile("goal"); return false; });
     $(".startEdgeButton").on("click", function () {
         var edges = ($(this).attr("data-edges") || "left").split("+");
         setStartEdges(edges);
         return false;
     });
-    $("#bumperButton").on("click", function () {
-        drawBrushAimer = false;
-        drawObject = null;
-        drawObject = config.hazards.bumper.id;
-        return false;
-    });
-    $("#movingBumperButton").on("click", function () {
-        drawBrushAimer = false;
-        drawObject = null;
-        drawObject = config.hazards.movingBumper.id;
-        return false;
-    });
+    $("#bumperButton").on("click", function () { editorSelectHazard("bumper"); return false; });
+    $("#movingBumperButton").on("click", function () { editorSelectHazard("movingBumper"); return false; });
     $("#previewButton").on("click", function () {
         previewMap();
         return false;
@@ -395,12 +368,10 @@ function setupPage() {
     $("#loadButton").on("click", function () {
         setSelectedObject(null);
         $("#createNewImage").attr("src", createCanvas.toDataURL("image/jpeg", 0.1));
-        $("#submitStatus, #exportStatus").hide();
+        resetStatuses();
+        closeDetailsPanel();
         showLoadWindow();
-
-        window.removeEventListener("mousemove", cellUnderMouse, false);
-        window.removeEventListener("mousedown", handleClick, false);
-        window.removeEventListener("mouseup", handleUnClick, false);
+        removeListeners();
         return false;
     });
     window.addEventListener('contextmenu', suppressContextMenu, false);
@@ -422,6 +393,27 @@ function addListeners() {
     window.addEventListener("mousemove", cellUnderMouse, false);
     window.addEventListener("mousedown", handleClick, false);
     window.addEventListener("mouseup", handleUnClick, false);
+    // Touch drives the same paint/place/select paths as the mouse. touchstart binds
+    // to the canvas (so taps on the tool docks don't paint); move/end bind to the
+    // window so a drag that strays off the canvas still tracks (touch capture).
+    if (createCanvas != null) {
+        createCanvas.addEventListener("touchstart", handleTouchStart, { passive: false });
+    }
+    window.addEventListener("touchmove", handleTouchMove, { passive: false });
+    window.addEventListener("touchend", handleTouchEnd, { passive: false });
+    window.addEventListener("touchcancel", handleTouchEnd, { passive: false });
+}
+
+function removeListeners() {
+    window.removeEventListener("mousemove", cellUnderMouse, false);
+    window.removeEventListener("mousedown", handleClick, false);
+    window.removeEventListener("mouseup", handleUnClick, false);
+    if (createCanvas != null) {
+        createCanvas.removeEventListener("touchstart", handleTouchStart);
+    }
+    window.removeEventListener("touchmove", handleTouchMove);
+    window.removeEventListener("touchend", handleTouchEnd);
+    window.removeEventListener("touchcancel", handleTouchEnd);
 }
 
 function suppressContextMenu(ev) {
@@ -431,8 +423,12 @@ function suppressContextMenu(ev) {
 
 function setSelectedObject(obj) {
     selectedObject = obj;
-    var btn = document.getElementById("deleteSelectedButton");
-    if (btn != null) btn.disabled = (obj == null);
+    var none = (obj == null);
+    var ids = ["deleteSelectedButton", "rotateButton", "rotateLeftButton"];
+    for (var i = 0; i < ids.length; i++) {
+        var btn = document.getElementById(ids[i]);
+        if (btn != null) { btn.disabled = none; }
+    }
     dirty = true;
 }
 
@@ -440,10 +436,11 @@ function setSelectedObject(obj) {
 // a non-default tile painted, or a hazard placed.
 function mapHasContent() {
     if (vMap == null || !Array.isArray(vMap.cells)) { return false; }
+    if (vMap.hazards && vMap.hazards.length > 0) { return true; }
+    if (config == null) { return false; } // can't compare tile ids until config arrives
     for (var i = 0; i < vMap.cells.length; i++) {
         if (vMap.cells[i].id != config.tileMap.normal.id) { return true; }
     }
-    if (vMap.hazards && vMap.hazards.length > 0) { return true; }
     return false;
 }
 
@@ -475,19 +472,26 @@ function validateEmail(mail) {
 }
 
 function rebuild() {
-    $("#submitStatus, #exportStatus").hide();
+    resetStatuses();
+    clearFieldErrors();
     setSelectedObject(null);
     vMap = generateVMap();
+    clearHistory(); // a fresh map starts with an empty undo history
     $('#author').val("");
     $('#name').val("");
     $("#createNewImage").attr("src", createCanvas.toDataURL("image/jpeg", 0.1));
+    updateContinueTile();
     resize();
 }
 
 function init() {
     initEditorGamepad();
+    installEditorShortcuts();
+    installMapSearch();
     recomputeStartLayout();
     updateStartEdgeButtons();
+    setTool({ kind: "select" }); // sensible default; pick a tile/hazard to start painting
+    updateUndoRedoButtons();
     animloop();
 }
 
@@ -500,13 +504,22 @@ function animloop() {
         mapReady = true;
         rebuild();
     }
-    if (drawBrushAimer) {
+    if (rotatingHandle && selectedObject != null) {
+        // Dragging the on-canvas rotate knob: angle tracks the cursor.
+        selectedObject.angle = Math.atan2(mousey - selectedObject.y, mousex - selectedObject.x) * (180 / Math.PI);
+        updateSelectedObject();
+        dirty = true;
+    }
+    if (drawBrushAimer || erasing) {
         var prev = currentCell;
         currentCell = cellIdFromPoint(mousex, mousey);
         if (prev !== currentCell) dirty = true;
     }
     if (brushing) {
         if (paintTile()) dirty = true;
+    }
+    if (erasing) {
+        if (paintTile(config.tileMap.normal.id)) dirty = true;
     }
     if (dirty) {
         drawEditor(dt);
@@ -608,6 +621,7 @@ function applyStartEdges(edges) {
     if (mapReady && vMap != null) {
         setSelectedObject(null);
         vMap = generateVMap();
+        clearHistory(); // the reshape replaced every cell — old undo steps are stale
     }
     if (vMap != null) { vMap.startEdges = startEdges.slice(); }
     updateStartEdgeButtons();
@@ -720,27 +734,338 @@ function drawMovingBumper(x, y, angle) {
 function handleClick(event) {
     switch (event.which) {
         case 1: {
-            if (drawBrushAimer) {
-                brushing = true;
-                break;
+            // On-canvas hazard handles take priority over painting/selecting.
+            if (selectedObject != null) {
+                if (overDeleteHandle(mousex, mousey)) { removeSelectedObject(); break; }
+                if (overRotateHandle(mousex, mousey)) {
+                    rotatingHandle = true;
+                    rotateStartAngle = selectedObject.angle || 0;
+                    break;
+                }
             }
-            if (drawObject != null) {
-                addObjectToMap(mousex, mousey, drawObject);
-                break;
-            }
+            if (drawBrushAimer) { brushing = true; beginStroke(); break; }
+            if (drawObject != null) { addObjectToMap(mousex, mousey, drawObject); break; }
             locateObject(mousex, mousey);
+            break;
+        }
+        case 3: {
+            // Right button: delete a hazard under the cursor, else erase to dirt
+            // (right-drag keeps erasing). Backlog UX item.
+            if (hazardUnderPoint(mousex, mousey)) {
+                removeHazardUnderPoint(mousex, mousey);
+                break;
+            }
+            erasing = true;
+            beginStroke();
+            break;
         }
     }
 }
 function handleUnClick(event) {
     switch (event.which) {
         case 1: {
-            if (drawBrushAimer) {
-                brushing = false;
+            if (rotatingHandle) {
+                rotatingHandle = false;
+                if (selectedObject != null) {
+                    pushRotateCommand(selectedHazardIndex(), rotateStartAngle, selectedObject.angle || 0);
+                }
                 break;
             }
+            if (brushing) { brushing = false; commitStroke(); break; }
+            break;
+        }
+        case 3: {
+            if (erasing) { erasing = false; commitStroke(); break; }
+            break;
         }
     }
+}
+
+// --- touch input --------------------------------------------------------------
+function canvasPointFromTouch(touch) {
+    var rect = createCanvas.getBoundingClientRect();
+    return {
+        x: ((touch.clientX - rect.left) / newWidth) * createCanvas.width,
+        y: ((touch.clientY - rect.top) / newHeight) * createCanvas.height
+    };
+}
+function handleTouchStart(event) {
+    if (event.touches.length === 0) { return; }
+    event.preventDefault();
+    touchActive = true;
+    var p = canvasPointFromTouch(event.touches[0]);
+    setMousePos(p.x, p.y);
+    // Resolve the touched cell up front so the first paint lands immediately
+    // (the animloop's per-frame recompute hasn't run yet for this point).
+    if (drawBrushAimer) { currentCell = cellIdFromPoint(p.x, p.y); }
+    handleClick({ which: 1 });
+}
+function handleTouchMove(event) {
+    if (!touchActive || event.touches.length === 0) { return; }
+    event.preventDefault();
+    var p = canvasPointFromTouch(event.touches[0]);
+    setMousePos(p.x, p.y);
+    dirty = true;
+}
+function handleTouchEnd(event) {
+    if (!touchActive) { return; }
+    if (event.cancelable) { event.preventDefault(); }
+    touchActive = false;
+    handleUnClick({ which: 1 });
+}
+
+// --- unified tool model -------------------------------------------------------
+// Every input path routes through setTool(); the legacy render flags are derived
+// here so draw/paint code is untouched.
+function setTool(tool) {
+    activeTool = tool;
+    drawBrushAimer = (tool.kind === "tile" || tool.kind === "eraser");
+    drawObject = (tool.kind === "hazard") ? tool.id : null;
+    if (tool.kind === "tile") {
+        brushID = tool.id;
+        brushColor = tool.color;
+    } else if (tool.kind === "eraser") {
+        brushID = config.tileMap.normal.id;
+        brushColor = patterns[config.tileMap.normal.id];
+    }
+    // A paint/place tool can't also keep a hazard selected (no handles to show).
+    if (tool.kind !== "select") {
+        setSelectedObject(null);
+    }
+    updateToolButtons();
+    dirty = true;
+}
+function editorSelectTool(kind) {
+    setTool({ kind: kind === "eraser" ? "eraser" : "select" });
+}
+function editorSelectTile(typeName) {
+    if (config == null) { return; }
+    var t = config.tileMap[typeName];
+    if (t == null) { return; }
+    var color = (patterns[t.id] != null) ? patterns[t.id] : t.color;
+    setTool({ kind: "tile", id: t.id, color: color, name: typeName });
+}
+function editorSelectHazard(typeName) {
+    if (config == null) { return; }
+    var h = config.hazards[typeName];
+    if (h == null) { return; }
+    setTool({ kind: "hazard", id: h.id, name: typeName });
+}
+function editorDeselect() {
+    if (selectedObject != null) { setSelectedObject(null); }
+}
+function editorRotateSelected(deg) {
+    if (selectedObject == null) { return; }
+    var from = selectedObject.angle || 0;
+    selectedObject.angle = from + deg;
+    updateSelectedObject();
+    pushRotateCommand(selectedHazardIndex(), from, selectedObject.angle);
+    dirty = true;
+}
+function editorDeleteSelected() {
+    if (selectedObject != null) { removeSelectedObject(); }
+}
+
+// Highlight the active tool/tile/hazard button.
+var TOOL_BUTTON_IDS = ["selectToolButton", "eraserToolButton", "slowTileButton",
+    "normalTileButton", "fastTileButton", "lavaTileButton", "iceTileButton",
+    "abilityTileButton", "randomTileButton", "goalTileButton", "bumperButton",
+    "movingBumperButton"];
+function updateToolButtons() {
+    for (var i = 0; i < TOOL_BUTTON_IDS.length; i++) {
+        var el = document.getElementById(TOOL_BUTTON_IDS[i]);
+        if (el != null) { el.classList.remove("tool-active"); }
+    }
+    var activeId = activeToolButtonId();
+    if (activeId != null) {
+        var a = document.getElementById(activeId);
+        if (a != null) { a.classList.add("tool-active"); }
+    }
+}
+function activeToolButtonId() {
+    if (activeTool.kind === "select") { return "selectToolButton"; }
+    if (activeTool.kind === "eraser") { return "eraserToolButton"; }
+    if (activeTool.kind === "tile") {
+        var tileMap = {
+            slow: "slowTileButton", normal: "normalTileButton", fast: "fastTileButton",
+            lava: "lavaTileButton", ice: "iceTileButton", ability: "abilityTileButton",
+            random: "randomTileButton", goal: "goalTileButton"
+        };
+        return tileMap[activeTool.name] || null;
+    }
+    if (activeTool.kind === "hazard") {
+        return activeTool.name === "movingBumper" ? "movingBumperButton" : "bumperButton";
+    }
+    return null;
+}
+
+// --- paint-stroke undo grouping ----------------------------------------------
+function beginStroke() { strokeChanges = {}; }
+function recordCellChange(idx, from, to) {
+    if (strokeChanges == null) { return; }
+    if (!Object.prototype.hasOwnProperty.call(strokeChanges, idx)) {
+        strokeChanges[idx] = { from: from };
+    }
+    strokeChanges[idx].to = to;
+}
+function commitStroke() {
+    if (strokeChanges == null) { return; }
+    var changes = [];
+    for (var k in strokeChanges) {
+        if (!Object.prototype.hasOwnProperty.call(strokeChanges, k)) { continue; }
+        var c = strokeChanges[k];
+        if (c.from !== c.to) { changes.push({ idx: +k, from: c.from, to: c.to }); }
+    }
+    strokeChanges = null;
+    if (changes.length === 0) { return; }
+    pushCommand({
+        undo: function () { for (var i = 0; i < changes.length; i++) { var cell = vMap.cells[changes[i].idx]; if (cell) { cell.id = changes[i].from; } } },
+        redo: function () { for (var i = 0; i < changes.length; i++) { var cell = vMap.cells[changes[i].idx]; if (cell) { cell.id = changes[i].to; } } }
+    });
+}
+
+// --- hazard helpers (index/reference based — also fixes the stacked-duplicate
+//     selection bug, since selection now tracks the array index, not x/y) -------
+function hazardConfigById(id) {
+    for (var type in config.hazards) {
+        if (config.hazards[type].id == id) { return config.hazards[type]; }
+    }
+    return null;
+}
+function selectedHazardIndex() {
+    return (selectedObject != null && selectedObject.index != null) ? selectedObject.index : -1;
+}
+function hazardIndexUnderPoint(x, y) {
+    if (outsideMapBounds(x, y, 0)) { return -1; }
+    var hazards = vMap.hazards || [];
+    for (var i = hazards.length - 1; i >= 0; i--) { // topmost (last drawn) first
+        var cfg = hazardConfigById(hazards[i].id);
+        if (cfg == null) { continue; }
+        if (getMagSq(x, y, hazards[i].x, hazards[i].y) < Math.pow(cfg.radius, 2)) { return i; }
+    }
+    return -1;
+}
+function hazardUnderPoint(x, y) { return hazardIndexUnderPoint(x, y) >= 0; }
+function removeHazardUnderPoint(x, y) {
+    var i = hazardIndexUnderPoint(x, y);
+    if (i < 0) { return; }
+    var removed = vMap.hazards[i];
+    vMap.hazards.splice(i, 1);
+    pushHazardRemoveCommand(removed, i);
+    setSelectedObject(null); // a splice shifts indices — drop any stale selection
+    dirty = true;
+}
+function pushHazardAddCommand(hazard) {
+    pushCommand({
+        undo: function () { var i = vMap.hazards.indexOf(hazard); if (i >= 0) { vMap.hazards.splice(i, 1); } },
+        redo: function () { if (vMap.hazards.indexOf(hazard) < 0) { vMap.hazards.push(hazard); } }
+    });
+}
+function pushHazardRemoveCommand(hazard, index) {
+    pushCommand({
+        undo: function () { vMap.hazards.splice(Math.min(index, vMap.hazards.length), 0, hazard); },
+        redo: function () { var i = vMap.hazards.indexOf(hazard); if (i >= 0) { vMap.hazards.splice(i, 1); } }
+    });
+}
+function pushRotateCommand(index, from, to) {
+    if (from === to) { return; }
+    var hz = (index >= 0 && vMap.hazards[index]) ? vMap.hazards[index] : null;
+    if (hz == null) { return; }
+    pushCommand({
+        undo: function () { hz.angle = from; },
+        redo: function () { hz.angle = to; }
+    });
+}
+
+// --- on-canvas hazard handles -------------------------------------------------
+function rotateHandlePos() {
+    var r = selectedObject.radius + 50;
+    return pos({ x: selectedObject.x, y: selectedObject.y }, r, selectedObject.angle || 0);
+}
+function deleteHandlePos() {
+    var d = selectedObject.radius + 28;
+    return { x: selectedObject.x + d, y: selectedObject.y - d };
+}
+function overRotateHandle(x, y) {
+    if (selectedObject == null) { return false; }
+    var p = rotateHandlePos();
+    return getMagSq(x, y, p.x, p.y) < 18 * 18;
+}
+function overDeleteHandle(x, y) {
+    if (selectedObject == null) { return false; }
+    var p = deleteHandlePos();
+    return getMagSq(x, y, p.x, p.y) < 18 * 18;
+}
+function drawHazardHandles() {
+    var rp = rotateHandlePos();
+    createContext.save();
+    createContext.beginPath();
+    createContext.arc(rp.x, rp.y, 12, 0, 2 * Math.PI);
+    createContext.fillStyle = "#1e90ff";
+    createContext.strokeStyle = "white";
+    createContext.lineWidth = 3;
+    createContext.fill();
+    createContext.stroke();
+    createContext.restore();
+
+    var dp = deleteHandlePos();
+    createContext.save();
+    createContext.beginPath();
+    createContext.arc(dp.x, dp.y, 13, 0, 2 * Math.PI);
+    createContext.fillStyle = "#cf1020";
+    createContext.strokeStyle = "white";
+    createContext.lineWidth = 3;
+    createContext.fill();
+    createContext.stroke();
+    createContext.beginPath();
+    createContext.moveTo(dp.x - 5, dp.y - 5); createContext.lineTo(dp.x + 5, dp.y + 5);
+    createContext.moveTo(dp.x + 5, dp.y - 5); createContext.lineTo(dp.x - 5, dp.y + 5);
+    createContext.lineWidth = 2.5;
+    createContext.strokeStyle = "white";
+    createContext.stroke();
+    createContext.restore();
+}
+
+// --- required-field validation + status reset --------------------------------
+function setFieldError(inputId, msgId, message) {
+    var input = document.getElementById(inputId);
+    var msg = document.getElementById(msgId);
+    if (input != null) { input.classList.add("field-required"); }
+    if (msg != null) { msg.textContent = message || ""; }
+}
+function clearFieldErrors() {
+    var fields = [["author", "authorMsg"], ["name", "nameMsg"], ["email", "emailMsg"]];
+    for (var i = 0; i < fields.length; i++) {
+        var input = document.getElementById(fields[i][0]);
+        var msg = document.getElementById(fields[i][1]);
+        if (input != null) { input.classList.remove("field-required"); }
+        if (msg != null) { msg.textContent = ""; }
+    }
+}
+// Author + name are required before export/upload (previously substituted with
+// "anonymous"/"unknown" silently). Flags the empty fields and opens the Details
+// panel so the feedback is visible. Returns true when both are present.
+function requireDetails() {
+    clearFieldErrors();
+    var ok = true;
+    if (($("#author").val() || "").trim() === "") { setFieldError("author", "authorMsg", "Author is required"); ok = false; }
+    if (($("#name").val() || "").trim() === "") { setFieldError("name", "nameMsg", "Map name is required"); ok = false; }
+    if (!ok) { openDetailsPanel(); }
+    return ok;
+}
+var submitStatusTimer = null;
+function showSubmitStatus(message, bg, color) {
+    var el = $("#submitStatus");
+    el.text(message);
+    el.css({ "color": color || "white", "background-color": bg });
+    el.show();
+    if (submitStatusTimer) { clearTimeout(submitStatusTimer); }
+    submitStatusTimer = setTimeout(function () { el.hide(); }, 4000);
+}
+function resetStatuses() {
+    $("#submitStatus, #exportStatus, #previewStatus").hide();
+    if (submitStatusTimer) { clearTimeout(submitStatusTimer); submitStatusTimer = null; }
+    if (exportStatusTimer) { clearTimeout(exportStatusTimer); exportStatusTimer = null; }
 }
 
 function setMousePos(x, y) {
@@ -748,76 +1073,58 @@ function setMousePos(x, y) {
     mousey = y;
 }
 
-function paintTile() {
+function paintTile(targetId) {
     if (currentCell == null) return false;
     var cell = vMap.cells[currentCell];
     if (cell == null) return false;
-    var newId = locateId(brushColor);
+    var newId = (targetId != null) ? targetId : locateId(brushColor);
     if (cell.id === newId) return false;
+    recordCellChange(currentCell, cell.id, newId);
     cell.id = newId;
     return true;
 }
 
 function addObjectToMap(x, y, obj) {
-    var radius = 0;
-    for (var hazard in config.hazards) {
-        if (obj == config.hazards[hazard].id) {
-            radius = config.hazards[hazard].attackRadius;
-        }
-    }
+    var cfg = hazardConfigById(obj);
+    var radius = (cfg != null) ? cfg.attackRadius : 0;
     if (outsideMapBounds(x, y, radius)) {
         return;
     }
     if (vMap.hazards == undefined) {
         vMap.hazards = [];
     }
-    vMap.hazards.push({ id: drawObject, x: x, y: y, angle: 0 });
+    var hazard = { id: obj, x: x, y: y, angle: 0 };
+    vMap.hazards.push(hazard);
+    pushHazardAddCommand(hazard);
     dirty = true;
 }
 
 function locateObject(x, y) {
-    if (outsideMapBounds(x, y, 0)) {
+    var i = hazardIndexUnderPoint(x, y);
+    if (i < 0) {
+        setSelectedObject(null);
         return;
     }
-    for (var hazard in vMap.hazards) {
-        var hazardObj = null;
-        for (var type in config.hazards) {
-            if (vMap.hazards[hazard].id == config.hazards[type].id) {
-                hazardObj = config.hazards[type];
-                break;
-            }
-        }
-        if (hazardObj == null) continue;
-        var distance = getMagSq(x, y, vMap.hazards[hazard].x, vMap.hazards[hazard].y);
-        if (distance < Math.pow(hazardObj.radius, 2)) {
-            setSelectedObject({ id: vMap.hazards[hazard].id, x: vMap.hazards[hazard].x, y: vMap.hazards[hazard].y, angle: vMap.hazards[hazard].angle, radius: hazardObj.radius });
-            return;
-        }
-    }
-    setSelectedObject(null);
+    var hz = vMap.hazards[i];
+    var cfg = hazardConfigById(hz.id);
+    setSelectedObject({ index: i, id: hz.id, x: hz.x, y: hz.y, angle: hz.angle, radius: cfg.radius });
 }
 
+// Write the selection's live angle back to its hazard (selection tracks the array
+// index, so stacked duplicates at the same x/y are no longer ambiguous).
 function updateSelectedObject() {
-    for (var i = 0; i < vMap.hazards.length; i++) {
-        if (vMap.hazards[i].id == selectedObject.id) {
-            if (vMap.hazards[i].x == selectedObject.x && vMap.hazards[i].y == selectedObject.y) {
-                vMap.hazards[i].angle = selectedObject.angle;
-                return;
-            }
-        }
-    }
+    var i = selectedHazardIndex();
+    if (i < 0 || vMap.hazards[i] == null) { return; }
+    vMap.hazards[i].angle = selectedObject.angle;
 }
 
 function removeSelectedObject() {
-    for (var i = 0; i < vMap.hazards.length; i++) {
-        if (vMap.hazards[i].id == selectedObject.id) {
-            if (vMap.hazards[i].x == selectedObject.x && vMap.hazards[i].y == selectedObject.y) {
-                vMap.hazards.splice(i, 1);
-                setSelectedObject(null);
-                return;
-            }
-        }
-    }
+    var i = selectedHazardIndex();
+    if (i < 0 || vMap.hazards[i] == null) { return; }
+    var removed = vMap.hazards[i];
+    vMap.hazards.splice(i, 1);
+    pushHazardRemoveCommand(removed, i);
+    setSelectedObject(null);
 }
 
 
@@ -964,6 +1271,10 @@ function showExportStatus(message, bg) {
     exportStatusTimer = setTimeout(function () { el.hide(); }, 2500);
 }
 function exportToJSON() {
+    if (!requireDetails()) {
+        showExportStatus("Add an author and map name first", "red");
+        return;
+    }
     basicSanitize();
     navigator.clipboard.writeText(JSON.stringify(vMap)).then(function () {
         showExportStatus("Copied to clipboard!", "green");
@@ -980,20 +1291,25 @@ function submitViaEmail() {
 }
 
 function submitToGithub() {
+    if (!requireDetails()) {
+        showSubmitStatus("Add an author and map name first", "red", "white");
+        return false;
+    }
     var email = $("#email").val();
     if (!validateEmail(email)) {
         // Inline feedback instead of a focus-stealing alert() the gamepad can't close.
-        var submitStatus = $("#submitStatus");
-        submitStatus.show();
-        submitStatus.css("color", "white");
-        submitStatus.css("background-color", "red");
-        submitStatus.text("Enter a valid email to submit");
+        setFieldError("email", "emailMsg", "Enter a valid email");
+        openDetailsPanel();
+        showSubmitStatus("Enter a valid email to submit", "red", "white");
         $("#email").focus();
         return false;
     }
     basicSanitize();
     vMap.email = email;
+    // Pending state stays put until githubSuccess/githubFailure replaces it (those
+    // use the auto-resetting showSubmitStatus); don't auto-hide the "Submitting.."
     var submitStatus = $("#submitStatus");
+    if (submitStatusTimer) { clearTimeout(submitStatusTimer); submitStatusTimer = null; }
     submitStatus.show();
     submitStatus.css("color", "black");
     submitStatus.css("background-color", "#ADD8E6");
@@ -1212,6 +1528,7 @@ function drawSelectedObject() {
         createContext.stroke();
         createContext.restore();
         drawRotationRing();
+        drawHazardHandles();
     }
 }
 

@@ -29,6 +29,23 @@
   <link rel="icon" type="image/svg+xml" href="assets/img/favicon.svg">
   <title>Chao Chao Map Edit</title>
   <style>
+    /* ===========================================================================
+       Map editor layout. A single responsive CSS grid drives both forms:
+         desktop (>768px): top action bar + left tool rail + canvas
+         phone   (<=768px): top tool dock + canvas + bottom action dock
+       Same DOM in both — only the grid template + a few flex directions change —
+       so the editor gamepad's offsetParent-based focus ring stays correct and we
+       never hide tools on touch (the old layout did `display:none` on mobile).
+       =========================================================================== */
+
+    /* Editor-scoped accent + chrome tokens, layered on the site theme vars. */
+    #mapEditor {
+      --ed-accent: #2f8f4e;
+      --ed-accent-soft: rgba(47, 143, 78, 0.16);
+      --ed-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+      --ed-shadow-soft: 0 2px 6px rgba(0, 0, 0, 0.08);
+    }
+
     /* When the editor is visible, lock the page so the canvas can't be
        scrolled out of view. The load window flips this back to auto
        because the map grid needs to scroll. */
@@ -36,9 +53,9 @@
       overflow: hidden;
     }
 
-    /* Overrides styles.css `#createWindow { height: 100% }`, which would
-       otherwise force the editor to be a full viewport tall *below* the
-       navbar and overflow the page. */
+    /* Overrides styles.css `#createWindow { height: 100%; display: none }` — that
+       base rule was previously toggled by jQuery show/hide; we drive visibility
+       with the .editor-hidden class instead, so set display explicitly here. */
     #createWindow {
       position: fixed;
       top: var(--navbar-height);
@@ -48,208 +65,448 @@
       width: auto;
       height: auto;
       margin: 0;
-    }
-
-    #mapEditor {
-      position: relative;
-      width: 100%;
-      height: 100%;
-      margin: 0;
-    }
-
-    /* Overrides styles.css `#controlPanel { height: 90%; width: 9%; ... }`
-       so top/bottom take over for sizing. */
-    #controlPanel {
-      position: absolute;
-      top: 0;
-      left: 0;
-      bottom: 0;
-      width: 250px;
-      height: auto;
-      float: none;
-      z-index: 1002;
-      border-radius: 0;
-      border: 0;
-      border-right: thin solid #e6e6e6;
-      padding: 0 1rem;
-      box-shadow: 0px 8px 15px rgba(0, 0, 0, 0.1);
-      overflow-y: auto;
-    }
-
-    .mapEditorTile {
-      width: auto;
-      margin-left: 0;
-      margin-right: 4px;
-      border-radius: 100px;
-      padding: 4px 8px;
-      float: left;
-      margin-bottom: 2px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-wrap: wrap;
-      height: auto;
-      border: thin solid #e6e6e6;
-      font-size: 1rem;
-      font-weight: 500;
-      cursor: pointer;
-      min-width: 60px;
-      text-align: center !important;
-    }
-
-    #inputBar {
-      height: auto;
-    }
-
-    #inputBar .editor-inputs:last-child {
-      margin-bottom: 0;
-    }
-
-    .editor-inputs {
-      margin: 0;
-      margin-bottom: 1rem;
-    }
-
-    main {
-      position: absolute;
-      top: 0;
-      left: 250px;
-      right: 0;
-      bottom: 0;
-    }
-
-    /* Overrides styles.css `#canvasWindow { width: 80%; margin: 0 5%; ... }`
-       so the canvas-area uses the full width of <main> with the canvas
-       flex-centered inside it. */
-    #canvasWindow {
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      width: auto;
-      height: auto;
-      margin: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    /* The global `canvas` rule in styles.css pins canvases to top-left;
-       inside the editor we want flex-centered, sized via JS. */
-    #canvasWindow #createCanvas {
-      position: static;
       display: block;
     }
 
-    .palette {
-      height: auto;
+    #mapEditor {
+      display: grid;
+      grid-template-columns: 268px 1fr;
+      grid-template-rows: auto 1fr;
+      grid-template-areas:
+        "topbar topbar"
+        "rail   canvas";
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      background: var(--board-bg);
+      color: var(--text);
     }
 
-    /* Keep the toolbar icons pinned to the top of the panel so they
-       stay visible when the rest of the panel content scrolls. */
-    #editorToolbar {
-      position: sticky;
-      top: 0;
-      background: #f8f9fa;
-      z-index: 1;
-      padding-top: 0.5rem;
-      padding-bottom: 0.5rem;
-      margin: 0 -1rem 0.5rem;
-      padding-left: 1rem;
-      padding-right: 1rem;
-      border-bottom: thin solid #e6e6e6;
+    /* --- top action bar ----------------------------------------------------- */
+    #editorTopbar {
+      grid-area: topbar;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px;
+      background: var(--surface);
+      border-bottom: thin solid var(--border);
+      box-shadow: var(--ed-shadow-soft);
+      z-index: 1003;
+      flex-wrap: wrap;
     }
 
-    /* Compact the panel so every control fits in a typical viewport
-       height without needing to scroll. */
-    #controlPanel .h5 {
-      font-size: 0.75rem;
+    .ed-bar-group {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .ed-bar-divider {
+      width: 1px;
+      align-self: stretch;
+      background: var(--border);
+      margin: 2px 4px;
+    }
+
+    .ed-bar-spacer {
+      flex: 1 1 auto;
+    }
+
+    /* Square icon buttons (back, wipe, undo/redo, rotate, delete). */
+    .ed-icon-btn {
+      width: 40px;
+      height: 40px;
+      min-width: 40px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: thin solid transparent;
+      border-radius: 10px;
+      background: transparent;
+      color: var(--text);
+      font-size: 1.1rem;
+      cursor: pointer;
+      transition: background 0.12s, border-color 0.12s, opacity 0.12s;
+    }
+    .ed-icon-btn:hover {
+      background: var(--surface-2);
+      border-color: var(--border);
+    }
+    .ed-icon-btn:disabled {
+      opacity: 0.35;
+      cursor: default;
+    }
+    .ed-icon-btn.danger:hover {
+      background: rgba(207, 16, 32, 0.12);
+      border-color: rgba(207, 16, 32, 0.4);
+      color: #cf1020;
+    }
+
+    /* Text action buttons (Details / Preview / Copy / Upload / AI). */
+    .ed-btn {
+      height: 40px;
+      padding: 0 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border: thin solid var(--border);
+      border-radius: 10px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 0.9rem;
       font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.4px;
-      color: #6c757d;
-      margin: 0.4rem 0 0.25rem;
+      cursor: pointer;
+      transition: background 0.12s, border-color 0.12s, transform 0.06s;
     }
-    #controlPanel hr {
-      display: none;
+    .ed-btn:hover {
+      background: var(--surface-2);
     }
-    #controlPanel .mb-3 {
-      margin-bottom: 0.4rem !important;
+    .ed-btn:active {
+      transform: translateY(1px);
     }
-    #controlPanel .editor-inputs {
-      margin-bottom: 0.35rem !important;
-      padding: 0.25rem 0.5rem;
-      height: auto;
-      min-height: 0;
-      font-size: 0.85rem;
-    }
-    #controlPanel .btn-block {
-      padding: 0.3rem 0.5rem;
-      font-size: 0.85rem;
-      margin-bottom: 0.25rem;
-      margin-top: 0;
-    }
-    #controlPanel .mapEditorTile {
-      font-size: 0.85rem;
-      padding: 3px 7px;
-      min-width: 50px;
-    }
-    /* Compact the Start-edge picker so all six options fit in two rows (4 single
-       edges + 2 combos) and the section doesn't push the last row under the sticky
-       Actions footer. */
-    #controlPanel .startEdgeButton {
-      min-width: 0;
-      padding: 2px 6px;
-      font-size: 0.78rem;
-      margin: 0 3px 2px 0;
-    }
-    #startEdgePalette {
-      margin-bottom: 0.25rem !important;
-    }
-    #startEdgePalette .h5 {
-      margin: 0.25rem 0 0.2rem;
-    }
-
-    /* Pin the Actions section to the bottom of the panel — together
-       with the sticky toolbar, this guarantees the user can always
-       reach Copy/Upload regardless of viewport height. */
-    #actionsSection {
-      position: sticky;
-      bottom: 0;
-      background: #f8f9fa;
-      z-index: 1;
-      margin: 0.4rem -1rem 0;
-      padding: 0.5rem 1rem;
-      border-top: thin solid #e6e6e6;
-    }
-
-    /* "AI racers" preview toggle, styled as a full-width action button so it's
-       a large touch target and is reachable by the editor gamepad nav (A ->
-       click), unlike a tiny DOM checkbox. Off looks like the other Actions
-       buttons; on gets a brand-green fill (with a matching focus ring) so the
-       state reads at a glance in both light and dark. Two IDs keep this above
-       the [data-theme="dark"] #controlPanel .btn-block rule's specificity. */
-    #controlPanel #enableAIButton.ai-on {
-      background-color: #2f8f4e;
-      border-color: #2f8f4e;
+    .ed-btn.primary {
+      background: var(--ed-accent);
+      border-color: var(--ed-accent);
       color: #fff;
     }
-    /* Recolour the whole keyboard focus ring (outline + halo) green so the
-       on-state button doesn't show the global pink .btn:focus-visible outline
-       around a green fill. Gamepad nav keeps the shared .gp-focus ring. */
-    #controlPanel #enableAIButton.ai-on:focus-visible {
-      outline-color: #2f8f4e;
+    .ed-btn.primary:hover {
+      background: #267b42;
+    }
+    /* "AI racers" toggle: green fill when on, matching the primary actions. */
+    #enableAIButton.ai-on {
+      background: var(--ed-accent);
+      border-color: var(--ed-accent);
+      color: #fff;
+    }
+    #enableAIButton.ai-on:focus-visible {
+      outline-color: var(--ed-accent);
       box-shadow: 0 0 0 3px rgba(47, 143, 78, 0.5);
     }
 
-    @media screen and (max-width:768px) {
-      #controlPanel {
+    /* --- Details disclosure ------------------------------------------------- */
+    #detailsWrap {
+      position: relative;
+    }
+    #detailsPanel {
+      display: none;
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
+      width: 260px;
+      padding: 14px;
+      background: var(--surface);
+      border: thin solid var(--border);
+      border-radius: 12px;
+      box-shadow: var(--ed-shadow);
+      z-index: 1005;
+    }
+    #detailsPanel.open {
+      display: block;
+    }
+    #detailsPanel .ed-section-title {
+      margin-top: 0;
+    }
+    #detailsPanel .form-control {
+      margin-bottom: 8px;
+    }
+    .form-control.field-required {
+      border-color: #cf1020 !important;
+      box-shadow: 0 0 0 2px rgba(207, 16, 32, 0.18);
+    }
+    .ed-field-msg {
+      font-size: 0.75rem;
+      color: #cf1020;
+      min-height: 1em;
+      margin: -4px 0 6px;
+    }
+
+    /* --- left tool rail ----------------------------------------------------- */
+    #toolRail {
+      grid-area: rail;
+      background: var(--surface);
+      border-right: thin solid var(--border);
+      padding: 12px;
+      overflow-y: auto;
+      z-index: 1002;
+    }
+    .ed-section {
+      margin-bottom: 14px;
+    }
+    .ed-section-title {
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin: 0 0 7px;
+    }
+    .ed-tool-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    /* Select / Eraser tools: icon over label. */
+    .ed-tool {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      height: 56px;
+      border: thin solid var(--border);
+      border-radius: 10px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    .ed-tool i {
+      font-size: 1.15rem;
+    }
+    .ed-tool:hover {
+      background: var(--surface-2);
+    }
+
+    /* Tile / hazard / start-edge chips. Override the float-based styles.css
+       base so they tile cleanly inside the rail's grid. */
+    #toolRail .mapEditorTile {
+      float: none;
+      width: 100%;
+      min-width: 0;
+      margin: 0;
+      height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 9px;
+      border: thin solid rgba(0, 0, 0, 0.12);
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      box-shadow: var(--ed-shadow-soft);
+    }
+    #toolRail .startEdgeButton {
+      background: var(--surface);
+      color: var(--text);
+      box-shadow: none;
+    }
+    #toolRail .startEdgeButton span {
+      color: var(--text);
+      mix-blend-mode: normal;
+    }
+
+    /* Active selection ring shared by tools / tiles / hazards / edges. */
+    .tool-active {
+      outline: 3px solid var(--ed-accent) !important;
+      outline-offset: 1px;
+      box-shadow: 0 0 0 4px var(--ed-accent-soft) !important;
+    }
+
+    /* --- canvas area -------------------------------------------------------- */
+    main {
+      grid-area: canvas;
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+    }
+    #canvasWindow {
+      position: absolute;
+      inset: 0;
+      width: auto;
+      height: auto;
+      margin: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 12px;
+    }
+    #canvasWindow #createCanvas {
+      position: static;
+      display: block;
+      border-radius: 8px;
+      box-shadow: var(--ed-shadow);
+      touch-action: none; /* we drive painting from touch events ourselves */
+    }
+
+    /* Floating status toasts over the canvas (preview/export/submit feedback).
+       Kept out of the topbar flow so status text can't reflow the buttons. */
+    #editorStatus {
+      position: absolute;
+      top: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      align-items: center;
+      pointer-events: none;
+      z-index: 1004;
+    }
+    #editorStatus .btn {
+      pointer-events: auto;
+      border-radius: 999px;
+      font-weight: 600;
+      box-shadow: var(--ed-shadow);
+    }
+
+    /* --- map list ----------------------------------------------------------- */
+    #loadWindow {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 18px;
+      padding: 20px;
+      max-width: 1280px;
+      margin: 0 auto;
+      align-content: start;
+    }
+    #loadWindow.editor-hidden,
+    #createWindow.editor-hidden {
+      display: none !important;
+    }
+    #mapListHeader {
+      grid-column: 1 / -1;
+    }
+    .map-search {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      max-width: 480px;
+      padding: 0 14px;
+      height: 46px;
+      background: var(--surface);
+      border: thin solid var(--border);
+      border-radius: 12px;
+      box-shadow: var(--ed-shadow-soft);
+    }
+    .map-search i {
+      color: var(--text-muted);
+    }
+    .map-search input {
+      flex: 1 1 auto;
+      border: 0;
+      background: transparent;
+      color: var(--text);
+      font-size: 0.95rem;
+      outline: none;
+    }
+    #mapSearchClear {
+      border: 0;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 1.1rem;
+      cursor: pointer;
+      padding: 4px 6px;
+      line-height: 1;
+    }
+    #mapSearchClear:hover {
+      color: var(--text);
+    }
+
+    div.map-image {
+      float: none;
+      width: 100%;
+      margin: 0;
+    }
+    div.map-image button {
+      width: 100%;
+      padding: 0;
+      border: thin solid var(--border);
+      border-radius: 12px;
+      background: var(--surface);
+      overflow: hidden;
+      cursor: pointer;
+      box-shadow: var(--ed-shadow-soft);
+      transition: transform 0.12s, box-shadow 0.12s, border-color 0.12s;
+    }
+    div.map-image button:hover {
+      transform: translateY(-3px);
+      box-shadow: var(--ed-shadow);
+      border-color: var(--ed-accent);
+    }
+    div.map-image img {
+      width: 100%;
+      height: auto;
+      aspect-ratio: 1366 / 768;
+      object-fit: cover;
+      display: block;
+      background: var(--surface-2);
+    }
+    /* The pinned New / Continue tile has no thumbnail until you've edited; give it
+       a friendly placeholder so it isn't a blank box on a fresh visit. */
+    #createNewImage[src=""],
+    #createNewImage:not([src]) {
+      min-height: 124px;
+    }
+    div.map-image .desc {
+      font-size: 0.82rem;
+      padding: 9px;
+      text-align: center;
+      color: var(--text);
+      border-top: thin solid var(--border);
+    }
+
+    /* --- responsive: phone reflow ------------------------------------------- */
+    @media screen and (max-width: 768px) {
+      #mapEditor {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto 1fr auto;
+        grid-template-areas:
+          "rail"
+          "canvas"
+          "topbar";
+      }
+      /* Tool rail becomes a horizontal scrolling dock at the top. */
+      #toolRail {
+        border-right: 0;
+        border-bottom: thin solid var(--border);
+        overflow-x: auto;
+        overflow-y: hidden;
+        display: flex;
+        gap: 14px;
+        padding: 8px 12px;
+        white-space: nowrap;
+      }
+      .ed-section {
+        margin-bottom: 0;
+        flex: 0 0 auto;
+      }
+      .ed-section-title {
+        display: none; /* save vertical space in the strip */
+      }
+      .ed-tool-grid {
+        display: flex;
+        gap: 6px;
+      }
+      .ed-tool {
+        width: 56px;
+      }
+      #toolRail .mapEditorTile {
+        width: auto;
+        min-width: 64px;
+        padding: 0 12px;
+      }
+      /* Action bar docks to the bottom and wraps. */
+      #editorTopbar {
+        border-bottom: 0;
+        border-top: thin solid var(--border);
+        justify-content: center;
+        padding-bottom: calc(8px + var(--safe-bottom));
+      }
+      .ed-bar-spacer {
         display: none;
       }
-
-      main {
-        left: 0;
+      #detailsPanel {
+        position: fixed;
+        left: 12px;
+        right: 12px;
+        bottom: 80px;
+        top: auto;
+        width: auto;
       }
     }
   </style>
@@ -264,101 +521,125 @@
   </nav>
   <!-- Game enclosed here -->
   <section>
-    <div id="createWindow">
+    <div id="createWindow" class="editor-hidden">
       <div id="mapEditor">
-        <div id="controlPanel" class="bg-light">
-          <div id="editorToolbar" class="d-flex align-items-center justify-content-between">
-            <button id="loadButton" data-gp-nav class="btn bg-light p-0" title="Back to map list"><i class="fa fa-arrow-left fa-2x" aria-hidden="true"></i></button>
-            <button id="rebuildButton" data-gp-nav class="btn bg-light p-0" title="Wipe map and start over"><i class="fa fa-trash fa-2x" aria-hidden="true"></i></button>
-            <button id="deleteSelectedButton" data-gp-nav class="btn bg-light p-0" title="Delete selected hazard" disabled><i class="fa fa-times fa-2x" aria-hidden="true"></i></button>
-            <button id="rotateButton" data-gp-nav class="btn bg-light p-0" title="Rotate selected hazard 15°"><i class="fa fa-rotate-right fa-2x" aria-hidden="true"></i></button>
-            <button id="mouseButton" data-gp-nav class="btn bg-light p-0" title="Switch to selection cursor"><i class="fa fa-mouse-pointer fa-2x" aria-hidden="true"></i></button>
+        <!-- Top action bar (reflows to a bottom dock on phones). -->
+        <div id="editorTopbar">
+          <div class="ed-bar-group">
+            <button id="loadButton" data-gp-nav class="ed-icon-btn" title="Back to map list"><i class="fa fa-arrow-left" aria-hidden="true"></i></button>
+            <button id="rebuildButton" data-gp-nav class="ed-icon-btn danger" title="Wipe map and start over"><i class="fa fa-trash" aria-hidden="true"></i></button>
           </div>
-          <div id="inputBar" class="mb-3">
-            <div class="h5">
-              Details
-            </div>
-            <hr />
-            <input class="editor-inputs form-control" data-gp-nav type="text" id="author" name="author" placeholder="Author" maxlength="15"></input>
-            <input class="editor-inputs form-control" data-gp-nav type="text" id="name" name="name" placeholder="Map Name" maxlength="15"></input>
-            <input class="editor-inputs form-control" data-gp-nav type="text" id="email" name="email" placeholder="Email" maxlength="50"></input>
+          <div class="ed-bar-divider"></div>
+          <div class="ed-bar-group">
+            <button id="undoButton" data-gp-nav class="ed-icon-btn" title="Undo (Ctrl+Z)" disabled><i class="fa fa-undo" aria-hidden="true"></i></button>
+            <button id="redoButton" data-gp-nav class="ed-icon-btn" title="Redo (Ctrl+Shift+Z)" disabled><i class="fa fa-repeat" aria-hidden="true"></i></button>
           </div>
-          <div class="palette mb-3">
-            <div class="h5">
-              Tiles
-            </div>
-            <hr />
-            <div>
-              <button id="slowTileButton" data-gp-nav style="background-color: #f6d7b0;" title="Sand" class="mapEditorTile"><span>Sand</span></button>
-              <button id="normalTileButton" data-gp-nav style="background-color: #523A28" title="Dirt" class="mapEditorTile"><span>Dirt</span></button>
-              <button id="fastTileButton" data-gp-nav style="background-color: #90ee90" title="Grass" class="mapEditorTile"><span>Grass</span></button>
-              <button id="lavaTileButton" data-gp-nav style="background-color: #cf1020" title="Lava" class="mapEditorTile"><span>Lava</span></button>
-              <button id="iceTileButton" data-gp-nav style="background-color: #A5F2F3" title="Ice" class="mapEditorTile"><span>Ice</span></button>
-              <button id="abilityTileButton" data-gp-nav style="background-color: #C8C8C8" title="Ability" class="mapEditorTile"><span>Ability</span></button>
-              <button id="randomTileButton" data-gp-nav style="background-color: #020DFE" title="Random" class="mapEditorTile"><span>Random</span></button>
-              <button id="goalTileButton" data-gp-nav style="background-color: #FFD700" title="Goal" class="mapEditorTile"><span>Goal</span></button>
-            </div>
+          <div class="ed-bar-divider"></div>
+          <div class="ed-bar-group">
+            <button id="rotateLeftButton" data-gp-nav class="ed-icon-btn" title="Rotate selected hazard -15° (Shift+R)"><i class="fa fa-rotate-left" aria-hidden="true"></i></button>
+            <button id="rotateButton" data-gp-nav class="ed-icon-btn" title="Rotate selected hazard +15° (R)"><i class="fa fa-rotate-right" aria-hidden="true"></i></button>
+            <button id="deleteSelectedButton" data-gp-nav class="ed-icon-btn danger" title="Delete selected hazard (Del)" disabled><i class="fa fa-times" aria-hidden="true"></i></button>
           </div>
-          <div class="palette mb-3">
-            <div class="h5">
-              Hazards
-            </div>
-            <hr />
-            <div>
-              <button id="bumperButton" data-gp-nav style="background-color: orange" title="Bumper" class="mapEditorTile"><span>Bumper</span></button>
-              <button id="movingBumperButton" data-gp-nav style="background-color: orange" title="Moving Bumper" class="mapEditorTile"><span>Moving Bumper</span></button>
+
+          <div class="ed-bar-spacer"></div>
+
+          <div class="ed-bar-group" id="detailsWrap">
+            <button id="detailsToggle" data-gp-nav class="ed-btn" title="Map details"><i class="fa fa-info-circle" aria-hidden="true"></i><span>Details</span></button>
+            <div id="detailsPanel">
+              <div class="ed-section-title">Map details</div>
+              <input class="form-control" data-gp-nav type="text" id="author" name="author" placeholder="Author" maxlength="15">
+              <div class="ed-field-msg" id="authorMsg"></div>
+              <input class="form-control" data-gp-nav type="text" id="name" name="name" placeholder="Map Name" maxlength="15">
+              <div class="ed-field-msg" id="nameMsg"></div>
+              <input class="form-control" data-gp-nav type="text" id="email" name="email" placeholder="Email (for upload)" maxlength="50">
+              <div class="ed-field-msg" id="emailMsg"></div>
             </div>
           </div>
-          <div id="startEdgePalette" class="palette mb-3">
-            <div class="h5">
-              Start edge
+          <div class="ed-bar-group">
+            <button id="enableAIButton" data-gp-nav class="ed-btn" aria-pressed="false"
+              title="Fill the grid with AI racers. Off = a solo, bot-free run of your map."><i class="fa fa-square-o" aria-hidden="true"></i><span>AI racers: off</span></button>
+            <button id="previewButton" data-gp-nav class="ed-btn primary" title="Play-test this map"><span>Preview</span><i class="fa fa-play" aria-hidden="true"></i></button>
+            <button id="exportButton" data-gp-nav class="ed-btn" title="Copy map JSON to clipboard"><i class="fa fa-clipboard" aria-hidden="true"></i><span>Copy</span></button>
+            <button id="submitButton" data-gp-nav class="ed-btn" title="Submit this map via GitHub"><i class="fa fa-cloud-upload" aria-hidden="true"></i><span>Upload</span></button>
+          </div>
+        </div>
+
+        <!-- Left tool rail (reflows to a horizontal dock on phones). -->
+        <div id="toolRail">
+          <div class="ed-section">
+            <div class="ed-section-title">Tools</div>
+            <div class="ed-tool-grid">
+              <button id="selectToolButton" data-gp-nav class="ed-tool" title="Select / move (S)"><i class="fa fa-mouse-pointer" aria-hidden="true"></i><span>Select</span></button>
+              <button id="eraserToolButton" data-gp-nav class="ed-tool" title="Erase to dirt (E)"><i class="fa fa-eraser" aria-hidden="true"></i><span>Eraser</span></button>
             </div>
-            <hr />
-            <div>
+          </div>
+          <div class="ed-section">
+            <div class="ed-section-title">Tiles</div>
+            <div class="ed-tool-grid">
+              <button id="slowTileButton" data-gp-nav style="background-color: #f6d7b0;" title="Sand (1)" class="mapEditorTile"><span>Sand</span></button>
+              <button id="normalTileButton" data-gp-nav style="background-color: #523A28" title="Dirt (2)" class="mapEditorTile"><span>Dirt</span></button>
+              <button id="fastTileButton" data-gp-nav style="background-color: #90ee90" title="Grass (3)" class="mapEditorTile"><span>Grass</span></button>
+              <button id="lavaTileButton" data-gp-nav style="background-color: #cf1020" title="Lava (4)" class="mapEditorTile"><span>Lava</span></button>
+              <button id="iceTileButton" data-gp-nav style="background-color: #A5F2F3" title="Ice (5)" class="mapEditorTile"><span>Ice</span></button>
+              <button id="abilityTileButton" data-gp-nav style="background-color: #C8C8C8" title="Ability (6)" class="mapEditorTile"><span>Ability</span></button>
+              <button id="randomTileButton" data-gp-nav style="background-color: #020DFE" title="Random (7)" class="mapEditorTile"><span>Random</span></button>
+              <button id="goalTileButton" data-gp-nav style="background-color: #FFD700" title="Goal (8)" class="mapEditorTile"><span>Goal</span></button>
+            </div>
+          </div>
+          <div class="ed-section">
+            <div class="ed-section-title">Hazards</div>
+            <div class="ed-tool-grid">
+              <button id="bumperButton" data-gp-nav style="background-color: orange" title="Bumper (B)" class="mapEditorTile"><span>Bumper</span></button>
+              <button id="movingBumperButton" data-gp-nav style="background-color: orange" title="Moving Bumper (M)" class="mapEditorTile"><span>Moving</span></button>
+            </div>
+          </div>
+          <div id="startEdgePalette" class="ed-section">
+            <div class="ed-section-title">Start edge</div>
+            <div class="ed-tool-grid">
               <button data-edges="left" data-gp-nav class="mapEditorTile startEdgeButton"><span>Left</span></button>
               <button data-edges="right" data-gp-nav class="mapEditorTile startEdgeButton"><span>Right</span></button>
               <button data-edges="top" data-gp-nav class="mapEditorTile startEdgeButton"><span>Top</span></button>
               <button data-edges="bottom" data-gp-nav class="mapEditorTile startEdgeButton"><span>Bottom</span></button>
-              <button data-edges="left+right" data-gp-nav class="mapEditorTile startEdgeButton"><span>Left + Right</span></button>
-              <button data-edges="top+bottom" data-gp-nav class="mapEditorTile startEdgeButton"><span>Top + Bottom</span></button>
+              <button data-edges="left+right" data-gp-nav class="mapEditorTile startEdgeButton"><span>L + R</span></button>
+              <button data-edges="top+bottom" data-gp-nav class="mapEditorTile startEdgeButton"><span>T + B</span></button>
             </div>
           </div>
-          <div id="actionsSection">
-            <div class="h5">
-              Actions
+        </div>
+
+        <main>
+          <div id="canvasWindow"><canvas id="createCanvas" width="1366" height="768"></canvas></div>
+          <!-- Floating status toasts; create.js shows/hides each as needed. -->
+          <div id="editorStatus">
+            <button id="previewStatus" class="btn" disabled style="display:none;"><span></span></button>
+            <button id="exportStatus" class="btn" disabled style="display:none;"><span></span></button>
+            <button id="submitStatus" class="btn" disabled style="display:none;"><span>Submitting..</span></button>
+          </div>
+        </main>
+
+        <!-- Controller-friendly confirm dialog (replaces native confirm(), which a
+             gamepad can't operate). Shares the leave-game modal's .confirm-* styling
+             (see styles.css). The editor gamepad traps focus to these buttons while
+             the modal is open. -->
+        <div id="wipeConfirmModal" class="confirm-modal hidden">
+          <div class="confirm-dialog">
+            <div class="confirm-title" id="wipeConfirmMessage">Are you sure?</div>
+            <div class="confirm-buttons">
+              <button type="button" id="wipeConfirmYes" class="confirm-btn confirm-leave">Delete</button>
+              <button type="button" id="wipeConfirmCancel" class="confirm-btn confirm-cancel">Cancel</button>
             </div>
-            <hr />
-            <button id="enableAIButton" data-gp-nav class="btn btn-block" aria-pressed="false"
-              title="Fill the grid with AI racers. Off = a solo, bot-free run of your map."><i class="fa fa-square-o mr-2" aria-hidden="true"></i><span>AI racers: off</span></button>
-            <button id="previewButton" data-gp-nav class="btn btn-block">Preview / Playtest<i class="fa fa-play ml-2" aria-hidden="true"></i></button>
-            <button id="previewStatus" class="btn btn-block" disabled style="display:none;"><span></span></button>
-            <button id="exportButton" data-gp-nav class="btn btn-block">Copy to Clipboard<i class="fa fa-clipboard ml-2" aria-hidden="true"></i></button>
-            <button id="exportStatus" class="btn btn-block" disabled style="display:none;"><span></span></button>
-            <button id="submitButton" data-gp-nav class="btn btn-block">Upload to Github<i class="fa fa-cloud-upload ml-2"></i></button>
-            <button id="submitStatus" class="btn btn-block" disabled style="display:none;"><span>Submitting..</span></button>
           </div>
         </div>
       </div>
-      <main>
-        <div id="canvasWindow"><canvas id="createCanvas" width="1366" height="768"></canvas></div>
-      </main>
-      <!-- Controller-friendly confirm dialog (replaces native confirm(), which a
-           gamepad can't operate). Shares the leave-game modal's .confirm-* styling
-           (see styles.css). The editor gamepad traps focus to these buttons while
-           the modal is open. -->
-      <div id="wipeConfirmModal" class="confirm-modal hidden">
-        <div class="confirm-dialog">
-          <div class="confirm-title" id="wipeConfirmMessage">Are you sure?</div>
-          <div class="confirm-buttons">
-            <button type="button" id="wipeConfirmYes" class="confirm-btn confirm-leave">Delete</button>
-            <button type="button" id="wipeConfirmCancel" class="confirm-btn confirm-cancel">Cancel</button>
-          </div>
-        </div>
-      </div>
-    </div>
     </div>
     <div id="loadWindow">
-      <div class="map-image">
+      <div id="mapListHeader">
+        <div class="map-search">
+          <i class="fa fa-search" aria-hidden="true"></i>
+          <input id="mapSearch" data-gp-nav type="text" placeholder="Search maps by name or author…" autocomplete="off">
+          <button id="mapSearchClear" data-gp-nav title="Clear search">&times;</button>
+        </div>
+      </div>
+      <div class="map-image" data-keep="1">
         <button id="createNew" data-gp-nav><img id="createNewImage" src="">
           <div class="desc">Create a new map</div>
         </button>
@@ -382,6 +663,7 @@
   <!-- BUILD: bundle-start -->
   <script src="scripts/rhill-voronoi-core.js"></script>
   <script src="scripts/create.js"></script>
+  <script src="scripts/editorTools.js"></script>
   <script src="scripts/osk.js"></script>
   <script src="scripts/editorGamepad.js"></script>
   <script src="scripts/utils.js"></script>
