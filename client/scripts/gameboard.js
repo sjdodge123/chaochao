@@ -157,7 +157,19 @@ function resetTrails() {
 	}
 }
 
+// Trail vertices are sampled at ~30Hz regardless of render rate. Motion smoothing
+// (smoothEntities) now nudges x/y every frame, so without this gate the trail
+// would record at 60fps — doubling the stroke/memory work on desktop and halving
+// the kept-tail duration of the direct-trail cap on Low. 30Hz matches the server
+// tick (the cadence the trail recorded at before smoothing existed).
+var TRAIL_SAMPLE_MS = 33;
+var lastTrailSampleAt = 0;
 function updateTrails() {
+	var now = Date.now();
+	if (now - lastTrailSampleAt < TRAIL_SAMPLE_MS) {
+		return;
+	}
+	lastTrailSampleAt = now;
 	for (var id in playerList) {
 		var player = playerList[id];
 		if (player.alive == false || player.infected == true) {
@@ -970,7 +982,12 @@ function addEffect(effect) {
 		while (ei < effectsList.length && effectsList[ei].keep) {
 			ei++;
 		}
-		effectsList.splice(ei < effectsList.length ? ei : 0, 1);
+		// Evict the oldest non-keep effect. If EVERY live effect is a telegraph,
+		// let the list exceed the cap rather than dropping one — telegraphs are
+		// few and short-lived, so "keep" truly means never evicted.
+		if (ei < effectsList.length) {
+			effectsList.splice(ei, 1);
+		}
 	}
 	effectsList.push(effect);
 	return effect;

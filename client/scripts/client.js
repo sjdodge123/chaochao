@@ -306,8 +306,11 @@ function registerScoreHandlers(server) {
 			// Remember where/when they fell: a dead local player can press attack
 			// to ping every dead player's spot, and the floating skull fades from
 			// deathAt — see updateDeathPings()/drawDeathMessage() in draw.js.
-			playerList[id].deathX = playerList[id].x;
-			playerList[id].deathY = playerList[id].y;
+			// Use the authoritative server position (tx/ty), not the eased render
+			// position (x/y), so the death skull/ping lands where the kart actually
+			// died (x/y lags by ~tau, noticeable for a fast death into lava).
+			playerList[id].deathX = (playerList[id].tx != null) ? playerList[id].tx : playerList[id].x;
+			playerList[id].deathY = (playerList[id].ty != null) ? playerList[id].ty : playerList[id].y;
 			playerList[id].deathAt = Date.now();
 		}
 		recapMarkHighlight('death', [id]); // flag an elimination moment for the recap

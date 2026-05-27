@@ -240,7 +240,13 @@ function keyUp(evt) {
 
 function determineMovement() {
     if (playerList[myID] != null) {
-        var curAngle = angle(playerList[myID].x, playerList[myID].y, mousex, mousey);
+        // Aim from the AUTHORITATIVE server position (the smoothing target), not the
+        // eased render position (x/y), which lags by ~tau — otherwise mouse-drive
+        // direction is computed from a stale spot and can pick the wrong cone.
+        var mp = playerList[myID];
+        var ax = (mp.tx != null) ? mp.tx : mp.x;
+        var ay = (mp.ty != null) ? mp.ty : mp.y;
+        var curAngle = angle(ax, ay, mousex, mousey);
         var rightCone = (curAngle >= 330 || curAngle <= 30);
         var rfwdCone = (curAngle >= 300 && curAngle <= 330);
         var forwardCone = (curAngle >= 240 && curAngle <= 300);
