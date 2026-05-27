@@ -106,7 +106,15 @@ function audiencePopulated() {
 // frame budget, and a near-16:9 fullscreen phone has little/no letterbox anyway.
 // isTouchScreen is the game's shared touch/coarse-pointer flag (input.js).
 function audienceDisabled() {
-    return (typeof isTouchScreen !== "undefined" && isTouchScreen === true);
+    if (typeof isTouchScreen !== "undefined" && isTouchScreen === true) {
+        return true;
+    }
+    // Low-end performance profiles drop the crowd to reclaim its frame budget
+    // (e.g. a small desktop window that auto-resolved to LOW).
+    if (typeof perfAudienceAllowed === "function" && !perfAudienceAllowed()) {
+        return true;
+    }
+    return false;
 }
 
 // Pre-render the fan sprites once: every palette colour x depth bucket x

@@ -389,11 +389,22 @@ function animloop() {
     }
 }
 function gameLoop(dt) {
+    // performance.now() splits the frame into input / render / rest phases for the
+    // perf diagnostics. Four now() calls/frame is negligible; the tick helpers
+    // below no-op unless ?fps=1 / ?diag=1 is set, so normal play is unaffected.
+    var t0 = performance.now();
     pollGamepad(dt);
+    var t1 = performance.now();
     drawObjects(dt);
+    var t2 = performance.now();
     updateGameboard(dt);
     // Crowd in the letterbox (own canvas; no-op until audience.js is loaded).
     if (typeof drawAudience === "function") { drawAudience(dt); }
+    var t3 = performance.now();
+    // Diagnostic FPS/frame-time overlay (only when ?fps=1; no-op otherwise).
+    if (typeof perfHudTick === "function") { perfHudTick(dt); }
+    // Diagnostic perf telemetry to the server (only when ?diag=1; no-op otherwise).
+    if (typeof perfDiagTick === "function") { perfDiagTick(dt, t1 - t0, t2 - t1, t3 - t2); }
 }
 
 
@@ -430,11 +441,13 @@ function resize() {
     overlayCanvas.style.height = newHeight + "px";
 
     // Backing store: render at device resolution so the game (and its text) is
-    // sharp on Retina/phone displays. Cap dpr at 2 to avoid over-rendering on
-    // 3x phones. The logical 1366x768 space is unchanged; applyCanvasTransform()
-    // scales drawing into the backing store each frame, so no gameplay math
-    // moves to device pixels.
-    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    // sharp on Retina/phone displays. The dpr ceiling avoids over-rendering on
+    // 3x phones; the active performance profile can drop it further on low-end
+    // devices (perfDprCap, default 2). The logical 1366x768 space is unchanged;
+    // applyCanvasTransform() scales drawing into the backing store each frame, so
+    // no gameplay math moves to device pixels.
+    var dprCap = (typeof perfDprCap === "function") ? perfDprCap() : 2;
+    var dpr = Math.min(window.devicePixelRatio || 1, dprCap);
     gameCanvas.width = Math.round(newWidth * dpr);
     gameCanvas.height = Math.round(newHeight * dpr);
     overlayCanvas.width = Math.round(newWidth * dpr);

@@ -890,6 +890,24 @@ function addEffect(effect) {
 	if (effect.maxAge == null) {
 		effect.maxAge = 300;
 	}
+	// Bound the live effect list per the performance profile. At the cap, an
+	// ordinary cosmetic effect is simply DROPPED (O(1), no array churn / GC) —
+	// the cheap path, since this runs hardest on the low-end device the cap is
+	// for. A gameplay telegraph (tagged `keep` — death ping, brutal-round flash)
+	// is always admitted, making room by evicting the oldest non-keep effect, so
+	// a flood of cosmetic FX can never crowd out something the player must see.
+	// The safe default is evictable: a new cosmetic spawner needs no flag.
+	// HIGH's cap is effectively unbounded, so this never trims on desktop.
+	if (typeof perfMaxEffects === "function" && effectsList.length >= perfMaxEffects()) {
+		if (!effect.keep) {
+			return null;
+		}
+		var ei = 0;
+		while (ei < effectsList.length && effectsList[ei].keep) {
+			ei++;
+		}
+		effectsList.splice(ei < effectsList.length ? ei : 0, 1);
+	}
 	effectsList.push(effect);
 	return effect;
 }
@@ -1029,7 +1047,7 @@ function tileIdAt(x, y) {
 // `count` flecks kicked up behind a moving player, coloured by the terrain and
 // scattered a little so they read as a puff rather than a single dot.
 function spawnTerrainParticle(p, color, minSize, count) {
-	count = count || 1;
+	count = (typeof perfCount === "function") ? perfCount(count || 1) : (count || 1);
 	var dir = Math.atan2(p.velY, p.velX);
 	for (var i = 0; i < count; i++) {
 		var bx = p.x - Math.cos(dir) * p.radius + (Math.random() * 2 - 1) * p.radius * 0.5;
@@ -1078,7 +1096,8 @@ function spawnIceTrail(p) {
 // direction of travel, coloured by the terrain underfoot.
 function spawnSkid(p, color) {
 	var dir = Math.atan2(p.prevVelY, p.prevVelX);
-	for (var i = 0; i < 4; i++) {
+	var n = (typeof perfCount === "function") ? perfCount(4) : 4;
+	for (var i = 0; i < n; i++) {
 		var spread = (Math.random() * 2 - 1) * 0.04;
 		var vx = Math.cos(dir) * 0.02 + Math.cos(dir + Math.PI / 2) * spread;
 		var vy = Math.sin(dir) * 0.02 + Math.sin(dir + Math.PI / 2) * spread;
@@ -1090,6 +1109,9 @@ function updateMovementParticles(dt) {
 	if (config == null) {
 		return;
 	}
+	// Spawn-cooldown helper: the performance profile stretches the gaps between
+	// particle bursts (>1x => rarer) so a low-end device emits fewer over time.
+	var cd = (typeof perfCooldown === "function") ? perfCooldown : function (ms) { return ms; };
 	var maxSpeed = config.playerMaxSpeed;
 	var fastThresh = maxSpeed * 0.55;
 	var walkThresh = maxSpeed * 0.08;
@@ -1114,7 +1136,7 @@ function updateMovementParticles(dt) {
 				var dot = (p.velX * p.prevVelX + p.velY * p.prevVelY) / (speed * prevSpeed);
 				if (dot < 0.6) {
 					spawnSkid(p, terrainParticleColor(tileIdAt(p.x, p.y)));
-					p.skidCD = 140;
+					p.skidCD = cd(140);
 				}
 			}
 		}
@@ -1127,31 +1149,32 @@ function updateMovementParticles(dt) {
 				// Skate trails only when actually gliding fast across the ice.
 				if (speed > fastThresh) {
 					spawnIceTrail(p);
-					p.dustCD = 40;
+					p.dustCD = cd(40);
 				} else {
-					p.dustCD = 60;
+					p.dustCD = cd(60);
 				}
 			} else if (tile == config.tileMap.fast.id) {
 				// Grass dialed back ~20% (smaller flecks) — it read a touch strong.
 				spawnTerrainParticle(p, grassColor(), 1.8, 2);
-				p.dustCD = speed > fastThresh ? 45 : 70;
+				p.dustCD = cd(speed > fastThresh ? 45 : 70);
 			} else if (tile == config.tileMap.slow.id) {
 				spawnTerrainParticle(p, sandColor(), 3, 2);
-				p.dustCD = speed > fastThresh ? 45 : 70;
+				p.dustCD = cd(speed > fastThresh ? 45 : 70);
 			} else if (speed > fastThresh) {
 				spawnTerrainParticle(p, dustColor(), 2.5, 2);
-				p.dustCD = 50;
+				p.dustCD = cd(50);
 			} else {
 				// Bare dirt at a walk: nothing to emit; recheck shortly (keeps the
 				// per-frame nearest-cell lookup throttled).
-				p.dustCD = 60;
+				p.dustCD = cd(60);
 			}
 		}
 
-		// Burning -> rising embers.
-		if (p.onFire > 0 && p.emberCD <= 0) {
+		// Burning -> rising embers. Shed entirely on low-end profiles (the flame
+		// sprite still draws, so a burning kart still reads).
+		if (p.onFire > 0 && p.emberCD <= 0 && (typeof perfEmbers !== "function" || perfEmbers())) {
 			spawnEmber(p.x + (Math.random() * 2 - 1) * p.radius, p.y + (Math.random() * 2 - 1) * p.radius);
-			p.emberCD = 70;
+			p.emberCD = cd(70);
 		}
 
 		p.prevVelX = p.velX;
@@ -1222,7 +1245,9 @@ class Trail {
 	}
 	_applyStrokeStyle(color, dashed) {
 		this.ctx.lineWidth = dashed ? 6 : 5;
-		this.ctx.shadowBlur = 3;
+		// shadowBlur on every trail segment is a per-frame fill cost; drop it on
+		// profiles that disable glow (the trail still reads as a solid stroke).
+		this.ctx.shadowBlur = (typeof perfGlow === "function" && !perfGlow()) ? 0 : 3;
 		this.ctx.shadowColor = "black";
 		this.ctx.strokeStyle = color;
 		this.ctx.setLineDash(dashed ? [20, 3, 3, 3, 3, 3, 3, 3] : []);
@@ -1263,6 +1288,22 @@ class Trail {
 				}
 				this._redrawAll(player.color, nvStill);
 				this.wasNearVictory = nvStill;
+				this.lastColor = player.color;
+			}
+			return;
+		}
+		// Direct trail mode (low-end profile): keep only a capped recent tail and
+		// let drawTrail stroke it onto the main canvas each frame. Avoids the
+		// per-kart world-sized offscreen canvas whose every-frame mutation forces a
+		// full-texture GPU re-upload — the source of the paint stutter on weak
+		// devices. No _ensureCanvas, no incremental stroke, no growing _redrawAll.
+		if ((typeof perfTrailDirect === "function") && perfTrailDirect()) {
+			var dcap = (typeof perfTrailDirectMax === "function") ? perfTrailDirectMax() : 240;
+			while (this.vertices.length >= dcap) {
+				this.vertices.shift();
+			}
+			this.vertices.push(currentPosition);
+			if (player != null) {
 				this.lastColor = player.color;
 			}
 			return;

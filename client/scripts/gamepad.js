@@ -1025,6 +1025,9 @@ function settingsRowDefs() {
         { id: "musicControl",      icon: "fas fa-music",  label: "Music",          on: function () { return typeof musicVolume !== "undefined" && musicVolume > 0; } },
         { id: "cameraControl",     icon: "fas fa-video",  label: "Dynamic camera", on: function () { return typeof cameraZoomEnabled !== "undefined" && cameraZoomEnabled; } },
         { id: "colorblindControl", icon: "fas fa-eye",    label: "Colour-blind",   on: function () { return typeof colorblindEnabled !== "undefined" && colorblindEnabled; } },
+        // Graphics detail cycles auto/high/balanced/low via the navbar
+        // #performanceControl (perf.js). `value` shows the current tier, like Theme.
+        { id: "performanceControl", icon: "fas fa-bolt",  label: "Graphics detail", value: function () { return (typeof perfProfileLabel === "function") ? perfProfileLabel() : "Auto"; } },
         // Theme is tri-state (auto/light/dark) — A cycles it via theme.js's injected
         // #themeToggle. `value` (vs `on`) makes the row show the mode instead of On/Off.
         { id: "themeToggle",       icon: "fas fa-adjust", label: "Theme",          value: function () { return themePrefLabel(); } }
