@@ -7,6 +7,7 @@ var c = utils.loadConfig();
 c.colorPalette = utils.getColorPalette();
 var compressor = require('./compressor.js');
 var debug = require('./debug.js');
+var mapFormat = require('./mapFormat.js');
 var mailBoxList = {},
 	identityList = {},
 	roomMailList = {},
@@ -150,6 +151,14 @@ function checkForMail(client) {
 			client.emit("githubFailure", "Map is missing required info (name, author).");
 			return;
 		}
+		// Rebuild full geometry if the client sent the compact sites-only form, so
+		// validateMap (and submitPullRequest's reduction) see a full map either way.
+		try {
+			vMap = mapFormat.hydrate(vMap);
+		} catch (e) {
+			client.emit("githubFailure", "Map geometry could not be reconstructed.");
+			return;
+		}
 		// Structural validation at the trust boundary — the same check the
 		// preview path runs — so a crafted, non-map payload can never reach the
 		// GitHub API (and the server's credentials) with the submitter's data.
@@ -187,6 +196,15 @@ function checkForMail(client) {
 			(Object.prototype.hasOwnProperty.call(parsed, "map") || Object.prototype.hasOwnProperty.call(parsed, "enableAI"));
 		var previewMap = isWrapper ? parsed.map : parsed;
 		var enableAI = isWrapper && parsed.enableAI === true;
+		// Maps are sites-only now; rebuild full geometry at this trust boundary so a
+		// client may submit either form (the editor sends full geometry, but a raw
+		// committed map is sites-only). validateMap + the engine need cells.
+		try {
+			previewMap = mapFormat.hydrate(previewMap);
+		} catch (e) {
+			client.emit("previewRejected", { reason: "Map geometry could not be reconstructed." });
+			return;
+		}
 		var result = utils.validateMap(previewMap, c);
 		if (!result.valid) {
 			client.emit("previewRejected", { reason: result.reason });
