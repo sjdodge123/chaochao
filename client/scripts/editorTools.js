@@ -65,6 +65,9 @@ function afterHistoryChange() {
     if (typeof dirty !== "undefined") {
         dirty = true;
     }
+    // An empty undo stack means we're back at the map's loaded/created baseline (a
+    // fresh load/new clears history too), so no unsaved edits remain to warn about.
+    if (typeof mapModified !== "undefined") { mapModified = edUndoStack.length > 0; }
     updateUndoRedoButtons();
 }
 
@@ -95,6 +98,12 @@ function handleEditorShortcut(e) {
     // Don't hijack keys while the on-screen keyboard is up or a field has focus.
     if (typeof oskIsOpen === "function" && oskIsOpen()) { return; }
     if (editorTypingTarget(document.activeElement)) { return; }
+    // While the confirm modal is open, the gamepad is trapped to its buttons; the
+    // keyboard must defer too, or a stray key would mutate the map behind the dialog
+    // the user is being asked to confirm (Escape is handled by create.js's own
+    // keydown that closes the modal).
+    var modal = document.getElementById("wipeConfirmModal");
+    if (modal != null && !modal.classList.contains("hidden")) { return; }
     // Shortcuts only make sense on the editing surface, not the map list.
     if (!document.body.classList.contains("editor-open")) { return; }
     if (typeof config === "undefined" || config == null) { return; }
@@ -123,7 +132,7 @@ function handleEditorShortcut(e) {
             editorSelectHazard("movingBumper"); e.preventDefault(); return;
         case "r": case "R":
             editorRotateSelected(e.shiftKey ? -15 : 15); e.preventDefault(); return;
-        case "Delete": case "Backspace":
+        case "Delete":
             editorDeleteSelected(); e.preventDefault(); return;
         case "Escape":
             editorDeselect(); return; // modal Escape is handled separately in create.js
