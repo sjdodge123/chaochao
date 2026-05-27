@@ -14,6 +14,7 @@ const repoRoot = path.join(__dirname, '..', '..');
 const messenger = require(path.join(repoRoot, 'server', 'messenger.js'));
 const game = require(path.join(repoRoot, 'server', 'game.js'));
 const config = require(path.join(repoRoot, 'server', 'config.json'));
+const mapFormat = require(path.join(repoRoot, 'server', 'mapFormat.js'));
 const { Punch } = require(path.join(repoRoot, 'server', 'entities', 'punch.js'));
 
 const RACING = config.stateMap.racing;
@@ -30,7 +31,7 @@ messenger.build(fakeIo);
 function bootRoom() {
     const mapsDir = path.join(repoRoot, 'client', 'maps');
     const file = fs.readdirSync(mapsDir).filter(f => f.endsWith('.json'))[0];
-    const map = JSON.parse(fs.readFileSync(path.join(mapsDir, file), 'utf8'));
+    const map = mapFormat.hydrate(JSON.parse(fs.readFileSync(path.join(mapsDir, file), 'utf8')));
     const sig = 'punch-test-room';
     const room = game.getRoom(sig, 4);
     room.game.gameBoard.isPreview = true;
@@ -239,7 +240,7 @@ try {
     room2.game.gameBoard.isPreview = true;
     const mapsDir2 = path.join(repoRoot, 'client', 'maps');
     const f2 = fs.readdirSync(mapsDir2).filter(f => f.endsWith('.json'))[0];
-    room2.game.gameBoard.previewMap = JSON.parse(fs.readFileSync(path.join(mapsDir2, f2), 'utf8'));
+    room2.game.gameBoard.previewMap = mapFormat.hydrate(JSON.parse(fs.readFileSync(path.join(mapsDir2, f2), 'utf8')));
     for (let i = 0; i < 2; i++) {
         const bid = sig2 + '-bot' + i;
         const bot = room2.world.createNewBot(bid, { id: 'tester' + i, name: 'T' + i, title: '', aggression: 0.9, skill: 0.8, tempo: 0.5, risk: 0.4, focus: 'combat' });

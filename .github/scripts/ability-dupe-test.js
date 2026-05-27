@@ -32,6 +32,7 @@ const repoRoot = path.join(__dirname, '..', '..');
 const game = require(path.join(repoRoot, 'server', 'game.js'));
 const _engine = require(path.join(repoRoot, 'server', 'engine.js'));
 const config = require(path.join(repoRoot, 'server', 'config.json'));
+const mapFormat = require(path.join(repoRoot, 'server', 'mapFormat.js'));
 
 const DT = config.serverTickSpeed / 1000;
 const NORMAL = config.tileMap.normal.id;
@@ -63,7 +64,7 @@ require(path.join(repoRoot, 'server', 'messenger.js')).build({
 // interior cell to turn into an ability tile.
 const sampleMapFile = fs.readdirSync(path.join(repoRoot, 'client', 'maps'))
     .filter(f => f.endsWith('.json') && !f.startsWith('_'))[0];
-const baseMap = JSON.parse(fs.readFileSync(path.join(repoRoot, 'client', 'maps', sampleMapFile), 'utf8'));
+const baseMap = mapFormat.hydrate(JSON.parse(fs.readFileSync(path.join(repoRoot, 'client', 'maps', sampleMapFile), 'utf8')));
 
 // The cell whose site sits nearest world-center: interior (away from gates/edges),
 // so two players parked on its site reliably resolve to it.

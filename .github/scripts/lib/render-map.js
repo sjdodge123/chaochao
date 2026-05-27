@@ -2,12 +2,10 @@
 
 // Dependency-free server-side renderer for a submitted map.
 //
-// Why this exists: the map editor embeds a client-captured `thumbnail` JPEG in
-// every submission, but that image is *client-supplied* — a crafted POST could
-// pair an innocent thumbnail with cells that actually spell something obscene.
-// This module redraws the map from the AUTHORITATIVE painted `cells` + the tile
-// colours in config.json, so the reviewer sees exactly what will play. A
-// mismatch between this render and the embedded thumbnail is itself a red flag.
+// Why this exists: maps ship as voronoi sites only (no client-supplied image),
+// so the review CI rebuilds the full geometry and redraws the map from the
+// AUTHORITATIVE painted `cells` + the tile colours in config.json. The reviewer
+// sees exactly what will play and can eyeball it for inappropriate imagery.
 //
 // It is intentionally zero-dependency (Node's built-in `zlib` only): the PR
 // validation CI is kept dependency-light on purpose (see pr-validation.yml), and

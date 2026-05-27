@@ -103,4 +103,10 @@ function reconstruct(sitesMap) {
     return carryMeta(diagram, sitesMap);
 }
 
-module.exports = { isSitesOnly: isSitesOnly, reconstruct: reconstruct, toSitesOnly: toSitesOnly, deriveBbox: deriveBbox };
+// Convenience for code that reads a map file and needs full geometry regardless
+// of which format it's in: reconstruct a sites-only map, pass a full map through.
+function hydrate(map) {
+    return isSitesOnly(map) ? reconstruct(map) : map;
+}
+
+module.exports = { isSitesOnly: isSitesOnly, reconstruct: reconstruct, toSitesOnly: toSitesOnly, deriveBbox: deriveBbox, hydrate: hydrate };

@@ -27,6 +27,7 @@ const messenger = require(path.join(repoRoot, 'server', 'messenger.js'));
 const hostess = require(path.join(repoRoot, 'server', 'hostess.js'));
 const compressor = require(path.join(repoRoot, 'server', 'compressor.js'));
 const config = require(path.join(repoRoot, 'server', 'config.json'));
+const mapFormat = require(path.join(repoRoot, 'server', 'mapFormat.js'));
 
 const DT = config.serverTickSpeed / 1000;
 const MOVES = ['moveForward', 'moveBackward', 'turnLeft', 'turnRight', 'attack'];
@@ -97,7 +98,7 @@ function countPlayers(room) {
 function loadAMap() {
     const mapsDir = path.join(repoRoot, 'client', 'maps');
     const files = fs.readdirSync(mapsDir).filter(f => f.endsWith('.json'));
-    return JSON.parse(fs.readFileSync(path.join(mapsDir, files[0]), 'utf8'));
+    return mapFormat.hydrate(JSON.parse(fs.readFileSync(path.join(mapsDir, files[0]), 'utf8')));
 }
 
 // Create a preview room through the REAL messenger handler, then join one human.
