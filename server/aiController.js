@@ -48,7 +48,8 @@ var FEELER_BOXED_NEAR = 0.6;    // both-sides "boxed in" brakes only when lava i
 // farther ahead on ice (and allow more samples + a bigger cap so the long ray still
 // catches lava) so the perpendicular push starts curving the slide while there's room.
 var ICE_FEELER_MULT = 2.6;      // feeler reach/cap multiplier while on ice
-var ICE_FEELER_SAMPLES = 16;    // more ray samples on ice so the longer feeler doesn't step over lava
+var ICE_FEELER_SAMPLES = 24;    // ray samples on ice: keep ~13px spacing (=FEELER_STEP) over the
+                                // ~2.6x-longer feeler so a thin lava finger isn't stepped over
 // Pre-ice speed control: a kart can only brake on a GRIPPY tile (ice brake is 0.0001),
 // so the time to bleed speed for the ice is BEFORE crossing onto it. When grippy and ice
 // is imminent dead ahead, brake down to a controllable entry speed so the weak ice-steering
@@ -911,7 +912,10 @@ function steerBot(bot, ctx, dt) {
         // Final ladder rung: stuck (no real headway) past BEELINE_AFTER_MS regardless of
         // the soft/committed escape — it's sealed in. The steer below abandons the path
         // and beelines the nearest goal with avoidance off (thread out, or die clearing it).
-        beelining = (nowProbe - ai.headwayAt) >= BEELINE_AFTER_MS;
+        // Not during a collapse — there the no-path branch already flees toward the safe
+        // center (collapseLoc), which beats charging a goal tile with lava avoidance off
+        // into the advancing collapse front.
+        beelining = !ctx.collapsing && (nowProbe - ai.headwayAt) >= BEELINE_AFTER_MS;
     }
 
     // --- Re-path on a throttle (and immediately if we have no path) ---
@@ -995,10 +999,9 @@ function steerBot(bot, ctx, dt) {
         // No path AND stuck for BEELINE_AFTER_MS: it's sealed off (the goal is lava-walled
         // from here and a re-path will keep returning null). Don't keep holding — that's
         // exactly the off-terrain corner freeze where the bot never moves and never dies.
-        // Beeline the nearest goal with avoidance off (below) to thread out or die clearing it.
-        var ngz = nearestGoalPoint(bot.x, bot.y, ctx.goalTiles);
-        var gzx = ngz.x - bot.x, gzy = ngz.y - bot.y, gzm = mag(gzx, gzy) || 1;
-        desiredX = gzx / gzm; desiredY = gzy / gzm;
+        // The unconditional beeline override below points `desired` straight at the nearest
+        // goal (with avoidance off) to thread out or die clearing it; just don't fall into
+        // the hold/return branch here.
     } else {
         // No path and not collapsing: hold position (don't drive blindly). A walled
         // bot isn't "stuck at a pinch", so clear any charging escape and re-anchor
