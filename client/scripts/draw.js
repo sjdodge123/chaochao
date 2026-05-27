@@ -2853,7 +2853,10 @@ function drawMap() {
         mapDirty = false;
     }
     if (mapCanvas != null) {
-        gameContext.drawImage(mapCanvas, world.x - mapCanvasPad, world.y - mapCanvasPad);
+        // Stretch the (possibly reduced-resolution) cache back over the full world
+        // region; at scale 1 this is a 1:1 blit (unchanged on High/Balanced).
+        gameContext.drawImage(mapCanvas, world.x - mapCanvasPad, world.y - mapCanvasPad,
+            world.width + mapCanvasPad * 2, world.height + mapCanvasPad * 2);
     }
     if (Object.keys(hazardList).length > 0) {
         for (var id in hazardList) {
@@ -2969,15 +2972,28 @@ function renderMapToCache() {
     if (world == null) {
         return;
     }
+    // The map cache is re-rendered AND re-uploaded to the GPU on every tile change
+    // (ability pickup, bomb, tileSwap, collapse). On low-end GPUs that big-texture
+    // upload is the dominant paint stutter, so render the cache at a reduced
+    // resolution there (perfMapScale < 1) — fewer bytes per upload, slightly softer
+    // terrain. Rebuild from scratch if the scale changed (profile toggled).
+    var scale = (typeof perfMapScale === "function") ? perfMapScale() : 1;
+    if (mapCanvas != null && mapCanvas._mapScale !== scale) {
+        mapCanvas = null;
+    }
     if (mapCanvas == null) {
         mapCanvas = document.createElement("canvas");
-        mapCanvas.width = world.width + mapCanvasPad * 2;
-        mapCanvas.height = world.height + mapCanvasPad * 2;
+        mapCanvas.width = Math.max(1, Math.ceil((world.width + mapCanvasPad * 2) * scale));
+        mapCanvas.height = Math.max(1, Math.ceil((world.height + mapCanvasPad * 2) * scale));
+        mapCanvas._mapScale = scale;
         mapCtx = mapCanvas.getContext("2d");
     } else {
         mapCtx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
     }
     mapCtx.save();
+    if (scale !== 1) {
+        mapCtx.scale(scale, scale);   // render world-coord cells into the smaller texture
+    }
     mapCtx.translate(-world.x + mapCanvasPad, -world.y + mapCanvasPad);
 
     var cells = currentMap.cells;
