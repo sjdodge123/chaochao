@@ -27,8 +27,10 @@
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css" integrity="sha384-MCw98/SFnGE8fJT3GXwEOngsV7Zt27NXFoaoApmYm81iuXoPkFOJwJ8ERdknLPMO" crossorigin="anonymous">
     <link rel="stylesheet" type="text/css" href="css/styles.css">
     <link rel="stylesheet" type="text/css" href="assets/css/all.css">
+    <!-- on-screen keyboard styles, so the search box is typeable with a controller -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/simple-keyboard@3/build/css/index.css">
     <link rel="icon" type="image/svg+xml" href="assets/img/favicon.svg">
-    <title>Chao Chao</title>
+    <title>Chao Chao — Codex</title>
   </head>
   <body>
     <nav class="d-flex align-items-center px-3">
@@ -37,38 +39,41 @@
         color: inherit;" href="./index.html">ChaoChao</a>
       </div>
     </nav>
-    <section>
-      <div id="main">
-        <div class="container d-flex h-100 align-items-center">
-          <div class="row justify-content-center align-self-center mx-auto w-100">
-            <div class="landing-stack">
-              <div class="play-container">
-                <span id="version"><b><!-- VERSION --></b></span>
-                <span id="game-title">Chao Chao</span>
-                <a href="./play.html" id="playButton" data-gp-nav class="btn btn-outline-success w-100 mt-3" onclick="trackEvent('cta_click', { target: 'play' })">Play</a>
-                <a href="./join.html" id="joinButton" data-gp-nav class="btn btn-outline-info w-100 mt-2" onclick="trackEvent('cta_click', { target: 'join' })">Join</a>
-                <a href="./create.html" id="createButton" data-gp-nav class="btn btn-outline-warning w-100 mt-2" onclick="trackEvent('cta_click', { target: 'create' })">Create</a>
-                <a href="./learn.html" id="learnButton" data-gp-nav class="btn btn-outline-primary w-100 mt-2" onclick="trackEvent('cta_click', { target: 'learn' })">Learn</a>
-                <!-- NEWS_BANNER -->
-              </div>
-              <p class="tagline">Slow-paced multiplayer arena racing.</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
 
-    <!-- Load bootstrap -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.3/umd/popper.min.js" integrity="sha384-ZMP7rVo3mIykV+2+9J3UJ46jBk0WLaUAdn689aCwoqbBJiSnjAK/l8WvCWPIPm49" crossorigin="anonymous"></script>
-    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/js/bootstrap.min.js" integrity="sha384-ChfqqxuZUCnJSK3+MXmPNIyE6ZbWh2IMqE241rYiqJxyMiZ6OW/JmZQ5stwEULTy" crossorigin="anonymous"></script>
+    <!-- Codex: full-info card grid of mechanics, tiles, abilities, brutal rounds
+         and medals. Built by scripts/learn.js; each card's live animation by
+         scripts/learnScenes.js. Uses a plain scrolling container (NOT <section>,
+         whose global rule is fixed-height and would clip it). The fixed-navbar
+         offset comes from body { padding-top }. -->
+    <main class="learn-shell">
+      <header class="learn-header">
+        <h1>Codex</h1>
+        <p class="learn-sub">How everything in Chao Chao works — and feels.</p>
+      </header>
+      <!-- Sticky search + category filter. Both are data-gp-nav (controller-
+           reachable); the search input pops the on-screen keyboard when activated
+           by a pad (menuGamepad routes to osk.js). Chips are built by learn.js. -->
+      <div class="learn-toolbar">
+        <input type="search" id="learnSearch" class="learn-search" data-gp-nav
+               placeholder="Search the codex…" aria-label="Search the codex" autocomplete="off">
+        <div class="learn-filters" id="learnFilters" role="group" aria-label="Filter by category"><!-- chips built by learn.js --></div>
+      </div>
+      <!-- Card groups built by learn.js (one .codex-group per category). -->
+      <div class="codex-groups" id="codexGroups"></div>
+    </main>
+
+    <!-- Menu-page script set (same as index/join): controller identity must load
+         before menuGamepad; learn.js builds the [data-gp-nav] entries it walks.
+         osk.js (after the simple-keyboard lib, before menuGamepad) gives the
+         search box pad-driven text entry; it falls back to plain focus if the
+         CDN is blocked. -->
     <script src="scripts/controllerIdentity.js"></script>
+    <script src="scripts/learnScenes.js"></script>
+    <script src="scripts/learn.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/simple-keyboard@3/build/index.js"></script>
+    <script src="scripts/osk.js"></script>
     <script src="scripts/menuGamepad.js"></script>
     <script src="scripts/controllerHeader.js"></script>
     <script src="scripts/theme.js"></script>
-    <!-- Auth: browser-safe Supabase config injected server-side; stripped when disabled. -->
-    <!-- SUPABASE_CONFIG -->
-    <!-- deferred (non-render-blocking); run in order before DOMContentLoaded. -->
-    <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script defer src="scripts/auth.js"></script>
   </body>
 </html>

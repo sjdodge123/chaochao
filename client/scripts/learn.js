@@ -1,0 +1,467 @@
+// ============================================================================
+// learn.js — the Codex / "Learn" page (client-only, no game loop, no socket).
+//
+// LAYOUT: a responsive full-info CARD GRID grouped by category. Each card shows
+// a live in-game animation (drawn by learnScenes.js), an icon + name, and the
+// full plain-English description. A sticky toolbar at the top has a search box
+// and category-filter chips. Chosen over master-detail because it fills the
+// width (no whitespace), needs no modal, and degrades to 1 column on phones.
+//
+// DUAL PURPOSE — keep both in mind when editing:
+//   1. PLAYER REFERENCE: how every mechanic/tile/ability/brutal round/medal
+//      WORKS AND FEELS. Deliberately NO numbers / percentages / durations —
+//      describe the feel ("a short fuse", "skates", "briefly"), never the value.
+//   2. AGENT KNOWLEDGE BASE: the CODEX array is the canonical plain-English
+//      description of what the game does. When you change a mechanic in
+//      server/config.json / game.js / engine.js, update the matching entry here
+//      in the SAME change. (Contract recorded in MEMORY.md → "Learn/Codex page".)
+//
+// SOURCING + GOTCHAS:
+//   • Behaviour confirmed in server/engine.js, game.js, entities/player.js,
+//     achievements.js (medals; note the source typo "Resouceful" → shown
+//     "Resourceful"). Tuning lives in server/config.json.
+//   • PUNCH entry reflects the rework on branch worktree-feat-punch-rework
+//     (momentum + hold-to-charge + stamina ring + overcharge + clashes). If that
+//     changes / doesn't ship, reconcile with live player.js + config punch*.
+//   • Each entry has `anim`: a scene name registered in learnScenes.js. Add a
+//     card → add a SCENES[name] there too. Scenes reuse the REAL game art (kart
+//     disc, fire sprites, bumper disc+ring, terrain PNGs, gold goal).
+//   • Icons: ability/brutal SVGs are BLACK SILHOUETTES → shown on a light chip
+//     (.codex-icon--svg) so they survive dark theme. The bumper head-icon is
+//     drawn procedurally via LearnAnim.staticIcon (matches in-game).
+//   • Only brutal rounds active:true are shown; parked ones (gravity/fiesta/
+//     golden) stay in CODEX with show:false so the knowledge survives.
+//   • Page is socket-free / no config fetch (static, instant, can't error).
+//
+// CONTROLLER / TOUCH:
+//   • Search box + chips + every card carry data-gp-nav; shared menuGamepad.js
+//     does 2D-spatial focus (A=activate, B=back). Cards are focusable so a pad
+//     can scroll the whole grid. osk.js gives pad-driven typing in the search.
+//   • Tap targets (search, chips) are >=44px; see styles.css.
+// ============================================================================
+
+(function () {
+    "use strict";
+
+    var IMG = "assets/img/";
+    function svg(file) { return { kind: "svg", src: IMG + file }; }
+    function tex(file) { return { kind: "texture", src: IMG + file }; }
+    function swatch(color) { return { kind: "swatch", color: color }; }
+    function emoji(glyph) { return { kind: "emoji", glyph: glyph }; }
+    function art(name) { return { kind: "art", art: name }; }   // procedural in-game art
+
+    // ------------------------------------------------------------------------
+    // THE CODEX. `blurb` = short line (also fuels search). `detail` = full prose
+    // (string or array of paragraphs) shown on the card. `anim` = scene name in
+    // learnScenes.js. `id` must be unique (used for the deep-link hash).
+    // ------------------------------------------------------------------------
+    var CODEX = [
+        {
+            id: "basics",
+            label: "Basics",
+            entries: [
+                {
+                    id: "winning", name: "Winning a Match", icon: swatch("#FFD700"), anim: "goalRun",
+                    blurb: "Reach the goal to score — first to enough wins.",
+                    detail: [
+                        "Every round is a dash to the glowing goal zone. Cross into it and you bank a notch — your tally of round wins. String enough notches together before anyone else and you take the whole match.",
+                        "The more racers in the room, the fewer notches it takes, so a packed lobby crowns a champion faster than a quiet one. And being the one everybody's chasing is dangerous: fall just short of the win and rivals will gun for you, hungry to knock the leader down a peg."
+                    ]
+                },
+                {
+                    id: "collapse", name: "The Collapse", icon: tex("lava.png"), anim: "collapse",
+                    blurb: "The floor turns to lava and squeezes everyone inward.",
+                    detail: [
+                        "Once the front-runners are home, the arena starts turning to lava from the edges inward, shrinking the safe ground and herding everyone toward the middle. Linger too long and you'll be swimming in fire.",
+                        "It's the game's clock — it guarantees every round ends and turns the final moments into a frantic scramble for solid footing. When a single racer is all that's left, the lava eases up to give them a fair shot at the goal."
+                    ]
+                },
+                {
+                    id: "punching", name: "Punching", icon: emoji("👊"), anim: "punch",
+                    blurb: "Timing and positioning, not mashing.",
+                    detail: [
+                        "Punching is about how you commit, not how fast you tap. A standing tap barely nudges someone; driving into them at full speed lands a real shove — your punch hits as hard as the speed you carry into it. A glow in front of your kart previews how hard you'd connect right now.",
+                        "Hold the button to wind up a heavier hit: a fist rears back in front of you and your view rumbles. Everyone can see the haymaker coming, so a big one can be dodged or beaten to the punch. Hold too long, though, and you overcharge and fizzle — left winded and sluggish with nothing to show for it.",
+                        "Every punch draws from a stamina ring around your kart. Spam it and you run dry, then have to recover before you can swing again, so mashing no longer pays off. And punches clash: swing back into an incoming fist at the right moment and an even match sends both of you flying — but a clearly stronger punch bowls straight through a weak one, so over-committing a charge can backfire spectacularly."
+                    ]
+                },
+                {
+                    id: "fire", name: "Fire & Killstreaks", icon: tex("redFire.png"), anim: "fire",
+                    blurb: "Kills set you ablaze and hit harder.",
+                    detail: [
+                        "Knock a rival into the lava and you catch fire — flames trail your kart and your hits land meaner. Keep the kills coming without cooling off and the whole arena hears about it: a Killing Spree, then a Rampage, then truly Godlike.",
+                        "Fire makes you faster and deadlier, but the flames paint a target on your back — every burning streak invites someone to put you out."
+                    ]
+                },
+                {
+                    id: "pickups", name: "Ability Pickups", icon: svg("toolbox-solid.svg"), anim: "pickup",
+                    blurb: "Roll over a pad to pocket a single-use power.",
+                    detail: [
+                        "Some maps scatter ability pads around the track. Roll over one and you pocket a single-use power — anything from a lobbed bomb to a blinding fog to a swap of places with a rival.",
+                        "You hold one at a time, so grabbing a new pad means committing to what you're carrying. Save it for the perfect moment, or burn it to bail yourself out of trouble. A pad goes quiet for a bit after someone takes it, then re-arms."
+                    ]
+                }
+            ]
+        },
+        {
+            id: "terrain",
+            label: "Terrain",
+            entries: [
+                { id: "tile-normal", name: "Normal Ground", icon: tex("dirt.png"), anim: "terrainNormal",
+                  blurb: "The default footing — your baseline.",
+                  detail: "Plain dirt with predictable grip and steady acceleration. This is the feel every other surface is measured against — nothing surprising, just honest traction." },
+                { id: "tile-fast", name: "Fast Ground", icon: tex("grass.png"), anim: "terrainFast",
+                  blurb: "Slick and speedy — easy to overshoot.",
+                  detail: "Grass that lets you accelerate harder and carry more speed. Brilliant for overtakes and breakaways, but all that pace makes it easy to blow straight past a tight turn." },
+                { id: "tile-slow", name: "Slow Ground", icon: tex("sand.png"), anim: "terrainSlow",
+                  blurb: "Draggy sand that saps your momentum.",
+                  detail: "Sand grabs at your wheels and bleeds off speed the moment you touch it. Plowing through a patch costs you, so it's often worth the longer line around it." },
+                { id: "tile-ice", name: "Ice", icon: tex("ice.png"), anim: "terrainIce",
+                  blurb: "Almost no grip — you keep sliding.",
+                  detail: "Ice barely bites. You keep gliding long after you ease off, steering only suggests where you'd like to go, and any shove sends you skating helplessly. It turns precise driving into a guessing game." },
+                { id: "tile-lava", name: "Lava", icon: tex("lava.png"), anim: "lavaBurn",
+                  blurb: "Touch it and you burn out of the round.",
+                  detail: "A fiery dunk and you're done — burned out and respawned, out of the round. The collapse turns the whole arena into this, and a well-aimed punch can post a rival straight into it." },
+                { id: "tile-goal", name: "Goal", icon: swatch("#FFCB30"), anim: "goalRun",
+                  blurb: "Reach it to bank a notch.",
+                  detail: "The finish zone, glowing gold. Reaching it banks you a notch toward the match win. It's the one tile everyone is racing toward, every single round." },
+                { id: "tile-ability", name: "Ability Pad", icon: swatch("#C8C8C8"), anim: "pickup",
+                  blurb: "Grab a random single-use power.",
+                  detail: "A pickup pad. Roll across it to grab a random single-use power. It goes dormant briefly after someone claims it, then lights back up for the next racer." },
+                { id: "tile-bumper", name: "Bumpers", icon: art("bumper"), anim: "bumper",
+                  blurb: "Springy obstacles that fling you back.",
+                  detail: "Bump a bumper and you're flung away from it — maddening when you're in a hurry, but a clever way to launch a chasing rival clean off their line. Some maps add moving bumpers that sweep across the track like windscreen wipers, so the safe lane keeps shifting." },
+                { id: "tile-random", name: "Random Ground", icon: swatch("#7c3aed"), anim: "randomTile",
+                  blurb: "A wildcard disguised as another surface.",
+                  detail: "A trickster tile. It masquerades as one of the ordinary surfaces, so you won't know whether you're about to hit speedy grass or draggy sand until you're already committed to it." }
+            ]
+        },
+        {
+            id: "abilities",
+            label: "Abilities",
+            entries: [
+                { id: "ability-blindfold", name: "Blindfold", icon: svg("low-vision.svg"), anim: "blindfold",
+                  blurb: "Blinds the whole room but you.",
+                  detail: "Drops a blackout over everyone's view except your own. For a few seconds the entire room is driving blind while you see just fine — pure chaos when you spring it right before the goal." },
+                { id: "ability-swap", name: "Swap", icon: svg("random.svg"), anim: "swap",
+                  blurb: "Trade places with a nearby racer.",
+                  detail: "Marks the ground with a growing ring everyone can see, then trades your position with a racer caught inside it. Steal a leader's safe spot at the last instant, or yank yourself out of the lava's path and dump someone else into it." },
+                { id: "ability-bomb", name: "Bomb", icon: svg("bomb.svg"), anim: "bomb",
+                  blurb: "Lob an explosive that flings karts.",
+                  detail: "Lobs an explosive that sits for a short fuse and then erupts, flinging every kart caught in the blast — including you, if you hang around. Wherever it goes off it scorches the ground into a patch of slow, draggy sand, so it both clears a crowd off the goal and gums up the spot they were fighting for." },
+                { id: "ability-speedbuff", name: "Speed Burst", icon: svg("wind-solid.svg"), anim: "speedBurst",
+                  blurb: "A burst of extra speed for you.",
+                  detail: "A shot of extra pace for a short while. Pop it to run down a leader, outrun the closing lava, or simply blitz a long straightaway before anyone reacts." },
+                { id: "ability-speeddebuff", name: "Slowdown", icon: svg("hourglass-start-solid.svg"), anim: "slowdown",
+                  blurb: "Bogs down everyone but you.",
+                  detail: "Saps the speed of every other racer at once, miring the whole pack in molasses while you carry on at full clip. Drop it as you make your break and watch the field bog down behind you." },
+                { id: "ability-tileswap", name: "Tile Swap", icon: svg("copy-regular.svg"), anim: "tileSwap",
+                  blurb: "Flips the fast and icy patches.",
+                  detail: "After a wind-up everyone can see, the arena's fast lanes and icy patches trade places — the speedy grass you were counting on turns to treacherous ice, and vice versa. Time it to flip a rival's safe line out from under them as they commit." },
+                { id: "ability-icecannon", name: "Ice Cannon", icon: svg("snowflake-solid.svg"), anim: "iceCannon",
+                  blurb: "Freeze the ground where it lands.",
+                  detail: "Fires a frozen shot that turns the patch where it lands into slick ice. Lay a trap on a tight corner and watch chasers skate helplessly off the track." },
+                { id: "ability-cut", name: "Cut", icon: svg("scissors-solid.svg"), anim: "cut",
+                  blurb: "A short-range swipe that shoves rivals aside.",
+                  detail: "A quick, close-range swipe that carves a line through the pack and flings every nearby racer away from that line — anyone on one side is thrown one way, anyone on the other side the opposite way. No wind-up and no aiming, just an instant shove to clear bodies off you or fling a clinging rival off course." }
+            ]
+        },
+        {
+            id: "brutal",
+            label: "Brutal Rounds",
+            entries: [
+                { id: "brutal-what", name: "What Is a Brutal Round?", icon: emoji("🔥"), anim: "brutalIntro",
+                  blurb: "Special rounds where the arena turns nasty.",
+                  detail: [
+                      "Now and then a round goes brutal: the arena bends a rule, throws a twist into the mix, and dares everyone to survive it. The music shifts, the icon flashes up, and the usual race becomes a fight to last.",
+                      "The closer the match is to ending, the more likely a brutal round is to appear — and sometimes several twists stack on the same round. Here's what each one does."
+                  ] },
+                { id: "brutal-ability", name: "Ability", icon: svg("toolbox-solid.svg"), anim: "abilityRain",
+                  blurb: "Every racer starts holding an ability.",
+                  detail: "Every racer starts the round already holding a random ability, so powers come flying from the opening moment instead of having to be hunted down. Expect bombs, blinds, swaps and freezes going off back to back — it's an instant free-for-all of effects." },
+                { id: "brutal-cloudy", name: "Cloudy", icon: svg("cloud-solid.svg"), anim: "cloudy",
+                  blurb: "Drifting clouds hide the track.",
+                  detail: "Banks of cloud roll across the arena, blotting out patches of the track as they drift. Hazards and rivals vanish into the fog and reappear without warning — you're racing half-blind through the gaps." },
+                { id: "brutal-lightning", name: "Lightning", icon: svg("bolt-solid.svg"), anim: "lightning",
+                  blurb: "Every racer is sped up.",
+                  detail: "Everyone gets a jolt: every racer is given a big speed boost for the whole round, and the hazards whip around faster too. You cover ground in a blink, so the pace turns twitchy and unforgiving — there's far less time to read the track and react before you've overshot it." },
+                { id: "brutal-volcano", name: "Volcano", icon: svg("volcano-solid.svg"), anim: "volcano",
+                  blurb: "The ground erupts mid-round.",
+                  detail: "Partway through, the arena erupts — lava blooms out and floods inward with only a brief warning before it blows. Read the rumble, get clear of where it's about to open, and ride out the eruption to claim the goal." },
+                { id: "brutal-infection", name: "Infection", icon: svg("biohazard-solid.svg"), anim: "infection",
+                  blurb: "Get tagged and you join the horde.",
+                  detail: [
+                      "One racer starts infected, and their touch spreads it. Get tagged and you turn too, joining a horde that hunts down whoever's left. The last clean racer standing wins the round.",
+                      "Once you're infected there's no winning the round — your only job is to drag everyone else down with you. So survivors run and scatter while the horde closes in."
+                  ] },
+                { id: "brutal-hockey", name: "Air Hockey", icon: svg("hockey-puck-solid.svg"), anim: "hockey",
+                  blurb: "A puck rockets around, launching karts.",
+                  detail: "A giant puck ricochets around the arena, picking up frightening speed with every wall it slams into. Get clipped and you're launched across the map. Smack it to redirect it into rivals — and stay well clear of its line, because it only gets faster." },
+                { id: "brutal-explosive", name: "Explosive", icon: svg("explosion-solid.svg"), anim: "explosive",
+                  blurb: "Every death blasts a crater of lava.",
+                  detail: "Every kart is a walking powder keg. When a racer goes down, the spot they died swells with a warning and then detonates — flinging everyone nearby and scorching the ground around it into lava. Each death eats away the safe floor and can chain into the next, so a crowded scramble can erupt into a string of blasts that leaves the arena pocked with fire." },
+                { id: "brutal-blackout", name: "Blackout", icon: svg("moon-solid.svg"), anim: "blackout",
+                  blurb: "The lights go out.",
+                  detail: "The arena goes dark and you can only see a small pool of light around your own kart. The goal, the lava and your rivals all lurk in the black until you're nearly on top of them — every move is a gamble into the unknown." },
+                // --- Parked brutal modes (active:false in config today). Flip show:true when re-enabled. ---
+                { id: "brutal-gravity", name: "Gravity", icon: svg("infinity-solid.svg"), anim: "_blank", show: false,
+                  blurb: "(disabled) Pull warps your movement.",
+                  detail: "Currently disabled. A gravity twist that warps how karts drift across the arena." },
+                { id: "brutal-fiesta", name: "Fiesta", icon: svg("cake-candles-solid.svg"), anim: "_blank", show: false,
+                  blurb: "(disabled) A party-themed twist.",
+                  detail: "Currently disabled. A celebratory chaos round." },
+                { id: "brutal-golden", name: "Golden", icon: svg("sack-dollar-solid.svg"), anim: "_blank", show: false,
+                  blurb: "(disabled) A high-stakes gold round.",
+                  detail: "Currently disabled. A high-value scoring twist." }
+            ]
+        },
+        {
+            id: "medals",
+            label: "Medals",
+            entries: [
+                { id: "medal-intro", name: "About Medals", icon: emoji("🏅"), anim: "medalShine",
+                  blurb: "Honours handed out when the match ends.",
+                  detail: "When the match wraps, the game looks back over everything that happened and hands out medals for how each racer played — who racked up kills, who kept reaching the goal, who couldn't catch a break. They're bragging rights, awarded automatically." },
+                { id: "medal-serialkiller", name: "Serial Killer", icon: emoji("🔪"), anim: "medalShine",
+                  blurb: "Most kills across the whole match.",
+                  detail: "Goes to the racer who knocked out the most rivals over the entire match. The arena's apex predator — more interested in the body count than the finish line." },
+                { id: "medal-savior", name: "Savior", icon: emoji("🛡️"), anim: "medalShine",
+                  blurb: "Took down a rival on the brink of winning.",
+                  detail: "Earned by eliminating someone who was one step from taking the match, snatching victory out of their hands at the last possible second. The crowd loves a spoiler." },
+                { id: "medal-survivalist", name: "Survivalist", icon: emoji("🏁"), anim: "medalShine",
+                  blurb: "Reached the goal the most times.",
+                  detail: "For the racer who crossed into the goal the most often — slippery, relentless, and somehow always still alive when it counts." },
+                { id: "medal-brutalist", name: "Brutalist", icon: emoji("🔥"), anim: "medalShine",
+                  blurb: "Most finishes during brutal rounds.",
+                  detail: "Like Survivalist, but earned the hard way: the most goals reached during brutal rounds, when the arena is throwing everything it has at you and just finishing is an achievement." },
+                { id: "medal-pickedon", name: "Picked On", icon: emoji("🎯"), anim: "medalShine",
+                  blurb: "Killed the most by a single rival.",
+                  detail: "The unlucky one — knocked out more times by the same rival than anyone else. Somebody clearly had a vendetta, and you were it." },
+                { id: "medal-resourceful", name: "Resourceful", icon: emoji("🧰"), anim: "medalShine",
+                  blurb: "Used the most abilities.",
+                  detail: "For the racer who leaned hardest on pickups, always with a trick in their back pocket. Why win a fair fight when you can swap, bomb, or freeze your way through it?" },
+                { id: "medal-bully", name: "Bully", icon: emoji("👊"), anim: "medalShine",
+                  blurb: "Threw the most punches.",
+                  detail: "Awarded for throwing more punches than anyone else — less interested in racing, more interested in shoving. Whether they connected is beside the point." },
+                { id: "medal-multikill", name: "Multi-Kills", icon: emoji("💥"), anim: "medalShine",
+                  blurb: "Double, Triple and Mega Kills.",
+                  detail: "For stacking eliminations in a single breath: take out two in quick succession for a Double Kill, three for a Triple, and four or more for a Mega Kill. The more you fell before the dust settles, the louder the call-out." }
+            ]
+        }
+    ];
+
+    // ------------------------------------------------------------------------
+    // Rendering + filtering. Cards are shown/hidden in place (display:none) so
+    // focus and the menuGamepad cursor stay stable and off-screen canvases stop
+    // animating (the IntersectionObserver in learnScenes.js handles that).
+    // ------------------------------------------------------------------------
+    var groupsEl, searchInput, filtersEl, emptyEl;
+    var allRecords = [];     // [{ entry, card, catId, groupEl }]
+    var groupEls = {};       // catId -> group wrapper element
+    var activeCat = "all";
+    var query = "";
+
+    function paragraphs(detail) { return Array.isArray(detail) ? detail : [detail]; }
+
+    function buildIcon(icon) {
+        var wrap = document.createElement("span");
+        wrap.className = "codex-icon";
+        if (!icon) { return wrap; }
+        if (icon.kind === "emoji") {
+            wrap.classList.add("codex-icon--emoji");
+            wrap.textContent = icon.glyph;
+        } else if (icon.kind === "swatch") {
+            wrap.classList.add("codex-icon--swatch");
+            wrap.style.background = icon.color;
+        } else if (icon.kind === "texture") {
+            wrap.classList.add("codex-icon--texture");
+            var t = document.createElement("img");
+            t.src = icon.src; t.alt = ""; t.setAttribute("aria-hidden", "true");
+            wrap.appendChild(t);
+        } else if (icon.kind === "art") {
+            // Procedural in-game art (e.g. the bumper disc + ring) drawn to a
+            // tiny canvas so the list icon matches what's rendered in-game.
+            wrap.classList.add("codex-icon--art");
+            var cv = document.createElement("canvas");
+            cv.setAttribute("aria-hidden", "true");
+            wrap.appendChild(cv);
+            if (typeof LearnAnim !== "undefined" && LearnAnim.staticIcon) { LearnAnim.staticIcon(cv, icon.art); }
+        } else { // "svg" — black silhouette, needs the light chip to stay visible
+            wrap.classList.add("codex-icon--svg");
+            var s = document.createElement("img");
+            s.src = icon.src; s.alt = ""; s.setAttribute("aria-hidden", "true");
+            wrap.appendChild(s);
+        }
+        return wrap;
+    }
+
+    function buildCard(entry) {
+        var card = document.createElement("article");
+        card.className = "codex-card";
+        card.id = "card-" + entry.id;
+        card.setAttribute("data-entry-id", entry.id);
+        card.setAttribute("data-gp-nav", "");        // pad can scroll through cards
+        card.setAttribute("tabindex", "-1");
+
+        var canvas = document.createElement("canvas");
+        canvas.className = "codex-card-anim";
+        canvas.setAttribute("aria-hidden", "true");
+        card.appendChild(canvas);
+
+        var body = document.createElement("div");
+        body.className = "codex-card-body";
+
+        var head = document.createElement("div");
+        head.className = "codex-card-head";
+        head.appendChild(buildIcon(entry.icon));
+        var h = document.createElement("h3");
+        h.textContent = entry.name;
+        head.appendChild(h);
+        body.appendChild(head);
+
+        paragraphs(entry.detail).forEach(function (text) {
+            var p = document.createElement("p");
+            p.textContent = text;
+            body.appendChild(p);
+        });
+        card.appendChild(body);
+
+        // Clicking a card anchors it (shareable deep-link) without a modal.
+        card.addEventListener("click", function () {
+            try { history.replaceState(null, "", "#" + entry.id); } catch (e) { /* ignore */ }
+        });
+
+        // Wire the live animation (only runs while on-screen; see learnScenes.js).
+        if (typeof LearnAnim !== "undefined" && LearnAnim.attach) {
+            LearnAnim.attach(canvas, entry.anim, { glyph: entry.icon && entry.icon.glyph });
+        }
+        return card;
+    }
+
+    function buildFilters() {
+        if (!filtersEl) { return; }
+        var cats = [{ id: "all", label: "All" }];
+        CODEX.forEach(function (g) { cats.push({ id: g.id, label: g.label }); });
+        cats.forEach(function (c) {
+            var chip = document.createElement("button");
+            chip.type = "button";
+            chip.className = "learn-chip" + (c.id === activeCat ? " is-active" : "");
+            chip.setAttribute("data-gp-nav", "");
+            chip.setAttribute("data-cat", c.id);
+            chip.setAttribute("aria-pressed", c.id === activeCat ? "true" : "false");
+            chip.textContent = c.label;
+            chip.addEventListener("click", function () {
+                activeCat = c.id;
+                var chips = filtersEl.querySelectorAll(".learn-chip");
+                for (var i = 0; i < chips.length; i++) {
+                    var on = chips[i] === chip;
+                    chips[i].classList.toggle("is-active", on);
+                    chips[i].setAttribute("aria-pressed", on ? "true" : "false");
+                }
+                applyFilter();
+            });
+            filtersEl.appendChild(chip);
+        });
+    }
+
+    function matchesQuery(entry) {
+        if (!query) { return true; }
+        var hay = (entry.name + " " + entry.blurb + " " + paragraphs(entry.detail).join(" ")).toLowerCase();
+        return hay.indexOf(query) !== -1;
+    }
+
+    function applyFilter() {
+        var anyVisible = false;
+        var visibleByCat = {};
+        allRecords.forEach(function (r) {
+            var vis = (activeCat === "all" || r.catId === activeCat) && matchesQuery(r.entry);
+            r.card.classList.toggle("is-hidden", !vis);
+            if (vis) { anyVisible = true; visibleByCat[r.catId] = true; }
+        });
+        Object.keys(groupEls).forEach(function (catId) {
+            groupEls[catId].classList.toggle("is-hidden", !visibleByCat[catId]);
+        });
+        if (emptyEl) { emptyEl.classList.toggle("is-hidden", anyVisible); }
+    }
+
+    function build() {
+        groupsEl = document.getElementById("codexGroups");
+        searchInput = document.getElementById("learnSearch");
+        filtersEl = document.getElementById("learnFilters");
+        if (!groupsEl) { return; }
+
+        CODEX.forEach(function (group) {
+            var groupEl = document.createElement("div");
+            groupEl.className = "codex-group";
+            groupEl.setAttribute("data-cat", group.id);
+
+            var title = document.createElement("h2");
+            title.className = "codex-group-title";
+            title.textContent = group.label;
+            groupEl.appendChild(title);
+
+            var grid = document.createElement("div");
+            grid.className = "codex-grid";
+            group.entries.forEach(function (entry) {
+                if (entry.show === false) { return; }
+                var card = buildCard(entry);
+                grid.appendChild(card);
+                allRecords.push({ entry: entry, card: card, catId: group.id, groupEl: groupEl });
+            });
+            groupEl.appendChild(grid);
+            groupsEl.appendChild(groupEl);
+            groupEls[group.id] = groupEl;
+        });
+
+        emptyEl = document.createElement("p");
+        emptyEl.className = "learn-empty is-hidden";
+        emptyEl.textContent = "No matches — try a different search or category.";
+        groupsEl.appendChild(emptyEl);
+
+        buildFilters();
+        if (searchInput) {
+            searchInput.addEventListener("input", function () {
+                query = (searchInput.value || "").trim().toLowerCase();
+                applyFilter();
+            });
+        }
+
+        // Deep-link: if the URL has #entry-id, scroll that card into view + flash.
+        focusHashCard();
+        window.addEventListener("hashchange", focusHashCard);
+    }
+
+    function focusHashCard() {
+        var id = (location.hash || "").replace(/^#/, "");
+        if (!id) { return; }
+        var el = document.getElementById("card-" + id);
+        if (!el) { return; }
+        // If an active filter/search is hiding the target, clear it so the
+        // deep-link actually lands (scrollIntoView no-ops on a display:none card).
+        if (el.classList.contains("is-hidden")) { resetFilters(); }
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("is-anchored");
+        setTimeout(function () { el.classList.remove("is-anchored"); }, 1600);
+    }
+
+    function resetFilters() {
+        activeCat = "all";
+        query = "";
+        if (searchInput) { searchInput.value = ""; }
+        if (filtersEl) {
+            var chips = filtersEl.querySelectorAll(".learn-chip");
+            for (var i = 0; i < chips.length; i++) {
+                var on = chips[i].getAttribute("data-cat") === "all";
+                chips[i].classList.toggle("is-active", on);
+                chips[i].setAttribute("aria-pressed", on ? "true" : "false");
+            }
+        }
+        applyFilter();
+    }
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", build);
+    } else {
+        build();
+    }
+})();

@@ -1370,3 +1370,208 @@ body.osk-open .gamepad-prompts {
         margin-top: 0.5rem;
     }
 }
+
+/* ============================================================================
+   Codex / Learn page (learn.html + scripts/learn.js).
+   Master/detail: a scrolling list of entries on the left, a detail pane on the
+   right that is sticky on wide screens and stacks below on narrow/touch.
+   All colours come from the theme tokens so light/dark "just work".
+   GOTCHA: the ability/brutal icons are BLACK SILHOUETTE SVGs — .codex-icon--svg
+   gives them a fixed light chip so they never disappear in dark theme.
+   ============================================================================ */
+.learn-shell {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 1rem calc(1rem + var(--safe-left)) 3rem calc(1rem + var(--safe-right));
+}
+.learn-header {
+    text-align: center;
+    margin-bottom: 1rem;
+}
+.learn-header h1 {
+    margin: 0;
+    font-size: clamp(1.8rem, 6vw, 2.6rem);
+    color: var(--text);
+}
+.learn-sub {
+    margin: 0.25rem 0 0;
+    color: var(--text-muted);
+    font-size: 0.95rem;
+}
+
+/* --- search + category filter toolbar --- */
+.learn-toolbar {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin-bottom: 1.1rem;
+    /* Stay reachable while the long grid scrolls. Sits just under the navbar;
+       the negative-margin + padding trick keeps cards from peeking above it. */
+    position: sticky;
+    top: calc(var(--navbar-height) + var(--safe-top));
+    z-index: 4;
+    background: var(--bg);
+    padding: 0.75rem 0 0.6rem;
+    margin-top: -0.5rem;
+}
+.learn-search {
+    width: 100%;
+    min-height: 44px;            /* touch target */
+    padding: 0.5rem 0.9rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 0.95rem;
+}
+.learn-search::placeholder {
+    color: var(--text-muted);
+}
+.learn-search:focus {
+    outline: none;
+    border-color: #c87f8a;
+    box-shadow: 0 0 0 3px rgba(200, 127, 138, 0.3);
+}
+.learn-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+}
+.learn-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;            /* touch target */
+    padding: 0.35rem 0.95rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-soft);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.learn-chip:hover {
+    background: var(--surface-2);
+}
+.learn-chip.is-active {
+    background: #c87f8a;
+    border-color: #c87f8a;
+    color: #fff;
+}
+
+/* applyFilter() toggles this on hidden entries/headings */
+.is-hidden {
+    display: none !important;
+}
+.learn-empty {
+    color: var(--text-muted);
+    padding: 1rem 0.25rem;
+}
+
+/* --- card grid, grouped by category --- */
+.codex-group {
+    margin-bottom: 1.6rem;
+}
+.codex-group-title {
+    font-size: 0.74rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin: 0 0 0.6rem;
+    padding-left: 0.15rem;
+}
+.codex-grid {
+    display: grid;
+    /* responsive: ~3 cols desktop, 2 iPad, 1 phone — auto from min card width */
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 1rem;
+    align-items: start;
+}
+.codex-card {
+    display: flex;
+    flex-direction: column;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0px 0px 6px var(--card-shadow);
+    outline: none;
+}
+.codex-card.is-anchored {
+    border-color: #c87f8a;
+    box-shadow: 0 0 0 3px rgba(200, 127, 138, 0.35);
+}
+/* the live animation canvas: full width, keeps its 240x140 aspect.
+   position:static OVERRIDES the global unscoped `canvas { position:absolute }`
+   rule, which would otherwise rip the canvas out to fill the viewport. */
+.codex-card-anim {
+    position: static;
+    display: block;
+    width: 100%;
+    height: auto;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+}
+.codex-card-body {
+    padding: 0.85rem 1rem 1rem;
+}
+.codex-card-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 0.5rem;
+}
+.codex-card-head h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    color: var(--text);
+}
+.codex-card-body p {
+    color: var(--text-soft);
+    line-height: 1.55;
+    font-size: 0.9rem;
+    margin: 0 0 0.6rem;
+}
+.codex-card-body p:last-child {
+    margin-bottom: 0;
+}
+
+/* --- icon chips in card heads --- */
+.codex-icon {
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+.codex-icon--emoji {
+    font-size: 20px;
+    line-height: 1;
+}
+.codex-icon--swatch {
+    border: 1px solid var(--border);
+}
+.codex-icon--texture img,
+.codex-icon--art canvas {
+    position: static;            /* beat the global canvas{position:absolute} */
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+.codex-icon--art {
+    background: var(--surface-2);
+}
+/* Black-silhouette SVGs sit on a FIXED light chip so they're visible in dark
+   theme too — do not remove the background. */
+.codex-icon--svg {
+    background: #f0f0f0;
+    border: 1px solid var(--border);
+}
+.codex-icon--svg img {
+    width: 62%;
+    height: 62%;
+    object-fit: contain;
+}
