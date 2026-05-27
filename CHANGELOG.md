@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.14.0 — 2026-05-27
+
 - New **Learn** page, reachable from the landing screen — an in-game Codex that explains every tile, ability, brutal round, and medal, each with a plain-English "how it works and feels" description and a little live animated example built from the real in-game effects. Search the codex or filter it by category, and browse it all with a controller or by touch.
 
 ## v0.13.0 — 2026-05-27
