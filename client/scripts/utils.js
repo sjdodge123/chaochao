@@ -13,26 +13,34 @@ function mapIsSitesOnly(map) {
     return map != null && Array.isArray(map.sites) && !Array.isArray(map.cells);
 }
 function reconstructSitesOnlyMap(map) {
-    if (!mapIsSitesOnly(map)) { return map; }
-    var siteObjs = new Array(map.sites.length);
-    for (var i = 0; i < map.sites.length; i++) {
-        siteObjs[i] = { x: map.sites[i].x, y: map.sites[i].y };
+    if (!mapIsSitesOnly(map) || map.bbox == null) { return map; }
+    try {
+        var siteObjs = new Array(map.sites.length);
+        for (var i = 0; i < map.sites.length; i++) {
+            siteObjs[i] = { x: map.sites[i].x, y: map.sites[i].y };
+        }
+        var diagram = new Voronoi().compute(siteObjs, map.bbox);
+        for (var j = 0; j < map.sites.length; j++) {
+            var vid = siteObjs[j].voronoiId;
+            if (vid == null || diagram.cells[vid] == null) { continue; }
+            diagram.cells[vid].id = map.sites[j].id;
+        }
+        diagram.hazards = map.hazards || [];
+        if (map.startEdges != null) { diagram.startEdges = map.startEdges; }
+        if (map.parTime != null) { diagram.parTime = map.parTime; }
+        if (map.lobbyOnly) { diagram.lobbyOnly = map.lobbyOnly; }
+        if (map.name != null) { diagram.name = map.name; }
+        if (map.author != null) { diagram.author = map.author; }
+        if (map.id != null) { diagram.id = map.id; }
+        if (map.email != null) { diagram.email = map.email; }
+        return diagram;
+    } catch (e) {
+        // A malformed sites-only map must not throw out of the $.getJSON callback
+        // that loads every map (that would abort loading the others). Return it
+        // unchanged so just this one map is unusable.
+        if (typeof console !== "undefined") { console.warn("map reconstruction failed", map && map.id, e); }
+        return map;
     }
-    var diagram = new Voronoi().compute(siteObjs, map.bbox);
-    for (var j = 0; j < map.sites.length; j++) {
-        var vid = siteObjs[j].voronoiId;
-        if (vid == null || diagram.cells[vid] == null) { continue; }
-        diagram.cells[vid].id = map.sites[j].id;
-    }
-    diagram.hazards = map.hazards || [];
-    if (map.startEdges != null) { diagram.startEdges = map.startEdges; }
-    if (map.parTime != null) { diagram.parTime = map.parTime; }
-    if (map.lobbyOnly) { diagram.lobbyOnly = map.lobbyOnly; }
-    if (map.name != null) { diagram.name = map.name; }
-    if (map.author != null) { diagram.author = map.author; }
-    if (map.id != null) { diagram.id = map.id; }
-    if (map.email != null) { diagram.email = map.email; }
-    return diagram;
 }
 
 Colors = {};

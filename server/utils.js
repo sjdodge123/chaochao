@@ -583,9 +583,10 @@ exports.shuffleArray = function (array) {
 function loadMaps() {
     var normalizedPath = require("path").join(__dirname, "../client/maps");
     fs.readdirSync(normalizedPath).forEach(function (file) {
-        if (file != ".DS_Store") {
-            mapListing.push(file);
-            var loadedMap = require("../client/maps/" + file);
+        if (file == ".DS_Store") { return; }
+        var loadedMap;
+        try {
+            loadedMap = require("../client/maps/" + file);
             // Compact sites-only maps store only voronoi sites + bbox; rebuild the
             // full diagram (cells/edges/geometry) before anything downstream — par-time,
             // adjacency, the engine and the renderer all expect full geometry. Legacy
@@ -593,19 +594,26 @@ function loadMaps() {
             if (mapFormat.isSitesOnly(loadedMap)) {
                 loadedMap = mapFormat.reconstruct(loadedMap);
             }
-            // Par-time is a fixed property of a map's geometry; compute it once
-            // at boot for any map lacking it (submitted maps embed it). Deep
-            // copies (currentMap) preserve the number.
-            if (loadedMap.parTime == null) {
-                loadedMap.parTime = cellGraph.computeMapParTime(loadedMap);
-            }
-            maps.push(loadedMap);
-            // The editor list excludes lobbyOnly maps (e.g. _lobbyTutorial.json).
-            // Built here from this file's own map object so it never relies on
-            // index alignment between mapListing and maps.
-            if (!loadedMap.lobbyOnly) {
-                editorMapListing.push(file);
-            }
+        } catch (e) {
+            // A malformed/degenerate map must not take down the whole server at boot.
+            // Skip it (and keep mapListing/maps/editorMapListing in lockstep by only
+            // pushing on success) so the rest of the maps still load.
+            console.error("Skipping map " + file + " — failed to load/reconstruct: " + e.message);
+            return;
+        }
+        mapListing.push(file);
+        // Par-time is a fixed property of a map's geometry; compute it once
+        // at boot for any map lacking it (submitted maps embed it). Deep
+        // copies (currentMap) preserve the number.
+        if (loadedMap.parTime == null) {
+            loadedMap.parTime = cellGraph.computeMapParTime(loadedMap);
+        }
+        maps.push(loadedMap);
+        // The editor list excludes lobbyOnly maps (e.g. _lobbyTutorial.json).
+        // Built here from this file's own map object so it never relies on
+        // index alignment between mapListing and maps.
+        if (!loadedMap.lobbyOnly) {
+            editorMapListing.push(file);
         }
     });
 }

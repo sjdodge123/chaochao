@@ -507,15 +507,11 @@ function loadMapPreview(id) {
 // the in-game look. Falls back to the tile's flat config colour for any id without
 // a pattern. Rendered at world resolution; drawImage downscales it to the preview
 // box. Patterns are loaded long before any next-map preview appears mid-game.
-function thumbnailTileColor(id) {
-	for (var type in config.tileMap) {
-		var t = config.tileMap[type];
-		if (t && t.id === id && t.color) { return t.color; }
-	}
-	return '#888';
-}
 function thumbnailTileFill(id) {
-	return (typeof patterns !== 'undefined' && patterns[id] != null) ? patterns[id] : thumbnailTileColor(id);
+	// Prefer the textured pattern; fall back to the shared locateColor (draw.js)
+	// which already handles ability ids (>99) and the null case.
+	if (typeof patterns !== 'undefined' && patterns[id] != null) { return patterns[id]; }
+	return locateColor(id) || '#888';
 }
 function buildMapThumbnailCanvas(map) {
 	var cv = document.createElement('canvas');

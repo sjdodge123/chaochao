@@ -57,8 +57,11 @@ for (const f of files) {
         console.log(`KEEP   ${f} (reconstruct threw: ${e.message}) — left in full format`);
     }
     if (!ok) {
-        if (sitesOnly === undefined) { kept++; sizeAfter += beforeBytes; continue; }
-        console.log(`KEEP   ${f} (not equivalent) — left in full format`);
+        // Left in full format — copy the original through to client/maps/ so the
+        // map is always present there even when it isn't already (re-run, or a
+        // newly-added archive map that doesn't reconstruct equivalently).
+        if (!checkOnly) { fs.copyFileSync(path.join(archiveDir, f), path.join(mapsDir, f)); }
+        console.log(`KEEP   ${f} (${sitesOnly === undefined ? 'reconstruct failed' : 'not equivalent'}) — left in full format`);
         kept++; sizeAfter += beforeBytes; continue;
     }
     const out = JSON.stringify(sitesOnly, null, 2);
