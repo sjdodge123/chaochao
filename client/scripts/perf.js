@@ -177,10 +177,11 @@ function applyPerfProfile() {
     if (PERF.dprCap !== prevDprCap && typeof resize === "function") {
         try { resize(); } catch (e) { /* canvas not ready yet */ }
     }
-    // The map cache resolution (mapScale) is baked in; force a rebuild so a tier
-    // change re-bakes it at the new resolution instead of waiting for a tile change.
-    if (typeof invalidateMapCache === "function") {
-        invalidateMapCache();
+    // The map cache resolution (mapScale) is baked into the cached canvas, so a
+    // tier change must discard it (not just mark it dirty) to re-bake at the new
+    // resolution rather than re-rendering into the old-sized canvas.
+    if (typeof discardMapCache === "function") {
+        discardMapCache();
     }
     updatePerformanceToggleUI();
     if (typeof renderSettingsRows === "function") {

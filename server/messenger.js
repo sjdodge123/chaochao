@@ -101,19 +101,26 @@ function checkForMail(client) {
 
 	// Diagnostic only: a client running with ?diag=1 streams render-perf samples
 	// (frame times, phase split, device class, game-state counts) so a stutter on
-	// a real device can be diagnosed from server logs. Untrusted input — accept
-	// only a small object, log one compact line, never act on it or echo it.
+	// a real device can be diagnosed from server logs. Untrusted input from any
+	// client, so it's hardened against abuse: reject anything but a small string,
+	// rate-limit per client, and log one truncated line. Never parse a large
+	// payload (avoids a main-thread JSON.parse DoS) and never act on it.
+	var lastPerfDiagAt = 0;
 	client.on("clientPerfDiag", function (payload) {
 		try {
-			var d = (typeof payload === "string") ? JSON.parse(payload) : payload;
+			if (typeof payload !== "string" || payload.length > 4000) {
+				return;   // the legit client sends a small JSON string; ignore anything else
+			}
+			var now = Date.now();
+			if (now - lastPerfDiagAt < 500) {
+				return;   // rate-limit: the real client emits every ~1.5-3s
+			}
+			lastPerfDiagAt = now;
+			var d = JSON.parse(payload);
 			if (d == null || typeof d !== "object") {
 				return;
 			}
-			var s = JSON.stringify(d);
-			if (s.length > 4000) {
-				s = s.slice(0, 4000) + "…";
-			}
-			console.log("[perf-diag] " + client.id + " " + s);
+			console.log("[perf-diag] " + client.id + " " + payload);
 		} catch (e) { /* ignore malformed diag payloads */ }
 	});
 
