@@ -33,6 +33,16 @@ function isSitesOnly(map) {
 // min/max of every halfedge endpoint (va/vb) is the bbox. (The diagram's own
 // `vertices` array is NOT usable here — it retains un-clipped circle-event points
 // that lie far outside the box.)
+//
+// CRITICAL: the clip-intersection math leaves ~1e-13 float dust on those min/max
+// values (e.g. 74.99999999999999 instead of 75). The editor always computes with a
+// clean bbox (integer world dims + integer gate depth), so we round the recovered
+// value back to that clean grid. Without this, reconstruct() runs voronoi.compute
+// with a *slightly* different bbox than the original, producing geometry that
+// differs by ~1e-13 — invisible to the eye, but enough to flip a borderline
+// AI-pathing assertion (the start-edges test). Rounding makes reconstruction
+// BIT-IDENTICAL to the original geometry (verified diff == 0 across all maps).
+function snap(v) { return Math.round(v * 1e6) / 1e6; }
 function deriveBbox(fullMap) {
     var xl = Infinity, xr = -Infinity, yt = Infinity, yb = -Infinity;
     var cells = fullMap.cells;
@@ -52,7 +62,7 @@ function deriveBbox(fullMap) {
             }
         }
     }
-    return { xl: xl, xr: xr, yt: yt, yb: yb };
+    return { xl: snap(xl), xr: snap(xr), yt: snap(yt), yb: snap(yb) };
 }
 
 // Carry the non-geometry fields that travel with a map, in a stable key order.
