@@ -521,6 +521,15 @@ function registerCombatHandlers(server) {
 		}
 
 	});
+	server.on("punchClash", function (payload) {
+		// Two players countered each other — both got flung back, neither landed the
+		// hit. A bright parry flash at the midpoint sells the "clang". The two swing
+		// "punch" events already played the melee sound, so don't stack a third here;
+		// the gold star is the distinct visual cue for the clash.
+		if (payload != null && payload.x != null && payload.y != null) {
+			spawnClashEffect(payload.x, payload.y);
+		}
+	});
 	server.on("spawnBomb", function (owner) {
 		spawnBomb(owner);
 		fireMuzzleFlash(owner, "#ffcf8f");
@@ -557,10 +566,18 @@ function registerCombatHandlers(server) {
 		if (hitX != null && hitY != null) {
 			var sparkColor = playerList[owner] != null ? playerList[owner].color : "white";
 			spawnHitEffect(hitX, hitY, sparkColor);
+			// A fully-charged punch landing gets a meaty "thwack" (Smash-style charged
+			// bat) and an extra kick, on top of the normal swing/hit feedback.
+			if (payload != null && payload.charged) {
+				playSound(chargedHitSound);
+				if ((isLocalId(victim) || isLocalId(owner)) && currentState != config.stateMap.gated) {
+					addTrauma(0.4);
+				}
+			}
 			// Feel a connecting hit when a local player is on either end of it —
 			// but not during the gated countdown (jostling at the start line
 			// shouldn't rattle the camera while everyone's waiting to race).
-			if ((isLocalId(victim) || isLocalId(owner)) && currentState != config.stateMap.gated) {
+			else if ((isLocalId(victim) || isLocalId(owner)) && currentState != config.stateMap.gated) {
 				addTrauma(0.28);
 			}
 		}

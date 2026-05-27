@@ -102,6 +102,11 @@ class Player extends Circle {
 		this.turnLeft = false;
 		this.turnRight = false;
 		this.attack = false;
+		// Latched press edge: a punch now fires on RELEASE, so a tap faster than a server
+		// tick (keydown+keyup both arriving between ticks) would leave attack=false at
+		// checkAttack and be lost. The movement handler sets this on a false->true edge so
+		// checkAttack can still throw the tap. Cleared once consumed.
+		this.attackQueued = false;
 		this.angle = 0;
 
 
@@ -130,6 +135,23 @@ class Player extends Circle {
 		this.punchWaitTime = c.playerPunchCooldown;
 		this.punchedTimer = null;
 		this.punchTimeLeft = this.punchWaitTime;
+		// Punch stamina: punching drains it, it regenerates over time, and below the
+		// cost you can't punch. staminaExhausted latches when a punch empties you, and
+		// only clears once you've regenerated back up to exhaustRecover — that
+		// hysteresis is what makes "getting tired" then "recovered" a distinct beat.
+		this.stamina = c.punchStamina.max;
+		this.staminaExhausted = false;
+		// Hold-to-charge punch state. charging spans press->release; chargeFrac (0..1)
+		// drives both the thrown punch's power and the telegraph fist art on the client.
+		this.charging = false;
+		this.chargeStartedAt = 0;
+		this.chargeStaminaAtStart = 0;
+		this.chargeFrac = 0;
+		// Overcharge: holding way too long fills a dark-red danger meter (overcharge
+		// 0..1) and, if you don't release in time, locks you in the exhausted move
+		// penalty until exhaustLockUntil (regen is paused, so staminaExhausted stays set).
+		this.overcharge = 0;
+		this.exhaustLockUntil = 0;
 
 		//On Fire
 		this.onFire = 0;
@@ -200,71 +222,209 @@ class Player extends Circle {
 		this.checkAttack(currentState, punchDirectional);
 		this.checkChatCoolDownTimer();
 		this.checkFireTimer();
+		this.regenStamina(dt);
+		this.updateOverchargeMeter();
 	}
 	move() {
 		this.x = this.newX;
 		this.y = this.newY;
 	}
+	// Punch input is hold-to-charge: a press starts a charge that drains stamina and
+	// grows over time, and the punch is thrown on RELEASE with force = momentum x
+	// charge. A quick tap (press then release) is a normal light punch; holding dumps
+	// more of the stamina bar into a harder hit. Abilities are unchanged — they fire
+	// instantly on press, not on a charge.
 	checkAttack(currentState, punchDirectional) {
-		if (this.attack) {
-			if ((currentState == c.stateMap.racing || currentState == c.stateMap.collapsing || currentState == c.stateMap.lobby) && this.ability != null) {
-				this.punchedTimer = Date.now();
-				// No scoring in the lobby: firing an ability there must not tick the
-				// resourceful achievement stat (it isn't gated by checkForWinners). The
-				// curated lobby ability set is enforced by the map's tiles (bomb only),
-				// not here — swap/blindfold/tileSwap simply aren't placed to pick up.
-				if (currentState != c.stateMap.lobby) {
-					this.resourceful += 1;
-				}
-				this.ability.use();
-				// Clear the attack input so using an ability doesn't bleed into the
-				// next tick. Otherwise, once checkAbilities() nulls out the consumed
-				// ability, the still-true attack flag would trigger the punch
-				// slow-down in the engine (and throw a stray punch), stopping movement.
-				this.attack = false;
-				return;
-			}
-			// Punching is only meaningful during active play: the race itself
-			// (racing/collapsing), the pre-race gate where players jostle at the start
-			// (gated), and the lobby tutorial. In the non-play screens — the overview
-			// "next map" screen, waiting, and gameOver — swallow the input so no punch
-			// (and no punch sound, which the client only plays on the server's "punch"
-			// event) is thrown.
-			if (currentState != c.stateMap.racing && currentState != c.stateMap.collapsing && currentState != c.stateMap.lobby && currentState != c.stateMap.gated) {
-				this.attack = false;
-				return;
-			}
-			if (this.checkPunchCoolDown()) {
-				return;
-			}
+		var playState = (currentState == c.stateMap.racing || currentState == c.stateMap.collapsing
+			|| currentState == c.stateMap.lobby || currentState == c.stateMap.gated);
+		// Holding attack while carrying an ability fires it instantly (no charge).
+		if (this.attack && this.ability != null
+			&& (currentState == c.stateMap.racing || currentState == c.stateMap.collapsing || currentState == c.stateMap.lobby)) {
+			this.cancelCharge();
 			this.punchedTimer = Date.now();
-			var punchRadius = c.punchRadius;
-			if (this.isZombie == true) {
-				punchRadius = c.brutalRounds.infection.punchRadius;
-			}
-			// Directional punch: place the hitbox in front of the player along its
-			// facing angle so you have to aim, and the radial knockback shoves the
-			// target forward. The decision (per round/mode) is resolved in
-			// GameBoard.updatePlayers and passed in. (Bumper/hazard punches are
-			// created elsewhere and stay centered/radial.)
-			var directional = punchDirectional === undefined ? c.directionalPunch : punchDirectional;
-			var punchX = this.x;
-			var punchY = this.y;
-			if (directional) {
-				var aim = utils.pos({ x: this.x, y: this.y }, c.punchReach, this.angle);
-				punchX = aim.x;
-				punchY = aim.y;
-			}
-			this.punch = new Punch(punchX, punchY, punchRadius, this.color, this.id, this.roomSig, 1, this.isZombie);
-			this.punch.directional = directional;
-			// No scoring in the lobby: punches still land (knockback feel) but must not
-			// tick the bully achievement stat, which isn't gated by checkForWinners.
+			// No scoring in the lobby (the resourceful stat isn't gated by checkForWinners).
 			if (currentState != c.stateMap.lobby) {
-				this.bully += 1;
+				this.resourceful += 1;
 			}
-			messenger.messageRoomBySig(this.roomSig, "punch", compressor.sendPunch(this.punch));
+			this.ability.use();
 			this.attack = false;
+			return;
 		}
+		// Punching only matters in active play (racing/collapsing/gated/lobby tutorial).
+		// Outside that, swallow the input and drop any in-progress charge.
+		if ((this.attack || this.attackQueued) && !playState) {
+			this.attack = false;
+			this.attackQueued = false;
+			this.cancelCharge();
+			return;
+		}
+		// Zombies bite instantly and for FREE — infection is a relentless chase, not a
+		// stamina-managed duel — so they skip the charge/stamina flow entirely (still
+		// cooldown-gated). (A zombie can't hold-charge a bite.)
+		if (this.isZombie) {
+			if ((this.attack || this.attackQueued) && !this.checkPunchCoolDown()) {
+				this.cancelCharge();
+				this.throwBite(currentState, punchDirectional);
+			} else if (!this.attack) {
+				this.cancelCharge();
+			}
+			this.attackQueued = false;
+			return;
+		}
+		if (this.attack) {
+			// Button held -> build (or continue) a charge. The punch fires on release.
+			if (!this.charging) {
+				if (this.checkPunchCoolDown()) { return; } // still recovering from the last punch
+				if (!this.canSpendStamina()) { this.attack = false; this.attackQueued = false; return; } // too tired
+				this.startCharge();
+			}
+			this.updateCharge();
+			this.attackQueued = false;
+			return;
+		}
+		// Button up -> release a held charge as a punch.
+		if (this.charging) {
+			if (playState) {
+				this.throwChargedPunch(currentState, punchDirectional);
+			} else {
+				this.cancelCharge();
+			}
+			this.attackQueued = false;
+			return;
+		}
+		// Sub-tick tap rescue: a press+release that both landed between ticks never set
+		// charging, so throw it as a tap here rather than dropping it.
+		if (this.attackQueued && !this.checkPunchCoolDown() && this.canSpendStamina()) {
+			this.startCharge();
+			this.updateCharge();        // ~0 charge -> a tap
+			this.throwChargedPunch(currentState, punchDirectional);
+		}
+		this.attackQueued = false;
+	}
+	// An instant, stamina-free zombie bite (used in infection rounds). Mirrors a tap punch
+	// but with the infection bite radius + infected flag, no charge/stamina.
+	throwBite(currentState, punchDirectional) {
+		this.punchedTimer = Date.now();
+		var directional = punchDirectional === undefined ? c.directionalPunch : punchDirectional;
+		var punchX = this.x, punchY = this.y;
+		if (directional) {
+			var aim = utils.pos({ x: this.x, y: this.y }, c.punchReach, this.angle);
+			punchX = aim.x; punchY = aim.y;
+		}
+		this.punch = new Punch(punchX, punchY, c.brutalRounds.infection.punchRadius, this.color, this.id, this.roomSig, 1, true);
+		this.punch.directional = directional;
+		this.punch.angle = this.angle;
+		this.punch.ox = this.x;
+		this.punch.oy = this.y;
+		if (currentState != c.stateMap.lobby) { this.bully += 1; }
+		messenger.messageRoomBySig(this.roomSig, "punch", compressor.sendPunch(this.punch));
+		this.attack = false;
+	}
+	startCharge() {
+		this.charging = true;
+		this.chargeStartedAt = Date.now();
+		this.chargeStaminaAtStart = this.stamina;
+		this.chargeFrac = 0;
+	}
+	// Stamina a charge of `frac` (0..1) costs: a tap (0) costs punchCost; a full charge
+	// (1) costs fullChargeCost. Charge IS the fuel.
+	chargeCost(frac) {
+		var s = c.punchStamina;
+		return s.punchCost + (s.fullChargeCost - s.punchCost) * frac;
+	}
+	// Grow the charge over time toward full, capped by the stamina we can afford, and
+	// drain the meter as we hold so it visibly empties.
+	updateCharge() {
+		var s = c.punchStamina;
+		var held = Date.now() - this.chargeStartedAt;
+		// Overcharge: hold way too long and the charge is wasted — you're locked in the
+		// exhausted move penalty (the dark-red meter filled). Anti-camping pressure.
+		var ch = c.punchCharge;
+		if (held >= ch.overchargeAfterMs + ch.overchargeFillMs) {
+			this.triggerOverchargeLock();
+			return;
+		}
+		var frac = Math.min(1, held / ch.maxChargeMs);
+		var span = s.fullChargeCost - s.punchCost;
+		var affordable = span > 0 ? Math.min(1, Math.max(0, (this.chargeStaminaAtStart - s.punchCost) / span)) : 0;
+		if (frac > affordable) { frac = affordable; }
+		this.chargeFrac = frac;
+		this.stamina = Math.max(0, this.chargeStaminaAtStart - this.chargeCost(frac));
+	}
+	// Held past the danger window: drop the charge (no punch), empty the bar, and lock
+	// the exhausted move penalty for exhaustLockMs (regen is paused so it stays latched).
+	triggerOverchargeLock() {
+		this.cancelCharge();
+		this.stamina = 0;
+		this.staminaExhausted = true;
+		this.exhaustLockUntil = Date.now() + c.punchCharge.exhaustLockMs;
+		this.attack = false;
+	}
+	// Client-facing dark-red danger meter (0..1): fills while overcharging, then drains
+	// across the lock as the penalty counts down; 0 otherwise.
+	updateOverchargeMeter() {
+		var now = Date.now();
+		var ch = c.punchCharge;
+		if (now < this.exhaustLockUntil) {
+			this.overcharge = (this.exhaustLockUntil - now) / ch.exhaustLockMs;
+		} else if (this.charging) {
+			var held = now - this.chargeStartedAt;
+			this.overcharge = held >= ch.overchargeAfterMs
+				? Math.min(1, (held - ch.overchargeAfterMs) / ch.overchargeFillMs)
+				: 0;
+		} else {
+			this.overcharge = 0;
+		}
+	}
+	cancelCharge() {
+		this.charging = false;
+		this.chargeFrac = 0;
+	}
+	throwChargedPunch(currentState, punchDirectional) {
+		var frac = this.chargeFrac;
+		// Stamina was already drained while charging; latch exhaustion off what's left.
+		if (this.stamina < c.punchStamina.punchCost) {
+			this.stamina = Math.max(0, this.stamina);
+			this.staminaExhausted = true;
+		}
+		this.punchedTimer = Date.now();
+		var punchRadius = c.punchRadius;
+		if (this.isZombie == true) {
+			punchRadius = c.brutalRounds.infection.punchRadius;
+		}
+		// Directional punch: place the hitbox in front of the player along its facing so
+		// you have to aim. The decision (per round/mode) is resolved in
+		// GameBoard.updatePlayers and passed in.
+		var directional = punchDirectional === undefined ? c.directionalPunch : punchDirectional;
+		var punchX = this.x;
+		var punchY = this.y;
+		if (directional) {
+			var aim = utils.pos({ x: this.x, y: this.y }, c.punchReach, this.angle);
+			punchX = aim.x;
+			punchY = aim.y;
+		}
+		// Force = momentum (speed toward aim) x charge multiplier, so a fast, fully
+		// charged commit hits hardest. Stash facing + owner position for the clash pass.
+		var chargeMult = 1 + (c.punchCharge.maxChargeMult - 1) * frac;
+		var bonus = this.calcPunchBonus(directional) * chargeMult;
+		this.punch = new Punch(punchX, punchY, punchRadius, this.color, this.id, this.roomSig, bonus, this.isZombie);
+		this.punch.directional = directional;
+		this.punch.angle = this.angle;
+		this.punch.ox = this.x;
+		this.punch.oy = this.y;
+		this.punch.chargeFrac = frac; // so a fully-charged hit can play its own SFX
+		// Throwing a punch costs momentum: brake your velocity so even a tap isn't free
+		// — you lurch as you swing and have to rebuild speed. (The hit's force already
+		// captured your pre-brake speed via calcPunchBonus above.)
+		this.velX *= c.punchThrowBrake;
+		this.velY *= c.punchThrowBrake;
+		// No scoring in the lobby (the bully stat isn't gated by checkForWinners).
+		if (currentState != c.stateMap.lobby) {
+			this.bully += 1;
+		}
+		messenger.messageRoomBySig(this.roomSig, "punch", compressor.sendPunch(this.punch));
+		this.cancelCharge();
+		this.attack = false;
 	}
 	checkPunchCoolDown() {
 		if (this.punchedTimer != null) {
@@ -273,6 +433,44 @@ class Player extends Circle {
 				return true;
 			}
 			return false;
+		}
+	}
+	// Knockback multiplier from momentum: project velocity onto the punch's aim
+	// (facing) for a directional punch, or use raw speed for a radial swat (hockey /
+	// survivor-vs-zombie, which have no aim). Maps 0..refFrac*maxVelocity to floor..ceil.
+	calcPunchBonus(directional) {
+		var m = c.punchMomentum;
+		var speedToward;
+		if (directional) {
+			var rad = this.angle * Math.PI / 180;
+			speedToward = this.velX * Math.cos(rad) + this.velY * Math.sin(rad);
+		} else {
+			speedToward = utils.getMag(this.velX, this.velY);
+		}
+		if (speedToward < 0) { speedToward = 0; }
+		var ref = this.maxVelocity * m.refFrac;
+		var frac = ref > 0 ? Math.min(1, speedToward / ref) : 0;
+		return m.floor + (m.ceil - m.floor) * frac;
+	}
+	// True if there's enough stamina to throw a punch. Once exhausted, stays false
+	// until regenStamina lifts the latch (hysteresis), even if cost is momentarily met.
+	canSpendStamina() {
+		if (this.staminaExhausted) { return false; }
+		return this.stamina >= c.punchStamina.punchCost;
+	}
+	regenStamina(dt) {
+		// Don't regenerate mid-charge — holding the button is actively spending the bar
+		// (updateCharge drains it), so regen here would fight that and inflate the meter.
+		if (this.charging) { return; }
+		// During an overcharge lock the penalty is forced: pause regen so staminaExhausted
+		// stays latched (and the move penalty holds) for the whole lock window.
+		if (Date.now() < this.exhaustLockUntil) { return; }
+		var s = c.punchStamina;
+		if (this.stamina < s.max) {
+			this.stamina = Math.min(s.max, this.stamina + s.regenPerSec * dt);
+		}
+		if (this.staminaExhausted && this.stamina >= s.exhaustRecover) {
+			this.staminaExhausted = false;
 		}
 	}
 	// Lobby-only protection.
@@ -527,6 +725,11 @@ class Player extends Circle {
 		}
 	}
 	handlePunchHit(object) {
+		// A clashed punch was countered (resolvePunchClashes already flung both owners
+		// back); it lands on no one, so swallow the hit here.
+		if (object.clashed) {
+			return;
+		}
 		// Invulnerable lobby players (freshly respawned, or held safe in the start
 		// circle) can't be punched — so a griefer can't shove them into lava or out
 		// of the safe circle. Normal players still bump freely. No-op outside lobby.
@@ -539,8 +742,14 @@ class Player extends Circle {
 		if (!object.mapOwned) {
 			this.setPunchedBy(object.ownerId);
 		}
+		// Mark the punch as having connected. A punch that already landed a normal hit
+		// must not later be pulled into a clash (resolvePunchClashes skips landed
+		// punches) — otherwise a punch thrown a tick earlier could both hit a victim AND
+		// reflect, so only truly simultaneous (same-tick) mutual punches clash.
+		object.landed = true;
 		_engine.punchPlayer(this, object);
-		messenger.messageRoomBySig(this.roomSig, "playerPunched", { owner: object.ownerId, victim: this.id, x: this.x, y: this.y });
+		var charged = object.chargeFrac != null && object.chargeFrac >= c.punchCharge.chargedHitFrac;
+		messenger.messageRoomBySig(this.roomSig, "playerPunched", { owner: object.ownerId, victim: this.id, x: this.x, y: this.y, charged: charged });
 		emitBotEmote(this, "hurt"); // an AI racer reacts to getting knocked
 		return;
 	}
@@ -739,6 +948,16 @@ class Player extends Circle {
 		packet.removeNotch();
 		packet.enabled = false;
 		packet.alive = false;
+		// Clear any in-progress charge/exhaustion so a death mid-charge doesn't leak a
+		// frozen charge-fist on the corpse or, via the infection resurrect, revive a
+		// zombie with a stale charge (phantom punch / instant overcharge-lock).
+		packet.cancelCharge();
+		packet.overcharge = 0;
+		packet.exhaustLockUntil = 0;
+		packet.staminaExhausted = false;
+		packet.stamina = c.punchStamina.max;
+		packet.attack = false;
+		packet.attackQueued = false;
 		packet.ability = null;
 		packet.newX = packet.x;
 		packet.newY = packet.y;
@@ -768,7 +987,7 @@ class Player extends Circle {
 		// on the new map instead of steering toward old-map coordinates. Identity,
 		// personality knobs and the emote cooldown live on the Player/profile and
 		// are intentionally preserved.
-		if (this.ai != null) { this.ai.waypoints = null; this.ai.repathTimer = 0; }
+		if (this.ai != null) { this.ai.waypoints = null; this.ai.repathTimer = 0; this.ai.punchHoldUntil = null; this.ai.punchAngle = 0; }
 		this.x = this.initialLoc.x;
 		this.y = this.initialLoc.y;
 		this.newX = this.x;
@@ -789,6 +1008,15 @@ class Player extends Circle {
 		this.reachedGoal = false;
 		this.timeReached = null;
 		this.collapseMargin = null;
+		this.stamina = c.punchStamina.max;
+		this.staminaExhausted = false;
+		this.charging = false;
+		this.chargeFrac = 0;
+		this.chargeStartedAt = 0;
+		this.chargeStaminaAtStart = 0;
+		this.overcharge = 0;
+		this.exhaustLockUntil = 0;
+		this.attackQueued = false;
 		this.punch = null;
 		this.punchedBy = null;
 		this.murderedBy = null;

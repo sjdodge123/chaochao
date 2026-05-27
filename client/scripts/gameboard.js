@@ -247,6 +247,21 @@ function updatePlayerList(packet) {
 			playerList[player[0]].velX = player[3];
 			playerList[player[0]].velY = player[4];
 			playerList[player[0]].angle = player[5];
+			playerList[player[0]].stamina = player[6];
+			playerList[player[0]].charge = (player[7] != null) ? player[7] / 100 : 0;
+			playerList[player[0]].overcharge = (player[8] != null) ? player[8] / 100 : 0;
+			// Mirror the server's exhaustion hysteresis off the authoritative stamina
+			// value (the server's staminaExhausted flag isn't sent): once stamina drops
+			// below the punch cost you're "tired" and can't punch until it climbs back to
+			// exhaustRecover. Drives the charge glow so it never says "ready" while the
+			// server is still refusing the punch.
+			if (config.punchStamina != null && player[6] != null) {
+				if (player[6] < config.punchStamina.punchCost) {
+					playerList[player[0]]._tired = true;
+				} else if (player[6] >= config.punchStamina.exhaustRecover) {
+					playerList[player[0]]._tired = false;
+				}
+			}
 		}
 	}
 }
@@ -525,6 +540,7 @@ function spawnPunch(payload) {
 	punch.radius = payload[4];
 	punch.type = payload[5];
 	punch.directional = payload[6] == 1;
+	punch.bonus = (payload[7] != null) ? payload[7] : 1;
 	punchList[punch.ownerId] = punch;
 	return punch;
 }
@@ -827,6 +843,17 @@ var shakeSustainFloor = 0;
 
 function addTrauma(amount) {
 	shakeTrauma = Math.min(1, shakeTrauma + amount);
+}
+// A sustained low rumble while a punch is charging (held one frame at a time): set a
+// trauma FLOOR rather than accumulating, so it holds steady instead of ramping to max.
+// Respects a stronger existing sustain (e.g. a volcano) so charging can't quiet it.
+function chargeRumble(intensity) {
+	if (Date.now() < shakeSustainUntil) {
+		shakeSustainFloor = Math.max(shakeSustainFloor, intensity);
+	} else {
+		shakeSustainFloor = intensity;
+	}
+	shakeSustainUntil = Date.now() + 90;
 }
 // Hold a minimum trauma floor for a duration (e.g. a long volcano eruption),
 // then let it decay normally.

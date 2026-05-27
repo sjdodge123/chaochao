@@ -19,7 +19,10 @@ exports.sendPlayerUpdates = function (playerList) {
 			player.y,
 			player.velX,
 			player.velY,
-			player.angle
+			player.angle,
+			Math.round(player.stamina),
+			Math.round((player.chargeFrac || 0) * 100),
+			Math.round((player.overcharge || 0) * 100)
 		];
 		packet.push(listItem);
 	}
@@ -209,6 +212,7 @@ exports.sendPunch = function (punch) {
 	packet[4] = punch.radius;
 	packet[5] = punch.type;
 	packet[6] = punch.directional ? 1 : 0;
+	packet[7] = punch.getBonus();
 	packet = JSON.stringify(packet);
 	player = null;
 	listItem = null;

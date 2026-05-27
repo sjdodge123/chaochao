@@ -270,6 +270,10 @@ function checkForMail(client) {
 				player.moveBackward = packet.moveBackward;
 				player.turnLeft = packet.turnLeft;
 				player.turnRight = packet.turnRight;
+				// Latch the press edge so a sub-tick tap (press+release between two server
+				// ticks) still throws — punches now fire on release, so checkAttack would
+				// otherwise see only the trailing attack=false and drop the punch.
+				if (packet.attack && !player.attack) { player.attackQueued = true; }
 				player.attack = packet.attack;
 			}
 		}

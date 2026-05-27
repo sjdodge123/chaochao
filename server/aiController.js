@@ -328,6 +328,9 @@ var BOMB_THROW_RANGE = 340; // px: throw a bomb at a rival within this
 var SWAP_RANGE = 280;       // px: only swap with a rival this near (and only when behind)
 var CUT_RANGE = 78;         // px: cut when a rival is this close
 var BOMB_MAX_HOLD = 2.6;    // s: detonate before the bomb's 3s auto-expire
+var PUNCH_MOMENTUM_MIN = 0.4; // min momentum-toward-target (as a fraction of a full-power
+                              // charge) before a bot throws a routine offensive punch — so
+                              // it commits to a closing hit instead of a weak standing tap
 
 // --- Phase 5: brutal-round tunables ---
 var BLIND_DRIFT_STEP = 7;       // deg/tick random-walk of the blind steering error
@@ -350,6 +353,10 @@ function angleDeg(fromX, fromY, toX, toY) {
     return Math.atan2(toY - fromY, toX - fromX) * 180 / Math.PI;
 }
 function punchReady(bot) {
+    // Respect the punch-stamina gate the same way checkAttack does, so a tired bot
+    // doesn't keep setting attack on punches that the server will silently swallow.
+    if (bot.staminaExhausted) { return false; }
+    if (c.punchStamina != null && bot.stamina != null && bot.stamina < c.punchStamina.punchCost) { return false; }
     return bot.punchedTimer == null || (Date.now() - bot.punchedTimer) >= bot.punchWaitTime;
 }
 function isRacer(p, self) {
@@ -498,6 +505,21 @@ function isBlinded(bot, ctx, now) {
 // (lands in front of the kart); harmless where it's omnidirectional.
 function facePunch(bot, x, y) { bot.angle = angleDeg(bot.x, bot.y, x, y); }
 
+// Punches now fire on RELEASE (checkAttack charges while attack is held, throws when it
+// drops). So a bot can't just hold attack=true — it would charge forever and never throw.
+// botPunch holds the button for holdMs (0 = a tap that releases next tick) and records the
+// release time; decideAttack's manager drops attack when it's reached. Keep this OFF the
+// ability-fire paths (abilities fire instantly on press, not on a charge).
+function botPunch(bot, holdMs) {
+    bot.attack = true;
+    bot.ai.punchHoldUntil = Date.now() + (holdMs || 0);
+    // steerBot rewrites bot.angle to the movement direction every tick, but the punch
+    // fires on the release tick (where decideAttack's manager returns early before any
+    // facePunch). Lock the aim now (facePunch already set bot.angle at the target) so the
+    // manager can hold it through the charge and the thrown punch lands on target.
+    bot.ai.punchAngle = bot.angle;
+}
+
 function decideBrutalPunch(bot, ctx) {
     // A "punch" is attack with no held ability. If the bot holds an ability,
     // setting attack would FIRE THE ABILITY (Player.checkAttack), not punch — and
@@ -508,19 +530,19 @@ function decideBrutalPunch(bot, ctx) {
     if (ctx.infection && bot.isZombie) {
         var prey = nearestMatch(bot, ctx.players, notZombiePrey);
         if (prey != null && prey.dist < c.punchRadius + bot.radius + prey.player.radius + 8) {
-            facePunch(bot, prey.player.x, prey.player.y); bot.attack = true; return true;
+            facePunch(bot, prey.player.x, prey.player.y); botPunch(bot, 0); return true;
         }
         return false; // not in range — the chase is handled in steering
     }
     if (ctx.infection && !bot.isZombie) {
         var z = nearestMatch(bot, ctx.players, isZombieP);
         if (z != null && z.dist < c.punchRadius + bot.radius + z.player.radius + 8) {
-            facePunch(bot, z.player.x, z.player.y); bot.attack = true; return true; // knock the zombie back
+            facePunch(bot, z.player.x, z.player.y); botPunch(bot, 0); return true; // knock the zombie back
         }
     }
     if (ctx.hockey && ctx.puck != null) {
         if (mag(ctx.puck.x - bot.x, ctx.puck.y - bot.y) < c.punchRadius + bot.radius + (ctx.puck.radius || 0) + 8) {
-            facePunch(bot, ctx.puck.x, ctx.puck.y); bot.attack = true; return true; // clear the puck off us
+            facePunch(bot, ctx.puck.x, ctx.puck.y); botPunch(bot, 0); return true; // clear the puck off us
         }
     }
     return false;
@@ -651,6 +673,41 @@ function offensiveCombatAllowed(bot, now) {
     return true;
 }
 
+// Fraction (0..1) of a full-power punch the bot's CURRENT velocity would earn
+// against `target` — i.e. its speed projected onto the line to the target, over the
+// same reference speed Player.calcPunchBonus uses. facePunch aims the bot at the
+// target before the swing, so this matches the bonus the resulting punch will get.
+function momentumTowardFrac(bot, target) {
+    if (c.punchMomentum == null) { return 1; }
+    var dx = target.x - bot.x, dy = target.y - bot.y;
+    var d = mag(dx, dy);
+    if (d === 0) { return 0; }
+    var toward = (bot.velX * dx + bot.velY * dy) / d;
+    if (toward < 0) { return 0; }
+    var ref = bot.maxVelocity * c.punchMomentum.refFrac;
+    return ref > 0 ? Math.min(1, toward / ref) : 0;
+}
+
+// How long to hold a charge (ms); 0 = a quick tap. A committed haymaker is held to a
+// strong depth but ALWAYS released with a wide margin before the overcharge danger line,
+// so a bot can never charge itself into the exhaustion lock. Only commit from a near-full
+// bar (a charge spends most of it), on a real closing line, and not while we need our
+// mobility (fleeing a collapse, or braking at a lava edge).
+function chargeHoldFor(bot, ctx, nr) {
+    if (c.punchCharge == null) { return 0; }
+    var fullBar = c.punchStamina ? c.punchStamina.fullChargeCost : 100;
+    var commit = !(ctx && ctx.collapsing) && !bot.braking
+        && bot.stamina != null && bot.stamina >= fullBar * 0.85
+        && bot.ai.aggression >= 0.5
+        && momentumTowardFrac(bot, nr.player) >= 0.7;
+    if (!commit) { return 0; }
+    var depth = 0.65 + 0.3 * bot.ai.aggression;          // 0.65 .. 0.95 of a full charge
+    var holdMs = depth * c.punchCharge.maxChargeMs;
+    // Hard safety: never get near the overcharge threshold (leave a wide margin).
+    var safeCap = Math.min(c.punchCharge.maxChargeMs, c.punchCharge.overchargeAfterMs - 700);
+    return Math.max(0, Math.min(holdMs, safeCap));
+}
+
 // Decide whether to throw a (cooldown-gated, bursty) punch this tick. Priority:
 // shove a rival into adjacent lava; aggressive bots also punch a rival pressed
 // against them — but only during a combat burst. Brutal-round combat (zombies,
@@ -667,13 +724,102 @@ function decidePunch(bot, ctx) {
     // A free shove into the lava is always worth it; routine aggression only in bursts.
     if (!shove && bot.ai.aggression < 0.6) { return; }
     if (!offensiveCombatAllowed(bot, Date.now())) { return; }
+    // Momentum-aware timing: punch power scales with closing speed, so for a routine
+    // offensive punch the bot holds the swing until it's actually charging toward the
+    // rival hard enough to land a real hit — not a limp standing tap. A free lava
+    // shove (about position, not power) and a point-blank defensive jab still go
+    // through regardless.
+    if (!shove) {
+        var pointBlank = nr.dist < (bot.radius + nr.player.radius + 2);
+        if (!pointBlank && momentumTowardFrac(bot, nr.player) < PUNCH_MOMENTUM_MIN) { return; }
+    }
     facePunch(bot, nr.player.x, nr.player.y);
-    bot.attack = true;
+    // Charge a committed haymaker on a strong closing line (held safely below overcharge),
+    // otherwise a quick tap. Charging holds attack across ticks — the decideAttack manager
+    // releases it; the throw cost/charge size is finalised server-side.
+    botPunch(bot, chargeHoldFor(bot, ctx, nr));
+}
+
+// Defensive counter: swing back at a REAL incoming punch. Scans live punches for a
+// rival's punch that's close and aimed at the bot, then punches toward that attacker
+// so the two clash (and the heavier committer eats their own momentum). Reacting to an
+// actual punch — not merely a rival that happens to face the bot — keeps the bot from
+// burning its stamina on speculative counters against rivals who never swing.
+// Cooldown + stamina gated via punchReady.
+function decideCounter(bot, ctx) {
+    if (ctx.punches == null || c.punchClash == null) { return false; }
+    if (!punchReady(bot)) { return false; }
+    var cfg = c.punchClash;
+    for (var oid in ctx.punches) {
+        if (oid == bot.id) { continue; } // not our own punch
+        var pn = ctx.punches[oid];
+        if (pn == null || pn.mapOwned || !pn.directional || pn.clashResolved || pn.landed) { continue; }
+        var attacker = ctx.players[pn.ownerId];
+        if (attacker == null || !isRacer(attacker, bot)) { continue; }
+        var dx = bot.x - attacker.x, dy = bot.y - attacker.y;
+        var d = mag(dx, dy);
+        if (d === 0 || d > cfg.range) { continue; }
+        var rr = (pn.angle || 0) * Math.PI / 180; // the punch's aim
+        if (Math.cos(rr) * (dx / d) + Math.sin(rr) * (dy / d) < cfg.facingDot) { continue; }
+        // Don't counter into a losing clash: if the incoming punch is clearly stronger
+        // than the tap we could swing back (stronger wins), a counter just loses and
+        // wastes stamina — better to eat it / let steering carry us clear.
+        if (c.punchMomentum != null) {
+            var mm = c.punchMomentum;
+            var ourTap = mm.floor + (mm.ceil - mm.floor) * momentumTowardFrac(bot, attacker);
+            if (pn.getBonus() > ourTap + cfg.tieMargin) { continue; }
+        }
+        facePunch(bot, attacker.x, attacker.y);
+        botPunch(bot, 0); // quick reactive jab
+        return true;
+    }
+    return false;
+}
+
+// A tap punch brakes ~55% of your velocity, so it doubles as an emergency stop. This
+// fires when a bot is sliding fast on ICE (reduced grip) toward lava with its steering
+// fighting its momentum (trying to turn away but skating in anyway) — the classic
+// "slide off the ice into the lava" death that normal braking can't save. The tap kills
+// the slide so the steering can redirect. Bare-handed only (a held ability would fire
+// instead of braking) and stamina/cooldown gated like any punch.
+function emergencyBrakeNeeded(bot) {
+    if (bot.brakeCoeff >= c.playerBrakeCoeff) { return false; } // not on a slippery tile
+    var speed = mag(bot.velX, bot.velY);
+    if (speed < bot.maxVelocity * 0.45) { return false; }       // not sliding fast enough to matter
+    var tlen = mag(bot.targetDirX, bot.targetDirY);
+    if (tlen < 1e-3) { return true; }                           // no escape heading + lava ahead -> stop
+    var dot = (bot.velX * bot.targetDirX + bot.velY * bot.targetDirY) / (speed * tlen);
+    return dot < 0.4;                                           // momentum badly off our intended line
 }
 
 // Top-level per-tick combat decision: fire the held ability, else consider a punch.
 function decideAttack(bot, ctx, nav) {
+    // Manage an in-progress punch hold (charge): hold the button (and keep the locked
+    // aim, since steerBot just overwrote bot.angle) until the planned release, then drop
+    // it so checkAttack throws the punch on the falling edge. This is what makes a bot
+    // RELEASE — without it a bot that keeps wanting to punch would charge forever.
+    if (bot.ai.punchHoldUntil != null) {
+        // Bail out of a charge hold if survival or an ability now takes over: release the
+        // button so checkAttack throws the (partial) charge — the throw-brake doubles as
+        // the ice-stop — instead of skating into lava or firing a just-grabbed ability via
+        // the still-held attack.
+        if (bot.ability != null || (nav && nav.lavaAhead && emergencyBrakeNeeded(bot))) {
+            bot.ai.punchHoldUntil = null;
+            bot.attack = false;
+            return;
+        }
+        bot.angle = bot.ai.punchAngle;
+        if (Date.now() < bot.ai.punchHoldUntil) { bot.attack = true; return; } // still charging
+        bot.ai.punchHoldUntil = null;
+        bot.attack = false; // release -> throw on the locked aim
+        return;
+    }
     bot.attack = false;
+    // Survival first: tap to brake out of an ice slide into lava before anything else.
+    if (nav && nav.lavaAhead && bot.ability == null && punchReady(bot) && emergencyBrakeNeeded(bot)) {
+        botPunch(bot, 0);
+        return;
+    }
     if (decideBrutalPunch(bot, ctx)) { return; } // zombies / puck / zombie-defense first
     if (bot.ability != null) {
         // Track how long this ability has been held so it gets used within the
@@ -688,6 +834,7 @@ function decideAttack(bot, ctx, nav) {
         return;
     }
     bot.ai.heldAbilityId = null;
+    if (decideCounter(bot, ctx)) { return; }
     decidePunch(bot, ctx);
 }
 
@@ -1255,6 +1402,7 @@ function update(gameBoard, currentState, dt) {
         players: playerList,
         projectileList: gameBoard.projectileList,
         hazardList: gameBoard.hazardList,
+        punches: gameBoard.punchList, // live punches, so a bot can counter a REAL incoming one
         collapsing: currentState === c.stateMap.collapsing,
         collapseLoc: gameBoard.collapseLoc && gameBoard.collapseLoc.x != null ? gameBoard.collapseLoc : null,
         collapseLine: gameBoard.collapseLine,
@@ -1285,5 +1433,7 @@ module.exports._test = {
     closestOnSegment: closestOnSegment,
     hazardRepulsion: hazardRepulsion,
     decideAbility: decideAbility,
-    newBotState: newBotState
+    newBotState: newBotState,
+    chargeHoldFor: chargeHoldFor,
+    emergencyBrakeNeeded: emergencyBrakeNeeded
 };

@@ -4,6 +4,7 @@
     "punchRadius": 11,
     "directionalPunch": true,
     "punchReach": 14,
+    "punchThrowBrake": 0.45,
     "worldWidth": 1366,
     "worldHeight": 768,
     "worldCollapseSpeed": 6,
@@ -330,8 +331,38 @@
     "playerKilledNearVictoryBonus": 500,
     "playerStartSleepTime": 60,
     "playerAFKKickTime": 240,
-    "playerPunchSlowAmt": 0.35,
-    "playerPunchCooldown": 300,
+    "playerPunchCooldown": 200,
+    "punchMomentum": {
+        "_doc": "Punch knockback scales with how fast you're moving TOWARD your aim. floor/ceil are the bonus multiplier at zero vs full charge; refFrac is the fraction of maxVelocity (along facing) that counts as full charge.",
+        "floor": 0.5,
+        "ceil": 1.9,
+        "refFrac": 0.55
+    },
+    "punchStamina": {
+        "_doc": "Stamina is the punch/charge fuel. A tap costs punchCost; holding to charge drains up to fullChargeCost (a full charge empties the bar). Below punchCost you can't punch; once exhausted you must regen back to exhaustRecover before punching again (set = punchCost so you can tap again the moment you've recovered one tap's worth), and you move at exhaustedMoveFactor speed until then. max/punchCost = taps from a full bar.",
+        "max": 100,
+        "punchCost": 45,
+        "fullChargeCost": 100,
+        "regenPerSec": 18,
+        "exhaustRecover": 45,
+        "exhaustedMoveFactor": 0.85
+    },
+    "punchCharge": {
+        "_doc": "Hold-to-charge: holding punch for maxChargeMs reaches a full charge that multiplies the momentum-scaled knockback by maxChargeMult (final force = momentum bonus x charge). Charge is capped by the stamina you can afford. Overcharge: holding past overchargeAfterMs starts a danger phase whose dark-red meter fills over overchargeFillMs; if you don't release in time the charge is wasted and you're locked in the exhausted move-penalty for exhaustLockMs. chargedHitFrac = how full a charge counts as a 'fully charged' hit (drives the thwack SFX).",
+        "maxChargeMs": 700,
+        "maxChargeMult": 2.0,
+        "overchargeAfterMs": 2000,
+        "overchargeFillMs": 1500,
+        "exhaustLockMs": 3000,
+        "chargedHitFrac": 0.85
+    },
+    "punchClash": {
+        "_doc": "Two players who punch each other while facing each other clash. If their forces are within tieMargin it's a standoff: both flung back by THEIR OWN momentum (reflectKick * bonus). Otherwise the STRONGER punch wins — the weaker is cancelled and the stronger lands normally. range = max owner separation; facingDot = min dot of facing vs direction-to-rival.",
+        "range": 50,
+        "facingDot": 0.45,
+        "reflectKick": 70,
+        "tieMargin": 0.35
+    },
     "playerMaxSpeed": 500,
     "playerMaxSpeedBonus": 800,
     "playerMaxSpeed_prod": 50,
