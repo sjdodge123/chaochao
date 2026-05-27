@@ -99,6 +99,17 @@ function checkForMail(client) {
 		client.emit("config", c);
 	});
 
+	// Opt-in touch diagnostics: a client running with ?debugtouch=1 streams touch
+	// lifecycle snapshots here. We only log them when the server is started with
+	// TOUCH_DEBUG=1, so in production this is a no-op and can't be log-spammed.
+	client.on("touchDebugReport", function (data) {
+		if (process.env.TOUCH_DEBUG !== "1") {
+			return;
+		}
+		try { console.log("[touchDebug] " + JSON.stringify(data)); }
+		catch (e) { console.log("[touchDebug] (unserializable)"); }
+	});
+
 	// Diagnostic only: a client running with ?diag=1 streams render-perf samples
 	// (frame times, phase split, device class, game-state counts) so a stutter on
 	// a real device can be diagnosed from server logs. Untrusted input from any

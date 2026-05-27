@@ -2,6 +2,30 @@ var menuOpen = false;
 
 var gamePadA = null;
 var movingByMouse = false;
+// Opt-in touch diagnostics. Enable with ?debugtouch=1 in the URL: the client then
+// streams a touch-lifecycle snapshot (which control claimed each touch, every
+// control's live touchIdx, fullscreen state, touchcancel events) to the server,
+// for diagnosing touch problems on devices that can't be remotely inspected
+// (e.g. iOS Chrome/Safari). Off by default and zero-cost when off; the server
+// only logs these when started with TOUCH_DEBUG=1 (see messenger.js).
+var touchDebug = false;
+function tdLog(ev, extra) {
+    if (!touchDebug || typeof server === "undefined" || !server) {
+        return;
+    }
+    var p = {
+        ev: ev,
+        fs: !!(document.fullscreenElement || document.webkitFullscreenElement),
+        idx: {
+            move: joystickMovement ? joystickMovement.touchIdx : "n/a",
+            attack: attackButton ? attackButton.touchIdx : "n/a",
+            exit: exitButton ? exitButton.touchIdx : "n/a",
+            chat: chatButton ? chatButton.touchIdx : "n/a"
+        }
+    };
+    if (extra) { for (var k in extra) { p[k] = extra[k]; } }
+    server.emit("touchDebugReport", p);
+}
 var isTouchScreen = false,
     virtualButtonList = null,
     joystickMovement = null,
@@ -10,24 +34,55 @@ var isTouchScreen = false,
     chatButton = null,
     attackButton = null;
 
+// initEventHandlers() can run more than once per session (init() is called at
+// page load AND from the gameState handler, which re-fires on reconnect/re-join),
+// so the window/document listeners are bound exactly once behind this flag to
+// avoid stacking duplicate handlers.
+var eventListenersBound = false;
+var wasFullscreen = false;
+function onFullscreenChange() {
+    var nowFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    tdLog("fschange");
+    // Release any still-held touch control when LEAVING fullscreen — that exit is
+    // the transition that orphaned the joystick (a stuck touchIdx bricked it).
+    // We skip ENTER so a player holding the stick while tapping fullscreen isn't
+    // dropped; touchcancel handles genuinely-cancelled touches in either direction.
+    if (wasFullscreen && !nowFs) {
+        releaseHeldTouchControls();
+    }
+    wasFullscreen = nowFs;
+}
+
 function initEventHandlers() {
-    window.addEventListener("mousemove", calcMousePos, false);
-    window.addEventListener("mousedown", handleClick, false);
-    window.addEventListener("mouseup", handleUnClick, false);
-    window.addEventListener("keydown", keyDown, false);
-    window.addEventListener("keyup", keyUp, false);
-    window.addEventListener("dblclick", handleDblClick, false);
+    if (!eventListenersBound) {
+        eventListenersBound = true;
+        window.addEventListener("mousemove", calcMousePos, false);
+        window.addEventListener("mousedown", handleClick, false);
+        window.addEventListener("mouseup", handleUnClick, false);
+        window.addEventListener("keydown", keyDown, false);
+        window.addEventListener("keyup", keyUp, false);
+        window.addEventListener("dblclick", handleDblClick, false);
 
+        window.addEventListener('touchstart', onTouchStart, { passive: false });
+        window.addEventListener('touchend', onTouchEnd, { passive: false });
+        window.addEventListener('touchmove', onTouchMove, { passive: false });
+        // The OS can CANCEL in-flight touches (touchcancel) rather than end them —
+        // notably iOS does this for touches held across a fullscreen enter/exit.
+        // Without a handler the touched control's touchIdx stays set forever and it
+        // goes dead (the movement stick bricked after toggling fullscreen).
+        window.addEventListener('touchcancel', onTouchCancel, { passive: false });
+        // Backstop: leaving fullscreen can orphan a touch without firing
+        // touchend/cancel; onFullscreenChange releases any still-held control then.
+        document.addEventListener('fullscreenchange', onFullscreenChange, false);
+        document.addEventListener('webkitfullscreenchange', onFullscreenChange, false);
 
-    window.addEventListener('touchstart', onTouchStart, { passive: false });
-    window.addEventListener('touchend', onTouchEnd, { passive: false });
-    window.addEventListener('touchmove', onTouchMove, { passive: false });
-
-    window.addEventListener('contextmenu', function (ev) {
-        ev.preventDefault();
-        return false;
-    }, false);
+        window.addEventListener('contextmenu', function (ev) {
+            ev.preventDefault();
+            return false;
+        }, false);
+    }
     isTouchScreen = isTouchDevice();
+    try { touchDebug = /[?&]debugtouch/.test(window.location.search); } catch (e) { touchDebug = false; }
     // Experiment: dynamic camera defaults ON for every input method (still
     // toggleable via the navbar camera button). It auto-falls back to the
     // whole-map view when >1 local player is sharing the screen (see
@@ -519,12 +574,15 @@ function onTouchStart(evt) {
         evt.preventDefault();
         return;
     }
+    var claimedName = "none";   // for touch diagnostics (tdLog below)
     for (var i = 0; i < virtualButtonList.length; i++) {
         if (virtualButtonList[i].bound.pointInRect(touchX, touchY)) {
             var button = virtualButtonList[i].button;
             if (button.touchIdx == null) {
                 button.touchIdx = touch.identifier;
                 button.onDown(touchX, touchY);
+                claimedName = button === joystickMovement ? "MOVE" : button === attackButton ? "ATTACK" :
+                    button === exitButton ? "EXIT" : button === chatButton ? "CHAT" : "?";
 
                 if (button == attackButton) {
                     // The ENTIRE right tap region punches (not just the drawn
@@ -557,12 +615,18 @@ function onTouchStart(evt) {
         }
 
     }
+    tdLog("start", { id: touch.identifier, x: Math.round(touchX), y: Math.round(touchY), claimed: claimedName });
 }
 function onTouchEnd(evt) {
     if (!virtualButtonList) {
         return;
     }
     var touchList = evt.changedTouches;
+    if (touchDebug) {
+        var endIds = [];
+        for (var e = 0; e < touchList.length; e++) { endIds.push(touchList[e].identifier); }
+        tdLog("end", { ids: endIds });
+    }
     for (var i = 0; i < touchList.length; i++) {
         for (var j = 0; j < virtualButtonList.length; j++) {
             var button = virtualButtonList[j].button;
@@ -584,6 +648,57 @@ function onTouchEnd(evt) {
                 button.onUp();
             }
         }
+    }
+}
+// touchcancel: the OS interrupted these touches (no touchend will come). Release
+// the matched controls exactly like touchend does, but WITHOUT requesting
+// fullscreen — a cancelled exit-button touch must not toggle fullscreen.
+function onTouchCancel(evt) {
+    if (!virtualButtonList) {
+        return;
+    }
+    var touchList = evt.changedTouches;
+    if (touchDebug) {
+        var cids = [];
+        for (var c = 0; c < touchList.length; c++) { cids.push(touchList[c].identifier); }
+        tdLog("CANCEL", { ids: cids });
+    }
+    for (var i = 0; i < touchList.length; i++) {
+        for (var j = 0; j < virtualButtonList.length; j++) {
+            var button = virtualButtonList[j].button;
+            if (touchList[i].identifier == button.touchIdx) {
+                if (button == joystickMovement) {
+                    cancelMovement();
+                }
+                if (button == attackButton) {
+                    attack = false;
+                    server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
+                }
+                button.touchIdx = null;
+                button.onUp();
+            }
+        }
+    }
+}
+// Release any control that still thinks it's being touched. Used as a fullscreen-
+// change backstop: a transition can orphan a touch (no touchend/cancel), leaving
+// a stuck touchIdx that bricks the control until reload. Clearing it lets the
+// next tap re-claim the control cleanly.
+function releaseHeldTouchControls() {
+    if (!virtualButtonList) {
+        return;
+    }
+    var any = false;
+    for (var i = 0; i < virtualButtonList.length; i++) {
+        var button = virtualButtonList[i].button;
+        if (button.touchIdx != null) {
+            button.touchIdx = null;
+            if (button.onUp) { button.onUp(); }
+            any = true;
+        }
+    }
+    if (any) {
+        cancelMovement(); // clears the movement/attack globals and emits a stop
     }
 }
 function onTouchMove(evt) {
