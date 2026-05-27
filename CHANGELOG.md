@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.15.0 — 2026-05-27
+
 ### General
 
 - AI racers handle ice a lot better. They now slow down before sliding onto an icy stretch and look much farther ahead while on it, so they curve around lava instead of skating straight into it — they make it across slippery, lava-lined maps far more often than before.
