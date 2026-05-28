@@ -366,6 +366,10 @@ var BOMB_THROW_RANGE = 340; // px: throw a bomb at a rival within this
 var SWAP_RANGE = 280;       // px: only swap with a rival this near (and only when behind)
 var CUT_RANGE = 78;         // px: cut when a rival is this close
 var BOMB_MAX_HOLD = 2.6;    // s: detonate before the bomb's 3s auto-expire
+var BOMB_LEAD_TIME = 0.35;  // s: lead a moving target by this much when aiming a thrown bomb
+var SWAP_LAND_PROBE = 70;   // px: a swap leaves us on the target's ground — don't steal onto lava this close
+var BLIND_HAZARD_PROBE = 60;// px: a rival is "in a pinch" for a blindfold if lava is this close to them
+var GOAL_CONTEST_RANGE = 160;// px: a rival this near a goal tile is contesting the finish (good blindfold timing)
 var PUNCH_MOMENTUM_MIN = 0.4; // min momentum-toward-target (as a fraction of a full-power
                               // charge) before a bot throws a routine offensive punch — so
                               // it commits to a closing hit instead of a weak standing tap
@@ -460,6 +464,122 @@ function lavaBeyond(ctx, bot, target, dist) {
     var dx = target.x - bot.x, dy = target.y - bot.y;
     var m = mag(dx, dy) || 1;
     return isLavaAt(ctx, target.x + (dx / m) * dist, target.y + (dy / m) * dist);
+}
+
+// --- Telegraph-reasoning helpers: PREDICT an ability's effect and TIME its release
+// for maximum impact, instead of firing on the first plain range gate. ---
+
+// Straight-line distance from a player to the goal point a bot is pathing toward.
+function goalDistOf(p, goal) { return goal == null ? Infinity : mag(goal.x - p.x, goal.y - p.y); }
+
+// Rivals that are AHEAD of the bot in the race (closer to the goal), each tagged with
+// its distance to the bot. Nearest-first. Empty when no goal is known (degrade safely).
+function rivalsAhead(bot, ctx, goal) {
+    var out = [];
+    if (goal == null) { return out; }
+    var mine = goalDistOf(bot, goal);
+    for (var id in ctx.players) {
+        var p = ctx.players[id];
+        if (!isRacer(p, bot)) { continue; }
+        if (goalDistOf(p, goal) >= mine) { continue; } // not ahead of us
+        out.push({ player: p, dist: mag(p.x - bot.x, p.y - bot.y), goalDist: goalDistOf(p, goal) });
+    }
+    out.sort(function (a, b) { return a.dist - b.dist; });
+    return out;
+}
+// The race LEADER among the bot's rivals (the rival closest to the goal) with its
+// distance to the bot. null when there are no rivals. Falls back to the bot-nearest
+// rival when no goal is known so callers still get a sensible target.
+function raceLeader(bot, ctx, goal) {
+    var best = null;
+    for (var id in ctx.players) {
+        var p = ctx.players[id];
+        if (!isRacer(p, bot)) { continue; }
+        var gd = goalDistOf(p, goal);
+        var d = mag(p.x - bot.x, p.y - bot.y);
+        if (best == null || gd < best.goalDist || (gd === best.goalDist && d < best.dist)) {
+            best = { player: p, dist: d, goalDist: gd };
+        }
+    }
+    return best;
+}
+// Where a moving target will be after `t` seconds at its current velocity. A thrown
+// bomb persists (~3s) and its trigger watches for a rival entering the blast, so
+// aiming at where the rival is HEADED keeps the bomb's line crossing their path.
+function leadPoint(p, t) { return { x: p.x + (p.velX || 0) * t, y: p.y + (p.velY || 0) * t }; }
+
+// True if (x,y) is on, or lava-adjacent within `probe` of, a lava cell (samples the
+// containing cell plus 8 points one probe out). Used to keep abilities from putting
+// the bot (swap landing) or judging a rival (blindfold) on safe vs. dangerous ground.
+function lavaNear(ctx, x, y, probe) {
+    if (isLavaAt(ctx, x, y)) { return true; }
+    for (var a = 0; a < 360; a += 45) {
+        var r = a * Math.PI / 180;
+        if (isLavaAt(ctx, x + Math.cos(r) * probe, y + Math.sin(r) * probe)) { return true; }
+    }
+    return false;
+}
+// The point a held bomb should be thrown at to MAXIMIZE impact, lead-predicted by
+// rival velocity. Preference order: a Nemesis bot's human; a CLUSTER centroid where
+// the blast catches 2+ rivals at once; else the race LEADER; else the nearest rival.
+// Only considers rivals inside BOMB_THROW_RANGE — returns null if none are in range
+// (so the bomb stays held/telegraphed rather than wasted down an empty track).
+function bombTarget(bot, ctx, goal) {
+    var cands = [];
+    for (var id in ctx.players) {
+        var p = ctx.players[id];
+        if (!isRacer(p, bot)) { continue; }
+        if (mag(p.x - bot.x, p.y - bot.y) >= BOMB_THROW_RANGE) { continue; }
+        cands.push(p);
+    }
+    if (cands.length === 0) { return null; }
+    var blast = AB.bomb.explosionRadius;
+    // Nemesis (focus 'human'): hunt the human first if one is in range.
+    if (bot.ai && bot.ai.focus === 'human') {
+        for (var hi = 0; hi < cands.length; hi++) {
+            if (!cands[hi].isAI) { return leadPoint(cands[hi], BOMB_LEAD_TIME); }
+        }
+    }
+    var leads = cands.map(function (p) { return leadPoint(p, BOMB_LEAD_TIME); });
+    // Cluster: pick the lead-position whose blast catches the most rivals at once.
+    var bestI = 0, bestCount = 0;
+    for (var i = 0; i < leads.length; i++) {
+        var n = 0;
+        for (var j = 0; j < leads.length; j++) {
+            if (mag(leads[i].x - leads[j].x, leads[i].y - leads[j].y) < blast) { n++; }
+        }
+        if (n > bestCount) { bestCount = n; bestI = i; }
+    }
+    if (bestCount >= 2) { return leads[bestI]; }
+    // No cluster: aim at the LEADER (closest to goal) among candidates, else nearest.
+    var li = 0, best = Infinity;
+    for (var k = 0; k < cands.length; k++) {
+        var score = goal != null ? goalDistOf(cands[k], goal) : mag(cands[k].x - bot.x, cands[k].y - bot.y);
+        if (score < best) { best = score; li = k; }
+    }
+    return leads[li];
+}
+// Blindfold blinds the WHOLE room (the bot too, in effect), so it only pays off when
+// the disruption lands harder on rivals than on us: the bot is on easy, open ground
+// while at least one rival is in terrain where losing vision really hurts — hugging
+// lava, or right on a contested goal. Otherwise bank it for the endgame.
+function blindfoldWorthIt(bot, ctx, nav, goal) {
+    if (nav.lavaAhead || nav.sharpTurn || nav.braking) { return false; } // bot itself in a pinch
+    for (var id in ctx.players) {
+        var p = ctx.players[id];
+        if (!isRacer(p, bot)) { continue; }
+        if (lavaNear(ctx, p.x, p.y, BLIND_HAZARD_PROBE)) { return true; }
+        if (goalContested(ctx, p)) { return true; }
+    }
+    return false;
+}
+function goalContested(ctx, p) {
+    var gt = ctx.goalTiles;
+    if (!gt || gt.length === 0) { return false; }
+    for (var i = 0; i < gt.length; i++) {
+        if (mag(gt[i].x - p.x, gt[i].y - p.y) < GOAL_CONTEST_RANGE) { return true; }
+    }
+    return false;
 }
 
 // --- Phase 5 helpers ---
@@ -621,7 +741,8 @@ function decideAbility(bot, ctx, ability, nav) {
     var armed = held >= minHold;
     var endgame = ctx.collapsing === true; // round ending -> deploy now or waste it
     var forced = endgame || held > maxHold;
-    var rank = goalRank(bot, ctx.players, bot.ai.goal);
+    var goal = bot.ai.goal;
+    var rank = goalRank(bot, ctx.players, goal);
     var racers = countRacers(ctx.players);
     var behind = racers > 1 && rank >= 1;  // at least one rival is ahead of us
     var aimAhead = function () { bot.angle = snap45(Math.atan2(bot.targetDirY, bot.targetDirX) * 180 / Math.PI); };
@@ -630,22 +751,36 @@ function decideAbility(bot, ctx, ability, nav) {
     var openRunway = !nav.lavaAhead && !nav.sharpTurn && !nav.braking;
 
     if (id === AB.bomb.id) {
-        var nr = preferredTarget(bot, ctx); // Nemesis aims at the human
-        if (nr != null && nr.dist < BOMB_THROW_RANGE && armed) {
-            bot.angle = snap45(angleDeg(bot.x, bot.y, nr.player.x, nr.player.y));
+        // TIME the throw for impact rather than firing at the first rival in range:
+        // aim where the blast catches the most rivals (a cluster) or the race leader,
+        // lead-predicted for a moving target (see bombTarget).
+        var btgt = bombTarget(bot, ctx, goal);
+        if (btgt != null && armed) {
+            bot.angle = snap45(angleDeg(bot.x, bot.y, btgt.x, btgt.y));
             bot.attack = true; bot.ai.bombFiredAt = Date.now();
         } else if (forced) {
             // No target in range — lob it down the track to lay slow tiles ahead.
             aimAhead(); bot.attack = true; bot.ai.bombFiredAt = Date.now();
+        } else {
+            // Still holding: telegraph the threat by pointing the bomb at our
+            // preferred target (Nemesis -> human) so a held bomb reads as a deliberate
+            // aimed threat and pressures the rival, instead of spinning with our
+            // steering. Facing only — movement uses targetDirX/Y.
+            var preB = preferredTarget(bot, ctx);
+            if (preB != null) { bot.angle = snap45(angleDeg(bot.x, bot.y, preB.player.x, preB.player.y)); }
         }
         return;
     }
     if (id === AB.swap.id) {
-        // Swap with a leader when behind (a random-target swap while leading risks
-        // giving away the lead, so never force it while in front).
+        // STEAL the lead, deliberately: only swap when behind (a random-target swap
+        // while leading risks giving away the lead, so never force it while in front).
+        // Time it for when the race LEADER is within the swap's catch radius AND their
+        // ground is safe to inherit — don't steal onto lava-adjacent ground we'd die
+        // on or be instantly re-passed from. Endgame still forces it so it isn't wasted.
         if (rank >= 1) {
-            var nrs = preferredTarget(bot, ctx);
-            if (nrs != null && ((nrs.dist < SWAP_RANGE && armed) || forced)) { bot.attack = true; }
+            var leadS = raceLeader(bot, ctx, goal);
+            var landingSafe = leadS != null && !lavaNear(ctx, leadS.player.x, leadS.player.y, SWAP_LAND_PROBE);
+            if (forced || (leadS != null && leadS.dist < SWAP_RANGE && armed && landingSafe)) { bot.attack = true; }
         }
         return;
     }
@@ -665,10 +800,14 @@ function decideAbility(bot, ctx, ability, nav) {
         return;
     }
     if (id === AB.speedDebuff.id) {
-        // Slows ALL rivals — hold it until a rival is near AND ahead of us (catch-up
-        // value); a runaway leader banks it for the collapse instead of wasting it.
-        var nrd = nearestRival(bot, ctx.players);
-        if ((armed && behind && nrd != null && nrd.dist < BOMB_THROW_RANGE) || forced) { bot.attack = true; }
+        // Slows ALL rivals — time it for max catch-up value: a rival (ideally a
+        // cluster of them) is AHEAD of us and near, so the slow bites the racers we
+        // actually need to reel in. A runaway leader with no one ahead banks it for
+        // the collapse instead of wasting it on rivals already behind.
+        var aheadD = rivalsAhead(bot, ctx, goal);
+        var aheadNear = 0;
+        for (var ai2 = 0; ai2 < aheadD.length; ai2++) { if (aheadD[ai2].dist < BOMB_THROW_RANGE) { aheadNear++; } }
+        if ((armed && behind && aheadNear >= 1) || forced) { bot.attack = true; }
         return;
     }
     if (id === AB.speedBuff.id) {
@@ -685,8 +824,10 @@ function decideAbility(bot, ctx, ability, nav) {
     }
     if (id === AB.blindfold.id) {
         // Room-wide blind: best when a human rival is in play and the bot isn't out
-        // front; otherwise bank it until the round's wrapping up so it isn't wasted.
-        if ((hasHumanRival(bot, ctx.players) && rank >= 1 && armed) || forced) { bot.attack = true; }
+        // front, AND the disruption lands harder on rivals than on the bot itself —
+        // the bot is on easy ground while a rival is in a hazard pinch (lava edge /
+        // contested goal). Otherwise bank it until the round's wrapping up.
+        if ((hasHumanRival(bot, ctx.players) && rank >= 1 && armed && blindfoldWorthIt(bot, ctx, nav, goal)) || forced) { bot.attack = true; }
         return;
     }
     if (id === AB.tileSwap.id) {
@@ -1523,5 +1664,10 @@ module.exports._test = {
     decideAbility: decideAbility,
     newBotState: newBotState,
     chargeHoldFor: chargeHoldFor,
-    emergencyBrakeNeeded: emergencyBrakeNeeded
+    emergencyBrakeNeeded: emergencyBrakeNeeded,
+    bombTarget: bombTarget,
+    raceLeader: raceLeader,
+    rivalsAhead: rivalsAhead,
+    lavaNear: lavaNear,
+    blindfoldWorthIt: blindfoldWorthIt
 };
