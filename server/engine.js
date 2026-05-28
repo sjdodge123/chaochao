@@ -168,50 +168,43 @@ class Engine {
 			if (!hazard.moveable) {
 				continue;
 			}
-			var newVelX = 0;
-			var newVelY = 0;
-			if (hazard.rail != null) {
-				var currentDist = utils.getMagSq(hazard.rail.x, hazard.rail.y, hazard.x, hazard.y);
-				var movingOutward = (hazard.angle == hazard.rail.angle);
-				// Reverse at the far end only while heading outward, and at the
-				// near end only while heading back. Guarding both ends keeps a
-				// single overshoot (e.g. from a long tick) from flipping the
-				// angle every frame and trapping the bumper jittering in place.
-				// Assign exact values (rail.angle or rail.angle - 180) instead of
-				// ±= 180: a non-axis-aligned rail.angle (e.g. -3.85°) doesn't
-				// round-trip in float, so after one full cycle hazard.angle drifts
-				// ~10 ULPs from rail.angle and the strict-eq `movingOutward` check
-				// stays false at the second far-end clamp — bumper freezes there.
-				if (movingOutward && currentDist > hazard.rail.lengthSq) {
-					hazard.angle = hazard.rail.angle - 180;
-				} else if (!movingOutward && currentDist < hazard.lengthSq) {
-					hazard.angle = hazard.rail.angle;
-				}
-
-				newVelX = Math.cos((hazard.angle) * (Math.PI / 180)) * hazard.speed * this.dt;
-				newVelY = Math.sin((hazard.angle) * (Math.PI / 180)) * hazard.speed * this.dt;
+			if (hazard.rail == null) {
+				hazard.velX = 0;
+				hazard.velY = 0;
+				continue;
 			}
-			hazard.velX = newVelX;
-			hazard.velY = newVelY;
-			hazard.newX += hazard.velX * this.dt;
-			hazard.newY += hazard.velY * this.dt;
-			// Keep the bumper on its rail: if a long tick overshot the far end,
-			// snap it back onto the segment instead of letting it drift away.
-			if (hazard.rail != null) {
-				var overshootSq = utils.getMagSq(hazard.rail.x, hazard.rail.y, hazard.newX, hazard.newY);
-				if (overshootSq > hazard.rail.lengthSq) {
-					var scale = Math.sqrt(hazard.rail.lengthSq / overshootSq);
-					hazard.newX = hazard.rail.x + (hazard.newX - hazard.rail.x) * scale;
-					hazard.newY = hazard.rail.y + (hazard.newY - hazard.rail.y) * scale;
-					// Clamping pins the bumper exactly AT the far end, where the top-of-loop
-					// reversal (currentDist > lengthSq, strict) can never fire again — so it
-					// would re-clamp to the same spot every tick and freeze there. Turn it
-					// around now if it was heading outward, so it heads back next tick.
-					if (hazard.angle == hazard.rail.angle) {
-						hazard.angle = hazard.rail.angle - 180;
-					}
-				}
+			// Confine the bumper to its rail PARAMETRICALLY: track how far along the
+			// rail it sits (t in [0, length]) and step that single scalar, instead of
+			// free 2-D integration with an after-the-fact clamp. The old approach only
+			// clamped the FAR end radially, so a long tick — a lag spike, or the
+			// server's sleep/wake re-arm, where dt can be seconds and the step grows as
+			// speed·dt² — overshot the UN-clamped near end, mirrored across the origin,
+			// and the far clamp then pinned it at -length where the reversal could never
+			// fire again, freezing it off-rail. Clamping the scalar t to the segment
+			// makes leaving the rail impossible for ANY dt. Reflect at both ends with
+			// exact angle values (rail.angle / rail.angle-180) so a non-axis rail angle
+			// can't drift out of the strict-equality direction check (prior freeze bug).
+			var rad = hazard.rail.angle * (Math.PI / 180);
+			var dirX = Math.cos(rad);
+			var dirY = Math.sin(rad);
+			var len = hazard.rail.width; // rail length (rail.lengthSq = width²)
+			// Where the bumper is along the rail right now (project onto the axis).
+			var t = (hazard.x - hazard.rail.x) * dirX + (hazard.y - hazard.rail.y) * dirY;
+			var outward = (hazard.angle == hazard.rail.angle);
+			// Same step magnitude as before (speed·dt², the prior double-dt integration).
+			t += (outward ? 1 : -1) * hazard.speed * this.dt * this.dt;
+			if (t >= len) {
+				t = len;
+				hazard.angle = hazard.rail.angle - 180;
+			} else if (t <= 0) {
+				t = 0;
+				hazard.angle = hazard.rail.angle;
 			}
+			// Snap exactly onto the rail line — also sheds any perpendicular drift.
+			hazard.newX = hazard.rail.x + dirX * t;
+			hazard.newY = hazard.rail.y + dirY * t;
+			hazard.velX = hazard.newX - hazard.x;
+			hazard.velY = hazard.newY - hazard.y;
 		}
 	}
 
