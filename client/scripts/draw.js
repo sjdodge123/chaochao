@@ -420,8 +420,11 @@ function getCartHeading(player) {
     if (vx * vx + vy * vy > 0.01) {
         return Math.atan2(vy, vx);
     }
-    if (typeof player.angle === "number" && player.angle !== 0) {
-        return player.angle;
+    if (typeof player.angle === "number") {
+        // player.angle is in DEGREES on the client (cf. drawFire / aimers), but the
+        // velocity branch above returns radians — convert so an idle skinned kart
+        // faces its heading. 0° (due east) is a valid heading, not "missing".
+        return player.angle * Math.PI / 180;
     }
     return -Math.PI / 2; // default: face up
 }
@@ -2178,7 +2181,7 @@ function drawMapTitle() {
 // dino leg cycle). Advanced once per frame in drawPlayers, NOT per player.
 var cartSkinAnimTime = 0;
 function drawPlayers(dt) {
-    cartSkinAnimTime += dt || 0;
+    cartSkinAnimTime += (dt || 0) / 1000; // dt is milliseconds; this accumulator is seconds
     // Draw remote players first, then ALL local players (the primary plus any
     // couch co-op slots) on top — so your own karts always read clearly over
     // other players' floating emojis and name labels.

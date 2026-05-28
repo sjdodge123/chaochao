@@ -138,15 +138,79 @@ function stationPanelNav(lp, dx, dy) {
         return;
     }
     if (lp.stationPanel.kind === "skin") {
-        var count = skinOptionCount(lp);
-        if (!count) {
+        skinPanelNav(lp, dx, dy);
+    }
+}
+
+// Keyboard/gamepad nav over the skin panel's flat option space: the swatch+avatar
+// grid (SKIN_COLS wide) occupies [0, base-1], then the cart-skin row occupies
+// [base, base+cartN-1]. This keeps the cart cells reachable by pad/keyboard, not
+// just by pointer.
+function skinPanelNav(lp, dx, dy) {
+    var sp = lp.stationPanel;
+    var base = skinOptionCount(lp);
+    if (!base) { return; }
+    var cartN = CART_SKIN_OPTIONS.length;
+    var cols = SKIN_COLS;
+    var cur = sp.cursor || 0;
+    var maxRow = Math.floor((base - 1) / cols);
+
+    if (cur >= base) {
+        // Cursor is in the cart-skin row.
+        var cidx = cur - base;
+        if (dx !== 0) {
+            cidx += dx;
+            if (cidx < 0) { cidx = cartN - 1; }
+            if (cidx >= cartN) { cidx = 0; }
+        }
+        if (dy < 0) {
+            var up = maxRow * cols + cidx;        // back up into the grid's last row
+            sp.cursor = (up >= base) ? base - 1 : up;
             return;
         }
-        var i = lp.stationPanel.cursor || 0;
-        i += dx + dy * SKIN_COLS;
-        if (i < 0) { i = 0; }
-        if (i > count - 1) { i = count - 1; }
-        lp.stationPanel.cursor = i;
+        sp.cursor = base + cidx;                  // down keeps us in the (bottom) cart row
+        return;
+    }
+
+    // Cursor is in the swatch/avatar grid.
+    var row = Math.floor(cur / cols);
+    var col = cur % cols;
+    if (dx !== 0) {
+        col += dx;
+        if (col < 0) { col = cols - 1; }
+        if (col >= cols) { col = 0; }
+    }
+    if (dy > 0 && row === maxRow) {
+        sp.cursor = base + Math.min(col, cartN - 1); // drop into the cart row
+        return;
+    }
+    if (dy !== 0) {
+        row += dy;
+        if (row < 0) { row = 0; }
+        if (row > maxRow) { row = maxRow; }
+    }
+    var idx = row * cols + col;
+    if (idx >= base) { idx = base - 1; }         // last grid row may be partially filled
+    sp.cursor = idx;
+}
+
+// Commit the cell under the cursor: colour swatch, avatar, or cart skin.
+function skinPanelConfirm(lp) {
+    var sp = lp.stationPanel;
+    var base = skinOptionCount(lp);
+    var cur = sp.cursor || 0;
+    if (cur >= base) {
+        var opt = CART_SKIN_OPTIONS[cur - base];
+        if (opt) { stationPickCartSkin(lp, opt.id); } // id === null clears to the plain cart
+        return;
+    }
+    if (isAvatarIndex(lp, cur)) {
+        stationPickAvatar(lp);
+        return;
+    }
+    var pal = skinPalette();
+    if (cur >= 0 && cur < pal.length) {
+        stationPickSkin(lp, pal[cur]);
     }
 }
 
@@ -154,13 +218,7 @@ function stationPanelNav(lp, dx, dy) {
 // dismisses; for the skin picker it commits the colour under the cursor.
 function stationPanelConfirm(lp) {
     if (lp && lp.stationPanel && lp.stationPanel.kind === "skin") {
-        var cur = lp.stationPanel.cursor || 0;
-        if (isAvatarIndex(lp, cur)) {
-            stationPickAvatar(lp);
-        } else {
-            var pal = skinPalette();
-            stationPickSkin(lp, pal[cur]);
-        }
+        skinPanelConfirm(lp);
         return;
     }
     closeStationPanel(lp);
@@ -870,6 +928,11 @@ function drawCartSkinRow(lp, x, y, w, hit) {
     var cellW = (w - cgap * (n - 1)) / n;
     var current = currentCartSkin(lp);
     var currentColor = skinCurrentColor(lp);
+    // Which cart cell the keyboard/gamepad cursor is on (-1 = cursor is up in the
+    // swatch grid), so pad/keyboard users can see the highlighted cart option.
+    var sp = lp.stationPanel || {};
+    var cursorCart = (typeof sp.cursor === "number" && sp.cursor >= skinOptionCount(lp))
+        ? (sp.cursor - skinOptionCount(lp)) : -1;
     for (var i = 0; i < n; i++) {
         var opt = CART_SKIN_OPTIONS[i];
         var cx = x + i * (cellW + cgap);
@@ -881,6 +944,12 @@ function drawCartSkinRow(lp, x, y, w, hit) {
         gameContext.strokeStyle = sel ? "#ffd34d" : "rgba(255,255,255,0.2)";
         lhRoundRect(gameContext, cx, y, cellW, ch, 6);
         gameContext.stroke();
+        if (i === cursorCart) {
+            gameContext.strokeStyle = "#fff";
+            gameContext.lineWidth = 2.5;
+            lhRoundRect(gameContext, cx - 1, y - 1, cellW + 2, ch + 2, 7);
+            gameContext.stroke();
+        }
         drawCartSkinPreview(opt.id, cx + cellW / 2, y + ch * 0.34, ch * 0.22, currentColor);
         gameContext.fillStyle = "#fff";
         gameContext.font = "11px sans-serif";
