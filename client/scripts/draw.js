@@ -301,9 +301,41 @@ function paintTrenchSegment(ctx, s) {
     ctx.lineTo(s.ex - ox, s.ey - oy);
     ctx.stroke();
 }
+// Tile id of the cell containing a world point (nearest Voronoi site = that point's
+// cell), or null if the map isn't ready. Used to tell whether a trench still sits on
+// sand. Cheap enough for the rare cache rebuild (cells ~ a few hundred).
+function tileIdAtPoint(x, y) {
+    if (currentMap == null || currentMap.cells == null) {
+        return null;
+    }
+    var cells = currentMap.cells, best = Infinity, id = null;
+    for (var i = 0; i < cells.length; i++) {
+        var st = cells[i].site;
+        var dx = st.x - x, dy = st.y - y, d = dx * dx + dy * dy;
+        if (d < best) { best = d; id = cells[i].id; }
+    }
+    return id;
+}
 // Replay every recorded trench segment onto the map cache. Called from
 // renderMapToCache while its world->cache transform is active.
+//
+// First drop any segment whose ground is no longer sand: a bomb/ice/tileSwap/collapse,
+// an ability pickup, or the lobby idle-reset (restoreLobbyMap) can flip a sand tile
+// back to something else, and the carved groove must not linger on a tile that isn't
+// sand anymore. Every tile-change path invalidates the map cache, so pruning here —
+// on the rebuild that follows — clears stale grooves no matter what changed the tile.
 function paintTrenchSegments(ctx) {
+    if (currentMap != null && currentMap.cells != null && trenchSegments.length > 0) {
+        var sandId = config.tileMap.slow.id;
+        var kept = [];
+        for (var k = 0; k < trenchSegments.length; k++) {
+            var s = trenchSegments[k];
+            if (tileIdAtPoint((s.bx + s.ex) / 2, (s.by + s.ey) / 2) === sandId) {
+                kept.push(s);
+            }
+        }
+        trenchSegments = kept;
+    }
     for (var i = 0; i < trenchSegments.length; i++) {
         paintTrenchSegment(ctx, trenchSegments[i]);
     }
@@ -319,11 +351,27 @@ function stampSandTrench(bx, by, ex, ey, dir, radius) {
         return; // not cached yet — the segment paints on the next cache rebuild
     }
     var scale = mapCanvas._mapScale || 1;
-    mapCtx.save();
+    var last = trenchSegments[trenchSegments.length - 1];
     // World -> map-cache transform, matching renderMapToCache's mapping.
-    mapCtx.setTransform(scale, 0, 0, scale, (-world.x + mapCanvasPad) * scale, (-world.y + mapCanvasPad) * scale);
-    paintTrenchSegment(mapCtx, trenchSegments[trenchSegments.length - 1]);
+    var tx = (-world.x + mapCanvasPad) * scale, ty = (-world.y + mapCanvasPad) * scale;
+    mapCtx.save();
+    mapCtx.setTransform(scale, 0, 0, scale, tx, ty);
+    paintTrenchSegment(mapCtx, last);
     mapCtx.restore();
+    // In the space theme drawMap blits the arena COMPOSITE (arenaCanvas), not
+    // mapCanvas, and that composite only rebuilds on a full mapCacheRev bump — so a
+    // live stamp into mapCanvas alone is invisible while driving (it only surfaced on
+    // the next tile-change rebuild). arenaCanvas shares mapCanvas's dimensions and
+    // pixel mapping, so mirror the stroke straight onto it (over the baked terrain)
+    // so the trench shows immediately, exactly like the plain/water floor that blits
+    // mapCanvas. A later full rebuild repaints arenaCanvas from the (pruned) mapCanvas.
+    if (arenaCanvas != null) {
+        var actx = arenaCanvas.getContext('2d');
+        actx.save();
+        actx.setTransform(scale, 0, 0, scale, tx, ty);
+        paintTrenchSegment(actx, last);
+        actx.restore();
+    }
 }
 
 var playerSpriteCache = {};
