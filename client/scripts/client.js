@@ -126,6 +126,19 @@ function registerLobbyHubHandlers(server) {
 			preloadAvatarImage(p.avatarUrl);
 		}
 	});
+	// A player equipped/cleared a cosmetic cart skin (room broadcast — like color,
+	// cartSkin isn't in the per-tick updates, only the spawn packet). Independent of
+	// color/avatar, so we touch nothing else here.
+	server.on("playerCartSkinChanged", function (payload) {
+		if (payload == null) {
+			return;
+		}
+		var p = playerList[payload.id];
+		if (p == null) {
+			return;
+		}
+		p.cartSkin = payload.cartSkin || null;
+	});
 	// The primary's skin request was rejected (color taken). Flash the picker.
 	server.on("skinRejected", function (payload) {
 		if (typeof flagSkinRejected === "function") {

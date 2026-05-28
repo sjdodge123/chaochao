@@ -202,6 +202,7 @@ class Player extends Circle {
 		// their Discord/Google picture (and `name`) shown on their kart for everyone.
 		// null = default colour skin, nameless. Set/cleared via messenger setAvatarSkin/setSkin.
 		this.avatarUrl = null;
+		this.cartSkin = null;
 		this.profile = null;
 		this.emoteReadyAt = 0;
 		//Steering outputs the engine's isAI branch reads each tick.
