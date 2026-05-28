@@ -1,0 +1,48 @@
+name: Dependency audit
+
+# Fails when a dependency we ship has a known high/critical vulnerability.
+# `npm audit` is currently clean — this gate keeps it that way as the deps
+# (express, socket.io, @octokit, jsonwebtoken, …) accrue CVEs over time.
+# Dependabot opens the fix PRs; this check is what makes a vulnerable tree red.
+#
+# Why a dedicated workflow (not a job in pr-validation.yml): pr-validation skips
+# map-only PRs via paths-ignore, but a vulnerability gate must run on every PR
+# and every push to main, plus a weekly sweep that catches CVEs disclosed against
+# deps we already have pinned (no code change needed to go red).
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Mondays 09:00 UTC — surfaces newly-disclosed CVEs against the current lock.
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # Audit the lockfile directly — no install needed, so this stays fast and
+      # can't be perturbed by install-time scripts. --audit-level=high means
+      # moderate/low findings are reported but don't fail the build; high and
+      # critical do. Runtime deps are what ship to players, so audit those first…
+      - name: Audit production dependencies (fail on high/critical)
+        run: npm audit --omit=dev --audit-level=high
+
+      # …then surface dev-dep findings too, but advisory-only (build tooling and
+      # Playwright don't ship to players, so a dev-only CVE shouldn't block a PR).
+      - name: Audit dev dependencies (advisory)
+        if: always()
+        continue-on-error: true
+        run: npm audit --audit-level=high

@@ -1,0 +1,36 @@
+# Dependabot keeps dependencies current and opens PRs the moment a known CVE
+# lands in something we ship. Two ecosystems:
+#   npm            — runtime + dev deps (express, socket.io, @octokit, etc.).
+#   github-actions — the `uses:` actions in .github/workflows/ (so the floating
+#                    @v4 tags get bumped/repinned as new majors ship).
+# Security updates are opened regardless of the schedule below; the weekly
+# cadence just batches routine version bumps so the PR list stays manageable.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    # Group the routine (non-security) bumps into a single PR per run so they
+    # don't drown out feature PRs. Security updates still come through on their own.
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+      - ci
+    groups:
+      actions:
+        update-types:
+          - minor
+          - patch
