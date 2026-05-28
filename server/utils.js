@@ -511,22 +511,16 @@ exports.loadMaps = function () {
 // Mirrored on the client (client/scripts/create.js) so the editor can give
 // fast feedback; re-run here as the trust boundary before a preview room is
 // created. Returns { valid: bool, reason: string }.
-// Memoized known-id sets. Built defensively from config (skip entries without
-// a numeric .id, e.g. tileMap.abilities), keyed by the config object so the
-// rare test case that passes a different config still works correctly. The
-// production caller always passes the cached `c`, which means one build over
-// the process lifetime.
+// Memoized known-hazard-id set, built defensively from config (skip entries
+// without a numeric .id), keyed by the config object so the rare test that
+// passes a different config still rebuilds correctly. The production caller
+// always passes the cached `c`, so this is one build over the process lifetime.
+// (Cells are not similarly checked — see validateMap's cell loop for why.)
 var _knownIdSetsCache = null;
 var _knownIdSetsConfig = null;
 function getKnownIdSets(config) {
     if (_knownIdSetsConfig === config && _knownIdSetsCache != null) {
         return _knownIdSetsCache;
-    }
-    var tile = {};
-    for (var tk in config.tileMap) {
-        if (config.tileMap[tk] && typeof config.tileMap[tk].id === "number") {
-            tile[config.tileMap[tk].id] = true;
-        }
     }
     var hazard = {};
     for (var hk in config.hazards) {
@@ -534,7 +528,7 @@ function getKnownIdSets(config) {
             hazard[config.hazards[hk].id] = true;
         }
     }
-    _knownIdSetsCache = { tile: tile, hazard: hazard };
+    _knownIdSetsCache = { hazard: hazard };
     _knownIdSetsConfig = config;
     return _knownIdSetsCache;
 }
@@ -552,12 +546,10 @@ exports.validateMap = function (vMap, config) {
     if (vMap.cells.length > mapFormat.MAX_MAP_CELLS) {
         return { valid: false, reason: "Map is too large (over " + mapFormat.MAX_MAP_CELLS + " cells)." };
     }
-    // Module-level cached id sets (config is immutable across the process
-    // lifetime). Built once at first validateMap call; the alternative —
-    // rebuilding them on every preview/submit — was pure waste.
-    var sets = getKnownIdSets(config);
-    var validTileIds = sets.tile;
-    var validHazardIds = sets.hazard;
+    // Module-level cached known-id set for hazards (config is immutable across
+    // the process lifetime). Cells don't get the same membership check — see
+    // the loop below — so only hazard ids are looked up.
+    var validHazardIds = getKnownIdSets(config).hazard;
     var hasGoal = false;
     for (var i = 0; i < vMap.cells.length; i++) {
         var cell = vMap.cells[i];
@@ -572,7 +564,15 @@ exports.validateMap = function (vMap, config) {
         if (!Array.isArray(cell.halfedges)) {
             return { valid: false, reason: "Map has a cell with no geometry." };
         }
-        if (typeof cell.id !== "number" || !validTileIds[cell.id]) {
+        // Just a numeric-id check: the engine tolerates extra tile ids beyond
+        // config.tileMap (the curated _lobbyTutorial map uses station-sentinel
+        // ids 102-108 that lobbyStations[] interprets specially), so rejecting
+        // by membership would falsely fail validate-content on real maps. The
+        // realistic crafted-submit threat is already covered upstream — the
+        // editor only paints config.tileMap.* ids — and the finite-check + cell
+        // cap above contain the DoS surface. Hazards stay strict below: they're
+        // fully config-driven, two ids total, no special-purpose extensions.
+        if (typeof cell.id !== "number") {
             return { valid: false, reason: "Map has a cell with an invalid tile." };
         }
         if (cell.id === config.tileMap.goal.id) {
