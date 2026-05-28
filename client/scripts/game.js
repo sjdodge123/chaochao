@@ -135,6 +135,11 @@ function makeLocalPlayer(slot, socket, isPrimary) {
         isPrimary: !!isPrimary,
         joined: false,
         everJoined: false,        // has this slot ever confirmed a room? (drives auto-rejoin)
+        // True when THIS slot joined a match already racing: the server parked it as
+        // a temp spectator that races from the next round. Per-slot so a co-op seat
+        // that joins mid-race gets the spectating banner while P1 keeps racing.
+        // Drives drawSpectatorBanner; cleared for every slot at the next startGated.
+        lateJoinSpectating: false,
         reconnectTimer: null,     // grace timer started on a transient disconnect
         leaveConfirm: false,      // showing the inline "leave?" confirm in this player's block
         leaveConfirmTimer: null,  // auto-cancel timer for the inline leave confirm

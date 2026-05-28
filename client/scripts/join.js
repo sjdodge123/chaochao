@@ -148,23 +148,33 @@ function buildCard(room, maxPlayers) {
         info.appendChild(buildStat('AI', aiLabel));
     }
 
-    // A full or already-started room is surfaced (so it doesn't silently
-    // vanish) but can't be joined: grey the card and disable its button.
+    // A room with space is joinable even mid-match. The label reflects what the
+    // join actually does: only a LIVE race (racing/collapsing) makes you a
+    // spectator for the round, so that reads "Spectate"; every other joinable
+    // state (lobby, the gated countdown, the between-rounds overview, the
+    // game-over screen) drops you straight in, so it reads "Join". (Keying off the
+    // coarse `locked` flag would mislabel gated/overview/gameOver as "Spectate".)
+    // Only a FULL room can't be joined — surfaced greyed so it doesn't vanish.
     var joinable = room.joinable !== false;
     var joinBtn = document.createElement('a');
     if (joinable) {
         joinBtn.href = './play.html?gameid=' + encodeURIComponent(room.gameID);
         joinBtn.className = 'btn btn-outline-info join-btn';
-        joinBtn.setAttribute('data-gp-nav', ''); // joinable rooms only; locked/full cards stay unfocusable
-        joinBtn.textContent = 'Join';
+        joinBtn.setAttribute('data-gp-nav', ''); // joinable rooms only; full cards stay unfocusable
+        if (isLiveRace(room)) {
+            joinBtn.textContent = 'Spectate';
+            joinBtn.title = 'Race in progress — watch this round, race the next.';
+        } else {
+            joinBtn.textContent = 'Join';
+        }
     } else {
-        // Not joinable: a started match reads "In progress"; a room that's merely
-        // full (still in the lobby, not locked) reads "Full" — a slot may open up.
+        // Not joinable means full: a slot may open up, so it's shown greyed rather
+        // than hidden.
         card.classList.add('gameCard-locked');
         joinBtn.className = 'btn btn-outline-secondary join-btn disabled';
         joinBtn.setAttribute('aria-disabled', 'true');
         joinBtn.setAttribute('tabindex', '-1');
-        joinBtn.textContent = room.locked ? 'In progress' : 'Full';
+        joinBtn.textContent = 'Full';
     }
 
     card.appendChild(info);
@@ -203,6 +213,18 @@ function buildStat(label, value) {
     span.appendChild(labelEl);
     span.appendChild(valueEl);
     return span;
+}
+
+// True when joining the room right now would drop you into a LIVE race as a
+// spectator-until-next-round (server determineGameState's racing/collapsing
+// branch). Other locked states (gated/overview/gameOver) put you straight into
+// play, so they aren't "spectating". Falls back to false until config arrives.
+function isLiveRace(room) {
+    if (config == null || config.stateMap == null) {
+        return false;
+    }
+    return room.state === config.stateMap.racing ||
+        room.state === config.stateMap.collapsing;
 }
 
 function stateLabel(state) {

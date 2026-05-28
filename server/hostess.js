@@ -18,11 +18,12 @@ exports.getRooms = function () {
 		if (room.isPreview) {
 			continue;
 		}
-		// A full room, or one whose match has started (locked), can't be joined
-		// — but it should still appear so the join page can show it greyed out
-		// ("In progress") instead of having it silently vanish. Flag joinability
-		// explicitly (mirrors findARoom's matchmaking test).
-		var joinable = room.hasSpace() && !room.isLocked();
+		// Late-join: a started (locked) match is now joinable as long as it has
+		// space — the joiner spectates the current round and races from the next
+		// (determineGameState's racing branch). Only a FULL room is unjoinable, and
+		// it's still listed (greyed "Full") rather than silently vanishing. `locked`
+		// is sent alongside so the join page can label an in-progress room as such.
+		var joinable = room.hasSpace();
 		// AI hub: surface the room's bots so the join page shows them. aiCount is the
 		// LIVE bot count (non-zero during a race). aiPlanned is how many bots will
 		// actually spawn NEXT race for the current human count — computed for every
@@ -88,7 +89,7 @@ exports.kickFromRoom = function (clientID) {
 		}
 	}
 }
-exports.joinARoom = function (sig, clientID, coop) {
+exports.joinARoom = function (sig, clientID) {
 	var room = roomList[sig];
 	if (room == null) {
 		return false;
@@ -101,20 +102,14 @@ exports.joinARoom = function (sig, clientID, coop) {
 	if (room.isPreview && !room.hasSpace()) {
 		return false;
 	}
-	// getRooms now advertises full and locked (mid-match) rooms so the join page
-	// can show them greyed out — but the disabled UI button is not the enforcement.
-	// Reject a hand-typed/shared ?gameid= (or "Join by ID") into a full or started
-	// room so it can't overflow capacity or drop a player into a live race. Mirrors
-	// findARoom's matchmaking test; preview rooms are handled above.
-	//
-	// A local co-op seat (coop) is exempt from the locked check: it joins the
-	// primary's exact room mid-game and lands as a spectator (determineGameState),
-	// racing from the next round — so a controller plugged in after the gate can
-	// still join instead of being booted. Capacity is still enforced for everyone.
+	// Late-join: a started (locked) match can now be joined as long as it has
+	// space. The joiner lands as a temp spectator (determineGameState's racing /
+	// collapsing branch) and races from the next round. Matchmaking (id == -1)
+	// never resolves to a locked room — findARoom filters them — so a locked room
+	// only reaches here via a deliberate join (the join page, "Join by ID", a
+	// shared ?gameid= link, or a local co-op seat), which is exactly the intent.
+	// Capacity is still enforced for everyone; preview-full is handled above.
 	if (!room.isPreview && !room.hasSpace()) {
-		return false;
-	}
-	if (!room.isPreview && !coop && room.isLocked()) {
 		return false;
 	}
 	room.join(clientID);

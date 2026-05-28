@@ -229,11 +229,13 @@ function checkForMail(client) {
 		} else {
 			roomSig = id;
 		}
-		// coop = a local co-op seat joining the primary's exact room. Such a join is
-		// allowed into an already-started (locked) room, landing as a spectator who
-		// races from the next round (determineGameState's racing branch). A bare
-		// enterGame (matchmaking / hand-typed id) is still blocked from locked rooms.
-		var room = hostess.joinARoom(roomSig, client.id, coop === true);
+		// Any deliberate join (join page, "Join by ID", shared id, or a local co-op
+		// seat) may now land in an already-started (locked) room, spawning as a
+		// spectator who races from the next round (determineGameState's racing
+		// branch). joinARoom enforces capacity; matchmaking (id == -1) still avoids
+		// locked rooms in findARoom. The legacy `coop` event arg is no longer needed
+		// server-side but clients may still send it — accepted and ignored.
+		var room = hostess.joinARoom(roomSig, client.id);
 		if (room == false) {
 			debug.log("enterGame: joinARoom FAILED for client=", client.id, " roomSig=", roomSig);
 			client.emit("roomNotFound");

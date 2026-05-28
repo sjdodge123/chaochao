@@ -181,6 +181,16 @@ function registerConnectionHandlers(server) {
 		if (playerList[myID] != null) {
 			myPlayer = playerList[myID];
 		}
+		// Joined a match already racing/collapsing? The server spawned this player as
+		// a temp spectator (parked off-arena, not alive) who races from the next
+		// round — flag the slot so drawSpectatorBanner explains the wait. The server
+		// spectator-izes exactly the racing/collapsing states, so the state alone is
+		// the signal; the banner's own !alive check gates the display. Cleared for
+		// every slot at the next startGated.
+		if (localPlayers[primarySlot]) {
+			localPlayers[primarySlot].lateJoinSpectating =
+				(currentState == config.stateMap.racing || currentState == config.stateMap.collapsing);
+		}
 		//Late joiners: pick up the race already in progress on the right track/mood.
 		if (gameState.music != null) {
 			setBackgroundMusic(gameState.music.mood, gameState.music.track);
@@ -206,7 +216,13 @@ function registerConnectionHandlers(server) {
 	server.on("playerJoin", function (appendPlayerList) {
 		clientList[appendPlayerList.id] = appendPlayerList.id;
 		appendNewPlayer(appendPlayerList.player);
-		playSound(playerJoinSound);
+		// Pre-late-join this only fired pre-race (lobby/waiting). With public
+		// late-join enabled, the same broadcast now reaches racers mid-round for a
+		// spectator who isn't even on the track — don't ring the chime over an
+		// active race. Lobby/waiting/gameOver keep the welcome cue.
+		if (currentState != config.stateMap.racing && currentState != config.stateMap.collapsing) {
+			playSound(playerJoinSound);
+		}
 	});
 	server.on("playerLeft", function (id) {
 		// Always drop the rendered player. AI racers live in playerList but may be
@@ -402,6 +418,11 @@ function registerStateHandlers(server) {
 		// Match starting — force-close any open hub panel + drop the zones/prompts.
 		if (typeof lobbyHubReset === "function") {
 			lobbyHubReset();
+		}
+		// The next round gates everyone in, including any late-join spectators from
+		// the previous round — they're racing now, so drop the banner for every slot.
+		for (var ljs = 0; ljs < localPlayers.length; ljs++) {
+			if (localPlayers[ljs]) { localPlayers[ljs].lateJoinSpectating = false; }
 		}
 		currentState = config.stateMap.gated;
 	});
@@ -973,6 +994,19 @@ function registerSecondaryHandlers(sock, slot) {
 			lp.myID = gs.myID;
 			lp.joined = true;
 			lp.everJoined = true;
+			// A pad seat that joins (or reconnects) mid-race lands as a temp spectator
+			// who races from the next round — flag the slot so it gets the spectating
+			// banner too (the primary keeps racing). Read the state from THIS gs
+			// payload (compressor.gameState JSON-stringifies an array with state at
+			// [0]) rather than the global currentState the primary maintains on its
+			// own socket — separate sockets can deliver events in different orders,
+			// so the global may have already advanced past the snapshot's state.
+			var gsRoomState = null;
+			if (config != null && gs != null && gs.game != null) {
+				try { gsRoomState = JSON.parse(gs.game)[0]; } catch (e) { gsRoomState = null; }
+			}
+			lp.lateJoinSpectating = config != null && gsRoomState != null &&
+				(gsRoomState == config.stateMap.racing || gsRoomState == config.stateMap.collapsing);
 			if (lp.reconnectTimer) {
 				clearTimeout(lp.reconnectTimer);
 				lp.reconnectTimer = null;

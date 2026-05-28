@@ -263,6 +263,12 @@ class Game {
 		client.emit("tileChanges", JSON.stringify(this.gameBoard.gatherTileChanges()));
 		//Send current abilities
 		client.emit("allAbilityHoldings", JSON.stringify(this.gameBoard.gatherAbilities()));
+		// Late-join spectator: send the LIVE hazard list (the puck, mid-round volcano
+		// debris, lightning hazards, etc.). newMap only carries the map's round-start
+		// hazards, and updateHazardList on the client only updates EXISTING entries
+		// — without this, a mid-race joiner is blind to anything spawned after
+		// the round began. Mirrors the lobby branch above.
+		client.emit("applyHazards", compressor.newHazards(this.gameBoard.hazardList));
 	}
 	checkLobbyStart() {
 		debug.log("checkLobbyStart: playerCount=", this.playerCount, " min=", c.minPlayersToStart, " state=", this.currentState);
@@ -346,6 +352,14 @@ class Game {
 		var playersConcluded = 0;
 
 		for (var player in this.playerList) {
+			// A temp spectator (late joiner waiting for the next round) is alive=false
+			// but isn't IN this round — they must not be infected, exploded, or
+			// credited as a kill, all of which the !alive branch below would do. They
+			// just count as already-concluded so the round can end normally.
+			if (this.playerList[player].isSpectator) {
+				playersConcluded++;
+				continue;
+			}
 			if (!this.playerList[player].alive && !this.playerList[player].reachedGoal) {
 				playersConcluded++;
 
@@ -367,10 +381,6 @@ class Game {
 						this.playerList[player].exploded = true;
 					}
 				}
-				continue;
-			}
-			if (this.playerList[player].isSpectator) {
-				playersConcluded++
 				continue;
 			}
 			if (this.playerList[player].awake == false) {
@@ -561,6 +571,15 @@ class Game {
 	// Called whenever a human joins; a no-op in normal flow (no bots while joinable),
 	// and a human is never refused a slot a bot is holding.
 	trimBotsToCapacity() {
+		// Late-join changed who calls this: a public join can now land in a locked
+		// room mid-race, and despawning a bot then would blink a kart out of the
+		// active race for every viewer. fillGridWithBots already promises bots are
+		// "held across rounds within a match" — keep the same promise on the join
+		// side. Cap may transiently exceed by a few seats inside one match; the
+		// next match's resetGame -> removeBots re-rolls the grid cleanly.
+		if (this.locked) {
+			return;
+		}
 		var cap = c.maxPlayersInRoom || 25;
 		var humanCount = 0, botIds = [];
 		for (var id in this.playerList) {
@@ -2196,6 +2215,11 @@ class GameBoard {
 		for (var specID in this.tempSpectatorList) {
 			this.tempSpectatorList[specID].isSpectator = false;
 		}
+		// The round reset turns every temp spectator into an active racer, so the
+		// cohort is spent — drop the references. Otherwise a late joiner who left
+		// before the reset would linger here for the room's lifetime and get
+		// re-touched (a stale-object write) every round.
+		this.tempSpectatorList = {};
 	}
 	clean() {
 		this.lobbyStartButton = null;

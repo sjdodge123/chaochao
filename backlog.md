@@ -41,6 +41,10 @@ Tracked work that is known and intentionally deferred. The currently-in-progress
 
 ## Lobby (`server/game.js`, `server/hostess.js`, `client/scripts/...`)
 
+### Bugs
+
+- **`Room.leave` doesn't clean up the leaving player's aimers / projectiles / held ability.** `room.leave(clientID)` (`game.js:56`) deletes the entry from `clientList` and `playerList` but leaves any `aimerList`/`projectileList`/`abilityList` entries owned by that id still in those maps, with `ownerId` now pointing at a player that no longer exists. The per-tick update loops keep iterating those orphans, the compressor keeps emitting them, and any owner-deref (e.g. `playerList[ownerId]` in `SwapAimer` construction / ability handling) sees `undefined`. Pre-existing, but **late-join-spectate now makes it hit far more often** (a stranger can briefly hold an ability picked up via the brutal ability round, then leave). Also: `tempSpectatorList` is only re-emptied at `resetPlayers` — between leave and the next round reset, a departed spectator's `Player` ref lingers there too. Fix: on leave, drop the player's id from `aimerList`/`projectileList`/`abilityList`/`tempSpectatorList`.
+
 ### Features
 
 - **AI hub — toggle bots and surface their count.** Bots auto-spawn via `fillGridWithBots` (`game.js:441`, called from `startGated`) at a random 6–10 count (`config.ai.minGrid`/`maxGrid`) with no player control, and `hostess.getRooms` (`hostess.js:18`) doesn't expose a bot count. Add a lobby hub to enable/disable AI, and include "+N AI" as a join detail in the room listing (join page + lobby).
