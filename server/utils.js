@@ -1,6 +1,5 @@
 var lastFrame = new Date();
 var fs = require('fs');
-const { map } = require('jquery');
 var maps = [];
 var mapListing = [];
 var editorMapListing = []; // mapListing minus lobbyOnly maps (the editor's list)
