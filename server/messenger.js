@@ -214,15 +214,19 @@ function checkForMail(client) {
 		client.emit("previewRoomCreated", { gameID: sig });
 	});
 
-	client.on('enterGame', function (id) {
-		debug.log("enterGame: client=", client.id, " requestedId=", id);
+	client.on('enterGame', function (id, coop) {
+		debug.log("enterGame: client=", client.id, " requestedId=", id, " coop=", coop);
 		var roomSig = '';
 		if (id == -1) {
 			roomSig = hostess.findARoom(client.id);
 		} else {
 			roomSig = id;
 		}
-		var room = hostess.joinARoom(roomSig, client.id);
+		// coop = a local co-op seat joining the primary's exact room. Such a join is
+		// allowed into an already-started (locked) room, landing as a spectator who
+		// races from the next round (determineGameState's racing branch). A bare
+		// enterGame (matchmaking / hand-typed id) is still blocked from locked rooms.
+		var room = hostess.joinARoom(roomSig, client.id, coop === true);
 		if (room == false) {
 			debug.log("enterGame: joinARoom FAILED for client=", client.id, " roomSig=", roomSig);
 			client.emit("roomNotFound");

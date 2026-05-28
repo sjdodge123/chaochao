@@ -2,7 +2,12 @@ var server = null,
     config = null,
     myID,
     refreshInterval = null,
-    firstResponseReceived = false;
+    firstResponseReceived = false,
+    // Signature of the last rendered room list. The list auto-refreshes every 5s;
+    // rebuilding the cards wholesale (replaceChildren) destroys the <a> a player is
+    // mid-tap on, so on touch the tap lands on a freshly-swapped element and never
+    // navigates. Skip the rebuild when nothing visible actually changed.
+    lastRoomsSig = null;
 
 var REFRESH_MS = 5000;
 
@@ -73,16 +78,40 @@ function stopRefreshing() {
     }
 }
 
+// Everything buildCard() renders for a room, so an unchanged list re-renders to
+// the identical signature and we can leave the live DOM (and any in-flight tap)
+// untouched.
+function roomsSignature(rooms) {
+    var ids = Object.keys(rooms);
+    var parts = [];
+    for (var i = 0; i < ids.length; i++) {
+        var r = rooms[ids[i]];
+        parts.push([r.gameID, r.state, r.round, r.currentMap, r.players,
+            r.joinable, r.locked, r.aiCount, r.aiAuto, r.aiPlanned].join('|'));
+    }
+    return parts.join('||');
+}
+
 function renderRooms(rooms) {
     var container = document.getElementById('gameSelection');
     var empty = document.getElementById('emptyState');
     var loading = document.getElementById('loadingState');
     if (container == null) return;
 
-    container.replaceChildren();
     if (loading != null) loading.hidden = true;
 
     var ids = Object.keys(rooms);
+
+    // Identical to what's already on screen -> don't touch the DOM, so a tap that
+    // started on a Join button completes against the same element.
+    var sig = roomsSignature(rooms);
+    if (sig === lastRoomsSig && container.childElementCount === ids.length) {
+        if (empty != null) empty.hidden = ids.length !== 0;
+        return;
+    }
+    lastRoomsSig = sig;
+
+    container.replaceChildren();
     if (ids.length === 0) {
         if (empty != null) empty.hidden = false;
         return;
