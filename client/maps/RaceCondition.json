@@ -1258,8 +1258,8 @@
     }
   ],
   "hazards": [],
-  "name": "Race Condition",
-  "author": "sjdodge",
   "id": "vGjEzPVKpYSZ3jaFZSSKxBBWU2Qv8J6q",
+  "author": "sjdodge",
+  "name": "Race Condition",
   "email": "sjdodge@outlook.com"
 }

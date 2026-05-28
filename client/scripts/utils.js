@@ -26,13 +26,15 @@ function reconstructSitesOnlyMap(map) {
             diagram.cells[vid].id = map.sites[j].id;
         }
         diagram.hazards = map.hazards || [];
-        if (map.startEdges != null) { diagram.startEdges = map.startEdges; }
-        if (map.parTime != null) { diagram.parTime = map.parTime; }
-        if (map.lobbyOnly) { diagram.lobbyOnly = map.lobbyOnly; }
-        if (map.name != null) { diagram.name = map.name; }
-        if (map.author != null) { diagram.author = map.author; }
-        if (map.id != null) { diagram.id = map.id; }
-        if (map.email != null) { diagram.email = map.email; }
+        // Carry every non-geometry field by denylist (matches server mapFormat.js):
+        // an allowlist silently drops map-type fields like the lobby map's
+        // spawnPad/stations. bbox/sites are the sites-only representation;
+        // cells/edges/vertices/execTime are regenerated above.
+        var GEOMETRY_KEYS = { cells: 1, edges: 1, vertices: 1, execTime: 1, thumbnail: 1, sites: 1, bbox: 1, hazards: 1 };
+        for (var key in map) {
+            if (GEOMETRY_KEYS[key]) { continue; }
+            if (diagram[key] === undefined) { diagram[key] = map[key]; }
+        }
         return diagram;
     } catch (e) {
         // A malformed sites-only map must not throw out of the $.getJSON callback
