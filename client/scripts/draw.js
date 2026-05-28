@@ -301,21 +301,6 @@ function paintTrenchSegment(ctx, s) {
     ctx.lineTo(s.ex - ox, s.ey - oy);
     ctx.stroke();
 }
-// Tile id of the cell containing a world point (nearest Voronoi site = that point's
-// cell), or null if the map isn't ready. Used to tell whether a trench still sits on
-// sand. Cheap enough for the rare cache rebuild (cells ~ a few hundred).
-function tileIdAtPoint(x, y) {
-    if (currentMap == null || currentMap.cells == null) {
-        return null;
-    }
-    var cells = currentMap.cells, best = Infinity, id = null;
-    for (var i = 0; i < cells.length; i++) {
-        var st = cells[i].site;
-        var dx = st.x - x, dy = st.y - y, d = dx * dx + dy * dy;
-        if (d < best) { best = d; id = cells[i].id; }
-    }
-    return id;
-}
 // Replay every recorded trench segment onto the map cache. Called from
 // renderMapToCache while its world->cache transform is active.
 //
@@ -330,7 +315,7 @@ function paintTrenchSegments(ctx) {
         var kept = [];
         for (var k = 0; k < trenchSegments.length; k++) {
             var s = trenchSegments[k];
-            if (tileIdAtPoint((s.bx + s.ex) / 2, (s.by + s.ey) / 2) === sandId) {
+            if (tileIdAt((s.bx + s.ex) / 2, (s.by + s.ey) / 2) === sandId) {
                 kept.push(s);
             }
         }
@@ -3845,6 +3830,14 @@ function drawEmptyBorders(ctx) {
     }
     var emptyId = config.tileMap.empty.id;
     var cells = currentMap.cells;
+    // Most maps have no holes — bail before the neighbour-index build + per-edge work.
+    var anyEmpty = false;
+    for (var e = 0; e < cells.length; e++) {
+        if (cells[e].id === emptyId) { anyEmpty = true; break; }
+    }
+    if (!anyEmpty) {
+        return;
+    }
     var idByVoronoi = {};
     for (var i = 0; i < cells.length; i++) {
         idByVoronoi[cells[i].site.voronoiId] = cells[i].id;

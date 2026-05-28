@@ -704,6 +704,21 @@ function ensureCellIndex(map) {
 	}
 	return map._cellIndex;
 }
+// Whether the map has ANY empty (hole) cells. Empty cells are authored in the map
+// JSON and never created or destroyed at runtime (explosions/collapse skip them and
+// nothing converts a tile *to* empty), so this is fixed for the map's life — cache it
+// once so the per-tick bounce check on the common case (maps with no holes) is a single
+// boolean test instead of a spatial-index lookup per player per tick.
+function mapHasEmptyCells(map) {
+	if (map._hasEmptyCells === undefined) {
+		var has = false, cells = map.cells, eid = c.tileMap.empty.id;
+		for (var i = 0; i < cells.length; i++) {
+			if (cells[i].id === eid) { has = true; break; }
+		}
+		Object.defineProperty(map, '_hasEmptyCells', { value: has, enumerable: false, writable: true, configurable: true });
+	}
+	return map._hasEmptyCells;
+}
 // The empty cell containing (x,y), or null. Empty cells are non-walkable holes
 // that show the skybox/water below; locating one means that point is over a hole.
 function emptyCellAt(x, y, map) {
@@ -721,6 +736,9 @@ function emptyCellAt(x, y, map) {
 // the velocity reversed + damped (matching preventEscape's player-edge feel).
 var EMPTY_BOUNCE_DAMP = 0.25;
 function bounceOffEmptyCells(player, map) {
+	if (!mapHasEmptyCells(map)) {
+		return; // no holes on this map — skip the per-tick lookup entirely
+	}
 	if (emptyCellAt(player.newX, player.newY, map) == null) {
 		return; // projected position stays on solid ground
 	}
