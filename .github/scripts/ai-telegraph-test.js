@@ -171,6 +171,14 @@ try {
         ctx = ctxWith([bot, trailer], { collapsing: true }); // forced
         decide(bot, ctx, AB.swap.id, ARMED);
         check(bot.attack === false, 'never force-swaps while in the lead (even when forced)');
+
+        // 6d: "behind" only because the sole rival already FINISHED -> no live target,
+        // so a forced swap must NOT fire (it would just arm an aimer that fizzles).
+        bot = makeBot(500, 500);                 // goalRank counts a finished rival as ahead
+        const finisher = player('done', 1900, 500, { reachedGoal: true });
+        ctx = ctxWith([bot, finisher], { collapsing: true }); // forced + rank>=1, but raceLeader -> null
+        decide(bot, ctx, AB.swap.id, ARMED);
+        check(bot.attack === false, 'forced swap does NOT fire with no live target (finished rival != stealable)');
     }
 
     // -----------------------------------------------------------------------
