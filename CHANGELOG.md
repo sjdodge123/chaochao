@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.24.0 — 2026-05-28
+
 ### Bug fixes
 
 - Driving across sand now reads like trudging through a dune: your kart carves a trench that stays for the rest of the round and kicks up a puff of sand the whole time you're on it, instead of only flicking a few flecks the instant you crossed onto it.
