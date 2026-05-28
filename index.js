@@ -180,12 +180,13 @@ app.use(function (req, res, next) {
 // Set real cache lifetimes by kind so a browser/CDN can serve from the edge:
 //   - /assets/** (images + sounds): content-stable media, cache hard (30 days).
 //     A CDN edge-caches these near the player; purge the CDN on the rare change.
-//   - /maps/**: map JSON is mostly add-only (new file = new name = cache miss),
-//     so a day's cache is safe and a new/edited map still surfaces quickly.
-//   - everything else (JS bundles, CSS — unhashed, change on deploy): no-cache
-//     so a deploy is picked up at once; the ETag keeps the unchanged case a 304.
+//   - everything else, INCLUDING /maps/**: JS bundles, CSS, and map JSON are all
+//     unhashed and can change in place on deploy (e.g. the curated lobby map is
+//     edited, not renamed), so use no-cache — a deploy/map edit is picked up at
+//     once and the ETag keeps the unchanged case a cheap 304. (Map JSON is small;
+//     the revalidation cost the asset cache avoids was about the tens-of-MB media,
+//     not KB maps. A previous 1-day map cache made lobby/map edits lag a full day.)
 var ASSET_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
-var MAP_MAX_AGE_MS = 24 * 60 * 60 * 1000;        // 1 day
 app.use(express.static(htmlPath, {
     etag: true,
     lastModified: true,
@@ -193,8 +194,6 @@ app.use(express.static(htmlPath, {
         var rel = path.relative(htmlPath, filePath);
         if (rel.indexOf('assets' + path.sep) === 0) {
             res.set('Cache-Control', 'public, max-age=' + Math.floor(ASSET_MAX_AGE_MS / 1000));
-        } else if (rel.indexOf('maps' + path.sep) === 0) {
-            res.set('Cache-Control', 'public, max-age=' + Math.floor(MAP_MAX_AGE_MS / 1000));
         } else {
             res.set('Cache-Control', 'no-cache');
         }
