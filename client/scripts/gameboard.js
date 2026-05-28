@@ -1324,22 +1324,27 @@ function terrainParticleColor(tile) {
 	return dustColor();
 }
 
-// Which tile id a point sits on. The map is a Voronoi diagram, so the cell a
-// point belongs to is simply the one whose site is nearest — cheap and exact,
-// and it tracks tile changes (bombs, tileSwap) since cell.id is mutated in place.
-function tileIdAt(x, y) {
+// The cell a point sits in. The map is a Voronoi diagram, so it's simply the cell
+// whose site is nearest — cheap and exact, and it tracks tile changes (bombs,
+// tileSwap) since cell.id is mutated in place.
+function nearestCell(x, y) {
 	if (currentMap == null || currentMap.cells == null) {
 		return null;
 	}
 	var cells = currentMap.cells;
-	var bestId = null, bestD = Infinity;
+	var bestCell = null, bestD = Infinity;
 	for (var i = 0; i < cells.length; i++) {
 		var s = cells[i].site;
 		var dx = s.x - x, dy = s.y - y;
 		var d = dx * dx + dy * dy;
-		if (d < bestD) { bestD = d; bestId = cells[i].id; }
+		if (d < bestD) { bestD = d; bestCell = cells[i]; }
 	}
-	return bestId;
+	return bestCell;
+}
+// Tile id at a point (the nearest cell's id), or null if the map isn't ready.
+function tileIdAt(x, y) {
+	var cell = nearestCell(x, y);
+	return cell != null ? cell.id : null;
 }
 
 // `count` flecks kicked up behind a moving player, coloured by the terrain and
@@ -1441,7 +1446,7 @@ function addSandTrench(bx, by, ex, ey, dir, radius) {
 // round wipes it (resetRound clears the decal). LOW never reaches here (the extraFx
 // gate at the call site skips the trench on phone-class devices); the addSandTrench
 // fading effect is the fallback if the decal ever isn't available.
-function spawnSandTrail(p) {
+function spawnSandTrail(p, vid) {
 	if (p.trenchX == null) { p.trenchX = p.x; p.trenchY = p.y; return; }
 	var dx = p.x - p.trenchX, dy = p.y - p.trenchY;
 	var d2 = dx * dx + dy * dy;
@@ -1454,7 +1459,9 @@ function spawnSandTrail(p) {
 			currentState == config.stateMap.collapsing ||
 			currentState == config.stateMap.lobby);
 		if (inGame && typeof stampSandTrench === "function") {
-			stampSandTrench(p.trenchX, p.trenchY, p.x, p.y, dir, p.radius);
+			// Pass the sand cell's voronoiId so the trench can later be pruned in O(1)
+			// when that tile stops being sand, instead of a per-segment nearest-site scan.
+			stampSandTrench(p.trenchX, p.trenchY, p.x, p.y, dir, p.radius, vid);
 		} else {
 			addSandTrench(p.trenchX, p.trenchY, p.x, p.y, dir, p.radius);
 		}
@@ -1525,7 +1532,8 @@ function updateMovementParticles(dt) {
 		// walkThresh so the ambient ice/dirt flecks still stay quiet at idle.
 		var sandThresh = maxSpeed * 0.03;
 		if (speed > sandThresh && p.dustCD <= 0) {
-			var tile = tileIdAt(p.x, p.y);
+			var dustCell = nearestCell(p.x, p.y);
+			var tile = dustCell != null ? dustCell.id : null;
 			// Drop the trench anchor the moment the kart leaves sand, so a trench is
 			// only ever stamped along CONTINUOUS sand travel. Otherwise two sand cells
 			// separated by a short non-sand gap (< p.radius * 4) would reuse the old
@@ -1561,7 +1569,7 @@ function updateMovementParticles(dt) {
 				// light puff of displaced sand on top so the trench art stays readable
 				// rather than being buried under a cloud of flecks.
 				if (extraFx) {
-					spawnSandTrail(p);
+					spawnSandTrail(p, dustCell.site.voronoiId);
 				}
 				spawnTerrainParticle(p, sandColor(), 1.8, 1);
 				p.dustCD = cd(speed > fastThresh ? 90 : 130);

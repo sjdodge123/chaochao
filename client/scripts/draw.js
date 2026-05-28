@@ -312,10 +312,22 @@ function paintTrenchSegment(ctx, s) {
 function paintTrenchSegments(ctx) {
     if (currentMap != null && currentMap.cells != null && trenchSegments.length > 0) {
         var sandId = config.tileMap.slow.id;
+        var cells = currentMap.cells;
+        // Build voronoiId -> current tile id ONCE (O(cells)), then drop any segment whose
+        // stamped cell is no longer sand via an O(1) lookup. The previous per-segment
+        // nearest-site scan was O(segments x cells) and, on tile-change-heavy rounds (a
+        // brutal round rebuilds the cache most ticks, with up to TRENCH_SEGMENT_MAX
+        // segments), measurably spiked per-frame scripting time.
+        var idByVid = {};
+        for (var c2 = 0; c2 < cells.length; c2++) {
+            idByVid[cells[c2].site.voronoiId] = cells[c2].id;
+        }
         var kept = [];
         for (var k = 0; k < trenchSegments.length; k++) {
             var s = trenchSegments[k];
-            if (tileIdAt((s.bx + s.ex) / 2, (s.by + s.ey) / 2) === sandId) {
+            // s.vid is the sand cell the segment was stamped on; keep a legacy segment
+            // without one rather than risk dropping a valid groove.
+            if (s.vid == null || idByVid[s.vid] === sandId) {
                 kept.push(s);
             }
         }
@@ -326,9 +338,10 @@ function paintTrenchSegments(ctx) {
     }
 }
 // Record a trench segment and stamp it straight into the live map cache so it shows
-// immediately (without waiting for the next cache rebuild).
-function stampSandTrench(bx, by, ex, ey, dir, radius) {
-    trenchSegments.push({ bx: bx, by: by, ex: ex, ey: ey, dir: dir, r: radius });
+// immediately (without waiting for the next cache rebuild). `vid` is the voronoiId of
+// the sand cell the segment sits on, used for O(1) pruning when the tile changes.
+function stampSandTrench(bx, by, ex, ey, dir, radius, vid) {
+    trenchSegments.push({ bx: bx, by: by, ex: ex, ey: ey, dir: dir, r: radius, vid: vid });
     if (trenchSegments.length > TRENCH_SEGMENT_MAX) {
         trenchSegments.shift();
     }
