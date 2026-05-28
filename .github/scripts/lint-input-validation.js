@@ -51,11 +51,15 @@ function attr(s, n) {
 
 function extract(html) {
     const els = [];
+    // Drop HTML comments first so a commented-out `<!-- <input ...> -->` doesn't
+    // get flagged as a live unvalidated input — the lint should reflect the
+    // rendered DOM, not the source text.
+    const live = html.replace(/<!--[\s\S]*?-->/g, '');
     // Catches both void <input ...> / <input ... /> and the opening <textarea ...>
     // tag (we only need its attributes — body length is what maxlength bounds).
     const re = /<(input|textarea)\b([^>]*?)\/?>/gi;
     let m;
-    while ((m = re.exec(html))) {
+    while ((m = re.exec(live))) {
         const tag = m[1].toLowerCase();
         const at = m[2];
         // textarea has no `type=`; treat it as the "textarea" type so its rule
