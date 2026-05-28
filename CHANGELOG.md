@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.20.1 — 2026-05-28
+
 ### General
 
 - Punches hit in every direction again — your swing pops out around your whole kart instead of only landing in front of you. A rival pressed against your side gets shoved away just like one head-on, and the new charge-up glow rings your kart so the wind-up is visible from any angle. The momentum, charge meter, stamina ring, overcharge fizzle, and counter-clash all still work the same.
