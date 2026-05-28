@@ -3,7 +3,7 @@
     "version": "0.23.0",
     "description": "Multiplayer web based slow paced racing game",
     "dependencies": {
-        "@octokit/core": "^5.2.2",
+        "@octokit/core": "^7.0.6",
         "@supabase/supabase-js": "^2.106.1",
         "compression": "^1.7.4",
         "dotenv": "^17.4.2",
