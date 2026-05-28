@@ -35,7 +35,7 @@ jobs:
           fetch-depth: 0   # full history so we can diff against the merge base
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
