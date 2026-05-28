@@ -55,7 +55,13 @@
                     <div class="rotate-text">Rotate your device to landscape to play</div>
                 </div>
             </div>
-            <div id="progressContainer" class="row justify-content-center align-self-center mx-auto">Loading Assets..<div id="progressWindow"><div id="progressBar"></div></div></div>
+            <div id="progressContainer">
+                <div class="loading-stack">
+                    <span class="loading-brand">Chao Chao</span>
+                    <span class="loading-caption">Loading assets<span class="loading-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span>
+                    <div id="progressWindow" role="progressbar" aria-label="Loading assets"><div id="progressBar"></div></div>
+                </div>
+            </div>
             <div id="gameWindow" >
             <!-- Live crowd drawn in the letterbox bars, behind the play canvas. -->
             <canvas id="audienceCanvas"></canvas>
