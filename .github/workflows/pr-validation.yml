@@ -142,6 +142,9 @@ jobs:
       - name: Headless AI telegraph-reasoning test (ability targeting + timing)
         run: node .github/scripts/ai-telegraph-test.js
 
+      - name: Headless AI telegraph-reasoning ENGINE test (live tick + recorded emits)
+        run: node .github/scripts/ai-telegraph-engine-test.js
+
   perf-tick-budget:
     # Server-side worst-case load: a full 25-kart grid in a stacked brutal round.
     # Proves one room still ticks well within the 30 Hz interval. Zero new deps —
