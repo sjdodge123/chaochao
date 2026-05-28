@@ -88,6 +88,11 @@ class Player extends Circle {
 		this.gateIndex = 0;
 		this.reachedGoal = false;
 		this.timeReached = null;
+		// Set when the map-time leaderboard has already saved this finish (either
+		// via publishMapLeaderboard at round-end or via the disconnect-flush in
+		// Room.leave). Prevents a double upsert when both paths fire for the same
+		// finish, and prevents a stale finish from re-uploading on re-spawn.
+		this.pbWritten = false;
 		this.collapseMargin = null; // distance to the lava front while collapsing (for clutch-goal cheer)
 		this.notches = 0;
 		this.nearVictory = false;
@@ -866,7 +871,15 @@ class Player extends Circle {
 			// genuinely close (collapseMargin stamped each collapsing tick), so an
 			// uncontested slow-collapse stroll-in doesn't trigger the big eruption.
 			var clutch = this.collapseMargin != null && this.collapseMargin < c.audienceClutchMargin;
-			messenger.messageRoomBySig(this.roomSig, "playerConcluded", { id: this.id, clutch: clutch });
+			// Server-authoritative elapsed time at finish — sent down so the
+			// client can freeze the HUD timer at this exact value (avoiding
+			// any clock-skew drift between server Date.now() and the browser's
+			// Date.now() that the client would otherwise have to subtract).
+			// Null when raceStartedAt isn't stamped (preview / non-racing path).
+			var finishMs = (this.raceStartedAt != null)
+				? Math.max(0, this.timeReached - this.raceStartedAt)
+				: null;
+			messenger.messageRoomBySig(this.roomSig, "playerConcluded", { id: this.id, clutch: clutch, finishMs: finishMs });
 			return;
 		}
 		this.tryAcquireAbility(object);
@@ -1003,6 +1016,7 @@ class Player extends Circle {
 		this.attack = false;
 		this.reachedGoal = false;
 		this.timeReached = null;
+		this.pbWritten = false;
 		this.collapseMargin = null;
 		this.stamina = c.punchStamina.max;
 		this.staminaExhausted = false;

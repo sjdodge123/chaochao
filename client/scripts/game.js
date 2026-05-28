@@ -56,6 +56,33 @@ var server = null,
     camera,
     nextMapPreview = null,
     nextMapThumbnail = null,
+    // Server-published map-leaderboard data. Three slots, each cleared at
+    // round-restart so a stale board doesn't flash:
+    //   * mapLeaderboardData       — NEXT map's global top 10 (overview card).
+    //   * mapLeaderboardJustPlayed — in-room rank+time on the just-played map
+    //                                (drawn inline beside each notch row).
+    //   * mapLeaderboardCurrent    — CURRENT (racing) map's global top 10
+    //                                (spectator mini-widget during the race).
+    mapLeaderboardData = null,
+    mapLeaderboardJustPlayed = null,
+    mapLeaderboardCurrent = null,
+    // Server-authoritative race-start timestamp (ms, Date.now() basis). Set on
+    // every startRace; the HUD timer reads it. Null between rounds.
+    raceStartedAt = null,
+    // Local-player timer freeze. Stamped when the local racer goes !alive
+    // (either crosses the goal — uses timeReached — or dies — uses Date.now()).
+    // Null = timer is still running. Reset on each startRace.
+    localTimerStopAt = null,
+    // Whether the timer froze because of a death (true) vs. a goal finish
+    // (false). Drives the HUD timer color: red on death, gold on finish.
+    localTimerStopByDeath = false,
+    // Active per-player NEW PERSONAL / WORLD RECORD floats, anchored to a
+    // player id. Pushed on playerPbResult; drained when their animation ends.
+    recordFloats = [],
+    // Screen-space WORLD-record banner: { displayName, mapName, finishMs,
+    // startedAt }. Single slot — a fresh WR replaces the active banner so the
+    // most recent wins (rare enough that queueing isn't worth the code).
+    worldRecordBanner = null,
     round = 0,
     timeOutChecker = null,
     currentState = null,

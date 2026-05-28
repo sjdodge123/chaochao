@@ -605,6 +605,7 @@ function drawObjects(dt) {
     }
     drawPlayers(dt);
     drawProjectiles(dt);
+    drawRecordFloats();
     drawEffects();
     drawAbilties();
     drawOverlay();
@@ -3332,9 +3333,295 @@ function compareSite(siteA, siteB) {
 
 function drawHUD() {
     drawGameInfo();
+    drawRaceTimer();
+    drawSpectatorLeaderboard();
+    drawWorldRecordBanner();
     drawVirtualButtons();
     drawTouchControls();
     drawTitle();
+}
+
+// Screen-space banner that drops in when ANY player (you, an opponent, an
+// off-screen finisher) sets a top-10 world record. Visible regardless of
+// where the camera is so a WR happening across the map isn't missed. Slides
+// down from the top, holds, fades up. Self-clears after the animation; a new
+// WR mid-animation replaces it.
+var WORLD_RECORD_BANNER_DURATION_MS = 4800;
+function drawWorldRecordBanner() {
+    if (worldRecordBanner == null) { return; }
+    var t = (Date.now() - worldRecordBanner.startedAt) / WORLD_RECORD_BANNER_DURATION_MS;
+    if (t >= 1) { worldRecordBanner = null; return; }
+
+    // Slide-down + fade-in (first 12%), hold (12-78%), slide-up + fade-out (last 22%).
+    var alpha, slide;
+    if (t < 0.12) {
+        var k = t / 0.12;
+        alpha = k;
+        slide = -40 * (1 - k); // start 40px above target, ease in
+    } else if (t > 0.78) {
+        var k2 = (t - 0.78) / 0.22;
+        alpha = 1 - k2;
+        slide = -40 * k2;
+    } else {
+        alpha = 1;
+        slide = 0;
+    }
+
+    var cx = LOGICAL_WIDTH / 2;
+    var by = 70 + slide;
+    var rankSuffix = (worldRecordBanner.rank != null) ? ("  ·  #" + worldRecordBanner.rank + " global") : "";
+    var line1 = "New world record";
+    var line2 = worldRecordBanner.displayName + " — " + worldRecordBanner.mapName;
+    var line3 = formatRaceTime(worldRecordBanner.finishMs) + rankSuffix;
+
+    gameContext.save();
+    gameContext.globalAlpha = alpha;
+    gameContext.textAlign = "center";
+    gameContext.textBaseline = "alphabetic";
+    // Headline — magenta, subtle outline; no glow.
+    gameContext.font = "bold 22px Arial";
+    gameContext.lineWidth = 3;
+    gameContext.strokeStyle = "rgba(0,0,0,0.85)";
+    gameContext.strokeText(line1, cx, by);
+    gameContext.fillStyle = "#ff5fea";
+    gameContext.fillText(line1, cx, by);
+    // Who · where — white.
+    gameContext.font = "15px Arial";
+    gameContext.strokeText(line2, cx, by + 19);
+    gameContext.fillStyle = "white";
+    gameContext.fillText(line2, cx, by + 19);
+    // Time + rank — gold.
+    gameContext.font = "bold 16px Arial";
+    gameContext.strokeText(line3, cx, by + 38);
+    gameContext.fillStyle = "#ffd54a";
+    gameContext.fillText(line3, cx, by + 38);
+    gameContext.restore();
+}
+
+// Compact corner leaderboard shown while spectating (dead/finished during a
+// race). Sources mapLeaderboardCurrent (server emits at startRace). Top-left
+// of the HUD so the timer in the top-right and centered GameID row stay
+// uncluttered. Renders even when the current map has no leaderboard rows yet
+// — shows a "New map!" placeholder so the player understands the widget is
+// alive, just unfilled. Hidden when the local racer is still actively racing.
+function drawSpectatorLeaderboard() {
+    if (mapLeaderboardCurrent == null) { return; }
+    if (currentState != config.stateMap.racing && currentState != config.stateMap.collapsing) {
+        return;
+    }
+    var local = (typeof myID !== "undefined" && playerList) ? playerList[myID] : null;
+    if (local == null) { return; }
+    // Only when the local racer is no longer active (died or finished).
+    var spectating = (!local.alive) || local.reachedGoal || local.isSpectator;
+    if (!spectating) { return; }
+
+    var rows = mapLeaderboardCurrent.rows || [];
+    var mapName = mapLeaderboardCurrent.mapName || "this map";
+    var listX = 20;
+    var listY = 50;
+    var rowH = 18;
+
+    gameContext.save();
+    gameContext.fillStyle = "white";
+    gameContext.font = "bold 14px Arial";
+    gameContext.textBaseline = "alphabetic";
+    gameContext.textAlign = "left";
+    gameContext.fillText("Times to beat — " + mapName, listX, listY);
+
+    if (rows.length === 0) {
+        gameContext.font = "italic 13px Arial";
+        gameContext.fillStyle = "#9b5";
+        gameContext.fillText("New map!", listX, listY + 18);
+        gameContext.restore();
+        return;
+    }
+
+    gameContext.font = "12px Arial";
+    var nameColX = listX + 38;
+    var timeColX = listX + 240;
+    for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        var rowY = listY + 16 + i * rowH;
+        gameContext.textAlign = "left";
+        gameContext.fillStyle = "white";
+        gameContext.fillText("#" + row.rank, listX, rowY);
+        // "Anon" placeholder for nameless rows (same convention as the main
+        // overview card and WR banner).
+        var label = row.displayName || "Anon";
+        var maxNameW = (timeColX - nameColX) - 14;
+        var truncated = label;
+        if (gameContext.measureText(label).width > maxNameW) {
+            while (truncated.length > 1 && gameContext.measureText(truncated + "…").width > maxNameW) {
+                truncated = truncated.slice(0, -1);
+            }
+            truncated += "…";
+        }
+        gameContext.fillText(truncated, nameColX, rowY);
+        gameContext.textAlign = "right";
+        gameContext.fillText(formatRaceTime(row.bestMs), timeColX, rowY);
+    }
+    gameContext.restore();
+}
+
+// "NEW personal record!!" / "NEW WORLD record!!!" float for each player who
+// just set a PB this round. Server pushes records via playerPbResult after the
+// per-finish upsert + rank lookup, which means the last finisher's float can
+// arrive AFTER startOverview has already begun (their finish triggered it).
+//
+// Rendered in two contexts:
+//   * Race/collapse — anchored above the kart's world position (it's at the
+//     goal cell when they finished). Drawn from the world-space pass.
+//   * Overview      — anchored to the player's notch row on the standings
+//     column, so a late-arriving float still surfaces visibly. Drawn from
+//     drawOverviewBoard.
+//
+// `drainRecordFloats` runs every frame so expired entries are pruned even when
+// no render branch fires, keeping the array bounded across rounds.
+var RECORD_FLOAT_DURATION_MS = 2400;
+
+function drainRecordFloats() {
+    if (recordFloats.length === 0) { return; }
+    var now = Date.now();
+    var w = 0;
+    for (var r = 0; r < recordFloats.length; r++) {
+        if (now - recordFloats[r].startedAt < RECORD_FLOAT_DURATION_MS) {
+            recordFloats[w++] = recordFloats[r];
+        }
+    }
+    recordFloats.length = w;
+}
+
+// Animation envelope (alpha, vertical rise) shared by both render contexts.
+function recordFloatEnvelope(now, startedAt) {
+    var t = (now - startedAt) / RECORD_FLOAT_DURATION_MS;
+    var alpha;
+    if (t < 0.1) { alpha = t / 0.1; }
+    else if (t > 0.6) { alpha = Math.max(0, (1 - t) / 0.4); }
+    else { alpha = 1; }
+    var rise = 50 * (1 - Math.pow(1 - t, 2));
+    return { alpha: alpha, rise: rise, t: t };
+}
+
+function paintRecordFloat(f, x, y, alpha) {
+    var label = f.isWorldRecord ? "NEW WORLD record!!!" : "NEW personal record!!";
+    var color = f.isWorldRecord ? "#ff5fea" : "#ffd54a";
+    gameContext.globalAlpha = alpha;
+    gameContext.font = "bold 18px Arial";
+    gameContext.lineWidth = 4;
+    gameContext.strokeStyle = "rgba(0,0,0,0.85)";
+    gameContext.shadowColor = color;
+    gameContext.shadowBlur = 10;
+    gameContext.strokeText(label, x, y);
+    gameContext.fillStyle = color;
+    gameContext.fillText(label, x, y);
+    gameContext.font = "bold 22px Arial";
+    gameContext.strokeText(formatRaceTime(f.finishMs), x, y + 22);
+    gameContext.fillText(formatRaceTime(f.finishMs), x, y + 22);
+}
+
+// World-space rendering — used during the racing/collapsing draw pass.
+function drawRecordFloats() {
+    drainRecordFloats();
+    if (recordFloats.length === 0) { return; }
+    var now = Date.now();
+    gameContext.save();
+    gameContext.textAlign = "center";
+    gameContext.textBaseline = "alphabetic";
+    for (var i = 0; i < recordFloats.length; i++) {
+        var f = recordFloats[i];
+        var player = playerList ? playerList[f.playerId] : null;
+        if (player == null || player.x == null || player.y == null) { continue; }
+        var env = recordFloatEnvelope(now, f.startedAt);
+        var x = player.x + camera.getCameraX();
+        var y = player.y + camera.getCameraY() - 40 - env.rise;
+        paintRecordFloat(f, x, y, env.alpha);
+    }
+    gameContext.restore();
+}
+
+// Notch-row rendering — used during the overview-screen pass. The world-space
+// anchor doesn't apply (camera detached, players unrendered), so the float
+// drops onto the player's scoreboard row instead. Last-finisher records that
+// arrive AFTER startOverview still surface here. Geometry mirrors
+// drawOldNotches's iteration so the rows line up regardless of player count.
+function drawRecordFloatsOverview() {
+    drainRecordFloats();
+    if (recordFloats.length === 0) { return; }
+    if (playerList == null) { return; }
+    // Map playerId -> row index, matching drawOldNotches's iteration order.
+    var rowIdx = {};
+    var count = 0;
+    for (var pid in playerList) { rowIdx[pid] = count++; }
+    if (count === 0) { return; }
+    var distanceApart = 7;
+    var rowH = config.playerBaseRadius * distanceApart;
+    var offSetX = 80;
+    var offSetY = LOGICAL_HEIGHT / 2 - (count * rowH * 0.5);
+    // Drop the float a bit to the right of the notch column header and just
+    // above the row so it doesn't collide with the notch icon or delta float.
+    var notchColEndX = (gameLength + 1) * notchDistanceApart;
+
+    var now = Date.now();
+    gameContext.save();
+    gameContext.textAlign = "center";
+    gameContext.textBaseline = "alphabetic";
+    for (var i = 0; i < recordFloats.length; i++) {
+        var f = recordFloats[i];
+        if (!(f.playerId in rowIdx)) { continue; }
+        var env = recordFloatEnvelope(now, f.startedAt);
+        var x = offSetX + notchColEndX / 2;
+        var y = offSetY + rowIdx[f.playerId] * rowH - 20 - env.rise;
+        paintRecordFloat(f, x, y, env.alpha);
+    }
+    gameContext.restore();
+}
+
+// Race elapsed-time timer in the top-right HUD corner. Active during racing /
+// collapsing. Stores the frozen elapsed value directly (not a wall-clock
+// timestamp) so the display never depends on subtracting a server clock from
+// the browser's clock. Three states:
+//   * Running   -> Date.now() - raceStartedAt, white
+//   * Finished  -> player.finishMs (server-authoritative), gold
+//   * Died      -> elapsed-at-receipt (client-relative), red
+// Latched on the first transition; later state changes (zombie respawn etc.)
+// can't unfreeze it.
+function drawRaceTimer() {
+    if (raceStartedAt == null) { return; }
+    if (currentState != config.stateMap.racing && currentState != config.stateMap.collapsing) {
+        return;
+    }
+    var local = (typeof myID !== "undefined" && playerList) ? playerList[myID] : null;
+
+    if (local != null && localTimerStopAt == null) {
+        if (local.reachedGoal && typeof local.finishMs === 'number') {
+            // Goal-cross: server tells us the elapsed delta directly. Pin
+            // the display to that value so it reads identical to the
+            // server-side leaderboard, regardless of any client clock drift.
+            localTimerStopAt = local.finishMs;
+            localTimerStopByDeath = false;
+        } else if (local.alive === false) {
+            // Death: no server time was sent. Client-relative elapsed is fine
+            // here because both endpoints (raceStartedAt and Date.now()) come
+            // from the same browser clock.
+            localTimerStopAt = Date.now() - raceStartedAt;
+            localTimerStopByDeath = true;
+        }
+    }
+
+    var elapsed = (localTimerStopAt != null) ? localTimerStopAt : (Date.now() - raceStartedAt);
+    if (!(elapsed >= 0)) { elapsed = 0; }
+
+    var color = "white";
+    if (localTimerStopAt != null) {
+        color = localTimerStopByDeath ? "#ff5a5a" : "#ffd54a";
+    }
+    gameContext.save();
+    gameContext.fillStyle = color;
+    gameContext.font = "bold 28px Arial";
+    gameContext.textAlign = "right";
+    gameContext.textBaseline = "alphabetic";
+    gameContext.fillText(formatRaceTime(elapsed), LOGICAL_WIDTH - 20, 40);
+    gameContext.restore();
 }
 
 // Local players (slots) that joined this match mid-race and are still waiting:
@@ -3669,7 +3956,87 @@ function drawOverviewBoard() {
     drawBlackBackground();
     drawOldNotches();
     drawNextMap();
+    drawMapLeaderboardCard();
+    // Late-arriving PB floats — the last finisher's playerPbResult lands
+    // AFTER startOverview because the server's per-finish upsert + rank lookup
+    // are async. The world-space drawRecordFloats in the race pass never sees
+    // them; this overview-context render catches them anchored to notch rows.
+    drawRecordFloatsOverview();
     drawHUD();
+}
+
+// Format an elapsed-race time (milliseconds) as "m:ss.SS" — minutes are only
+// shown when >0 so a typical sub-minute finish reads as "32.17".
+function formatRaceTime(ms) {
+    if (!Number.isFinite(ms) || ms < 0) { return "—"; }
+    var totalCs = Math.floor(ms / 10);
+    var cs = totalCs % 100;
+    var s = Math.floor(totalCs / 100) % 60;
+    var m = Math.floor(totalCs / 6000);
+    var csStr = (cs < 10 ? "0" : "") + cs;
+    var sStr = (s < 10 ? "0" : "") + s;
+    return (m > 0 ? (m + ":" + sStr) : sStr) + "." + csStr;
+}
+
+// "Times to beat for <next map>" — overview-screen card under the next-map
+// preview. Renders the global top 10 PB times for the upcoming map. If no one
+// has finished it yet (rows empty), shows "New map!" as a placeholder so the
+// blank space still says something. Plain text on the overview's black
+// backdrop — no card chrome.
+function drawMapLeaderboardCard() {
+    if (mapLeaderboardData == null) { return; }
+    var rows = mapLeaderboardData.rows || [];
+    var mapName = mapLeaderboardData.mapName || "this map";
+    var listX = LOGICAL_WIDTH / 2 + 100;
+    var listY = (LOGICAL_HEIGHT / 2 - (world.height / 10)) - 100 + (world.height / 3) + 28;
+    var listW = world.width / 3;
+    var headerH = 28;
+    var rowH = 26;
+
+    gameContext.save();
+    gameContext.fillStyle = "white";
+    gameContext.font = "bold 18px Arial";
+    gameContext.textBaseline = "alphabetic";
+    gameContext.textAlign = "left";
+    gameContext.fillText("Times to beat for " + mapName, listX, listY + 18);
+
+    if (rows.length === 0) {
+        // Empty-state placeholder where the rows would go.
+        gameContext.font = "italic 18px Arial";
+        gameContext.fillStyle = "#9b5";
+        gameContext.fillText("New map!", listX, listY + headerH + 22);
+        gameContext.restore();
+        return;
+    }
+
+    var nameColX = listX + 50;
+    var timeColX = listX + listW - 12;
+    for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        var rowY = listY + headerH + i * rowH;
+        var isYou = (row.playerId === myID);
+        gameContext.fillStyle = "white";
+        gameContext.font = (isYou ? "bold " : "") + "16px Arial";
+        gameContext.textAlign = "left";
+        gameContext.fillText("#" + row.rank, listX, rowY + 18);
+        // Anonymous rows render as "Anon" — short, neutral, and consistent
+        // with how the WR banner and spectator widget label nameless racers.
+        var label = row.displayName || "Anon";
+        if (isYou) { label += " (YOU)"; }
+        // Truncate names that would collide with the time column.
+        var maxNameW = (timeColX - nameColX) - 20;
+        var truncated = label;
+        if (gameContext.measureText(label).width > maxNameW) {
+            while (truncated.length > 1 && gameContext.measureText(truncated + "…").width > maxNameW) {
+                truncated = truncated.slice(0, -1);
+            }
+            truncated += "…";
+        }
+        gameContext.fillText(truncated, nameColX, rowY + 18);
+        gameContext.textAlign = "right";
+        gameContext.fillText(formatRaceTime(row.bestMs), timeColX, rowY + 18);
+    }
+    gameContext.restore();
 }
 
 function drawNextMap() {
@@ -3719,6 +4086,7 @@ function drawOldNotches() {
         drawGoalPost(playerList[player], notchDistanceApart);
         drawEmoji(playerList[player]);
         drawNotchDeltaFloat(playerList[player]);
+        drawNotchInlineLeaderboard(playerList[player], notchDistanceApart);
         gameContext.translate(0, config.playerBaseRadius * distanceApart);
     }
     gameContext.restore();
@@ -3891,6 +4259,32 @@ function drawGoalPost(player, distanceApart) {
 // after the icon/emoji so it sits on top. Driven off notchFloatStart, set on
 // overview entry; once the window elapses nothing draws, so a resize/redraw of the
 // board won't replay it and it resets cleanly each round.
+// Per-notch-row inline leaderboard tag — "#3  32.17" rendered just past the
+// goal post on each player's notch row, sourced from mapLeaderboardJustPlayed.
+// Lets the last finisher (who gets ~no overview time before the next round
+// starts) still see how they landed on the map they just played. Local-player
+// row is bolded. No tag for guests/bots or for logged-in players with no PB.
+function drawNotchInlineLeaderboard(player, distanceApart) {
+    if (mapLeaderboardJustPlayed == null || !mapLeaderboardJustPlayed.rows) { return; }
+    if (player == null || !player.id) { return; }
+    var row = null;
+    var rows = mapLeaderboardJustPlayed.rows;
+    for (var i = 0; i < rows.length; i++) {
+        if (rows[i].playerId === player.id) { row = rows[i]; break; }
+    }
+    if (row == null) { return; }
+    var x = (gameLength + 1) * distanceApart + 40; // just past the goal post
+    var isYou = (player.id === myID);
+    gameContext.save();
+    gameContext.textBaseline = "middle";
+    gameContext.textAlign = "left";
+    gameContext.fillStyle = "white";
+    gameContext.font = (isYou ? "bold " : "") + "16px Arial";
+    gameContext.fillText("#" + row.rank, x, 0);
+    gameContext.fillText(formatRaceTime(row.bestMs), x + 50, 0);
+    gameContext.restore();
+}
+
 function drawNotchDeltaFloat(player) {
     var delta = player.deltaNotches;
     // !delta rejects 0, NaN, null and undefined in one go — NaN can slip in if a
