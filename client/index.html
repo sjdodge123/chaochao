@@ -5,8 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="description" content="Slow-paced multiplayer arena racing. Free in the browser — play with friends on phone, controller, or keyboard.">
+    <meta name="theme-color" content="#000000">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Chao Chao">
+    <meta property="og:description" content="Slow-paced multiplayer arena racing. Free in the browser — play with friends on phone, controller, or keyboard.">
+    <meta property="og:image" content="assets/img/favicon.svg">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="Chao Chao">
+    <meta name="twitter:description" content="Slow-paced multiplayer arena racing. Free in the browser — play with friends on phone, controller, or keyboard.">
     <!-- Apply saved theme before first paint to avoid a flash of the wrong theme -->
     <script>(function(){try{var p=localStorage.getItem('themePref')||'auto';var d=p==='dark'||(p!=='light'&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.setAttribute('data-theme',d?'dark':'light');}catch(e){}})();</script>
+    <!-- Preconnect to third-party origins we will hit on this page. `crossorigin`
+         must MATCH the cors-mode the resource is actually fetched with, or the
+         browser opens a separate connection and the handshake we paid for is
+         wasted. Bootstrap CSS is loaded `crossorigin="anonymous"`; gtag.js and
+         the Supabase script are not. -->
+    <link rel="preconnect" href="https://www.googletagmanager.com">
+    <link rel="preconnect" href="https://stackpath.bootstrapcdn.com" crossorigin>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net">
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-832XFC4F84"></script>
     <script>
@@ -23,18 +40,15 @@
       }
     </script>
 
-    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css" integrity="sha384-MCw98/SFnGE8fJT3GXwEOngsV7Zt27NXFoaoApmYm81iuXoPkFOJwJ8ERdknLPMO" crossorigin="anonymous">
     <link rel="stylesheet" type="text/css" href="css/styles.css">
-    <link rel="stylesheet" type="text/css" href="assets/css/all.css">
     <link rel="icon" type="image/svg+xml" href="assets/img/favicon.svg">
     <title>Chao Chao</title>
   </head>
   <body>
     <nav class="d-flex align-items-center px-3">
       <div class="navbar-brand">
-        <a data-gp-nav style="text-decoration: inherit;
-        color: inherit;" href="./index.html">ChaoChao</a>
+        <a data-gp-nav class="brand-link" href="./index.html">ChaoChao</a>
       </div>
     </nav>
     <section>
@@ -42,29 +56,32 @@
         <div class="container d-flex h-100 align-items-center">
           <div class="row justify-content-center align-self-center mx-auto w-100">
             <div class="landing-stack">
+              <span id="game-title">Chao Chao</span>
+              <p class="tagline">Slow-paced multiplayer arena racing.</p>
               <div class="play-container">
                 <span id="version"><b><!-- VERSION --></b></span>
-                <span id="game-title">Chao Chao</span>
-                <a href="./play.html" id="playButton" data-gp-nav class="btn btn-outline-success w-100 mt-3" onclick="trackEvent('cta_click', { target: 'play' })">Play</a>
+                <a href="./play.html" id="playButton" data-gp-nav class="btn btn-success btn-lg btn-primary-cta w-100" onclick="trackEvent('cta_click', { target: 'play' })">Play</a>
                 <a href="./join.html" id="joinButton" data-gp-nav class="btn btn-outline-info w-100 mt-2" onclick="trackEvent('cta_click', { target: 'join' })">Join</a>
                 <a href="./create.html" id="createButton" data-gp-nav class="btn btn-outline-warning w-100 mt-2" onclick="trackEvent('cta_click', { target: 'create' })">Create</a>
                 <a href="./learn.html" id="learnButton" data-gp-nav class="btn btn-outline-primary w-100 mt-2" onclick="trackEvent('cta_click', { target: 'learn' })">Learn</a>
                 <!-- NEWS_BANNER -->
               </div>
-              <p class="tagline">Slow-paced multiplayer arena racing.</p>
+              <div class="tip-banner" id="tipBanner" data-gp-nav role="button" tabindex="0"
+                   aria-label="Next tip" title="Click for another tip">
+                <span class="tip-label" aria-hidden="true">Tip:</span>
+                <span class="tip-text" id="tipText" aria-live="polite"></span>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- Load bootstrap -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.3/umd/popper.min.js" integrity="sha384-ZMP7rVo3mIykV+2+9J3UJ46jBk0WLaUAdn689aCwoqbBJiSnjAK/l8WvCWPIPm49" crossorigin="anonymous"></script>
-    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/js/bootstrap.min.js" integrity="sha384-ChfqqxuZUCnJSK3+MXmPNIyE6ZbWh2IMqE241rYiqJxyMiZ6OW/JmZQ5stwEULTy" crossorigin="anonymous"></script>
     <script src="scripts/controllerIdentity.js"></script>
     <script src="scripts/menuGamepad.js"></script>
     <script src="scripts/controllerHeader.js"></script>
     <script src="scripts/theme.js"></script>
+    <script src="scripts/landingTips.js" defer></script>
     <!-- Auth: browser-safe Supabase config injected server-side; stripped when disabled. -->
     <!-- SUPABASE_CONFIG -->
     <!-- deferred (non-render-blocking); run in order before DOMContentLoaded. -->

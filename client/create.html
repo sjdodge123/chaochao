@@ -4,9 +4,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover">
+  <meta name="description" content="Design and submit Chao Chao maps — voronoi tiles, hazards, and a built-in play-test.">
+  <meta name="theme-color" content="#000000">
   <!-- Apply saved theme before first paint to avoid a flash of the wrong theme -->
   <script>(function(){try{var p=localStorage.getItem('themePref')||'auto';var d=p==='dark'||(p!=='light'&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.setAttribute('data-theme',d?'dark':'light');}catch(e){}})();</script>
+  <!-- Preconnect to third-party origins we will hit on this page. `crossorigin`
+       must match the actual fetch's cors-mode; mismatches open a second
+       connection and waste the handshake. cdnjs is hit by both Font Awesome
+       CSS (no cors) and Popper JS (crossorigin), so it gets two preconnects. -->
+  <link rel="preconnect" href="https://www.googletagmanager.com">
+  <link rel="preconnect" href="https://ajax.googleapis.com">
+  <link rel="preconnect" href="https://stackpath.bootstrapcdn.com" crossorigin>
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <!-- Google tag (gtag.js) -->
+
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-832XFC4F84"></script>
   <script>
     window.dataLayer = window.dataLayer || [];
@@ -27,7 +40,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/simple-keyboard@3/build/css/index.css">
   <link rel="icon" type="image/svg+xml" href="assets/img/favicon.svg">
-  <title>Chao Chao Map Edit</title>
+  <title>Chao Chao — Map Editor</title>
   <style>
     /* ===========================================================================
        Map editor layout. A single responsive CSS grid drives both forms:
@@ -573,8 +586,7 @@
 <body>
   <nav class="d-flex align-items-center px-3">
     <div class="navbar-brand">
-      <a data-gp-nav style="text-decoration: inherit;
-      color: inherit;" href="./index.html">ChaoChao</a>
+      <a data-gp-nav class="brand-link" href="./index.html">ChaoChao</a>
     </div>
   </nav>
   <!-- Game enclosed here -->

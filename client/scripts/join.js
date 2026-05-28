@@ -11,7 +11,7 @@ var server = null,
 
 var REFRESH_MS = 5000;
 
-$(function () {
+document.addEventListener('DOMContentLoaded', function () {
     server = clientConnect();
     var refreshButton = document.getElementById('refreshButton');
     if (refreshButton != null) {
