@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.19.0 — 2026-05-28
+
 ### General
 
 - Plug in a controller mid-game and you can now actually join: pressing to join part-way through a match adds you as the next racer (you hop in when the round resets) instead of flashing "joined" and immediately booting you.
