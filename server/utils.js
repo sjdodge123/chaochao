@@ -108,13 +108,15 @@ exports.submitPullRequest = async function (map) {
 
     const owner = 'sjdodge123';
     const repo = 'chaochao';
-    // Strip control chars (\x00-\x1f) from author/email too — they flow into the
-    // commit's committer fields and the PR title, and a crafted payload could
-    // smuggle newlines past the client's <input maxlength>. Map name has its own
-    // stricter rule below (it becomes a filename + branch ref).
-    var author = String(map.author).replace(/ /g, '').replace(/[\x00-\x1f]/g, '');
+    // Strip C0 control chars (\x00-\x1f) AND DEL (\x7f) from author/email —
+    // they flow into the commit's committer fields and the PR title, and a
+    // crafted payload could smuggle newlines past the client's <input
+    // maxlength>. DEL is the orphan control byte between the C0 range and the
+    // printable extended chars (which we keep so accented names work). Map name
+    // has its own stricter rule below (it becomes a filename + branch ref).
+    var author = String(map.author).replace(/ /g, '').replace(/[\x00-\x1f\x7f]/g, '');
     var mapName = String(map.name).replace(/ /g, '');
-    var email = String(map.email).replace(/ /g, '').replace(/[\x00-\x1f]/g, '');
+    var email = String(map.email).replace(/ /g, '').replace(/[\x00-\x1f\x7f]/g, '');
     if (author == '' || email == '' || mapName == '') {
         console.log("Can't submit to github; required info missing:" + author + ":" + email + ":" + mapName);
         returnToClient.status = false;
@@ -140,8 +142,10 @@ exports.submitPullRequest = async function (map) {
     // clear reason instead of falling through to GitHub and surfacing the
     // friendly generic. Keep both regexes in lockstep — changing one without
     // the other lets a name that passes the editor fail at submit, or vice
-    // versa. (client/scripts/create.js function validateEmail)
-    if (!/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/.test(email)) {
+    // versa. (client/scripts/create.js function validateEmail) The pattern is
+    // deliberately non-backtracking (no nested quantifiers on overlapping char
+    // classes) to avoid ReDoS on the single-event-loop server.
+    if (!/^[\w.+-]+@[\w-]+(\.[\w-]+)+$/.test(email)) {
         returnToClient.status = false;
         returnToClient.message = "That email address looks invalid.";
         return returnToClient;
@@ -161,7 +165,7 @@ exports.submitPullRequest = async function (map) {
         returnToClient.message = "Map thumbnail is too large.";
         return returnToClient;
     }
-    if (mapName.length > 64 || /[\\/\x00-\x1f]/.test(mapName) || mapName[0] === '.') {
+    if (mapName.length > 64 || /[\\/\x00-\x1f\x7f]/.test(mapName) || mapName[0] === '.') {
         console.log("Rejected map submission; unsafe map name: " + JSON.stringify(map.name));
         returnToClient.status = false;
         returnToClient.message = "Map name can't contain slashes or control characters, or start with a dot.";
@@ -507,6 +511,34 @@ exports.loadMaps = function () {
 // Mirrored on the client (client/scripts/create.js) so the editor can give
 // fast feedback; re-run here as the trust boundary before a preview room is
 // created. Returns { valid: bool, reason: string }.
+// Memoized known-id sets. Built defensively from config (skip entries without
+// a numeric .id, e.g. tileMap.abilities), keyed by the config object so the
+// rare test case that passes a different config still works correctly. The
+// production caller always passes the cached `c`, which means one build over
+// the process lifetime.
+var _knownIdSetsCache = null;
+var _knownIdSetsConfig = null;
+function getKnownIdSets(config) {
+    if (_knownIdSetsConfig === config && _knownIdSetsCache != null) {
+        return _knownIdSetsCache;
+    }
+    var tile = {};
+    for (var tk in config.tileMap) {
+        if (config.tileMap[tk] && typeof config.tileMap[tk].id === "number") {
+            tile[config.tileMap[tk].id] = true;
+        }
+    }
+    var hazard = {};
+    for (var hk in config.hazards) {
+        if (config.hazards[hk] && typeof config.hazards[hk].id === "number") {
+            hazard[config.hazards[hk].id] = true;
+        }
+    }
+    _knownIdSetsCache = { tile: tile, hazard: hazard };
+    _knownIdSetsConfig = config;
+    return _knownIdSetsCache;
+}
+
 exports.validateMap = function (vMap, config) {
     if (vMap == null) {
         return { valid: false, reason: "No map data." };
@@ -520,20 +552,12 @@ exports.validateMap = function (vMap, config) {
     if (vMap.cells.length > mapFormat.MAX_MAP_CELLS) {
         return { valid: false, reason: "Map is too large (over " + mapFormat.MAX_MAP_CELLS + " cells)." };
     }
-    // Known-id sets — built defensively from config so a metadata entry without
-    // an .id (e.g. tileMap.abilities) doesn't poison the set with `undefined`.
-    var validTileIds = {};
-    for (var tk in config.tileMap) {
-        if (config.tileMap[tk] && typeof config.tileMap[tk].id === "number") {
-            validTileIds[config.tileMap[tk].id] = true;
-        }
-    }
-    var validHazardIds = {};
-    for (var hk in config.hazards) {
-        if (config.hazards[hk] && typeof config.hazards[hk].id === "number") {
-            validHazardIds[config.hazards[hk].id] = true;
-        }
-    }
+    // Module-level cached id sets (config is immutable across the process
+    // lifetime). Built once at first validateMap call; the alternative —
+    // rebuilding them on every preview/submit — was pure waste.
+    var sets = getKnownIdSets(config);
+    var validTileIds = sets.tile;
+    var validHazardIds = sets.hazard;
     var hasGoal = false;
     for (var i = 0; i < vMap.cells.length; i++) {
         var cell = vMap.cells[i];

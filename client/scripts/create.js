@@ -670,7 +670,12 @@ function closeWipeConfirm() {
 }
 
 function validateEmail(mail) {
-    if (/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/.test(mail)) {
+    // Non-backtracking pattern (no nested quantifiers on overlapping char
+    // classes) — the older /\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+/ was a
+    // classic ReDoS shape. Mirror this exact regex server-side (server/utils.js
+    // submitPullRequest); changing one without the other desyncs the trust
+    // boundaries.
+    if (/^[\w.+-]+@[\w-]+(\.[\w-]+)+$/.test(mail)) {
         return (true)
     }
     return (false)
@@ -1308,7 +1313,9 @@ function showSubmitStatus(message, bg, color, holdMs) {
     el.css({ "color": color || "white", "background-color": bg });
     el.show();
     if (submitStatusTimer) { clearTimeout(submitStatusTimer); }
-    submitStatusTimer = setTimeout(function () { el.hide(); }, holdMs || 4000);
+    // `holdMs != null` (not `|| 4000`) so a caller passing 0 = "hide now" isn't
+    // silently bumped to the default.
+    submitStatusTimer = setTimeout(function () { el.hide(); }, holdMs != null ? holdMs : 4000);
 }
 function resetStatuses() {
     $("#exportStatus, #previewStatus").hide();
