@@ -240,11 +240,10 @@ var mapCanvasPad = 8;
 // Bumped every time the terrain cache is re-rendered, so derived caches (the
 // space island-depth FX) know to rebuild only when the terrain actually changed.
 var mapCacheRev = 0;
-// Offscreen caches for the (static) themed backdrop FX so they're built once and
-// blitted each frame instead of recomputed — see ensureSpaceFloorCache /
-// ensureIslandFxCache.
-var spaceFloorCanvas = null;
-var islandFxCanvas = null;
+// Offscreen cache for the space theme: the whole arena interior (starfield floor
+// + island depth + terrain) baked into one canvas and blitted in a single pass
+// per frame — see ensureArenaCache.
+var arenaCanvas = null;
 function invalidateMapCache() {
     mapDirty = true;
 }
@@ -252,7 +251,7 @@ function discardMapCache() {
     mapCanvas = null;
     mapCtx = null;
     mapDirty = true;
-    islandFxCanvas = null;
+    arenaCanvas = null;
 }
 
 // --- Persistent sand-trench (composited into the map cache) ---
@@ -674,8 +673,10 @@ function drawObjects(dt) {
     drawWorld(dt);
     cameraOnMyPlayer();
     if (currentState == config.stateMap.lobby) {
-        drawLobbyFloor();
+        // Map first: for space it's the single arena composite (floor baked in),
+        // so the lobby grid + props must overlay it rather than be painted under.
         drawMap();
+        drawLobbyFloor();
         drawLobbyArrows();
         drawLobbyStartButton();
         if (typeof drawLobbyStationZones === "function") {
@@ -685,8 +686,10 @@ function drawObjects(dt) {
     if (currentState == config.stateMap.gated ||
         currentState == config.stateMap.racing ||
         currentState == config.stateMap.collapsing) {
-        drawGate();
+        // Map (the space arena composite carries the floor) first, then the gate
+        // on top of it.
         drawMap();
+        drawGate();
         drawArenaVignette();
         drawPendingSwap();
         drawPingCircles();
@@ -1182,20 +1185,11 @@ function getSpaceStars() {
     return arr;
 }
 
-// The starfield void (base gradient + nebula washes + distant planet + stars) is
-// fully static, so it's baked into an offscreen canvas once per world size and
-// blitted each frame — instead of rebuilding ~5 gradients and stamping ~150 star
-// arcs every frame. Stars are static (the subtle twinkle wasn't worth recomputing
-// the whole field per frame).
-function ensureSpaceFloorCache(W, H) {
-    if (spaceFloorCanvas && spaceFloorCanvas.width === W && spaceFloorCanvas.height === H) {
-        return spaceFloorCanvas;
-    }
-    var cv = (typeof document !== 'undefined') ? document.createElement('canvas') : null;
-    if (cv == null) { return null; }
-    cv.width = W; cv.height = H;
-    var c = cv.getContext('2d');
-
+// Paint the static starfield void (base gradient + nebula washes + distant
+// planet + stars + neon rim) into context `c` over a W×H area at the origin.
+// Baked into the arena composite once per terrain change (see ensureArenaCache),
+// never per-frame.
+function paintStarfield(c, W, H) {
     // Deep-space base.
     var base = c.createLinearGradient(0, 0, 0, H);
     base.addColorStop(0, '#070611');
@@ -1249,8 +1243,7 @@ function ensureSpaceFloorCache(W, H) {
     }
     c.globalAlpha = 1;
 
-    // Neon rim baked in (so it isn't a per-frame shadowed stroke — see drawWorld,
-    // which skips the live rim for the space theme).
+    // Neon rim baked in.
     c.save();
     c.strokeStyle = 'rgba(170,195,255,0.7)';
     c.shadowColor = 'rgba(120,160,255,0.7)';
@@ -1258,18 +1251,6 @@ function ensureSpaceFloorCache(W, H) {
     c.lineWidth = 4;
     c.strokeRect(2, 2, W - 4, H - 4);
     c.restore();
-
-    spaceFloorCanvas = cv;
-    return cv;
-}
-
-// Space floor: blit the cached starfield over the world rect (pans/zooms via the
-// dest rect, like the terrain cache).
-function drawSpaceFloor(x, y, w, h) {
-    var cv = ensureSpaceFloorCache(Math.max(1, Math.round(w)), Math.max(1, Math.round(h)));
-    if (cv != null) {
-        gameContext.drawImage(cv, x, y, w, h);
-    }
 }
 
 function drawBackground() {
@@ -2934,10 +2915,13 @@ function drawWorld() {
         var oy = world.y + camera.getCameraY();
         var themed = arenaBackdropActive();
         var space = themed && ARENA_FLOOR_THEME === 'space';
-        if (themed && ARENA_FLOOR_THEME === 'space') {
-            // Starfield void as the floor: terrain reads as islands adrift in space.
-            drawSpaceFloor(ox, oy, world.width, world.height);
-        } else if (themed) {
+        if (space) {
+            // Space draws nothing here: its floor + islands + depth + rim are one
+            // composite blitted in drawMap (one pass, ≤ base's fillRect + terrain
+            // blit). Drawn after the gate via the reordered draw sequence.
+            return;
+        }
+        if (themed) {
             // Open water as the floor: terrain reads as islands; blank gaps
             // (background cells) show the sea, with shallows + reflections under
             // the terrain (added in drawMap).
@@ -2951,23 +2935,20 @@ function drawWorld() {
             gameContext.restore();
         }
 
-        // Space bakes its glowing rim into the floor cache (perf: no per-frame
-        // shadowed stroke). Water/non-themed draw their rim live here.
-        if (!space) {
-            gameContext.save();
-            gameContext.beginPath();
-            gameContext.lineWidth = 4;
-            if (themed) {
-                gameContext.strokeStyle = 'rgba(235,250,255,0.7)';
-                gameContext.shadowColor = 'rgba(180,230,255,0.7)';
-                gameContext.shadowBlur = 8;
-            } else {
-                gameContext.strokeStyle = themeColor('ink', 'black');
-            }
-            gameContext.rect(ox, oy, world.width, world.height);
-            gameContext.stroke();
-            gameContext.restore();
+        // Rim (water/non-themed draw it live here; space bakes it into the composite).
+        gameContext.save();
+        gameContext.beginPath();
+        gameContext.lineWidth = 4;
+        if (themed) {
+            gameContext.strokeStyle = 'rgba(235,250,255,0.7)';
+            gameContext.shadowColor = 'rgba(180,230,255,0.7)';
+            gameContext.shadowBlur = 8;
+        } else {
+            gameContext.strokeStyle = themeColor('ink', 'black');
         }
+        gameContext.rect(ox, oy, world.width, world.height);
+        gameContext.stroke();
+        gameContext.restore();
     }
 }
 
@@ -3381,14 +3362,15 @@ function drawMap() {
     if (mapCanvas != null) {
         var mdx = world.x - mapCanvasPad, mdy = world.y - mapCanvasPad;
         var mdw = world.width + mapCanvasPad * 2, mdh = world.height + mapCanvasPad * 2;
-        // Space blits a single composite (terrain + baked 3D depth) — one
-        // full-canvas blit, same as base. Water draws shallows + a swaying
-        // reflection under the terrain, then the terrain. Otherwise just terrain.
+        // Space blits a single composite (starfield floor + 3D depth + terrain) —
+        // one full-canvas blit, fewer ops than base's floor fill + terrain blit.
+        // Water draws shallows + a swaying reflection under the terrain, then the
+        // terrain. Otherwise just terrain.
         // Stretch the (possibly reduced-resolution) cache back over the full world
         // region; at scale 1 this is a 1:1 blit (unchanged on High/Balanced).
         if (arenaBackdropActive() && ARENA_FLOOR_THEME === 'space') {
-            var fxCache = ensureIslandFxCache();
-            gameContext.drawImage(fxCache != null ? fxCache : mapCanvas, mdx, mdy, mdw, mdh);
+            var arenaCache = ensureArenaCache();
+            gameContext.drawImage(arenaCache != null ? arenaCache : mapCanvas, mdx, mdy, mdw, mdh);
         } else {
             if (arenaBackdropActive()) {
                 drawIslandWater(mdx, mdy, mdw, mdh);
@@ -3430,19 +3412,21 @@ function drawIslandWater(dx, dy, dw, dh) {
     gameContext.restore();
 }
 
-// Space island layer: the depth FX (extruded side + blue atmosphere rim) baked
-// UNDER a crisp copy of the terrain, so drawMap blits this single composite
-// instead of an FX layer plus the terrain (one full-canvas blit per frame, same
-// as base). Rebuilt only when the terrain cache changes (mapCacheRev) or resizes.
-function ensureIslandFxCache() {
+// The whole space arena interior baked into ONE canvas: starfield floor, then the
+// island depth FX (extruded side + blue atmosphere rim), then a crisp copy of the
+// terrain on top. drawMap blits this in a single pass per frame — fewer ops than
+// the base flat-grey floor (fillRect) + terrain blit — so the per-frame render is
+// no heavier than main. Rebuilt only when the terrain cache changes (mapCacheRev)
+// or resizes; the floor is static but cheap to repaint at that (rare) cadence.
+function ensureArenaCache() {
     if (mapCanvas == null) { return null; }
-    if (islandFxCanvas &&
-        islandFxCanvas._srcRev === mapCacheRev &&
-        islandFxCanvas.width === mapCanvas.width &&
-        islandFxCanvas.height === mapCanvas.height) {
-        return islandFxCanvas;
+    if (arenaCanvas &&
+        arenaCanvas._srcRev === mapCacheRev &&
+        arenaCanvas.width === mapCanvas.width &&
+        arenaCanvas.height === mapCanvas.height) {
+        return arenaCanvas;
     }
-    var cv = islandFxCanvas;
+    var cv = arenaCanvas;
     if (cv == null || cv.width !== mapCanvas.width || cv.height !== mapCanvas.height) {
         cv = (typeof document !== 'undefined') ? document.createElement('canvas') : null;
         if (cv == null) { return null; }
@@ -3452,7 +3436,10 @@ function ensureIslandFxCache() {
     var c = cv.getContext('2d');
     c.clearRect(0, 0, cv.width, cv.height);
 
-    // Extruded side wall (stack of offset dark silhouettes via shadow).
+    // Starfield floor fills the whole arena (shows through the terrain's gaps).
+    paintStarfield(c, cv.width, cv.height);
+
+    // Extruded side wall (stack of offset dark silhouettes via shadow) over the floor.
     c.save();
     c.shadowColor = 'rgba(24,32,60,1)';
     c.shadowBlur = 1;
@@ -3474,12 +3461,11 @@ function ensureIslandFxCache() {
     c.drawImage(mapCanvas, 0, 0);
     c.restore();
 
-    // Crisp terrain on top, covering the dim/offset copies left by the FX passes,
-    // so this single canvas is the complete arena terrain + depth.
+    // Crisp terrain on top, covering the dim/offset copies left by the FX passes.
     c.drawImage(mapCanvas, 0, 0);
 
     cv._srcRev = mapCacheRev;
-    islandFxCanvas = cv;
+    arenaCanvas = cv;
     return cv;
 }
 
