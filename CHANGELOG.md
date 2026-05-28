@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.22.0 — 2026-05-28
+
 ### General
 
 - Driving into lava now shows your kart **sinking and burning** — it shrinks, darkens, and bobs under for a few seconds while still on fire, with embers and bubble pops rising around it. Works on the lobby's lava-and-respawn teaching pool too.
