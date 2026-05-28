@@ -235,85 +235,76 @@ function discardMapCache() {
     mapDirty = true;
 }
 
-// --- Persistent sand-trench decal (ground layer) ---
-// A kart trudging through sand carves a trench that lasts the whole round. Rather
-// than keep one fading effect per segment — which redraws every frame and is
-// bounded by the per-profile effect cap (so it could never persist a whole race on
-// BALANCED/LOW, and would cost a lot of overdraw on HIGH) — segments are STAMPED
-// ONCE onto a world-sized decal canvas and blitted under the karts each frame:
-// O(1) per frame regardless of how much trench exists. The texture only re-uploads
-// to the GPU on a stamp, and stamps are throttled by distance travelled (see
-// spawnSandTrail), so even continuous trudging dirties it only a few times a
-// second. Resolution follows perfMapScale — the same bytes-per-upload story as the
-// map cache, so weak GPUs move fewer bytes. LOW never stamps (the extraFx gate
-// upstream skips the whole trench), and the lobby uses the fading effect instead so
-// its floor isn't permanently scarred.
-var trenchCanvas = null;
-var trenchCtx = null;
+// --- Persistent sand-trench (composited into the map cache) ---
+// A kart trudging through sand carves a trench that lasts the whole round. Each
+// segment is recorded and STAMPED INTO THE MAP CACHE (mapCanvas) — the texture
+// that's already blitted under the karts every frame — so the trench costs ZERO
+// extra per-frame work. (An earlier version kept a SECOND world-sized canvas and
+// blitted it every frame; in the headless software-raster perf gate that doubled
+// scripting ms/frame, and a per-frame full-world blit is exactly the fill-rate /
+// re-upload pattern that hurts weak GPUs.) Segments live in `trenchSegments` and
+// are replayed whenever the cache is rebuilt (a tile change, or a profile/scale
+// switch). LOW never stamps (the extraFx gate upstream skips the whole trench).
+// Stamping dirties the map texture (one GPU re-upload), but it's throttled by
+// distance travelled (spawnSandTrail) to a few times a second.
+var trenchSegments = [];
+var TRENCH_SEGMENT_MAX = 800; // bound memory + cache-rebuild replay cost; oldest drop
 function discardTrenchDecal() {
-    trenchCanvas = null;
-    trenchCtx = null;
+    if (trenchSegments.length > 0) {
+        trenchSegments = [];
+        invalidateMapCache(); // drop the baked-in trench on the next cache rebuild
+    }
 }
-function ensureTrenchDecal() {
-    if (world == null) {
-        return false;
-    }
-    var scale = (typeof perfMapScale === "function") ? perfMapScale() : 1;
-    if (trenchCanvas != null && trenchCanvas._scale !== scale) {
-        trenchCanvas = null;
-    }
-    if (trenchCanvas == null) {
-        trenchCanvas = document.createElement("canvas");
-        trenchCanvas.width = Math.max(1, Math.ceil((world.width + mapCanvasPad * 2) * scale));
-        trenchCanvas.height = Math.max(1, Math.ceil((world.height + mapCanvasPad * 2) * scale));
-        trenchCanvas._scale = scale;
-        trenchCtx = trenchCanvas.getContext("2d");
-    }
-    return true;
-}
-// Stamp one trench segment (world coords) permanently onto the decal: a recessed
-// shadow groove flanked by two pale berms (sand shoved up to each lip). Mirrors
-// addSandTrench's look, minus the fade. Cumulative — a spot trudged repeatedly
-// darkens, reading as well-worn sand.
-function stampSandTrench(bx, by, ex, ey, dir, radius) {
-    if (!ensureTrenchDecal()) {
-        return;
-    }
-    var scale = trenchCanvas._scale;
-    var perp = dir + Math.PI / 2, off = radius * 0.7;
+// Paint one trench segment (world coords) with the map-cache transform already
+// applied: a recessed shadow groove flanked by two pale berms (sand shoved up to
+// each lip). Shared by the live stamp and the cache-rebuild replay. Cumulative —
+// a spot trudged repeatedly darkens, reading as well-worn sand.
+function paintTrenchSegment(ctx, s) {
+    var perp = s.dir + Math.PI / 2, off = s.r * 0.7;
     var ox = Math.cos(perp) * off, oy = Math.sin(perp) * off;
-    var ctx = trenchCtx;
-    ctx.save();
-    // World -> decal-canvas transform, matching renderMapToCache's mapping.
-    ctx.setTransform(scale, 0, 0, scale, (-world.x + mapCanvasPad) * scale, (-world.y + mapCanvasPad) * scale);
     ctx.lineCap = "round";
     ctx.globalAlpha = 0.22;
     ctx.strokeStyle = (typeof sandTrenchColor === "function") ? sandTrenchColor() : "rgba(120, 92, 52, 1)";
     ctx.lineWidth = off * 2;
     ctx.beginPath();
-    ctx.moveTo(bx, by);
-    ctx.lineTo(ex, ey);
+    ctx.moveTo(s.bx, s.by);
+    ctx.lineTo(s.ex, s.ey);
     ctx.stroke();
     ctx.globalAlpha = 0.4;
     ctx.strokeStyle = (typeof sandColor === "function") ? sandColor() : "rgba(250, 238, 205, 1)";
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(bx + ox, by + oy);
-    ctx.lineTo(ex + ox, ey + oy);
+    ctx.moveTo(s.bx + ox, s.by + oy);
+    ctx.lineTo(s.ex + ox, s.ey + oy);
     ctx.stroke();
     ctx.beginPath();
-    ctx.moveTo(bx - ox, by - oy);
-    ctx.lineTo(ex - ox, ey - oy);
+    ctx.moveTo(s.bx - ox, s.by - oy);
+    ctx.lineTo(s.ex - ox, s.ey - oy);
     ctx.stroke();
-    ctx.restore();
 }
-// Blit the trench decal under the karts (same placement as the map cache).
-function drawTrenchDecal() {
-    if (trenchCanvas == null) {
-        return;
+// Replay every recorded trench segment onto the map cache. Called from
+// renderMapToCache while its world->cache transform is active.
+function paintTrenchSegments(ctx) {
+    for (var i = 0; i < trenchSegments.length; i++) {
+        paintTrenchSegment(ctx, trenchSegments[i]);
     }
-    gameContext.drawImage(trenchCanvas, world.x - mapCanvasPad, world.y - mapCanvasPad,
-        world.width + mapCanvasPad * 2, world.height + mapCanvasPad * 2);
+}
+// Record a trench segment and stamp it straight into the live map cache so it shows
+// immediately (without waiting for the next cache rebuild).
+function stampSandTrench(bx, by, ex, ey, dir, radius) {
+    trenchSegments.push({ bx: bx, by: by, ex: ex, ey: ey, dir: dir, r: radius });
+    if (trenchSegments.length > TRENCH_SEGMENT_MAX) {
+        trenchSegments.shift();
+    }
+    if (mapCanvas == null || mapCtx == null || world == null) {
+        return; // not cached yet — the segment paints on the next cache rebuild
+    }
+    var scale = mapCanvas._mapScale || 1;
+    mapCtx.save();
+    // World -> map-cache transform, matching renderMapToCache's mapping.
+    mapCtx.setTransform(scale, 0, 0, scale, (-world.x + mapCanvasPad) * scale, (-world.y + mapCanvasPad) * scale);
+    paintTrenchSegment(mapCtx, trenchSegments[trenchSegments.length - 1]);
+    mapCtx.restore();
 }
 
 var playerSpriteCache = {};
@@ -3010,9 +3001,6 @@ function drawMap() {
         gameContext.drawImage(mapCanvas, world.x - mapCanvasPad, world.y - mapCanvasPad,
             world.width + mapCanvasPad * 2, world.height + mapCanvasPad * 2);
     }
-    // Sand trench sits on the ground, ABOVE the terrain but BELOW hazards (bumpers /
-    // rails) and karts — so the semi-transparent groove never paints over a bumper.
-    drawTrenchDecal();
     if (Object.keys(hazardList).length > 0) {
         for (var id in hazardList) {
             drawHazard(hazardList[id]);
@@ -3203,6 +3191,10 @@ function renderMapToCache() {
     }
     drawTileBorders(mapCtx);
     drawLavaBorders(mapCtx);
+    // Re-bake the persistent sand trench on top of the terrain (still under the
+    // hazard pass + karts, which draw after the cache blit) — its world->cache
+    // transform is the one active here.
+    paintTrenchSegments(mapCtx);
     mapCtx.restore();
 }
 
