@@ -95,7 +95,7 @@ if (config.stateMap == null || typeof config.stateMap !== 'object') {
 
 // tileMap.goal.id is what utils.validateMap looks for to confirm a map is
 // playable; the other tile types are referenced across engine.js.
-const requiredTiles = ['slow', 'normal', 'fast', 'lava', 'ice', 'ability', 'goal', 'bumper', 'random'];
+const requiredTiles = ['slow', 'normal', 'fast', 'lava', 'ice', 'ability', 'goal', 'bumper', 'random', 'empty'];
 if (config.tileMap == null || typeof config.tileMap !== 'object') {
     fail('config.json: "tileMap" is missing or not an object');
 } else {

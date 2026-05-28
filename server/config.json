@@ -131,6 +131,14 @@
             "canBeRandomed": false,
             "color": "#2b2b2b"
         },
+        "empty": {
+            "id": 10,
+            "brakeCoeff": 0.235,
+            "dragCoeff": 0.25,
+            "acel": 300,
+            "canBeRandomed": false,
+            "color": "#13131f"
+        },
         "abilities": {
             "canBeRandomed": false,
             "blindfold": {

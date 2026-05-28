@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### Map editor
+
+- New **Empty** tile (number key `9`) lets map makers carve open holes into a map. Holes aren't solid ground — you can see straight through them to the sky below, and driving into one bounces you back off the edge just like the boundary of the map. A glowing rim marks every hole so it's clear where you can't go.
 
 ## v0.24.1 — 2026-05-28
 

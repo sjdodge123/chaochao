@@ -481,6 +481,7 @@ function setupPage() {
     $("#abilityTileButton").on("click", function () { editorSelectTile("ability"); return false; });
     $("#randomTileButton").on("click", function () { editorSelectTile("random"); return false; });
     $("#goalTileButton").on("click", function () { editorSelectTile("goal"); return false; });
+    $("#emptyTileButton").on("click", function () { editorSelectTile("empty"); return false; });
     $(".startEdgeButton").on("click", function () {
         var edges = ($(this).attr("data-edges") || "left").split("+");
         setStartEdges(edges);
@@ -1052,8 +1053,8 @@ function editorDeleteSelected() {
 // Highlight the active tool/tile/hazard button.
 var TOOL_BUTTON_IDS = ["selectToolButton", "eraserToolButton", "slowTileButton",
     "normalTileButton", "fastTileButton", "lavaTileButton", "iceTileButton",
-    "abilityTileButton", "randomTileButton", "goalTileButton", "bumperButton",
-    "movingBumperButton"];
+    "abilityTileButton", "randomTileButton", "goalTileButton", "emptyTileButton",
+    "bumperButton", "movingBumperButton"];
 function updateToolButtons() {
     for (var i = 0; i < TOOL_BUTTON_IDS.length; i++) {
         var el = document.getElementById(TOOL_BUTTON_IDS[i]);
@@ -1072,7 +1073,7 @@ function activeToolButtonId() {
         var tileMap = {
             slow: "slowTileButton", normal: "normalTileButton", fast: "fastTileButton",
             lava: "lavaTileButton", ice: "iceTileButton", ability: "abilityTileButton",
-            random: "randomTileButton", goal: "goalTileButton"
+            random: "randomTileButton", goal: "goalTileButton", empty: "emptyTileButton"
         };
         return tileMap[activeTool.name] || null;
     }

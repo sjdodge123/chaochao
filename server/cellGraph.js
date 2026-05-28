@@ -184,6 +184,7 @@ function findPathToNearestGoal(map, point, options) {
     var neighbors = getAdjacency(map);
     var LAVA = c.tileMap.lava.id;
     var GOAL = c.tileMap.goal.id;
+    var EMPTY = c.tileMap.empty.id;
 
     var blocked = null;
     if (options.blocked) {
@@ -231,6 +232,15 @@ function findPathToNearestGoal(map, point, options) {
 
     var start = nearestCellIndex(cells, point);
 
+    // An empty hole is a hard no-go surface (players bounce off it), so a route can't
+    // originate inside one. Unlike lava — where a start gate may legitimately sit and
+    // the seed is allowed — seeding Dijkstra from a hole would falsely "reach" the goal
+    // via adjacent ground even though racers can't launch through that lane (a start
+    // edge sampled into a hole must read as unreachable, not pathable).
+    if (cells[start] != null && cells[start].id === EMPTY) {
+        return null;
+    }
+
     var N = cells.length;
     var cost = new Array(N).fill(Infinity);
     var geo = new Array(N).fill(Infinity);
@@ -262,9 +272,10 @@ function findPathToNearestGoal(map, point, options) {
             if (done[v]) {
                 continue;
             }
-            // Lava is impassable; so are caller-blocked cells. The goal is always
-            // enterable. The start cell is allowed even if it sits on lava.
-            if (cells[v].id === LAVA && cells[v].id !== GOAL) {
+            // Lava and empty holes are impassable; so are caller-blocked cells. The
+            // goal is always enterable. The start cell is allowed even if it sits on
+            // lava.
+            if ((cells[v].id === LAVA || cells[v].id === EMPTY) && cells[v].id !== GOAL) {
                 continue;
             }
             if (blocked && blocked[cells[v].site.voronoiId]) {
