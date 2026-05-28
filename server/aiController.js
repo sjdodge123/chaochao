@@ -780,7 +780,10 @@ function decideAbility(bot, ctx, ability, nav) {
         if (rank >= 1) {
             var leadS = raceLeader(bot, ctx, goal);
             var landingSafe = leadS != null && !lavaNear(ctx, leadS.player.x, leadS.player.y, SWAP_LAND_PROBE);
-            if (forced || (leadS != null && leadS.dist < SWAP_RANGE && armed && landingSafe)) { bot.attack = true; }
+            // Require a live swap target even when forced: if we're only "behind"
+            // because a rival already finished (raceLeader -> null), forcing a swap
+            // just arms a warning aimer that fizzles with no one to steal from.
+            if (leadS != null && (forced || (leadS.dist < SWAP_RANGE && armed && landingSafe))) { bot.attack = true; }
         }
         return;
     }
