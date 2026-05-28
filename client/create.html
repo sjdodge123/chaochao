@@ -688,6 +688,14 @@
           <div class="desc">Create a new map</div>
         </button>
       </div>
+      <div class="map-image" data-keep="1">
+        <button id="loadFromFileButton" data-gp-nav title="Load a map from a .json file you saved">
+          <div class="load-file-thumb"><i class="fa fa-upload fa-4x" aria-hidden="true"></i></div>
+          <div class="desc">Load from JSON file</div>
+        </button>
+        <input type="file" id="loadFromFileInput" accept=".json,application/json" style="display:none;">
+        <div id="loadFileStatus" class="load-file-status" style="display:none;"></div>
+      </div>
     </div>
 
     <!-- Controller-friendly confirm dialog (replaces native confirm(), which a
