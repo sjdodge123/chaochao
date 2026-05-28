@@ -211,22 +211,16 @@ function competingPaths(map) {
             const uni = setC.size + ch.set.size - inter;
             if (uni > 0 && inter / uni > ROUTE_DEDUPE_OVERLAP) { dup = true; break; }
         }
-        if (!dup) { chosen.push({ path: c.path, seconds: c.seconds, set: setC, origin: c.origin }); }
+        if (!dup) { chosen.push({ ...c, set: setC }); }
         if (chosen.length >= MAX_ROUTES) { break; }
     }
 
     return chosen.map((c, i) => {
         const sitePts = c.path.map(id => siteById[id]).filter(Boolean);
         // Anchor the rendered line at its gate origin so it visibly starts ON the
-        // gate (inside the playfield, spread across the start edge) rather than at
-        // the first cell SITE, which is the cell's centroid set in from the edge —
-        // and, when the gate sits over a no-cell margin, can be a far interior cell.
-        // The origin lies in path[0]'s own cell, so this segment stays inside the
-        // surface. Skip it if origin ≈ first site (no visible gap to bridge).
-        const first = sitePts[0];
-        const points = (first && c.origin && Math.hypot(first.x - c.origin.x, first.y - c.origin.y) > 1)
-            ? [{ x: c.origin.x, y: c.origin.y }, ...sitePts]
-            : sitePts;
+        // gate; path[0]'s site is the cell centroid (inset from the edge) and, when
+        // the gate sits over a no-cell margin, can resolve to a far interior cell.
+        const points = c.origin ? [{ x: c.origin.x, y: c.origin.y }, ...sitePts] : sitePts;
         return {
             label: i === 0 ? 'Fastest line' : 'Alt ' + String.fromCharCode(64 + i), // Alt A, Alt B…
             seconds: +c.seconds.toFixed(1),
