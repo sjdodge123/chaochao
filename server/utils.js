@@ -477,13 +477,21 @@ exports.validateMap = function (vMap, config) {
     if (!Array.isArray(vMap.cells) || vMap.cells.length === 0) {
         return { valid: false, reason: "Map has no cells." };
     }
+    // Cap mirrored from mapFormat.MAX_MAP_CELLS (which the CI validator also
+    // uses); rejects crafted/loaded maps that would otherwise hand a huge payload
+    // to the engine on the shared server process.
+    if (vMap.cells.length > mapFormat.MAX_MAP_CELLS) {
+        return { valid: false, reason: "Map is too large (over " + mapFormat.MAX_MAP_CELLS + " cells)." };
+    }
     var hasGoal = false;
     for (var i = 0; i < vMap.cells.length; i++) {
         var cell = vMap.cells[i];
         if (cell == null || cell.site == null) {
             return { valid: false, reason: "Map has a malformed cell." };
         }
-        if (typeof cell.site.x !== "number" || typeof cell.site.y !== "number") {
+        // Number.isFinite is type-safe AND rejects NaN/Infinity — both pass the
+        // old `typeof === "number"` and would propagate NaN through the engine.
+        if (!Number.isFinite(cell.site.x) || !Number.isFinite(cell.site.y)) {
             return { valid: false, reason: "Map has a cell with an invalid position." };
         }
         if (!Array.isArray(cell.halfedges)) {
@@ -506,13 +514,13 @@ exports.validateMap = function (vMap, config) {
         for (var h = 0; h < vMap.hazards.length; h++) {
             var hazard = vMap.hazards[h];
             if (hazard == null || hazard.id == null ||
-                typeof hazard.x !== "number" || typeof hazard.y !== "number") {
+                !Number.isFinite(hazard.x) || !Number.isFinite(hazard.y)) {
                 return { valid: false, reason: "Map has a malformed hazard." };
             }
-            // A moving bumper rides a rail at a given angle; without a numeric
-            // angle the engine's rail math goes NaN.
+            // A moving bumper rides a rail at a given angle; a non-finite angle
+            // sends the engine's rail math to NaN.
             if (hazard.id === config.hazards.movingBumper.id &&
-                typeof hazard.angle !== "number") {
+                !Number.isFinite(hazard.angle)) {
                 return { valid: false, reason: "Map has a moving bumper with no direction." };
             }
         }
