@@ -128,6 +128,26 @@ var LearnAnim = (function () {
             addIceStreak(bx, by, bx - Math.cos(dir) * len, by - Math.sin(dir) * len);
         }
     }
+    function sandTrenchColor() { return "rgba(120, 92, 52, 1)"; }
+    function addSandTrench(bx, by, ex, ey, dir, radius) {
+        var perp = dir + Math.PI / 2, off = radius * 0.7, ox = Math.cos(perp) * off, oy = Math.sin(perp) * off;
+        addEffect({ x: bx, y: by, maxAge: 1300, draw: function (ctx, t) {
+            ctx.save(); ctx.lineCap = "round";
+            ctx.globalAlpha = (1 - t) * 0.3; ctx.strokeStyle = sandTrenchColor(); ctx.lineWidth = off * 2;
+            ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(ex, ey); ctx.stroke();
+            ctx.globalAlpha = (1 - t) * 0.5; ctx.strokeStyle = sandColor(); ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(bx + ox, by + oy); ctx.lineTo(ex + ox, ey + oy); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(bx - ox, by - oy); ctx.lineTo(ex - ox, ey - oy); ctx.stroke();
+            ctx.restore();
+        } });
+    }
+    function spawnSandTrail(p) {
+        if (p.trenchX == null) { p.trenchX = p.x; p.trenchY = p.y; return; }
+        var dx = p.x - p.trenchX, dy = p.y - p.trenchY, d2 = dx * dx + dy * dy, step = p.radius * 0.5, maxGap = p.radius * 4;
+        if (d2 < step * step) { return; }
+        if (d2 <= maxGap * maxGap) { addSandTrench(p.trenchX, p.trenchY, p.x, p.y, Math.atan2(dy, dx), p.radius); }
+        p.trenchX = p.x; p.trenchY = p.y;
+    }
     function spawnSkid(p, color) {
         var dir = Math.atan2(p.prevVelY, p.prevVelX);
         for (var i = 0; i < 4; i++) {
@@ -155,7 +175,7 @@ var LearnAnim = (function () {
         if (speed > walkThresh && p.dustCD <= 0) {
             if (p.surface === "ice") { if (speed > fastThresh) { spawnIceTrail(p); p.dustCD = 40; } else { p.dustCD = 60; } }
             else if (p.surface === "fast") { spawnTerrainParticle(p, grassColor(), 1.8, 2); p.dustCD = speed > fastThresh ? 45 : 70; }
-            else if (p.surface === "slow") { spawnTerrainParticle(p, sandColor(), 3, 2); p.dustCD = speed > fastThresh ? 45 : 70; }
+            else if (p.surface === "slow") { spawnSandTrail(p); spawnTerrainParticle(p, sandColor(), 1.8, 1); p.dustCD = speed > fastThresh ? 90 : 130; }
             else if (speed > fastThresh) { spawnTerrainParticle(p, dustColor(), 2.5, 2); p.dustCD = 50; }
             else { p.dustCD = 60; }
         }

@@ -235,6 +235,87 @@ function discardMapCache() {
     mapDirty = true;
 }
 
+// --- Persistent sand-trench decal (ground layer) ---
+// A kart trudging through sand carves a trench that lasts the whole round. Rather
+// than keep one fading effect per segment — which redraws every frame and is
+// bounded by the per-profile effect cap (so it could never persist a whole race on
+// BALANCED/LOW, and would cost a lot of overdraw on HIGH) — segments are STAMPED
+// ONCE onto a world-sized decal canvas and blitted under the karts each frame:
+// O(1) per frame regardless of how much trench exists. The texture only re-uploads
+// to the GPU on a stamp, and stamps are throttled by distance travelled (see
+// spawnSandTrail), so even continuous trudging dirties it only a few times a
+// second. Resolution follows perfMapScale — the same bytes-per-upload story as the
+// map cache, so weak GPUs move fewer bytes. LOW never stamps (the extraFx gate
+// upstream skips the whole trench), and the lobby uses the fading effect instead so
+// its floor isn't permanently scarred.
+var trenchCanvas = null;
+var trenchCtx = null;
+function discardTrenchDecal() {
+    trenchCanvas = null;
+    trenchCtx = null;
+}
+function ensureTrenchDecal() {
+    if (world == null) {
+        return false;
+    }
+    var scale = (typeof perfMapScale === "function") ? perfMapScale() : 1;
+    if (trenchCanvas != null && trenchCanvas._scale !== scale) {
+        trenchCanvas = null;
+    }
+    if (trenchCanvas == null) {
+        trenchCanvas = document.createElement("canvas");
+        trenchCanvas.width = Math.max(1, Math.ceil((world.width + mapCanvasPad * 2) * scale));
+        trenchCanvas.height = Math.max(1, Math.ceil((world.height + mapCanvasPad * 2) * scale));
+        trenchCanvas._scale = scale;
+        trenchCtx = trenchCanvas.getContext("2d");
+    }
+    return true;
+}
+// Stamp one trench segment (world coords) permanently onto the decal: a recessed
+// shadow groove flanked by two pale berms (sand shoved up to each lip). Mirrors
+// addSandTrench's look, minus the fade. Cumulative — a spot trudged repeatedly
+// darkens, reading as well-worn sand.
+function stampSandTrench(bx, by, ex, ey, dir, radius) {
+    if (!ensureTrenchDecal()) {
+        return;
+    }
+    var scale = trenchCanvas._scale;
+    var perp = dir + Math.PI / 2, off = radius * 0.7;
+    var ox = Math.cos(perp) * off, oy = Math.sin(perp) * off;
+    var ctx = trenchCtx;
+    ctx.save();
+    // World -> decal-canvas transform, matching renderMapToCache's mapping.
+    ctx.setTransform(scale, 0, 0, scale, (-world.x + mapCanvasPad) * scale, (-world.y + mapCanvasPad) * scale);
+    ctx.lineCap = "round";
+    ctx.globalAlpha = 0.22;
+    ctx.strokeStyle = (typeof sandTrenchColor === "function") ? sandTrenchColor() : "rgba(120, 92, 52, 1)";
+    ctx.lineWidth = off * 2;
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+    ctx.globalAlpha = 0.4;
+    ctx.strokeStyle = (typeof sandColor === "function") ? sandColor() : "rgba(250, 238, 205, 1)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(bx + ox, by + oy);
+    ctx.lineTo(ex + ox, ey + oy);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(bx - ox, by - oy);
+    ctx.lineTo(ex - ox, ey - oy);
+    ctx.stroke();
+    ctx.restore();
+}
+// Blit the trench decal under the karts (same placement as the map cache).
+function drawTrenchDecal() {
+    if (trenchCanvas == null) {
+        return;
+    }
+    gameContext.drawImage(trenchCanvas, world.x - mapCanvasPad, world.y - mapCanvasPad,
+        world.width + mapCanvasPad * 2, world.height + mapCanvasPad * 2);
+}
+
 var playerSpriteCache = {};
 
 var blackoutHoleSprite = null;
@@ -2929,6 +3010,9 @@ function drawMap() {
         gameContext.drawImage(mapCanvas, world.x - mapCanvasPad, world.y - mapCanvasPad,
             world.width + mapCanvasPad * 2, world.height + mapCanvasPad * 2);
     }
+    // Sand trench sits on the ground, ABOVE the terrain but BELOW hazards (bumpers /
+    // rails) and karts — so the semi-transparent groove never paints over a bumper.
+    drawTrenchDecal();
     if (Object.keys(hazardList).length > 0) {
         for (var id in hazardList) {
             drawHazard(hazardList[id]);
