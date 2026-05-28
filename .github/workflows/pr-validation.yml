@@ -171,6 +171,22 @@ jobs:
       - name: Static button lint
         run: node .github/scripts/lint-button-input.js
 
+  input-validation-lint:
+    # Static input-validation lint — every <input>/<textarea> in a client HTML
+    # page must declare bounds (maxlength/pattern/max/accept per type) so the
+    # next "what could a crafted payload do?" answer starts at the boundary.
+    # Calibrated to pass on the current tree; a new unvalidated input fails.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Static input-validation lint
+        run: node .github/scripts/lint-input-validation.js
+
   button-gate:
     # Runtime button gate on the LIVE DOM (incl. JS-injected controls): axe
     # interactive-control rules + >=44px touch targets + gamepad-reachability.
