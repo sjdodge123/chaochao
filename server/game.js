@@ -64,6 +64,10 @@ class Room {
 		client.leave(String(this.sig));
 		delete this.clientList[clientID];
 		delete this.playerList[clientID];
+		// Remove anything this player owned (aimer/ability/projectile/temp-spectator
+		// entry) so the per-tick loops and compressor don't keep iterating and
+		// emitting orphans whose ownerId now points at a player that's gone.
+		this.game.gameBoard.removeOwnedEntities(clientID);
 		this.clientCount--;
 	}
 	update(dt) {
