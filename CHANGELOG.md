@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### Bug fixes
+
+- Sand now kicks up its pale dust puffs the whole time you're driving on it, not just for the brief moment you cross onto it from another surface.
 
 ## v0.23.0 — 2026-05-28
 

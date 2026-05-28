@@ -1438,9 +1438,19 @@ function updateMovementParticles(dt) {
 		// The walking-speed flecks (ice shavings + dirt puff) are AMBIENT and
 		// gated by perfExtraFx() so LOW skips them.
 		var extraFx = (typeof perfExtraFx === "function") ? perfExtraFx() : true;
-		if (speed > walkThresh && p.dustCD <= 0) {
+		// Sand (the slow tile) tops out (~21) BELOW walkThresh (40) because it's the
+		// draggiest surface, so gating it at walkThresh meant sand flecks only fired
+		// during the momentum-carrying crossover ONTO sand and never while you were
+		// actually driving on it. Sand gets its own lower gate; every other tile keeps
+		// walkThresh so the ambient ice/dirt flecks still stay quiet at idle.
+		var sandThresh = maxSpeed * 0.03;
+		if (speed > sandThresh && p.dustCD <= 0) {
 			var tile = tileIdAt(p.x, p.y);
-			if (tile == config.tileMap.ice.id) {
+			if (tile != config.tileMap.slow.id && speed <= walkThresh) {
+				// Non-sand tile below the walk threshold: nothing to shed. Throttle
+				// the recheck so we don't run tileIdAt every frame while coasting slow.
+				p.dustCD = cd(80);
+			} else if (tile == config.tileMap.ice.id) {
 				// Same line-mark look at every pace (matches the Codex scene):
 				// two cyan blade tracks under the cart, just at a slower cadence
 				// when walking so the marks don't run continuously together.
