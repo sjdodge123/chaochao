@@ -22,7 +22,6 @@ const repoRoot = path.join(__dirname, '..', '..');
 const config = require(path.join(repoRoot, 'server', 'config.json'));
 config.aiRacers.minGrid = 25;
 config.aiRacers.maxGrid = 25;
-config.aiRacers.autoTarget = 25;       // drives the fill target (lobby-hub); -> 24 bots + 1 human = 25 karts
 config.maxPlayersInRoom = 25;          // room cap must allow the full grid
 config.chanceOfBrutalRound = 100;      // force a brutal round
 config.chanceForAdditionalBrutal = 100;
@@ -109,6 +108,8 @@ const room = game.getRoom('perf-tick', 30);
 room.game.gameBoard.isPreview = true;     // pin this map
 room.game.gameBoard.previewMap = map;
 room.game.gameBoard.previewAI = true;     // allow bot fill in a preview room
+// Force the worst-case 25-kart grid (Auto's triangular fill only reaches 25 at 17+ humans).
+room.game.botOverride = { enabled: true, count: 24 };
 
 // One human so fillGridWithBots() engages (it no-ops with zero humans).
 const human = room.world.createNewPlayer('perf-human');

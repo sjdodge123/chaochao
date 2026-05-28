@@ -138,6 +138,10 @@ function runConfig(startEdges, lavaEdge, label) {
         room.playerList[id] = player;
         room.game.determineGameState(player);
     }
+    // Pin a healthy bot count so the safe-lane assertions have enough samples to
+    // be statistically meaningful (auto-mode now scales bots with humans, which
+    // would only give 2 bots here).
+    room.game.botOverride = { enabled: true, count: 6 };
 
     try {
         room.game.startLobby();

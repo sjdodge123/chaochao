@@ -423,7 +423,7 @@ function checkForMail(client) {
 	});
 
 	// Lobby AI station: set the room-wide bot override. { auto:true } => clear the
-	// override back to Auto (fill toward autoTarget); enabled:false => no bots next
+	// override back to Auto (triangular-tier fill); enabled:false => no bots next
 	// race; enabled:true + count => exactly `count` bots. Lobby-only; last-writer-
 	// wins; broadcast so every open AI panel + the join page reflect the live setting.
 	// Takes effect at the next startGated (fillGridWithBots reads game.botOverride).
@@ -432,7 +432,7 @@ function checkForMail(client) {
 		if (room == undefined || room.game.currentState != c.stateMap.lobby) {
 			return;
 		}
-		// Auto: drop the override so the grid auto-fills toward autoTarget again.
+		// Auto: drop the override so the grid auto-fills with the triangular-tier scale.
 		if (payload && payload.auto) {
 			room.game.botOverride = null;
 			messageRoomBySig(room.sig, "lobbyAIChanged", { auto: true });

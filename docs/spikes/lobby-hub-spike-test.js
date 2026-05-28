@@ -193,20 +193,20 @@ check(listing != null && listing.aiPlanned === 3, 'getRooms reports the planned 
 check(listing != null && listing.aiAuto === false, 'getRooms flags an explicit override as not-auto');
 
 // Toggle back to Auto: setLobbyAI {auto:true} clears the override, so the next race
-// fills toward autoTarget again and getRooms reports the auto fill count.
+// uses the triangular-tier auto fill (1H -> 1 bot for the only human in this room).
 game.removeBots();
 game.startLobby();
 sock.fire('setLobbyAI', { auto: true });
 check(game.botOverride == null, 'setLobbyAI {auto:true} clears the override back to Auto (null)');
 const autoListing = hostess.getRooms()[sig];
-const autoTarget = (config.aiRacers && config.aiRacers.autoTarget) ? config.aiRacers.autoTarget : 8;
 const humansNow = Object.keys(room.playerList).filter(id => !room.playerList[id].isAI).length;
+const expectedAuto = humansNow === 1 ? 1 : 0;  // this test only ever has one human in the room
 check(autoListing != null && autoListing.aiAuto === true, 'getRooms flags Auto mode (aiAuto=true)');
-check(autoListing != null && autoListing.aiPlanned === Math.max(0, autoTarget - humansNow),
-    'getRooms reports the Auto fill count (autoTarget - humans = ' + autoListing.aiPlanned + ')');
+check(autoListing != null && autoListing.aiPlanned === expectedAuto,
+    'getRooms reports the Auto fill count (triangular-tier: ' + humansNow + ' human -> ' + expectedAuto + ' bot, got ' + autoListing.aiPlanned + ')');
 game.startGated();
-check(botCount() === Math.max(0, autoTarget - humansNow),
-    'Auto fills toward autoTarget after toggling back (got ' + botCount() + ')');
+check(botCount() === expectedAuto,
+    'Auto fills with the triangular-tier count after toggling back (got ' + botCount() + ')');
 
 // --- bots yield to humans: humans + bots never exceed the room cap ------------
 // Stuff the room past capacity with bots, then add humans directly (bypassing the

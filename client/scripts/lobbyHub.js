@@ -536,17 +536,17 @@ function drawLobbyHubHud() {
     drawLobbyAIStatus();
 }
 
-// The grid total Auto fills toward (humans + bots ≈ autoTarget).
-function aiAutoTarget() {
-    return (typeof config !== "undefined" && config && config.aiRacers && config.aiRacers.autoTarget)
-        ? config.aiRacers.autoTarget : 8;
-}
-// How many bots Auto will actually spawn for the current human count (what the
-// banner shows so players see the count rise/fall as people join and leave).
+// Triangular-tier auto fill: a few bots scale up with humans (1H→1, 2-3H→2,
+// 4-6H→3, 7-10H→4, 11-15H→5, 16H→6). 17+ humans fills the remaining slots,
+// clamped to whatever room space is left so the banner never overpromises.
 function autoEffectiveBots() {
-    var n = aiAutoTarget() - lobbyHumanCount();
-    if (n < 0) { n = 0; }
-    return Math.min(n, aiMaxBots());
+    var h = lobbyHumanCount();
+    var capLeft = aiMaxBots();
+    if (capLeft <= 0 || h <= 0) { return 0; }
+    if (h >= 17) { return capLeft; }
+    var n = 1, end = 1;
+    while (end < h) { n++; end += n; }
+    return n > capLeft ? capLeft : n;
 }
 
 // A fixed top-centre banner showing the live room-wide AI setting during the lobby.

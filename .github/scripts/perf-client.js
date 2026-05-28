@@ -41,7 +41,7 @@ const SCRIPT_CEILING_MS = process.env.PERF_SCRIPT_CEILING_MS ? Number(process.en
 const OUT_JSON = process.env.PERF_OUT_JSON || '';
 
 const OVERRIDE = JSON.stringify({
-    aiRacers: { minGrid: 25, maxGrid: 25, autoTarget: 25 }, // autoTarget drives the fill (lobby-hub); rest for legacy
+    aiRacers: { minGrid: 25, maxGrid: 25, testForceBots: 24 }, // testForceBots pins the auto-fill at 24 bots (1H+24=25 karts)
     maxPlayersInRoom: 25,                                   // room cap must allow the full grid
     chanceOfBrutalRound: 100,
     chanceForAdditionalBrutal: 100,

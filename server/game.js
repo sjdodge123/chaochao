@@ -479,12 +479,14 @@ class Game {
 			}
 			desiredBots = this.botOverride.count;
 		} else {
-			// Auto (no override): fill the grid toward a target TOTAL of ~autoTarget
-			// players, so the bot count rises and falls as humans join/leave between
-			// matches. Held across rounds within a match (so a mid-match human join
-			// doesn't despawn a bot — desiredBots only ever tops up below).
+			// Auto (no override): pick a target TOTAL once at match start using a
+			// triangular-tier scale (humans -> small bot fill; full lobby -> fills
+			// the room). Held across rounds within a match so a mid-match human
+			// join can't despawn a bot — desiredBots only ever tops up below.
 			if (this.botTarget == null) {
-				this.botTarget = ai.autoTarget || 8;
+				var capLeft = (c.maxPlayersInRoom || 25) - humanCount;
+				if (capLeft < 0) { capLeft = 0; }
+				this.botTarget = humanCount + utils.autoBotsForHumans(humanCount, capLeft);
 			}
 			desiredBots = this.botTarget - humanCount;
 		}

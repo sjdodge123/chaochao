@@ -27,7 +27,7 @@ exports.getRooms = function () {
 		// AI hub: surface the room's bots so the join page shows them. aiCount is the
 		// LIVE bot count (non-zero during a race). aiPlanned is how many bots will
 		// actually spawn NEXT race for the current human count — computed for every
-		// mode (explicit count, Off, or Auto's autoTarget fill), clamped to room
+		// mode (explicit count, Off, or Auto's triangular-tier fill), clamped to room
 		// capacity — and aiAuto flags the Auto mode so the page can label it.
 		var humans = 0, aiCount = 0;
 		for (var pid in room.playerList) {
@@ -39,13 +39,11 @@ exports.getRooms = function () {
 		var aiAuto = (room.game.botOverride == null);
 		var aiPlanned;
 		if (aiAuto) {
-			var autoTarget = (c.aiRacers && c.aiRacers.autoTarget) ? c.aiRacers.autoTarget : 8;
-			aiPlanned = autoTarget - humans;
-			if (aiPlanned < 0) { aiPlanned = 0; }
+			aiPlanned = utils.autoBotsForHumans(humans, capLeft);
 		} else {
 			aiPlanned = room.game.botOverride.enabled ? room.game.botOverride.count : 0;
+			if (aiPlanned > capLeft) { aiPlanned = capLeft; }
 		}
-		if (aiPlanned > capLeft) { aiPlanned = capLeft; }
 		rooms[sig] = {
 			state: room.game.currentState,
 			round: room.game.gameBoard.round,

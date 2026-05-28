@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- The lobby's **AI bots** station's **Auto** mode now scales with the lobby: solo gets 1 bot, two players get 2 bots, a small group gets a few, and a packed lobby fills the room. So a quiet lobby races something close to a 1-v-1, and a full lobby still races a full grid.
 
 ## v0.20.1 — 2026-05-28
 
