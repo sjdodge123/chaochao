@@ -115,3 +115,6 @@ perf-trace.zip
 map-review-out/
 review-comment.md
 changed_maps.txt
+
+# Local-only notes / strategy docs (not committed)
+*.local.md
