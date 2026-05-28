@@ -467,6 +467,9 @@ function registerStateHandlers(server) {
 		// round's gate phase — covers lobby -> round 1 (lobby trench accrued while
 		// idling) and between rounds — and runs before the gate/countdown renders.
 		if (typeof discardTrenchDecal === "function") { discardTrenchDecal(); }
+		// Stamp the countdown start so the start-line glow can ramp toward release.
+		gatedStartTime = Date.now();
+		raceStartTime = null;
 		currentState = config.stateMap.gated;
 	});
 	server.on("startRace", function (packet) {
@@ -496,6 +499,8 @@ function registerStateHandlers(server) {
 		localTimerStopByDeath = false;
 		// Clear any lingering WR banner from the prior round.
 		worldRecordBanner = null;
+		// Stamp the gate-release moment so the start line can flash green as it fades.
+		raceStartTime = Date.now();
 		currentState = config.stateMap.racing;
 		// Fires once per round (racing state is re-entered each round), so this is a
 		// round-start signal. `players` counts humans only: clientList is the room's

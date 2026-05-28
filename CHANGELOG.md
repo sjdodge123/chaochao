@@ -10,7 +10,11 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- The arena now floats in space: the blank space around the map is a starfield with twinkling stars, faint nebulae, and a distant planet, and each landmass has a 3D extruded edge so it reads as a chunk of land adrift in the void.
+- The starting gate is now a glowing energy containment field that pulses softly, and the start line pulses faster and brighter as the countdown closes in, then flashes green the instant the gate opens.
+- The lobby "start game" spinner is reworked into a glowing portal that revs up — its rings spin faster and tighten as players gather to launch.
 
 ## v0.24.0 — 2026-05-28
 

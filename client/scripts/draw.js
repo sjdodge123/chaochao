@@ -129,6 +129,17 @@ function themeColor(key, fallback) {
 var patterns = {};
 var brutalPatterns = {};
 var brutalRoundImages = {};
+
+// Spawn-gate / start-line timing. Set by client.js state handlers (startGated /
+// startRace); read by drawGateLine to ramp the countdown pulse and fire the
+// green release flash. Declared here so they exist before any round begins.
+var gatedStartTime = null;
+var raceStartTime = null;
+
+// Arena floor theme — flip to compare looks. 'water' = ocean + island
+// reflections/shallows; 'space' = starfield void. The inactive theme's code is
+// left in place so switching back is a one-line change.
+var ARENA_FLOOR_THEME = 'space';
 var exitIcon = new Image(576, 512);
 exitIcon.src = "../assets/img/times-circle.svg";
 var fullscreenIcon = new Image(576, 512);
@@ -226,6 +237,14 @@ var mapCanvas = null;
 var mapCtx = null;
 var mapDirty = true;
 var mapCanvasPad = 8;
+// Bumped every time the terrain cache is re-rendered, so derived caches (the
+// space island-depth FX) know to rebuild only when the terrain actually changed.
+var mapCacheRev = 0;
+// Offscreen caches for the (static) themed backdrop FX so they're built once and
+// blitted each frame instead of recomputed — see ensureSpaceFloorCache /
+// ensureIslandFxCache.
+var spaceFloorCanvas = null;
+var islandFxCanvas = null;
 function invalidateMapCache() {
     mapDirty = true;
 }
@@ -233,6 +252,7 @@ function discardMapCache() {
     mapCanvas = null;
     mapCtx = null;
     mapDirty = true;
+    islandFxCanvas = null;
 }
 
 // --- Persistent sand-trench (composited into the map cache) ---
@@ -672,7 +692,9 @@ function drawObjects(dt) {
         drawPingCircles();
         drawCollapseShockwaves();
     }
-    if (currentState == config.stateMap.gated) {
+    if (currentState == config.stateMap.gated ||
+        currentState == config.stateMap.racing) {
+        // gated: pulsing red countdown line. racing: brief green release flash.
         drawGateLine();
     }
     drawPlayers(dt);
@@ -1052,9 +1074,199 @@ function applyWorldTransform() {
     }
 }
 
+// True when the floating-arena sky backdrop should sit behind the play field.
+// (Overview paints its own black board and gameOver its winner-colour fill, so
+// they opt out; waiting is a transient pre-lobby blank.)
+function arenaBackdropActive() {
+    if (config == null) { return false; }
+    return currentState == config.stateMap.lobby ||
+        currentState == config.stateMap.gated ||
+        currentState == config.stateMap.racing ||
+        currentState == config.stateMap.collapsing;
+}
+
+function isDarkTheme() {
+    return (typeof document !== 'undefined' &&
+        document.documentElement.getAttribute('data-theme') === 'dark');
+}
+
+// Water floor: the play field's surface is open water so the terrain reads as
+// islands floating on it (with shallows + reflections added under the terrain in
+// drawMap). Drawn in world space (clipped to the world rect at x,y,w,h) so it
+// pans/zooms with the arena. Animated with gentle drifting ripple lines + soft
+// caustic light patches — calm, not busy.
+function drawWaterFloor(x, y, w, h) {
+    var dark = isDarkTheme();
+    var now = Date.now();
+    gameContext.save();
+    gameContext.beginPath();
+    gameContext.rect(x, y, w, h);
+    gameContext.clip();
+
+    // Base water gradient (deeper toward the bottom).
+    var base = gameContext.createLinearGradient(0, y, 0, y + h);
+    if (dark) {
+        base.addColorStop(0, '#0a3a55');
+        base.addColorStop(1, '#062537');
+    } else {
+        base.addColorStop(0, '#3bb0e0');
+        base.addColorStop(1, '#1c7fb6');
+    }
+    gameContext.fillStyle = base;
+    gameContext.fillRect(x, y, w, h);
+
+    // Soft drifting caustic light patches.
+    gameContext.globalCompositeOperation = 'lighter';
+    var patch = dark ? 'rgba(90,180,230,' : 'rgba(255,255,255,';
+    var t = now / 1000;
+    var PATCHES = [
+        [0.20, 0.30, 0.34, 0.07], [0.62, 0.18, 0.42, 0.06],
+        [0.80, 0.62, 0.30, 0.07], [0.38, 0.74, 0.38, 0.05]
+    ];
+    for (var i = 0; i < PATCHES.length; i++) {
+        var p = PATCHES[i];
+        var px = x + (((p[0] + t * 0.012 * (i + 1)) % 1) * (w + 200)) - 100;
+        var py = y + p[1] * h + Math.sin(t * 0.5 + i) * 10;
+        var pr = Math.min(w, h) * p[2];
+        var rg = gameContext.createRadialGradient(px, py, 0, px, py, pr);
+        rg.addColorStop(0, patch + (p[3]) + ')');
+        rg.addColorStop(1, patch + '0)');
+        gameContext.fillStyle = rg;
+        gameContext.fillRect(x, y, w, h);
+    }
+
+    // Gentle ripple lines drifting upward, with a slow sine wobble in opacity.
+    gameContext.strokeStyle = dark ? 'rgba(150,210,245,0.10)' : 'rgba(255,255,255,0.16)';
+    gameContext.lineWidth = 1.5;
+    var rstep = 70;
+    var drift = (now / 28) % rstep;
+    for (var ry = y - rstep + (rstep - drift); ry <= y + h; ry += rstep) {
+        var amp = 5, wl = 130;
+        gameContext.beginPath();
+        for (var rx = x; rx <= x + w; rx += 16) {
+            var yy = ry + Math.sin((rx / wl) + now / 1300) * amp;
+            if (rx === x) { gameContext.moveTo(rx, yy); } else { gameContext.lineTo(rx, yy); }
+        }
+        gameContext.stroke();
+    }
+    gameContext.globalCompositeOperation = 'source-over';
+
+    // Light edge vignette for depth (subtle).
+    var cx = x + w / 2, cy = y + h / 2;
+    var vig = gameContext.createRadialGradient(cx, cy, Math.min(w, h) * 0.5, cx, cy, Math.max(w, h) * 0.72);
+    vig.addColorStop(0, 'rgba(0,0,0,0)');
+    vig.addColorStop(1, 'rgba(0,20,35,0.30)');
+    gameContext.fillStyle = vig;
+    gameContext.fillRect(x, y, w, h);
+
+    gameContext.restore();
+}
+
+// Deterministic starfield (positions as fractions of the field), built once via
+// a tiny seeded PRNG so the stars stay put frame-to-frame and twinkle in place.
+var spaceStars = null;
+function getSpaceStars() {
+    if (spaceStars) { return spaceStars; }
+    var arr = [], seed = 1337;
+    function rnd() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
+    for (var i = 0; i < 150; i++) {
+        arr.push({
+            fx: rnd(), fy: rnd(),
+            r: 0.5 + rnd() * 1.7,            // radius (world units)
+            ph: rnd() * Math.PI * 2,         // twinkle phase
+            sp: 0.4 + rnd() * 1.6,           // twinkle speed
+            b: 0.45 + rnd() * 0.55           // base brightness
+        });
+    }
+    spaceStars = arr;
+    return arr;
+}
+
+// The starfield void (base gradient + nebula washes + distant planet + stars) is
+// fully static, so it's baked into an offscreen canvas once per world size and
+// blitted each frame — instead of rebuilding ~5 gradients and stamping ~150 star
+// arcs every frame. Stars are static (the subtle twinkle wasn't worth recomputing
+// the whole field per frame).
+function ensureSpaceFloorCache(W, H) {
+    if (spaceFloorCanvas && spaceFloorCanvas.width === W && spaceFloorCanvas.height === H) {
+        return spaceFloorCanvas;
+    }
+    var cv = (typeof document !== 'undefined') ? document.createElement('canvas') : null;
+    if (cv == null) { return null; }
+    cv.width = W; cv.height = H;
+    var c = cv.getContext('2d');
+
+    // Deep-space base.
+    var base = c.createLinearGradient(0, 0, 0, H);
+    base.addColorStop(0, '#070611');
+    base.addColorStop(0.55, '#0c0a1f');
+    base.addColorStop(1, '#120a24');
+    c.fillStyle = base;
+    c.fillRect(0, 0, W, H);
+
+    // Faint nebula washes (additive).
+    c.globalCompositeOperation = 'lighter';
+    var NEB = [
+        [0.26, 0.30, 0.45, 'rgba(90,70,200,0.10)'],
+        [0.72, 0.62, 0.50, 'rgba(40,120,200,0.09)'],
+        [0.55, 0.18, 0.34, 'rgba(150,60,170,0.07)']
+    ];
+    for (var n = 0; n < NEB.length; n++) {
+        var nb = NEB[n];
+        var ncx = nb[0] * W, ncy = nb[1] * H, nr = Math.max(W, H) * nb[2];
+        var ng = c.createRadialGradient(ncx, ncy, 0, ncx, ncy, nr);
+        ng.addColorStop(0, nb[3]);
+        ng.addColorStop(1, 'rgba(0,0,0,0)');
+        c.fillStyle = ng;
+        c.fillRect(0, 0, W, H);
+    }
+
+    // Distant planet (upper-right) + atmosphere glow.
+    var px = W * 0.82, py = H * 0.20, pr = Math.min(W, H) * 0.10;
+    var glow = c.createRadialGradient(px, py, pr * 0.8, px, py, pr * 1.7);
+    glow.addColorStop(0, 'rgba(120,160,255,0.22)');
+    glow.addColorStop(1, 'rgba(120,160,255,0)');
+    c.fillStyle = glow;
+    c.fillRect(0, 0, W, H);
+    c.globalCompositeOperation = 'source-over';
+    var pg = c.createRadialGradient(px - pr * 0.4, py - pr * 0.4, pr * 0.1, px, py, pr);
+    pg.addColorStop(0, '#5b6fb0');
+    pg.addColorStop(1, '#1d2347');
+    c.fillStyle = pg;
+    c.beginPath();
+    c.arc(px, py, pr, 0, 2 * Math.PI);
+    c.fill();
+
+    // Stars.
+    var stars = getSpaceStars();
+    for (var i = 0; i < stars.length; i++) {
+        var s = stars[i];
+        c.globalAlpha = s.b;
+        c.fillStyle = (i % 7 === 0) ? '#bfe0ff' : '#ffffff';
+        c.beginPath();
+        c.arc(s.fx * W, s.fy * H, s.r, 0, 2 * Math.PI);
+        c.fill();
+    }
+    c.globalAlpha = 1;
+
+    spaceFloorCanvas = cv;
+    return cv;
+}
+
+// Space floor: blit the cached starfield over the world rect (pans/zooms via the
+// dest rect, like the terrain cache).
+function drawSpaceFloor(x, y, w, h) {
+    var cv = ensureSpaceFloorCache(Math.max(1, Math.round(w)), Math.max(1, Math.round(h)));
+    if (cv != null) {
+        gameContext.drawImage(cv, x, y, w, h);
+    }
+}
+
 function drawBackground() {
     gameContext.clearRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
     overlayContext.clearRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
+    // The sky vista is painted as the play-field floor in drawWorld (the world
+    // rect fills the whole canvas, so there's no separate backdrop layer).
 }
 // Pick a text colour + contrasting outline that stays readable on an arbitrary
 // background. The gameOver screen paints its backdrop in the winner's kart
@@ -2708,95 +2920,240 @@ function updateDeathPings() {
 
 function drawWorld() {
     if (world != null) {
-        gameContext.save();
-        gameContext.beginPath();
-        gameContext.fillStyle = themeColor('surface', '#F0F0F0');
-        gameContext.rect(world.x + camera.getCameraX(), world.y + camera.getCameraY(), world.width, world.height);
-        gameContext.fill();
-        gameContext.restore();
+        var ox = world.x + camera.getCameraX();
+        var oy = world.y + camera.getCameraY();
+        var themed = arenaBackdropActive();
+        var space = themed && ARENA_FLOOR_THEME === 'space';
+        if (themed && ARENA_FLOOR_THEME === 'space') {
+            // Starfield void as the floor: terrain reads as islands adrift in space.
+            drawSpaceFloor(ox, oy, world.width, world.height);
+        } else if (themed) {
+            // Open water as the floor: terrain reads as islands; blank gaps
+            // (background cells) show the sea, with shallows + reflections under
+            // the terrain (added in drawMap).
+            drawWaterFloor(ox, oy, world.width, world.height);
+        } else {
+            gameContext.save();
+            gameContext.beginPath();
+            gameContext.fillStyle = themeColor('surface', '#F0F0F0');
+            gameContext.rect(ox, oy, world.width, world.height);
+            gameContext.fill();
+            gameContext.restore();
+        }
 
         gameContext.save();
         gameContext.beginPath();
         gameContext.lineWidth = 4;
-        gameContext.strokeStyle = themeColor('ink', 'black');
+        // Themed rim (a plain ink border reads harshly on the sea/space).
+        if (space) {
+            gameContext.strokeStyle = 'rgba(170,195,255,0.65)';
+            gameContext.shadowColor = 'rgba(120,160,255,0.7)';
+            gameContext.shadowBlur = 10;
+        } else if (themed) {
+            gameContext.strokeStyle = 'rgba(235,250,255,0.7)';
+            gameContext.shadowColor = 'rgba(180,230,255,0.7)';
+            gameContext.shadowBlur = 8;
+        } else {
+            gameContext.strokeStyle = themeColor('ink', 'black');
+        }
         gameContext.rect(world.x + camera.getCameraX(), world.y + camera.getCameraY(), world.width, world.height);
         gameContext.stroke();
         gameContext.restore();
     }
 }
 
+// Lobby "start game" portal: concentric rings of rotating arc segments around a
+// glowing core. Idle it turns slowly; as players gather to launch it revs up
+// (velocity ramps toward maxVelocity), the rings counter-rotate faster, the arcs
+// lengthen, and the core brightens/pulses — a vortex tightening before launch.
 function drawLobbyStartButton() {
-    if (lobbyStartButton != null && camera.inBounds(lobbyStartButton)) {
-        gameContext.save();
-        if (lobbyStartButton.startSpin == true) {
-            if (lobbyStartButton.velocity < lobbyStartButton.maxVelocity) {
-                lobbyStartButton.velocity += 0.1;
-            }
-
-        } else {
-            if (lobbyStartButton.velocity != 0) {
-                lobbyStartButton.velocity -= 0.25;
-            }
-            if (lobbyStartButton.velocity < 0) {
-                lobbyStartButton.velocity = 0;
-            }
-        }
-        lobbyStartButton.angle += lobbyStartButton.velocity;
-        gameContext.translate(lobbyStartButton.x + camera.getCameraX(), lobbyStartButton.y + camera.getCameraY());
-        gameContext.rotate(lobbyStartButton.angle * (Math.PI / 180));
-        gameContext.beginPath();
-        gameContext.arc(0, 0, lobbyStartButton.radius, 0, 2 * Math.PI);
-        gameContext.lineWidth = 5;
-        gameContext.stroke();
-
-        gameContext.beginPath();
-        gameContext.arc(0, 0, lobbyStartButton.radius, 0, 2 * Math.PI);
-        gameContext.clip();
-
-        gameContext.moveTo(0, 0);
-        for (i = 0; i < 360; i++) {
-            var angle = 0.1 * i;
-            var x = 0 + (4 + 2 * angle) * Math.cos(angle);
-            var y = 0 + (4 + 2 * angle) * Math.sin(angle);
-            gameContext.lineTo(x, y);
-        }
-        gameContext.lineWidth = 3;
-        gameContext.strokeStyle = lobbyStartButton.color;
-        gameContext.stroke();
-        gameContext.restore();
-
+    if (lobbyStartButton == null || !camera.inBounds(lobbyStartButton)) {
+        return;
     }
+    // Velocity ramp (unchanged behaviour): spin up while starting, ease down otherwise.
+    if (lobbyStartButton.startSpin == true) {
+        if (lobbyStartButton.velocity < lobbyStartButton.maxVelocity) {
+            lobbyStartButton.velocity += 0.1;
+        }
+    } else {
+        if (lobbyStartButton.velocity != 0) {
+            lobbyStartButton.velocity -= 0.25;
+        }
+        if (lobbyStartButton.velocity < 0) {
+            lobbyStartButton.velocity = 0;
+        }
+    }
+    lobbyStartButton.angle += lobbyStartButton.velocity;
+
+    var now = Date.now();
+    var R = lobbyStartButton.radius;
+    // Keep rotation bounded (arcs are periodic, so mod 360 is identical) — a huge
+    // start angle makes canvas arc() degenerate and the rings disappear.
+    var spin = (lobbyStartButton.angle % 360) * (Math.PI / 180);
+    var maxV = lobbyStartButton.maxVelocity || 60;
+    var rev = Math.max(0, Math.min(1, lobbyStartButton.velocity / maxV)); // 0..1 intensity
+    var idle = (now / 1600) % (Math.PI * 2); // gentle constant turn (bounded)
+    var accent = lobbyStartButton.color || 'rgba(95,220,255,1)';
+
+    gameContext.save();
+    gameContext.translate(lobbyStartButton.x + camera.getCameraX(), lobbyStartButton.y + camera.getCameraY());
+
+    // Outer glow ring (steady frame so it reads as a button at rest).
+    gameContext.shadowColor = accent;
+    gameContext.shadowBlur = 12 + 22 * rev;
+    gameContext.strokeStyle = accent;
+    gameContext.lineWidth = 3;
+    gameContext.globalAlpha = 0.85;
+    gameContext.beginPath();
+    gameContext.arc(0, 0, R, 0, 2 * Math.PI);
+    gameContext.stroke();
+
+    // Concentric rings of arc segments, alternating rotation direction + colour.
+    var rings = 4;
+    for (var i = 0; i < rings; i++) {
+        var rr = R * (0.32 + 0.17 * i);
+        var dir = (i % 2 === 0) ? 1 : -1;
+        var rot = (spin * (1 + 0.35 * i) + idle * (1 + 0.2 * i)) * dir;
+        var segs = 3 + i;                       // more segments on outer rings
+        var gap = (Math.PI * 2) / segs;
+        var arcLen = gap * (0.32 + 0.34 * rev); // arcs lengthen as it revs up
+        gameContext.strokeStyle = (i % 2 === 0) ? accent : 'rgba(220,250,255,1)';
+        gameContext.shadowColor = gameContext.strokeStyle;
+        gameContext.shadowBlur = 6 + 10 * rev;
+        gameContext.lineWidth = 3.5;
+        gameContext.globalAlpha = 0.55 + 0.35 * rev;
+        for (var s = 0; s < segs; s++) {
+            var a0 = rot + s * gap;
+            gameContext.beginPath();
+            gameContext.arc(0, 0, rr, a0, a0 + arcLen);
+            gameContext.stroke();
+        }
+    }
+
+    // Glowing core that pulses faster + bigger as it revs.
+    var pulse = 0.5 + 0.5 * Math.sin(now / (340 - 180 * rev));
+    var coreR = R * (0.12 + 0.06 * pulse * (0.4 + rev));
+    gameContext.globalAlpha = 1;
+    gameContext.shadowColor = 'rgba(230,252,255,1)';
+    gameContext.shadowBlur = 12 + 18 * rev;
+    var core = gameContext.createRadialGradient(0, 0, 0, 0, 0, coreR);
+    core.addColorStop(0, 'rgba(255,255,255,1)');
+    core.addColorStop(1, accent);
+    gameContext.fillStyle = core;
+    gameContext.beginPath();
+    gameContext.arc(0, 0, coreR, 0, 2 * Math.PI);
+    gameContext.fill();
+
+    gameContext.restore();
 }
 function drawGate() {
     if (gates == null || gates.length == 0) {
         return;
     }
+    var collapsing = currentState == config.stateMap.collapsing;
+    // Collapse keeps the lava fill; brutal rounds keep their mode pattern. Normal
+    // rounds get the translucent energy containment field instead of a solid slab.
+    if (collapsing || brutalRound) {
+        var baseFill = collapsing
+            ? patterns[config.tileMap.lava.id]
+            : brutalPatterns[brutalRoundConfig.brutalTypes.toString()];
+        gameContext.save();
+        gameContext.fillStyle = baseFill;
+        for (var i = 0; i < gates.length; i++) {
+            var g = gates[i];
+            gameContext.beginPath();
+            gameContext.rect(g.x, g.y, g.width, g.height);
+            gameContext.fill();
+        }
+        gameContext.restore();
+        return;
+    }
+    drawGateField();
+}
+
+// Energy containment field: a translucent blue/cyan barrier (the starfield shows
+// faintly through it) that brightens toward the inner launch edge and breathes
+// with a slow pulse, ringed by a soft glowing outline. Ties into the portal
+// spinner's glow; calm (no sweeping bands) so the red→green start line stays the
+// focal point.
+function drawGateField() {
+    var now = Date.now();
+    var gatedState = currentState == config.stateMap.gated;
+    var pulse = 0.5 + 0.5 * Math.sin(now / 600); // slow, gentle
+    var a = (gatedState ? 0.5 : 0.32) + 0.12 * pulse;
     gameContext.save();
-    gameContext.lineWidth = 5;
-    if (brutalRound == false) {
-        gameContext.fillStyle = "grey";
-    } else {
-        gameContext.fillStyle = brutalPatterns[brutalRoundConfig.brutalTypes.toString()];
-    }
-    if (currentState == config.stateMap.collapsing) {
-        gameContext.fillStyle = patterns[config.tileMap.lava.id];
-    }
     for (var i = 0; i < gates.length; i++) {
         var g = gates[i];
-        gameContext.beginPath();
-        gameContext.rect(g.x, g.y, g.width, g.height);
-        gameContext.fill();
+        gameContext.fillStyle = gateFieldGradient(g, a);
+        gameContext.fillRect(g.x, g.y, g.width, g.height);
+        // Soft glowing containment edge.
+        gameContext.strokeStyle = 'rgba(160,225,255,' + (a * 0.9) + ')';
+        gameContext.shadowColor = 'rgba(90,190,255,' + a + ')';
+        gameContext.shadowBlur = 9 + 6 * pulse;
+        gameContext.lineWidth = 2;
+        gameContext.strokeRect(g.x + 1, g.y + 1, g.width - 2, g.height - 2);
     }
     gameContext.restore();
 }
 
+// Translucent field tint across the strip's thin axis, brightest at the inner
+// (launch) edge so the barrier glows where players are pressed against it.
+function gateFieldGradient(g, a) {
+    var grad;
+    if (g.edge == "right") {
+        grad = gameContext.createLinearGradient(g.x + g.width, 0, g.x, 0);
+    } else if (g.edge == "top") {
+        grad = gameContext.createLinearGradient(0, g.y, 0, g.y + g.height);
+    } else if (g.edge == "bottom") {
+        grad = gameContext.createLinearGradient(0, g.y + g.height, 0, g.y);
+    } else { // left (default): inner edge is the right side of the strip
+        grad = gameContext.createLinearGradient(g.x, 0, g.x + g.width, 0);
+    }
+    grad.addColorStop(0, 'rgba(40,90,200,' + (a * 0.35) + ')');
+    grad.addColorStop(0.5, 'rgba(80,170,255,' + (a * 0.7) + ')');
+    grad.addColorStop(1, 'rgba(150,225,255,' + a + ')');
+    return grad;
+}
+
+// Release line on the gate's inner (launch) edge. During the gated countdown it
+// glows red and pulses faster/brighter as the start nears; on release it flashes
+// green for ~0.6s while it fades (drawn briefly into the racing state).
 function drawGateLine() {
     if (gates == null || gates.length == 0) {
         return;
     }
+    var now = Date.now();
+    var gatedState = currentState == config.stateMap.gated;
+    var prog = 0;        // countdown progress 0..1
+    var flash = 0;       // green release-flash strength 1..0
+    if (gatedState) {
+        if (gatedStartTime != null && config.gatedWaitTime) {
+            prog = clamp01((now - gatedStartTime) / (config.gatedWaitTime * 1000));
+        }
+    } else {
+        if (raceStartTime == null) { return; }
+        flash = 1 - clamp01((now - raceStartTime) / 600);
+        if (flash <= 0) { return; }
+    }
+    // Pulse accelerates as the countdown closes in (period 200ms -> 80ms).
+    var pulse = 0.5 + 0.5 * Math.sin(now / Math.max(80, 200 - 120 * prog));
+    var color, glow, width;
+    if (gatedState) {
+        glow = 8 + 22 * prog + 12 * pulse * prog;
+        width = 5 + 3 * prog;
+        var grn = Math.round(35 + 110 * prog); // red -> orange near the end
+        color = 'rgba(255,' + grn + ',40,' + (0.7 + 0.3 * pulse) + ')';
+    } else {
+        glow = 34 * flash;
+        width = 6;
+        color = 'rgba(60,255,95,' + flash + ')';
+    }
     gameContext.save();
-    gameContext.lineWidth = 5;
-    gameContext.strokeStyle = "red";
+    gameContext.lineCap = "round";
+    gameContext.lineWidth = width;
+    gameContext.strokeStyle = color;
+    gameContext.shadowColor = color;
+    gameContext.shadowBlur = glow;
     for (var i = 0; i < gates.length; i++) {
         var g = gates[i];
         gameContext.beginPath();
@@ -3011,16 +3368,107 @@ function drawMap() {
         mapDirty = false;
     }
     if (mapCanvas != null) {
+        var mdx = world.x - mapCanvasPad, mdy = world.y - mapCanvasPad;
+        var mdw = world.width + mapCanvasPad * 2, mdh = world.height + mapCanvasPad * 2;
+        // Ground the islands on the themed floor: water gets shallows + a swaying
+        // reflection; space gets a baked 3D extruded edge + atmosphere rim.
+        if (arenaBackdropActive()) {
+            if (ARENA_FLOOR_THEME === 'space') {
+                var fxCache = ensureIslandFxCache();
+                if (fxCache != null) {
+                    gameContext.drawImage(fxCache, mdx, mdy, mdw, mdh);
+                }
+            } else {
+                drawIslandWater(mdx, mdy, mdw, mdh);
+            }
+        }
         // Stretch the (possibly reduced-resolution) cache back over the full world
         // region; at scale 1 this is a 1:1 blit (unchanged on High/Balanced).
-        gameContext.drawImage(mapCanvas, world.x - mapCanvasPad, world.y - mapCanvasPad,
-            world.width + mapCanvasPad * 2, world.height + mapCanvasPad * 2);
+        gameContext.drawImage(mapCanvas, mdx, mdy, mdw, mdh);
     }
     if (Object.keys(hazardList).length > 0) {
         for (var id in hazardList) {
             drawHazard(hazardList[id]);
         }
     }
+}
+
+// Shallows + reflection for the water floor, drawn UNDER the terrain blit (the
+// real terrain is painted on top right after, so only the parts that extend past
+// the island edges remain visible). Reuses the cached terrain image (mapCanvas).
+//   - Shallows: the cache blitted with a light glow → a bright rim where land
+//     meets water.
+//   - Reflection: a faint copy offset south and gently swaying → each island
+//     casts a watery reflection that peeks out below it.
+function drawIslandWater(dx, dy, dw, dh) {
+    if (mapCanvas == null) { return; }
+    var now = Date.now();
+    var sway = Math.sin(now / 950) * 4;
+
+    // Reflection first (deepest layer).
+    gameContext.save();
+    gameContext.globalAlpha = 0.20;
+    gameContext.drawImage(mapCanvas, dx + sway, dy + 16, dw, dh);
+    gameContext.restore();
+
+    // Shallows rim (light glow around the landmasses).
+    gameContext.save();
+    gameContext.globalAlpha = 0.55;
+    gameContext.shadowColor = isDarkTheme() ? 'rgba(140,215,255,0.9)' : 'rgba(205,245,255,0.95)';
+    gameContext.shadowBlur = 13;
+    gameContext.drawImage(mapCanvas, dx, dy, dw, dh);
+    gameContext.restore();
+}
+
+// Space island depth FX (extruded side + blue atmosphere rim), baked from the
+// terrain cache once per terrain change so it's a single blit per frame instead
+// of ~6 shadow-blits. Rebuilt only when the terrain cache changes (mapCacheRev)
+// or its size changes. The cache holds the terrain image too, but the real
+// terrain blit (in drawMap, right after) covers those pixels — only the extruded
+// edge + rim that extend past the island edges remain visible.
+function ensureIslandFxCache() {
+    if (mapCanvas == null) { return null; }
+    if (islandFxCanvas &&
+        islandFxCanvas._srcRev === mapCacheRev &&
+        islandFxCanvas.width === mapCanvas.width &&
+        islandFxCanvas.height === mapCanvas.height) {
+        return islandFxCanvas;
+    }
+    var cv = islandFxCanvas;
+    if (cv == null || cv.width !== mapCanvas.width || cv.height !== mapCanvas.height) {
+        cv = (typeof document !== 'undefined') ? document.createElement('canvas') : null;
+        if (cv == null) { return null; }
+        cv.width = mapCanvas.width;
+        cv.height = mapCanvas.height;
+    }
+    var c = cv.getContext('2d');
+    c.clearRect(0, 0, cv.width, cv.height);
+
+    // Extruded side wall (stack of offset dark silhouettes via shadow).
+    c.save();
+    c.shadowColor = 'rgba(24,32,60,1)';
+    c.shadowBlur = 1;
+    c.shadowOffsetX = 0;
+    c.globalAlpha = 0.7;
+    for (var d = 3; d <= 15; d += 3) {
+        c.shadowOffsetY = d;
+        c.drawImage(mapCanvas, 0, 0);
+    }
+    c.restore();
+
+    // Soft blue atmosphere rim on the lit top edge.
+    c.save();
+    c.globalAlpha = 0.6;
+    c.shadowColor = 'rgba(120,170,255,0.95)';
+    c.shadowOffsetX = 0;
+    c.shadowOffsetY = 0;
+    c.shadowBlur = 16;
+    c.drawImage(mapCanvas, 0, 0);
+    c.restore();
+
+    cv._srcRev = mapCacheRev;
+    islandFxCanvas = cv;
+    return cv;
 }
 
 // Trace a voronoi cell's polygon into the current path (no fill/stroke).
@@ -3211,6 +3659,8 @@ function renderMapToCache() {
     // transform is the one active here.
     paintTrenchSegments(mapCtx);
     mapCtx.restore();
+    // Terrain changed → derived FX caches (space island depth) must rebuild.
+    mapCacheRev++;
 }
 
 // A subtle dark vignette over the play area, so the flat background reads as an
