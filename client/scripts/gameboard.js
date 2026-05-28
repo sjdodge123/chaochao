@@ -650,8 +650,7 @@ function spawnPunch(payload) {
 	punch.color = payload[3];
 	punch.radius = payload[4];
 	punch.type = payload[5];
-	punch.directional = payload[6] == 1;
-	punch.bonus = (payload[7] != null) ? payload[7] : 1;
+	punch.bonus = (payload[6] != null) ? payload[6] : 1;
 	punchList[punch.ownerId] = punch;
 	return punch;
 }

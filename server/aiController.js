@@ -535,8 +535,9 @@ function isBlinded(bot, ctx, now) {
 // Brutal-round punches take priority over the generic punch/ability policy:
 // zombies hunt-and-bite, non-zombies fend off an adjacent zombie, and anyone
 // clears the puck when it's on top of them. Returns true if it set an attack.
-// Face a punch target before swinging — needed where the punch is directional
-// (lands in front of the kart); harmless where it's omnidirectional.
+// Face a punch target before swinging — the punch is omnidirectional, but the
+// stored facing drives the clash-facing check (so a bot has to commit toward a
+// rival to clash with their swing).
 function facePunch(bot, x, y) { bot.angle = angleDeg(bot.x, bot.y, x, y); }
 
 // Punches now fire on RELEASE (checkAttack charges while attack is held, throws when it
@@ -549,8 +550,8 @@ function botPunch(bot, holdMs) {
     bot.ai.punchHoldUntil = Date.now() + (holdMs || 0);
     // steerBot rewrites bot.angle to the movement direction every tick, but the punch
     // fires on the release tick (where decideAttack's manager returns early before any
-    // facePunch). Lock the aim now (facePunch already set bot.angle at the target) so the
-    // manager can hold it through the charge and the thrown punch lands on target.
+    // facePunch). Lock the facing now (facePunch already set bot.angle toward the target)
+    // so the clash-facing check on the thrown punch sees a committed approach.
     bot.ai.punchAngle = bot.angle;
 }
 
@@ -707,19 +708,14 @@ function offensiveCombatAllowed(bot, now) {
     return true;
 }
 
-// Fraction (0..1) of a full-power punch the bot's CURRENT velocity would earn
-// against `target` — i.e. its speed projected onto the line to the target, over the
-// same reference speed Player.calcPunchBonus uses. facePunch aims the bot at the
-// target before the swing, so this matches the bonus the resulting punch will get.
-function momentumTowardFrac(bot, target) {
+// Fraction (0..1) of a full-power punch the bot's CURRENT velocity would earn —
+// raw speed magnitude over the same reference speed Player.calcPunchBonus uses.
+// Punches are radial, so any motion contributes (no aim to project onto).
+function momentumFrac(bot) {
     if (c.punchMomentum == null) { return 1; }
-    var dx = target.x - bot.x, dy = target.y - bot.y;
-    var d = mag(dx, dy);
-    if (d === 0) { return 0; }
-    var toward = (bot.velX * dx + bot.velY * dy) / d;
-    if (toward < 0) { return 0; }
     var ref = bot.maxVelocity * c.punchMomentum.refFrac;
-    return ref > 0 ? Math.min(1, toward / ref) : 0;
+    if (ref <= 0) { return 0; }
+    return Math.min(1, mag(bot.velX, bot.velY) / ref);
 }
 
 // How long to hold a charge (ms); 0 = a quick tap. A committed haymaker is held to a
@@ -733,7 +729,7 @@ function chargeHoldFor(bot, ctx, nr) {
     var commit = !(ctx && ctx.collapsing) && !bot.braking
         && bot.stamina != null && bot.stamina >= fullBar * 0.85
         && bot.ai.aggression >= 0.5
-        && momentumTowardFrac(bot, nr.player) >= 0.7;
+        && momentumFrac(bot) >= 0.7;
     if (!commit) { return 0; }
     var depth = 0.65 + 0.3 * bot.ai.aggression;          // 0.65 .. 0.95 of a full charge
     var holdMs = depth * c.punchCharge.maxChargeMs;
@@ -758,14 +754,13 @@ function decidePunch(bot, ctx) {
     // A free shove into the lava is always worth it; routine aggression only in bursts.
     if (!shove && bot.ai.aggression < 0.6) { return; }
     if (!offensiveCombatAllowed(bot, Date.now())) { return; }
-    // Momentum-aware timing: punch power scales with closing speed, so for a routine
-    // offensive punch the bot holds the swing until it's actually charging toward the
-    // rival hard enough to land a real hit — not a limp standing tap. A free lava
-    // shove (about position, not power) and a point-blank defensive jab still go
-    // through regardless.
+    // Momentum-aware timing: punch power scales with speed, so for a routine
+    // offensive punch the bot holds the swing until it's actually moving fast enough
+    // to land a real hit — not a limp standing tap. A free lava shove (about position,
+    // not power) and a point-blank defensive jab still go through regardless.
     if (!shove) {
         var pointBlank = nr.dist < (bot.radius + nr.player.radius + 2);
-        if (!pointBlank && momentumTowardFrac(bot, nr.player) < PUNCH_MOMENTUM_MIN) { return; }
+        if (!pointBlank && momentumFrac(bot) < PUNCH_MOMENTUM_MIN) { return; }
     }
     facePunch(bot, nr.player.x, nr.player.y);
     // Charge a committed haymaker on a strong closing line (held safely below overcharge),
@@ -787,20 +782,22 @@ function decideCounter(bot, ctx) {
     for (var oid in ctx.punches) {
         if (oid == bot.id) { continue; } // not our own punch
         var pn = ctx.punches[oid];
-        if (pn == null || pn.mapOwned || !pn.directional || pn.clashResolved || pn.landed) { continue; }
+        if (pn == null || pn.mapOwned || pn.clashResolved || pn.landed || pn.ownerInfected) { continue; }
         var attacker = ctx.players[pn.ownerId];
         if (attacker == null || !isRacer(attacker, bot)) { continue; }
         var dx = bot.x - attacker.x, dy = bot.y - attacker.y;
         var d = mag(dx, dy);
         if (d === 0 || d > cfg.range) { continue; }
-        var rr = (pn.angle || 0) * Math.PI / 180; // the punch's aim
+        // The attacker has to be heading toward us for this to be a real incoming threat
+        // (the same facingDot the clash check uses on the server). Skip drive-by swings.
+        var rr = (pn.angle || 0) * Math.PI / 180;
         if (Math.cos(rr) * (dx / d) + Math.sin(rr) * (dy / d) < cfg.facingDot) { continue; }
         // Don't counter into a losing clash: if the incoming punch is clearly stronger
         // than the tap we could swing back (stronger wins), a counter just loses and
         // wastes stamina — better to eat it / let steering carry us clear.
         if (c.punchMomentum != null) {
             var mm = c.punchMomentum;
-            var ourTap = mm.floor + (mm.ceil - mm.floor) * momentumTowardFrac(bot, attacker);
+            var ourTap = mm.floor + (mm.ceil - mm.floor) * momentumFrac(bot);
             if (pn.getBonus() > ourTap + cfg.tieMargin) { continue; }
         }
         facePunch(bot, attacker.x, attacker.y);

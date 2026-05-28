@@ -206,7 +206,7 @@ class Player extends Circle {
 		//Scratch space for the bot brain (aiController) — path cache, timers, etc.
 		this.ai = null;
 	}
-	update(currentState, dt, punchDirectional) {
+	update(currentState, dt) {
 		this.currentState = currentState;
 		// Bots have no socket and never AFK — the sleep/kick path ends in
 		// messageClientBySig (Room.checkAFK), which would throw on a socketless
@@ -219,7 +219,7 @@ class Player extends Circle {
 		}
 		this.dt = dt;
 		this.move();
-		this.checkAttack(currentState, punchDirectional);
+		this.checkAttack(currentState);
 		this.checkChatCoolDownTimer();
 		this.checkFireTimer();
 		this.regenStamina(dt);
@@ -234,7 +234,7 @@ class Player extends Circle {
 	// charge. A quick tap (press then release) is a normal light punch; holding dumps
 	// more of the stamina bar into a harder hit. Abilities are unchanged — they fire
 	// instantly on press, not on a charge.
-	checkAttack(currentState, punchDirectional) {
+	checkAttack(currentState) {
 		var playState = (currentState == c.stateMap.racing || currentState == c.stateMap.collapsing
 			|| currentState == c.stateMap.lobby || currentState == c.stateMap.gated);
 		// Holding attack while carrying an ability fires it instantly (no charge).
@@ -264,7 +264,7 @@ class Player extends Circle {
 		if (this.isZombie) {
 			if ((this.attack || this.attackQueued) && !this.checkPunchCoolDown()) {
 				this.cancelCharge();
-				this.throwBite(currentState, punchDirectional);
+				this.throwBite(currentState);
 			} else if (!this.attack) {
 				this.cancelCharge();
 			}
@@ -285,7 +285,7 @@ class Player extends Circle {
 		// Button up -> release a held charge as a punch.
 		if (this.charging) {
 			if (playState) {
-				this.throwChargedPunch(currentState, punchDirectional);
+				this.throwChargedPunch(currentState);
 			} else {
 				this.cancelCharge();
 			}
@@ -297,22 +297,15 @@ class Player extends Circle {
 		if (this.attackQueued && !this.checkPunchCoolDown() && this.canSpendStamina()) {
 			this.startCharge();
 			this.updateCharge();        // ~0 charge -> a tap
-			this.throwChargedPunch(currentState, punchDirectional);
+			this.throwChargedPunch(currentState);
 		}
 		this.attackQueued = false;
 	}
 	// An instant, stamina-free zombie bite (used in infection rounds). Mirrors a tap punch
 	// but with the infection bite radius + infected flag, no charge/stamina.
-	throwBite(currentState, punchDirectional) {
+	throwBite(currentState) {
 		this.punchedTimer = Date.now();
-		var directional = punchDirectional === undefined ? c.directionalPunch : punchDirectional;
-		var punchX = this.x, punchY = this.y;
-		if (directional) {
-			var aim = utils.pos({ x: this.x, y: this.y }, c.punchReach, this.angle);
-			punchX = aim.x; punchY = aim.y;
-		}
-		this.punch = new Punch(punchX, punchY, c.brutalRounds.infection.punchRadius, this.color, this.id, this.roomSig, 1, true);
-		this.punch.directional = directional;
+		this.punch = new Punch(this.x, this.y, c.brutalRounds.infection.punchRadius, this.color, this.id, this.roomSig, 1, true);
 		this.punch.angle = this.angle;
 		this.punch.ox = this.x;
 		this.punch.oy = this.y;
@@ -380,7 +373,7 @@ class Player extends Circle {
 		this.charging = false;
 		this.chargeFrac = 0;
 	}
-	throwChargedPunch(currentState, punchDirectional) {
+	throwChargedPunch(currentState) {
 		var frac = this.chargeFrac;
 		// Stamina was already drained while charging; latch exhaustion off what's left.
 		if (this.stamina < c.punchStamina.punchCost) {
@@ -392,23 +385,11 @@ class Player extends Circle {
 		if (this.isZombie == true) {
 			punchRadius = c.brutalRounds.infection.punchRadius;
 		}
-		// Directional punch: place the hitbox in front of the player along its facing so
-		// you have to aim. The decision (per round/mode) is resolved in
-		// GameBoard.updatePlayers and passed in.
-		var directional = punchDirectional === undefined ? c.directionalPunch : punchDirectional;
-		var punchX = this.x;
-		var punchY = this.y;
-		if (directional) {
-			var aim = utils.pos({ x: this.x, y: this.y }, c.punchReach, this.angle);
-			punchX = aim.x;
-			punchY = aim.y;
-		}
-		// Force = momentum (speed toward aim) x charge multiplier, so a fast, fully
-		// charged commit hits hardest. Stash facing + owner position for the clash pass.
+		// Force = raw momentum x charge multiplier, so a fast, fully charged commit hits
+		// hardest. Stash facing + owner position for the clash pass.
 		var chargeMult = 1 + (c.punchCharge.maxChargeMult - 1) * frac;
-		var bonus = this.calcPunchBonus(directional) * chargeMult;
-		this.punch = new Punch(punchX, punchY, punchRadius, this.color, this.id, this.roomSig, bonus, this.isZombie);
-		this.punch.directional = directional;
+		var bonus = this.calcPunchBonus() * chargeMult;
+		this.punch = new Punch(this.x, this.y, punchRadius, this.color, this.id, this.roomSig, bonus, this.isZombie);
 		this.punch.angle = this.angle;
 		this.punch.ox = this.x;
 		this.punch.oy = this.y;
@@ -435,21 +416,14 @@ class Player extends Circle {
 			return false;
 		}
 	}
-	// Knockback multiplier from momentum: project velocity onto the punch's aim
-	// (facing) for a directional punch, or use raw speed for a radial swat (hockey /
-	// survivor-vs-zombie, which have no aim). Maps 0..refFrac*maxVelocity to floor..ceil.
-	calcPunchBonus(directional) {
+	// Knockback multiplier from momentum: raw speed magnitude (punches are radial, so
+	// any motion contributes — no aim to project onto). Maps 0..refFrac*maxVelocity
+	// to floor..ceil.
+	calcPunchBonus() {
 		var m = c.punchMomentum;
-		var speedToward;
-		if (directional) {
-			var rad = this.angle * Math.PI / 180;
-			speedToward = this.velX * Math.cos(rad) + this.velY * Math.sin(rad);
-		} else {
-			speedToward = utils.getMag(this.velX, this.velY);
-		}
-		if (speedToward < 0) { speedToward = 0; }
+		var speed = utils.getMag(this.velX, this.velY);
 		var ref = this.maxVelocity * m.refFrac;
-		var frac = ref > 0 ? Math.min(1, speedToward / ref) : 0;
+		var frac = ref > 0 ? Math.min(1, speed / ref) : 0;
 		return m.floor + (m.ceil - m.floor) * frac;
 	}
 	// True if there's enough stamina to throw a punch. Once exhausted, stays false

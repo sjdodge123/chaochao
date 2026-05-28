@@ -167,18 +167,15 @@ var LearnAnim = (function () {
     function surfaceColor(s) { return s === "fast" ? grassColor() : s === "slow" ? sandColor() : s === "ice" ? iceColor() : dustColor(); }
 
     // ---- ability / impact bursts (PORT: draw.js spawn* functions) ----
-    function spawnPunchEffect(px, py, baseRadius, color, angleDeg) {
+    // The punch is omnidirectional; the optional angleDeg arg is unused, kept for the
+    // existing callsites that still pass one.
+    function spawnPunchEffect(px, py, baseRadius, color) {
         addEffect({ x: px, y: py, maxAge: 220, draw: function (ctx, t) {
             var grow = easeOutCubic(t); ctx.lineCap = "round";
             ctx.globalAlpha = (1 - t) * 0.5; ctx.fillStyle = color;
             ctx.beginPath(); ctx.arc(px, py, baseRadius * (0.55 + 0.75 * grow), 0, 2 * Math.PI); ctx.fill();
             ctx.globalAlpha = (1 - t); ctx.lineWidth = 2 * (1 - t) + 1; ctx.strokeStyle = color;
             ctx.beginPath(); ctx.arc(px, py, baseRadius * (0.8 + 0.8 * grow), 0, 2 * Math.PI); ctx.stroke();
-            if (angleDeg != null && t < 0.6) {
-                var st = clamp01(t / 0.6), center = angleDeg * Math.PI / 180, half = 0.95 * (1 - st * 0.4), reach = baseRadius * (1.1 + 0.7 * st);
-                ctx.globalAlpha = (1 - st) * 0.85; ctx.lineWidth = baseRadius * 0.45 * (1 - st) + 1.5;
-                ctx.beginPath(); ctx.arc(px, py, reach, center - half, center + half); ctx.stroke();
-            }
         } });
     }
     function spawnHitEffect(x, y, color) {

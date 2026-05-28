@@ -60,33 +60,34 @@ let clock = 100000;
 Date.now = () => clock;
 
 // Throw a punch via the real press->(hold)->release flow. holdMs=0 is a tap.
-function throwPunch(p, holdMs, directional) {
+function throwPunch(p, holdMs) {
     p.punch = null;
-    p.attack = true; p.checkAttack(RACING, directional);   // press: start charge
+    p.attack = true; p.checkAttack(RACING);   // press: start charge
     if (holdMs > 0) {
         clock += holdMs;
-        p.attack = true; p.checkAttack(RACING, directional); // continue charge
+        p.attack = true; p.checkAttack(RACING); // continue charge
     }
-    p.attack = false; p.checkAttack(RACING, directional);  // release: throw
+    p.attack = false; p.checkAttack(RACING);  // release: throw
     return p.punch;
 }
 
 try {
     // -----------------------------------------------------------------------
-    // 1) Momentum-scaled bonus: scales with speed TOWARD the aim.
+    // 1) Momentum-scaled bonus: scales with raw speed (any direction). The punch
+    // is omnidirectional, so a fast kart hits hard no matter which way it's pointed.
     // -----------------------------------------------------------------------
     console.log('\n[1] momentum-scaled punch bonus');
     A.angle = 0;
     A.velX = 0; A.velY = 0;
-    const bonusStanding = A.calcPunchBonus(true);
+    const bonusStanding = A.calcPunchBonus();
     A.velX = A.maxVelocity; A.velY = 0;
-    const bonusCharging = A.calcPunchBonus(true);
+    const bonusForward = A.calcPunchBonus();
     A.velX = -A.maxVelocity; A.velY = 0;
-    const bonusBackward = A.calcPunchBonus(true);
+    const bonusBackward = A.calcPunchBonus();
     const m = config.punchMomentum;
     check(Math.abs(bonusStanding - m.floor) < 1e-6, 'standing punch ~= floor (' + bonusStanding.toFixed(2) + ')');
-    check(Math.abs(bonusCharging - m.ceil) < 1e-6, 'full-speed punch ~= ceil (' + bonusCharging.toFixed(2) + ')');
-    check(bonusBackward <= bonusStanding + 1e-6, 'moving away clamps to floor (' + bonusBackward.toFixed(2) + ')');
+    check(Math.abs(bonusForward - m.ceil) < 1e-6, 'full-speed forward ~= ceil (' + bonusForward.toFixed(2) + ')');
+    check(Math.abs(bonusBackward - m.ceil) < 1e-6, 'full-speed any direction ~= ceil (' + bonusBackward.toFixed(2) + ')');
 
     // -----------------------------------------------------------------------
     // 2) Hold-to-charge: a held punch hits harder than a tap and costs the bar.
@@ -97,7 +98,7 @@ try {
     A.angle = 0; A.velX = A.maxVelocity; A.velY = 0; // full momentum toward aim
 
     clock += config.playerPunchCooldown + 1;
-    const tap = throwPunch(A, 0, true);
+    const tap = throwPunch(A, 0);
     const tapBonus = tap ? tap.getBonus() : 0;
     const tapStaminaSpent = config.punchStamina.max - A.stamina;
 
@@ -105,7 +106,7 @@ try {
     A.stamina = config.punchStamina.max; A.staminaExhausted = false;
     A.punchedTimer = null; A.charging = false;
     clock += config.playerPunchCooldown + 1;
-    const charged = throwPunch(A, config.punchCharge.maxChargeMs, true);
+    const charged = throwPunch(A, config.punchCharge.maxChargeMs);
     const chargedBonus = charged ? charged.getBonus() : 0;
 
     check(tap != null && charged != null, 'both a tap and a full charge throw a punch');
@@ -127,7 +128,7 @@ try {
     let thrown = 0;
     for (let i = 0; i < 5; i++) {
         clock += config.playerPunchCooldown + 1;
-        if (throwPunch(A, 0, true) != null) { thrown++; }
+        if (throwPunch(A, 0) != null) { thrown++; }
     }
     check(thrown === Math.floor(config.punchStamina.max / config.punchStamina.punchCost),
         'threw ' + thrown + ' taps before running dry (max/cost = ' + (config.punchStamina.max / config.punchStamina.punchCost).toFixed(1) + ')');
@@ -140,7 +141,7 @@ try {
     A.regenStamina(config.punchStamina.max / config.punchStamina.regenPerSec);
     check(A.staminaExhausted === false, 'recovered once the bar refills (' + A.stamina.toFixed(1) + ')');
     clock += config.playerPunchCooldown + 1;
-    check(throwPunch(A, 0, true) != null, 'can punch again after recovery');
+    check(throwPunch(A, 0) != null, 'can punch again after recovery');
 
     // -----------------------------------------------------------------------
     // 4) Clash contest: near-tie reflects both; otherwise the stronger wins.
@@ -152,10 +153,13 @@ try {
         A.x = 100; A.y = 100; A.angle = 0;     // A faces +x toward B
         B.x = 130; B.y = 100; B.angle = 180;   // B faces -x toward A
         A.velX = 0; A.velY = 0; B.velX = 0; B.velY = 0;
-        const pa = new Punch(A.x + config.punchReach, A.y, config.punchRadius, A.color, A.id, A.roomSig, bonusA, false);
-        pa.directional = true; pa.angle = A.angle; pa.ox = A.x; pa.oy = A.y;
-        const pb = new Punch(B.x - config.punchReach, B.y, config.punchRadius, B.color, B.id, B.roomSig, bonusB, false);
-        pb.directional = true; pb.angle = B.angle; pb.ox = B.x; pb.oy = B.y;
+        // Punches spawn at the puncher's position (omnidirectional). The stored angle
+        // is the puncher's facing — clash logic needs it to confirm both are heading
+        // into each other.
+        const pa = new Punch(A.x, A.y, config.punchRadius, A.color, A.id, A.roomSig, bonusA, false);
+        pa.angle = A.angle; pa.ox = A.x; pa.oy = A.y;
+        const pb = new Punch(B.x, B.y, config.punchRadius, B.color, B.id, B.roomSig, bonusB, false);
+        pb.angle = B.angle; pb.ox = B.x; pb.oy = B.y;
         gb.punchList = {};
         gb.punchList[A.id] = pa;
         gb.punchList[B.id] = pb;
@@ -186,13 +190,13 @@ try {
     A.velX = 0; A.velY = 0; A.angle = 0;
     clock += config.playerPunchCooldown + 1;
     A.punch = null;
-    A.attack = true; A.checkAttack(RACING, true);            // start charge
+    A.attack = true; A.checkAttack(RACING);            // start charge
     clock += ch.overchargeAfterMs + ch.overchargeFillMs + 10; // hold WAY too long
-    A.attack = true; A.checkAttack(RACING, true);            // -> overcharge lock
+    A.attack = true; A.checkAttack(RACING);            // -> overcharge lock
     check(A.charging === false, 'overcharge cancels the charge');
     check(A.punch == null, 'overcharge throws no punch (charge wasted)');
     check(A.staminaExhausted === true && A.exhaustLockUntil > clock, 'overcharge locks you exhausted');
-    A.attack = false; A.checkAttack(RACING, true);
+    A.attack = false; A.checkAttack(RACING);
     check(A.punch == null, 'releasing after overcharge still throws nothing');
     A.regenStamina(10); // huge dt — but the lock pauses regen
     check(A.staminaExhausted === true, 'regen is paused during the lock');
@@ -206,7 +210,6 @@ try {
     check(B.velX === 0 && B.velY === 0, 'a clashed punch deals no normal knockback');
     // A normal punch still knocks back (regression guard).
     const fresh = new Punch(B.x - 2, B.y, config.punchRadius, A.color, A.id, A.roomSig, 1, false);
-    fresh.directional = true;
     B.velX = 0; B.velY = 0;
     B.handlePunchHit(fresh);
     check(B.velX !== 0 || B.velY !== 0, 'a normal (un-clashed) punch still knocks back');
@@ -283,31 +286,42 @@ try {
     check(ai._test.emergencyBrakeNeeded(slider(iceBrake, 30, 0, -1, 0)) === false, 'slow on ice -> no brake');
 
     // -----------------------------------------------------------------------
-    // 7) Directional knockback follows your AIM, even point-blank (the hitbox
-    //    sits ahead of you, so a close target must not get flung backward).
+    // 7) Omnidirectional knockback: a punch shoves the victim radially AWAY from
+    //    the hitbox center (= the puncher's position), no aim involved.
     // -----------------------------------------------------------------------
-    console.log('\n[7] directional knockback aim');
+    console.log('\n[7] omnidirectional knockback');
     const engine = require(path.join(repoRoot, 'server', 'engine.js'));
-    function aimedPunch(hitX) {
-        const p = new Punch(hitX, 0, config.punchRadius, '#fff', 'att', 'sig', 1.5, false);
-        p.directional = true; p.angle = 0; p.ox = 0; p.oy = 0; // puncher at origin facing +x
-        return p;
+    function radialPunch(px, py) {
+        return new Punch(px, py, config.punchRadius, '#fff', 'att', 'sig', 1.5, false);
     }
-    // Target CLOSER than punchReach -> hitbox overshoots past it. Must still go +x (aim).
-    var near = { x: 8, y: 0, velX: 0, velY: 0 };
-    engine.punchPlayer(near, aimedPunch(config.punchReach));
-    check(near.velX > 0, 'point-blank target shoved along the aim, not backward (velX ' + near.velX.toFixed(0) + ')');
-    check(Math.abs(near.velY) < 0.001, 'knockback is straight along the aim');
-    // Target beyond reach -> also +x.
-    var far = { x: 30, y: 0, velX: 0, velY: 0 };
-    engine.punchPlayer(far, aimedPunch(config.punchReach));
-    check(far.velX > 0, 'in-front target shoved along the aim');
-    // Aim up (angle -90 in degrees = -y): a target gets shoved -y regardless of its side.
-    var up = new Punch(0, -config.punchReach, config.punchRadius, '#fff', 'att', 'sig', 1.5, false);
-    up.directional = true; up.angle = -90; up.ox = 0; up.oy = 0;
-    var aboveTarget = { x: 0, y: -8, velX: 0, velY: 0 }; // target above, closer than reach
-    engine.punchPlayer(aboveTarget, up);
-    check(aboveTarget.velY < 0, 'aiming up shoves an above target further up, not back down (velY ' + aboveTarget.velY.toFixed(0) + ')');
+    // Target to the RIGHT of the puncher -> shoved further right.
+    var right = { x: 12, y: 0, velX: 0, velY: 0 };
+    engine.punchPlayer(right, radialPunch(0, 0));
+    check(right.velX > 0, 'target right of puncher shoved right (velX ' + right.velX.toFixed(0) + ')');
+    // Target ABOVE the puncher (-y) -> shoved further up (-y), regardless of which way the puncher faced.
+    var above = { x: 0, y: -12, velX: 0, velY: 0 };
+    engine.punchPlayer(above, radialPunch(0, 0));
+    check(above.velY < 0, 'target above puncher shoved further up (velY ' + above.velY.toFixed(0) + ')');
+    // Target to the LEFT (-x) -> shoved further left, even if the puncher's stored angle was +x.
+    var left = { x: -12, y: 0, velX: 0, velY: 0 };
+    var radialP = radialPunch(0, 0);
+    radialP.angle = 0; // facing +x, but punch is radial — direction is from center, not aim
+    engine.punchPlayer(left, radialP);
+    check(left.velX < 0, 'target left of puncher shoved further left despite +x facing (velX ' + left.velX.toFixed(0) + ')');
+    // Stacked victim (exact overlap from a swap teleport / spawn collision): the punch
+    // must NOT inject runaway velocity. With the radial spawn-at-puncher position,
+    // distance=0 used to hit _calcVelCont's integer random fallback and launch the
+    // victim off-map (~20k velocity). It now picks a random unit direction at distance=1.
+    var capped = config.forceConstant * 1.5 + 1; // forceConstant * bonus at distance=1, unit vec
+    var maxOverlapVel = 0;
+    for (var sample = 0; sample < 50; sample++) {
+        var stacked = { x: 0, y: 0, velX: 0, velY: 0 };
+        engine.punchPlayer(stacked, radialPunch(0, 0));
+        var v = Math.sqrt(stacked.velX * stacked.velX + stacked.velY * stacked.velY);
+        if (v > maxOverlapVel) { maxOverlapVel = v; }
+    }
+    check(maxOverlapVel <= capped, 'stacked-victim punch knockback is bounded (' + maxOverlapVel.toFixed(0) + ' <= ' + capped.toFixed(0) + ')');
+    check(maxOverlapVel > 0, 'stacked-victim punch still applies SOME knockback (' + maxOverlapVel.toFixed(0) + ')');
 
     // -----------------------------------------------------------------------
     // 8) Review fixes: free zombie bite, death clears charge, sub-tick tap.
@@ -318,7 +332,7 @@ try {
     A.punchedTimer = null; A.exhaustLockUntil = 0; A.angle = 0; A.velX = 0; A.velY = 0;
     A.punch = null; A.attack = false; A.attackQueued = false; A.ability = null; A.alive = true;
     clock += config.playerPunchCooldown + 1;
-    A.attack = true; A.checkAttack(RACING, true); // zombie bite is instant
+    A.attack = true; A.checkAttack(RACING); // zombie bite is instant
     check(A.punch != null, 'zombie bites with a near-empty bar (free, ungated)');
     check(Math.abs(A.stamina - 5) < 1e-6, 'zombie bite consumes no stamina (' + A.stamina.toFixed(0) + ')');
 
@@ -334,7 +348,7 @@ try {
     A.stamina = config.punchStamina.max; A.staminaExhausted = false; A.punchedTimer = null; A.exhaustLockUntil = 0;
     A.punch = null; A.attack = false; A.attackQueued = true;
     clock += config.playerPunchCooldown + 1;
-    A.checkAttack(RACING, true);
+    A.checkAttack(RACING);
     check(A.punch != null, 'sub-tick tap (queued press, button already up) still throws');
     check(A.attackQueued === false, 'attackQueued is consumed');
 } finally {
