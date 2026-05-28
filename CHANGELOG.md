@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.20.0 — 2026-05-28
+
 ### General
 
 - You can now join a match that's already in progress from the **Join** menu (or with a Game ID / shared link): in-progress games show a **Spectate** button instead of a greyed-out "In progress". You watch the current round, then race in when the next round starts — an on-screen banner shows the kart colour you'll race as. Only genuinely full games stay unjoinable.
