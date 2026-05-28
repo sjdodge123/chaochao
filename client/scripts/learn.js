@@ -99,7 +99,7 @@
                   detail: "Grass that lets you accelerate harder and carry more speed. Brilliant for overtakes and breakaways, but all that pace makes it easy to blow straight past a tight turn." },
                 { id: "tile-slow", name: "Slow Ground", icon: tex("sand.png"), anim: "terrainSlow",
                   blurb: "Draggy sand that saps your momentum.",
-                  detail: "Sand grabs at your wheels and bleeds off speed the moment you touch it. Plowing through a patch costs you, so it's often worth the longer line around it." },
+                  detail: "Sand grabs at your wheels and bleeds off speed the moment you touch it — you trudge through it, carving a trench and throwing up dust in your wake. Plowing through a patch costs you, so it's often worth the longer line around it." },
                 { id: "tile-ice", name: "Ice", icon: tex("ice.png"), anim: "terrainIce",
                   blurb: "Almost no grip — you keep sliding.",
                   detail: "Ice barely bites — you keep gliding long after you ease off, steering only suggests where you'd like to go, and any shove sends you skating helplessly." },

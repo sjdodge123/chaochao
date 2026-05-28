@@ -54,6 +54,7 @@ function resetGameboard() {
 	shakeSustainUntil = 0;
 	shakeSustainFloor = 0;
 	pendingSwapCells = null;
+	if (typeof discardTrenchDecal === "function") { discardTrenchDecal(); }
 }
 
 function resetRound() {
@@ -67,6 +68,9 @@ function resetRound() {
 	shakeSustainFloor = 0;
 	pendingSwapCells = null;
 	blindfold = {};
+	// The sand trench is a per-round ground decal; wipe it so the next round starts
+	// on clean sand (the trench "lasts the duration of the race", not beyond it).
+	if (typeof discardTrenchDecal === "function") { discardTrenchDecal(); }
 	// Buff auras, movement-particle cooldowns and the last-velocity sample all
 	// live on the persistent playerList objects, so they have to be cleared by
 	// hand or they bleed into the next round (stale wind streaks, a phantom skid
@@ -84,6 +88,8 @@ function resetRound() {
 		// goal-cross doesn't latch the HUD timer on the new race's first tick.
 		rp.reachedGoal = false;
 		rp.finishMs = null;
+		rp.trenchX = null;
+		rp.trenchY = null;
 	}
 	for (var aimerID in this.aimerList) {
 		delete this.aimerList[aimerID];
@@ -1383,6 +1389,79 @@ function spawnIceTrail(p) {
 	}
 }
 
+// Colours for the trench a kart plows through sand: a recessed shadow groove
+// (the dug-out floor) flanked by pale berms (sand shoved up to either side).
+function sandTrenchColor() { return "rgba(120, 92, 52, 1)"; }   // dark sandy shadow
+// One lingering trench segment carved through the dune from (bx,by) to (ex,ey).
+// `dir` is the travel angle and `radius` the kart radius — used to splay the
+// berms out either side of the groove. Lingers longer than an ice mark because
+// scooped sand holds its shape.
+function addSandTrench(bx, by, ex, ey, dir, radius) {
+	var perp = dir + Math.PI / 2;
+	var off = radius * 0.7;
+	var ox = Math.cos(perp) * off, oy = Math.sin(perp) * off;
+	addEffect({
+		x: bx,
+		y: by,
+		maxAge: 1300,
+		draw: function (ctx, t) {
+			ctx.save();
+			ctx.lineCap = "round";
+			// Recessed groove floor: a soft, wide dark band the width of the kart.
+			ctx.globalAlpha = (1 - t) * 0.3;
+			ctx.strokeStyle = sandTrenchColor();
+			ctx.lineWidth = off * 2;
+			ctx.beginPath();
+			ctx.moveTo(bx, by);
+			ctx.lineTo(ex, ey);
+			ctx.stroke();
+			// Pushed-up berms: thin pale ridges along each lip of the trench.
+			ctx.globalAlpha = (1 - t) * 0.5;
+			ctx.strokeStyle = sandColor();
+			ctx.lineWidth = 2;
+			ctx.beginPath();
+			ctx.moveTo(bx + ox, by + oy);
+			ctx.lineTo(ex + ox, ey + oy);
+			ctx.stroke();
+			ctx.beginPath();
+			ctx.moveTo(bx - ox, by - oy);
+			ctx.lineTo(ex - ox, ey - oy);
+			ctx.stroke();
+			ctx.restore();
+		}
+	});
+}
+// Extend the continuous trench behind a kart trudging through sand. Segments are
+// laid by distance travelled (not time) so a slow crawl draws one clean groove
+// instead of stacking overlapping bands into a dark blob; a big jump (re-entering
+// sand, a teleport) just resets the anchor without drawing a streak across the map.
+// The segment is stamped onto a persistent ground decal (drawTrenchDecal) so the
+// trench lasts — through a whole race round, and across the lobby until the next
+// round wipes it (resetRound clears the decal). LOW never reaches here (the extraFx
+// gate at the call site skips the trench on phone-class devices); the addSandTrench
+// fading effect is the fallback if the decal ever isn't available.
+function spawnSandTrail(p) {
+	if (p.trenchX == null) { p.trenchX = p.x; p.trenchY = p.y; return; }
+	var dx = p.x - p.trenchX, dy = p.y - p.trenchY;
+	var d2 = dx * dx + dy * dy;
+	var step = p.radius * 0.5;
+	if (d2 < step * step) { return; }
+	var maxGap = p.radius * 4;
+	if (d2 <= maxGap * maxGap) {
+		var dir = Math.atan2(dy, dx);
+		var inGame = (currentState == config.stateMap.racing ||
+			currentState == config.stateMap.collapsing ||
+			currentState == config.stateMap.lobby);
+		if (inGame && typeof stampSandTrench === "function") {
+			stampSandTrench(p.trenchX, p.trenchY, p.x, p.y, dir, p.radius);
+		} else {
+			addSandTrench(p.trenchX, p.trenchY, p.x, p.y, dir, p.radius);
+		}
+	}
+	p.trenchX = p.x;
+	p.trenchY = p.y;
+}
+
 // A skid burst when a player whips around — particles fly off in the old
 // direction of travel, coloured by the terrain underfoot.
 function spawnSkid(p, color) {
@@ -1446,6 +1525,14 @@ function updateMovementParticles(dt) {
 		var sandThresh = maxSpeed * 0.03;
 		if (speed > sandThresh && p.dustCD <= 0) {
 			var tile = tileIdAt(p.x, p.y);
+			// Drop the trench anchor the moment the kart leaves sand, so a trench is
+			// only ever stamped along CONTINUOUS sand travel. Otherwise two sand cells
+			// separated by a short non-sand gap (< p.radius * 4) would reuse the old
+			// anchor and stamp a groove straight across the gap.
+			if (tile != config.tileMap.slow.id) {
+				p.trenchX = null;
+				p.trenchY = null;
+			}
 			if (tile != config.tileMap.slow.id && speed <= walkThresh) {
 				// Non-sand tile below the walk threshold: nothing to shed. Throttle
 				// the recheck so we don't run tileIdAt every frame while coasting slow.
@@ -1468,8 +1555,15 @@ function updateMovementParticles(dt) {
 				spawnTerrainParticle(p, grassColor(), 1.8, 2);
 				p.dustCD = cd(speed > fastThresh ? 45 : 70);
 			} else if (tile == config.tileMap.slow.id) {
-				spawnTerrainParticle(p, sandColor(), 3, 2);
-				p.dustCD = cd(speed > fastThresh ? 45 : 70);
+				// Trudging through a dune: a continuous trench carves out behind the
+				// kart (skipped on LOW — it's a lingering/decal effect), with just a
+				// light puff of displaced sand on top so the trench art stays readable
+				// rather than being buried under a cloud of flecks.
+				if (extraFx) {
+					spawnSandTrail(p);
+				}
+				spawnTerrainParticle(p, sandColor(), 1.8, 1);
+				p.dustCD = cd(speed > fastThresh ? 90 : 130);
 			} else if (speed > fastThresh) {
 				spawnTerrainParticle(p, dustColor(), 2.5, 2);
 				p.dustCD = cd(50);

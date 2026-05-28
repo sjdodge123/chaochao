@@ -463,6 +463,10 @@ function registerStateHandlers(server) {
 		for (var ljs = 0; ljs < localPlayers.length; ljs++) {
 			if (localPlayers[ljs]) { localPlayers[ljs].lateJoinSpectating = false; }
 		}
+		// Wipe the sand trench so a round always starts on clean sand. Fires every
+		// round's gate phase — covers lobby -> round 1 (lobby trench accrued while
+		// idling) and between rounds — and runs before the gate/countdown renders.
+		if (typeof discardTrenchDecal === "function") { discardTrenchDecal(); }
 		currentState = config.stateMap.gated;
 	});
 	server.on("startRace", function (packet) {
@@ -578,6 +582,9 @@ function registerStateHandlers(server) {
 		// Match over (solo creator hit the winning notch) — schedule the editor
 		// return first so the calls below can't strand the creator if they throw.
 		previewReturnToEditor();
+		// Match over — clear the final round's sand trench so it doesn't linger into
+		// the game-over screen or the return to the lobby.
+		if (typeof discardTrenchDecal === "function") { discardTrenchDecal(); }
 		playerWon = packet.winner;
 		achievements = packet.achievements;
 		recapHarvestRound();      // fold the final round's clips into the archive first
