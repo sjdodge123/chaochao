@@ -108,6 +108,9 @@ function reconstruct(sitesMap) {
         siteObjs[i] = { x: sitesMap.sites[i].x, y: sitesMap.sites[i].y };
     }
     var diagram = new Voronoi().compute(siteObjs, sitesMap.bbox);
+    // rhill's Diagram constructor leaves a vestigial top-level `site` (null, never
+    // populated or read); drop it so the reconstructed map is clean.
+    delete diagram.site;
     for (var j = 0; j < sitesMap.sites.length; j++) {
         var vid = siteObjs[j].voronoiId;
         if (vid == null || diagram.cells[vid] == null) {
