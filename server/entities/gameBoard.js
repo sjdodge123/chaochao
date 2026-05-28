@@ -328,6 +328,14 @@ class GameBoard {
 				delete this.abilityList[id];
 				continue;
 			}
+			// Defensive: if the owning player has left the room mid-round, the ability
+			// is orphaned. Room.leave clears it via removeOwnedEntities, but never let
+			// the owner-derefs below (e.g. the SwapAimer construction) read a missing
+			// player — drop the orphan and move on.
+			if (this.playerList[this.abilityList[id].ownerId] == null) {
+				delete this.abilityList[id];
+				continue;
+			}
 			if (this.abilityList[id].swap) {
 				this.abilityList[id].swap = false;
 				var aimer = new SwapAimer(this.playerList[this.abilityList[id].ownerId].x, this.playerList[this.abilityList[id].ownerId].y, c.tileMap.abilities.swap.startSize, "red", this.abilityList[id].ownerId, this.roomSig);
@@ -1359,6 +1367,42 @@ class GameBoard {
 		player.x = -100;
 		player.y = -100;
 		this.tempSpectatorList[player.id] = player;
+	}
+	// Drop every entity owned by a player who is leaving the room, so the per-tick
+	// update loops and the compressor stop touching ghosts whose owner is no longer
+	// in playerList (an owner-deref like the SwapAimer construction in checkAbilities
+	// would otherwise read `undefined`). aimerList / abilityList / tempSpectatorList
+	// are keyed by owner id; projectileList is mixed-keyed (bombs/snowflakes by owner
+	// id, but brutal-round clouds by hash and the hockey puck by roomSig), so
+	// projectiles are matched on ownerId rather than key — which leaves the
+	// clouds/puck (owned by a hash/roomSig, never a client id) correctly untouched.
+	//
+	// Clients build their own projectileList/aimerList from spawn events and only
+	// prune them on terminateProj/terminateAimer (gameUpdates never removes missing
+	// entries), so emit the matching terminate BEFORE the server-side delete or the
+	// ghost stays rendered until the next reset. Both lists are keyed client-side by
+	// ownerId, which for a player-owned entity equals the leaving id. (The player's
+	// ability indicator hangs off playerList[id].ability and is already cleared by
+	// the playerLeft handler.)
+	removeOwnedEntities(clientID) {
+		var aimer = this.aimerList[clientID];
+		if (aimer != null) {
+			// SwapAimer arms a setInterval (this.index); clear it so the orphaned
+			// aimer doesn't keep a live closure (and itself) alive after we drop it.
+			if (aimer.index != null) {
+				clearInterval(aimer.index);
+			}
+			messenger.messageRoomBySig(this.roomSig, "terminateAimer", clientID);
+			delete this.aimerList[clientID];
+		}
+		delete this.abilityList[clientID];
+		delete this.tempSpectatorList[clientID];
+		for (var projID in this.projectileList) {
+			if (this.projectileList[projID].ownerId == clientID) {
+				messenger.messageRoomBySig(this.roomSig, "terminateProj", projID);
+				delete this.projectileList[projID];
+			}
+		}
 	}
 	resetProjectiles() {
 		messenger.messageRoomBySig(this.roomSig, "resetProjectiles", null);
