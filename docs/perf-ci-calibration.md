@@ -30,12 +30,19 @@ the raster cost is charged to main-thread scripting, so the headline number —
 GPU-accelerated canvas is a small fraction of that). The absolute value is
 therefore **environment-dependent and not an iPad frame time**.
 
-What *is* meaningful is the **delta vs `main`** measured in the same environment:
-if a PR pushes scripting ms/frame up, it made the per-frame render/JS work
-heavier, and that will hurt real devices too. So the gate compares PR vs the
-`main` baseline (stored by `perf-baseline.yml`) and flags a >15% regression. It
-is non-blocking to start, so you can watch the real run-to-run CI variance before
-deciding to enforce it (tune `PERF_REGRESS_PCT` in `pr-validation.yml`).
+What *is* meaningful is the **delta vs `main`** measured in the **same
+environment**: if a PR pushes scripting ms/frame up, it made the per-frame
+render/JS work heavier, and that will hurt real devices too. The `client-perf`
+job therefore measures BOTH the PR head and its merge base on the **same runner,
+back to back, in the same job**, then flags a >15% regression in the ratio. This
+matters because GitHub's shared runners vary 2-3x in available CPU run to run, so
+the absolute software-raster number is dominated by which runner you landed on —
+measuring both halves together cancels that runner-speed term out of the delta.
+(The earlier design compared the live PR number against a baseline cached from a
+different runner/time via a now-removed `perf-baseline.yml`, which turned runner
+noise into phantom regressions on diffs that never touched client render.) The
+gate is non-blocking to start, so you can watch the residual run-to-run variance
+before deciding to enforce it (tune `PERF_REGRESS_PCT` in `pr-validation.yml`).
 
 ## Calibrating to real iPad performance (one-time, ~20 min)
 

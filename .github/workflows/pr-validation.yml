@@ -213,50 +213,73 @@ jobs:
 
   client-perf:
     # Client render-perf REGRESSION gate (relative, non-blocking). Measures the
-    # 25-kart brutal scenario's scripting ms/frame and compares it to main's
-    # baseline (a regression gate, NOT an iPad-FPS predictor — headless software
-    # raster; calibrate absolute mobile perf on a real iPad, see the calibration
-    # doc). continue-on-error keeps it advisory while CI variance is learned.
+    # 25-kart brutal scenario's scripting ms/frame for BOTH the PR head and its
+    # merge base, ON THE SAME RUNNER, back to back — then gates on the delta. A
+    # regression gate, NOT an iPad-FPS predictor (headless software raster;
+    # calibrate absolute mobile perf on a real iPad, see the calibration doc).
+    #
+    # Why measure the base here instead of restoring a cached baseline: GitHub's
+    # shared runners vary wildly in available CPU, so the ABSOLUTE software-raster
+    # ms/frame swings 2-3x run to run on byte-identical code. Comparing a live PR
+    # measurement against a baseline cached from a DIFFERENT runner at a different
+    # time turned that runner-speed noise into phantom "regressions" (a server-only
+    # PR that can't touch client render would still trip the gate). Measuring both
+    # halves on the same runner in the same job cancels the shared runner-speed
+    # term out of the ratio, so only a real code-driven delta survives.
+    # continue-on-error keeps it advisory while CI variance is learned.
     runs-on: ubuntu-latest
     continue-on-error: true
     permissions:
       contents: read
       pull-requests: write
     steps:
-      - name: Check out repo
+      - name: Check out PR head
         uses: actions/checkout@v6
+        with:
+          path: head
+      - name: Check out merge base
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
-      - name: Install dependencies
+          # Two checkouts live in subdirs, so point npm caching at the head lockfile.
+          cache-dependency-path: head/package-lock.json
+      - name: Install dependencies (PR head)
         run: npm ci
+        working-directory: head
+      - name: Install dependencies (merge base)
+        run: npm ci
+        working-directory: base
       - name: Cache Playwright browser
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ hashFiles('head/package-lock.json') }}
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
+        working-directory: head
+      # Measure base FIRST then PR head, both on this runner. Distinct ports so a
+      # lingering socket from the first server can't collide with the second. Output
+      # JSON to the shared workspace root so the compare step finds both files.
+      - name: Measure merge base
+        run: node .github/scripts/perf-client.js
+        working-directory: base
+        env:
+          PERF_OUT_JSON: ${{ github.workspace }}/perf-baseline.json
+          PERF_PORT: "28921"
       - name: Measure this PR
         run: node .github/scripts/perf-client.js
+        working-directory: head
         env:
-          PERF_OUT_JSON: perf-pr.json
-      - name: Restore main baseline
-        uses: actions/cache/restore@v5
-        with:
-          path: perf-baseline.json
-          # The exact `key` is deliberately a value that never matches (run_id is
-          # unique per run) so the restore ALWAYS falls through to `restore-keys`,
-          # which prefix-matches the most recent `perf-client-baseline-<sha>` saved
-          # by perf-baseline.yml on main. Don't "fix" this to github.sha — that would
-          # only match the PR's own sha and never find main's baseline.
-          key: perf-client-baseline-${{ github.run_id }}
-          restore-keys: |
-            perf-client-baseline-
-      - name: Compare vs baseline
-        run: node .github/scripts/perf-compare.js perf-baseline.json perf-pr.json
+          PERF_OUT_JSON: ${{ github.workspace }}/perf-pr.json
+          PERF_PORT: "28911"
+      - name: Compare base vs PR
+        run: node head/.github/scripts/perf-compare.js perf-baseline.json perf-pr.json
         env:
           PERF_COMMENT_OUT: perf-comment.md
           PERF_REGRESS_PCT: "15"
@@ -265,7 +288,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: perf-trace
-          path: perf-trace.zip
+          path: head/perf-trace.zip
           if-no-files-found: ignore
       - name: Upsert sticky PR comment
         if: always()
