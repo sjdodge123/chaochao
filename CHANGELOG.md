@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.25.1 — 2026-05-28
+
 ### General
 
 - New cart skins! Equip a Five-Alarm fire truck or a dinosaur in the skin shop — each has its own animated wheels/legs and a custom fiery or earthy trail, layered on top of your usual color.
