@@ -800,7 +800,9 @@ function computeFocusedView() {
     var wholeMap = { cx: LOGICAL_WIDTH / 2, cy: LOGICAL_HEIGHT / 2, scale: 1 };
     var pts = focusWorldPoints();
     if (pts.length === 0) {
-        // Nobody local alive to follow -> whole map (watch the action).
+        // Nobody local alive to follow -> whole map (watch the action). Drop the
+        // goal latch so it can't carry stale engagement into the next round/map.
+        worldGoalEngaged = false;
         return wholeMap;
     }
     var halfX = LOGICAL_WIDTH / (2 * WORLD_ZOOM_MAX);
@@ -823,7 +825,18 @@ function computeFocusedView() {
             if (d < nd) { nd = d; ng = goals[g]; }
         }
     }
-    if (ng && nd <= WORLD_ZOOM_ENGAGE) {
+    // Hysteresis: engage the goal framing once within ENGAGE, but don't let go
+    // until clearly past RELEASE. Otherwise a player drifting at the ENGAGE edge
+    // (e.g. circling the spawn gate beside the goal) flips the framing every few
+    // frames, which the gate-countdown ramp follows directly (a=1) and jerks.
+    if (!ng) {
+        worldGoalEngaged = false;
+    } else if (worldGoalEngaged) {
+        if (nd > WORLD_ZOOM_RELEASE) { worldGoalEngaged = false; }
+    } else if (nd <= WORLD_ZOOM_ENGAGE) {
+        worldGoalEngaged = true;
+    }
+    if (ng && worldGoalEngaged) {
         minX = Math.min(minX, ng.x - WORLD_ZOOM_PAD);
         maxX = Math.max(maxX, ng.x + WORLD_ZOOM_PAD);
         minY = Math.min(minY, ng.y - WORLD_ZOOM_PAD);
@@ -845,6 +858,7 @@ function computeWorldViewTarget(dt) {
     var wholeMap = { cx: LOGICAL_WIDTH / 2, cy: LOGICAL_HEIGHT / 2, scale: 1 };
     if (!cameraZoomEnabled || myPlayer == null || typeof world === "undefined" || world == null) {
         worldViewFocusedElapsed = 0;
+        worldGoalEngaged = false;
         return wholeMap;
     }
     // Focus once the round is live (gate countdown + race); plus the LOBBY on
@@ -860,6 +874,7 @@ function computeWorldViewTarget(dt) {
         inLobbyTouch);
     if (!focused) {
         worldViewFocusedElapsed = 0;
+        worldGoalEngaged = false;
         return wholeMap;
     }
     // Advance the focus-phase clock by the (already-clamped) frame dt rather than

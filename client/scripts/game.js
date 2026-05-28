@@ -42,8 +42,13 @@ var server = null,
     // palette. Persisted in localStorage (see the #colorblindControl wiring).
     colorblindEnabled = false,
     worldViewFocusedElapsed = 0,  // ms accumulated in the focus phase (frame-dt based, not wall-clock)
+    // Latched goal-engage state, so the framing can't flap when a player skims the
+    // edge of WORLD_ZOOM_ENGAGE (e.g. drifting around the spawn gate next to the
+    // goal). Engage at ENGAGE, only release past RELEASE — hysteresis kills the jerk.
+    worldGoalEngaged = false,
     WORLD_ZOOM_MAX = 1.8,      // tightest focus on the player while racing (shows some surroundings)
     WORLD_ZOOM_ENGAGE = 460,   // world-units: nearest goal pulls into frame within this
+    WORLD_ZOOM_RELEASE = 620,  // world-units: once engaged, only let go of the goal past this (hysteresis band)
     WORLD_ZOOM_PAD = 120,      // world-units padding around framed points
     WORLD_ZOOM_TAU = 620,      // smoothing time-constant (ms); higher = slower, gentler glide
     WORLD_ZOOM_HOLD_MS = 1100, // hold the whole-map view this long when a round starts, before easing in
