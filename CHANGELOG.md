@@ -10,7 +10,11 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### Bug fixes
+
+- Moving bumpers no longer freeze mid-track after running their first round-trip on maps where the rail isn't axis-aligned (e.g. *What Goes Up*) — they keep oscillating back and forth as intended.
+- After an infection round, the poison-green lava texture used to linger into the next round; lava now snaps back to red the moment the infection wears off.
+- The "next map" preview between rounds now shows bumpers and moving bumpers so you can see what's coming, and random ("?") tiles render with their ? icon instead of a flat purple cell.
 
 ## v0.20.1 — 2026-05-28
 

@@ -150,6 +150,11 @@ blindfoldLargeIcon.scale = .5;
 
 var transferIcon = new Image(576, 512);
 transferIcon.src = "../assets/img/random.svg";
+// Question-mark icon for un-resolved random tiles in the next-map preview
+// thumbnail (the live map never has them — they're replaced before rendering —
+// but `maps[i]` keeps the original ids that the thumbnail draws from).
+var randomTileIcon = new Image(576, 512);
+randomTileIcon.src = "../assets/img/question-solid.svg";
 var copyIcon = new Image(576, 512);
 copyIcon.src = "../assets/img/copy-regular.svg";
 var bombIcon = new Image(576, 512);
@@ -343,7 +348,7 @@ var requiredImages = [
     snowFlakeIcon, windIcon, hourglassIcon, lightningIcon, cloudyIcon,
     infinityIcon, fiestaIcon, toolBoxIcon, moneyIcon, volcanoIcon,
     bombImage, snowFlakeImage, cloudImage, infectionIcon, puckIcon,
-    explosionIcon, moonIcon, scissorsIcon,
+    explosionIcon, moonIcon, scissorsIcon, randomTileIcon,
     lava, poison, grass, dirt, ice, sand,
     redFire, orangeFire, yellowFire, greenFire, blueFire, purpleFire
 ];
@@ -407,6 +412,11 @@ function loadPatterns() {
     patterns[config.tileMap.fast.id] = makeSeamlessPattern(gGrass);
     patterns[config.tileMap.normal.id] = makeSeamlessPattern(gDirt);
     patterns[config.tileMap.slow.id] = makeSeamlessPattern(gSand);
+    // Random tiles are replaced (applyRandomTiles) before any cell in the LIVE
+    // map renders, so this pattern is only used by the next-map preview
+    // thumbnail (buildMapThumbnailCanvas), which draws straight from maps[i]'s
+    // un-replaced cell ids. Without it the thumbnail fell back to flat purple.
+    patterns[config.tileMap.random.id] = makePattern(randomTileIcon, config.tileMap.random.color);
 
 
 

@@ -533,6 +533,39 @@ function buildMapThumbnailCanvas(map) {
 		ctx.fillStyle = thumbnailTileFill(cell.id);
 		ctx.fill();
 	}
+	// Hazards: matches drawBumper/drawMovingBumper in draw.js (orange disc +
+	// red attack ring; moving bumper also draws its rail). The thumbnail can't
+	// know the moving bumper's current position along the rail, so it draws
+	// the bumper at the rail anchor — where every round starts it anyway.
+	if (Array.isArray(map.hazards)) {
+		var bumperColor = config.hazards.bumper.color;
+		var bumperRingColor = "#E5392B";
+		var attackR = config.hazards.bumper.attackRadius;
+		var bodyR = config.hazards.bumper.radius;
+		var mbWidth = config.hazards.movingBumper.width;
+		var mbHeight = config.hazards.movingBumper.height;
+		for (var hi = 0; hi < map.hazards.length; hi++) {
+			var hz = map.hazards[hi];
+			if (hz == null) { continue; }
+			if (hz.id === config.hazards.movingBumper.id) {
+				ctx.save();
+				ctx.translate(hz.x, hz.y);
+				ctx.rotate((hz.angle || 0) * Math.PI / 180);
+				ctx.fillStyle = "black";
+				ctx.fillRect(0, -mbHeight / 2, mbWidth, mbHeight);
+				ctx.restore();
+			}
+			ctx.beginPath();
+			ctx.arc(hz.x, hz.y, attackR, 0, 2 * Math.PI);
+			ctx.strokeStyle = bumperRingColor;
+			ctx.lineWidth = 3;
+			ctx.stroke();
+			ctx.beginPath();
+			ctx.arc(hz.x, hz.y, bodyR, 0, 2 * Math.PI);
+			ctx.fillStyle = bumperColor;
+			ctx.fill();
+		}
+	}
 	return cv;
 }
 function applyAbilites(abilities) {
@@ -590,6 +623,12 @@ function clearInfection() {
 }
 
 function applyBrutalMap(brconfig) {
+	// Always recompute `infection` from this round's config: the early-return
+	// branch used to leave it untouched, so a non-brutal round after an
+	// infection round inherited the poison-lava texture (loadPatterns()
+	// reads this flag) and the visuals never cleared.
+	infection = brconfig.brutal != false &&
+		brconfig.brutalTypes.indexOf(config.brutalRounds.infection.id) != -1;
 	if (brconfig.brutal == false) {
 		brutalRound = false;
 		brutalRoundConfig = null;
@@ -598,11 +637,6 @@ function applyBrutalMap(brconfig) {
 	brutalRound = true;
 	brutalRoundConfig = brconfig;
 	playSound(brutalRoundSound);
-	if (brutalRoundConfig.brutalTypes.indexOf(config.brutalRounds.infection.id) != -1) {
-		infection = true;
-	} else {
-		infection = false;
-	}
 }
 
 function spawnLobbyStartButton(payload) {
