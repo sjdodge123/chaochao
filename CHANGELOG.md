@@ -10,7 +10,17 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- Plug in a controller mid-game and you can now actually join: pressing to join part-way through a match adds you as the next racer (you hop in when the round resets) instead of flashing "joined" and immediately booting you.
+- The lobby's **Skins** and **AI bots** stations now sit on the grass — the AI bots station moved up front next to the spawn so it's the first thing you reach.
+
+### Bug fixes
+
+- The air-hockey puck no longer keeps ricocheting around after a round is decided, so its bounce sound stops spamming once the round ends.
+- Fixed not being able to join a game from the **Join** menu by tapping its button on a touchscreen (the list could refresh out from under your tap).
+- The crowd on the right side of the screen now hugs the arena edge like the other sides.
+- The end-of-game winner screen text is now always readable, whatever colour the winner is.
 
 ## v0.18.0 — 2026-05-27
 

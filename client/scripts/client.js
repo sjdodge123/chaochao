@@ -993,7 +993,9 @@ function registerSecondaryHandlers(sock, slot) {
 		// the gameState handler updates the slot's myID.
 		if (lp && lp.everJoined && gameID != null) {
 			debugLog("[localmp] slot", slot, "reconnected — re-joining room", gameID);
-			sock.emit('enterGame', gameID);
+			// Co-op flag so a mid-game reconnect into a now-locked room is accepted
+			// (spectator until the next round) rather than dropped.
+			sock.emit('enterGame', gameID, true);
 		}
 	});
 	// Lobby hub enter/exit edges arrive on THIS pad player's own socket, so they
@@ -1075,7 +1077,10 @@ function addLocalPlayer(slot, padIndex) {
 	lp.padIndex = padIndex;
 	localPlayers[slot] = lp;
 	registerSecondaryHandlers(sock, slot);
-	sock.emit('enterGame', gameID);
+	// `true` = local co-op join: allowed to land in an already-started (locked)
+	// room mid-game as a spectator who races from the next round, instead of being
+	// rejected (which booted couch players who pressed to join after the gate).
+	sock.emit('enterGame', gameID, true);
 	if (typeof onLocalPlayersChanged === "function") {
 		onLocalPlayersChanged(); // switch to per-player blocks if now >= 2 players
 	}

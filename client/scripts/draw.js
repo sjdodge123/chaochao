@@ -957,6 +957,25 @@ function drawBackground() {
     gameContext.clearRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
     overlayContext.clearRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
 }
+// Pick a text colour + contrasting outline that stays readable on an arbitrary
+// background. The gameOver screen paints its backdrop in the winner's kart
+// colour (anything from near-black navy to bright yellow), so the old hard-coded
+// black text vanished on dark winners — this keys the ink off the backdrop's
+// perceived luminance and always strokes the opposite tone behind it.
+function gameOverInk(bgHex) {
+    var r = 0, g = 0, b = 0;
+    if (typeof bgHex === "string" && bgHex.charAt(0) === "#") {
+        var h = bgHex.slice(1);
+        if (h.length === 3) { h = h.charAt(0) + h.charAt(0) + h.charAt(1) + h.charAt(1) + h.charAt(2) + h.charAt(2); }
+        r = parseInt(h.substr(0, 2), 16) || 0;
+        g = parseInt(h.substr(2, 2), 16) || 0;
+        b = parseInt(h.substr(4, 2), 16) || 0;
+    }
+    var lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return lum > 0.55
+        ? { fill: "#000000", stroke: "rgba(255,255,255,0.92)" }
+        : { fill: "#ffffff", stroke: "rgba(0,0,0,0.92)" };
+}
 function drawGameOverScreen(dt) {
     // playerList[playerWon] can be gone if the winner was an AI racer that
     // removeBots() cleared at the gameOver->waiting transition — guard the deref.
@@ -969,14 +988,21 @@ function drawGameOverScreen(dt) {
     gameContext.fill();
     gameContext.restore();
 
+    // Readable ink for everything drawn over the winner-coloured backdrop.
+    var ink = gameOverInk(playerList[playerWon].color);
+
     gameContext.save();
-    gameContext.fillStyle = "black";
+    gameContext.fillStyle = ink.fill;
+    gameContext.strokeStyle = ink.stroke;
+    gameContext.lineWidth = 4;
+    gameContext.lineJoin = "round";
     gameContext.font = '48px serif';
     var winString = decodedColorName + " won the game.";
     // When a recap montage is showing, lift the header so the header + clip
     // block is vertically centred (recap.js owns the shared layout). No recap
     // (or recap.js absent) -> the usual vertical-centre baseline.
     var goHeaderY = (typeof recapHeaderBaseline === "function") ? recapHeaderBaseline() : (LOGICAL_HEIGHT + 48) / 2;
+    gameContext.strokeText(winString, LOGICAL_WIDTH / 2 - 400, goHeaderY);
     gameContext.fillText(winString, LOGICAL_WIDTH / 2 - 400, goHeaderY);
     gameContext.restore();
 
@@ -985,8 +1011,12 @@ function drawGameOverScreen(dt) {
         var yOffset = -200;
         var startingHeight = (LOGICAL_HEIGHT + 48) / 2;
         gameContext.save();
-        gameContext.fillStyle = "black";
+        gameContext.fillStyle = ink.fill;
+        gameContext.strokeStyle = ink.stroke;
+        gameContext.lineWidth = 3;
+        gameContext.lineJoin = "round";
         gameContext.font = '28px serif';
+        gameContext.strokeText("-- Medals -- ", (LOGICAL_WIDTH / 2) + xOffset, startingHeight + yOffset);
         gameContext.fillText("-- Medals -- ", (LOGICAL_WIDTH / 2) + xOffset, startingHeight + yOffset);
 
 
@@ -996,7 +1026,12 @@ function drawGameOverScreen(dt) {
             if (achievements[medal].ids.length == 0) {
                 continue;
             }
-            gameContext.fillStyle = "black";
+            // Re-assert the ink each title: the medalist-dot loop below overwrites
+            // strokeStyle (to the dot's colour), so without this the 2nd+ title would
+            // be outlined in a leftover dot colour instead of the readable ink.
+            gameContext.fillStyle = ink.fill;
+            gameContext.strokeStyle = ink.stroke;
+            gameContext.strokeText(achievements[medal].title, (LOGICAL_WIDTH / 2) + xOffset, startingHeight + (lineHeight * count) + yOffset);
             gameContext.fillText(achievements[medal].title, (LOGICAL_WIDTH / 2) + xOffset, startingHeight + (lineHeight * count) + yOffset);
             count++;
             for (var i = 0; i < achievements[medal].ids.length; i++) {

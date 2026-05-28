@@ -88,7 +88,7 @@ exports.kickFromRoom = function (clientID) {
 		}
 	}
 }
-exports.joinARoom = function (sig, clientID) {
+exports.joinARoom = function (sig, clientID, coop) {
 	var room = roomList[sig];
 	if (room == null) {
 		return false;
@@ -106,7 +106,15 @@ exports.joinARoom = function (sig, clientID) {
 	// Reject a hand-typed/shared ?gameid= (or "Join by ID") into a full or started
 	// room so it can't overflow capacity or drop a player into a live race. Mirrors
 	// findARoom's matchmaking test; preview rooms are handled above.
-	if (!room.isPreview && (!room.hasSpace() || room.isLocked())) {
+	//
+	// A local co-op seat (coop) is exempt from the locked check: it joins the
+	// primary's exact room mid-game and lands as a spectator (determineGameState),
+	// racing from the next round — so a controller plugged in after the gate can
+	// still join instead of being booted. Capacity is still enforced for everyone.
+	if (!room.isPreview && !room.hasSpace()) {
+		return false;
+	}
+	if (!room.isPreview && !coop && room.isLocked()) {
 		return false;
 	}
 	room.join(clientID);

@@ -742,6 +742,16 @@ class Game {
 	startCollapse(xloc, yloc) {
 		console.log("Start Collapse");
 		this.currentState = this.stateMap.collapsing;
+		// A hockey puck is frictionless and never expires on its own, so once the
+		// round is decided it would keep ricocheting around the arena — and each
+		// wall bounce fires the bounce SFX — all the way through the collapse.
+		// Retire it the instant the round ends so it can't spam its sound.
+		for (var pid in this.gameBoard.projectileList) {
+			if (this.gameBoard.projectileList[pid].isPuck) {
+				delete this.gameBoard.projectileList[pid];
+				messenger.messageRoomBySig(this.roomSig, "terminateProj", pid);
+			}
+		}
 		this.gameBoard.startCollapse({ x: xloc, y: yloc });
 		// Telegraph: erupt the shockwave from where the lava FIRST appears (the
 		// point farthest from the collapse center, which turns to lava first),

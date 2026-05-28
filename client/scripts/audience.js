@@ -278,6 +278,12 @@ function buildFans(rect, dir, gameWidth) {
         for (var i = 0; i < cols; i++) {
             var cx = rect.x + (i + 0.5) * stepX + rowShift + (Math.random() - 0.5) * stepX * 0.1;
             var cy = rect.y + (j + 0.5) * stepY + (Math.random() - 0.5) * stepY * 0.1;
+            // The brick stagger always nudges rows toward +x, so the LEFT pillar
+            // packs tight against the arena (its right edge) while the RIGHT pillar's
+            // arena-facing (left) edge ends up ragged and pulled away — it visibly
+            // doesn't hug the border like the others. Mirror the right pillar's x so
+            // its near edge hugs the arena exactly the way the left pillar's does.
+            if (dir === "left") { cx = 2 * rect.x + rect.w - cx; }
             // A staggered (odd) row's last seat overflows the bar — skip it rather
             // than clamping a denser column onto the edge.
             if (cx < rect.x + size * 0.5 || cx > rect.x + rect.w - size * 0.5) { continue; }
