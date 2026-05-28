@@ -52,6 +52,14 @@ var gradedTex = {};
 // (which would discard the in-progress work). Reset by load/rebuild.
 var mapModified = false;
 
+// Coarse uniform-grid spatial index over the Voronoi cells, keyed by each cell's
+// site x/y, so cellIdFromPoint() tests only the cells in the nearby bucket(s)
+// instead of all ~250 cells on every mousemove. Rebuilt lazily (and invalidated
+// via invalidateCellIndex() wherever vMap/cells are reassigned). The exact
+// point-in-polygon test (pointIntersection) stays the final arbiter, so results
+// are identical to a full scan.
+var cellIndex = null;
+
 var scale = 0.035;
 // Gate strip depth (px), matching server/game.js GATE_DEPTH so the previewed gate
 // lines up with where the server actually holds players.
@@ -120,6 +128,7 @@ window.onload = function () {
     }
     if (restored != null) {
         vMap = restored;
+        invalidateCellIndex();
         syncStartEdgesFromMap();
         $('#author').val(vMap.author);
         $('#name').val(vMap.name);
@@ -186,6 +195,7 @@ function loadMapById(id) {
     for (var j = 0; j < maps.length; j++) {
         if (maps[j].id == id) {
             vMap = JSON.parse(JSON.stringify(maps[j]));
+            invalidateCellIndex();
             syncStartEdgesFromMap();
             $('#author').val(vMap.author);
             $('#name').val(vMap.name);
@@ -203,6 +213,7 @@ function clientConnect() {
 
     server.on("config", function (c) {
         config = c;
+        buildHazardById();
         tryStart();
     });
 
@@ -297,6 +308,9 @@ function loadPatterns() {
 
     brushColor = patterns[config.tileMap.normal.id];
 }
+// The source canvas is referenced by the returned CanvasPattern (it must be, to
+// repeat-tile) but isn't captured in any other closure, and patterns are built
+// once in loadPatterns() and never rebuilt — so there's nothing to free here.
 function makePattern(image, color) {
     const canvasPadding = 3;
     const canvasPattern = document.createElement("canvas");
@@ -627,6 +641,7 @@ function rebuild() {
     clearFieldErrors();
     setSelectedObject(null);
     vMap = generateVMap();
+    invalidateCellIndex();
     clearHistory(); // a fresh map starts with an empty undo history
     mapModified = false;
     $('#author').val("");
@@ -774,6 +789,7 @@ function applyStartEdges(edges) {
     if (mapReady && vMap != null) {
         setSelectedObject(null);
         vMap = generateVMap();
+        invalidateCellIndex();
         clearHistory(); // the reshape replaced every cell — old undo steps are stale
         // The reshaped surface is blank again (no painted tiles/hazards), so there's
         // nothing unsaved to warn about — matches a fresh map. Painting after this
@@ -1111,7 +1127,22 @@ function commitStroke() {
 
 // --- hazard helpers (index/reference based — also fixes the stacked-duplicate
 //     selection bug, since selection now tracks the array index, not x/y) -------
+// Resolve a hazard config by its id. Built once when the config socket message
+// arrives (buildHazardById) so the per-call for-in over config.hazards — hit on
+// every hover/place/select — collapses to a single map lookup. Falls back to the
+// linear scan if a lookup somehow happens before the map is built.
+var hazardById = null;
+function buildHazardById() {
+    hazardById = {};
+    if (config == null || config.hazards == null) { return; }
+    for (var type in config.hazards) {
+        hazardById[config.hazards[type].id] = config.hazards[type];
+    }
+}
 function hazardConfigById(id) {
+    if (hazardById != null) {
+        return Object.prototype.hasOwnProperty.call(hazardById, id) ? hazardById[id] : null;
+    }
     for (var type in config.hazards) {
         if (config.hazards[type].id == id) { return config.hazards[type]; }
     }
@@ -1370,14 +1401,82 @@ function cellUnderMouse(evt) {
     dirty = true;
 }
 
-function cellIdFromPoint(xmouse, ymouse) {
+// Drop the cached spatial index. Call this anywhere vMap / vMap.cells is
+// (re)assigned (new map loaded, reshape, wipe, preview restore) so the next
+// query rebuilds from the current geometry instead of pointing at stale cells.
+function invalidateCellIndex() {
+    cellIndex = null;
+}
+
+// (Re)build the uniform-grid index from the current cells. Buckets are ~one to a
+// few sites each over the world bounds. Each cell's site is bucketed by its x/y.
+function buildCellIndex() {
+    cellIndex = null;
+    if (vMap == null || !Array.isArray(vMap.cells) || vMap.cells.length === 0) { return; }
     var cells = vMap.cells;
-    var iCell = cells.length;
-    while (iCell--) {
-        var cell = cells[iCell];
-        if (pointIntersection(xmouse, ymouse, cell) > 0) {
-            return cells[iCell].site.voronoiId;
+    var minX = world.x, minY = world.y;
+    // ~96px buckets give roughly 1-2 sites per bucket for the ~250-site maps,
+    // keeping the per-query search to a handful of cells.
+    var bucketSize = 96;
+    var cols = Math.max(1, Math.ceil(world.width / bucketSize));
+    var rows = Math.max(1, Math.ceil(world.height / bucketSize));
+    var buckets = new Array(cols * rows);
+    for (var i = 0; i < cells.length; i++) {
+        var site = cells[i].site;
+        if (site == null) { continue; }
+        var cx = Math.floor((site.x - minX) / bucketSize);
+        var cy = Math.floor((site.y - minY) / bucketSize);
+        if (cx < 0) { cx = 0; } else if (cx >= cols) { cx = cols - 1; }
+        if (cy < 0) { cy = 0; } else if (cy >= rows) { cy = rows - 1; }
+        var b = cy * cols + cx;
+        if (buckets[b] == null) { buckets[b] = []; }
+        buckets[b].push(cells[i]);
+    }
+    cellIndex = { bucketSize: bucketSize, cols: cols, rows: rows, minX: minX, minY: minY, buckets: buckets };
+}
+
+// Test every cell whose site falls in a bucket at Chebyshev distance `ring` from
+// (qx,qy) — the ring's perimeter only, since inner rings were already tested.
+// Returns the voronoiId of the first cell whose exact polygon contains (x,y), or
+// undefined if none on this ring do.
+function testCellRing(idx, qx, qy, ring, x, y) {
+    var cols = idx.cols, rows = idx.rows, buckets = idx.buckets;
+    var y0 = qy - ring, y1 = qy + ring, x0 = qx - ring, x1 = qx + ring;
+    for (var gy = y0; gy <= y1; gy++) {
+        if (gy < 0 || gy >= rows) { continue; }
+        var onYEdge = (gy === y0 || gy === y1);
+        for (var gx = x0; gx <= x1; gx++) {
+            if (gx < 0 || gx >= cols) { continue; }
+            if (!onYEdge && gx !== x0 && gx !== x1) { continue; } // perimeter only
+            var bucket = buckets[gy * cols + gx];
+            if (bucket == null) { continue; }
+            for (var i = 0; i < bucket.length; i++) {
+                if (pointIntersection(x, y, bucket[i]) > 0) {
+                    return bucket[i].site.voronoiId;
+                }
+            }
         }
+    }
+    return undefined;
+}
+
+function cellIdFromPoint(xmouse, ymouse) {
+    if (vMap == null || !Array.isArray(vMap.cells)) { return; }
+    if (cellIndex == null) { buildCellIndex(); }
+    if (cellIndex == null) { return; }
+    var idx = cellIndex;
+    var qx = Math.floor((xmouse - idx.minX) / idx.bucketSize);
+    var qy = Math.floor((ymouse - idx.minY) / idx.bucketSize);
+    if (qx < 0) { qx = 0; } else if (qx >= idx.cols) { qx = idx.cols - 1; }
+    if (qy < 0) { qy = 0; } else if (qy >= idx.rows) { qy = idx.rows - 1; }
+    // Search the query bucket, then expand the ring outward. The owning cell's
+    // site is almost always in the nearest bucket(s); expanding until a polygon
+    // hit (or all buckets are covered) keeps the result identical to a full scan,
+    // including boundary/outside points that match no cell (returns undefined).
+    var maxRing = Math.max(idx.cols, idx.rows);
+    for (var ring = 0; ring <= maxRing; ring++) {
+        var hit = testCellRing(idx, qx, qy, ring, xmouse, ymouse);
+        if (hit !== undefined) { return hit; }
     }
 }
 function renderCells() {
