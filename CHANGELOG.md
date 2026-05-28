@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.24.1 — 2026-05-28
+
 ### General
 
 - The arena now floats in space: the blank space around the map is a starfield with twinkling stars, faint nebulae, and a distant planet, and each landmass has a 3D extruded edge so it reads as a chunk of land adrift in the void.
