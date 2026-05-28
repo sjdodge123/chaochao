@@ -108,15 +108,31 @@ function loadWeeklyNews() {
 }
 
 function newsBannerHtml() {
-    if (!APP_NEWS) {
-        return '';
+    // Both branches build the same `<a class="news-banner">` shell — only the
+    // href, badge, and headline differ. `rel="noopener noreferrer"` guards the
+    // target=_blank against reverse-tabnabbing on older Safari (modern browsers
+    // imply noopener already, but it's free to be explicit).
+    function bannerAnchor(href, badge, headline) {
+        return '<a class="news-banner" target="_blank" rel="noopener noreferrer" href="' +
+            escapeHtml(href) + '">' +
+            '<span class="news-badge">' + escapeHtml(badge) + '</span>' +
+            '<span class="news-headline">' + escapeHtml(headline) + '</span>' +
+            '</a>';
     }
-    var href = 'https://github.com/' + RELEASES_REPO +
-        '/releases/tag/' + encodeURIComponent(APP_NEWS.weekTag);
-    return '<a class="news-banner" target="_blank" href="' + escapeHtml(href) + '">' +
-        '<span class="news-badge">Patch notes</span>' +
-        '<span class="news-headline">' + escapeHtml(APP_NEWS.headline) + '</span>' +
-        '</a>';
+    if (!APP_NEWS) {
+        // No flagged headline this week — fall back to a quiet link to the
+        // releases index so the banner slot never goes silent.
+        return bannerAnchor(
+            'https://github.com/' + RELEASES_REPO + '/releases',
+            "What's new",
+            'See the latest releases'
+        );
+    }
+    return bannerAnchor(
+        'https://github.com/' + RELEASES_REPO + '/releases/tag/' + encodeURIComponent(APP_NEWS.weekTag),
+        'Patch notes',
+        APP_NEWS.headline
+    );
 }
 
 const bundleMap = {
