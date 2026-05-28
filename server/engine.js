@@ -177,10 +177,15 @@ class Engine {
 				// near end only while heading back. Guarding both ends keeps a
 				// single overshoot (e.g. from a long tick) from flipping the
 				// angle every frame and trapping the bumper jittering in place.
+				// Assign exact values (rail.angle or rail.angle - 180) instead of
+				// ±= 180: a non-axis-aligned rail.angle (e.g. -3.85°) doesn't
+				// round-trip in float, so after one full cycle hazard.angle drifts
+				// ~10 ULPs from rail.angle and the strict-eq `movingOutward` check
+				// stays false at the second far-end clamp — bumper freezes there.
 				if (movingOutward && currentDist > hazard.rail.lengthSq) {
-					hazard.angle -= 180;
+					hazard.angle = hazard.rail.angle - 180;
 				} else if (!movingOutward && currentDist < hazard.lengthSq) {
-					hazard.angle += 180;
+					hazard.angle = hazard.rail.angle;
 				}
 
 				newVelX = Math.cos((hazard.angle) * (Math.PI / 180)) * hazard.speed * this.dt;
@@ -203,7 +208,7 @@ class Engine {
 					// would re-clamp to the same spot every tick and freeze there. Turn it
 					// around now if it was heading outward, so it heads back next tick.
 					if (hazard.angle == hazard.rail.angle) {
-						hazard.angle -= 180;
+						hazard.angle = hazard.rail.angle - 180;
 					}
 				}
 			}

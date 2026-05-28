@@ -1496,6 +1496,33 @@ function renderMapThumbnail(map) {
         ctx.fillStyle = tileFill(cell.id);
         ctx.fill();
     }
+    // Hazards (same look as the editor canvas: orange disc + red attack ring,
+    // plus a black rail bar for moving bumpers). Without this, the load-list
+    // thumbnails dropped every bumper a map authored.
+    if (Array.isArray(map.hazards)) {
+        for (var hi = 0; hi < map.hazards.length; hi++) {
+            var hz = map.hazards[hi];
+            if (hz == null) { continue; }
+            if (hz.id === config.hazards.movingBumper.id) {
+                ctx.save();
+                ctx.translate(hz.x, hz.y);
+                ctx.rotate((hz.angle || 0) * Math.PI / 180);
+                ctx.fillStyle = "black";
+                ctx.fillRect(0, -config.hazards.movingBumper.height / 2,
+                    config.hazards.movingBumper.width, config.hazards.movingBumper.height);
+                ctx.restore();
+            }
+            ctx.beginPath();
+            ctx.arc(hz.x, hz.y, config.hazards.bumper.attackRadius, 0, 2 * Math.PI);
+            ctx.strokeStyle = "#E5392B";
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(hz.x, hz.y, config.hazards.bumper.radius, 0, 2 * Math.PI);
+            ctx.fillStyle = config.hazards.bumper.color;
+            ctx.fill();
+        }
+    }
     var url = cv.toDataURL("image/jpeg", 0.7);
     if (map.id != null && patternsReady) { thumbnailCache[map.id] = url; }
     return url;
