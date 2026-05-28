@@ -135,6 +135,17 @@ exports.submitPullRequest = async function (map) {
         returnToClient.message = "Email address is too long.";
         return returnToClient;
     }
+    // Mirror the client's validateEmail regex so a crafted socket payload
+    // (which bypasses the editor's pre-submit check) is rejected here with a
+    // clear reason instead of falling through to GitHub and surfacing the
+    // friendly generic. Keep both regexes in lockstep — changing one without
+    // the other lets a name that passes the editor fail at submit, or vice
+    // versa. (client/scripts/create.js function validateEmail)
+    if (!/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/.test(email)) {
+        returnToClient.status = false;
+        returnToClient.message = "That email address looks invalid.";
+        return returnToClient;
+    }
     // mapName is interpolated into a repo file path (client/maps/<name>.json) and
     // into a git branch ref below, both written with the server's GitHub
     // credentials. The submitter is untrusted, so reject anything that could
