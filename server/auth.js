@@ -15,6 +15,14 @@ var SUPABASE_URL = process.env.SUPABASE_URL || null;
 var SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || null;
 var JWT_SECRET = process.env.SUPABASE_JWT_SECRET || null;
 
+// Global kill-switch for ALL Supabase WRITE paths (leaderboard upserts,
+// progression-row writes, anything added later). Reads stay live so dev can
+// still see prod's data. Default OFF so local dev never accidentally pollutes
+// the prod database — Heroku/production must explicitly set this to "true".
+// Add new writers here too: gate every write at the call site so this stays
+// the one switch the operator flips.
+var writesEnabled = (process.env.ALLOW_SUPABASE_WRITES === 'true');
+
 var supabase = null;
 var jwt = null;
 var enabled = false;
@@ -40,7 +48,7 @@ if (JWT_SECRET) {
 }
 
 if (enabled) {
-    console.log('[auth] Supabase auth ENABLED (' + (jwt && JWT_SECRET ? 'local JWT verify' : 'network verify') + ').');
+    console.log('[auth] Supabase auth ENABLED (' + (jwt && JWT_SECRET ? 'local JWT verify' : 'network verify') + '), writes ' + (writesEnabled ? 'ENABLED' : 'BLOCKED (ALLOW_SUPABASE_WRITES != "true")') + '.');
 } else {
     console.log('[auth] Supabase env vars absent — auth DISABLED, all clients are guests.');
 }
@@ -167,6 +175,12 @@ async function ensureProgressionRow(userId, deviceId) {
     if (!enabled || !userId) {
         return;
     }
+    // Global Supabase-writes gate. Local dev defaults to blocked so test
+    // sessions can sign in (reads still work) without seeding rows into the
+    // shared/prod project.
+    if (!writesEnabled) {
+        return;
+    }
     try {
         var existing = await supabase
             .from('progression')
@@ -211,10 +225,59 @@ async function ensureProgressionRow(userId, deviceId) {
     }
 }
 
+// Best-effort display-name lookup for a verified user_id. Used by the map-time
+// leaderboard to denormalize a player label into the map_times row so the
+// overview-screen card doesn't need to round-trip through auth.users on every
+// render. The first lookup hits supabase.auth.admin.getUserById once; the
+// result is cached for the lifetime of the process (display names rarely
+// change, and a stale label on a leaderboard refreshes on the next PB write).
+// Returns null when auth is disabled, the user is missing, or the call fails.
+var displayNameCache = new Map();
+var DISPLAY_NAME_TTL_MS = 30 * 60 * 1000; // 30 min — provider name changes are rare
+
+function sanitizeDisplayName(raw) {
+    if (typeof raw !== 'string') { return null; }
+    // Same control/bidi strip as the avatar-skin name path in messenger.js so a
+    // leaderboard row can't smuggle in zero-width or override characters.
+    var s = raw.replace(/[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060\u2066-\u2069\ufeff]/g, '').trim();
+    if (!s.length) { return null; }
+    // Code-point cap so a surrogate pair (emoji name) is never split.
+    return Array.from(s).slice(0, 24).join('');
+}
+
+async function getDisplayName(userId) {
+    if (!enabled || !userId) { return null; }
+    var hit = displayNameCache.get(userId);
+    if (hit && hit.expiresAt > Date.now()) { return hit.name; }
+    try {
+        var res = await supabase.auth.admin.getUserById(userId);
+        if (res.error || !res.data || !res.data.user) {
+            displayNameCache.set(userId, { name: null, expiresAt: Date.now() + DISPLAY_NAME_TTL_MS });
+            return null;
+        }
+        var u = res.data.user;
+        var meta = u.user_metadata || {};
+        // Never fall back to u.email — display_name is denormalized into the
+        // publicly-readable map_times row, so a user with no name metadata
+        // would have their email broadcast on the leaderboard. Null is fine;
+        // the client renders "user <id-prefix>" as a placeholder for null
+        // names.
+        var raw = meta.full_name || meta.name || meta.user_name || null;
+        var clean = sanitizeDisplayName(raw);
+        displayNameCache.set(userId, { name: clean, expiresAt: Date.now() + DISPLAY_NAME_TTL_MS });
+        return clean;
+    } catch (e) {
+        console.log('[auth] getDisplayName failed:', e.message);
+        return null;
+    }
+}
+
 exports.enabled = enabled;
+exports.writesEnabled = writesEnabled;
 exports.supabase = supabase;
 exports.verifyToken = verifyToken;
 exports.ensureProgressionRow = ensureProgressionRow;
+exports.getDisplayName = getDisplayName;
 // Public, browser-safe config to inject into served pages. Returns null unless
 // the server is fully able to VERIFY tokens (`enabled`) AND the anon key is
 // present — otherwise the client would show a login UI and mint tokens the

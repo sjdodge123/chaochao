@@ -80,6 +80,10 @@ function resetRound() {
 		rp.dustCD = 0;
 		rp.skidCD = 0;
 		rp.emberCD = 0;
+		// Map-leaderboard transient state: clear per-round so last round's
+		// goal-cross doesn't latch the HUD timer on the new race's first tick.
+		rp.reachedGoal = false;
+		rp.finishMs = null;
 	}
 	for (var aimerID in this.aimerList) {
 		delete this.aimerList[aimerID];

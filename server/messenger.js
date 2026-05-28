@@ -249,6 +249,10 @@ function checkForMail(client) {
 
 		//Spawn a player for the new player
 		room.playerList[client.id] = room.world.createNewPlayer(client.id);
+		// Stamp the verified Supabase user id so the map-time leaderboard knows
+		// whose finish to record (null for guests). Bots never get a user id —
+		// world.createNewBot sets isAI but leaves verifiedUserId undefined.
+		room.playerList[client.id].verifiedUserId = client.userId || null;
 		room.game.determineGameState(room.playerList[client.id]);
 		// Bots yield to the joining human so humans + bots can never exceed the room
 		// cap (no-op in normal flow — there are no bots while a room is joinable).

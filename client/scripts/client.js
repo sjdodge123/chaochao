@@ -312,6 +312,14 @@ function registerScoreHandlers(server) {
 		var id = (packet != null && packet.id != null) ? packet.id : packet;
 		if (playerList[id] != null) {
 			playerList[id].alive = false;
+			// Stamp goal-cross + server-authoritative finish elapsed (ms) so the
+			// HUD timer can freeze on the exact server value rather than the
+			// receive-time approximation, and so drawRaceTimer's "did the local
+			// player finish?" check has a real signal to read.
+			playerList[id].reachedGoal = true;
+			if (packet != null && typeof packet.finishMs === 'number') {
+				playerList[id].finishMs = packet.finishMs;
+			}
 			playerList[id].recapState = RECAP_SCORED; // recap: vanish with a goal poof, not hover the goal
 		}
 		recapMarkHighlight('goal', [id]); // flag a scoring moment for the recap
@@ -466,6 +474,24 @@ function registerStateHandlers(server) {
 		resetTrails();
 		resetPlayerRanks();
 		recapReset(); // start a fresh recap buffer for this round's map
+		// Anchor the HUD timer to the CLIENT's Date.now() at receipt — mixing
+		// server's Date.now() with the browser's local Date.now() would drift
+		// arbitrarily if the player's system clock disagrees with the server's.
+		// Server's raceStartedAt (in packet.raceStartedAt) is intentionally
+		// ignored here; the server-authoritative finishMs delta arrives later
+		// in playerConcluded for goal-cross freeze.
+		raceStartedAt = Date.now();
+		// Clear last round's spectator board + any lingering record floats so
+		// they don't bleed into the new race before the server's mapLeaderboardCurrent
+		// arrives.
+		mapLeaderboardCurrent = null;
+		recordFloats.length = 0;
+		// Reset the per-race local-player timer freeze (re-stamped on death or
+		// goal-cross by drawRaceTimer's transition detector).
+		localTimerStopAt = null;
+		localTimerStopByDeath = false;
+		// Clear any lingering WR banner from the prior round.
+		worldRecordBanner = null;
 		currentState = config.stateMap.racing;
 		// Fires once per round (racing state is re-entered each round), so this is a
 		// round-start signal. `players` counts humans only: clientList is the room's
@@ -498,8 +524,55 @@ function registerStateHandlers(server) {
 		updateAudienceIntensity();
 		calculateNotchMoveAmt();
 		loadMapPreview(packet.nextMapID);
+		// Clear last round's leaderboards so stale rows don't flash on the new
+		// overview before the server's async queries return.
+		mapLeaderboardData = null;
+		mapLeaderboardJustPlayed = null;
 		currentState = config.stateMap.overview;
 		trackEvent('round_complete');
+	});
+	// Map leaderboard for the JUST-PLAYED map (rank/time per logged-in racer in
+	// this room). Drives the inline rank/time shown alongside each notch row on
+	// the overview, so even the last finisher catches their result.
+	server.on("mapLeaderboardJustPlayed", function (packet) {
+		if (packet == null || !packet.rows) { return; }
+		mapLeaderboardJustPlayed = packet;
+	});
+	// Map leaderboard for the UPCOMING map (global top 10). Drives the "Times
+	// to beat for <map>" card under the next-map preview on the overview.
+	server.on("mapLeaderboardNextMap", function (packet) {
+		if (packet == null) { return; }
+		mapLeaderboardData = packet;
+	});
+	// Map leaderboard for the CURRENT (racing) map. Drives the spectator
+	// mini-leaderboard widget in the HUD corner. Fired once at race start.
+	server.on("mapLeaderboardCurrent", function (packet) {
+		if (packet == null) { return; }
+		mapLeaderboardCurrent = packet;
+	});
+	// A logged-in racer just set a personal (and possibly world) record on the
+	// current map. Spawn a floating "NEW PERSONAL/WORLD RECORD!! <time>" above
+	// their kart, and — for world records (rank<=10 globally) — also raise a
+	// screen-space banner so it's visible regardless of camera position.
+	server.on("playerPbResult", function (packet) {
+		if (packet == null || !packet.playerId || !packet.isNewRecord) { return; }
+		recordFloats.push({
+			playerId: packet.playerId,
+			isWorldRecord: !!packet.isWorldRecord,
+			finishMs: packet.finishMs,
+			startedAt: Date.now()
+		});
+		if (packet.isWorldRecord) {
+			worldRecordBanner = {
+				// Same "Anon" placeholder used on the overview/spectator
+				// leaderboards when a signed-in racer has no name metadata.
+				displayName: packet.displayName || 'Anon',
+				mapName: packet.mapName || 'this map',
+				finishMs: packet.finishMs,
+				rank: packet.rank || null,
+				startedAt: Date.now()
+			};
+		}
 	});
 	server.on("startGameover", function (packet) {
 		// Match over (solo creator hit the winning notch) — schedule the editor

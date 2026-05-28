@@ -18,6 +18,8 @@ var { HazardRail, Hazard, Bumper } = require('./entities/hazards.js');
 var { Projectile, CloudProj, SnowFlakeProj, BombProj, Puck } = require('./entities/projectiles.js');
 var { Ability, Blindfold, Swap, IceCannon, Bomb, SpeedBuff, SpeedDebuff, TileSwap, Cut, BombTrigger } = require('./entities/abilities.js');
 var { GameBoard } = require('./entities/gameBoard.js');
+var auth = require('./auth.js');
+var leaderboard = require('./leaderboard.js');
 
 exports.getRoom = function (sig, size) {
 	return new Room(sig, size);
@@ -50,6 +52,12 @@ class Room {
 		this.clientCount++;
 	}
 	leave(clientID) {
+		// Flush an unsaved personal-best BEFORE removing the player — a logged-in
+		// racer who crossed the goal and then disconnected before the round-end
+		// publish would otherwise lose their time entirely (their player object
+		// vanishes from playerList here, so the next checkForWinners snapshot
+		// never sees them).
+		this.game.flushPendingFinishForPlayer(this.playerList[clientID]);
 		messenger.messageRoomBySig(this.sig, 'playerLeft', clientID);
 		messenger.removeRoomMailBox(clientID);
 		var client = messenger.getClient(clientID);
@@ -160,6 +168,15 @@ class Game {
 		//State mgmt
 		this.stateMap = c.stateMap;
 		this.currentState = this.stateMap.waiting;
+		// Set when the gate opens (startRace) so the round-end leaderboard hook can
+		// compute each finisher's elapsed time as Player.timeReached - raceStartedAt.
+		// Reset on each new race; null between rounds.
+		this.raceStartedAt = null;
+		// In-flight per-finish PB upsert promises. publishMapLeaderboard awaits
+		// these before issuing the just-played rank query so a still-pending
+		// upsert (especially the last finisher's, which awaits getDisplayName
+		// first) can't be missed from the overview rows.
+		this.pendingPbWrites = [];
 		//Server-authoritative background music ({mood, track}); null until a race starts
 		this.currentMusic = null;
 		//When currentMusic.track was last chosen, for the fallback rotation timer
@@ -389,6 +406,9 @@ class Game {
 			}
 			if (this.playerList[player].reachedGoal == true) {
 				playersConcluded++;
+				// Per-finish PB upsert (idempotent via the pbWritten flag, so
+				// firing every tick while reachedGoal stays true is harmless).
+				this.recordPlayerFinish(this.playerList[player]);
 				this.playerList[player].survivalist += 1;
 				if (this.gameBoard.brutalRound) {
 					this.playerList[player].brutalist += 1;
@@ -396,6 +416,13 @@ class Game {
 				if (this.firstPlaceSig == null) {
 					if (this.playerList[player].notches == this.notchesToWin) {
 						//Game over player wins
+						// Sweep up any OTHER racers who reached the goal on this
+						// same tick — gameOver's early-return below skips the rest
+						// of the iteration, and publishMapLeaderboard then clears
+						// raceStartedAt. Without this sweep, simultaneous finishers
+						// after the winner in playerList iteration order would never
+						// get recordPlayerFinish called and their PBs would be lost.
+						this.recordAllPendingFinishes();
 						this.gameOver(player);
 						return;
 					}
@@ -698,6 +725,15 @@ class Game {
 	startRace() {
 		console.log("Start Race");
 		this.currentState = this.stateMap.racing;
+		this.raceStartedAt = Date.now();
+		// Stamp the per-race start on every player so handleMapCellHit can
+		// compute the finishMs delta locally without reaching back through
+		// hostess->room->game (avoids a circular require from entities/).
+		for (var rid in this.playerList) {
+			if (this.playerList[rid] != null) {
+				this.playerList[rid].raceStartedAt = this.raceStartedAt;
+			}
+		}
 
 		// A few AI racers greet/hype as the gate opens (full emote range, not just taunts).
 		for (var gid in this.playerList) {
@@ -746,7 +782,48 @@ class Game {
 			this.setRoomMusic(mood, this.pickMusicTrack(mood, null));
 		}
 
-		messenger.messageRoomBySig(this.roomSig, "startRace", { music: this.currentMusic });
+		messenger.messageRoomBySig(this.roomSig, "startRace", { music: this.currentMusic, raceStartedAt: this.raceStartedAt });
+		this.publishCurrentMapLeaderboard();
+	}
+
+	// Async-fetch the current map's global top 10 and emit it to the room so
+	// the client can render the spectator mini-leaderboard during the race
+	// (and any racer who looks at the corner widget sees what they're chasing).
+	// Fire-and-forget; skipped for preview rooms and rooms without a map.
+	//
+	// Staleness guard: a slow Supabase response can return after the room has
+	// already advanced to a different map / state. Re-check the room is still
+	// on the same map before emitting, so the spectator widget never gets the
+	// previous race's leaderboard injected into the new race.
+	publishCurrentMapLeaderboard() {
+		if (this.gameBoard.isPreview) { return; }
+		var currentMap = this.gameBoard.currentMap;
+		if (currentMap == null || !currentMap.id) { return; }
+		var mapId = currentMap.id;
+		var mapName = currentMap.name || null;
+		var roomSig = this.roomSig;
+		var self = this;
+		(async function () {
+			var topRows = await leaderboard.getTopForMap(mapId, 10);
+			if (!self.isStillOnMap(mapId)) { return; }
+			messenger.messageRoomBySig(roomSig, 'mapLeaderboardCurrent', {
+				mapId: mapId,
+				mapName: mapName,
+				rows: topRows
+			});
+		})().catch(function (e) {
+			console.log('[leaderboard] current-map publish error:', e.message);
+		});
+	}
+
+	// True if the room's currently-loaded map still matches the given mapId.
+	// Used to gate every async leaderboard emit against the case where the
+	// Supabase round-trip finished after the room advanced — without this,
+	// a slow response would broadcast a previous-map payload into a new race
+	// or a previous-round PB float into an unrelated overview.
+	isStillOnMap(mapId) {
+		var cm = this.gameBoard.currentMap;
+		return cm != null && cm.id === mapId;
 	}
 
 	startOverview() {
@@ -755,6 +832,201 @@ class Game {
 		var nextMapID = this.gameBoard.determineNextMap();
 		this.collapseInitated = false;
 		messenger.messageRoomBySig(this.roomSig, 'startOverview', { notchUpdates: compressor.sendNotchUpdates(this.playerList), nextMapID: nextMapID });
+		this.publishMapLeaderboard();
+	}
+
+	// Per-finish PB upsert. Called every tick from checkForWinners on any player
+	// flagged reachedGoal — the pbWritten flag (set synchronously before any
+	// await) makes it idempotent so each finish writes exactly once even though
+	// the call site fires repeatedly. Runs the upsert + rank lookup + emits
+	// `playerPbResult` so the client can show a NEW PERSONAL / WORLD RECORD
+	// float over the kart that just finished. No-op for guests, bots, preview
+	// rooms, races that never started, and already-written finishes.
+	//
+	// Also called from Room.leave for disconnect-during-race so a player who
+	// finished and immediately quit still gets their PB saved.
+	recordPlayerFinish(p) {
+		if (p == null || p.isAI || !p.verifiedUserId) { return; }
+		if (!p.reachedGoal || !p.timeReached || p.pbWritten) { return; }
+		if (this.gameBoard.isPreview) { return; }
+		if (this.raceStartedAt == null) { return; }
+		var currentMap = this.gameBoard.currentMap;
+		if (currentMap == null || !currentMap.id) { return; }
+		var elapsed = p.timeReached - this.raceStartedAt;
+		if (!(elapsed > 0 && elapsed < 86400000)) { return; }
+		// Synchronous latch: subsequent ticks (or a disconnect-flush racing the
+		// in-flight upsert) see pbWritten=true and bail.
+		p.pbWritten = true;
+		var userId = p.verifiedUserId;
+		var playerId = p.id;
+		var mapId = currentMap.id;
+		var mapName = currentMap.name || null;
+		var roomSig = this.roomSig;
+		var self = this;
+		// Track the promise so publishMapLeaderboard can wait for in-flight PB
+		// writes to settle before issuing the round-end rank query — otherwise
+		// the very last finisher's PB read can run before their own upsert
+		// commits, omitting them from the overview rows.
+		var p_promise = (async function () {
+			try {
+				var name = await auth.getDisplayName(userId);
+				var upsert = await leaderboard.upsertBestTime(userId, mapId, elapsed, name);
+				// Only telegraph PB-improving finishes; a slower finish never floats.
+				if (!upsert.isNewRecord) { return; }
+				// Staleness guard: if the room has moved on to a different map
+				// before this async chain returns, the PB write is still valid
+				// but the float/banner would fire on the WRONG race. Skip emit.
+				if (!self.isStillOnMap(mapId)) { return; }
+				// World-record check: rank <= 10 globally on this map after the upsert.
+				var ranked = await leaderboard.getLeaderboardForPlayers(mapId, [userId]);
+				if (!self.isStillOnMap(mapId)) { return; } // re-check after second await
+				var myRank = (ranked[0] && ranked[0].rank) || null;
+				messenger.messageRoomBySig(roomSig, 'playerPbResult', {
+					playerId: playerId,
+					isNewRecord: true,
+					isWorldRecord: myRank != null && myRank <= 10,
+					finishMs: Math.round(elapsed),
+					rank: myRank,
+					// Display name + map name carried in the payload so the world-
+					// record screen-space banner doesn't have to round-trip through
+					// playerList lookups (the kart that finished can leave the
+					// scoreboard column before the banner finishes animating).
+					displayName: name,
+					mapName: mapName
+				});
+			} catch (e) {
+				console.log('[leaderboard] recordPlayerFinish failed:', e.message);
+			}
+		})();
+		this.pendingPbWrites.push(p_promise);
+		// Self-prune on settle so the array doesn't grow unbounded across
+		// many rounds. Using finally so both success and failure clean up.
+		p_promise.finally(function () {
+			var i = self.pendingPbWrites.indexOf(p_promise);
+			if (i !== -1) { self.pendingPbWrites.splice(i, 1); }
+		});
+	}
+
+	// Disconnect-during-race hook — same idempotent upsert path. Kept as a
+	// separate name so the call site in Room.leave reads as intent.
+	flushPendingFinishForPlayer(p) {
+		this.recordPlayerFinish(p);
+	}
+
+	// Sweep every reached-goal player and call recordPlayerFinish on any whose
+	// PB hasn't been written yet. Called just before gameOver() so the early
+	// return on a match-ending finish doesn't skip simultaneous finishers
+	// later in the playerList iteration order. The pbWritten flag makes this
+	// idempotent — players the loop already visited this tick are no-ops.
+	recordAllPendingFinishes() {
+		for (var pid in this.playerList) {
+			var p = this.playerList[pid];
+			if (p != null && p.reachedGoal && !p.pbWritten) {
+				this.recordPlayerFinish(p);
+			}
+		}
+	}
+
+	// Round-end leaderboard publish. PB upserts are NOT done here — they happen
+	// per-finish in recordPlayerFinish. This is just two read queries + emits:
+	//   * mapLeaderboardJustPlayed — one row per logged-in racer in this room
+	//     with a PB on the just-played map. Drives the inline rank/time shown
+	//     beside each notch row so the last finisher still glimpses their time.
+	//   * mapLeaderboardNextMap — global top 10 for the upcoming map, plus the
+	//     map's display name. Drives the "Times to beat for <name>" card under
+	//     the next-map preview. Empty rows -> client renders "New map!".
+	// Skipped for preview rooms, races that never started, and gameOver paths
+	// where there's no follow-on round (next-map fetch would be wasted).
+	publishMapLeaderboard() {
+		if (this.gameBoard.isPreview) { return; }
+		if (this.raceStartedAt == null) { return; }
+		var justPlayedMap = this.gameBoard.currentMap;
+		if (justPlayedMap == null || !justPlayedMap.id) { return; }
+		// Reset so a follow-on overview (e.g. AFK timer) can't double-publish.
+		this.raceStartedAt = null;
+
+		var justPlayedId = justPlayedMap.id;
+		var nextMap = this.gameBoard.nextMap;
+		var nextMapId = (nextMap && nextMap.id) ? nextMap.id : null;
+		var nextMapName = (nextMap && nextMap.name) ? nextMap.name : null;
+
+		// Logged-in racers currently in the room — used for the inline notch-row
+		// data on the just-played map. Bots and guests are filtered out.
+		var loggedInIds = [];
+		var userIdToPlayerId = {};
+		for (var pid in this.playerList) {
+			var p = this.playerList[pid];
+			if (p == null || p.isAI || !p.verifiedUserId) { continue; }
+			loggedInIds.push(p.verifiedUserId);
+			userIdToPlayerId[p.verifiedUserId] = pid;
+		}
+
+		var roomSig = this.roomSig;
+		var self = this;
+		// Snapshot the in-flight PB write promises and clear the live array so
+		// any writes that begin AFTER this snapshot (e.g. a stragglet flush)
+		// don't leak into the next round's await.
+		var inflightPbWrites = this.pendingPbWrites.slice();
+		this.pendingPbWrites = [];
+		(async function () {
+			// Wait for every per-finish upsert kicked off this round to settle
+			// before we read ranks. allSettled so one Supabase failure can't
+			// stall the whole publish.
+			if (inflightPbWrites.length > 0) {
+				await Promise.allSettled(inflightPbWrites);
+			}
+			// Just-played: rows for logged-in racers in this room that have a PB
+			// on the just-played map (the per-finish upserts ran already).
+			if (loggedInIds.length > 0) {
+				var ranked = await leaderboard.getLeaderboardForPlayers(justPlayedId, loggedInIds);
+				// Staleness guard: if the next race has already loaded a different
+				// map, this overview leaderboard would land on a screen where the
+				// just-played map is no longer "just played." Skip the emit; the
+				// PBs themselves were already saved per-finish.
+				if (self.isStillOnMap(justPlayedId)) {
+					var justRows = ranked.map(function (r) {
+						return {
+							userId: r.userId,
+							playerId: userIdToPlayerId[r.userId] || null,
+							displayName: r.displayName,
+							bestMs: r.bestMs,
+							rank: r.rank
+						};
+					});
+					justRows.sort(function (a, b) { return a.rank - b.rank; });
+					messenger.messageRoomBySig(roomSig, 'mapLeaderboardJustPlayed', {
+						mapId: justPlayedId,
+						rows: justRows
+					});
+				}
+			}
+			// Next map: global top 10 + name. Tag rows that belong to a current
+			// racer with their socket id so the client can highlight them.
+			if (nextMapId) {
+				var topRows = await leaderboard.getTopForMap(nextMapId, 10);
+				// Same staleness guard: skip if the room has moved past this
+				// overview onto a different map. The next-map card the client
+				// would otherwise render would be against the wrong context.
+				if (self.isStillOnMap(justPlayedId)) {
+					var rows = topRows.map(function (r) {
+						return {
+							userId: r.userId,
+							playerId: userIdToPlayerId[r.userId] || null,
+							displayName: r.displayName,
+							bestMs: r.bestMs,
+							rank: r.rank
+						};
+					});
+					messenger.messageRoomBySig(roomSig, 'mapLeaderboardNextMap', {
+						mapId: nextMapId,
+						mapName: nextMapName,
+						rows: rows
+					});
+				}
+			}
+		})().catch(function (e) {
+			console.log('[leaderboard] publish error:', e.message);
+		});
 	}
 	startCollapse(xloc, yloc) {
 		console.log("Start Collapse");
@@ -845,6 +1117,12 @@ class Game {
 		console.log("Game Over");
 		this.currentState = this.stateMap.gameOver;
 		messenger.messageRoomBySig(this.roomSig, 'startGameover', { winner: player, achievements: this.gatherAchievements() });
+		// The match-ending finish skips startOverview, but the player still
+		// crossed a goal — record their PB so a record-setting run on the final
+		// round isn't lost. The emitted mapLeaderboard message arrives during
+		// gameOver state where the card doesn't render; the PB is what matters
+		// here, and the next round's overview will reflect it.
+		this.publishMapLeaderboard();
 	}
 }
 Object.assign(Game.prototype, require('./music.js'), require('./achievements.js'));

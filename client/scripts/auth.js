@@ -126,14 +126,17 @@
     }
 
     // The signed-in profile other client code can read (e.g. the skin station):
-    // display name + avatar URL, or null when not signed in.
+    // display name + avatar URL, or null when not signed in. Never falls back
+    // to currentUser.email — `name` is broadcast to every racer in the room
+    // via setAvatarSkin, and email/password users would otherwise have their
+    // address shown above their kart and on the leaderboard.
     function getProfile() {
         if (!currentUser) {
             return null;
         }
         var meta = currentUser.user_metadata || {};
         return {
-            name: meta.full_name || meta.name || meta.user_name || currentUser.email || 'Player',
+            name: meta.full_name || meta.name || meta.user_name || 'Player',
             avatarUrl: meta.avatar_url || null
         };
     }

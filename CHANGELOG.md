@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- Signed-in players now have a **per-map global leaderboard**. Every time you reach the goal your best time on that map is saved, and the overview screen between rounds shows a card under the next-map preview listing every signed-in racer in the room — their global rank on this map and their personal-best time. Beat your own best and the row lights up gold with a **NEW!** badge.
 
 ## v0.22.1 — 2026-05-28
 
