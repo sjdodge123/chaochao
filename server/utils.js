@@ -228,9 +228,17 @@ exports.submitPullRequest = async function (map) {
         returnToClient.status = false;
         return returnToClient;
     } catch (e) {
+        // Log the real error (GitHub API / network / par-time, etc.) to the
+        // server console for debugging, but never surface raw exception text to
+        // the player — "getaddrinfo ENOTFOUND api.github.com" means nothing to
+        // them and can leak internals. Return one friendly, generic reason
+        // instead. (Deliberate, player-actionable messages — missing info,
+        // validation — are returned on their own paths above and reach the
+        // client unchanged.) Also note this no longer reads e.response, so a
+        // non-HTTP error can't throw back out of this catch.
         console.log(e);
         returnToClient.status = false;
-        returnToClient.message = e.response.data.message;
+        returnToClient.message = "Couldn't upload your map right now. Please try again in a moment.";
         return returnToClient;
     }
 
