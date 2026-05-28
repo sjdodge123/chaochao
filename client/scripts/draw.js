@@ -377,6 +377,205 @@ function getBlackoutHoleSprite() {
     blackoutHoleSprite = canvas;
     return canvas;
 }
+
+// ---- Cart skins (procedural overlay, drawn on top of the colored cart) ----
+// drawCartSkin builds a local coordinate space centered on the cart, rotated to
+// the player's heading and scaled so the cart radius == 1.0; "forward" (travel
+// direction) is +X. Each painter draws in that normalized space. Callers pass the
+// already-camera-adjusted screen center, so the camera offset is never double-applied.
+function getCartHeading(player) {
+    var vx = player.velX || 0;
+    var vy = player.velY || 0;
+    if (vx * vx + vy * vy > 0.01) {
+        return Math.atan2(vy, vx);
+    }
+    if (typeof player.angle === "number" && player.angle !== 0) {
+        return player.angle;
+    }
+    return -Math.PI / 2; // default: face up
+}
+
+function getCartSpeed(player) {
+    var vx = player.velX || 0;
+    var vy = player.velY || 0;
+    return Math.sqrt(vx * vx + vy * vy);
+}
+
+function drawCartSkin(player, centerX, centerY, radius, painter) {
+    var ctx = gameContext;
+    var heading = getCartHeading(player);
+    var speed = getCartSpeed(player);
+    // Animation runs faster while moving, but always ticks a little when idle.
+    var anim = cartSkinAnimTime * (0.6 + Math.min(speed, 6) * 0.5);
+    ctx.save();
+    ctx.translate(centerX, centerY);
+    ctx.rotate(heading);
+    ctx.scale(radius, radius);
+    painter(ctx, anim, speed);
+    ctx.restore();
+}
+
+// Rounded-rect path helper (CanvasRenderingContext2D.roundRect isn't available on
+// every target we support).
+function cartRoundRectPath(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.arcTo(x + w, y, x + w, y + r, r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+    ctx.lineTo(x + r, y + h);
+    ctx.arcTo(x, y + h, x, y + h - r, r);
+    ctx.lineTo(x, y + r);
+    ctx.arcTo(x, y, x + r, y, r);
+    ctx.closePath();
+}
+
+function drawFiretruckSkin(ctx, anim) {
+    // Normalized space (radius == 1), forward == +X. Five-Alarm monster truck:
+    // red body, white "5" badge, ladder, big wheels with spinning spokes.
+    var wheelR = 0.42;
+    var wheels = [
+        [0.5, 0.72],
+        [0.5, -0.72],
+        [-0.5, 0.72],
+        [-0.5, -0.72],
+    ];
+    for (var i = 0; i < wheels.length; i++) {
+        ctx.save();
+        ctx.translate(wheels[i][0], wheels[i][1]);
+        ctx.beginPath();
+        ctx.arc(0, 0, wheelR, 0, Math.PI * 2);
+        ctx.fillStyle = "#1a1a1a";
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(0, 0, wheelR * 0.45, 0, Math.PI * 2);
+        ctx.fillStyle = "#cfcfcf";
+        ctx.fill();
+        ctx.rotate(anim * 3); // spinning spokes
+        ctx.strokeStyle = "#555";
+        ctx.lineWidth = 0.06;
+        for (var s = 0; s < 4; s++) {
+            var a = (s * Math.PI) / 2;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(Math.cos(a) * wheelR * 0.85, Math.sin(a) * wheelR * 0.85);
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+
+    // Body.
+    ctx.fillStyle = "#d11f1f";
+    ctx.strokeStyle = "#7a0d0d";
+    ctx.lineWidth = 0.07;
+    cartRoundRectPath(ctx, -0.78, -0.52, 1.56, 1.04, 0.18);
+    ctx.fill();
+    ctx.stroke();
+
+    // Cab window (front, toward +X).
+    ctx.fillStyle = "#bfe6ff";
+    cartRoundRectPath(ctx, 0.28, -0.34, 0.4, 0.68, 0.08);
+    ctx.fill();
+
+    // Ladder rails + rungs.
+    ctx.strokeStyle = "#e8e8e8";
+    ctx.lineWidth = 0.05;
+    ctx.beginPath();
+    ctx.moveTo(-0.55, -0.18);
+    ctx.lineTo(0.15, -0.18);
+    ctx.moveTo(-0.55, 0.18);
+    ctx.lineTo(0.15, 0.18);
+    ctx.stroke();
+    for (var r = 0; r < 4; r++) {
+        var lx = -0.5 + r * 0.18;
+        ctx.beginPath();
+        ctx.moveTo(lx, -0.18);
+        ctx.lineTo(lx, 0.18);
+        ctx.stroke();
+    }
+
+    // White "5" badge.
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(-0.32, 0, 0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#d11f1f";
+    ctx.save();
+    ctx.font = "0.3px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.translate(-0.32, 0);
+    ctx.fillText("5", 0, 0.02);
+    ctx.restore();
+}
+
+function drawDinoSkin(ctx, anim) {
+    // Top-down dino: body, head toward +X, tail toward -X, four cycling legs.
+    var legSwing = Math.sin(anim * 4) * 0.22;
+
+    // Legs (under body).
+    ctx.fillStyle = "#2f7d32";
+    var legs = [
+        [0.28, 0.55, legSwing],
+        [-0.3, 0.55, -legSwing],
+        [0.28, -0.55, -legSwing],
+        [-0.3, -0.55, legSwing],
+    ];
+    for (var i = 0; i < legs.length; i++) {
+        ctx.beginPath();
+        ctx.ellipse(legs[i][0] + legs[i][2], legs[i][1], 0.16, 0.1, 0, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // Tail.
+    ctx.fillStyle = "#3a9d3e";
+    ctx.beginPath();
+    ctx.moveTo(-0.55, -0.18);
+    ctx.lineTo(-1.0, 0);
+    ctx.lineTo(-0.55, 0.18);
+    ctx.closePath();
+    ctx.fill();
+
+    // Body.
+    ctx.fillStyle = "#43b047";
+    ctx.strokeStyle = "#236626";
+    ctx.lineWidth = 0.06;
+    ctx.beginPath();
+    ctx.ellipse(-0.05, 0, 0.6, 0.45, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Spine plates.
+    ctx.fillStyle = "#2f7d32";
+    for (var p = 0; p < 3; p++) {
+        var px = -0.3 + p * 0.28;
+        ctx.beginPath();
+        ctx.moveTo(px - 0.1, 0);
+        ctx.lineTo(px, -0.22);
+        ctx.lineTo(px + 0.1, 0);
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    // Head.
+    ctx.fillStyle = "#43b047";
+    ctx.strokeStyle = "#236626";
+    ctx.beginPath();
+    ctx.ellipse(0.62, 0, 0.3, 0.26, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Eye.
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(0.72, -0.12, 0.07, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#111";
+    ctx.beginPath();
+    ctx.arc(0.74, -0.12, 0.035, 0, Math.PI * 2);
+    ctx.fill();
+}
 function getPlayerSprite(color, radius, strokeColor) {
     var key = color + '|' + radius + '|' + strokeColor;
     var cached = playerSpriteCache[key];
@@ -1940,7 +2139,11 @@ function drawMapTitle() {
     }
 }
 
+// Accumulated time (seconds) driving cart-skin animation (fire-truck wheel spin,
+// dino leg cycle). Advanced once per frame in drawPlayers, NOT per player.
+var cartSkinAnimTime = 0;
 function drawPlayers(dt) {
+    cartSkinAnimTime += dt || 0;
     // Draw remote players first, then ALL local players (the primary plus any
     // couch co-op slots) on top — so your own karts always read clearly over
     // other players' floating emojis and name labels.
@@ -2091,6 +2294,15 @@ function drawPlayer(player, dt) {
         // INSIDE the dim/immune alpha scope so it fades/flashes with the kart body
         // (non-local karts dim during a race; immune karts pulse) instead of popping.
         drawAvatarSkin(player, sprite);
+        // Cosmetic cart skin (procedural overlay), drawn on top of the base sprite
+        // (and avatar) so it reads as an equipped skin. Uses the SAME screen anchor
+        // as the sprite blit above (player.x/y + camera offset), so the camera
+        // offset is applied exactly once.
+        if (player.cartSkin === "firetruck") {
+            drawCartSkin(player, player.x + camera.getCameraX(), player.y + camera.getCameraY(), player.radius, drawFiretruckSkin);
+        } else if (player.cartSkin === "dino") {
+            drawCartSkin(player, player.x + camera.getCameraX(), player.y + camera.getCameraY(), player.radius, drawDinoSkin);
+        }
     } finally {
         if (dimKart) {
             gameContext.restore();
@@ -2786,7 +2998,16 @@ function drawTrail(player) {
     gameContext.lineWidth = dashed ? 4 : 3;
     gameContext.lineCap = "round";
     gameContext.lineJoin = "round";
-    gameContext.strokeStyle = player.color;
+    // Skin-aware trail: an equipped cart skin overrides the kart colour with a themed
+    // hue (fiery for the fire truck, earthy green for the dino). Alpha/fade-bucket and
+    // dashed-near-victory styling below are untouched — only the stroke colour changes.
+    var trailColor = player.color;
+    if (player.cartSkin === "firetruck") {
+        trailColor = "#ff5a1f";
+    } else if (player.cartSkin === "dino") {
+        trailColor = "#4caf3a";
+    }
+    gameContext.strokeStyle = trailColor;
     if (typeof perfGlow === "function" && perfGlow()) {
         gameContext.shadowBlur = 3;
         gameContext.shadowColor = "black";

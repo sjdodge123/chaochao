@@ -200,6 +200,7 @@ function newPlayerPacket(player) {
 	// Avatar-skin URL (null unless the player opted into the avatar skin). Static
 	// like name/title — spawn/append only, not per tick.
 	packet[12] = player.avatarUrl || null;
+	packet[13] = player.cartSkin || null;
 	return packet;
 }
 

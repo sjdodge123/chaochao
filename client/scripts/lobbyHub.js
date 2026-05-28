@@ -176,6 +176,8 @@ function stationPanelAction(lp, action) {
         closeStationPanel(lp);
     } else if (action === "pickAvatar") {
         stationPickAvatar(lp);
+    } else if (action != null && action.indexOf("cartskin:") === 0) {
+        stationPickCartSkin(lp, action.slice("cartskin:".length) || null);
     } else if (action != null && action.indexOf("pick:") === 0) {
         stationPickSkin(lp, action.slice(5));
     }
@@ -270,6 +272,13 @@ function flushLobbyAIEmit() {
 // --- skin station model ------------------------------------------------------
 
 var SKIN_COLS = 6; // swatches per row in the picker grid
+var CART_SKIN_CELL_H = 46; // height of a cart-skin picker cell
+// Cosmetic cart skins (available to everyone). id null == plain colored cart.
+var CART_SKIN_OPTIONS = [
+    { id: null, label: "Default" },
+    { id: "firetruck", label: "Fire Truck" },
+    { id: "dino", label: "Dino" },
+];
 
 function skinPalette() {
     return (typeof config !== "undefined" && config && Array.isArray(config.colorPalette))
@@ -669,7 +678,8 @@ function drawStationPanel(lp, sp) {
     if (kind === "skin") {
         var rows = Math.max(1, Math.ceil(skinOptionCount(lp) / SKIN_COLS));
         w = 272;
-        h = 78 + rows * 34;
+        // base swatch grid height + an extra row for the cart-skin picker.
+        h = 78 + rows * 34 + CART_SKIN_CELL_H + 8;
     }
     var x = lhClamp(sp.x - w / 2, 8, LOGICAL_WIDTH - w - 8);
     var y = lhClamp(sp.y - h - 46, 8, LOGICAL_HEIGHT - h - 8);
@@ -843,6 +853,85 @@ function drawSkinPanelBody(lp, x, y, w, h, hit) {
         gameContext.textAlign = "center";
         gameContext.font = "bold 13px sans-serif";
         gameContext.fillText("Colour taken", x + w / 2, y + h - 12);
+    }
+    // Cart-skin picker row, one row below the swatch/avatar grid. Cart skins are
+    // independent of colour/avatar and open to everyone, so this always shows.
+    var gridRows = Math.ceil(skinOptionCount(lp) / SKIN_COLS);
+    var csY = top + gridRows * (cell + gap) + gap;
+    drawCartSkinRow(lp, x + pad, csY, w - pad * 2, hit);
+}
+
+// Default / Fire Truck / Dino cells with a tiny procedural preview + label. Each
+// cell pushes a "cartskin:<id>" hit action, handled by stationPanelAction.
+function drawCartSkinRow(lp, x, y, w, hit) {
+    var ch = CART_SKIN_CELL_H;
+    var n = CART_SKIN_OPTIONS.length;
+    var cgap = 8;
+    var cellW = (w - cgap * (n - 1)) / n;
+    var current = currentCartSkin(lp);
+    for (var i = 0; i < n; i++) {
+        var opt = CART_SKIN_OPTIONS[i];
+        var cx = x + i * (cellW + cgap);
+        var sel = current === opt.id;
+        gameContext.fillStyle = sel ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.06)";
+        lhRoundRect(gameContext, cx, y, cellW, ch, 6);
+        gameContext.fill();
+        gameContext.lineWidth = sel ? 2 : 1;
+        gameContext.strokeStyle = sel ? "#ffd34d" : "rgba(255,255,255,0.2)";
+        lhRoundRect(gameContext, cx, y, cellW, ch, 6);
+        gameContext.stroke();
+        drawCartSkinPreview(opt.id, cx + cellW / 2, y + ch * 0.34, ch * 0.22);
+        gameContext.fillStyle = "#fff";
+        gameContext.font = "11px sans-serif";
+        gameContext.textAlign = "center";
+        gameContext.textBaseline = "middle";
+        gameContext.fillText(opt.label, cx + cellW / 2, y + ch * 0.76);
+        hit.options.push({ rect: { x: cx, y: y, w: cellW, h: ch }, action: "cartskin:" + (opt.id == null ? "" : opt.id) });
+    }
+}
+
+// Tiny procedural preview swatch for a cart-skin cell.
+function drawCartSkinPreview(id, cx, cy, r) {
+    if (id === "firetruck") {
+        gameContext.fillStyle = "#d11f1f";
+        gameContext.fillRect(cx - r, cy - r * 0.6, r * 2, r * 1.2);
+        gameContext.fillStyle = "#1a1a1a";
+        gameContext.beginPath();
+        gameContext.arc(cx - r * 0.6, cy + r * 0.6, r * 0.4, 0, Math.PI * 2);
+        gameContext.arc(cx + r * 0.6, cy + r * 0.6, r * 0.4, 0, Math.PI * 2);
+        gameContext.fill();
+    } else if (id === "dino") {
+        gameContext.fillStyle = "#43b047";
+        gameContext.beginPath();
+        gameContext.ellipse(cx - r * 0.2, cy, r * 0.9, r * 0.6, 0, 0, Math.PI * 2);
+        gameContext.fill();
+        gameContext.beginPath();
+        gameContext.ellipse(cx + r * 0.7, cy - r * 0.1, r * 0.4, r * 0.35, 0, 0, Math.PI * 2);
+        gameContext.fill();
+    } else {
+        gameContext.fillStyle = "rgba(255,255,255,0.4)";
+        gameContext.beginPath();
+        gameContext.arc(cx, cy, r * 0.7, 0, Math.PI * 2);
+        gameContext.fill();
+    }
+}
+
+// This local player's currently-equipped cart skin (server-authoritative), else null.
+function currentCartSkin(lp) {
+    var p = (lp && lp.myID != null && typeof playerList !== "undefined" && playerList) ? playerList[lp.myID] : null;
+    return (p && p.cartSkin) || null;
+}
+
+// Commit a cart-skin pick: emit on this slot's own socket. The change lands for
+// everyone via playerCartSkinChanged. "" clears back to the plain colored cart.
+function stationPickCartSkin(lp, skinId) {
+    if (!lp || !lp.socket) {
+        return;
+    }
+    lp.socket.emit("setCartSkin", { cartSkin: skinId || null });
+    var p = (lp.myID != null && typeof playerList !== "undefined" && playerList) ? playerList[lp.myID] : null;
+    if (p) {
+        p.cartSkin = skinId || null; // optimistic local update
     }
 }
 

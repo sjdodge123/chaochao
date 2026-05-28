@@ -426,6 +426,29 @@ function checkForMail(client) {
 		messageRoomBySig(room.sig, "playerAvatarChanged", { id: client.id, avatarUrl: player.avatarUrl, name: player.name });
 	});
 
+	// Cosmetic cart skin (procedural overlay). Independent of color/avatar: equipping
+	// one does NOT clear them. Available to everyone (no ownership gating yet).
+	// Validated against an allowlist; "" / null clears back to the plain colored cart.
+	client.on('setCartSkin', function (payload) {
+		var room = hostess.getRoomBySig(roomMailList[client.id]);
+		if (room == undefined || room.game.currentState != c.stateMap.lobby) {
+			return;
+		}
+		var player = room.playerList[client.id];
+		if (player == null) {
+			return;
+		}
+		var cartSkin = payload && payload.cartSkin;
+		var allowed = ["firetruck", "dino"];
+		if (cartSkin === "" || cartSkin == null) {
+			cartSkin = null;
+		} else if (allowed.indexOf(cartSkin) === -1) {
+			return; // unknown skin id
+		}
+		player.cartSkin = cartSkin;
+		messageRoomBySig(room.sig, "playerCartSkinChanged", { id: client.id, cartSkin: player.cartSkin });
+	});
+
 	// Lobby AI station: set the room-wide bot override. { auto:true } => clear the
 	// override back to Auto (triangular-tier fill); enabled:false => no bots next
 	// race; enabled:true + count => exactly `count` bots. Lobby-only; last-writer-
