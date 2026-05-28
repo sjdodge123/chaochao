@@ -2371,9 +2371,32 @@
       "angle": 90
     }
   ],
-  "lobbyOnly": true,
+  "id": "lobbyTutorialIslandsV1",
   "name": "LobbyTutorial",
   "author": "system",
-  "id": "lobbyTutorialIslandsV1",
-  "email": ""
+  "email": "",
+  "lobbyOnly": true,
+  "spawnPad": {
+    "cx": 175,
+    "cy": 384,
+    "r": 75
+  },
+  "stations": [
+    {
+      "id": "ai",
+      "kind": "ai",
+      "cx": 920,
+      "cy": 384,
+      "r": 60,
+      "color": "#3ad17a"
+    },
+    {
+      "id": "skin",
+      "kind": "skin",
+      "cx": 450,
+      "cy": 384,
+      "r": 60,
+      "color": "#4aa3ff"
+    }
+  ]
 }
