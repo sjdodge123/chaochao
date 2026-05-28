@@ -1,0 +1,47 @@
+name: CodeQL
+
+# Static security analysis (SAST) for the JavaScript on both sides of the wire.
+# The motivating surface: the unauthenticated `submitNewMap` socket event flows
+# user input into a GITHUB_AUTH-backed PR-creation path (utils.submitPullRequest),
+# so CodeQL's injection / taint-tracking queries are directly relevant here.
+# Runs on PRs into main, pushes to main, and a weekly schedule so newly-shipped
+# queries re-scan the existing tree.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Mondays 09:30 UTC — staggered after the dependency audit.
+    - cron: "30 9 * * 1"
+  workflow_dispatch:
+
+jobs:
+  analyze:
+    name: Analyze JavaScript
+    runs-on: ubuntu-latest
+    permissions:
+      # Required for CodeQL to upload results to the Security tab.
+      security-events: write
+      contents: read
+      actions: read
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          # security-and-quality adds maintainability queries on top of the
+          # default security set; drop to `security-extended` if it gets noisy.
+          queries: security-and-quality
+
+      # No build step: this is an interpreted JS codebase, so CodeQL extracts
+      # straight from source. (The esbuild bundles in client/scripts/dist/ are
+      # generated output and .gitignored, so there's nothing to compile here.)
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
