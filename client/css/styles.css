@@ -664,23 +664,6 @@ div.map-image img {
     height: auto;
 }
 
-/* The "Load from JSON file" tile has no thumbnail image, so give it a box that
-   matches the square-ish footprint of a rendered map thumbnail beside it. */
-.load-file-thumb {
-    width: 100%;
-    height: 192px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background-color: rgba(127, 127, 127, 0.18);
-    border-radius: 4px;
-}
-.load-file-status {
-    font-size: 12px;
-    text-align: center;
-    padding: 4px;
-}
-
 div.desc {
     font-size: 12px;
     padding: 7px;
