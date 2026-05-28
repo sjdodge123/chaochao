@@ -383,6 +383,37 @@ function getBlackoutHoleSprite() {
 // the player's heading and scaled so the cart radius == 1.0; "forward" (travel
 // direction) is +X. Each painter draws in that normalized space. Callers pass the
 // already-camera-adjusted screen center, so the camera offset is never double-applied.
+// Resolve any CSS colour (palette name/hex/colour-blind remap) to {r,g,b} by
+// painting one pixel and reading it back — works for ANY colour without parsing.
+// Cached; the palette is ~22 colours so this stays tiny.
+var _cartSkinRGB = {};
+function cartSkinRGB(color) {
+    if (_cartSkinRGB[color] != null) {
+        return _cartSkinRGB[color];
+    }
+    var c = document.createElement("canvas");
+    c.width = c.height = 1;
+    var cx = c.getContext("2d");
+    cx.fillStyle = "#000";   // fallback if `color` is invalid
+    cx.fillStyle = color;
+    cx.fillRect(0, 0, 1, 1);
+    var d = cx.getImageData(0, 0, 1, 1).data;
+    var rgb = { r: d[0], g: d[1], b: d[2] };
+    _cartSkinRGB[color] = rgb;
+    return rgb;
+}
+// Lighten (amt>0, toward white) / darken (amt<0, toward black) a colour by a 0..1
+// fraction, so one picked colour fans out into body/outline/leg shades.
+function cartSkinShade(color, amt) {
+    var c = cartSkinRGB(color);
+    var t = amt < 0 ? 0 : 255;
+    var f = amt < 0 ? -amt : amt;
+    return "rgb(" +
+        Math.round(c.r + (t - c.r) * f) + "," +
+        Math.round(c.g + (t - c.g) * f) + "," +
+        Math.round(c.b + (t - c.b) * f) + ")";
+}
+
 function getCartHeading(player) {
     var vx = player.velX || 0;
     var vy = player.velY || 0;
@@ -411,7 +442,7 @@ function drawCartSkin(player, centerX, centerY, radius, painter) {
     ctx.translate(centerX, centerY);
     ctx.rotate(heading);
     ctx.scale(radius, radius);
-    painter(ctx, anim, speed);
+    painter(ctx, anim, (player && player.color) ? player.color : null);
     ctx.restore();
 }
 
@@ -431,9 +462,11 @@ function cartRoundRectPath(ctx, x, y, w, h, r) {
     ctx.closePath();
 }
 
-function drawFiretruckSkin(ctx, anim) {
-    // Normalized space (radius == 1), forward == +X. Five-Alarm monster truck:
-    // red body, white "5" badge, ladder, big wheels with spinning spokes.
+function drawFiretruckSkin(ctx, anim, paint) {
+    // Normalized space (radius == 1), forward == +X. Five-Alarm monster truck,
+    // painted in the player's chosen cart colour (tinted body + darker outline),
+    // white "5" badge, ladder, big wheels with spinning spokes.
+    paint = paint || "#d11f1f";
     var wheelR = 0.42;
     var wheels = [
         [0.5, 0.72],
@@ -465,9 +498,9 @@ function drawFiretruckSkin(ctx, anim) {
         ctx.restore();
     }
 
-    // Body.
-    ctx.fillStyle = "#d11f1f";
-    ctx.strokeStyle = "#7a0d0d";
+    // Body (player colour) with a darker outline of the same hue.
+    ctx.fillStyle = cartSkinShade(paint, -0.05);
+    ctx.strokeStyle = cartSkinShade(paint, -0.45);
     ctx.lineWidth = 0.07;
     cartRoundRectPath(ctx, -0.78, -0.52, 1.56, 1.04, 0.18);
     ctx.fill();
@@ -500,7 +533,7 @@ function drawFiretruckSkin(ctx, anim) {
     ctx.beginPath();
     ctx.arc(-0.32, 0, 0.2, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = "#d11f1f";
+    ctx.fillStyle = cartSkinShade(paint, -0.05);
     ctx.save();
     ctx.font = "0.3px sans-serif";
     ctx.textAlign = "center";
@@ -510,12 +543,14 @@ function drawFiretruckSkin(ctx, anim) {
     ctx.restore();
 }
 
-function drawDinoSkin(ctx, anim) {
-    // Top-down dino: body, head toward +X, tail toward -X, four cycling legs.
+function drawDinoSkin(ctx, anim, paint) {
+    // Top-down dino painted in the player's chosen cart colour (tinted body/limbs,
+    // darker legs + spine of the same hue). Head toward +X, tail toward -X.
+    paint = paint || "#43b047";
     var legSwing = Math.sin(anim * 4) * 0.22;
 
     // Legs (under body).
-    ctx.fillStyle = "#2f7d32";
+    ctx.fillStyle = cartSkinShade(paint, -0.35);
     var legs = [
         [0.28, 0.55, legSwing],
         [-0.3, 0.55, -legSwing],
@@ -529,7 +564,7 @@ function drawDinoSkin(ctx, anim) {
     }
 
     // Tail.
-    ctx.fillStyle = "#3a9d3e";
+    ctx.fillStyle = cartSkinShade(paint, -0.12);
     ctx.beginPath();
     ctx.moveTo(-0.55, -0.18);
     ctx.lineTo(-1.0, 0);
@@ -538,8 +573,8 @@ function drawDinoSkin(ctx, anim) {
     ctx.fill();
 
     // Body.
-    ctx.fillStyle = "#43b047";
-    ctx.strokeStyle = "#236626";
+    ctx.fillStyle = paint;
+    ctx.strokeStyle = cartSkinShade(paint, -0.45);
     ctx.lineWidth = 0.06;
     ctx.beginPath();
     ctx.ellipse(-0.05, 0, 0.6, 0.45, 0, 0, Math.PI * 2);
@@ -547,7 +582,7 @@ function drawDinoSkin(ctx, anim) {
     ctx.stroke();
 
     // Spine plates.
-    ctx.fillStyle = "#2f7d32";
+    ctx.fillStyle = cartSkinShade(paint, -0.35);
     for (var p = 0; p < 3; p++) {
         var px = -0.3 + p * 0.28;
         ctx.beginPath();
@@ -559,8 +594,8 @@ function drawDinoSkin(ctx, anim) {
     }
 
     // Head.
-    ctx.fillStyle = "#43b047";
-    ctx.strokeStyle = "#236626";
+    ctx.fillStyle = paint;
+    ctx.strokeStyle = cartSkinShade(paint, -0.45);
     ctx.beginPath();
     ctx.ellipse(0.62, 0, 0.3, 0.26, 0, 0, Math.PI * 2);
     ctx.fill();
