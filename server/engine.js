@@ -731,25 +731,62 @@ function emptyCellAt(x, y, map) {
 	}
 	return null;
 }
-// Bounce a player off an empty hole the same way the world edge stops them: a
-// projected move that would carry the player's center into a hole is reverted and
-// the velocity reversed + damped (matching preventEscape's player-edge feel).
+// Nearest non-empty (solid) cell to a point — the ground to steer a stranded player
+// back toward. O(cells), but only runs when a player is actually inside a hole, which
+// the rim bounce below normally prevents.
+function nearestSolidCell(x, y, map) {
+	var cells = map.cells, eid = c.tileMap.empty.id, best = Infinity, bestCell = null;
+	for (var i = 0; i < cells.length; i++) {
+		if (cells[i].id === eid) {
+			continue;
+		}
+		var s = cells[i].site, dx = s.x - x, dy = s.y - y, d = dx * dx + dy * dy;
+		if (d < best) { best = d; bestCell = cells[i]; }
+	}
+	return bestCell;
+}
+// Keep players out of empty holes the way the world edge stops them. Two cases:
+//   1. On solid ground, projected move would enter a hole -> stop at the rim and
+//      bounce back (reverse + damp), matching preventEscape's player-edge feel.
+//   2. Already inside a hole (a hard punch/knockback flung the center past the rim,
+//      or a spawn landed there) -> DON'T just reverse velocity; that oscillates and
+//      bleeds energy, leaving the player stranded in the void. Redirect this tick's
+//      step straight at the nearest solid ground and point their velocity that way,
+//      so they consistently climb back out.
 var EMPTY_BOUNCE_DAMP = 0.25;
 function bounceOffEmptyCells(player, map) {
 	if (!mapHasEmptyCells(map)) {
 		return; // no holes on this map — skip the per-tick lookup entirely
 	}
+	if (emptyCellAt(player.x, player.y, map) != null) {
+		// Case 2: stranded inside a hole — eject toward solid ground.
+		var solid = nearestSolidCell(player.x, player.y, map);
+		if (solid != null) {
+			var ex = solid.site.x - player.x, ey = solid.site.y - player.y;
+			var em = Math.sqrt(ex * ex + ey * ey);
+			if (em > 1e-6) {
+				var ux = ex / em, uy = ey / em;
+				// Redirect this tick's already-integrated displacement toward solid
+				// (same length, new heading) instead of letting it carry deeper. Cap
+				// the step at the distance to the target so a big knockback step can't
+				// overshoot the solid cell into a hole on its far side and zig-zag.
+				var sx = player.newX - player.x, sy = player.newY - player.y;
+				var step = Math.min(Math.sqrt(sx * sx + sy * sy), em);
+				player.newX = player.x + ux * step;
+				player.newY = player.y + uy * step;
+				player.velX = ux * player.maxVelocity;
+				player.velY = uy * player.maxVelocity;
+			}
+		}
+		player.bounced = true;
+		return;
+	}
 	if (emptyCellAt(player.newX, player.newY, map) == null) {
-		return; // projected position stays on solid ground
+		return; // on solid ground and the projected move stays on solid ground
 	}
-	// Don't pin a player who is *already* inside a hole (a hard punch can fling one
-	// clean past the rim in a single tick) — pinning would freeze them in the void.
-	// Reversing the velocity still pushes them back toward solid ground over the
-	// next ticks.
-	if (emptyCellAt(player.x, player.y, map) == null) {
-		player.newX = player.x;
-		player.newY = player.y;
-	}
+	// Case 1: outside -> inside. Stop at the rim and bounce back.
+	player.newX = player.x;
+	player.newY = player.y;
 	player.velX = -player.velX * EMPTY_BOUNCE_DAMP;
 	player.velY = -player.velY * EMPTY_BOUNCE_DAMP;
 	player.bounced = true;
