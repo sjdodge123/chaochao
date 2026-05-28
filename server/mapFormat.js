@@ -99,13 +99,34 @@ function toSitesOnly(fullMap) {
 // with site/halfedges/edge/va/vb, plus the carried metadata), so every consumer
 // is unchanged. Throws on a degenerate site set (a duplicate site produces no
 // cell), which the migration treats as "keep this map in full format".
+// Runtime cap on cells/sites — mirrored from .github/scripts/validate-submitted-map.js
+// (the offline PR validator), where it's documented as "largest committed map is
+// 470; this is generous headroom". Enforced here so a crafted preview/submit can
+// never reach voronoi.compute on the shared server process with a giant payload.
+var MAX_MAP_CELLS = 2500;
+
 function reconstruct(sitesMap) {
     if (sitesMap.bbox == null || !Array.isArray(sitesMap.sites)) {
         throw new Error('reconstruct: map is missing bbox or sites');
     }
+    if (sitesMap.sites.length > MAX_MAP_CELLS) {
+        throw new Error('reconstruct: too many sites (' + sitesMap.sites.length + ' > ' + MAX_MAP_CELLS + ')');
+    }
+    // Voronoi compute is undefined on non-finite or inverted bboxes — guard so
+    // a crafted bbox can't produce garbage cells or hang the algorithm.
+    var bb = sitesMap.bbox;
+    if (!Number.isFinite(bb.xl) || !Number.isFinite(bb.xr) ||
+        !Number.isFinite(bb.yt) || !Number.isFinite(bb.yb) ||
+        bb.xr <= bb.xl || bb.yb <= bb.yt) {
+        throw new Error('reconstruct: invalid bbox');
+    }
     var siteObjs = new Array(sitesMap.sites.length);
     for (var i = 0; i < sitesMap.sites.length; i++) {
-        siteObjs[i] = { x: sitesMap.sites[i].x, y: sitesMap.sites[i].y };
+        var s = sitesMap.sites[i];
+        if (s == null || !Number.isFinite(s.x) || !Number.isFinite(s.y)) {
+            throw new Error('reconstruct: site ' + i + ' has non-finite coordinates');
+        }
+        siteObjs[i] = { x: s.x, y: s.y };
     }
     var diagram = new Voronoi().compute(siteObjs, sitesMap.bbox);
     // rhill's Diagram constructor leaves a vestigial top-level `site` (null, never
@@ -129,4 +150,4 @@ function hydrate(map) {
     return isSitesOnly(map) ? reconstruct(map) : map;
 }
 
-module.exports = { isSitesOnly: isSitesOnly, reconstruct: reconstruct, toSitesOnly: toSitesOnly, deriveBbox: deriveBbox, hydrate: hydrate };
+module.exports = { isSitesOnly: isSitesOnly, reconstruct: reconstruct, toSitesOnly: toSitesOnly, deriveBbox: deriveBbox, hydrate: hydrate, MAX_MAP_CELLS: MAX_MAP_CELLS };
