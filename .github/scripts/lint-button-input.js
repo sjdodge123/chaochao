@@ -37,8 +37,6 @@ const ALLOWLIST = [
       why: 'icon emoji-cancel link (has aria-label); reachable via gamepad.js "#emojiMenu a"' },
     { page: 'create.html', match: (e) => e.id === 'createNew', skip: ['class'],
       why: 'id-styled "Create a new map" tile; reachable via editorGamepad "#loadWindow button"' },
-    { page: 'create.html', match: (e) => e.id === 'loadFromFileButton', skip: ['class'],
-      why: 'id-styled "Load from JSON file" load-window tile (sibling of createNew); reachable via data-gp-nav' },
 ];
 
 function attr(s, n) {

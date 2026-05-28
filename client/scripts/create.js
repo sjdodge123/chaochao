@@ -198,46 +198,6 @@ function loadMapById(id) {
     }
 }
 
-// Transient feedback for the "Load from JSON file" tile (the load window has no
-// #exportStatus, which lives in the editor panel). Mirrors showExportStatus.
-var loadFileStatusTimer = null;
-function showLoadFileStatus(message, color) {
-    var el = $("#loadFileStatus");
-    el.text(message).css("color", color).show();
-    if (loadFileStatusTimer) { clearTimeout(loadFileStatusTimer); }
-    loadFileStatusTimer = setTimeout(function () { el.hide(); }, 4000);
-}
-
-// Load a map from raw .json text the player saved off. Accepts either a bare
-// map object or the { map: {...} } wrapper the preview path uses, and only
-// requires a cells array — same permissiveness as loadMapById, which doesn't
-// re-validate library maps either (submit/preview is the real trust boundary).
-function loadMapFromFile(text) {
-    var parsed = null;
-    try {
-        parsed = JSON.parse(text);
-    } catch (e) {
-        showLoadFileStatus("That file isn't valid JSON.", "red");
-        return;
-    }
-    if (parsed != null && parsed.map != null && Array.isArray(parsed.map.cells)) {
-        parsed = parsed.map;
-    }
-    if (parsed == null || !Array.isArray(parsed.cells) || parsed.cells.length === 0) {
-        showLoadFileStatus("That file isn't a chaochao map.", "red");
-        return;
-    }
-    vMap = parsed;
-    syncStartEdgesFromMap();
-    $('#author').val(vMap.author || "");
-    $('#name').val(vMap.name || "");
-    setSelectedObject(null);
-    clearHistory();
-    mapModified = false;
-    mapReady = true;
-    showEditor();
-}
-
 function clientConnect() {
     var server = io();
 
@@ -559,25 +519,6 @@ function setupPage() {
         showLoadWindow();
         removeListeners();
         return false;
-    });
-
-    // Load a map from a .json file the player saved off (e.g. the "Copy to
-    // clipboard" export, pasted into a file). The button just opens the native
-    // file picker; the actual load happens in the input's change handler.
-    $("#loadFromFileButton").on("click", function () {
-        $("#loadFileStatus").hide();
-        $("#loadFromFileInput").trigger("click");
-        return false;
-    });
-    $("#loadFromFileInput").on("change", function (e) {
-        var file = e.target && e.target.files ? e.target.files[0] : null;
-        if (file == null) { return; }
-        var reader = new FileReader();
-        reader.onload = function (ev) { loadMapFromFile(ev.target.result); };
-        reader.onerror = function () { showLoadFileStatus("Couldn't read that file.", "red"); };
-        reader.readAsText(file);
-        // Clear the value so picking the same file again still fires "change".
-        this.value = "";
     });
     window.addEventListener('contextmenu', suppressContextMenu, false);
     window.addEventListener('resize', resize, false);
