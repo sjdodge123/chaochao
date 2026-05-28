@@ -113,17 +113,37 @@ function effectiveStartEdges(map) {
 
 function isFiniteNum(n) { return typeof n === 'number' && isFinite(n); }
 
+// The playable surface, clamped to the world. The voronoi cells only cover the
+// map's bbox, which CAN be inset from the world edge (e.g. a "bottom"-start map
+// whose surface stops short of y=worldHeight). Sampling gate origins along the
+// raw world edge then lands them in that empty margin, where nearestCellIndex
+// snaps each to a far interior/corner cell — so the rendered lines appear to
+// start from random points mid-map instead of the gate. deriveBbox recovers the
+// surface bounds from the cell polygons (reconstruct() drops the bbox field).
+function playableBounds(map) {
+    const W = config.worldWidth, H = config.worldHeight;
+    let b = null;
+    try { b = mapFormat.deriveBbox(map); } catch (e) { b = null; }
+    if (!b || !isFiniteNum(b.xl) || !isFiniteNum(b.yt) || !isFiniteNum(b.xr) || !isFiniteNum(b.yb) || b.xr <= b.xl || b.yb <= b.yt) {
+        return { xl: 0, yt: 0, xr: W, yb: H };
+    }
+    return { xl: Math.max(0, b.xl), yt: Math.max(0, b.yt), xr: Math.min(W, b.xr), yb: Math.min(H, b.yb) };
+}
+
 // Sample a handful of start positions along an edge's gate (inset from the edge
-// and its ends), mirroring where racers actually gate. ~half of GATE_DEPTH in.
-function gateOrigins(edge) {
-    const W = config.worldWidth, H = config.worldHeight, IN = 40, N = 6;
-    const lin = (a, b) => { const out = []; for (let i = 0; i < N; i++) { out.push(a + (b - a) * (i / (N - 1))); } return out; };
+// and its ends), mirroring where racers actually gate. Sampled along the PLAYABLE
+// surface edge (not the world edge) and inset ~half of GATE_DEPTH, so every origin
+// sits inside a real cell near the gate rather than in the empty world margin.
+function gateOrigins(edge, map) {
+    const IN = 40, N = 6;
+    const b = playableBounds(map);
+    const lin = (a, c2) => { const out = []; for (let i = 0; i < N; i++) { out.push(a + (c2 - a) * (i / (N - 1))); } return out; };
     switch (edge) {
-        case 'right':  return lin(IN, H - IN).map(y => ({ x: W - IN, y }));
-        case 'top':    return lin(IN, W - IN).map(x => ({ x, y: IN }));
-        case 'bottom': return lin(IN, W - IN).map(x => ({ x, y: H - IN }));
+        case 'right':  return lin(b.yt + IN, b.yb - IN).map(y => ({ x: b.xr - IN, y }));
+        case 'top':    return lin(b.xl + IN, b.xr - IN).map(x => ({ x, y: b.yt + IN }));
+        case 'bottom': return lin(b.xl + IN, b.xr - IN).map(x => ({ x, y: b.yb - IN }));
         case 'left':
-        default:       return lin(IN, H - IN).map(y => ({ x: IN, y }));
+        default:       return lin(b.yt + IN, b.yb - IN).map(y => ({ x: b.xl + IN, y }));
     }
 }
 
@@ -158,7 +178,7 @@ function competingPaths(map) {
     for (const c of map.cells) { if (c && c.site) { siteById[c.site.voronoiId] = { x: c.site.x, y: c.site.y }; } }
 
     const origins = [];
-    for (const edge of effectiveStartEdges(map)) { origins.push(...gateOrigins(edge)); }
+    for (const edge of effectiveStartEdges(map)) { origins.push(...gateOrigins(edge, map)); }
 
     const cands = [];
     for (let i = 0; i < origins.length; i++) {
@@ -174,7 +194,7 @@ function competingPaths(map) {
         if (route && Array.isArray(route.path) && route.path.length >= 2) {
             let secs = 0;
             try { secs = cellGraph.estimatePathTime(map, route.path) || 0; } catch (e) { secs = 0; }
-            if (secs > 0) { cands.push({ path: route.path, seconds: secs }); }
+            if (secs > 0) { cands.push({ path: route.path, seconds: secs, origin: origins[i] }); }
         }
     }
 
@@ -191,16 +211,29 @@ function competingPaths(map) {
             const uni = setC.size + ch.set.size - inter;
             if (uni > 0 && inter / uni > ROUTE_DEDUPE_OVERLAP) { dup = true; break; }
         }
-        if (!dup) { chosen.push({ path: c.path, seconds: c.seconds, set: setC }); }
+        if (!dup) { chosen.push({ path: c.path, seconds: c.seconds, set: setC, origin: c.origin }); }
         if (chosen.length >= MAX_ROUTES) { break; }
     }
 
-    return chosen.map((c, i) => ({
-        label: i === 0 ? 'Fastest line' : 'Alt ' + String.fromCharCode(64 + i), // Alt A, Alt B…
-        seconds: +c.seconds.toFixed(1),
-        color: ROUTE_COLORS[i % ROUTE_COLORS.length].name,
-        points: c.path.map(id => siteById[id]).filter(Boolean)
-    }));
+    return chosen.map((c, i) => {
+        const sitePts = c.path.map(id => siteById[id]).filter(Boolean);
+        // Anchor the rendered line at its gate origin so it visibly starts ON the
+        // gate (inside the playfield, spread across the start edge) rather than at
+        // the first cell SITE, which is the cell's centroid set in from the edge —
+        // and, when the gate sits over a no-cell margin, can be a far interior cell.
+        // The origin lies in path[0]'s own cell, so this segment stays inside the
+        // surface. Skip it if origin ≈ first site (no visible gap to bridge).
+        const first = sitePts[0];
+        const points = (first && c.origin && Math.hypot(first.x - c.origin.x, first.y - c.origin.y) > 1)
+            ? [{ x: c.origin.x, y: c.origin.y }, ...sitePts]
+            : sitePts;
+        return {
+            label: i === 0 ? 'Fastest line' : 'Alt ' + String.fromCharCode(64 + i), // Alt A, Alt B…
+            seconds: +c.seconds.toFixed(1),
+            color: ROUTE_COLORS[i % ROUTE_COLORS.length].name,
+            points
+        };
+    });
 }
 
 function deepValidate(map) {
