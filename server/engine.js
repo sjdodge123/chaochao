@@ -452,20 +452,6 @@ function bounceOffBoundry(obj, bound) {
 
 function punchPlayer(player, punch) {
 	var distance = utils.getMag(punch.x - player.x, punch.y - player.y);
-	if (punch.directional && punch.angle != null) {
-		// Directional punch: shove the victim along the AIM direction (where the puncher
-		// is facing), keeping the same inverse-square magnitude as before. The hitbox sits
-		// punchReach in FRONT of the puncher, so radial "away from the hitbox center" points
-		// the wrong way (back toward the puncher) when the target is closer than that reach
-		// — a point-blank shove would fling them backward. Locking knockback to the aim
-		// makes them always go where you pointed.
-		if (distance < 1) { distance = 1; }
-		var force = (forceConstant / (distance * distance)) * punch.getBonus();
-		var rad = punch.angle * Math.PI / 180;
-		player.velX += Math.cos(rad) * force;
-		player.velY += Math.sin(rad) * force;
-		return;
-	}
 	var velCont = _calcVelCont(distance, player, punch.x, punch.y);
 	player.velX += velCont.velContX * punch.getBonus();
 	player.velY += velCont.velContY * punch.getBonus();
@@ -542,16 +528,19 @@ function cutPlayer(p2, p1, angle) {
 }
 
 function _calcVelCont(distance, object, x, y) {
-	if (distance == 0) {
-		distance = 1;
-	}
 	var xDist = object.x - x;
 	var yDist = object.y - y;
-	if (xDist == 0) {
-		xDist = utils.getRandomInt(-4, 4);
-	}
-	if (yDist == 0) {
-		yDist = utils.getRandomInt(-4, 4);
+	// Essentially overlapping (a radial punch on a stacked kart from a swap, an
+	// explosion centered on a player, a cut on an overlapping victim). Pick a
+	// random unit direction and floor distance at 1 — the old -4..4 integer
+	// fallback was used as a MAGNITUDE rather than a direction, so distance=1
+	// and xDist=4 produced velCont = forceConstant * 4, injecting ~20k velocity
+	// from a single tap and launching the victim off-map.
+	if (distance < 1) {
+		var ang = Math.random() * Math.PI * 2;
+		xDist = Math.cos(ang);
+		yDist = Math.sin(ang);
+		distance = 1;
 	}
 	var velCont = { velContX: 0, velContY: 0 };
 	velCont.velContX = (forceConstant / (distance * distance)) * xDist / distance;

@@ -13,13 +13,10 @@ class Punch extends Circle {
 		this.mapOwned = false;
 		// Clash bookkeeping (set by GameBoard.resolvePunchClashes / Player.handlePunchHit):
 		// landed = already connected; clashed = nullified by a clash; clashResolved =
-		// already processed by the clash pass. directional/angle drive aim-based knockback.
-		// Initialised so reads never hit undefined.
+		// already processed by the clash pass. Initialised so reads never hit undefined.
 		this.landed = false;
 		this.clashed = false;
 		this.clashResolved = false;
-		this.directional = false;
-		this.angle = null;
 	}
 	handleHit(object) {
 

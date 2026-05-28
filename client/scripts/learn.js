@@ -20,9 +20,9 @@
 //   • Behaviour confirmed in server/engine.js, game.js, entities/player.js,
 //     achievements.js (medals; note the source typo "Resouceful" → shown
 //     "Resourceful"). Tuning lives in server/config.json.
-//   • PUNCH entry reflects the rework on branch worktree-feat-punch-rework
-//     (momentum + hold-to-charge + stamina ring + overcharge + clashes). If that
-//     changes / doesn't ship, reconcile with live player.js + config punch*.
+//   • PUNCH entry: omnidirectional radial hit (hitbox at the puncher's position;
+//     no aim). Momentum-scaled bonus + hold-to-charge ring + stamina + overcharge
+//     + facing-based clashes. Reconcile here if player.js / config punch* changes.
 //   • Each entry has `anim`: a scene name registered in learnScenes.js. Add a
 //     card → add a SCENES[name] there too. Scenes reuse the REAL game art (kart
 //     disc, fire sprites, bumper disc+ring, terrain PNGs, gold goal).
@@ -73,7 +73,7 @@
                 {
                     id: "punching", name: "Punching", icon: emoji("👊"), anim: "punch",
                     blurb: "Timing and positioning, not mashing.",
-                    detail: "Punching is about commitment, not how fast you tap — your hit lands as hard as the speed you carry into it, and a glow previews the force. Hold the button to wind up a heavier, telegraphed haymaker, but overcharge and it fizzles, leaving you winded. Every swing drains a stamina ring, so mashing runs you dry, and punches clash: an even match sends both flying, while a clearly stronger punch bowls straight through a weak one."
+                    detail: "Punching is about commitment, not how fast you tap. A swing pops out around your kart and shoves anyone touching it — no aim, just position — and lands as hard as the speed you carry into the hit, which a glowing halo previews. Hold the button to wind up a heavier, telegraphed haymaker, but overcharge and it fizzles, leaving you winded. Every swing drains a stamina ring, so mashing runs you dry, and punches clash: charge into a rival who's swinging back and an even match sends both flying, while a clearly stronger punch bowls straight through a weak one."
                 },
                 {
                     id: "fire", name: "Fire & Killstreaks", icon: tex("redFire.png"), anim: "fire",

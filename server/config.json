@@ -2,8 +2,6 @@
     "port": 3000,
     "serverTickSpeed": 33.33,
     "punchRadius": 11,
-    "directionalPunch": true,
-    "punchReach": 14,
     "punchThrowBrake": 0.45,
     "worldWidth": 1366,
     "worldHeight": 768,

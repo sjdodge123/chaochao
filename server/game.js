@@ -1000,18 +1000,19 @@ class GameBoard {
 			}
 		}
 	}
-	// Only real, aimed, still-pending player punches can clash. Excludes: empty slots,
+	// Only real, still-pending player punches can clash. Excludes: empty slots,
 	// bumper/hazard punches (mapOwned), already-resolved clashes, punches that already
 	// landed a normal hit (so only same-tick simultaneous punches clash, never a punch
-	// retroactively after it connected), non-directional swats (hockey / survivor-vs-
-	// zombie radial punches have no meaningful aim), and zombie bites (ownerInfected) —
-	// a clash must never deny an infection.
+	// retroactively after it connected), and zombie bites (ownerInfected) — a clash
+	// must never deny an infection.
 	clashEligible(p) {
 		return p != null && !p.mapOwned && !p.clashResolved && !p.landed
-			&& p.directional && !p.ownerInfected;
+			&& !p.ownerInfected;
 	}
 	// A clash needs the owners close (range) AND each facing roughly toward the other
-	// (facingDot). Uses each punch's stored aim angle so it matches what was thrown.
+	// (facingDot). Uses each punch's stored facing angle (the puncher's heading at the
+	// moment of swing) — the punch lands radially, but two players have to be charging
+	// into each other to clash.
 	isPunchClash(ownerA, pa, ownerB, pb, cfg) {
 		var dx = ownerB.x - ownerA.x;
 		var dy = ownerB.y - ownerA.y;
@@ -1198,13 +1199,6 @@ class GameBoard {
 		}
 	}
 	updatePlayers(currentState, dt) {
-		// Punch directionality policy (resolved here, applied in checkAttack):
-		//  - Hockey: radial for everyone, so you can smack the puck from any side.
-		//  - Infection: zombies must aim their bite (directional), but survivors
-		//    swat zombies in any direction (radial).
-		//  - Otherwise: per config.directionalPunch.
-		var hockeyRound = this.checkForActiveBrutal(c.brutalRounds.hockey.id);
-		var infectionRound = this.checkForActiveBrutal(c.brutalRounds.infection.id);
 		for (var playerID in this.playerList) {
 			var player = this.playerList[playerID];
 			// handleHit (during checkCollisions, just above) flags lobby lava/goal hits
@@ -1235,13 +1229,7 @@ class GameBoard {
 				}
 				player.acquiredAbility = null;
 			}
-			var punchDirectional = c.directionalPunch;
-			if (hockeyRound) {
-				punchDirectional = false;
-			} else if (infectionRound && !player.isZombie) {
-				punchDirectional = false;
-			}
-			player.update(currentState, dt, punchDirectional);
+			player.update(currentState, dt);
 			if (currentState == c.stateMap.lobby) {
 				this.updateLobbyInvulnHold(player);
 			}

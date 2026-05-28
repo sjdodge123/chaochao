@@ -1116,11 +1116,9 @@ function drawEffects() {
 }
 
 // Seeded by the server "punch" event (the punch object itself only lives
-// ~100ms). The original three-part look — a quick impact pop, an expanding
-// shockwave ring, and a directional sweep — but scaled down so nothing exceeds
-// ~1.8x the real punch radius (the first cut sprawled to ~3x). The pop + ring
-// are radial and always shown; the sweep is added only for directional punches
-// (radial punches — hockey, survivors swatting zombies, bumpers — skip it).
+// ~100ms). A two-part radial burst: a quick impact pop + an expanding
+// shockwave ring (nothing exceeds ~1.6x the real punch radius). The punch is
+// omnidirectional, so the visual is too — no aimed sweep.
 function spawnPunchEffect(punch) {
     if (punch == null) {
         return;
@@ -1130,25 +1128,15 @@ function spawnPunchEffect(punch) {
     var baseRadius = infected ? config.brutalRounds.infection.punchRadius : punch.radius;
     // Scale the impact FX by the punch's momentum bonus so a hard, committed punch
     // visibly reads bigger than a standing tap (matches the server knockback). Maps
-    // the floor..ceil bonus range onto ~0.8x..1.45x of the base hit. Only directional
-    // player punches ride the momentum scale; bumper/radial punches carry an unrelated
-    // bonus and keep their base FX size.
-    if (punch.directional && punch.bonus != null && config.punchMomentum != null) {
+    // the floor..ceil bonus range onto ~0.8x..1.45x of the base hit. Bumper/hazard
+    // punches carry an unrelated bonus, so leave them at their base FX size.
+    var mapOwned = owner == null;
+    if (!mapOwned && punch.bonus != null && config.punchMomentum != null) {
         var pm = config.punchMomentum;
         var power = (pm.ceil > pm.floor) ? clamp01((punch.bonus - pm.floor) / (pm.ceil - pm.floor)) : 0;
         baseRadius *= 0.8 + 0.65 * power;
     }
     var color = infected ? "#7CFC00" : punch.color;
-    // Derive the swing direction from where the server actually placed the
-    // punch hitbox (offset punchReach in front of the player at throw time),
-    // not the owner's live angle — a player who keeps turning would otherwise
-    // make the sweep point away from where the hit really landed.
-    var angleDeg = null;
-    if (punch.directional && owner != null) {
-        var ddx = punch.x - owner.x;
-        var ddy = punch.y - owner.y;
-        angleDeg = (ddx * ddx + ddy * ddy > 0.0001) ? Math.atan2(ddy, ddx) * 180 / Math.PI : owner.angle;
-    }
     var px = punch.x;
     var py = punch.y;
     addEffect({
@@ -1164,26 +1152,13 @@ function spawnPunchEffect(punch) {
             ctx.beginPath();
             ctx.arc(px, py, baseRadius * (0.55 + 0.75 * grow), 0, 2 * Math.PI);
             ctx.fill();
-            // Expanding shockwave ring (tops ~1.6x — was 2.5x).
+            // Expanding shockwave ring (tops ~1.6x).
             ctx.globalAlpha = (1 - t);
             ctx.lineWidth = 2 * (1 - t) + 1;
             ctx.strokeStyle = color;
             ctx.beginPath();
             ctx.arc(px, py, baseRadius * (0.8 + 0.8 * grow), 0, 2 * Math.PI);
             ctx.stroke();
-            // Directional sweep — a crescent that thrusts out in the facing
-            // direction and narrows as it fades (tops ~1.8x — was 3.1x; thinner).
-            if (angleDeg != null && t < 0.6) {
-                var st = clamp01(t / 0.6);
-                var center = angleDeg * Math.PI / 180;
-                var half = 0.95 * (1 - st * 0.4);
-                var reach = baseRadius * (1.1 + 0.7 * st);
-                ctx.globalAlpha = (1 - st) * 0.85;
-                ctx.lineWidth = baseRadius * 0.45 * (1 - st) + 1.5;
-                ctx.beginPath();
-                ctx.arc(px, py, reach, center - half, center + half);
-                ctx.stroke();
-            }
         }
     });
 }
@@ -1884,12 +1859,13 @@ function punchChargeColor(frac) {
     return out;
 }
 
-// The "fist" in front of a kart along its facing. Two roles:
+// A radial halo around a kart that's winding up a punch. Two roles:
 //  - While CHARGING (player.charge > 0, sent for every player): a growing, brightening
-//    telegraph so opponents can SEE a haymaker winding up and dodge/counter it.
-//  - On your OWN idle kart: a preview of how hard you'd hit right now from your momentum
-//    toward your aim (greys out when you're too tired to punch). Local-only, since other
+//    ring so opponents can SEE a haymaker winding up and back off / counter it.
+//  - On your OWN idle kart: a preview of how hard you'd hit right now from your raw
+//    momentum (greys out when you're too tired to punch). Local-only, since other
 //    players' momentum potential would just be noise.
+// The punch is omnidirectional, so the telegraph is too — no aimed arc.
 function drawPunchCharge(player) {
     var chargeLevel = player.charge || 0;
     var ocLevel = player.overcharge || 0;
@@ -1921,37 +1897,36 @@ function drawPunchCharge(player) {
     if (isCharging) {
         level = chargeLevel; // telegraph (all players)
     } else if (isLocal && player.ability == null) {
-        var rad0 = (player.angle || 0) * Math.PI / 180;
-        var st = (player.velX || 0) * Math.cos(rad0) + (player.velY || 0) * Math.sin(rad0);
-        if (st < 0) { st = 0; }
+        // Raw speed magnitude — calcPunchBonus uses the same on the server.
+        var speed = Math.sqrt((player.velX || 0) * (player.velX || 0) + (player.velY || 0) * (player.velY || 0));
         var refSpeed = config.playerMaxSpeed * config.punchMomentum.refFrac;
-        level = refSpeed > 0 ? clamp01(st / refSpeed) : 0;
+        level = refSpeed > 0 ? clamp01(speed / refSpeed) : 0;
         if (level < 0.08) { return; } // barely moving -> no preview worth a per-frame draw
         exhausted = player._tired === true;
     } else {
         return; // local kart that's exhausted-locked / holding an ability -> nothing
     }
-    var rad = (player.angle || 0) * Math.PI / 180;
     var x = player.x + camera.getCameraX();
     var y = player.y + camera.getCameraY();
-    var grow = isCharging ? (0.3 + 0.45 * level) : (0.35 + 0.35 * level);
-    var reach = player.radius + (config.punchReach || 14) * grow;
+    var grow = isCharging ? (0.45 + 0.55 * level) : (0.5 + 0.4 * level);
+    var radius = player.radius + 3 + player.radius * 0.6 * grow;
     var color = exhausted ? "rgb(150,150,150)" : punchChargeColor(level);
     gameContext.save();
     gameContext.lineCap = "round";
-    // The forward "fist" arc — the primary tell, drawn for everyone winding up.
+    // The aura ring — the primary tell, drawn for everyone winding up.
     gameContext.globalAlpha = (isCharging ? 0.32 : 0.16) + 0.55 * level;
     gameContext.strokeStyle = color;
-    gameContext.lineWidth = 1.5 + (isCharging ? 1.5 : 1.2) * level;
+    gameContext.lineWidth = 1.5 + (isCharging ? 1.8 : 1.2) * level;
     gameContext.beginPath();
-    gameContext.arc(x, y, reach, rad - 0.4, rad + 0.4);
+    gameContext.arc(x, y, radius, 0, 2 * Math.PI);
     gameContext.stroke();
-    // A small knuckle glow — only on YOUR kart, so a crowd of charging bots stays cheap.
-    if (isLocal && !exhausted) {
-        gameContext.globalAlpha = 0.2 + 0.6 * level;
+    // An inner fill glow at peak charge — only on YOUR kart, so a crowd of charging bots
+    // stays cheap. Reads as "fully wound up" without obscuring your own sprite.
+    if (isLocal && !exhausted && level > 0.4) {
+        gameContext.globalAlpha = 0.08 + 0.25 * (level - 0.4) / 0.6;
         gameContext.fillStyle = color;
         gameContext.beginPath();
-        gameContext.arc(x + Math.cos(rad) * reach, y + Math.sin(rad) * reach, 2 + 4 * level, 0, 2 * Math.PI);
+        gameContext.arc(x, y, radius, 0, 2 * Math.PI);
         gameContext.fill();
     }
     gameContext.restore();
