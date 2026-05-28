@@ -10,7 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### Ability changes
+
+- Bots now play their banked abilities like a thinking opponent instead of firing the moment something wanders into range. A held bomb is aimed at the racer ahead of you (or whoever it can catch the most of at once) and lobbed where you're headed, not where you were; a held swap waits for the actual leader and won't steal you onto a patch of lava it'd just die on; a debuff is saved for when the racers ahead are the ones who'll feel it; and a room-wide blindfold is held back until rivals are in a spot where going blind really hurts — at a lava edge or fighting over the finish — and the bot itself is on safe ground.
+- Bots now visibly line a held bomb (and, as before, a held cut) up on a target, so you can read the threat coming and react before they pull the trigger.
 
 ## v0.25.1 — 2026-05-28
 
