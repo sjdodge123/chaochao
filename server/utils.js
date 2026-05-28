@@ -625,15 +625,20 @@ exports.validateMap = function (vMap, config) {
         if (!startEdgeCheck.valid) {
             return startEdgeCheck;
         }
-        // Every start edge must have a goal reachable from it, or that side's
-        // racers can never finish (most likely on an opposite-edge combo with an
-        // off-center / walled-off goal). Server-only — the cell graph isn't in the
-        // editor bundle, so the editor surfaces this via the preview/submit
-        // rejection rather than inline.
-        for (var se = 0; se < vMap.startEdges.length; se++) {
-            if (!cellGraph.reachableFromEdge(vMap, vMap.startEdges[se])) {
-                return { valid: false, reason: "No goal is reachable from the " + vMap.startEdges[se] + " start." };
-            }
+    }
+    // Every (effective) start edge must have a goal reachable from it, or that
+    // side's racers can never finish (most likely on an opposite-edge combo with
+    // an off-center / walled-off goal). When startEdges is absent the map still
+    // starts somewhere at runtime — gameBoard.resolveStartEdges defaults to the
+    // left gate — so the default must be checked too, mirroring the same
+    // resolution computeMapParTime uses; otherwise a goal walled off from the
+    // left start slips through validation and leaves the map uncompletable.
+    // Server-only — the cell graph isn't in the editor bundle, so the editor
+    // surfaces this via the preview/submit rejection rather than inline.
+    var effectiveStartEdges = (Array.isArray(vMap.startEdges) && vMap.startEdges.length > 0) ? vMap.startEdges : ["left"];
+    for (var se = 0; se < effectiveStartEdges.length; se++) {
+        if (!cellGraph.reachableFromEdge(vMap, effectiveStartEdges[se])) {
+            return { valid: false, reason: "No goal is reachable from the " + effectiveStartEdges[se] + " start." };
         }
     }
     return { valid: true };
