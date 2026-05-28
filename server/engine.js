@@ -18,6 +18,9 @@ exports.bounceOffBoundry = function (obj, bound) {
 exports.checkCollideCells = function (player, map) {
 	checkCollideCells(player, map);
 }
+exports.bounceOffEmptyCells = function (player, map) {
+	bounceOffEmptyCells(player, map);
+}
 exports.punchPlayer = function (player, punch) {
 	punchPlayer(player, punch);
 }
@@ -689,6 +692,49 @@ function checkCollideCells(player, map) {
 	if (typeof player.resetGrip === "function") {
 		player.resetGrip();
 	}
+}
+function ensureCellIndex(map) {
+	if (map._cellIndex == null) {
+		Object.defineProperty(map, '_cellIndex', {
+			value: new CellIndex(map.cells),
+			enumerable: false,
+			writable: true,
+			configurable: true
+		});
+	}
+	return map._cellIndex;
+}
+// The empty cell containing (x,y), or null. Empty cells are non-walkable holes
+// that show the skybox/water below; locating one means that point is over a hole.
+function emptyCellAt(x, y, map) {
+	var candidates = ensureCellIndex(map).candidates(x, y);
+	for (var i = 0; i < candidates.length; i++) {
+		var cell = candidates[i];
+		if (cell.id === c.tileMap.empty.id && pointIntersection(x, y, cell) > 0) {
+			return cell;
+		}
+	}
+	return null;
+}
+// Bounce a player off an empty hole the same way the world edge stops them: a
+// projected move that would carry the player's center into a hole is reverted and
+// the velocity reversed + damped (matching preventEscape's player-edge feel).
+var EMPTY_BOUNCE_DAMP = 0.25;
+function bounceOffEmptyCells(player, map) {
+	if (emptyCellAt(player.newX, player.newY, map) == null) {
+		return; // projected position stays on solid ground
+	}
+	// Don't pin a player who is *already* inside a hole (a hard punch can fling one
+	// clean past the rim in a single tick) — pinning would freeze them in the void.
+	// Reversing the velocity still pushes them back toward solid ground over the
+	// next ticks.
+	if (emptyCellAt(player.x, player.y, map) == null) {
+		player.newX = player.x;
+		player.newY = player.y;
+	}
+	player.velX = -player.velX * EMPTY_BOUNCE_DAMP;
+	player.velY = -player.velY * EMPTY_BOUNCE_DAMP;
+	player.bounced = true;
 }
 function pointIntersection(x, y, cell) {
 	{

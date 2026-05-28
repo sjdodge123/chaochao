@@ -138,8 +138,8 @@ function handleEditorShortcut(e) {
             editorDeselect(); return; // modal Escape is handled separately in create.js
     }
 
-    // Number row 1..8 → tile brushes, in the palette's visual order.
-    var tileOrder = ["slow", "normal", "fast", "lava", "ice", "ability", "random", "goal"];
+    // Number row 1..9 → tile brushes, in the palette's visual order.
+    var tileOrder = ["slow", "normal", "fast", "lava", "ice", "ability", "random", "goal", "empty"];
     var n = parseInt(e.key, 10);
     if (!isNaN(n) && n >= 1 && n <= tileOrder.length) {
         editorSelectTile(tileOrder[n - 1]);

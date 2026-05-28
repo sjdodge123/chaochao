@@ -88,7 +88,10 @@ class SnowFlakeProj extends Projectile {
 	}
 	handleHit(object) {
 		if (object.isMapCell) {
-			if (object.id != c.tileMap.lava.id && object.id != c.tileMap.goal.id && object.id != c.tileMap.slow.id) {
+			// Empty holes are non-walkable; freezing one to ice would let players fill /
+			// bridge a hole just by gliding a snowflake over it, defeating its no-walk
+			// semantics. Skip it like lava/goal (explodeIce already skips it too).
+			if (object.id != c.tileMap.lava.id && object.id != c.tileMap.goal.id && object.id != c.tileMap.slow.id && object.id != c.tileMap.empty.id) {
 				this.tileChanges[object.voronoiId] = c.tileMap.ice.id;
 			}
 		}

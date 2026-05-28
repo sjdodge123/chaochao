@@ -3610,6 +3610,12 @@ function renderMapToCache() {
         if (cell.id == config.tileMap.background.id) {
             continue;
         }
+        // Empty "hole" cells render nothing either, so whatever sits below the map
+        // (skybox / water) shows through. Their no-go rim is stroked separately by
+        // drawEmptyBorders so players can see they can't drive in.
+        if (cell.id == config.tileMap.empty.id) {
+            continue;
+        }
         var halfedges = cell.halfedges;
         var nHalfedges = halfedges.length;
         if (nHalfedges == 0) {
@@ -3656,6 +3662,7 @@ function renderMapToCache() {
     // hazard pass + karts, which draw after the cache blit) — its world->cache
     // transform is the one active here.
     paintTrenchSegments(mapCtx);
+    drawEmptyBorders(mapCtx);
     mapCtx.restore();
     // Terrain changed → derived FX caches (space island depth) must rebuild.
     mapCacheRev++;
@@ -3703,6 +3710,7 @@ function drawTileBorders(ctx) {
     var cells = currentMap.cells;
     var bgId = config.tileMap.background.id;
     var lavaId = config.tileMap.lava.id;
+    var emptyId = config.tileMap.empty.id;
     var idByVoronoi = {};
     for (var i = 0; i < cells.length; i++) {
         idByVoronoi[cells[i].site.voronoiId] = cells[i].id;
@@ -3711,16 +3719,16 @@ function drawTileBorders(ctx) {
     ctx.beginPath();
     for (var c = 0; c < cells.length; c++) {
         var cell = cells[c];
-        if (cell.id == bgId || cell.id == lavaId) {
-            continue; // background draws nothing; lava has its own rim
+        if (cell.id == bgId || cell.id == lavaId || cell.id == emptyId) {
+            continue; // background draws nothing; lava and empty holes have their own rim
         }
         var halfedges = cell.halfedges;
         for (var h = 0; h < halfedges.length; h++) {
             var he = halfedges[h];
             var neighbor = compareSite(he.edge.lSite, he.site) ? he.edge.rSite : he.edge.lSite;
             var nid = neighbor != null ? idByVoronoi[neighbor.voronoiId] : null;
-            if (nid === cell.id || nid === lavaId) {
-                continue; // same-type internal seam, or lava's edge — skip
+            if (nid === cell.id || nid === lavaId || nid === emptyId) {
+                continue; // same-type internal seam, or lava's / hole's own rim — skip
             }
             var sp = getStartpoint(he);
             var ep = getEndpoint(he);
@@ -3774,6 +3782,55 @@ function drawLavaBorders(ctx) {
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.strokeStyle = lavaBorderColor;
+    ctx.stroke();
+    ctx.restore();
+}
+// The rim around an empty hole. Empty cells are non-walkable and draw nothing (the
+// skybox/water below shows through), so this perimeter is the only cue that you'll
+// bounce off the edge — given a beveled "ledge" look (dark outer lip + light inner
+// highlight) to read as a drop-off rather than a tile seam.
+var emptyBorderOuter = "#0c0c14";
+var emptyBorderInner = "rgba(170, 190, 215, 0.85)";
+function drawEmptyBorders(ctx) {
+    if (currentMap == null || currentMap.cells == null) {
+        return;
+    }
+    var emptyId = config.tileMap.empty.id;
+    var cells = currentMap.cells;
+    var idByVoronoi = {};
+    for (var i = 0; i < cells.length; i++) {
+        idByVoronoi[cells[i].site.voronoiId] = cells[i].id;
+    }
+    ctx.save();
+    ctx.beginPath();
+    for (var c = 0; c < cells.length; c++) {
+        var cell = cells[c];
+        if (cell.id != emptyId) {
+            continue;
+        }
+        var halfedges = cell.halfedges;
+        for (var h = 0; h < halfedges.length; h++) {
+            var he = halfedges[h];
+            // The cell across this edge (null on the map boundary).
+            var neighbor = compareSite(he.edge.lSite, he.site) ? he.edge.rSite : he.edge.lSite;
+            if (neighbor != null && idByVoronoi[neighbor.voronoiId] == emptyId) {
+                continue; // internal seam between two empty cells — skip
+            }
+            var sp = getStartpoint(he);
+            var ep = getEndpoint(he);
+            ctx.moveTo(sp.x, sp.y);
+            ctx.lineTo(ep.x, ep.y);
+        }
+    }
+    ctx.setLineDash([]);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    // Dark outer lip first, then a thinner light highlight on top, for a ledge look.
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = emptyBorderOuter;
+    ctx.stroke();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = emptyBorderInner;
     ctx.stroke();
     ctx.restore();
 }

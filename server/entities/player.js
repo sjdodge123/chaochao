@@ -767,6 +767,17 @@ class Player extends Circle {
 			this.dragCoeff = object.dragCoeff;
 			return;
 		}
+		if (object.id == c.tileMap.empty.id) {
+			// Empty cells are non-walkable holes; the engine bounces players off the
+			// rim before their center ever commits inside one (bounceOffEmptyCells).
+			// This branch is a defensive fallback (e.g. a hard punch flinging a kart
+			// clean past the rim in a single tick): keep normal grip so the previous
+			// tile's physics — notably ice — doesn't persist while they're pushed out.
+			this.acel = object.acel;
+			this.brakeCoeff = object.brakeCoeff;
+			this.dragCoeff = object.dragCoeff;
+			return;
+		}
 		if (object.id == c.tileMap.normal.id) {
 			if (this.isZombie == true) {
 				this.applyInfectedMods(object);

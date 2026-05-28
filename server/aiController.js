@@ -292,9 +292,13 @@ function nearestTileId(ctx, x, y) {
     }
     return bestId;
 }
-// True if the cell containing (x,y) is lava. Used by the predictive feelers to catch a
-// momentum car about to slide off the path.
-function isLavaAt(ctx, x, y) { return nearestTileId(ctx, x, y) === ctx.lavaId; }
+// True if the cell containing (x,y) is a death/no-go tile (lava, or an empty hole that
+// bounces you off). Used by the predictive feelers to catch a momentum car about to
+// slide off the path into lava or over a rim.
+function isLavaAt(ctx, x, y) {
+	var id = nearestTileId(ctx, x, y);
+	return id === ctx.lavaId || id === ctx.emptyId;
+}
 
 function rotate(x, y, deg) {
     var r = deg * Math.PI / 180, cs = Math.cos(r), sn = Math.sin(r);
@@ -1329,6 +1333,7 @@ function steerGatedPhase(gameBoard) {
         var ctx = {
             map: gameBoard.currentMap,
             lavaId: c.tileMap.lava.id,
+            emptyId: c.tileMap.empty.id,
             players: playerList,
             projectileList: gameBoard.projectileList,
             gate: gates[gi],
@@ -1476,6 +1481,7 @@ function update(gameBoard, currentState, dt) {
     var ctx = {
         map: map,
         lavaId: LAVA,
+        emptyId: c.tileMap.empty.id,
         iceId: c.tileMap.ice.id,
         siteById: buildSiteIndex(map),
         lavaCells: lavaCells,

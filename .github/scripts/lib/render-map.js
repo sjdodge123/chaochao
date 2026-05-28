@@ -51,7 +51,8 @@ const REVIEW_PALETTE = {
     ability: '#C8C8C8',
     goal: '#FFD700',
     bumper: '#FF7900',
-    random: '#2C3EF0'
+    random: '#2C3EF0',
+    empty: '#0A0A12'    // non-walkable hole — darker than the bg so it reads as a void
 };
 // id -> [r,g,b] from config.tileMap, preferring the review palette by tile name.
 function buildTileColors(config) {

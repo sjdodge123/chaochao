@@ -233,7 +233,15 @@ class GameBoard {
 			// still works.
 			if (this.currentMap != null && this.currentMap.cells != null) {
 				_engine.checkCollideCells(this.playerList[player], this.currentMap);
+				_engine.bounceOffEmptyCells(this.playerList[player], this.currentMap);
 			}
+			// The spawn pad is a safe zone (force-shield against bomb/ice/cut knockback).
+			// It used to inherit that from the transparent "background" sanctuary tile,
+			// but the pad is now solid ground, so checkCollideCells just cleared
+			// onSanctuary based on the grass/dirt underfoot. Re-assert it for any player
+			// standing within the pad radius so freshly-spawned / mid-join players can't
+			// be flung off the pad (into a hole or lava) before they get moving.
+			this.reassertSpawnPadSanctuary(this.playerList[player]);
 			objectArray.push(this.playerList[player]);
 		}
 		// Curated abilities are live in the lobby (bomb + ice cannon), so projectiles
@@ -299,6 +307,7 @@ class GameBoard {
 			}
 			_engine.preventEscape(this.playerList[player], this.world);
 			_engine.checkCollideCells(this.playerList[player], this.currentMap);
+			_engine.bounceOffEmptyCells(this.playerList[player], this.currentMap);
 			objectArray.push(this.playerList[player]);
 		}
 		for (var projID in this.projectileList) {
@@ -702,7 +711,7 @@ class GameBoard {
 		var explodeLoc = { x: this.projectileList[owner].x, y: this.projectileList[owner].y };
 		var cells = this.currentMap.cells;
 		for (var i = 0; i < cells.length; i++) {
-			if (cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.lava.id || cells[i].id == c.tileMap.background.id) {
+			if (cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.lava.id || cells[i].id == c.tileMap.background.id || cells[i].id == c.tileMap.empty.id) {
 				continue;
 			}
 			var distance = utils.getMag(explodeLoc.x - cells[i].site.x, explodeLoc.y - cells[i].site.y);
@@ -730,7 +739,7 @@ class GameBoard {
 		var cells = this.currentMap.cells;
 		var tileDelta = {};
 		for (var i = 0; i < cells.length; i++) {
-			if (cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.background.id) {
+			if (cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.background.id || cells[i].id == c.tileMap.empty.id) {
 				continue;
 			}
 			var distance = utils.getMag(explodeLoc.x - cells[i].site.x, explodeLoc.y - cells[i].site.y);
@@ -750,7 +759,7 @@ class GameBoard {
 		var cells = this.currentMap.cells;
 		var tileDelta = {};
 		for (var i = 0; i < cells.length; i++) {
-			if (cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.background.id) {
+			if (cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.background.id || cells[i].id == c.tileMap.empty.id) {
 				continue;
 			}
 			var distance = utils.getMag(explodeLoc.x - cells[i].site.x, explodeLoc.y - cells[i].site.y);
@@ -934,6 +943,20 @@ class GameBoard {
 			return; // station gone, or no live socket for this player
 		}
 		messenger.messageClientBySig(playerId, header, { id: stationId, kind: station.stationKind });
+	}
+	// Keep the spawn pad a safe zone regardless of the tile under it: a player whose
+	// center is within the pad radius is force-shielded (isProtected) against bomb/ice/
+	// cut knockback. Called each lobby tick after checkCollideCells (which sets
+	// onSanctuary from the tile) so the pad stays safe now that it's solid ground.
+	reassertSpawnPadSanctuary(player) {
+		if (this.currentMap == null || this.currentMap.spawnPad == null) {
+			return;
+		}
+		var sp = this.currentMap.spawnPad;
+		var dx = player.x - sp.cx, dy = player.y - sp.cy;
+		if (dx * dx + dy * dy <= sp.r * sp.r) {
+			player.onSanctuary = true;
+		}
 	}
 	// Place a player on the background spawn pad (used for the lobby start and for
 	// players who join mid-lobby). onSanctuary keeps them force-shielded on the pad.
@@ -1254,7 +1277,7 @@ class GameBoard {
 		var collapsedCells = [];
 		var cells = this.currentMap.cells;
 		for (var i = 0; i < cells.length; i++) {
-			if (cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.lava.id) {
+			if (cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.lava.id || cells[i].id == c.tileMap.empty.id) {
 				continue;
 			}
 			var distance = utils.getMag(this.collapseLoc.x - cells[i].site.x, this.collapseLoc.y - cells[i].site.y);
