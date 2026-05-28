@@ -501,6 +501,24 @@ exports.getMag = function (x, y) {
 exports.dotProduct = function (a, b) {
     return a.x * b.x + a.y * b.y;
 }
+// Auto-mode AI fill: small additions of bots as humans join, then fill the room
+// once the lobby is mostly human. Triangular tiers — bots = n where n*(n+1)/2 >= humans:
+//   1H→1, 2-3H→2, 4-6H→3, 7-10H→4, 11-15H→5, 16H→6. At 17+ humans we just fill
+//   the remaining slots so a full lobby still races a full grid.
+exports.autoBotsForHumans = function (humans, capLeft) {
+    if (capLeft <= 0) { return 0; }
+    // Test-only override (CI perf harness pins a worst-case bot count via
+    // CHAO_PERF_OVERRIDE). Plain numbers only; clamped by capLeft like normal.
+    var forced = c.aiRacers && c.aiRacers.testForceBots;
+    if (typeof forced === "number" && forced >= 0) {
+        return forced > capLeft ? capLeft : forced;
+    }
+    if (humans <= 0) { return 0; }
+    if (humans >= 17) { return capLeft; }
+    var n = 1, end = 1;
+    while (end < humans) { n++; end += n; }
+    return n > capLeft ? capLeft : n;
+}
 exports.loadConfig = function () {
     return c;
 }
