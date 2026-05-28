@@ -130,7 +130,16 @@ exports.submitPullRequest = async function (map) {
         returnToClient.message = "Map name can't contain slashes or control characters, or start with a dot.";
         return returnToClient;
     }
-    var branchName = "mapchange-" + mapName.toLowerCase() + "-" + getRandomBranchCode();
+    // The branch ref is created through the GitHub API and must satisfy git's
+    // ref-name rules (git-check-ref-format): no "..", no trailing dot, none of
+    // ~ ^ : ? * [ \ or spaces. Map names legitimately carry punctuation
+    // ("What Goes Up...") that's fine in the filename above but illegal in a
+    // ref — those dots are exactly what produced the rejected
+    // "mapchange-whatgoesup...-832465". Slug the name down to [a-z0-9-] for the
+    // branch only; the committed file still uses the real mapName. The random
+    // code guarantees a unique, non-empty ref even if the slug collapses to "".
+    var branchSlug = mapName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    var branchName = "mapchange-" + branchSlug + "-" + getRandomBranchCode();
     try {
         const octokit = await getOctokit();
         var result = await octokit.request('GET /repos/{owner}/{repo}/git/refs/heads', {
