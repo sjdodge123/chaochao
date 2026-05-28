@@ -166,11 +166,40 @@ app.use(function (req, res, next) {
             modified = modified.replace(/<!-- BUILD: bundle-start -->[\s\S]*?<!-- BUILD: bundle-end -->/g, bundleTag);
         }
         res.set('Content-Type', 'text/html');
+        // HTML carries the injected version/news/bundle tags and must reflect a
+        // fresh deploy immediately, so never let a browser/CDN serve it stale —
+        // revalidate every time (the ETag keeps the unchanged case a cheap 304).
+        res.set('Cache-Control', 'no-cache');
         res.send(modified);
     });
 });
 
-app.use(express.static(htmlPath));
+// Static assets. The default (max-age=0) forces a revalidation round-trip for
+// every file on every visit — brutal for distant players (e.g. a phone in
+// Vietnam ~250ms from the US dyno re-checking ~150 files, tens of MB of audio).
+// Set real cache lifetimes by kind so a browser/CDN can serve from the edge:
+//   - /assets/** (images + sounds): content-stable media, cache hard (30 days).
+//     A CDN edge-caches these near the player; purge the CDN on the rare change.
+//   - /maps/**: map JSON is mostly add-only (new file = new name = cache miss),
+//     so a day's cache is safe and a new/edited map still surfaces quickly.
+//   - everything else (JS bundles, CSS — unhashed, change on deploy): no-cache
+//     so a deploy is picked up at once; the ETag keeps the unchanged case a 304.
+var ASSET_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+var MAP_MAX_AGE_MS = 24 * 60 * 60 * 1000;        // 1 day
+app.use(express.static(htmlPath, {
+    etag: true,
+    lastModified: true,
+    setHeaders: function (res, filePath) {
+        var rel = path.relative(htmlPath, filePath);
+        if (rel.indexOf('assets' + path.sep) === 0) {
+            res.set('Cache-Control', 'public, max-age=' + Math.floor(ASSET_MAX_AGE_MS / 1000));
+        } else if (rel.indexOf('maps' + path.sep) === 0) {
+            res.set('Cache-Control', 'public, max-age=' + Math.floor(MAP_MAX_AGE_MS / 1000));
+        } else {
+            res.set('Cache-Control', 'no-cache');
+        }
+    }
+}));
 
 var utils = require('./server/utils.js');
 var messenger = require('./server/messenger.js');
