@@ -202,7 +202,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Cache Playwright browser
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
@@ -233,7 +233,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Cache Playwright browser
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
@@ -244,7 +244,7 @@ jobs:
         env:
           PERF_OUT_JSON: perf-pr.json
       - name: Restore main baseline
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: perf-baseline.json
           # The exact `key` is deliberately a value that never matches (run_id is
