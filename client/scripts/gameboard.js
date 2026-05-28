@@ -1120,6 +1120,144 @@ function spawnDustParticle(x, y, vx, vy, size, color) {
 	});
 }
 
+// A flame sprite on top of a sinking corpse. Mirrors drawFire's translate+rotate,
+// but takes explicit (x, y, angle, size) so it can be driven from an effect that
+// no longer has a live player entry (the dead kart isn't in playerList anymore).
+function drawCorpseFire(x, y, angleDeg, size) {
+	if (typeof redFire === "undefined" || redFire == null || redFire.spriteSheet == null) {
+		return;
+	}
+	gameContext.save();
+	var ar = angleDeg * (Math.PI / 180);
+	gameContext.translate(x - 5 * Math.cos(ar), y - 5 * Math.sin(ar));
+	gameContext.rotate((angleDeg - 90) * (Math.PI / 180));
+	redFire.spriteSheet.update(dt);
+	redFire.spriteSheet.draw(size, size);
+	gameContext.restore();
+}
+
+// A "crashed and sinking" corpse: when a player dies on lava, leave a shrinking,
+// darkening disc bobbing slightly as it sinks, with a flame sprite on top for the
+// first ~70% of the dive plus a fading surface ring and a slow drip of embers and
+// lava bubble pops. Lives ~2.8s in the effects list, which is cleaned up by the
+// usual `updateEffects` path. Entirely cosmetic: doesn't touch playerList or any
+// recap/networking state. Skipped on LOW (perfExtraFx) — most of the new visual
+// budget for this feature lives here.
+function spawnSinkingCorpse(player) {
+	if (player == null) {
+		return;
+	}
+	if (typeof perfExtraFx === "function" && !perfExtraFx()) {
+		return;
+	}
+	var cx = (player.deathX != null) ? player.deathX : player.x;
+	var cy = (player.deathY != null) ? player.deathY : player.y;
+	if (cx == null || cy == null || isNaN(cx) || isNaN(cy)) {
+		return;
+	}
+	var color = player.color || "#cc3333";
+	var angle0 = (player.angle != null) ? player.angle : 0;
+	var radius0 = (player.radius != null && player.radius > 0) ? player.radius : 11;
+	// Longer sink + flame phase reads as a slow burnout, not a flash. The flame
+	// stays visible through ~80% of the sink and shrinks gently with the body
+	// (not aggressively) so it's still legible when the disc is small.
+	var maxAge = 3600;
+	var flameCutoff = 0.8;
+	// Closure state for the per-frame update (embers + bubble pops on a cadence).
+	var lastEmberAt = -1000; // negative so the first ember fires immediately
+	var lastBubbleAt = -1000;
+	addEffect({
+		x: cx,
+		y: cy,
+		maxAge: maxAge,
+		update: function (deltaT) {
+			var age = this.age;
+			var t = age / maxAge;
+			// Embers ride on the same per-tier embers knob that the running flame uses,
+			// so a Balanced profile that already dims live-fire embers also dims these.
+			if (t < 0.9 && age - lastEmberAt >= 110) {
+				lastEmberAt = age;
+				if (typeof perfEmbers !== "function" || perfEmbers()) {
+					spawnEmber(cx + (Math.random() * 2 - 1) * radius0 * 0.6,
+						cy + (Math.random() * 2 - 1) * radius0 * 0.4);
+				}
+			}
+			// Lava bubble pops: orange droplets that rise + fade. perfCount thins them
+			// on Balanced (0.6) and would on Low too — but Low never reaches this code.
+			if (t < 0.95 && age - lastBubbleAt >= 220) {
+				lastBubbleAt = age;
+				var n = (typeof perfCount === "function") ? perfCount(2) : 2;
+				for (var i = 0; i < n; i++) {
+					var ang = Math.random() * Math.PI * 2;
+					var r = Math.random() * radius0 * 0.85;
+					var bx = cx + Math.cos(ang) * r;
+					var by = cy + Math.sin(ang) * r;
+					var vx = (Math.random() * 2 - 1) * 0.012;
+					var vy = -(0.022 + Math.random() * 0.022);
+					var hue = 18 + Math.random() * 22;
+					var size = 1.6 + Math.random() * 2.2;
+					spawnDustParticle(bx, by, vx, vy, size, "hsl(" + hue + ", 92%, 55%)");
+				}
+			}
+		},
+		draw: function (ctx, t) {
+			var sink = t;
+			var bodyR = radius0 * (1 - 0.85 * sink);
+			if (bodyR <= 0.5) {
+				return;
+			}
+			// Surface lava ring: a quick widening ring at the moment of impact,
+			// fully gone by ~70% sink.
+			if (sink < 0.7) {
+				var ringAlpha = 0.85 * (1 - sink / 0.7);
+				ctx.save();
+				ctx.globalAlpha = ringAlpha;
+				ctx.beginPath();
+				ctx.arc(cx, cy, radius0 * (1 + 0.45 * sink), 0, 2 * Math.PI);
+				ctx.strokeStyle = "rgba(255, 130, 50, 1)";
+				ctx.lineWidth = 2.4;
+				ctx.stroke();
+				ctx.restore();
+			}
+			// Sinking disc: roll slowly, bob slightly, dim toward black as it goes under.
+			var rollDeg = angle0 + 35 * sink;
+			var bob = 3 * Math.sin(sink * Math.PI);
+			ctx.save();
+			ctx.translate(cx, cy + bob);
+			ctx.rotate(rollDeg * Math.PI / 180);
+			ctx.globalAlpha = clamp01(1 - sink * 0.85);
+			ctx.beginPath();
+			ctx.arc(0, 0, bodyR, 0, 2 * Math.PI);
+			ctx.fillStyle = color;
+			ctx.fill();
+			// Scorch overlay strengthens with the sink so the disc reads "burnt" not
+			// just "small" — pure black at low alpha multiplies the tint toward dark.
+			ctx.globalAlpha = clamp01(sink * 0.75);
+			ctx.beginPath();
+			ctx.arc(0, 0, bodyR, 0, 2 * Math.PI);
+			ctx.fillStyle = "rgba(20, 10, 4, 1)";
+			ctx.fill();
+			// Thin outline so the corpse stays legible over the lava texture.
+			ctx.globalAlpha = clamp01(1 - sink);
+			ctx.lineWidth = 1.4;
+			ctx.strokeStyle = "rgba(0, 0, 0, 0.8)";
+			ctx.stroke();
+			ctx.restore();
+			// Flame on top through the first ~80% of the sink, shrinking gently so
+			// it stays legible while the disc gets small.
+			if (sink < flameCutoff) {
+				var flameT = sink / flameCutoff;
+				var flameAlpha = 1 - flameT;
+				var flameSize = 55 * (1 - 0.4 * sink);
+				ctx.save();
+				ctx.globalAlpha = flameAlpha;
+				drawCorpseFire(cx, cy + bob, rollDeg, flameSize);
+				ctx.restore();
+			}
+		}
+	});
+}
+
 // A rising, cooling ember for a burning player (complements the flame sprite).
 function spawnEmber(x, y) {
 	var vx = (Math.random() * 2 - 1) * 0.015;
@@ -1290,17 +1428,26 @@ function updateMovementParticles(dt) {
 			}
 		}
 
-		// Moving -> terrain-aware trail. Ice leaves skate marks even at a walk;
-		// grass/sand sprinkle flecks; bare dirt only kicks up dust at speed.
+		// Moving -> terrain-aware trail. Ice glides leave skate marks; at a walk
+		// it sheds a faint shaving fleck. Grass/sand sprinkle at any pace. Bare
+		// dirt kicks up a subtle puff at a walk and a stronger one at speed.
+		// The walking-speed flecks (ice shavings + dirt puff) are AMBIENT and
+		// gated by perfExtraFx() so LOW skips them.
+		var extraFx = (typeof perfExtraFx === "function") ? perfExtraFx() : true;
 		if (speed > walkThresh && p.dustCD <= 0) {
 			var tile = tileIdAt(p.x, p.y);
 			if (tile == config.tileMap.ice.id) {
-				// Skate trails only when actually gliding fast across the ice.
+				// Same line-mark look at every pace (matches the Codex scene):
+				// two cyan blade tracks under the cart, just at a slower cadence
+				// when walking so the marks don't run continuously together.
 				if (speed > fastThresh) {
 					spawnIceTrail(p);
 					p.dustCD = cd(40);
 				} else {
-					p.dustCD = cd(60);
+					if (extraFx) {
+						spawnIceTrail(p);
+					}
+					p.dustCD = cd(120);
 				}
 			} else if (tile == config.tileMap.fast.id) {
 				// Grass dialed back ~20% (smaller flecks) — it read a touch strong.
@@ -1313,9 +1460,13 @@ function updateMovementParticles(dt) {
 				spawnTerrainParticle(p, dustColor(), 2.5, 2);
 				p.dustCD = cd(50);
 			} else {
-				// Bare dirt at a walk: nothing to emit; recheck shortly (keeps the
-				// per-frame nearest-cell lookup throttled).
-				p.dustCD = cd(60);
+				// Bare dirt at a walk: a single subtle puff at a slower cadence
+				// than the fast-speed burst. Skipped on LOW; the throttle still
+				// ticks so we don't recheck the tile every frame.
+				if (extraFx) {
+					spawnTerrainParticle(p, dustColor(), 1.5, 1);
+				}
+				p.dustCD = cd(extraFx ? 110 : 60);
 			}
 		}
 
@@ -1368,142 +1519,49 @@ function positionEmojiSlots() {
 }
 
 
+// Trail vertices stay visible for TRAIL_FADE_MS milliseconds, then they're
+// dropped off the head of the list. drawTrail (draw.js) re-strokes the
+// remaining vertices each frame with alpha scaled by age, so older bits of the
+// path naturally fade out. At the 30 Hz trail sample cadence this caps each
+// kart's vertex buffer at ~150 entries — small enough to re-stroke cheaply on
+// the main canvas, so the previous per-kart offscreen-canvas + direct-mode
+// split is gone (perfTrailDirect now no-ops; both render paths converge here).
+var TRAIL_FADE_MS = 5000;
 class Trail {
 	constructor(initialPosition) {
-		this.vertices = [];
-		this.maxLength = 100000;
-		this.canvas = null;
-		this.ctx = null;
-		this.canvasOriginX = 0;
-		this.canvasOriginY = 0;
-		this.wasNearVictory = false;
-		this.accumulatedLength = 0;
+		this.vertices = []; // each entry: { x, y, t }
 		this.lastColor = null;
-	}
-	_ensureCanvas() {
-		if (this.canvas != null || world == null) {
-			return;
-		}
-		var pad = 8;
-		this.canvas = document.createElement("canvas");
-		this.canvas.width = world.width + pad * 2;
-		this.canvas.height = world.height + pad * 2;
-		this.ctx = this.canvas.getContext("2d");
-		this.canvasOriginX = world.x - pad;
-		this.canvasOriginY = world.y - pad;
-	}
-	_applyStrokeStyle(color, dashed) {
-		this.ctx.lineWidth = dashed ? 6 : 5;
-		// shadowBlur on every trail segment is a per-frame fill cost; drop it on
-		// profiles that disable glow (the trail still reads as a solid stroke).
-		this.ctx.shadowBlur = (typeof perfGlow === "function" && !perfGlow()) ? 0 : 3;
-		this.ctx.shadowColor = "black";
-		this.ctx.strokeStyle = color;
-		this.ctx.setLineDash(dashed ? [20, 3, 3, 3, 3, 3, 3, 3] : []);
-	}
-	_redrawAll(color, dashed) {
-		this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-		var total = 0;
-		for (var i = 1; i < this.vertices.length; i++) {
-			var dx = this.vertices[i].x - this.vertices[i - 1].x;
-			var dy = this.vertices[i].y - this.vertices[i - 1].y;
-			total += Math.sqrt(dx * dx + dy * dy);
-		}
-		this.accumulatedLength = total;
-		if (this.vertices.length < 2) {
-			return;
-		}
-		this._applyStrokeStyle(color, dashed);
-		this.ctx.lineDashOffset = 0;
-		this.ctx.beginPath();
-		var v0 = this.vertices[0];
-		this.ctx.moveTo(v0.x - this.canvasOriginX, v0.y - this.canvasOriginY);
-		for (var j = 1; j < this.vertices.length; j++) {
-			var v = this.vertices[j];
-			this.ctx.lineTo(v.x - this.canvasOriginX, v.y - this.canvasOriginY);
-		}
-		this.ctx.stroke();
+		this.wasNearVictory = false;
 	}
 	update(currentPosition, player) {
-		var last = this.vertices.length > 0 ? this.vertices[this.vertices.length - 1] : null;
-		if (last != null && currentPosition.x == last.x && currentPosition.y == last.y) {
-			// Parked, so no new segment — but still repaint if the colour changed
-			// (e.g. toggling colour-blind assist while stationary), otherwise the
-			// cached strip stays two-toned until the kart next moves.
-			if (this.canvas != null && player != null && this.lastColor != null && this.lastColor !== player.color) {
-				var nvStill = player.notches == gameLength;
-				if (DEBUG_FORCE_NEAR_VICTORY && player.id == myID) {
-					nvStill = true;
-				}
-				this._redrawAll(player.color, nvStill);
-				this.wasNearVictory = nvStill;
-				this.lastColor = player.color;
-			}
-			return;
+		var now = Date.now();
+		// Expire vertices off the head before considering new ones, so the
+		// buffer stays bounded even when sat at the spawn pad.
+		while (this.vertices.length > 0 && now - this.vertices[0].t > TRAIL_FADE_MS) {
+			this.vertices.shift();
 		}
-		// Direct trail mode (low-end profile): keep only a capped recent tail and
-		// let drawTrail stroke it onto the main canvas each frame. Avoids the
-		// per-kart world-sized offscreen canvas whose every-frame mutation forces a
-		// full-texture GPU re-upload — the source of the paint stutter on weak
-		// devices. No _ensureCanvas, no incremental stroke, no growing _redrawAll.
-		if ((typeof perfTrailDirect === "function") && perfTrailDirect()) {
-			var dcap = (typeof perfTrailDirectMax === "function") ? perfTrailDirectMax() : 240;
-			while (this.vertices.length >= dcap) {
-				this.vertices.shift();
-			}
-			this.vertices.push(currentPosition);
+		var last = this.vertices.length > 0 ? this.vertices[this.vertices.length - 1] : null;
+		// Parked? Don't add a duplicate vertex — but keep tracking colour so a
+		// mid-round colour-blind toggle propagates to the next live segment.
+		if (last != null && currentPosition.x === last.x && currentPosition.y === last.y) {
 			if (player != null) {
 				this.lastColor = player.color;
 			}
 			return;
 		}
-		if (this.vertices.length > this.maxLength) {
-			this.vertices.shift();
+		this.vertices.push({ x: currentPosition.x, y: currentPosition.y, t: now });
+		if (player != null) {
+			this.lastColor = player.color;
+			var isNV = player.notches == gameLength;
+			if (DEBUG_FORCE_NEAR_VICTORY && player.id == myID) {
+				isNV = true;
+			}
+			this.wasNearVictory = isNV;
 		}
-		this.vertices.push(currentPosition);
-
-		this._ensureCanvas();
-		if (this.canvas == null || player == null) {
-			return;
-		}
-
-		var isNearVictory = player.notches == gameLength;
-		if (DEBUG_FORCE_NEAR_VICTORY && player.id == myID) {
-			isNearVictory = true;
-		}
-		// Repaint the whole strip in one colour when the near-victory style flips OR
-		// the player's colour changes mid-round (e.g. toggling colour-blind assist),
-		// so the cached canvas never ends up two-toned.
-		var colorChanged = (this.lastColor != null && this.lastColor !== player.color);
-		this.lastColor = player.color;
-		if (isNearVictory != this.wasNearVictory || colorChanged) {
-			this._redrawAll(player.color, isNearVictory);
-			this.wasNearVictory = isNearVictory;
-			return;
-		}
-		if (last == null) {
-			return;
-		}
-		var sdx = currentPosition.x - last.x;
-		var sdy = currentPosition.y - last.y;
-		var segLen = Math.sqrt(sdx * sdx + sdy * sdy);
-
-		this._applyStrokeStyle(player.color, isNearVictory);
-		this.ctx.lineDashOffset = isNearVictory ? this.accumulatedLength : 0;
-		this.ctx.beginPath();
-		this.ctx.moveTo(last.x - this.canvasOriginX, last.y - this.canvasOriginY);
-		this.ctx.lineTo(currentPosition.x - this.canvasOriginX, currentPosition.y - this.canvasOriginY);
-		this.ctx.stroke();
-
-		this.accumulatedLength += segLen;
 	}
 	reset(player) {
 		this.vertices = [];
 		this.wasNearVictory = false;
-		this.accumulatedLength = 0;
 		this.lastColor = null;
-		if (this.ctx != null) {
-			this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-		}
 	}
 }

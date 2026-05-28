@@ -325,9 +325,29 @@ function registerScoreHandlers(server) {
 			// Use the authoritative server position (tx/ty), not the eased render
 			// position (x/y), so the death skull/ping lands where the kart actually
 			// died (x/y lags by ~tau, noticeable for a fast death into lava).
-			playerList[id].deathX = (playerList[id].tx != null) ? playerList[id].tx : playerList[id].x;
-			playerList[id].deathY = (playerList[id].ty != null) ? playerList[id].ty : playerList[id].y;
+			// Prefer the authoritative position from the server (packet.x/y); fall
+			// back to the eased/server-tx position only if the server didn't send
+			// it (a kart that crossed onto lava between server ticks has its post-
+			// lava tx/ty sent in the NEXT gameUpdates, after this event).
+			var srvX = (packet != null && packet.x != null) ? packet.x : null;
+			var srvY = (packet != null && packet.y != null) ? packet.y : null;
+			playerList[id].deathX = (srvX != null) ? srvX :
+				((playerList[id].tx != null) ? playerList[id].tx : playerList[id].x);
+			playerList[id].deathY = (srvY != null) ? srvY :
+				((playerList[id].ty != null) ? playerList[id].ty : playerList[id].y);
 			playerList[id].deathAt = Date.now();
+			// Lava deaths get the sinking corpse. The server now tags the cause
+			// directly (packet.cause === "lava"); we still keep a tile-lookup
+			// fallback for the edge case where the server doesn't send a cause
+			// (legacy/test paths) but the authoritative position lands on lava.
+			var byLava = (packet != null && packet.cause === "lava");
+			if (!byLava && typeof tileIdAt === "function" && config != null &&
+				config.tileMap != null && config.tileMap.lava != null) {
+				byLava = (tileIdAt(playerList[id].deathX, playerList[id].deathY) == config.tileMap.lava.id);
+			}
+			if (byLava && typeof spawnSinkingCorpse === "function") {
+				spawnSinkingCorpse(playerList[id]);
+			}
 		}
 		recapMarkHighlight('death', [id]); // flag an elimination moment for the recap
 		createDownRankSymbol(id);
@@ -704,6 +724,23 @@ function registerCombatHandlers(server) {
 						playerList[id].deathMessage = null;
 					}
 				}, 800, packet.id);
+				// Sink the kart into the lobby lava too. The server snapshots the
+				// PRE-teleport position into packet.x/y, which is the authoritative
+				// lava-cell position (the gameUpdates packet carrying the spawn
+				// pad coords lands AFTER this event). Fall back to tx/ty only if
+				// the server didn't send it. The synthetic player-like object keeps
+				// the live playerList entry unmutated.
+				if (typeof spawnSinkingCorpse === "function") {
+					var dx = (packet.x != null) ? packet.x : ((p.tx != null) ? p.tx : p.x);
+					var dy = (packet.y != null) ? packet.y : ((p.ty != null) ? p.ty : p.y);
+					spawnSinkingCorpse({
+						deathX: dx,
+						deathY: dy,
+						color: p.color,
+						angle: p.angle,
+						radius: p.radius
+					});
+				}
 			}
 		}
 		playSound(packet.death ? playerDiedSound : playerFinished);

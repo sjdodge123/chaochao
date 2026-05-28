@@ -833,7 +833,7 @@ class Player extends Circle {
 			if (this.punchedBy == null && this.burnedBy != null) {
 				this.punchedBy = this.burnedBy;
 			}
-			this.killSelf();
+			this.killSelf("lava");
 			return;
 		}
 		if (object.id == c.tileMap.ice.id) {
@@ -904,7 +904,7 @@ class Player extends Circle {
 			this.notches -= 1;
 		}
 	}
-	killPlayer(packet) {
+	killPlayer(packet, cause) {
 		if (packet.currentState != c.stateMap.racing &&
 			packet.currentState != c.stateMap.collapsing) {
 			return;
@@ -946,10 +946,22 @@ class Player extends Circle {
 		// "killed" marks a player-caused death (punched/cut/blown into oblivion or
 		// the lava) versus an environmental/self death, so the crowd only cheers
 		// kills — not someone driving themselves into the lava.
-		messenger.messageRoomBySig(packet.roomSig, "playerDied", { id: packet.id, killed: packet.murderedBy != null });
+		// `cause` + `x`/`y` are AUTHORITATIVE: the client needs them to decide
+		// whether to spawn the sinking-corpse FX without racing the next
+		// gameUpdates packet (which is what carries the late tx/ty for a kart
+		// that crossed onto lava between server ticks). `cause` is null for
+		// non-lava deaths (gate-wall, infection-timer, AFK, bomb) so the client
+		// can also distinguish without inspecting the tile.
+		messenger.messageRoomBySig(packet.roomSig, "playerDied", {
+			id: packet.id,
+			killed: packet.murderedBy != null,
+			cause: cause || null,
+			x: packet.x,
+			y: packet.y
+		});
 	}
-	killSelf() {
-		this.killPlayer(this);
+	killSelf(cause) {
+		this.killPlayer(this, cause);
 	}
 	reset(currentState) {
 		this.alive = true;

@@ -1882,6 +1882,12 @@ class GameBoard {
 	// and goal touches leaves notches and achievement stats byte-for-byte unchanged.
 	// type is "death" or "goal" purely to pick which feedback cue the client plays.
 	respawnInLobby(player, type) {
+		// Snapshot the pre-teleport position so the client knows WHERE the player
+		// died/scored in world coords (the teleport below overwrites player.x/y,
+		// and the next gameUpdates packet — which would otherwise be the source —
+		// carries the post-teleport spawn-pad coords).
+		var preX = player.x;
+		var preY = player.y;
 		var loc = this.getLobbySpawnLoc();
 		player.x = loc.x;
 		player.y = loc.y;
@@ -1901,7 +1907,13 @@ class GameBoard {
 		player.invulnUntil = Date.now() + c.lobbyRespawnInvulnMs;
 		player.invulnHeldInCircle = false; // re-latches once they reach the start circle
 		player.onSanctuary = true; // landed on the background spawn pad
-		messenger.messageRoomBySig(this.roomSig, "lobbyRespawn", { id: player.id, death: (type == "death"), invulnMs: c.lobbyRespawnInvulnMs });
+		messenger.messageRoomBySig(this.roomSig, "lobbyRespawn", {
+			id: player.id,
+			death: (type == "death"),
+			invulnMs: c.lobbyRespawnInvulnMs,
+			x: preX,
+			y: preY
+		});
 	}
 	// A jittered point inside the spawn pad (a background region, inherently safe).
 	// Jitter keeps several simultaneous respawns from stacking on one spot.

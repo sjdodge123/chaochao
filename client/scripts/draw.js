@@ -2428,52 +2428,96 @@ function drawArmedRing(x, y, color, radius) {
     gameContext.restore();
 }
 
+// Render the kart's trail with each segment's alpha scaled by the segment's
+// AGE — newest segments are full opacity, the head of the buffer (vertices
+// approaching TRAIL_FADE_MS) fades to 0 and is dropped on the next update.
+// Segments are bucketed by age so each kart costs ~TRAIL_DRAW_BUCKETS stroke
+// calls per frame regardless of vertex count. Within each bucket, CONTIGUOUS
+// runs of segments are emitted as one moveTo + many lineTo so the canvas dash
+// pattern doesn't restart per segment — and lineDashOffset is set to the
+// cumulative path length at each run start so dashes line up across runs too
+// (matters for the near-victory dashed style; the codex review caught that the
+// per-segment subpaths were killing the dash cue at our 30Hz sample cadence).
+var TRAIL_DRAW_BUCKETS = 6;
 function drawTrail(player) {
     var trail = player.trail;
-    if (trail == null) {
+    if (trail == null || trail.vertices == null || trail.vertices.length < 2) {
         return;
     }
-    // Direct trail mode (low-end profile): stroke the capped recent tail straight
-    // onto the main canvas. The vertices are world coords (same space as the
-    // canvas blit's origin), so this aligns identically under the world pass —
-    // but with no per-kart world-sized texture to re-upload to the GPU each frame.
-    if ((typeof perfTrailDirect === "function") && perfTrailDirect()) {
-        var verts = trail.vertices;
-        if (verts == null || verts.length < 2) {
-            return;
-        }
-        var maxN = (typeof perfTrailDirectMax === "function") ? perfTrailDirectMax() : 240;
-        var start = Math.max(0, verts.length - maxN);
-        var dim = !isLocalId(player.id);
-        gameContext.save();
-        if (dim) {
-            gameContext.globalAlpha = NONLOCAL_TRAIL_ALPHA;
-        }
-        gameContext.strokeStyle = player.color;
-        gameContext.lineWidth = 5;
-        gameContext.lineCap = "round";
-        gameContext.lineJoin = "round";
-        gameContext.beginPath();
-        gameContext.moveTo(verts[start].x, verts[start].y);
-        for (var i = start + 1; i < verts.length; i++) {
-            gameContext.lineTo(verts[i].x, verts[i].y);
-        }
-        gameContext.stroke();
-        gameContext.restore();
+    var fadeMs = (typeof TRAIL_FADE_MS !== "undefined") ? TRAIL_FADE_MS : 5000;
+    var now = Date.now();
+    // Defensive expiry: trim head verts past their fade window even if update
+    // hasn't run this frame (e.g. dead karts whose trail still draws briefly).
+    var verts = trail.vertices;
+    while (verts.length > 0 && now - verts[0].t > fadeMs) {
+        verts.shift();
+    }
+    if (verts.length < 2) {
         return;
     }
-    if (trail.canvas != null) {
-        // Fade other players' trails so your own line stays legible in the pack.
-        var dimC = !isLocalId(player.id);
-        if (dimC) {
-            gameContext.save();
-            gameContext.globalAlpha = NONLOCAL_TRAIL_ALPHA;
-        }
-        gameContext.drawImage(trail.canvas, trail.canvasOriginX, trail.canvasOriginY);
-        if (dimC) {
-            gameContext.restore();
+    var dim = !isLocalId(player.id);
+    var baseAlpha = dim ? NONLOCAL_TRAIL_ALPHA : 1;
+    var dashed = !!trail.wasNearVictory;
+    gameContext.save();
+    gameContext.lineWidth = dashed ? 4 : 3;
+    gameContext.lineCap = "round";
+    gameContext.lineJoin = "round";
+    gameContext.strokeStyle = player.color;
+    if (typeof perfGlow === "function" && perfGlow()) {
+        gameContext.shadowBlur = 3;
+        gameContext.shadowColor = "black";
+    }
+    if (dashed) {
+        gameContext.setLineDash([20, 3, 3, 3, 3, 3, 3, 3]);
+    }
+    // Cumulative segment lengths up to vertex i (cumLen[0] = 0). Needed only for
+    // the dashed style — the offset is what makes the dash pattern continuous
+    // across the run boundaries when a stroke starts mid-trail.
+    var cumLen = null;
+    if (dashed) {
+        cumLen = new Array(verts.length);
+        cumLen[0] = 0;
+        for (var k = 1; k < verts.length; k++) {
+            var dx = verts[k].x - verts[k - 1].x;
+            var dy = verts[k].y - verts[k - 1].y;
+            cumLen[k] = cumLen[k - 1] + Math.sqrt(dx * dx + dy * dy);
         }
     }
+    var bucketMs = fadeMs / TRAIL_DRAW_BUCKETS;
+    // Bucket-index for the segment ENDING at vertex i (the segment verts[i-1] →
+    // verts[i] is in this bucket). >= TRAIL_DRAW_BUCKETS marks "expired".
+    var segBucket = new Array(verts.length);
+    segBucket[0] = -1;
+    for (var ii = 1; ii < verts.length; ii++) {
+        var age = now - verts[ii].t;
+        segBucket[ii] = (age >= fadeMs) ? TRAIL_DRAW_BUCKETS : Math.floor(age / bucketMs);
+    }
+    for (var b = 0; b < TRAIL_DRAW_BUCKETS; b++) {
+        var bucketAlpha = baseAlpha * (1 - (b + 0.5) / TRAIL_DRAW_BUCKETS);
+        if (bucketAlpha <= 0.01) {
+            continue;
+        }
+        gameContext.globalAlpha = bucketAlpha;
+        var runStart = -1;
+        for (var i = 1; i <= verts.length; i++) {
+            var inBucket = (i < verts.length) && (segBucket[i] === b);
+            if (inBucket) {
+                if (runStart === -1) {
+                    runStart = i - 1;
+                    if (dashed) {
+                        gameContext.lineDashOffset = cumLen[runStart];
+                    }
+                    gameContext.beginPath();
+                    gameContext.moveTo(verts[runStart].x, verts[runStart].y);
+                }
+                gameContext.lineTo(verts[i].x, verts[i].y);
+            } else if (runStart !== -1) {
+                gameContext.stroke();
+                runStart = -1;
+            }
+        }
+    }
+    gameContext.restore();
 }
 
 // --- Death ping ---
