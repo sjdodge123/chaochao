@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.23.1 — 2026-05-28
+
 ### Bug fixes
 
 - When a player leaves mid-round, any ability indicator, swap/explosion targeting circle, or bomb/ice projectile they were holding now vanishes with them instead of lingering as a ghost stuck to a player who's no longer there.
