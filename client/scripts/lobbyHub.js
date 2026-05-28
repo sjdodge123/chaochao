@@ -869,6 +869,7 @@ function drawCartSkinRow(lp, x, y, w, hit) {
     var cgap = 8;
     var cellW = (w - cgap * (n - 1)) / n;
     var current = currentCartSkin(lp);
+    var currentColor = skinCurrentColor(lp);
     for (var i = 0; i < n; i++) {
         var opt = CART_SKIN_OPTIONS[i];
         var cx = x + i * (cellW + cgap);
@@ -880,7 +881,7 @@ function drawCartSkinRow(lp, x, y, w, hit) {
         gameContext.strokeStyle = sel ? "#ffd34d" : "rgba(255,255,255,0.2)";
         lhRoundRect(gameContext, cx, y, cellW, ch, 6);
         gameContext.stroke();
-        drawCartSkinPreview(opt.id, cx + cellW / 2, y + ch * 0.34, ch * 0.22);
+        drawCartSkinPreview(opt.id, cx + cellW / 2, y + ch * 0.34, ch * 0.22, currentColor);
         gameContext.fillStyle = "#fff";
         gameContext.font = "11px sans-serif";
         gameContext.textAlign = "center";
@@ -891,9 +892,12 @@ function drawCartSkinRow(lp, x, y, w, hit) {
 }
 
 // Tiny procedural preview swatch for a cart-skin cell.
-function drawCartSkinPreview(id, cx, cy, r) {
+function drawCartSkinPreview(id, cx, cy, r, paint) {
+    // Preview in the player's own cart colour so the thumbnail matches what they'll
+    // drive; fall back to representative colours when no colour is known.
+    var canShade = (typeof cartSkinShade === "function" && paint);
     if (id === "firetruck") {
-        gameContext.fillStyle = "#d11f1f";
+        gameContext.fillStyle = canShade ? cartSkinShade(paint, -0.05) : "#d11f1f";
         gameContext.fillRect(cx - r, cy - r * 0.6, r * 2, r * 1.2);
         gameContext.fillStyle = "#1a1a1a";
         gameContext.beginPath();
@@ -901,7 +905,7 @@ function drawCartSkinPreview(id, cx, cy, r) {
         gameContext.arc(cx + r * 0.6, cy + r * 0.6, r * 0.4, 0, Math.PI * 2);
         gameContext.fill();
     } else if (id === "dino") {
-        gameContext.fillStyle = "#43b047";
+        gameContext.fillStyle = paint || "#43b047";
         gameContext.beginPath();
         gameContext.ellipse(cx - r * 0.2, cy, r * 0.9, r * 0.6, 0, 0, Math.PI * 2);
         gameContext.fill();
