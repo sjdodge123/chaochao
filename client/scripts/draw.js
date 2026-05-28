@@ -1249,6 +1249,16 @@ function ensureSpaceFloorCache(W, H) {
     }
     c.globalAlpha = 1;
 
+    // Neon rim baked in (so it isn't a per-frame shadowed stroke — see drawWorld,
+    // which skips the live rim for the space theme).
+    c.save();
+    c.strokeStyle = 'rgba(170,195,255,0.7)';
+    c.shadowColor = 'rgba(120,160,255,0.7)';
+    c.shadowBlur = 10;
+    c.lineWidth = 4;
+    c.strokeRect(2, 2, W - 4, H - 4);
+    c.restore();
+
     spaceFloorCanvas = cv;
     return cv;
 }
@@ -2941,24 +2951,23 @@ function drawWorld() {
             gameContext.restore();
         }
 
-        gameContext.save();
-        gameContext.beginPath();
-        gameContext.lineWidth = 4;
-        // Themed rim (a plain ink border reads harshly on the sea/space).
-        if (space) {
-            gameContext.strokeStyle = 'rgba(170,195,255,0.65)';
-            gameContext.shadowColor = 'rgba(120,160,255,0.7)';
-            gameContext.shadowBlur = 10;
-        } else if (themed) {
-            gameContext.strokeStyle = 'rgba(235,250,255,0.7)';
-            gameContext.shadowColor = 'rgba(180,230,255,0.7)';
-            gameContext.shadowBlur = 8;
-        } else {
-            gameContext.strokeStyle = themeColor('ink', 'black');
+        // Space bakes its glowing rim into the floor cache (perf: no per-frame
+        // shadowed stroke). Water/non-themed draw their rim live here.
+        if (!space) {
+            gameContext.save();
+            gameContext.beginPath();
+            gameContext.lineWidth = 4;
+            if (themed) {
+                gameContext.strokeStyle = 'rgba(235,250,255,0.7)';
+                gameContext.shadowColor = 'rgba(180,230,255,0.7)';
+                gameContext.shadowBlur = 8;
+            } else {
+                gameContext.strokeStyle = themeColor('ink', 'black');
+            }
+            gameContext.rect(ox, oy, world.width, world.height);
+            gameContext.stroke();
+            gameContext.restore();
         }
-        gameContext.rect(world.x + camera.getCameraX(), world.y + camera.getCameraY(), world.width, world.height);
-        gameContext.stroke();
-        gameContext.restore();
     }
 }
 
@@ -3086,10 +3095,10 @@ function drawGateField() {
         var g = gates[i];
         gameContext.fillStyle = gateFieldGradient(g, a);
         gameContext.fillRect(g.x, g.y, g.width, g.height);
-        // Soft glowing containment edge.
-        gameContext.strokeStyle = 'rgba(160,225,255,' + (a * 0.9) + ')';
-        gameContext.shadowColor = 'rgba(90,190,255,' + a + ')';
-        gameContext.shadowBlur = 9 + 6 * pulse;
+        // Bright containment edge. (No shadowBlur — it's drawn every frame in the
+        // gated scene and software-raster blur is the costly bit; the translucent
+        // gradient fill already reads as a glow.)
+        gameContext.strokeStyle = 'rgba(180,235,255,' + (0.7 + 0.25 * pulse) + ')';
         gameContext.lineWidth = 2;
         gameContext.strokeRect(g.x + 1, g.y + 1, g.width - 2, g.height - 2);
     }
@@ -3137,14 +3146,16 @@ function drawGateLine() {
     }
     // Pulse accelerates as the countdown closes in (period 200ms -> 80ms).
     var pulse = 0.5 + 0.5 * Math.sin(now / Math.max(80, 200 - 120 * prog));
+    // Keep the blur modest — it's drawn every frame in the (perf-gated) gated
+    // scene and software-raster shadowBlur cost scales with the blur radius.
     var color, glow, width;
     if (gatedState) {
-        glow = 8 + 22 * prog + 12 * pulse * prog;
+        glow = 4 + 9 * prog + 4 * pulse * prog;
         width = 5 + 3 * prog;
         var grn = Math.round(35 + 110 * prog); // red -> orange near the end
         color = 'rgba(255,' + grn + ',40,' + (0.7 + 0.3 * pulse) + ')';
     } else {
-        glow = 34 * flash;
+        glow = 14 * flash;
         width = 6;
         color = 'rgba(60,255,95,' + flash + ')';
     }
@@ -3370,21 +3381,20 @@ function drawMap() {
     if (mapCanvas != null) {
         var mdx = world.x - mapCanvasPad, mdy = world.y - mapCanvasPad;
         var mdw = world.width + mapCanvasPad * 2, mdh = world.height + mapCanvasPad * 2;
-        // Ground the islands on the themed floor: water gets shallows + a swaying
-        // reflection; space gets a baked 3D extruded edge + atmosphere rim.
-        if (arenaBackdropActive()) {
-            if (ARENA_FLOOR_THEME === 'space') {
-                var fxCache = ensureIslandFxCache();
-                if (fxCache != null) {
-                    gameContext.drawImage(fxCache, mdx, mdy, mdw, mdh);
-                }
-            } else {
-                drawIslandWater(mdx, mdy, mdw, mdh);
-            }
-        }
+        // Space blits a single composite (terrain + baked 3D depth) — one
+        // full-canvas blit, same as base. Water draws shallows + a swaying
+        // reflection under the terrain, then the terrain. Otherwise just terrain.
         // Stretch the (possibly reduced-resolution) cache back over the full world
         // region; at scale 1 this is a 1:1 blit (unchanged on High/Balanced).
-        gameContext.drawImage(mapCanvas, mdx, mdy, mdw, mdh);
+        if (arenaBackdropActive() && ARENA_FLOOR_THEME === 'space') {
+            var fxCache = ensureIslandFxCache();
+            gameContext.drawImage(fxCache != null ? fxCache : mapCanvas, mdx, mdy, mdw, mdh);
+        } else {
+            if (arenaBackdropActive()) {
+                drawIslandWater(mdx, mdy, mdw, mdh);
+            }
+            gameContext.drawImage(mapCanvas, mdx, mdy, mdw, mdh);
+        }
     }
     if (Object.keys(hazardList).length > 0) {
         for (var id in hazardList) {
@@ -3420,12 +3430,10 @@ function drawIslandWater(dx, dy, dw, dh) {
     gameContext.restore();
 }
 
-// Space island depth FX (extruded side + blue atmosphere rim), baked from the
-// terrain cache once per terrain change so it's a single blit per frame instead
-// of ~6 shadow-blits. Rebuilt only when the terrain cache changes (mapCacheRev)
-// or its size changes. The cache holds the terrain image too, but the real
-// terrain blit (in drawMap, right after) covers those pixels — only the extruded
-// edge + rim that extend past the island edges remain visible.
+// Space island layer: the depth FX (extruded side + blue atmosphere rim) baked
+// UNDER a crisp copy of the terrain, so drawMap blits this single composite
+// instead of an FX layer plus the terrain (one full-canvas blit per frame, same
+// as base). Rebuilt only when the terrain cache changes (mapCacheRev) or resizes.
 function ensureIslandFxCache() {
     if (mapCanvas == null) { return null; }
     if (islandFxCanvas &&
@@ -3465,6 +3473,10 @@ function ensureIslandFxCache() {
     c.shadowBlur = 16;
     c.drawImage(mapCanvas, 0, 0);
     c.restore();
+
+    // Crisp terrain on top, covering the dim/offset copies left by the FX passes,
+    // so this single canvas is the complete arena terrain + depth.
+    c.drawImage(mapCanvas, 0, 0);
 
     cv._srcRev = mapCacheRev;
     islandFxCanvas = cv;
