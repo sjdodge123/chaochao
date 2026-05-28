@@ -248,7 +248,14 @@ function clientConnect() {
 
     server.on('githubFailure', function (error) {
         console.log(error);
-        showSubmitStatus("Upload failed — try again", "red", "white");
+        // The server sends a player-friendly reason: an actionable message
+        // ("Add a goal tile…", "Map name can't contain…") or a sanitized generic
+        // for unexpected errors — the raw exception is logged server-side, not
+        // sent here. Show it as-is (self-contained + red styling reads as a
+        // failure); fall back to a generic if the server sent nothing usable.
+        var reason = (typeof error === "string" && error.trim() !== "") ? error.trim()
+            : "Couldn't upload your map. Please try again.";
+        showSubmitStatus(reason, "red", "white", 9000);
     });
     server.on('githubSuccess', function (url) {
         console.log(url);
@@ -1294,14 +1301,14 @@ var submitStatusTimer = null;
 // True between clicking Upload and the server's success/failure reply — so an
 // input-change reset doesn't wipe the in-flight "Submitting.." indicator.
 var submitPending = false;
-function showSubmitStatus(message, bg, color) {
+function showSubmitStatus(message, bg, color, holdMs) {
     submitPending = false; // a terminal status (success/failure/validation) clears pending
     var el = $("#submitStatus");
     el.text(message);
     el.css({ "color": color || "white", "background-color": bg });
     el.show();
     if (submitStatusTimer) { clearTimeout(submitStatusTimer); }
-    submitStatusTimer = setTimeout(function () { el.hide(); }, 4000);
+    submitStatusTimer = setTimeout(function () { el.hide(); }, holdMs || 4000);
 }
 function resetStatuses() {
     $("#exportStatus, #previewStatus").hide();

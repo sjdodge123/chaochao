@@ -175,7 +175,14 @@ function checkForMail(client) {
 				return;
 			}
 			client.emit("githubSuccess", returnToClient.message);
-		})(client.id)
+		})(client.id).catch(function (e) {
+			// Backstop: submitPullRequest resolves with {status,message} on its own
+			// errors, but never let an unexpected throw become an unhandled
+			// rejection that leaves the editor stuck on "Submitting..". Log the
+			// real error; send the player the same friendly generic.
+			console.log(e);
+			client.emit("githubFailure", "Couldn't upload your map right now. Please try again in a moment.");
+		})
 
 	});
 
