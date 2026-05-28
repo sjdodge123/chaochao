@@ -10,7 +10,11 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- Driving into lava now shows your kart **sinking and burning** — it shrinks, darkens, and bobs under for a few seconds while still on fire, with embers and bubble pops rising around it. Works on the lobby's lava-and-respawn teaching pool too.
+- Player trails behind each kart now **fade out after about 5 seconds** instead of building up the whole round, and the trail itself is a little thinner — keeps your line readable without filling the map.
+- Ice now leaves skate marks at any speed (was only at a full glide), and bare dirt picks up a subtle puff at a walk. On phone-class devices these subtler effects are skipped to keep frames smooth.
 
 ## v0.21.1 — 2026-05-28
 

@@ -31,7 +31,8 @@ var PERF_PROFILES = {
         audience: true,          // letterbox crowd
         trailDirect: false,      // false = full per-kart offscreen trail canvas; true = stroke a capped tail straight to the main canvas (avoids re-uploading a world-sized texture/kart/frame on weak GPUs)
         mapScale: 1,             // resolution of the cached map texture (1 = full); <1 shrinks it so each re-upload on a tile change moves fewer bytes (the GPU-paint stutter on weak GPUs)
-        dprCap: 2                // device-pixel-ratio ceiling for the backing store
+        dprCap: 2,               // device-pixel-ratio ceiling for the backing store
+        extraFx: true            // walking-speed terrain flecks (ice/dirt) + lava-death sinking corpse — non-essential ambient feedback
     },
     // Tablets / small desktop windows: trim particle volume, keep the glow and
     // crowd (they read well on a mid device).
@@ -45,7 +46,8 @@ var PERF_PROFILES = {
         audience: true,
         trailDirect: false,
         mapScale: 1,
-        dprCap: 2
+        dprCap: 2,
+        extraFx: true
     },
     // Phones / low-end: shed the fill-rate-heavy work — glow passes, the crowd,
     // embers — cap effects hard, and drop the DPR a notch so the backing store
@@ -60,7 +62,8 @@ var PERF_PROFILES = {
         audience: false,
         trailDirect: true,
         mapScale: 0.6,
-        dprCap: 1.5
+        dprCap: 1.5,
+        extraFx: false           // skip walking-speed flecks and the multi-particle lava sinking animation on phone-class devices
     }
 };
 
@@ -236,6 +239,11 @@ function perfCooldown(ms) {
 // alone — they're not in the per-frame racing budget the LOW tier targets.
 function perfGlow() { return !!PERF.glow; }
 function perfEmbers() { return !!PERF.embers; }
+// Gates ambient "extra" FX whose absence isn't visible at a glance: walking-speed
+// terrain flecks (sand/ice/dirt) and the multi-particle lava-death sinking corpse.
+// Off on LOW; the always-on terrain feedback (fast-speed flecks, skate trails) is
+// not gated here so the racing read still has terrain cues even on a phone.
+function perfExtraFx() { return !!PERF.extraFx; }
 function perfTrailDirect() { return !!PERF.trailDirect; }
 function perfTrailDirectMax() { return PERF_TRAIL_DIRECT_MAX; }
 function perfMapScale() { return PERF.mapScale || 1; }
