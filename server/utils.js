@@ -108,13 +108,31 @@ exports.submitPullRequest = async function (map) {
 
     const owner = 'sjdodge123';
     const repo = 'chaochao';
-    var author = String(map.author).replace(/ /g, '');
+    // Strip control chars (\x00-\x1f) from author/email too — they flow into the
+    // commit's committer fields and the PR title, and a crafted payload could
+    // smuggle newlines past the client's <input maxlength>. Map name has its own
+    // stricter rule below (it becomes a filename + branch ref).
+    var author = String(map.author).replace(/ /g, '').replace(/[\x00-\x1f]/g, '');
     var mapName = String(map.name).replace(/ /g, '');
-    var email = String(map.email).replace(/ /g, '');
+    var email = String(map.email).replace(/ /g, '').replace(/[\x00-\x1f]/g, '');
     if (author == '' || email == '' || mapName == '') {
         console.log("Can't submit to github; required info missing:" + author + ":" + email + ":" + mapName);
         returnToClient.status = false;
         returnToClient.message = "Map name, author, and email are all required.";
+        return returnToClient;
+    }
+    // Length caps — the editor's <input maxlength> bounds these at the client
+    // (author 15, email 50, name 15), so a crafted socket payload is the only
+    // way past. RFC 5321 caps email at 254; author at 32 gives generous headroom
+    // over the editor's 15 without letting an abusive payload bloat the commit.
+    if (author.length > 32) {
+        returnToClient.status = false;
+        returnToClient.message = "Author name is too long (max 32 characters).";
+        return returnToClient;
+    }
+    if (email.length > 254) {
+        returnToClient.status = false;
+        returnToClient.message = "Email address is too long.";
         return returnToClient;
     }
     // mapName is interpolated into a repo file path (client/maps/<name>.json) and
@@ -124,6 +142,14 @@ exports.submitPullRequest = async function (map) {
     // and control characters. Ordinary punctuation real map names use
     // (apostrophes, "!") is left alone — only traversal-capable input is blocked.
     // The length cap keeps the resulting filename and ref sane.
+    // Thumbnail size cap — the editor exports JPEG at quality 0.1 (a few KB
+    // typical); 200 KB is comfortable headroom for higher-DPI editors, while
+    // rejecting a crafted blob that would bloat the repo or the socket payload.
+    if (typeof map.thumbnail === "string" && map.thumbnail.length > 200 * 1024) {
+        returnToClient.status = false;
+        returnToClient.message = "Map thumbnail is too large.";
+        return returnToClient;
+    }
     if (mapName.length > 64 || /[\\/\x00-\x1f]/.test(mapName) || mapName[0] === '.') {
         console.log("Rejected map submission; unsafe map name: " + JSON.stringify(map.name));
         returnToClient.status = false;
@@ -483,6 +509,20 @@ exports.validateMap = function (vMap, config) {
     if (vMap.cells.length > mapFormat.MAX_MAP_CELLS) {
         return { valid: false, reason: "Map is too large (over " + mapFormat.MAX_MAP_CELLS + " cells)." };
     }
+    // Known-id sets — built defensively from config so a metadata entry without
+    // an .id (e.g. tileMap.abilities) doesn't poison the set with `undefined`.
+    var validTileIds = {};
+    for (var tk in config.tileMap) {
+        if (config.tileMap[tk] && typeof config.tileMap[tk].id === "number") {
+            validTileIds[config.tileMap[tk].id] = true;
+        }
+    }
+    var validHazardIds = {};
+    for (var hk in config.hazards) {
+        if (config.hazards[hk] && typeof config.hazards[hk].id === "number") {
+            validHazardIds[config.hazards[hk].id] = true;
+        }
+    }
     var hasGoal = false;
     for (var i = 0; i < vMap.cells.length; i++) {
         var cell = vMap.cells[i];
@@ -497,7 +537,7 @@ exports.validateMap = function (vMap, config) {
         if (!Array.isArray(cell.halfedges)) {
             return { valid: false, reason: "Map has a cell with no geometry." };
         }
-        if (typeof cell.id !== "number") {
+        if (typeof cell.id !== "number" || !validTileIds[cell.id]) {
             return { valid: false, reason: "Map has a cell with an invalid tile." };
         }
         if (cell.id === config.tileMap.goal.id) {
@@ -513,7 +553,7 @@ exports.validateMap = function (vMap, config) {
         }
         for (var h = 0; h < vMap.hazards.length; h++) {
             var hazard = vMap.hazards[h];
-            if (hazard == null || hazard.id == null ||
+            if (hazard == null || !validHazardIds[hazard.id] ||
                 !Number.isFinite(hazard.x) || !Number.isFinite(hazard.y)) {
                 return { valid: false, reason: "Map has a malformed hazard." };
             }
