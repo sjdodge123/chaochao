@@ -608,6 +608,7 @@ function drawObjects(dt) {
         currentState == config.stateMap.collapsing) {
         drawMapTitle();
     }
+    drawSpectatorBanner();
     drawHUD();
     drawMouseDriveIndicator();
     drawOffscreenGoalIndicator();
@@ -3305,6 +3306,91 @@ function drawHUD() {
     drawVirtualButtons();
     drawTouchControls();
     drawTitle();
+}
+
+// Local players (slots) that joined this match mid-race and are still waiting:
+// the server parked them as temp spectators who race from the next round. Covers
+// the primary AND any co-op pad seat that joined after the gate. The per-slot
+// lateJoinSpectating flag distinguishes a late joiner from a racer who just died
+// this round (both are !alive during racing).
+function spectatingLocalPlayers() {
+    var out = [];
+    if (typeof localPlayers === "undefined" || typeof playerList === "undefined" || !playerList) {
+        return out;
+    }
+    for (var s = 0; s < localPlayers.length; s++) {
+        var lp = localPlayers[s];
+        if (!lp || lp.myID == null || !lp.lateJoinSpectating) {
+            continue;
+        }
+        var p = playerList[lp.myID];
+        if (p != null && !p.alive) {
+            out.push(p);
+        }
+    }
+    return out;
+}
+
+// A centered hint for local players who joined a match mid-round: each races from
+// the next round. Drawn in HUD (screen) space below the GameID/Players/Round row,
+// ending with a mini kart per waiting player in the colour the server assigned it
+// (same sprite + colour-blind remap as their real kart), so they know what
+// they'll race as. State-gated to the live race so it never bleeds into the
+// game-over / lobby screens. When a local player is actively RACING on this
+// shared couch screen, the whole banner is faded so it doesn't obscure their run;
+// at full strength only when everyone local is waiting.
+function drawSpectatorBanner() {
+    if (currentState != config.stateMap.racing && currentState != config.stateMap.collapsing) {
+        return;
+    }
+    var specs = spectatingLocalPlayers();
+    if (specs.length === 0) {
+        return;
+    }
+    var racingPresent = livingLocalPlayers().length > 0;
+
+    var swatchR = 10;          // kart disc radius drawn in the banner
+    var discGap = 6;           // spacing between multiple kart discs
+    var sprites = [];
+    for (var i = 0; i < specs.length; i++) {
+        if (specs[i].color != null) {
+            sprites.push(getPlayerSprite(specs[i].color, swatchR, "black"));
+        }
+    }
+    var hasSwatch = sprites.length > 0;
+    var text = hasSwatch ? "Spectating — you'll race next round as"
+        : "Spectating — you'll race next round";
+    var gap = hasSwatch ? 10 : 0;  // text -> first swatch spacing
+    var swatchW = hasSwatch ? (sprites.length * swatchR * 2 + (sprites.length - 1) * discGap) : 0;
+
+    gameContext.save();
+    // Considerate fade when a local kart is still racing; full strength otherwise.
+    gameContext.globalAlpha = racingPresent ? 0.6 : 1.0;
+    gameContext.font = "bold 18px Arial";
+    gameContext.textAlign = "left";
+    gameContext.textBaseline = "alphabetic";
+    var textW = gameContext.measureText(text).width;
+    var padX = 14;
+    var w = textW + gap + swatchW + padX * 2;
+    var cx = LOGICAL_WIDTH / 2;
+    var y = 52;
+    var boxX = cx - w / 2;
+
+    gameContext.fillStyle = "rgba(0, 0, 0, 0.55)";
+    roundRectPath(gameContext, boxX, y - 19, w, 28, 8); // in the play bundle (audience.js)
+    gameContext.fill();
+
+    var textX = boxX + padX;
+    gameContext.fillStyle = "white";
+    gameContext.fillText(text, textX, y);
+
+    var discCx = textX + textW + gap + swatchR;
+    var discCy = y - 5; // vertical centre of the pill (top y-19, height 28)
+    for (var j = 0; j < sprites.length; j++) {
+        gameContext.drawImage(sprites[j], discCx - sprites[j].halfSize, discCy - sprites[j].halfSize);
+        discCx += swatchR * 2 + discGap;
+    }
+    gameContext.restore();
 }
 
 function drawGameInfo() {
