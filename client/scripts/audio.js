@@ -87,12 +87,14 @@ function makeSound(src, opts) {
     return s;
 }
 
+// Returns a promise that resolves once the sound is decoded (or gave up) so a
+// throttled loader can chain on it. Never rejects.
 function loadSound(s) {
-    if (s.buffer || s.loading) { return; }
+    if (s.buffer || s.loading) { return Promise.resolve(); }
     var ctx = getCtx();
-    if (!ctx) { return; }
+    if (!ctx) { return Promise.resolve(); }
     s.loading = true;
-    fetch(s.src)
+    return fetch(s.src)
         .then(function (r) { return r.arrayBuffer(); })
         .then(function (buf) { return ctx.decodeAudioData(buf); })
         .then(function (decoded) {
@@ -103,11 +105,22 @@ function loadSound(s) {
         .catch(function () { s.loading = false; });
 }
 
-// Kick off decoding for every sound up front so the first punch/explosion isn't
-// silent while its buffer decodes. decodeAudioData works on a suspended context.
+// Load the rest of the library AFTER the essentials, a few at a time. Fetching
+// all ~65 clips at once (tens of MB) on page load would saturate a thin mobile
+// link and starve the map/image loads that actually gate entering the lobby —
+// the bug far/slow players hit. Throttling keeps the bulk audio out of the way;
+// anything played before its turn still decodes on-demand via startSound().
+var bgPreloadStarted = false;
 function preloadAllSounds() {
-    if (!getCtx()) { return; }
-    for (var i = 0; i < allSounds.length; i++) { loadSound(allSounds[i]); }
+    if (bgPreloadStarted || !getCtx()) { return; }
+    bgPreloadStarted = true;
+    var queue = allSounds.filter(function (s) { return !s.buffer && !s.loading; });
+    var CONCURRENCY = 3;
+    function pump() {
+        if (!queue.length) { return; }
+        loadSound(queue.shift()).then(pump);
+    }
+    for (var i = 0; i < CONCURRENCY; i++) { pump(); }
 }
 
 // Core playback: spawn one voice. Returns the voice handle (or undefined if it
@@ -564,12 +577,28 @@ function unlockAudio() {
         drainPending();
     }
 }
+// The sounds the lobby / first interaction needs promptly. Everything else is
+// loaded by the throttled background pass (preloadAllSounds), so the heavy
+// gameplay music can't compete with the map/image loads that gate the lobby.
+var essentialSounds = [lobbyMusic, playerJoinSound, gameStart, countDownA, countDownB];
+
+// Start the background load of the remaining clips. Called once the lobby is
+// reachable (from enterLobby in game.js), with a timed fallback in case that
+// path changes — bgPreloadStarted makes it idempotent either way.
+function startBackgroundAudioPreload() {
+    preloadAllSounds();
+}
+
 if (typeof window !== "undefined") {
     ["mousedown", "pointerdown", "keydown", "touchstart"].forEach(function (evt) {
         window.addEventListener(evt, unlockAudio, { passive: true });
     });
-    // Begin decoding everything immediately so gameplay sounds are ready on first use.
-    preloadAllSounds();
+    // Decode just the lobby essentials up front; defer the bulk so it doesn't
+    // saturate a slow link before the player reaches the lobby.
+    essentialSounds.forEach(loadSound);
+    // Fallback: ensure the background pass runs even if enterLobby never calls it.
+    window.setTimeout(startBackgroundAudioPreload, 4000);
+    window.startBackgroundAudioPreload = startBackgroundAudioPreload;
 }
 
 // ----------------------------------------------------------------------------

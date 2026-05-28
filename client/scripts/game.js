@@ -327,6 +327,12 @@ function enterLobby() {
     $('#main').hide();
     $('#gameWindow').css('display', 'flex');
     resize();
+    // The loading gate (maps + tile images) has cleared — now kick off the
+    // throttled background download of the rest of the audio library. Lobby
+    // music was already loaded up front; gameplay music/SFX stream in behind us.
+    if (typeof startBackgroundAudioPreload === "function") {
+        startBackgroundAudioPreload();
+    }
     var playParams = new URLSearchParams(window.location.search);
     // Preview launch: the editor stashed the unsaved map in sessionStorage.
     // Inject it into maps[] BEFORE enterGame so the server's newMap (which

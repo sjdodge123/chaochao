@@ -24,12 +24,21 @@ function handshakeAuth(cb) {
 	}
 }
 
+// Connect over WebSocket first and only fall back to HTTP long-polling if it
+// fails (tryAllTransports). The default order is polling-then-upgrade, which on
+// a high-latency link wastes several round trips on the long-poll handshake
+// before upgrading — and prod logs showed far clients getting stuck on polling,
+// the slowest transport. Skipping straight to WebSocket cuts connect latency and
+// keeps the realtime gameUpdates path off long-polling; polling stays as a
+// fallback for networks that block WebSockets.
+var SOCKET_TRANSPORT_OPTS = { transports: ["websocket", "polling"], tryAllTransports: true };
+
 function clientConnect() {
 	// The primary connection (slot 0): the keyboard/mouse player and the sole
 	// owner of rendering, audio, UI and one-shot/timer handlers. The globals
 	// `server`/`myID`/`myPlayer` alias this slot (see game.js localPlayers).
 	// This slot carries the signed-in account's token (if any).
-	var sock = io({ auth: handshakeAuth });
+	var sock = io({ auth: handshakeAuth, transports: SOCKET_TRANSPORT_OPTS.transports, tryAllTransports: SOCKET_TRANSPORT_OPTS.tryAllTransports });
 	server = sock;
 	localPlayers[primarySlot] = makeLocalPlayer(primarySlot, sock, true);
 	registerPrimaryHandlers(sock);
@@ -273,7 +282,6 @@ function registerConnectionHandlers(server) {
 	server.on("contentDelivery", function (payload) {
 		var payload = JSON.parse(payload);
 		var mapnames = payload.mapnames;
-		var soundnames = payload.soundnames;
 		var imagenames = payload.imagenames;
 		for (var i = 0; i < imagenames.length; i++) {
 			promises.push($.get("../assets/img/" + imagenames[i]));
@@ -283,9 +291,12 @@ function registerConnectionHandlers(server) {
 				maps.push(reconstructSitesOnlyMap(data));
 			}));
 		}
-		for (var i = 0; i < soundnames.length; i++) {
-			promises.push($.get("../assets/sounds/" + soundnames[i]));
-		}
+		// Sounds are deliberately NOT preloaded into `promises` (the loading-screen
+		// gate): the audio engine in audio.js loads them itself — lobby music up
+		// front, the rest (tens of MB of gameplay music/SFX) throttled in the
+		// background — and plays anything not-yet-decoded on-demand. Blocking lobby
+		// entry on the full audio download was the #1 cause of mobile load timeouts
+		// on far/slow links (a phone in Vietnam never cleared the loading bar).
 		setupPage();
 	});
 
@@ -1143,7 +1154,7 @@ function addLocalPlayer(slot, padIndex) {
 	// session has at most one signed-in account and it rides the primary socket.
 	// TODO: per-seat sign-in is technically feasible (each socket could carry its
 	// own token) — revisit if local-multiplayer accounts are wanted later.
-	var sock = io({ forceNew: true });
+	var sock = io({ forceNew: true, transports: SOCKET_TRANSPORT_OPTS.transports, tryAllTransports: SOCKET_TRANSPORT_OPTS.tryAllTransports });
 	var lp = makeLocalPlayer(slot, sock, false);
 	lp.padIndex = padIndex;
 	localPlayers[slot] = lp;

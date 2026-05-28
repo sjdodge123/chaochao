@@ -10,7 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- The game now reaches the lobby much faster, especially on phones and slower or far-away connections — it no longer waits for the entire sound library to download before letting you in. Music and effects stream in quietly in the background instead. (Fixes players, e.g. on mobile in Vietnam, getting stuck on the loading bar.)
+- Smaller, faster downloads: background music tracks were re-compressed, assets are now cached by your browser between visits, and the game connects over a faster realtime channel where available.
 
 ## v0.22.0 — 2026-05-28
 
