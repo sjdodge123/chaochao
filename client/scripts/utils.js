@@ -20,6 +20,8 @@ function reconstructSitesOnlyMap(map) {
             siteObjs[i] = { x: map.sites[i].x, y: map.sites[i].y };
         }
         var diagram = new Voronoi().compute(siteObjs, map.bbox);
+        // Drop rhill's vestigial top-level `site` (null, never read) — matches server.
+        delete diagram.site;
         for (var j = 0; j < map.sites.length; j++) {
             var vid = siteObjs[j].voronoiId;
             if (vid == null || diagram.cells[vid] == null) { continue; }
