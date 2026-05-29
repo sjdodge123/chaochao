@@ -669,6 +669,11 @@ function registerCombatHandlers(server) {
 		var punch = spawnPunch(packet);
 		spawnPunchEffect(punch);
 		var owner = playerList[punch.ownerId];
+		// Seed the cart-skin punch animation (forward lunge + impact pop) on a kart's
+		// own melee swing — not on bumper hits, which aren't a kart throwing a punch.
+		if (owner != null && punch.type == "player") {
+			owner.punchAnimAt = Date.now();
+		}
 		if (owner != null && owner.infected) {
 			playSoundVaried(zombieSwing, 0.1);
 			return;
