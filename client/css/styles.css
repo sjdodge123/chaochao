@@ -1737,3 +1737,17 @@ body.osk-open .gamepad-prompts {
     height: 62%;
     object-fit: contain;
 }
+
+/* --- Embedded (portal iframe) mode -------------------------------------------
+   Toggled by scripts/embed.js, which adds html.cc-embedded when the game is
+   framed by a portal (CrazyGames / Poki / itch.io). Hide chrome that navigates
+   away from the portal or that won't work inside a third-party iframe; the
+   in-game UI and internal Play/Join/Create/Learn links are left untouched.
+   See isEmbedded() in scripts/embed.js. */
+html.cc-embedded .brand-link,
+html.cc-embedded #version,
+html.cc-embedded .news-banner,
+html.cc-embedded #authLogin,
+html.cc-embedded .cc-toast {
+    display: none !important;
+}

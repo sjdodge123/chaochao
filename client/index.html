@@ -5,15 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="description" content="Slow-paced multiplayer arena racing. Free in the browser — play with friends on phone, controller, or keyboard.">
+    <meta name="description" content="Free multiplayer browser arena racing. Play with friends, survive brutal rounds, and build your own maps. No signup — works on phone, controller, or keyboard.">
     <meta name="theme-color" content="#000000">
+    <link rel="canonical" href="https://www.chaochaogame.com/">
+    <!-- Open Graph + Twitter Card for social / portal link previews. Scrapers
+         require ABSOLUTE urls; og:image is a 1200x630 PNG (assets/img/og-cover.png).
+         If the production host ever changes, update the domain here, in the other
+         pages' canonical/og:url, and in robots.txt / sitemap.xml. -->
     <meta property="og:type" content="website">
-    <meta property="og:title" content="Chao Chao">
-    <meta property="og:description" content="Slow-paced multiplayer arena racing. Free in the browser — play with friends on phone, controller, or keyboard.">
-    <meta property="og:image" content="assets/img/favicon.svg">
-    <meta name="twitter:card" content="summary">
-    <meta name="twitter:title" content="Chao Chao">
-    <meta name="twitter:description" content="Slow-paced multiplayer arena racing. Free in the browser — play with friends on phone, controller, or keyboard.">
+    <meta property="og:site_name" content="Chao Chao">
+    <meta property="og:title" content="Chao Chao — Free Multiplayer Browser Arena Racing">
+    <meta property="og:description" content="Free multiplayer browser arena racing. Play with friends, survive brutal rounds, and build your own maps. No signup needed.">
+    <meta property="og:url" content="https://www.chaochaogame.com/">
+    <meta property="og:image" content="https://www.chaochaogame.com/assets/img/og-cover.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Chao Chao — Free Multiplayer Browser Arena Racing">
+    <meta name="twitter:description" content="Free multiplayer browser arena racing. Play with friends, survive brutal rounds, and build your own maps. No signup needed.">
+    <meta name="twitter:image" content="https://www.chaochaogame.com/assets/img/og-cover.png">
     <!-- Apply saved theme before first paint to avoid a flash of the wrong theme -->
     <script>(function(){try{var p=localStorage.getItem('themePref')||'auto';var d=p==='dark'||(p!=='light'&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.setAttribute('data-theme',d?'dark':'light');}catch(e){}})();</script>
     <!-- Preconnect to third-party origins we will hit on this page. `crossorigin`
@@ -43,7 +53,29 @@
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css" integrity="sha384-MCw98/SFnGE8fJT3GXwEOngsV7Zt27NXFoaoApmYm81iuXoPkFOJwJ8ERdknLPMO" crossorigin="anonymous">
     <link rel="stylesheet" type="text/css" href="css/styles.css">
     <link rel="icon" type="image/svg+xml" href="assets/img/favicon.svg">
-    <title>Chao Chao</title>
+    <title>Chao Chao — Free Multiplayer Browser Arena Racing</title>
+    <!-- isEmbedded() + portal-embed chrome trimming; standalone (not bundled) so
+         it runs before first paint on every page. See scripts/embed.js. -->
+    <script src="scripts/embed.js"></script>
+    <!-- Structured data: schema.org VideoGame, for the Google "Game" rich result
+         and richer organic-search appearance. Validate at
+         https://search.google.com/test/rich-results -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "VideoGame",
+      "name": "Chao Chao",
+      "description": "Free multiplayer browser arena racing. Play with friends, survive brutal rounds, race to the goal, and build your own maps. No signup — plays in your browser.",
+      "url": "https://www.chaochaogame.com/",
+      "image": "https://www.chaochaogame.com/assets/img/og-cover.png",
+      "applicationCategory": "Game",
+      "operatingSystem": "Web",
+      "genre": ["Racing", "Arena", "Multiplayer"],
+      "playMode": "MultiPlayer",
+      "author": { "@type": "Person", "name": "sjdodge123" },
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+    }
+    </script>
   </head>
   <body>
     <nav class="d-flex align-items-center px-3">
