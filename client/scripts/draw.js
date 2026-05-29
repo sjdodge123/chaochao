@@ -2291,6 +2291,13 @@ function drawPlayer(player, dt) {
     if (DEBUG_FORCE_FIRE && player.id == myID) {
         player.onFire = 500;
     }
+    // Burn flame is drawn BEHIND the kart body/skin: the flame sprite (55px) is far
+    // bigger than the kart (~15px), so on top it fully engulfs the kart and every cart
+    // looks the same. Behind, the scorched skin stays visible/recognizable on top of
+    // the flames — reading as "this skin is on fire" rather than a generic blaze.
+    if (player.onFire > 0) {
+        drawFire(player);
+    }
     drawSpeedFx(player);
     // Draw a halo behind your own kart(s) — the primary plus every couch co-op
     // slot — so you can always find yourself in a crowded pack.
@@ -2414,12 +2421,6 @@ function drawPlayer(player, dt) {
         if (immune) {
             gameContext.restore();
         }
-    }
-    // Burn flames render AFTER the kart body/skin (so they sit on top of an equipped
-    // skin instead of being hidden behind it) and OUTSIDE the dim/immune alpha scope,
-    // so the threat reads at full intensity on every kart.
-    if (player.onFire > 0) {
-        drawFire(player);
     }
 
     if (player.ability != null) {

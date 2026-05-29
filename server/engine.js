@@ -785,39 +785,32 @@ function bounceOffEmptyCells(player, map) {
 	if (emptyCellAt(player.newX, player.newY, map) == null) {
 		return; // on solid ground and the projected move stays on solid ground
 	}
-	// Case 1: outside -> inside. Slide along the rim instead of dead-stopping: strip the
-	// part of the move (and velocity) heading INTO the hole and keep the tangential part,
-	// so a player pushing at an angle glides along the edge. A head-on push still stalls,
-	// since its whole motion is the inward component.
-	var hole = emptyCellAt(player.newX, player.newY, map);
-	// Outward normal: from the hole's site toward the player. Approximate but stable —
-	// the safety re-check below guarantees we never actually place the player in a hole.
-	var nx = player.x - hole.site.x;
-	var ny = player.y - hole.site.y;
-	var nm = Math.sqrt(nx * nx + ny * ny);
-	var slid = false;
-	if (nm > 1e-6) {
-		nx /= nm; ny /= nm;
-		// Remove the inward component from this tick's step...
-		var sx = player.newX - player.x, sy = player.newY - player.y;
-		var sDot = sx * nx + sy * ny;            // < 0 => step points into the hole
-		if (sDot < 0) { sx -= sDot * nx; sy -= sDot * ny; }
-		var slidX = player.x + sx, slidY = player.y + sy;
-		if (emptyCellAt(slidX, slidY, map) == null) {
-			// Clean slide: commit the tangential move and strip the inward part of the
-			// velocity so the glide carries into the next tick.
-			var vDot = player.velX * nx + player.velY * ny;
-			if (vDot < 0) { player.velX -= vDot * nx; player.velY -= vDot * ny; }
-			player.newX = slidX;
-			player.newY = slidY;
-			slid = true;
+	// Case 1: outside -> inside. Slide along the rim by resolving each axis independently
+	// (the robust top-down wall-slide): keep whichever of the X-only / Y-only sub-moves
+	// stays on solid ground, so a glancing approach glides along the edge while a head-on
+	// push (both sub-moves blocked) stops cleanly. Never lands the player inside a hole.
+	var clearX = (emptyCellAt(player.newX, player.y, map) == null);
+	var clearY = (emptyCellAt(player.x, player.newY, map) == null);
+	if (clearX && clearY) {
+		// Both single-axis moves are individually clear but the diagonal lands in a hole
+		// (a concave corner). Keep the larger component so the kart keeps sliding along
+		// one edge instead of stopping at the corner.
+		if (Math.abs(player.newX - player.x) >= Math.abs(player.newY - player.y)) {
+			player.newY = player.y; player.velY = 0;
+		} else {
+			player.newX = player.x; player.velX = 0;
 		}
-	}
-	if (!slid) {
-		// The site-vector normal is only approximate, so a glancing slide near a corner
-		// or long/curved rim can still land in the hole (or the player sits on the site).
-		// Fall back to the old rim bounce — reverse + damp — so the kart can't pin against
-		// the rim retaining inward speed and re-attack the hole every tick.
+	} else if (clearX) {
+		// Blocked vertically — slide horizontally along the rim.
+		player.newY = player.y;
+		player.velY = 0;
+	} else if (clearY) {
+		// Blocked horizontally — slide vertically along the rim.
+		player.newX = player.x;
+		player.velX = 0;
+	} else {
+		// Both sub-moves hit the hole (head-on into the rim, or a concave pocket) — stop
+		// at the edge and bleed the speed so the kart settles instead of jittering.
 		player.newX = player.x;
 		player.newY = player.y;
 		player.velX = -player.velX * EMPTY_BOUNCE_DAMP;
