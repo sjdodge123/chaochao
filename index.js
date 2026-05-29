@@ -27,11 +27,17 @@ app.use(compression());
 // Each portal is listed with BOTH its apex origin and a wildcard: a wildcard
 // (e.g. https://*.poki.com) matches subdomains only, NOT the bare apex, and
 // Poki/CrazyGames can frame from either, so both must be allowed explicitly.
+// Outside production we ALSO allow localhost origins so the documented local
+// embed test (embed-test.html served from a different port, framing
+// localhost:3000) can load; prod stays locked to the portals only.
 var FRAME_ANCESTORS =
     "frame-ancestors 'self' " +
     "https://crazygames.com https://*.crazygames.com " +
     "https://poki.com https://*.poki.com " +
-    "https://itch.io https://*.itch.io https://*.itch.zone";
+    "https://itch.io https://*.itch.io https://*.itch.zone" +
+    (process.env.NODE_ENV === 'production'
+        ? ''
+        : " http://localhost:* http://127.0.0.1:*");
 app.use(function (req, res, next) {
     res.set('Content-Security-Policy', FRAME_ANCESTORS);
     next();
