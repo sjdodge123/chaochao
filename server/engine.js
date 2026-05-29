@@ -754,6 +754,7 @@ function nearestSolidCell(x, y, map) {
 //      bleeds energy, leaving the player stranded in the void. Redirect this tick's
 //      step straight at the nearest solid ground and point their velocity that way,
 //      so they consistently climb back out.
+var EMPTY_BOUNCE_DAMP = 0.25;
 function bounceOffEmptyCells(player, map) {
 	if (!mapHasEmptyCells(map)) {
 		return; // no holes on this map — skip the per-tick lookup entirely
@@ -794,28 +795,33 @@ function bounceOffEmptyCells(player, map) {
 	var nx = player.x - hole.site.x;
 	var ny = player.y - hole.site.y;
 	var nm = Math.sqrt(nx * nx + ny * ny);
+	var slid = false;
 	if (nm > 1e-6) {
 		nx /= nm; ny /= nm;
 		// Remove the inward component from this tick's step...
 		var sx = player.newX - player.x, sy = player.newY - player.y;
 		var sDot = sx * nx + sy * ny;            // < 0 => step points into the hole
 		if (sDot < 0) { sx -= sDot * nx; sy -= sDot * ny; }
-		// ...and from the velocity, so the glide carries into the next tick.
-		var vDot = player.velX * nx + player.velY * ny;
-		if (vDot < 0) { player.velX -= vDot * nx; player.velY -= vDot * ny; }
 		var slidX = player.x + sx, slidY = player.y + sy;
 		if (emptyCellAt(slidX, slidY, map) == null) {
+			// Clean slide: commit the tangential move and strip the inward part of the
+			// velocity so the glide carries into the next tick.
+			var vDot = player.velX * nx + player.velY * ny;
+			if (vDot < 0) { player.velX -= vDot * nx; player.velY -= vDot * ny; }
 			player.newX = slidX;
 			player.newY = slidY;
-		} else {
-			// Tangential slide still lands in a hole (curved rim / corner) — hold position
-			// rather than risk placing the player inside the void.
-			player.newX = player.x;
-			player.newY = player.y;
+			slid = true;
 		}
-	} else {
+	}
+	if (!slid) {
+		// The site-vector normal is only approximate, so a glancing slide near a corner
+		// or long/curved rim can still land in the hole (or the player sits on the site).
+		// Fall back to the old rim bounce — reverse + damp — so the kart can't pin against
+		// the rim retaining inward speed and re-attack the hole every tick.
 		player.newX = player.x;
 		player.newY = player.y;
+		player.velX = -player.velX * EMPTY_BOUNCE_DAMP;
+		player.velY = -player.velY * EMPTY_BOUNCE_DAMP;
 	}
 	player.bounced = true;
 }
