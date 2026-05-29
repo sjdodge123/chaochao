@@ -448,10 +448,14 @@ function getCartSpeed(player) {
     return Math.sqrt(vx * vx + vy * vy);
 }
 
-function drawCartSkin(player, centerX, centerY, radius, painter) {
+function drawCartSkin(player, centerX, centerY, radius, painter, headingOverride) {
     var ctx = gameContext;
-    var heading = getCartHeading(player);
-    var speed = getCartSpeed(player);
+    // headingOverride pins the skin to a fixed angle (used by the overview scoreboard, a
+    // static display — otherwise it'd freeze at whatever heading the kart had when the
+    // race ended). A pinned heading also implies an idle pose (no movement-driven anim).
+    var pinned = (typeof headingOverride === "number");
+    var heading = pinned ? headingOverride : getCartHeading(player);
+    var speed = pinned ? 0 : getCartSpeed(player);
     // Animation runs faster while moving, but always ticks a little when idle.
     var anim = cartSkinAnimTime * (0.6 + Math.min(speed, 6) * 0.5);
     // Punch animation: a quick forward lunge + scale "pop" when this kart throws a
@@ -5206,7 +5210,9 @@ function drawPlayerIcon(player, notchDistanceApart) {
     // the kart's angle since overview icons are static.
     if (player.cartSkin === "firetruck" || player.cartSkin === "dino") {
         var iconPainter = (player.cartSkin === "firetruck") ? drawFiretruckSkin : drawDinoSkin;
-        drawCartSkin(player, notchX, 0, iconRadius, iconPainter);
+        // Fixed heading (face right, toward the finish) so the scoreboard icon doesn't
+        // freeze at the kart's last racing angle.
+        drawCartSkin(player, notchX, 0, iconRadius, iconPainter, 0);
     } else {
         gameContext.beginPath();
         gameContext.arc(notchX, 0, iconRadius, 0, 2 * Math.PI);
