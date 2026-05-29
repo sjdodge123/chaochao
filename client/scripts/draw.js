@@ -458,7 +458,13 @@ function drawCartSkin(player, centerX, centerY, radius, painter) {
     ctx.translate(centerX, centerY);
     ctx.rotate(heading);
     ctx.scale(radius, radius);
-    painter(ctx, anim, (player && player.color) ? player.color : null);
+    var paint = (player && player.color) ? player.color : null;
+    // While burning, char the skin toward black so the flames drawn on top read as
+    // the kart itself catching fire (rather than a flame floating over a clean skin).
+    if (paint && player.onFire > 0) {
+        paint = cartSkinShade(paint, -0.4);
+    }
+    painter(ctx, anim, paint);
     ctx.restore();
 }
 
@@ -2252,9 +2258,6 @@ function drawPlayer(player, dt) {
     if (DEBUG_FORCE_FIRE && player.id == myID) {
         player.onFire = 500;
     }
-    if (player.onFire > 0) {
-        drawFire(player);
-    }
     drawSpeedFx(player);
     // Draw a halo behind your own kart(s) — the primary plus every couch co-op
     // slot — so you can always find yourself in a crowded pack.
@@ -2332,23 +2335,28 @@ function drawPlayer(player, dt) {
         gameContext.save();
         gameContext.globalAlpha = NONLOCAL_KART_ALPHA;
     }
+    // A cart skin fully replaces the kart body, so skip the base colour disc (and the
+    // avatar overlay that rides it) — otherwise the round sprite pokes out around the
+    // irregular skin silhouette and reads as an unwanted "background". The skin is
+    // tinted with the player's colour, so their identity still carries.
+    var hasCartSkin = (player.cartSkin === "firetruck" || player.cartSkin === "dino");
     // try/finally so a thrown drawImage (e.g. an undecoded sprite -> InvalidStateError)
     // can't skip the restore() and leak the dimmed/flash alpha onto the rest of the frame.
     try {
-        gameContext.drawImage(
-            sprite,
-            player.x + camera.getCameraX() - sprite.halfSize,
-            player.y + camera.getCameraY() - sprite.halfSize
-        );
-        // Opt-in avatar skin: the player's picture, shrunk inside a distinct border,
-        // overlaid on the kart so it reads as an external (not earned) skin. Drawn
-        // INSIDE the dim/immune alpha scope so it fades/flashes with the kart body
-        // (non-local karts dim during a race; immune karts pulse) instead of popping.
-        drawAvatarSkin(player, sprite);
-        // Cosmetic cart skin (procedural overlay), drawn on top of the base sprite
-        // (and avatar) so it reads as an equipped skin. Uses the SAME screen anchor
-        // as the sprite blit above (player.x/y + camera offset), so the camera
-        // offset is applied exactly once.
+        if (!hasCartSkin) {
+            gameContext.drawImage(
+                sprite,
+                player.x + camera.getCameraX() - sprite.halfSize,
+                player.y + camera.getCameraY() - sprite.halfSize
+            );
+            // Opt-in avatar skin: the player's picture, shrunk inside a distinct border,
+            // overlaid on the kart so it reads as an external (not earned) skin. Drawn
+            // INSIDE the dim/immune alpha scope so it fades/flashes with the kart body
+            // (non-local karts dim during a race; immune karts pulse) instead of popping.
+            drawAvatarSkin(player, sprite);
+        }
+        // Cosmetic cart skin (procedural overlay). Uses the SAME screen anchor as the
+        // sprite blit (player.x/y + camera offset), so the camera offset is applied once.
         if (player.cartSkin === "firetruck") {
             drawCartSkin(player, player.x + camera.getCameraX(), player.y + camera.getCameraY(), player.radius, drawFiretruckSkin);
         } else if (player.cartSkin === "dino") {
@@ -2361,6 +2369,12 @@ function drawPlayer(player, dt) {
         if (immune) {
             gameContext.restore();
         }
+    }
+    // Burn flames render AFTER the kart body/skin (so they sit on top of an equipped
+    // skin instead of being hidden behind it) and OUTSIDE the dim/immune alpha scope,
+    // so the threat reads at full intensity on every kart.
+    if (player.onFire > 0) {
+        drawFire(player);
     }
 
     if (player.ability != null) {
@@ -3049,16 +3063,9 @@ function drawTrail(player) {
     gameContext.lineWidth = dashed ? 4 : 3;
     gameContext.lineCap = "round";
     gameContext.lineJoin = "round";
-    // Skin-aware trail: an equipped cart skin overrides the kart colour with a themed
-    // hue (fiery for the fire truck, earthy green for the dino). Alpha/fade-bucket and
-    // dashed-near-victory styling below are untouched — only the stroke colour changes.
-    var trailColor = player.color;
-    if (player.cartSkin === "firetruck") {
-        trailColor = "#ff5a1f";
-    } else if (player.cartSkin === "dino") {
-        trailColor = "#4caf3a";
-    }
-    gameContext.strokeStyle = trailColor;
+    // Trail always uses the player's own colour, even with a cart skin equipped — the
+    // colour is the player's identity, so a blue dino trails blue (not skin-themed).
+    gameContext.strokeStyle = player.color;
     if (typeof perfGlow === "function" && perfGlow()) {
         gameContext.shadowBlur = 3;
         gameContext.shadowColor = "black";
@@ -5019,15 +5026,6 @@ function drawPlayerIcon(player, notchDistanceApart) {
     drawScoreBoardTrail(notchX, player);
     drawFireOverview(notchX, player);
     //drawAbiltiesOverview(notchX, player);
-    gameContext.arc(notchX, 0, config.playerBaseRadius * 2, 0, 2 * Math.PI);
-
-    gameContext.save();
-    gameContext.beginPath();
-    gameContext.lineWidth = 5;
-    gameContext.strokeStyle = "black";
-    gameContext.arc(notchX, 0, config.playerBaseRadius * 2, 0, 2 * Math.PI);
-    gameContext.stroke();
-    gameContext.restore();
 
     if (playerAnimating === player.id) {
         if (player.distanceToMove - moveAmt < 0 && player.distanceToMove + moveAmt > 0) {
@@ -5040,8 +5038,26 @@ function drawPlayerIcon(player, notchDistanceApart) {
 
     player.x = notchX;
     player.y = 0;
-    gameContext.fillStyle = player.color;
-    gameContext.fill();
+    var iconRadius = config.playerBaseRadius * 2;
+    // Match the in-game look: a skinned kart shows its procedural skin (tinted by the
+    // player's colour) instead of the plain colour disc + ring. Heading falls back to
+    // the kart's angle since overview icons are static.
+    if (player.cartSkin === "firetruck" || player.cartSkin === "dino") {
+        var iconPainter = (player.cartSkin === "firetruck") ? drawFiretruckSkin : drawDinoSkin;
+        drawCartSkin(player, notchX, 0, iconRadius, iconPainter);
+    } else {
+        gameContext.beginPath();
+        gameContext.arc(notchX, 0, iconRadius, 0, 2 * Math.PI);
+        gameContext.fillStyle = player.color;
+        gameContext.fill();
+        gameContext.save();
+        gameContext.beginPath();
+        gameContext.lineWidth = 5;
+        gameContext.strokeStyle = "black";
+        gameContext.arc(notchX, 0, iconRadius, 0, 2 * Math.PI);
+        gameContext.stroke();
+        gameContext.restore();
+    }
 }
 
 function drawFireOverview(x, player) {

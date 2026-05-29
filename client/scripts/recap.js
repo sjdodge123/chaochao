@@ -167,7 +167,10 @@ function recapCaptureFrame() {
 		recapMeta[p.id] = {
 			color: p.color,
 			radius: (p.radius != null) ? p.radius : 12,
-			name: p.name || null
+			name: p.name || null,
+			// Cart skin is fixed for the match, so the static look carries it (no need
+			// to spend a per-frame tuple slot). Lets the replay render the equipped skin.
+			cartSkin: (p.cartSkin != null) ? p.cartSkin : null
 		};
 	}
 	if (players.length === 0) {
@@ -1144,6 +1147,7 @@ function recapDrawCar(pr, exits, frameT) {
 		velX: pr[RF_VX], velY: pr[RF_VY], color: meta.color,
 		radius: meta.radius, onFire: pr[RF_FIRE], ability: pr[RF_ABILITY],
 		name: meta.name,
+		cartSkin: meta.cartSkin,
 		// rebuild the buff/debuff window flags drawSpeedFx checks (future expiry = active)
 		speedBuffUntil: pr[RF_SPEEDFX] === 1 ? Date.now() + 99999 : null,
 		speedDebuffUntil: pr[RF_SPEEDFX] === 2 ? Date.now() + 99999 : null
@@ -1182,16 +1186,26 @@ function recapDrawCar(pr, exits, frameT) {
 		gameContext.restore();
 	}
 
-	if (p.onFire > 0 && typeof drawFire === "function") {
-		drawFire(p);
-	}
-
-	// The cached kart sprite (a coloured disc), blitted at world coords.
-	if (typeof getPlayerSprite === "function") {
+	// Kart body: a procedural cart skin replaces the coloured disc (matches live play,
+	// where the skin is tinted by the player's colour and the base disc is suppressed).
+	var recapPainter = (p.cartSkin === "firetruck") ? (typeof drawFiretruckSkin === "function" ? drawFiretruckSkin : null)
+		: (p.cartSkin === "dino") ? (typeof drawDinoSkin === "function" ? drawDinoSkin : null)
+		: null;
+	if (recapPainter != null && typeof drawCartSkin === "function") {
+		try {
+			drawCartSkin(p, p.x, p.y, p.radius, recapPainter);
+		} catch (e) { /* skin painter threw — skip, keep the montage alive */ }
+	} else if (typeof getPlayerSprite === "function") {
+		// The cached kart sprite (a coloured disc), blitted at world coords.
 		var sprite = getPlayerSprite(p.color, p.radius, "black");
 		try {
 			gameContext.drawImage(sprite, p.x - sprite.halfSize, p.y - sprite.halfSize);
 		} catch (e) { /* an undecoded sprite — skip this kart, keep the montage alive */ }
+	}
+
+	// Burn flames on top of the body/skin (matches live play).
+	if (p.onFire > 0 && typeof drawFire === "function") {
+		drawFire(p);
 	}
 
 	if (p.ability != null && typeof drawAbilityIndicator === "function") {
