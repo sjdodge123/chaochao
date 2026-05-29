@@ -1109,8 +1109,14 @@ function registerEffectHandlers(server) {
 
 	server.on("speedDebuff", function (owner) {
 		playSound(speedDebuff);
-		if (playerList[owner] != null) {
-			playerList[owner].speedDebuffUntil = Date.now() + config.tileMap.abilities.speedDebuff.duration;
+		// speedDebuff slows everyone EXCEPT the owner (see gameBoard.applySpeedDebuff),
+		// so the "slowed" aura belongs on the other karts — not on the caster. Mirror the
+		// server's target set (skip the owner, the dead, and zombies).
+		var until = Date.now() + config.tileMap.abilities.speedDebuff.duration;
+		for (var id in playerList) {
+			if (id == owner) { continue; }
+			if (playerList[id].alive === false || playerList[id].infected) { continue; }
+			playerList[id].speedDebuffUntil = until;
 		}
 		playerAbilityUsed(owner);
 	});
