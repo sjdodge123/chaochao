@@ -454,10 +454,25 @@ function drawCartSkin(player, centerX, centerY, radius, painter) {
     var speed = getCartSpeed(player);
     // Animation runs faster while moving, but always ticks a little when idle.
     var anim = cartSkinAnimTime * (0.6 + Math.min(speed, 6) * 0.5);
+    // Punch animation: a quick forward lunge + scale "pop" when this kart throws a
+    // melee punch (seeded by the server "punch" event -> player.punchAnimAt). Sharp
+    // attack (peak at 30% of the window) and gentler settle, so it reads as an impact
+    // rather than a pulse; applies to every skin since it lives here in drawCartSkin.
+    var punchK = 0;
+    if (player && player.punchAnimAt != null) {
+        var pe = (Date.now() - player.punchAnimAt) / 220;
+        if (pe >= 0 && pe < 1) {
+            punchK = (pe < 0.3) ? (pe / 0.3) : (1 - (pe - 0.3) / 0.7);
+        }
+    }
     ctx.save();
     ctx.translate(centerX, centerY);
     ctx.rotate(heading);
     ctx.scale(radius, radius);
+    if (punchK > 0) {
+        ctx.translate(punchK * 0.12, 0);                    // lunge forward (heading is local +X)
+        ctx.scale(1 + punchK * 0.14, 1 + punchK * 0.14);    // impact pop
+    }
     var paint = (player && player.color) ? player.color : null;
     // While burning, char the skin toward black so the flames drawn on top read as
     // the kart itself catching fire (rather than a flame floating over a clean skin).
