@@ -1501,30 +1501,43 @@ function drawWaterFloor(x, y, w, h) {
 }
 
 // Deterministic starfield (positions as fractions of the field), built once via
-// a tiny seeded PRNG so the stars stay put frame-to-frame and twinkle in place.
+// a tiny seeded PRNG so the stars stay put across cache rebuilds. The whole field
+// (stars + objects) is baked into the arena composite, never drawn per-frame, so we
+// can afford a dense field with glow + diffraction spikes on the headline stars.
 var spaceStars = null;
+// A handful of star tints — mostly white/blue with the odd warm or cyan giant.
+var STAR_TINTS = ['#ffffff', '#ffffff', '#ffffff', '#cfe3ff', '#cfe3ff', '#bfe0ff', '#ffe6c4', '#d6fbff'];
 function getSpaceStars() {
     if (spaceStars) { return spaceStars; }
     var arr = [], seed = 1337;
     function rnd() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
-    for (var i = 0; i < 150; i++) {
+    for (var i = 0; i < 360; i++) {
+        var roll = rnd();
+        var bright = roll > 0.95;            // ~5% headline stars: glow + diffraction spikes
+        var mid = !bright && roll > 0.74;    // ~21% medium pinpoints
         arr.push({
             fx: rnd(), fy: rnd(),
-            r: 0.5 + rnd() * 1.7,            // radius (world units)
-            ph: rnd() * Math.PI * 2,         // twinkle phase
-            sp: 0.4 + rnd() * 1.6,           // twinkle speed
-            b: 0.45 + rnd() * 0.55           // base brightness
+            r: bright ? (1.6 + rnd() * 1.5)  // radius (world units)
+               : mid   ? (0.85 + rnd() * 0.8)
+               :         (0.35 + rnd() * 0.65),
+            b: bright ? (0.85 + rnd() * 0.15) // base brightness
+               : mid   ? (0.55 + rnd() * 0.35)
+               :         (0.28 + rnd() * 0.4),
+            tint: STAR_TINTS[(rnd() * STAR_TINTS.length) | 0],
+            big: bright
         });
     }
     spaceStars = arr;
     return arr;
 }
 
-// Paint the static starfield void (base gradient + nebula washes + distant
-// planet + stars + neon rim) into context `c` over a W×H area at the origin.
-// Baked into the arena composite once per terrain change (see ensureArenaCache),
-// never per-frame.
+// Paint the static starfield void (base gradient + nebula washes + spiral galaxy
+// + stars + foreground space objects + neon rim) into context `c` over a W×H area
+// at the origin. Baked into the arena composite once per terrain change (see
+// ensureArenaCache), never per-frame — so the layering can be lavish for free.
 function paintStarfield(c, W, H) {
+    var maxWH = Math.max(W, H), minWH = Math.min(W, H);
+
     // Deep-space base.
     var base = c.createLinearGradient(0, 0, 0, H);
     base.addColorStop(0, '#070611');
@@ -1538,11 +1551,13 @@ function paintStarfield(c, W, H) {
     var NEB = [
         [0.26, 0.30, 0.45, 'rgba(90,70,200,0.10)'],
         [0.72, 0.62, 0.50, 'rgba(40,120,200,0.09)'],
-        [0.55, 0.18, 0.34, 'rgba(150,60,170,0.07)']
+        [0.55, 0.18, 0.34, 'rgba(150,60,170,0.07)'],
+        [0.12, 0.80, 0.40, 'rgba(60,160,180,0.07)'],
+        [0.88, 0.86, 0.30, 'rgba(150,70,140,0.06)']
     ];
     for (var n = 0; n < NEB.length; n++) {
         var nb = NEB[n];
-        var ncx = nb[0] * W, ncy = nb[1] * H, nr = Math.max(W, H) * nb[2];
+        var ncx = nb[0] * W, ncy = nb[1] * H, nr = maxWH * nb[2];
         var ng = c.createRadialGradient(ncx, ncy, 0, ncx, ncy, nr);
         ng.addColorStop(0, nb[3]);
         ng.addColorStop(1, 'rgba(0,0,0,0)');
@@ -1550,33 +1565,56 @@ function paintStarfield(c, W, H) {
         c.fillRect(0, 0, W, H);
     }
 
-    // Distant planet (upper-right) + atmosphere glow.
-    var px = W * 0.82, py = H * 0.20, pr = Math.min(W, H) * 0.10;
-    var glow = c.createRadialGradient(px, py, pr * 0.8, px, py, pr * 1.7);
-    glow.addColorStop(0, 'rgba(120,160,255,0.22)');
-    glow.addColorStop(1, 'rgba(120,160,255,0)');
-    c.fillStyle = glow;
-    c.fillRect(0, 0, W, H);
-    c.globalCompositeOperation = 'source-over';
-    var pg = c.createRadialGradient(px - pr * 0.4, py - pr * 0.4, pr * 0.1, px, py, pr);
-    pg.addColorStop(0, '#5b6fb0');
-    pg.addColorStop(1, '#1d2347');
-    c.fillStyle = pg;
+    // Distant spiral galaxy (faint, additive) — a stretched, rotated glow disc.
+    var galX = W * 0.40, galY = H * 0.52, galR = minWH * 0.16;
+    c.save();
+    c.translate(galX, galY);
+    c.rotate(-0.5);
+    c.scale(1, 0.42);
+    var gal = c.createRadialGradient(0, 0, 0, 0, 0, galR);
+    gal.addColorStop(0, 'rgba(190,185,220,0.09)');
+    gal.addColorStop(0.35, 'rgba(130,120,180,0.05)');
+    gal.addColorStop(1, 'rgba(60,40,120,0)');
+    c.fillStyle = gal;
     c.beginPath();
-    c.arc(px, py, pr, 0, 2 * Math.PI);
+    c.arc(0, 0, galR, 0, 2 * Math.PI);
     c.fill();
+    c.restore();
+    c.globalCompositeOperation = 'source-over';
 
-    // Stars.
+    // Stars (drawn under the foreground objects so planets occlude them).
     var stars = getSpaceStars();
     for (var i = 0; i < stars.length; i++) {
         var s = stars[i];
+        var sx = s.fx * W, sy = s.fy * H;
+        if (s.big) {
+            // Soft halo + four-point diffraction spikes for the headline stars.
+            c.globalCompositeOperation = 'lighter';
+            var halo = c.createRadialGradient(sx, sy, 0, sx, sy, s.r * 5);
+            halo.addColorStop(0, 'rgba(200,220,255,0.5)');
+            halo.addColorStop(1, 'rgba(200,220,255,0)');
+            c.fillStyle = halo;
+            c.fillRect(sx - s.r * 5, sy - s.r * 5, s.r * 10, s.r * 10);
+            c.globalAlpha = 0.55;
+            c.strokeStyle = s.tint;
+            c.lineWidth = 0.7;
+            var spike = s.r * 4.5;
+            c.beginPath();
+            c.moveTo(sx - spike, sy); c.lineTo(sx + spike, sy);
+            c.moveTo(sx, sy - spike); c.lineTo(sx, sy + spike);
+            c.stroke();
+            c.globalCompositeOperation = 'source-over';
+        }
         c.globalAlpha = s.b;
-        c.fillStyle = (i % 7 === 0) ? '#bfe0ff' : '#ffffff';
+        c.fillStyle = s.tint;
         c.beginPath();
-        c.arc(s.fx * W, s.fy * H, s.r, 0, 2 * Math.PI);
+        c.arc(sx, sy, s.r, 0, 2 * Math.PI);
         c.fill();
     }
     c.globalAlpha = 1;
+
+    // Foreground space objects (occlude the stars behind them).
+    paintSpaceObjects(c, W, H, minWH);
 
     // Neon rim baked in.
     c.save();
@@ -1586,6 +1624,60 @@ function paintStarfield(c, W, H) {
     c.lineWidth = 4;
     c.strokeRect(2, 2, W - 4, H - 4);
     c.restore();
+}
+
+// Deterministic foreground bodies for the space void: the main glowing planet and
+// an asteroid cluster. All positions are fixed fractions of the field so the scene
+// is stable across cache rebuilds, and the whole pass is baked once (see
+// paintStarfield), so it costs nothing per-frame.
+function paintSpaceObjects(c, W, H, minWH) {
+    // --- Main planet (upper-right) + atmosphere glow. ---
+    var px = W * 0.82, py = H * 0.20, pr = minWH * 0.10;
+    c.globalCompositeOperation = 'lighter';
+    var glow = c.createRadialGradient(px, py, pr * 0.8, px, py, pr * 1.7);
+    glow.addColorStop(0, 'rgba(120,160,255,0.11)');
+    glow.addColorStop(1, 'rgba(120,160,255,0)');
+    c.fillStyle = glow;
+    c.fillRect(px - pr * 1.7, py - pr * 1.7, pr * 3.4, pr * 3.4);
+    c.globalCompositeOperation = 'source-over';
+    var pg = c.createRadialGradient(px - pr * 0.4, py - pr * 0.4, pr * 0.1, px, py, pr);
+    pg.addColorStop(0, '#3d4a78');
+    pg.addColorStop(1, '#161a30');
+    c.fillStyle = pg;
+    c.beginPath();
+    c.arc(px, py, pr, 0, 2 * Math.PI);
+    c.fill();
+
+    // --- Asteroid cluster (lower-mid-right) — small rim-lit rocks. ---
+    var aSeed = 7919;
+    function arnd() { aSeed = (aSeed * 1103515245 + 12345) & 0x7fffffff; return aSeed / 0x7fffffff; }
+    var acx = W * 0.63, acy = H * 0.84, aSpread = minWH * 0.10;
+    for (var a = 0; a < 9; a++) {
+        var axx = acx + (arnd() - 0.5) * aSpread * 2;
+        var ayy = acy + (arnd() - 0.5) * aSpread;
+        var asz = minWH * (0.006 + arnd() * 0.012);
+        c.save();
+        c.translate(axx, ayy);
+        c.rotate(arnd() * Math.PI * 2);
+        c.beginPath();
+        var verts = 6 + ((arnd() * 3) | 0);
+        for (var v = 0; v < verts; v++) {
+            var ang = (v / verts) * Math.PI * 2;
+            var rad = asz * (0.7 + arnd() * 0.5);
+            var vx = Math.cos(ang) * rad, vy = Math.sin(ang) * rad;
+            if (v === 0) { c.moveTo(vx, vy); } else { c.lineTo(vx, vy); }
+        }
+        c.closePath();
+        c.fillStyle = '#32323b';
+        c.fill();
+        c.strokeStyle = 'rgba(150,160,185,0.28)';   // rim light (upper-left bias)
+        c.lineWidth = asz * 0.18;
+        c.stroke();
+        c.restore();
+    }
+
+    c.globalCompositeOperation = 'source-over';
+    c.globalAlpha = 1;
 }
 
 function drawBackground() {
