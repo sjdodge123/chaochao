@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.25.3 — 2026-05-29
+
 ### General
 
 - Cart skins now show everywhere your kart appears — on the round-overview scoreboard and in the end-of-match recap — and they read more cleanly with no colour circle poking out behind them. When you catch fire, the skin itself glows red-hot and burns instead of the flames hiding behind it. Your trail always uses your own colour now, even with a skin equipped.
