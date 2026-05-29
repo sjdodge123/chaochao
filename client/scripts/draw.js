@@ -2362,6 +2362,18 @@ function drawPlayer(player, dt) {
         } else if (player.cartSkin === "dino") {
             drawCartSkin(player, player.x + camera.getCameraX(), player.y + camera.getCameraY(), player.radius, drawDinoSkin);
         }
+        // The base sprite (skipped for skinned karts) is where the "you're being
+        // targeted" red rim lives, so re-draw that tell around the skin when this kart
+        // is in an aimer's target list (swap/explosive).
+        if (hasCartSkin && playerStrokeColor === "red") {
+            gameContext.save();
+            gameContext.beginPath();
+            gameContext.lineWidth = 3;
+            gameContext.strokeStyle = "red";
+            gameContext.arc(player.x + camera.getCameraX(), player.y + camera.getCameraY(), player.radius + 1, 0, 2 * Math.PI);
+            gameContext.stroke();
+            gameContext.restore();
+        }
     } finally {
         if (dimKart) {
             gameContext.restore();
