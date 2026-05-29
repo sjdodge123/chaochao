@@ -576,6 +576,16 @@ function drawDinoSkin(ctx, anim, paint) {
     // boundary) — nothing extends past where the regular cart would.
     ctx.save();
     ctx.scale(1.12, 1.12);
+    // Contrasting dark outline traced around every part (not just the body/head, and
+    // not the old low-contrast darkened-hue line) so the dino's silhouette reads
+    // clearly against any terrain or kart colour — same idea as the regular cart's
+    // black rim. Round joins/caps keep the outline clean at the leg/tail/spine points.
+    var outline = "#141414";
+    var outlineW = 0.11;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = outlineW;
 
     // Legs (under body).
     ctx.fillStyle = cartSkinShade(paint, -0.35);
@@ -589,6 +599,7 @@ function drawDinoSkin(ctx, anim, paint) {
         ctx.beginPath();
         ctx.ellipse(legs[i][0] + legs[i][2], legs[i][1], 0.16, 0.1, 0, 0, Math.PI * 2);
         ctx.fill();
+        ctx.stroke();
     }
 
     // Tail.
@@ -599,11 +610,10 @@ function drawDinoSkin(ctx, anim, paint) {
     ctx.lineTo(-0.55, 0.18);
     ctx.closePath();
     ctx.fill();
+    ctx.stroke();
 
     // Body.
     ctx.fillStyle = paint;
-    ctx.strokeStyle = cartSkinShade(paint, -0.45);
-    ctx.lineWidth = 0.06;
     ctx.beginPath();
     ctx.ellipse(-0.05, 0, 0.6, 0.45, 0, 0, Math.PI * 2);
     ctx.fill();
@@ -619,11 +629,11 @@ function drawDinoSkin(ctx, anim, paint) {
         ctx.lineTo(px + 0.1, 0);
         ctx.closePath();
         ctx.fill();
+        ctx.stroke();
     }
 
     // Head.
     ctx.fillStyle = paint;
-    ctx.strokeStyle = cartSkinShade(paint, -0.45);
     ctx.beginPath();
     ctx.ellipse(0.58, 0, 0.3, 0.26, 0, 0, Math.PI * 2); // head pulled in: front 0.88 * 1.12 ≈ 0.99
     ctx.fill();
