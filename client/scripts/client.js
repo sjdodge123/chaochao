@@ -603,6 +603,13 @@ function registerStateHandlers(server) {
 		// Match over — clear the final round's sand trench so it doesn't linger into
 		// the game-over screen or the return to the lobby.
 		if (typeof discardTrenchDecal === "function") { discardTrenchDecal(); }
+		// Clear any full-screen brutal overlay still up when the match ended — the
+		// blackout darkness or a blindfold tint — so it can't sit on top of (and hide)
+		// the game-over screen. These are set by their own events, never re-set per
+		// tick, so clearing them here holds for the whole game-over screen.
+		blackout = false;
+		blackoutStart = null;
+		blindfold = {};
 		playerWon = packet.winner;
 		achievements = packet.achievements;
 		recapHarvestRound();      // fold the final round's clips into the archive first

@@ -10,7 +10,17 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- Cart skins now show everywhere your kart appears — on the round-overview scoreboard and in the end-of-match recap — and they read more cleanly with no colour circle poking out behind them. When you catch fire, the skin itself chars and burns instead of the flames hiding behind it. Your trail always uses your own colour now, even with a skin equipped.
+- Brutal-round icons now appear next to the round-start announcement and stay as a small badge in the top-right for the whole round, so you can always tell which modes are active.
+- A racer one notch from winning has a bold, shimmering trail again, so the about-to-win player is easy to spot.
+- The slowdown ability now shows a clear "drag" effect closing in on whoever's slowed.
+
+### Bug fixes
+
+- You now slide along the edge of a hole when you push into it at an angle, instead of stopping dead.
+- Fixed the game-over screen not showing when a match ended during a blackout (or blindfold) round.
 
 ## v0.25.2 — 2026-05-29
 
