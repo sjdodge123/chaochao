@@ -448,6 +448,30 @@ function getCartSpeed(player) {
     return Math.sqrt(vx * vx + vy * vy);
 }
 
+// Single source of truth for cart-skin dispatch. A skin name maps to its
+// procedural painter; null means "no skin" (plain colour disc). Add future
+// skins HERE and they automatically work everywhere this is consulted: the live
+// kart, the scoreboard notch icon, and the ice reflection.
+function cartSkinPainter(name) {
+    if (name === "firetruck") { return drawFiretruckSkin; }
+    if (name === "dino") { return drawDinoSkin; }
+    return null;
+}
+// Draw a kart's core appearance (skin or plain colour disc) centred at screen
+// (sx,sy). No highlights/avatar/FX — just the body — so callers like the ice
+// reflection get a faithful, skin-aware image for any current or future skin.
+function drawKartAppearance(player, sx, sy, headingOverride) {
+    var painter = cartSkinPainter(player.cartSkin);
+    if (painter != null) {
+        drawCartSkin(player, sx, sy, player.radius, painter, headingOverride);
+        return;
+    }
+    var sprite = getPlayerSprite(player.color, player.radius, null);
+    if (sprite != null) {
+        gameContext.drawImage(sprite, sx - sprite.halfSize, sy - sprite.halfSize);
+    }
+}
+
 function drawCartSkin(player, centerX, centerY, radius, painter, headingOverride) {
     var ctx = gameContext;
     // headingOverride pins the skin to a fixed angle (used by the overview scoreboard, a
@@ -1033,6 +1057,12 @@ function drawObjects(dt) {
         currentState == config.stateMap.racing) {
         // gated: pulsing red countdown line. racing: brief green release flash.
         drawGateLine();
+    }
+    // Animated terrain overlays (goal beacon, lava convection, ice reflections,
+    // swaying/kart-pushed grass blades). Drawn over the terrain and UNDER the
+    // karts; self-gates by state + perf profile.
+    if (typeof drawTerrainFX === "function") {
+        drawTerrainFX(dt);
     }
     drawPlayers(dt);
     drawProjectiles(dt);
@@ -2484,7 +2514,7 @@ function drawPlayer(player, dt) {
     // avatar overlay that rides it) — otherwise the round sprite pokes out around the
     // irregular skin silhouette and reads as an unwanted "background". The skin is
     // tinted with the player's colour, so their identity still carries.
-    var hasCartSkin = (player.cartSkin === "firetruck" || player.cartSkin === "dino");
+    var hasCartSkin = cartSkinPainter(player.cartSkin) != null;
     // try/finally so a thrown drawImage (e.g. an undecoded sprite -> InvalidStateError)
     // can't skip the restore() and leak the dimmed/flash alpha onto the rest of the frame.
     try {
@@ -2502,10 +2532,9 @@ function drawPlayer(player, dt) {
         }
         // Cosmetic cart skin (procedural overlay). Uses the SAME screen anchor as the
         // sprite blit (player.x/y + camera offset), so the camera offset is applied once.
-        if (player.cartSkin === "firetruck") {
-            drawCartSkin(player, player.x + camera.getCameraX(), player.y + camera.getCameraY(), player.radius, drawFiretruckSkin);
-        } else if (player.cartSkin === "dino") {
-            drawCartSkin(player, player.x + camera.getCameraX(), player.y + camera.getCameraY(), player.radius, drawDinoSkin);
+        var bodyPainter = cartSkinPainter(player.cartSkin);
+        if (bodyPainter != null) {
+            drawCartSkin(player, player.x + camera.getCameraX(), player.y + camera.getCameraY(), player.radius, bodyPainter);
         }
         // The base sprite (skipped for skinned karts) is where the "you're being
         // targeted" red rim lives, so re-draw that tell around the skin when this kart
@@ -3711,9 +3740,9 @@ function drawCollapseShockwaves() {
     }
     gameContext.restore();
 }
-// Lobby-only "practice room" floor treatment: a faint grid + a dashed inset frame
-// over the arena. Races never draw this, so a returning player instantly reads the
-// lobby as a distinct practice space (not a glitched race map) — without any text.
+// Lobby-only "practice room" floor treatment: a dashed inset frame over the
+// arena. Races never draw this, so a returning player instantly reads the lobby
+// as a distinct practice space (not a glitched race map) — without any text.
 // Drawn after drawWorld (the plain fill) and before the islands.
 function drawLobbyFloor() {
     if (world == null) {
@@ -3721,28 +3750,6 @@ function drawLobbyFloor() {
     }
     var ox = world.x + camera.getCameraX();
     var oy = world.y + camera.getCameraY();
-    // Faint grid, clipped to the arena so it never spills past the border.
-    gameContext.save();
-    gameContext.beginPath();
-    gameContext.rect(ox, oy, world.width, world.height);
-    gameContext.clip();
-    // Theme-aware faint lines: the theme's foreground "ink" (dark on the light theme,
-    // light on dark) at low alpha, so the practice grid reads on both themes.
-    gameContext.globalAlpha = 0.07;
-    gameContext.strokeStyle = themeColor('ink', 'black');
-    gameContext.lineWidth = 1;
-    var step = 64;
-    gameContext.beginPath();
-    for (var gx = step; gx < world.width; gx += step) {
-        gameContext.moveTo(ox + gx, oy);
-        gameContext.lineTo(ox + gx, oy + world.height);
-    }
-    for (var gy = step; gy < world.height; gy += step) {
-        gameContext.moveTo(ox, oy + gy);
-        gameContext.lineTo(ox + world.width, oy + gy);
-    }
-    gameContext.stroke();
-    gameContext.restore();
     // Dashed inset frame — a "this is a bounded practice area" cue (theme-aware).
     gameContext.save();
     gameContext.globalAlpha = 0.32;
@@ -4110,7 +4117,12 @@ function renderMapToCache() {
     }
     mapCtx.translate(-world.x + mapCanvasPad, -world.y + mapCanvasPad);
 
+    // Per-cell AO edge shading reads as depth, but it's an extra gradient fill
+    // per cell on every cache rebuild — skip it on the reduced-resolution
+    // (low-end) profile, where the flat graded texture already looks clean.
+    var aoOn = (typeof perfMapScale === "function" ? perfMapScale() : 1) === 1;
     var cells = currentMap.cells;
+    var aoIds = aoOn ? buildIdByVoronoi(cells) : null;
     var iCell = cells.length;
     while (iCell--) {
         mapCtx.beginPath();
@@ -4143,7 +4155,11 @@ function renderMapToCache() {
             mapCtx.setLineDash([2, 2]);
             mapCtx.lineWidth = 5;
             mapCtx.strokeStyle = '#FFFF00';
-            color = patterns[cell.id];
+            // Ability tiles: bake only the dirt underlay here; the ability icon is
+            // drawn hovering per-frame (drawTerrainFX) instead of flat in the cache.
+            // Fall back to the baked icon pattern if dirt isn't ready yet.
+            var dirtPat = patterns[config.tileMap.normal.id];
+            color = (dirtPat != null) ? dirtPat : patterns[cell.id];
         } else if (patterns[cell.id] != null) {
             color = patterns[cell.id];
             mapCtx.setLineDash([]);
@@ -4165,6 +4181,10 @@ function renderMapToCache() {
         mapCtx.fillStyle = color;
         mapCtx.fill();
         mapCtx.stroke();
+        // Terrain depth: soft inner shadow only where this cell meets a different
+        // terrain type, so same-type regions stay seamless. No-op for non-terrain
+        // tiles. Baked into the cache, so it's free per frame.
+        if (aoIds) { paintCellEdgeAO(mapCtx, cell, aoIds); }
     }
     drawTileBorders(mapCtx);
     drawLavaBorders(mapCtx);
@@ -5300,8 +5320,8 @@ function drawPlayerIcon(player, notchDistanceApart) {
     // Match the in-game look: a skinned kart shows its procedural skin (tinted by the
     // player's colour) instead of the plain colour disc + ring. Heading falls back to
     // the kart's angle since overview icons are static.
-    if (player.cartSkin === "firetruck" || player.cartSkin === "dino") {
-        var iconPainter = (player.cartSkin === "firetruck") ? drawFiretruckSkin : drawDinoSkin;
+    var iconPainter = cartSkinPainter(player.cartSkin);
+    if (iconPainter != null) {
         // Fixed heading (face right, toward the finish) so the scoreboard icon doesn't
         // freeze at the kart's last racing angle.
         drawCartSkin(player, notchX, 0, iconRadius, iconPainter, 0);

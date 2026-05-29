@@ -12,6 +12,7 @@ const bundles = {
         'client/scripts/input.js',
         'client/scripts/gamepad.js',
         'client/scripts/draw.js',
+        'client/scripts/terrainfx.js',
         'client/scripts/gameboard.js',
         'client/scripts/lobbyHub.js',
         'client/scripts/audience.js',

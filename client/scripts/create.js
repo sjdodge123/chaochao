@@ -1480,11 +1480,13 @@ function cellIdFromPoint(xmouse, ymouse) {
         if (hit !== undefined) { return hit; }
     }
 }
+var tileIdByVid = null; // voronoiId -> tile id, for boundary-AO neighbour typing
 function renderCells() {
     var cells = vMap.cells,
         iCell = cells.length,
         cell;
 
+    tileIdByVid = buildIdByVoronoi(cells);
     while (iCell--) {
         renderCell(cells[iCell]);
     }
@@ -1525,6 +1527,7 @@ function renderMapThumbnail(map) {
     var ctx = cv.getContext('2d');
     ctx.fillStyle = tileFill(config.tileMap.normal.id);
     ctx.fillRect(0, 0, cv.width, cv.height);
+    var thumbIds = buildIdByVoronoi(map.cells);
     for (var i = 0; i < map.cells.length; i++) {
         var cell = map.cells[i];
         var hes = cell.halfedges;
@@ -1536,6 +1539,7 @@ function renderMapThumbnail(map) {
         ctx.closePath();
         ctx.fillStyle = tileFill(cell.id);
         ctx.fill();
+        paintCellEdgeAO(ctx, cell, thumbIds);
     }
     // Hazards (same look as the editor canvas: orange disc + red attack ring,
     // plus a black rail bar for moving bumpers). Without this, the load-list
@@ -1598,6 +1602,8 @@ function renderCell(cell) {
     createContext.strokeStyle = '#adadad';
     createContext.fill();
     createContext.stroke();
+    // Match the in-game board's depth: shadow only at terrain transitions.
+    if (tileIdByVid) { paintCellEdgeAO(createContext, cell, tileIdByVid); }
 }
 function getStartpoint(halfedge) {
     if (compareSite(halfedge.edge.lSite, halfedge.site)) {

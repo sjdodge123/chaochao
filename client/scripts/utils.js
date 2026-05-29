@@ -165,12 +165,12 @@ function easeOutBack(t) {
 // with a tint blend — averaging toward one colour smooths noise out.
 var TILE_GRADE_ENABLED = true;
 var TILE_GRADE = {
-    grass:  { sat: 0.60, light: 0.90, contrast: 0.92 }, // kill the neon lime
-    dirt:   { sat: 0.90, light: 0.98, contrast: 0.96 }, // anchor tone, barely touched
-    sand:   { sat: 0.92, light: 0.86, contrast: 0.95 }, // drop the bright glow
-    ice:    { sat: 0.82, light: 0.97, contrast: 1.00, tint: [120, 200, 236], tintAmt: 0.20 }, // deepen blue via tint, mute sparkle noise
-    lava:   { sat: 0.92, light: 0.96, contrast: 1.00 }, // still hot, a touch less fluorescent
-    poison: { sat: 0.92, light: 0.96, contrast: 1.00 }  // lava's infection-round swap
+    grass:  { sat: 0.85, light: 0.92, contrast: 1.05, tint: [80, 140, 70], tintAmt: 0.10 },   // richer meadow green (still no neon)
+    dirt:   { sat: 1.06, light: 0.98, contrast: 1.04, tint: [150, 95, 50], tintAmt: 0.12 },    // warm rich soil
+    sand:   { sat: 1.04, light: 0.90, contrast: 1.05, tint: [205, 160, 90], tintAmt: 0.10 },   // warm sun-baked gold
+    ice:    { sat: 0.85, light: 0.95, contrast: 1.05, tint: [90, 180, 230], tintAmt: 0.28 },   // deeper blue, mute sparkle noise
+    lava:   { sat: 1.05, light: 0.95, contrast: 1.12, tint: [210, 70, 20], tintAmt: 0.10 },    // hotter, higher contrast
+    poison: { sat: 0.92, light: 0.96, contrast: 1.00 }  // lava's infection-round swap (unchanged)
 };
 
 function _rgbToHsl(r, g, b) {
@@ -287,4 +287,98 @@ function gradeTexture(image, key) {
     }
     ctx.putImageData(data, 0, 0);
     return finish();
+}
+
+// --- Boundary-only ambient-occlusion edge shading -----------------------
+// A soft inner shadow drawn ONLY along edges where a terrain cell meets a
+// DIFFERENT tile type (or the map's outer void). Edges shared with a same-type
+// neighbour are skipped, so a contiguous grass/dirt/etc region stays seamless
+// and only real terrain transitions read as depth. Shared by the game cache
+// (draw.js), the editor (create.js) and the thumbnails (gameboard.js/create.js)
+// so depth is identical everywhere. The shadow is tinted toward each tile's own
+// dark so the crevice between two terrains feels natural.
+var TILE_AO = {
+    normal: { rgb: "20,12,4", a: 0.42 },   // dirt
+    fast:   { rgb: "15,18,6", a: 0.40 },   // grass
+    slow:   { rgb: "40,28,8", a: 0.40 },   // sand
+    ice:    { rgb: "18,40,60", a: 0.38 },
+    lava:   { rgb: "50,8,2", a: 0.45 }
+};
+var TILE_AO_DEPTH = 11; // how far the inner shadow reaches in from the edge
+function tileAOEntry(id) {
+    if (typeof config === "undefined" || config == null || config.tileMap == null) {
+        return null;
+    }
+    var tm = config.tileMap;
+    if (id === tm.normal.id) { return TILE_AO.normal; }
+    if (id === tm.fast.id)   { return TILE_AO.fast; }
+    if (id === tm.slow.id)   { return TILE_AO.slow; }
+    if (id === tm.ice.id)    { return TILE_AO.ice; }
+    if (id === tm.lava.id)   { return TILE_AO.lava; }
+    return null; // goal / ability / bumper / random / background get no AO
+}
+// Map voronoiId -> tile id, so a cell's halfedge neighbours can be typed.
+function buildIdByVoronoi(cells) {
+    var m = {};
+    for (var i = 0; i < cells.length; i++) {
+        var c = cells[i];
+        if (c != null && c.site != null) { m[c.site.voronoiId] = c.id; }
+    }
+    return m;
+}
+// Draw the boundary AO for one cell. `idByVoronoi` types its neighbours. Draws
+// in whatever coords the caller's halfedge points use; leaves ctx unchanged.
+function paintCellEdgeAO(ctx, cell, idByVoronoi) {
+    if (cell == null || cell.site == null) { return; }
+    var id = idByVoronoi[cell.site.voronoiId];
+    var entry = tileAOEntry(id);
+    if (entry == null) { return; }
+    var he = cell.halfedges;
+    if (!he || he.length === 0) { return; }
+    var verts = [], i;
+    var v = getStartpoint(he[0]);
+    verts.push({ x: v.x, y: v.y });
+    for (i = 0; i < he.length; i++) { v = getEndpoint(he[i]); verts.push({ x: v.x, y: v.y }); }
+    var cx = 0, cy = 0;
+    for (i = 0; i < verts.length; i++) { cx += verts[i].x; cy += verts[i].y; }
+    cx /= verts.length; cy /= verts.length;
+    // Collect only the EXPOSED edges (neighbour is a different type / the void).
+    var exposed = [];
+    for (i = 0; i < he.length; i++) {
+        var e = he[i].edge;
+        var nb = compareSite(e.lSite, he[i].site) ? e.rSite : e.lSite;
+        var nbId = (nb != null) ? idByVoronoi[nb.voronoiId] : undefined;
+        if (nbId === id) { continue; } // same-type seam — keep the region seamless
+        exposed.push([getStartpoint(he[i]), getEndpoint(he[i])]);
+    }
+    if (exposed.length === 0) { return; }
+    var depth = TILE_AO_DEPTH;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(verts[0].x, verts[0].y);
+    for (i = 1; i < verts.length; i++) { ctx.lineTo(verts[i].x, verts[i].y); }
+    ctx.closePath();
+    ctx.clip();
+    // Soft inner band built from a few concentric strokes of the exposed edges,
+    // widening + fading outward. Strokes are centred on the edge (outer half is
+    // clipped away), so only the interior darkens. Round caps/joins + one path
+    // per pass mean no corner-doubling "triangles". Layering ≈ a smooth falloff.
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    var passes = [
+        { w: depth * 2.0, a: entry.a * 0.22 },
+        { w: depth * 1.1, a: entry.a * 0.30 },
+        { w: depth * 0.5, a: entry.a * 0.34 }
+    ];
+    for (var p = 0; p < passes.length; p++) {
+        ctx.beginPath();
+        for (i = 0; i < exposed.length; i++) {
+            ctx.moveTo(exposed[i][0].x, exposed[i][0].y);
+            ctx.lineTo(exposed[i][1].x, exposed[i][1].y);
+        }
+        ctx.lineWidth = passes[p].w;
+        ctx.strokeStyle = "rgba(" + entry.rgb + "," + passes[p].a + ")";
+        ctx.stroke();
+    }
+    ctx.restore();
 }
