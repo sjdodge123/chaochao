@@ -982,7 +982,9 @@ function drawCartSkinPreview(id, cx, cy, r, paint) {
         gameContext.ellipse(cx + r * 0.7, cy - r * 0.1, r * 0.4, r * 0.35, 0, 0, Math.PI * 2);
         gameContext.fill();
     } else {
-        gameContext.fillStyle = "rgba(255,255,255,0.4)";
+        // The plain "regular" cart: preview it in the player's chosen colour so it
+        // re-tints live as they change colour, matching the skin previews above.
+        gameContext.fillStyle = paint || "rgba(255,255,255,0.4)";
         gameContext.beginPath();
         gameContext.arc(cx, cy, r * 0.7, 0, Math.PI * 2);
         gameContext.fill();
