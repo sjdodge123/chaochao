@@ -39,9 +39,14 @@ var RECAP_EXIT_FX_MS = 750;    // how long a death/goal poof lingers before the 
 var RECAP_EXPLOSION_MS = 430;  // explosion effect lifetime (matches spawnExplosion's maxAge)
 var RECAP_MUZZLE_MS = 160;     // muzzle-flash lifetime (matches spawnMuzzleFlash's maxAge)
 var RECAP_SHOCKWAVE_MS = 1100; // one collapse-shockwave ring pass (600px/s out to ~650px)
-var RECAP_MAP_SNAP_MS = 450;   // min gap between dynamic-map snapshots (collapse/explosion/swap)
+var RECAP_MAP_SNAP_MS = 450;   // min gap between dynamic-map snapshots (explosion/swap, slow racing changes)
+var RECAP_MAP_SNAP_COLLAPSE_MS = 110; // finer gap while collapsing — lava grows every tick, and a 450ms
+                               // gap left the killing lava up to ~half a second behind the death frame
+                               // in the replay (so a kart "died to nothing" until the next snapshot)
 var RECAP_MAP_SCALE = 0.6;     // downscale map snapshots (clips are small) to bound memory
-var RECAP_MAP_MAX = 28;        // cap rolling map snapshots per round (downscaled, so cheap)
+var RECAP_MAP_MAX = 48;        // cap rolling map snapshots per round (downscaled, so cheap); higher to
+                               // hold a finely-sampled collapse window without evicting the pre-collapse
+                               // baseline that earlier (racing) clips render from
 
 // per-player frame tuple: [id, x, y, angle, velX, velY, state, onFire, ability, infected, emote, speedFx]
 // emote = active emoji string or null; speedFx = 0 none / 1 buff / 2 debuff
@@ -220,7 +225,13 @@ function recapCaptureMap() {
 	}
 	var now = Date.now();
 	var first = recapMaps.length === 0;
-	if (!first && !(recapMapDirty && now - recapLastMapSnap >= RECAP_MAP_SNAP_MS)) {
+	// Sample finely while the map is collapsing (lava grows every tick) so the replay's
+	// lava reaches each victim in step with their death; coarse otherwise (racing map
+	// barely changes, so frequent snapshots would just burn memory).
+	var collapsing = (typeof currentState !== "undefined" && typeof config !== "undefined" &&
+		config != null && config.stateMap != null && currentState === config.stateMap.collapsing);
+	var snapGap = collapsing ? RECAP_MAP_SNAP_COLLAPSE_MS : RECAP_MAP_SNAP_MS;
+	if (!first && !(recapMapDirty && now - recapLastMapSnap >= snapGap)) {
 		return;
 	}
 	var scale = RECAP_MAP_SCALE;
