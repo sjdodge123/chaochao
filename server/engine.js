@@ -746,15 +746,14 @@ function nearestSolidCell(x, y, map) {
 	return bestCell;
 }
 // Keep players out of empty holes the way the world edge stops them. Two cases:
-//   1. On solid ground, projected move would enter a hole -> slide along the rim:
-//      keep the tangential part of the move, drop the part heading into the hole, so
-//      a glancing push glides along the edge and only a head-on push stalls.
+//   1. On solid ground, projected move would enter a hole -> slide along the hole's
+//      border edge: project the move/velocity onto the nearest edge's tangent, so the
+//      kart deflects AROUND the cell (even pushing straight in) instead of dead-stopping.
 //   2. Already inside a hole (a hard punch/knockback flung the center past the rim,
 //      or a spawn landed there) -> DON'T just reverse velocity; that oscillates and
 //      bleeds energy, leaving the player stranded in the void. Redirect this tick's
 //      step straight at the nearest solid ground and point their velocity that way,
 //      so they consistently climb back out.
-var EMPTY_BOUNCE_DAMP = 0.25;
 function bounceOffEmptyCells(player, map) {
 	if (!mapHasEmptyCells(map)) {
 		return; // no holes on this map — skip the per-tick lookup entirely
@@ -785,36 +784,55 @@ function bounceOffEmptyCells(player, map) {
 	if (emptyCellAt(player.newX, player.newY, map) == null) {
 		return; // on solid ground and the projected move stays on solid ground
 	}
-	// Case 1: outside -> inside. Slide along the rim by resolving each axis independently
-	// (the robust top-down wall-slide): keep whichever of the X-only / Y-only sub-moves
-	// stays on solid ground, so a glancing approach glides along the edge while a head-on
-	// push (both sub-moves blocked) stops cleanly. Never lands the player inside a hole.
-	var clearX = (emptyCellAt(player.newX, player.y, map) == null);
-	var clearY = (emptyCellAt(player.x, player.newY, map) == null);
-	if (clearX && clearY) {
-		// Both single-axis moves are individually clear but the diagonal lands in a hole
-		// (a concave corner). Keep the larger component so the kart keeps sliding along
-		// one edge instead of stopping at the corner.
-		if (Math.abs(player.newX - player.x) >= Math.abs(player.newY - player.y)) {
-			player.newY = player.y; player.velY = 0;
-		} else {
-			player.newX = player.x; player.velX = 0;
+	// Case 1: outside -> inside. Slide ALONG the hole's actual border edge so the kart
+	// deflects around the cell even when pushing straight in (not a dead-stop). Find the
+	// hole-polygon edge nearest the kart, then project both the intended step and the
+	// velocity onto that edge's tangent — the component parallel to the rim survives, the
+	// component into the rim is dropped.
+	var hole = emptyCellAt(player.newX, player.newY, map);
+	var hes = hole.halfedges;
+	var bestD2 = Infinity, tanX = 0, tanY = 0, foundEdge = false;
+	for (var hi = 0; hi < hes.length; hi++) {
+		var a = getStartpoint(hes[hi]);
+		var b = getEndpoint(hes[hi]);
+		var ex = b.x - a.x, ey = b.y - a.y;
+		var elen2 = ex * ex + ey * ey;
+		if (elen2 < 1e-9) { continue; }
+		// Closest point on segment a-b to the kart, then its distance.
+		var tt = ((player.x - a.x) * ex + (player.y - a.y) * ey) / elen2;
+		if (tt < 0) { tt = 0; } else if (tt > 1) { tt = 1; }
+		var ddx = player.x - (a.x + tt * ex), ddy = player.y - (a.y + tt * ey);
+		var d2 = ddx * ddx + ddy * ddy;
+		if (d2 < bestD2) {
+			bestD2 = d2;
+			var el = Math.sqrt(elen2);
+			tanX = ex / el; tanY = ey / el;
+			foundEdge = true;
 		}
-	} else if (clearX) {
-		// Blocked vertically — slide horizontally along the rim.
-		player.newY = player.y;
-		player.velY = 0;
-	} else if (clearY) {
-		// Blocked horizontally — slide vertically along the rim.
-		player.newX = player.x;
-		player.velX = 0;
+	}
+	if (foundEdge) {
+		var sx = player.newX - player.x, sy = player.newY - player.y;
+		var sProj = sx * tanX + sy * tanY;            // intended motion along the rim
+		var vProj = player.velX * tanX + player.velY * tanY;
+		var slidX = player.x + sProj * tanX;
+		var slidY = player.y + sProj * tanY;
+		// Keep the tangential velocity either way so the glide carries into the next tick;
+		// only commit the slid position if it stays out of the hole (sharp-corner guard).
+		player.velX = vProj * tanX;
+		player.velY = vProj * tanY;
+		if (emptyCellAt(slidX, slidY, map) == null) {
+			player.newX = slidX;
+			player.newY = slidY;
+		} else {
+			player.newX = player.x;
+			player.newY = player.y;
+		}
 	} else {
-		// Both sub-moves hit the hole (head-on into the rim, or a concave pocket) — stop
-		// at the edge and bleed the speed so the kart settles instead of jittering.
+		// Degenerate hole with no usable edge — just hold position.
 		player.newX = player.x;
 		player.newY = player.y;
-		player.velX = -player.velX * EMPTY_BOUNCE_DAMP;
-		player.velY = -player.velY * EMPTY_BOUNCE_DAMP;
+		player.velX = 0;
+		player.velY = 0;
 	}
 	player.bounced = true;
 }
