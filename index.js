@@ -14,6 +14,24 @@ const htmlPath = path.join(__dirname, 'client');
 
 app.use(compression());
 
+// Portal embeddability: CrazyGames / Poki / itch.io host the game inside an
+// <iframe> on their own domain. Allow exactly those origins to frame us (plus
+// our own pages) via CSP `frame-ancestors`, while every other site stays
+// blocked. We deliberately send NO `X-Frame-Options` header: its only
+// "allow a specific origin" value (ALLOW-FROM) is dead in modern browsers, and
+// a bare DENY/SAMEORIGIN would block the portals — `frame-ancestors` is the
+// modern, multi-origin-capable control. Only this one directive is set, so
+// scripts/styles/etc. (the CDN assets) are left unrestricted. Runs before the
+// page + static handlers so it covers every served response, including the
+// HTML pages and the socket.io polling endpoint.
+var FRAME_ANCESTORS =
+    "frame-ancestors 'self' https://*.crazygames.com https://*.poki.com " +
+    "https://itch.io https://*.itch.io https://*.itch.zone";
+app.use(function (req, res, next) {
+    res.set('Content-Security-Policy', FRAME_ANCESTORS);
+    next();
+});
+
 // Auth foundation: validates the Socket.IO handshake (below) and supplies the
 // browser-safe Supabase config injected into served pages. No-ops when the
 // Supabase env vars are absent, so the server boots and everyone is a guest.

@@ -118,3 +118,6 @@ changed_maps.txt
 
 # Local-only notes / strategy docs (not committed)
 *.local.md
+
+# Local-only portal embed test (see docs/portal-submission-checklist.md)
+embed-test.html
