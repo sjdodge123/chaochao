@@ -21,6 +21,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 - You now slide along the edge of a hole when you push into it at an angle, instead of stopping dead.
 - Fixed the game-over screen not showing when a match ended during a blackout (or blindfold) round.
+- Fixed the between-rounds map preview showing the poison-green "zombie" lava colour left over from a just-finished infection round.
 
 ## v0.25.2 — 2026-05-29
 

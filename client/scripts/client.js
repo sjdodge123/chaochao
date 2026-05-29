@@ -545,6 +545,12 @@ function registerStateHandlers(server) {
 		// as the leader closes in on the win.
 		updateAudienceIntensity();
 		calculateNotchMoveAmt();
+		// resetRound() above cleared the `infection` flag, but the baked lava pattern is
+		// still the poison-green texture from the just-ended infection round (loadPatterns
+		// only re-bakes it on a map load, which hasn't happened yet). Rebuild patterns now
+		// so the next-map preview thumbnail — which reads patterns[lava] — doesn't inherit
+		// the zombie lava colour.
+		loadPatterns();
 		loadMapPreview(packet.nextMapID);
 		// Clear last round's leaderboards so stale rows don't flash on the new
 		// overview before the server's async queries return.
