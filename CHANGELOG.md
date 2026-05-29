@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.25.4 — 2026-05-29
+
 ### General
 
 - The whole board got a visual pass. Terrain now has richer, warmer colours and a subtle per-tile depth shading, so the ground reads as distinct tiles instead of one flat sheet.
