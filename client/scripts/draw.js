@@ -570,6 +570,12 @@ function drawDinoSkin(ctx, anim, paint) {
     // darker legs + spine of the same hue). Head toward +X, tail toward -X.
     paint = paint || "#43b047";
     var legSwing = Math.sin(anim * 4) * 0.22;
+    // Scale the whole dino up so its body fills more of the cart's circle (it read
+    // small next to the plain disc). The tail tip and head front are pulled in below
+    // so that even after this scale the silhouette stays inside radius 1.0 (the cart
+    // boundary) — nothing extends past where the regular cart would.
+    ctx.save();
+    ctx.scale(1.12, 1.12);
 
     // Legs (under body).
     ctx.fillStyle = cartSkinShade(paint, -0.35);
@@ -589,7 +595,7 @@ function drawDinoSkin(ctx, anim, paint) {
     ctx.fillStyle = cartSkinShade(paint, -0.12);
     ctx.beginPath();
     ctx.moveTo(-0.55, -0.18);
-    ctx.lineTo(-1.0, 0);
+    ctx.lineTo(-0.88, 0); // tail tip pulled in: -0.88 * 1.12 ≈ -0.99, inside the boundary
     ctx.lineTo(-0.55, 0.18);
     ctx.closePath();
     ctx.fill();
@@ -619,19 +625,20 @@ function drawDinoSkin(ctx, anim, paint) {
     ctx.fillStyle = paint;
     ctx.strokeStyle = cartSkinShade(paint, -0.45);
     ctx.beginPath();
-    ctx.ellipse(0.62, 0, 0.3, 0.26, 0, 0, Math.PI * 2);
+    ctx.ellipse(0.58, 0, 0.3, 0.26, 0, 0, Math.PI * 2); // head pulled in: front 0.88 * 1.12 ≈ 0.99
     ctx.fill();
     ctx.stroke();
 
     // Eye.
     ctx.fillStyle = "#ffffff";
     ctx.beginPath();
-    ctx.arc(0.72, -0.12, 0.07, 0, Math.PI * 2);
+    ctx.arc(0.68, -0.12, 0.07, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = "#111";
     ctx.beginPath();
-    ctx.arc(0.74, -0.12, 0.035, 0, Math.PI * 2);
+    ctx.arc(0.70, -0.12, 0.035, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
 }
 function getPlayerSprite(color, radius, strokeColor) {
     var key = color + '|' + radius + '|' + strokeColor;
@@ -1247,17 +1254,18 @@ function computeWorldViewTarget(dt) {
         worldGoalEngaged = false;
         return wholeMap;
     }
-    // Focus once the round is live (gate countdown + race); plus the LOBBY on
-    // touch, where the whole-map view leaves the player a tiny dot on a phone —
-    // a follow camera keeps them readable while they walk to a station. (Desktop
-    // lobby stays whole-map; touch lobby taps are inverse-mapped through the zoom
-    // in onTouchStart so station hit-testing still lines up.)
-    var inLobbyTouch = (currentState === config.stateMap.lobby &&
-        typeof isTouchScreen !== "undefined" && isTouchScreen);
+    // Focus once the round is live (gate countdown + race); plus the LOBBY whenever
+    // the dynamic camera is on (cameraZoomEnabled, checked above) — a follow camera
+    // keeps the player readable while they walk to a station instead of a tiny dot on
+    // the whole-map view. Applies on desktop too now (camera toggle on), matching the
+    // race behaviour and touch: the lobby hub panel is drawn in HUD/screen space (so it
+    // doesn't zoom and its hit-testing is unaffected) and mouse-walk is inverse-mapped
+    // through the zoom in calcMousePos, so walking to stations still lines up.
+    var inLobby = (currentState === config.stateMap.lobby);
     var focused = (currentState === config.stateMap.gated ||
         currentState === config.stateMap.racing ||
         currentState === config.stateMap.collapsing ||
-        inLobbyTouch);
+        inLobby);
     if (!focused) {
         worldViewFocusedElapsed = 0;
         worldGoalEngaged = false;
