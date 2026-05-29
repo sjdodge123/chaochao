@@ -10,7 +10,13 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- The whole board got a visual pass. Terrain now has richer, warmer colours and a subtle per-tile depth shading, so the ground reads as distinct tiles instead of one flat sheet.
+- The goal tile now glows like a beacon — a soft breathing light with an outward pulse ring — so it's easier to spot where you're racing to.
+- Lava churns and bubbles with rolling hot spots, and ice shows a soft reflection of the karts gliding over it.
+- Ability pickup icons now float and bob above their tile with a little shadow, so they read as a pickup to grab rather than a flat marking.
+- These animated touches scale with your graphics setting and turn off on the lowest setting, where the terrain still shows its new colours and depth.
 
 ## v0.25.3 — 2026-05-29
 

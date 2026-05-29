@@ -532,6 +532,7 @@ function buildMapThumbnailCanvas(map) {
 	var ctx = cv.getContext('2d');
 	ctx.fillStyle = thumbnailTileFill(config.tileMap.normal.id);
 	ctx.fillRect(0, 0, cv.width, cv.height);
+	var thumbIds = buildIdByVoronoi(map.cells);
 	for (var i = 0; i < map.cells.length; i++) {
 		var cell = map.cells[i];
 		var hes = cell.halfedges;
@@ -543,6 +544,7 @@ function buildMapThumbnailCanvas(map) {
 		ctx.closePath();
 		ctx.fillStyle = thumbnailTileFill(cell.id);
 		ctx.fill();
+		paintCellEdgeAO(ctx, cell, thumbIds);
 	}
 	// Hazards: matches drawBumper/drawMovingBumper in draw.js (orange disc +
 	// red attack ring; moving bumper also draws its rail). The thumbnail can't
