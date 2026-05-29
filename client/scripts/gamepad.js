@@ -1043,7 +1043,12 @@ function settingsRowDefs() {
         var profile = typeof auth.getProfile === "function" ? auth.getProfile() : null;
         if (profile) {
             defs.push({ id: "signOut", icon: "fas fa-user", label: "Sign out", value: function () { var p = auth.getProfile(); return p ? p.name : ""; } });
-        } else {
+        } else if (!(typeof isEmbedded === "function" && isEmbedded())) {
+            // Skip the sign-IN rows inside a portal iframe: OAuth redirects break
+            // under third-party-cookie restrictions, and embedded mode hides the
+            // navbar login affordance these rows .click() — so they'd be a dead
+            // (or worse, half-working) OAuth entry point. Embeds stay anonymous.
+            // The Sign-out row above is left intact for a session that survives.
             defs.push({ id: "signInGoogle",  icon: "fas fa-user", label: "Sign in with Google",  value: function () { return ""; } });
             defs.push({ id: "signInDiscord", icon: "fas fa-user", label: "Sign in with Discord", value: function () { return ""; } });
         }

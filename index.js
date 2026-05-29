@@ -24,8 +24,13 @@ app.use(compression());
 // scripts/styles/etc. (the CDN assets) are left unrestricted. Runs before the
 // page + static handlers so it covers every served response, including the
 // HTML pages and the socket.io polling endpoint.
+// Each portal is listed with BOTH its apex origin and a wildcard: a wildcard
+// (e.g. https://*.poki.com) matches subdomains only, NOT the bare apex, and
+// Poki/CrazyGames can frame from either, so both must be allowed explicitly.
 var FRAME_ANCESTORS =
-    "frame-ancestors 'self' https://*.crazygames.com https://*.poki.com " +
+    "frame-ancestors 'self' " +
+    "https://crazygames.com https://*.crazygames.com " +
+    "https://poki.com https://*.poki.com " +
     "https://itch.io https://*.itch.io https://*.itch.zone";
 app.use(function (req, res, next) {
     res.set('Content-Security-Policy', FRAME_ANCESTORS);
