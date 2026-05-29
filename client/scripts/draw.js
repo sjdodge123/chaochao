@@ -2618,13 +2618,36 @@ function drawSpeedFx(player) {
         }
     }
     if (player.speedDebuffUntil != null && now < player.speedDebuffUntil) {
-        var rp = (now / 700) % 1;
+        // "Drag" read: four chevrons converging INWARD on the kart (the opposite of the
+        // speed-buff streaks that fly outward) plus a heavy saturated ring hugging the
+        // body — so a slowed kart is obvious even when it's barely moving.
+        var cp = (now / 600) % 1;                     // 0..1 convergence cycle
+        var dist = player.radius + 16 - cp * 13;      // chevrons march inward over the cycle
+        var chevAlpha = Math.sin(cp * Math.PI) * 0.85; // fade in as they appear, out as they close
+        var arms = player.radius * 0.45;
         gameContext.save();
-        gameContext.globalAlpha = (1 - rp) * 0.4;
-        gameContext.strokeStyle = "rgba(80,80,160,1)";
-        gameContext.lineWidth = 2;
+        gameContext.translate(player.x, player.y);
+        gameContext.strokeStyle = "rgba(120,80,200," + chevAlpha.toFixed(3) + ")";
+        gameContext.lineWidth = 2.5;
+        gameContext.lineCap = "round";
+        gameContext.lineJoin = "round";
+        for (var ci = 0; ci < 4; ci++) {
+            gameContext.save();
+            gameContext.rotate(ci * Math.PI / 2 + Math.PI / 4); // 4 diagonals
+            // ">" with its point aimed back at the kart (-X), arms flaring outward.
+            gameContext.beginPath();
+            gameContext.moveTo(dist + arms, -arms);
+            gameContext.lineTo(dist, 0);
+            gameContext.lineTo(dist + arms, arms);
+            gameContext.stroke();
+            gameContext.restore();
+        }
+        // Heavy saturated ring hugging the kart.
+        gameContext.globalAlpha = 0.5;
+        gameContext.strokeStyle = "rgba(95,70,150,1)";
+        gameContext.lineWidth = 3;
         gameContext.beginPath();
-        gameContext.arc(player.x, player.y, player.radius + 2 + rp * 12, 0, 2 * Math.PI);
+        gameContext.arc(0, 0, player.radius + 3, 0, 2 * Math.PI);
         gameContext.stroke();
         gameContext.restore();
     }
@@ -3060,7 +3083,7 @@ function drawTrail(player) {
     var baseAlpha = dim ? NONLOCAL_TRAIL_ALPHA : 1;
     var dashed = !!trail.wasNearVictory;
     gameContext.save();
-    gameContext.lineWidth = dashed ? 4 : 3;
+    gameContext.lineWidth = dashed ? 6 : 3;
     gameContext.lineCap = "round";
     gameContext.lineJoin = "round";
     // Trail always uses the player's own colour, even with a cart skin equipped — the
@@ -3071,7 +3094,8 @@ function drawTrail(player) {
         gameContext.shadowColor = "black";
     }
     if (dashed) {
-        gameContext.setLineDash([20, 3, 3, 3, 3, 3, 3, 3]);
+        // Clean chunky dash (the old dotty tail read as noise once semi-transparent).
+        gameContext.setLineDash([18, 10]);
     }
     // Cumulative segment lengths up to vertex i (cumLen[0] = 0). Needed only for
     // the dashed style — the offset is what makes the dash pattern continuous
@@ -3097,6 +3121,11 @@ function drawTrail(player) {
     }
     for (var b = 0; b < TRAIL_DRAW_BUCKETS; b++) {
         var bucketAlpha = baseAlpha * (1 - (b + 0.5) / TRAIL_DRAW_BUCKETS);
+        if (dashed) {
+            // Keep the near-victory trail bold along its whole length — don't let the
+            // age-fade dim it into near-invisibility; it's the "about to win" cue.
+            bucketAlpha = Math.max(bucketAlpha, baseAlpha * 0.55);
+        }
         if (bucketAlpha <= 0.01) {
             continue;
         }
@@ -3119,6 +3148,24 @@ function drawTrail(player) {
                 runStart = -1;
             }
         }
+    }
+    if (dashed) {
+        // Animated shimmer: a single bright gold segment that sweeps along the whole
+        // victory trail (~1/s), so the "about to win" dash visibly pulses with motion
+        // instead of sitting static. One extra stroke — near-victory is rare.
+        var totalLen = cumLen[verts.length - 1];
+        var sweep = (now / 1000) % 1;
+        gameContext.globalAlpha = baseAlpha * 0.9;
+        gameContext.strokeStyle = "rgba(255,240,170,1)";
+        gameContext.lineWidth = 3;
+        gameContext.setLineDash([16, totalLen + 40]); // one lit segment, rest is gap
+        gameContext.lineDashOffset = -sweep * (totalLen + 56);
+        gameContext.beginPath();
+        gameContext.moveTo(verts[0].x, verts[0].y);
+        for (var sv = 1; sv < verts.length; sv++) {
+            gameContext.lineTo(verts[sv].x, verts[sv].y);
+        }
+        gameContext.stroke();
     }
     gameContext.restore();
 }
@@ -4250,11 +4297,51 @@ function compareSite(siteA, siteB) {
 function drawHUD() {
     drawGameInfo();
     drawRaceTimer();
+    drawBrutalBadges();
     drawSpectatorLeaderboard();
     drawWorldRecordBanner();
     drawVirtualButtons();
     drawTouchControls();
     drawTitle();
+}
+
+// Persistent top-right badge (just under the race timer) showing one icon per active
+// brutal-round mode for the whole round — so a player who looked away, or who joined
+// after the announcement card faded, can always tell which modes are live. Reuses the
+// recap badge style (light tile + dark silhouette) so the icons read over any terrain.
+function drawBrutalBadges() {
+    if (brutalRound != true || brutalRoundConfig == null || brutalRoundConfig.brutalTypes == null) { return; }
+    if (currentState != config.stateMap.racing && currentState != config.stateMap.collapsing) { return; }
+    if (typeof brutalRoundImages === "undefined" || brutalRoundImages == null) { return; }
+    var icons = [];
+    for (var i = 0; i < brutalRoundConfig.brutalTypes.length; i++) {
+        var img = brutalRoundImages[brutalRoundConfig.brutalTypes[i]];
+        if (img != null) { icons.push(img); }
+    }
+    if (icons.length === 0) { return; }
+    var bw = 30, bh = 28, gap = 5, topY = 56;
+    var totalW = icons.length * bw + (icons.length - 1) * gap;
+    var startX = LOGICAL_WIDTH - 20 - totalW; // right-aligned under the timer
+    gameContext.save();
+    for (var k = 0; k < icons.length; k++) {
+        var bx = startX + k * (bw + gap);
+        gameContext.fillStyle = "rgba(255,255,255,0.82)";
+        gameContext.fillRect(bx, topY, bw, bh);
+        gameContext.strokeStyle = "rgba(0,0,0,0.55)";
+        gameContext.lineWidth = 1.5;
+        gameContext.strokeRect(bx, topY, bw, bh);
+        var ic = icons[k];
+        if (ic.complete !== false && (ic.naturalWidth == null || ic.naturalWidth > 0)) {
+            try {
+                var ratio = (ic.width && ic.height) ? (ic.height / ic.width) : 0.88;
+                var iw = bw - 8;
+                var ih = iw * ratio;
+                if (ih > bh - 6) { ih = bh - 6; iw = ih / ratio; }
+                gameContext.drawImage(ic, bx + (bw - iw) / 2, topY + (bh - ih) / 2, iw, ih);
+            } catch (e) { /* icon not decoded — badge tile still flags it */ }
+        }
+    }
+    gameContext.restore();
 }
 
 // Screen-space banner that drops in when ANY player (you, an opponent, an
@@ -4842,18 +4929,38 @@ function drawTitle() {
             gameContext.font = "50px Arial";
             gameContext.strokeText('Brutal Round', 0, 0);
             gameContext.fillText('Brutal Round', 0, 0);
-            var titles = [];
+            var titleRows = [];
             for (var i = 0; i < brutalRoundConfig.brutalTypes.length; i++) {
                 for (var prop in config.brutalRounds) {
                     if (config.brutalRounds[prop].id == brutalRoundConfig.brutalTypes[i]) {
-                        titles.push(config.brutalRounds[prop].title);
+                        titleRows.push({ title: config.brutalRounds[prop].title, id: brutalRoundConfig.brutalTypes[i] });
                     }
                 }
             }
             gameContext.font = "30px Arial";
-            for (var j = 0; j < titles.length; j++) {
-                gameContext.strokeText(titles[j], 0, 40 + (35 * j));
-                gameContext.fillText(titles[j], 0, 40 + (35 * j));
+            for (var j = 0; j < titleRows.length; j++) {
+                var ty = 40 + (35 * j);
+                gameContext.strokeText(titleRows[j].title, 0, ty);
+                gameContext.fillText(titleRows[j].title, 0, ty);
+                // Mode icon hugging the left edge of the title text — same iconography as
+                // the recap badges + the persistent corner badge — fading with the card.
+                var tImg = brutalRoundImages[titleRows[j].id];
+                if (tImg != null && tImg.complete !== false && (tImg.naturalWidth == null || tImg.naturalWidth > 0)) {
+                    var tw = gameContext.measureText(titleRows[j].title).width;
+                    var iratio = (tImg.width && tImg.height) ? (tImg.height / tImg.width) : 0.88;
+                    var iw2 = 30, ih2 = 30 * iratio;
+                    var ix2 = -tw / 2 - 12 - iw2;
+                    var iy2 = ty - 14 - ih2 / 2;
+                    gameContext.save();
+                    gameContext.globalAlpha = alpha;
+                    gameContext.fillStyle = "rgba(255,255,255,0.85)";
+                    gameContext.fillRect(ix2 - 3, iy2 - 3, iw2 + 6, ih2 + 6);
+                    gameContext.strokeStyle = "rgba(0,0,0,0.55)";
+                    gameContext.lineWidth = 1.5;
+                    gameContext.strokeRect(ix2 - 3, iy2 - 3, iw2 + 6, ih2 + 6);
+                    try { gameContext.drawImage(tImg, ix2, iy2, iw2, ih2); } catch (e) { /* icon not decoded — tile still flags it */ }
+                    gameContext.restore();
+                }
             }
             gameContext.restore();
         }
