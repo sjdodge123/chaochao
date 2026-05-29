@@ -746,14 +746,14 @@ function nearestSolidCell(x, y, map) {
 	return bestCell;
 }
 // Keep players out of empty holes the way the world edge stops them. Two cases:
-//   1. On solid ground, projected move would enter a hole -> stop at the rim and
-//      bounce back (reverse + damp), matching preventEscape's player-edge feel.
+//   1. On solid ground, projected move would enter a hole -> slide along the rim:
+//      keep the tangential part of the move, drop the part heading into the hole, so
+//      a glancing push glides along the edge and only a head-on push stalls.
 //   2. Already inside a hole (a hard punch/knockback flung the center past the rim,
 //      or a spawn landed there) -> DON'T just reverse velocity; that oscillates and
 //      bleeds energy, leaving the player stranded in the void. Redirect this tick's
 //      step straight at the nearest solid ground and point their velocity that way,
 //      so they consistently climb back out.
-var EMPTY_BOUNCE_DAMP = 0.25;
 function bounceOffEmptyCells(player, map) {
 	if (!mapHasEmptyCells(map)) {
 		return; // no holes on this map — skip the per-tick lookup entirely
@@ -784,11 +784,39 @@ function bounceOffEmptyCells(player, map) {
 	if (emptyCellAt(player.newX, player.newY, map) == null) {
 		return; // on solid ground and the projected move stays on solid ground
 	}
-	// Case 1: outside -> inside. Stop at the rim and bounce back.
-	player.newX = player.x;
-	player.newY = player.y;
-	player.velX = -player.velX * EMPTY_BOUNCE_DAMP;
-	player.velY = -player.velY * EMPTY_BOUNCE_DAMP;
+	// Case 1: outside -> inside. Slide along the rim instead of dead-stopping: strip the
+	// part of the move (and velocity) heading INTO the hole and keep the tangential part,
+	// so a player pushing at an angle glides along the edge. A head-on push still stalls,
+	// since its whole motion is the inward component.
+	var hole = emptyCellAt(player.newX, player.newY, map);
+	// Outward normal: from the hole's site toward the player. Approximate but stable —
+	// the safety re-check below guarantees we never actually place the player in a hole.
+	var nx = player.x - hole.site.x;
+	var ny = player.y - hole.site.y;
+	var nm = Math.sqrt(nx * nx + ny * ny);
+	if (nm > 1e-6) {
+		nx /= nm; ny /= nm;
+		// Remove the inward component from this tick's step...
+		var sx = player.newX - player.x, sy = player.newY - player.y;
+		var sDot = sx * nx + sy * ny;            // < 0 => step points into the hole
+		if (sDot < 0) { sx -= sDot * nx; sy -= sDot * ny; }
+		// ...and from the velocity, so the glide carries into the next tick.
+		var vDot = player.velX * nx + player.velY * ny;
+		if (vDot < 0) { player.velX -= vDot * nx; player.velY -= vDot * ny; }
+		var slidX = player.x + sx, slidY = player.y + sy;
+		if (emptyCellAt(slidX, slidY, map) == null) {
+			player.newX = slidX;
+			player.newY = slidY;
+		} else {
+			// Tangential slide still lands in a hole (curved rim / corner) — hold position
+			// rather than risk placing the player inside the void.
+			player.newX = player.x;
+			player.newY = player.y;
+		}
+	} else {
+		player.newX = player.x;
+		player.newY = player.y;
+	}
 	player.bounced = true;
 }
 function pointIntersection(x, y, cell) {
