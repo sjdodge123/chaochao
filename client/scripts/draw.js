@@ -483,7 +483,7 @@ function drawCartSkin(player, centerX, centerY, radius, painter) {
             Math.round(hc.g + (90 - hc.g) * hf) + "," +
             Math.round(hc.b + (10 - hc.b) * hf) + ")";
     }
-    painter(ctx, anim, paint);
+    painter(ctx, anim, paint, !!(player && player.onFire > 0));
     ctx.restore();
 }
 
@@ -503,7 +503,7 @@ function cartRoundRectPath(ctx, x, y, w, h, r) {
     ctx.closePath();
 }
 
-function drawFiretruckSkin(ctx, anim, paint) {
+function drawFiretruckSkin(ctx, anim, paint, hot) {
     // Normalized space (radius == 1), forward == +X. Five-Alarm monster truck,
     // painted in the player's chosen cart colour (tinted body + darker outline),
     // white "5" badge, ladder, big wheels with spinning spokes.
@@ -539,9 +539,10 @@ function drawFiretruckSkin(ctx, anim, paint) {
         ctx.restore();
     }
 
-    // Body (player colour) with a darker outline of the same hue.
+    // Body (player colour) with a darker outline of the same hue — or a bright glowing
+    // outline while burning, so the hot-orange truck reads as molten-hot.
     ctx.fillStyle = cartSkinShade(paint, -0.05);
-    ctx.strokeStyle = cartSkinShade(paint, -0.45);
+    ctx.strokeStyle = hot ? "#ffe27a" : cartSkinShade(paint, -0.45);
     ctx.lineWidth = 0.07;
     cartRoundRectPath(ctx, -0.78, -0.52, 1.56, 1.04, 0.18);
     ctx.fill();
@@ -584,7 +585,7 @@ function drawFiretruckSkin(ctx, anim, paint) {
     ctx.restore();
 }
 
-function drawDinoSkin(ctx, anim, paint) {
+function drawDinoSkin(ctx, anim, paint, hot) {
     // Top-down dino painted in the player's chosen cart colour (tinted body/limbs,
     // darker legs + spine of the same hue). Head toward +X, tail toward -X.
     paint = paint || "#43b047";
@@ -599,15 +600,19 @@ function drawDinoSkin(ctx, anim, paint) {
     // not the old low-contrast darkened-hue line) so the dino's silhouette reads
     // clearly against any terrain or kart colour — same idea as the regular cart's
     // black rim. Round joins/caps keep the outline clean at the leg/tail/spine points.
-    var outline = "#141414";
+    // When burning, glow the outline bright and barely darken the limbs/spine, so the
+    // hot-orange dino reads as molten-hot instead of a dark silhouette in the flames.
+    var outline = hot ? "#ffe27a" : "#141414";
     var outlineW = 0.11;
+    var shadeDeep = hot ? -0.1 : -0.35;
+    var shadeTail = hot ? -0.04 : -0.12;
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
     ctx.strokeStyle = outline;
     ctx.lineWidth = outlineW;
 
     // Legs (under body).
-    ctx.fillStyle = cartSkinShade(paint, -0.35);
+    ctx.fillStyle = cartSkinShade(paint, shadeDeep);
     var legs = [
         [0.28, 0.55, legSwing],
         [-0.3, 0.55, -legSwing],
@@ -622,7 +627,7 @@ function drawDinoSkin(ctx, anim, paint) {
     }
 
     // Tail.
-    ctx.fillStyle = cartSkinShade(paint, -0.12);
+    ctx.fillStyle = cartSkinShade(paint, shadeTail);
     ctx.beginPath();
     ctx.moveTo(-0.55, -0.18);
     ctx.lineTo(-0.88, 0); // tail tip pulled in: -0.88 * 1.12 ≈ -0.99, inside the boundary
@@ -639,7 +644,7 @@ function drawDinoSkin(ctx, anim, paint) {
     ctx.stroke();
 
     // Spine plates.
-    ctx.fillStyle = cartSkinShade(paint, -0.35);
+    ctx.fillStyle = cartSkinShade(paint, shadeDeep);
     for (var p = 0; p < 3; p++) {
         var px = -0.3 + p * 0.28;
         ctx.beginPath();
