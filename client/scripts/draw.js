@@ -474,10 +474,14 @@ function drawCartSkin(player, centerX, centerY, radius, painter) {
         ctx.scale(1 + punchK * 0.14, 1 + punchK * 0.14);    // impact pop
     }
     var paint = (player && player.color) ? player.color : null;
-    // While burning, char the skin toward black so the flames drawn on top read as
-    // the kart itself catching fire (rather than a flame floating over a clean skin).
+    // While burning, tint the skin toward glowing hot-orange (NOT black) so it reads as
+    // the skin itself on fire while staying recognizable — charring toward black just
+    // turned the small kart into an unreadable dark blob ("looks like a regular cart").
     if (paint && player.onFire > 0) {
-        paint = cartSkinShade(paint, -0.4);
+        var hc = cartSkinRGB(paint), hf = 0.6;
+        paint = "rgb(" + Math.round(hc.r + (255 - hc.r) * hf) + "," +
+            Math.round(hc.g + (90 - hc.g) * hf) + "," +
+            Math.round(hc.b + (10 - hc.b) * hf) + ")";
     }
     painter(ctx, anim, paint);
     ctx.restore();
