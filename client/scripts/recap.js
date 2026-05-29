@@ -1186,6 +1186,12 @@ function recapDrawCar(pr, exits, frameT) {
 		gameContext.restore();
 	}
 
+	// Burn flame BEHIND the body/skin (matches live play) — the big flame sprite would
+	// otherwise engulf the small kart and hide the skin entirely.
+	if (p.onFire > 0 && typeof drawFire === "function") {
+		drawFire(p);
+	}
+
 	// Kart body: a procedural cart skin replaces the coloured disc (matches live play,
 	// where the skin is tinted by the player's colour and the base disc is suppressed).
 	var recapPainter = (p.cartSkin === "firetruck") ? (typeof drawFiretruckSkin === "function" ? drawFiretruckSkin : null)
@@ -1201,11 +1207,6 @@ function recapDrawCar(pr, exits, frameT) {
 		try {
 			gameContext.drawImage(sprite, p.x - sprite.halfSize, p.y - sprite.halfSize);
 		} catch (e) { /* an undecoded sprite — skip this kart, keep the montage alive */ }
-	}
-
-	// Burn flames on top of the body/skin (matches live play).
-	if (p.onFire > 0 && typeof drawFire === "function") {
-		drawFire(p);
 	}
 
 	if (p.ability != null && typeof drawAbilityIndicator === "function") {
