@@ -1,0 +1,67 @@
+name: Database migrations (prod)
+
+# Applies Supabase schema migrations to PRODUCTION.
+#
+# Model: prod is read-only from every interactive surface (MCP, laptop, agent).
+# The ONLY thing with DDL/write access to prod is this CI runner, and it only
+# acts on migrations committed under supabase/migrations/. See docs/db-migrations.md.
+#
+# Required repo secrets (Settings -> Secrets and variables -> Actions):
+#   SUPABASE_ACCESS_TOKEN  - account personal access token (supabase.com/dashboard/account/tokens)
+#   SUPABASE_DB_PASSWORD   - PROD database password
+#   PROD_PROJECT_REF       - prod project ref (spkwpkpiuzshrfwplzyg)
+
+on:
+  push:
+    branches: [main]
+    paths: ['supabase/migrations/**', 'supabase/config.toml']
+  pull_request:
+    paths: ['supabase/migrations/**', 'supabase/config.toml']
+
+# Never let two migration runs race against the same database.
+concurrency:
+  group: db-migrate-prod
+  cancel-in-progress: false
+
+jobs:
+  # PR safety net: show exactly what SQL would hit prod, without applying it.
+  # Skipped for fork PRs (secrets are not exposed to forks).
+  dry-run:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Link prod project
+        run: supabase link --project-ref "${{ secrets.PROD_PROJECT_REF }}"
+      - name: Preview pending migrations
+        run: |
+          echo "Migrations local vs. prod:"
+          supabase migration list --linked
+          echo "---"
+          echo "SQL that would be applied to prod on merge:"
+          supabase db push --dry-run
+
+  # On merge to main: apply any not-yet-applied migrations to prod.
+  migrate:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Link prod project
+        run: supabase link --project-ref "${{ secrets.PROD_PROJECT_REF }}"
+      - name: Apply migrations to prod
+        run: supabase db push
