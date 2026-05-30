@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- A fully charged punch now hits noticeably harder — winding all the way up sends rivals flying much further than before.
 
 ## v0.25.4 — 2026-05-29
 

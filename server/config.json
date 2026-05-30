@@ -355,7 +355,7 @@
     "punchCharge": {
         "_doc": "Hold-to-charge: holding punch for maxChargeMs reaches a full charge that multiplies the momentum-scaled knockback by maxChargeMult (final force = momentum bonus x charge). Charge is capped by the stamina you can afford. Overcharge: holding past overchargeAfterMs starts a danger phase whose dark-red meter fills over overchargeFillMs; if you don't release in time the charge is wasted and you're locked in the exhausted move-penalty for exhaustLockMs. chargedHitFrac = how full a charge counts as a 'fully charged' hit (drives the thwack SFX).",
         "maxChargeMs": 700,
-        "maxChargeMult": 2.0,
+        "maxChargeMult": 3.0,
         "overchargeAfterMs": 2000,
         "overchargeFillMs": 1500,
         "exhaustLockMs": 3000,
