@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.25.6 — 2026-05-30
+
 ### General
 
 - Maps are now sorted into playlists. A new **Featured** mix gives you the better-balanced maps by default, and there are themed packs too — Slip & Slide (ice), Hardcore (lava), Pinball (bumpers), Pure Racing, Quick Sprints, Marathon, and Wild for the wild ones. Pick one at the lobby playlist board.
