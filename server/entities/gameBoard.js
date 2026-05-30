@@ -65,6 +65,12 @@ class GameBoard {
 		this.maps = allMaps.filter(function (m) { return !m.lobbyOnly; });
 		this.lobbyMaps = allMaps.filter(function (m) { return m.lobbyOnly; });
 		this.mapsPlayed = [];
+		// Active playlist for this room's rotation. Players set it at the lobby
+		// hub board (last-writer-wins, room-wide); the rotation only draws from
+		// maps whose meta.playlists includes it. Defaults to the auto-balanced
+		// "featured" pool. A too-thin playlist transparently falls back to the
+		// full pool (see getEligibleMapIndices) so rotation can never starve.
+		this.playlistId = (c.defaultPlaylist || "featured");
 		this.currentMap = {};
 		this.nextMap = {};
 		// Injected-map (preview) mode: when set, every round loads previewMap
@@ -1489,12 +1495,55 @@ class GameBoard {
 			this.nextMap = JSON.parse(JSON.stringify(this.maps[0]));
 			return this.nextMap.id;
 		}
-		if (this.maps.length == this.mapsPlayed.length) {
-			this.mapsPlayed = [];
+		// Draw only from the active playlist's eligible maps, keeping the
+		// no-repeat-until-exhausted behaviour but scoped to that pool. Reset the
+		// played set once every eligible map has been seen.
+		var eligible = this.getEligibleMapIndices();
+		var unplayed = [];
+		for (var ei = 0; ei < eligible.length; ei++) {
+			if (this.mapsPlayed.indexOf(this.maps[eligible[ei]].id) === -1) {
+				unplayed.push(eligible[ei]);
+			}
 		}
-		var nextMapId = this.getRandomMapR();
+		if (unplayed.length === 0) {
+			this.mapsPlayed = [];
+			unplayed = eligible;
+		}
+		var nextMapId = unplayed[utils.getRandomInt(0, unplayed.length - 1)];
 		this.nextMap = JSON.parse(JSON.stringify(this.maps[nextMapId]));
 		return this.nextMap.id;
+	}
+
+	// Indices into this.maps eligible for the room's current playlist. A map is
+	// eligible if its classifier meta lists the playlist id. "all" (or an
+	// unset/unknown playlist) means the whole pool. A playlist resolving to
+	// fewer than 2 maps — too thin for no-repeat rotation, or maps missing meta
+	// — falls back to the full pool so the rotation never deadlocks or starves.
+	getEligibleMapIndices() {
+		var all = [];
+		for (var i = 0; i < this.maps.length; i++) { all.push(i); }
+		var pid = this.playlistId;
+		if (!pid || pid === "all") { return all; }
+		var elig = [];
+		for (var j = 0; j < this.maps.length; j++) {
+			var meta = this.maps[j].meta;
+			if (meta && Array.isArray(meta.playlists) && meta.playlists.indexOf(pid) !== -1) {
+				elig.push(j);
+			}
+		}
+		return (elig.length < 2) ? all : elig;
+	}
+
+	// Set the room's active playlist (from the lobby hub board). Validates the id
+	// against the configured playlists, resets the played set so the new playlist
+	// starts fresh, and reports whether it actually changed. Last-writer-wins.
+	setPlaylist(playlistId) {
+		var defs = c.playlists || [];
+		var known = defs.some(function (p) { return p && p.id === playlistId; });
+		if (!known || playlistId === this.playlistId) { return false; }
+		this.playlistId = playlistId;
+		this.mapsPlayed = [];
+		return true;
 	}
 
 	loadNextMap(currentState) {
@@ -1694,16 +1743,6 @@ class GameBoard {
 			return;
 		}
 		this.chanceForAdditionalBrutal = this.chanceForAdditionalBrutal + increment;
-	}
-	getRandomMapR() {
-		var randomIndex = utils.getRandomInt(0, this.maps.length - 1);
-		var nextMap = this.maps[randomIndex];
-		for (var i = 0; i < this.mapsPlayed.length; i++) {
-			if (nextMap.id == this.mapsPlayed[i]) {
-				return this.getRandomMapR();
-			}
-		}
-		return randomIndex;
 	}
 	checkForBrutalRound() {
 		var brutalRoundConfig = { brutal: false, brutalTypes: [] };
