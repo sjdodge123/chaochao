@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<!--
+  Border REVIEW harness — loads the REAL client/scripts/borderEffects.js (the exact shipping
+  painters + BORDER_P), so what you see is what ships. Cycle every border with ◄ ►, tune its
+  knobs (which map to the shared BORDER_P params), and "Save config" to dump BORDER_P as JSON.
+  OPEN THIS FILE DIRECTLY (file://) — it references ../../client/scripts/borderEffects.js.
+  Note: BORDER_P is a SHARED param set, so e.g. spinSpeed affects every spinning border.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>chaochao — border review</title>
+<style>
+  body { margin:0; background:#0c0e14; color:#cdd3df; font:13px/1.4 system-ui, sans-serif; }
+  #wrap { display:flex; height:100vh; }
+  #stage { flex:1; position:relative; }
+  canvas { display:block; width:100%; height:100%; background:
+      radial-gradient(120% 120% at 50% 42%, #1a1f2b 0%, #0a0c11 100%); }
+  #panel { width:300px; padding:16px 18px; background:#11141c; border-left:1px solid #222936; overflow:auto; }
+  h1 { font-size:15px; margin:0 0 4px; color:#fff; }
+  .sub { color:#7f8aa0; font-size:11px; margin-bottom:14px; }
+  .row { margin:12px 0; }
+  .row label { display:block; font-weight:600; color:#aeb7c8; margin-bottom:5px; font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+  .eff { display:flex; align-items:center; gap:8px; }
+  .eff button { width:34px; height:34px; font-size:18px; background:#1c2230; color:#cdd3df; border:1px solid #2c3446; border-radius:7px; cursor:pointer; }
+  .eff button:hover { background:#252d3e; }
+  .eff .name { flex:1; text-align:center; font-size:15px; font-weight:700; color:#ffd34d; }
+  .idx { color:#6b7488; font-size:11px; }
+  input[type=range] { width:100%; }
+  .sw { display:inline-block; width:24px; height:24px; border-radius:5px; margin:2px; cursor:pointer; border:2px solid transparent; vertical-align:middle; }
+  .sw.on { border-color:#fff; }
+  select { background:#1c2230; color:#cdd3df; border:1px solid #2c3446; border-radius:5px; padding:4px 6px; width:100%; }
+  .val { color:#7f8aa0; font-size:11px; float:right; }
+  button.act { width:100%; padding:9px; margin-top:6px; background:#2a6df0; color:#fff; border:0; border-radius:7px; font-weight:700; cursor:pointer; }
+  button.act:hover { background:#3a7dff; }
+  pre { background:#0a0c11; border:1px solid #222936; border-radius:6px; padding:8px; font-size:11px; white-space:pre-wrap; color:#9fb0c8; max-height:160px; overflow:auto; }
+  .fps { position:absolute; top:8px; left:10px; color:#7f8aa0; font:12px monospace; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="stage"><canvas id="c"></canvas><div class="fps" id="fps"></div></div>
+  <div id="panel">
+    <h1>Border review</h1>
+    <div class="sub">Live <code>borderEffects.js</code> painters</div>
+
+    <div class="row">
+      <label>Border <span class="idx" id="eidx"></span></label>
+      <div class="eff"><button id="prev">◄</button><div class="name" id="ename">—</div><button id="next">►</button></div>
+    </div>
+
+    <div class="row"><label>Player colour</label><div id="swatches"></div>
+      <input type="color" id="custom" style="margin-top:6px;width:100%;height:28px;background:#1c2230;border:1px solid #2c3446;border-radius:5px;"></div>
+
+    <div class="row"><label>Cart body (behind the rim)</label>
+      <select id="body"><option value="sphere">Plain sphere</option><option value="shaped">Shaped (truck-ish)</option><option value="none">None (border alone)</option></select></div>
+
+    <div class="row"><label>Anim speed <span class="val" id="vanim"></span></label>
+      <input type="range" id="anim" min="0" max="3" step="0.05" value="1"></div>
+
+    <div class="row" id="effknobs"><label style="color:#ffd34d">This border's knobs <span class="idx">(BORDER_P, shared)</span></label><div id="knoblist"></div></div>
+
+    <div class="row">
+      <button class="act" id="save">Save config (BORDER_P)</button>
+      <button class="act" id="reset" style="background:#3a4254;margin-top:8px">Reset all to defaults</button>
+      <pre id="out" style="display:none"></pre>
+    </div>
+  </div>
+</div>
+
+<!-- Helper stubs the live painters expect (defined in draw.js in the bundle). -->
+<script>
+var TAU = Math.PI * 2;
+function cartSkinRGB(color){ var c=document.createElement('canvas'); c.width=c.height=1; var x=c.getContext('2d');
+  x.fillStyle='#000'; x.fillStyle=color; x.fillRect(0,0,1,1); var d=x.getImageData(0,0,1,1).data; return {r:d[0],g:d[1],b:d[2]}; }
+function cartSkinShade(color,amt){ var c=cartSkinRGB(color); var t=amt<0?0:255, f=amt<0?-amt:amt;
+  return "rgb("+Math.round(c.r+(t-c.r)*f)+","+Math.round(c.g+(t-c.g)*f)+","+Math.round(c.b+(t-c.b)*f)+")"; }
+function cartSkinShadeA(color,amt,a){ var c=cartSkinRGB(color); var t=amt<0?0:255, f=amt<0?-amt:amt;
+  return "rgba("+Math.round(c.r+(t-c.r)*f)+","+Math.round(c.g+(t-c.g)*f)+","+Math.round(c.b+(t-c.b)*f)+","+a+")"; }
+function cartPolyPath(ctx, cx, cy, r, sides, rot){ ctx.beginPath();
+  for (var k=0;k<sides;k++){ var a=rot+k*Math.PI*2/sides; var x=cx+Math.cos(a)*r, y=cy+Math.sin(a)*r;
+    if(k===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);} ctx.closePath(); }
+</script>
+<!-- The REAL shipping painters + BORDER_P. -->
+<script src="../../client/scripts/borderEffects.js"></script>
+<script>
+var ORDER = ['ring','double','studs','chevrons','dashed','ticks','scales','glow','spikes','gear',
+             'sawblade','runes','flames','electric','orbit','laurel','crown','plasma'];
+var NAMES = { ring:'Ring', double:'Double', studs:'Studs', chevrons:'Chevrons', dashed:'Dashed', ticks:'Ticks',
+  scales:'Scales', glow:'Glow', spikes:'Spikes', gear:'Gear', sawblade:'Sawblade', runes:'Runes', flames:'Flames',
+  electric:'Electric', orbit:'Orbit', laurel:'Laurel', crown:'Crown', plasma:'Plasma' };
+var PAINTER = { ring:drawRingBorder, double:drawDoubleBorder, studs:drawStudsBorder, chevrons:drawChevronsBorder,
+  dashed:drawDashedBorder, ticks:drawTicksBorder, scales:drawScalesBorder, glow:drawGlowBorder, spikes:drawSpikesBorder,
+  gear:drawGearBorder, sawblade:drawSawbladeBorder, runes:drawRunesBorder, flames:drawFlamesBorder, electric:drawElectricBorder,
+  orbit:drawOrbitBorder, laurel:drawLaurelBorder, crown:drawCrownBorder, plasma:drawPlasmaBorder };
+// Which BORDER_P keys each border actually reads (so we only show the relevant sliders).
+var BORDER_KEYS = { ring:['ringThickness'], studs:['studCount'], dashed:['dashCount','spinSpeed'],
+  glow:['glowRadius','spinSpeed'], spikes:['spikeCount','spikeLen'], gear:['gearTeeth','spinSpeed'],
+  electric:['spinSpeed'], chevrons:['spinSpeed'], sawblade:['spinSpeed'], flames:['spinSpeed'],
+  runes:['spinSpeed'], orbit:['spinSpeed'], plasma:['spinSpeed'], double:[], ticks:[], scales:[], laurel:[], crown:[] };
+var KNOB = { ringThickness:[0.02,0.4,0.01], studCount:[4,32,1], dashCount:[4,40,1], glowRadius:[0.05,0.6,0.01],
+  spikeLen:[0.05,0.6,0.01], spikeCount:[4,40,1], gearTeeth:[4,40,1], spinSpeed:[0,4,0.1] };
+var PALETTE = ['#e8453c','#4caf50','#f5d142','#4a78e0','#e07b39','#9b5de5','#5ad0ff','#ef6fb0','#2b2f3a','#ffffff','#c0392b','#3fb6c8'];
+var DEFAULTS = JSON.parse(JSON.stringify(window.BORDER_P)); // snapshot for reset
+
+var cfg = { border:'gear', color:'#5ad0ff', body:'sphere', anim:1 };
+var cv=document.getElementById('c'), ctx=cv.getContext('2d');
+function fit(){ cv.width=cv.clientWidth; cv.height=cv.clientHeight; } window.addEventListener('resize',fit); fit();
+
+function drawBody(R){
+  if(cfg.body==='none') return;
+  if(cfg.body==='sphere'){ ctx.beginPath(); ctx.arc(0,0,0.92,0,TAU); ctx.fillStyle=cfg.color; ctx.fill();
+    ctx.lineWidth=0.05; ctx.strokeStyle='rgba(0,0,0,.5)'; ctx.stroke(); return; }
+  // shaped: a rounded "truck" body so you can see the rim ring a non-round cart
+  ctx.fillStyle=cfg.color; ctx.strokeStyle='rgba(0,0,0,.5)'; ctx.lineWidth=0.06;
+  ctx.beginPath();
+  var x=-0.74,y=-0.5,w=1.48,h=1.0,r=0.2;
+  ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle='rgba(190,230,255,0.85)'; ctx.fillRect(0.28,-0.28,0.32,0.56);
+}
+
+var t0=Date.now(), frames=0, fpsT=0, fpsEl=document.getElementById('fps');
+function loop(){
+  // anim is in SECONDS to match the game (drawBorderOverlay passes cartSkinAnimTime, seconds);
+  // the spinning borders do spin = anim * k * spinSpeed, so seconds is what makes spinSpeed read right.
+  var now=Date.now(), anim=(now-t0)/1000*cfg.anim;
+  ctx.clearRect(0,0,cv.width,cv.height);
+  var R=Math.min(cv.width,cv.height)*0.30;
+  ctx.save(); ctx.translate(cv.width/2, cv.height/2); ctx.scale(R,R);
+  drawBody(R);
+  var fn=PAINTER[cfg.border];
+  if(fn){ try{ fn(ctx, anim, cfg.color); }catch(e){} }
+  ctx.restore();
+  frames++; if(now-fpsT>500){ fpsEl.textContent=Math.round(frames*1000/(now-fpsT))+' fps'; frames=0; fpsT=now; }
+  requestAnimationFrame(loop);
+}
+
+function renderKnobs(id){
+  var box=document.getElementById('knoblist'); box.innerHTML='';
+  var keys=BORDER_KEYS[id]||[];
+  if(!keys.length){ box.innerHTML='<span class="idx">No tunable knobs (baked inline).</span>'; return; }
+  keys.forEach(function(key){
+    var spec=KNOB[key], cur=window.BORDER_P[key];
+    var wrap=document.createElement('div'); wrap.style.margin='8px 0';
+    var lab=document.createElement('label'); lab.style.textTransform='none'; lab.innerHTML=key+' <span class="val">'+cur+'</span>';
+    var r=document.createElement('input'); r.type='range'; r.min=spec[0]; r.max=spec[1]; r.step=spec[2]; r.value=cur;
+    r.oninput=function(){ var v=parseFloat(r.value); window.BORDER_P[key]=v; lab.querySelector('.val').textContent=v; };
+    wrap.appendChild(lab); wrap.appendChild(r); box.appendChild(wrap);
+  });
+}
+function setBorder(id){ cfg.border=id; document.getElementById('ename').textContent=NAMES[id]||id;
+  document.getElementById('eidx').textContent='('+(ORDER.indexOf(id)+1)+'/'+ORDER.length+')'; renderKnobs(id); }
+function cycle(d){ var i=(ORDER.indexOf(cfg.border)+d+ORDER.length)%ORDER.length; setBorder(ORDER[i]); }
+document.getElementById('prev').onclick=function(){cycle(-1)}; document.getElementById('next').onclick=function(){cycle(1)};
+window.addEventListener('keydown',function(e){ if(e.key==='ArrowLeft')cycle(-1); if(e.key==='ArrowRight')cycle(1); });
+
+var sw=document.getElementById('swatches');
+PALETTE.forEach(function(col){ var d=document.createElement('span'); d.className='sw'; d.style.background=col; d.dataset.col=col;
+  d.onclick=function(){ cfg.color=col; markSw(); }; sw.appendChild(d); });
+function markSw(){ [].forEach.call(sw.children,function(d){ d.classList.toggle('on', d.dataset.col===cfg.color); }); }
+document.getElementById('custom').oninput=function(e){ cfg.color=e.target.value; markSw(); };
+document.getElementById('body').onchange=function(e){ cfg.body=e.target.value; };
+var av=document.getElementById('anim'), va=document.getElementById('vanim');
+av.oninput=function(){ cfg.anim=parseFloat(av.value); va.textContent=cfg.anim.toFixed(2)+'×'; }; av.oninput();
+
+document.getElementById('save').onclick=function(){
+  var out=document.getElementById('out'); var json=JSON.stringify(window.BORDER_P,null,2);
+  out.style.display='block'; out.textContent=json;
+  try{ navigator.clipboard.writeText(json); out.textContent=json+'\n\n(copied — paste back to bake)'; }catch(e){}
+};
+document.getElementById('reset').onclick=function(){ for(var k in DEFAULTS) window.BORDER_P[k]=DEFAULTS[k]; renderKnobs(cfg.border); };
+
+setBorder(cfg.border); markSw(); loop();
+</script>
+</body>
+</html>
