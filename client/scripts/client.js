@@ -18,7 +18,8 @@ var config,
 var ratingMapId = null,
 	ratingMapName = null,
 	myMapRating = 0,
-	ratingStarHits = [];
+	ratingStarHits = [],
+	ratingPadCursor = 0;   // gamepad-highlighted star (1..5; 0 = uninitialised)
 
 // The room's active playlist id for analytics, so rounds/matches can be segmented
 // by playlist (defaults to the configured default until a lobbyPlaylistChanged
@@ -653,6 +654,7 @@ function registerStateHandlers(server) {
 		ratingMapName = (packet.mapName != null) ? packet.mapName : ((currentMap && currentMap.name) || null);
 		myMapRating = 0;
 		ratingStarHits = [];
+		ratingPadCursor = 0;
 		trackEvent('round_complete', {
 			map: (currentMap && currentMap.name) || 'unknown',
 			playlist: currentPlaylistIdForMetrics()
@@ -728,6 +730,7 @@ function registerStateHandlers(server) {
 		ratingMapName = (packet.mapName != null) ? packet.mapName : ((currentMap && currentMap.name) || null);
 		myMapRating = 0;
 		ratingStarHits = [];
+		ratingPadCursor = 0;
 		recapHarvestRound();      // fold the final round's clips into the archive first
 		recapBuild(achievements); // then assemble the montage from the whole-match archive
 		stopAllSounds();
