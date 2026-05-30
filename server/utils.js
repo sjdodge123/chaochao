@@ -688,6 +688,22 @@ exports.getMapListings = function () {
 exports.getEditorMapListings = function () {
     return editorMapListing;
 }
+// Per-playlist map counts for the lobby hub board + editor filter chips, computed
+// once from the classified pool. Returns [{id, name, desc, count}] in config order.
+// Counts only race maps that actually classified (have meta); lobbyOnly maps are
+// already excluded from `maps` membership via their lack of meta.playlists.
+exports.getPlaylistSummary = function () {
+    var defs = (c.playlists || []);
+    var counts = {};
+    defs.forEach(function (p) { counts[p.id] = 0; });
+    maps.forEach(function (m) {
+        if (m.lobbyOnly || !m.meta || !Array.isArray(m.meta.playlists)) { return; }
+        m.meta.playlists.forEach(function (id) { if (counts[id] != null) { counts[id]++; } });
+    });
+    return defs.map(function (p) {
+        return { id: p.id, name: p.name, desc: p.desc, count: counts[p.id] || 0 };
+    });
+}
 exports.getSoundListings = function () {
     return soundListing;
 }

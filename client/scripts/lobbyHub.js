@@ -17,6 +17,15 @@ var lobbyAISetting = null;
 // incoming lobbyAIChanged is ALWAYS applied, so another player's change shows at once.
 var aiEmitTimer = null;
 var aiEmitSock = null;
+// Room-wide map playlist mirrored from the server (lobbyPlaylistChanged). The
+// hub "playlist board" station steps through config.playlists; like the AI dial
+// it applies room-wide, last-writer-wins, and coalesces a step burst into one
+// debounced emit. lobbyPlaylistInfo is the boot-time [{id,name,desc,count}]
+// summary delivered in contentDelivery, used only for the map-count display.
+var lobbyPlaylist = null;
+var lobbyPlaylistInfo = [];
+var plEmitTimer = null;
+var plEmitSock = null;
 // Per-slot HUD hit areas, rebuilt every frame in drawLobbyHubHud (logical coords).
 // slot -> { prompt: rect|null, options: [{rect, action}], close: rect|null }.
 var stationHudHit = {};
@@ -134,6 +143,12 @@ function stationPanelNav(lp, dx, dy) {
     if (lp.stationPanel.kind === "ai") {
         if (dx !== 0) {
             adjustAILevel(lp, dx > 0 ? 1 : -1);
+        }
+        return;
+    }
+    if (lp.stationPanel.kind === "playlist") {
+        if (dx !== 0) {
+            adjustPlaylist(lp, dx > 0 ? 1 : -1);
         }
         return;
     }
@@ -327,6 +342,56 @@ function flushLobbyAIEmit() {
     aiEmitSock.emit("setLobbyAI", payload);
 }
 
+// --- playlist station model --------------------------------------------------
+
+// The configured playlists ride along on the `config` payload (server config.json),
+// so the client already has their ids/names/filters. lobbyPlaylistInfo adds the
+// per-playlist map count computed at boot.
+function playlistDefList() {
+    return (typeof config !== "undefined" && config && Array.isArray(config.playlists)) ? config.playlists : [];
+}
+function defaultPlaylistId() {
+    return (typeof config !== "undefined" && config && config.defaultPlaylist) ? config.defaultPlaylist : "featured";
+}
+function currentPlaylistId() {
+    if (lobbyPlaylist) { return lobbyPlaylist; }
+    return defaultPlaylistId();
+}
+function playlistDef(id) {
+    var defs = playlistDefList();
+    for (var i = 0; i < defs.length; i++) { if (defs[i].id === id) { return defs[i]; } }
+    return null;
+}
+function playlistCount(id) {
+    for (var i = 0; i < lobbyPlaylistInfo.length; i++) {
+        if (lobbyPlaylistInfo[i].id === id) { return lobbyPlaylistInfo[i].count; }
+    }
+    return null;
+}
+function currentPlaylistLabel() {
+    var def = playlistDef(currentPlaylistId());
+    return def ? def.name : currentPlaylistId();
+}
+// Step the board to the prev/next playlist (wraps), update the room-wide setting
+// optimistically, and debounce the emit so a key burst sends one change.
+function adjustPlaylist(lp, dir) {
+    var defs = playlistDefList();
+    if (!defs.length) { return; }
+    var idx = -1;
+    for (var i = 0; i < defs.length; i++) { if (defs[i].id === currentPlaylistId()) { idx = i; break; } }
+    if (idx < 0) { idx = 0; }
+    idx = (idx + dir + defs.length) % defs.length;
+    lobbyPlaylist = defs[idx].id;
+    plEmitSock = (lp && lp.socket) ? lp.socket : (typeof server !== "undefined" ? server : null);
+    if (plEmitTimer) { clearTimeout(plEmitTimer); }
+    plEmitTimer = setTimeout(flushLobbyPlaylistEmit, 140);
+}
+function flushLobbyPlaylistEmit() {
+    plEmitTimer = null;
+    if (!plEmitSock) { return; }
+    plEmitSock.emit("setLobbyPlaylist", { id: currentPlaylistId() });
+}
+
 // --- skin station model ------------------------------------------------------
 
 var SKIN_COLS = 6; // swatches per row in the picker grid
@@ -489,11 +554,13 @@ function stationOccupied(s) {
 function stationTitle(kind) {
     if (kind === "ai") { return "AI Bots"; }
     if (kind === "skin") { return "Skins"; }
+    if (kind === "playlist") { return "Playlist"; }
     return "Station";
 }
 function stationGlyph(kind) {
     if (kind === "ai") { return "🤖"; }
     if (kind === "skin") { return "🎨"; }
+    if (kind === "playlist") { return "🗺️"; }
     return "⚙";
 }
 
@@ -598,9 +665,40 @@ function drawLobbyHubHud() {
             drawStationPrompt(lp, sp);
         }
     }
-    // The AI setting is room-wide, so show it persistently to the whole lobby (not
-    // just inside an open panel) — everyone sees a change before the race starts.
+    // The AI setting and playlist are both room-wide, so show them persistently to
+    // the whole lobby (not just inside a panel) — everyone sees a change before the
+    // race starts.
     drawLobbyAIStatus();
+    drawLobbyPlaylistStatus();
+}
+
+// A fixed top-centre banner showing the live room-wide playlist, just under the AI
+// banner. Synced to every client via lobbyPlaylistChanged.
+function drawLobbyPlaylistStatus() {
+    if (!playlistDefList().length) { return; }
+    var count = playlistCount(currentPlaylistId());
+    var text = "🗺️ Playlist: " + currentPlaylistLabel() + (count != null ? " (" + count + ")" : "");
+    var ink = hubInk();
+    gameContext.save();
+    gameContext.font = "bold 16px sans-serif";
+    var tw = gameContext.measureText(text).width;
+    var w = tw + 30;
+    var h = 32;
+    var x = (LOGICAL_WIDTH - w) / 2;
+    var y = 128; // just under the AI-bots banner (y=92, h=32)
+    gameContext.globalAlpha = 0.92;
+    gameContext.fillStyle = hubSurface();
+    lhRoundRect(gameContext, x, y, w, h, 9);
+    gameContext.fill();
+    gameContext.globalAlpha = 1;
+    gameContext.lineWidth = 2;
+    gameContext.strokeStyle = ink;
+    gameContext.stroke();
+    gameContext.fillStyle = ink;
+    gameContext.textAlign = "center";
+    gameContext.textBaseline = "middle";
+    gameContext.fillText(text, LOGICAL_WIDTH / 2, y + h / 2);
+    gameContext.restore();
 }
 
 // Triangular-tier auto fill: a few bots scale up with humans (1H→1, 2-3H→2,
@@ -733,6 +831,10 @@ function drawStationPanel(lp, sp) {
     var kind = lp.stationPanel.kind;
     var w = 250;
     var h = 132;
+    if (kind === "playlist") {
+        w = 280;
+        h = 150; // room for the playlist name + map count + one-line description
+    }
     if (kind === "skin") {
         var rows = Math.max(1, Math.ceil(skinOptionCount(lp) / SKIN_COLS));
         w = 272;
@@ -771,6 +873,8 @@ function drawStationPanel(lp, sp) {
 
     if (kind === "ai") {
         drawAIPanelBody(x, y, w, h, hit);
+    } else if (kind === "playlist") {
+        drawPlaylistPanelBody(x, y, w, h, hit);
     } else if (kind === "skin") {
         drawSkinPanelBody(lp, x, y, w, h, hit);
     } else {
@@ -802,6 +906,48 @@ function drawAIPanelBody(x, y, w, h, hit) {
     gameContext.fillStyle = "#9aa";
     gameContext.font = "12px sans-serif";
     gameContext.fillText("applies next race", x + w / 2, y + h - 16);
+}
+
+// Playlist board body: a ◄ name ► stepper through config.playlists, with the
+// map count and a one-line description. Selection is room-wide (last-writer-wins)
+// and applies to the next round's map pick.
+function drawPlaylistPanelBody(x, y, w, h, hit) {
+    var id = currentPlaylistId();
+    var def = playlistDef(id);
+    var name = def ? def.name : id;
+    var count = playlistCount(id);
+    var midY = y + 62;
+    // playlist name, centred
+    gameContext.textAlign = "center";
+    gameContext.textBaseline = "middle";
+    gameContext.fillStyle = "#fff";
+    gameContext.font = "bold 22px sans-serif";
+    gameContext.fillText(name, x + w / 2, midY);
+    // ◄ / ► buttons
+    var dec = { x: x + 12, y: midY - 20, w: 40, h: 40 };
+    var inc = { x: x + w - 52, y: midY - 20, w: 40, h: 40 };
+    gameContext.font = "bold 28px sans-serif";
+    gameContext.fillStyle = HUB_ACCENT;
+    gameContext.fillText("◄", dec.x + dec.w / 2, dec.y + dec.h / 2);
+    gameContext.fillText("►", inc.x + inc.w / 2, inc.y + inc.h / 2);
+    hit.options.push({ rect: dec, action: "dec" });
+    hit.options.push({ rect: inc, action: "inc" });
+    // map count
+    if (count != null) {
+        gameContext.fillStyle = "#cfd6dd";
+        gameContext.font = "12px sans-serif";
+        gameContext.fillText(count + (count === 1 ? " map" : " maps"), x + w / 2, midY + 24);
+    }
+    // one-line description
+    if (def && def.desc) {
+        gameContext.fillStyle = "#9aa";
+        gameContext.font = "12px sans-serif";
+        gameContext.fillText(def.desc, x + w / 2, y + h - 30);
+    }
+    // footer caption
+    gameContext.fillStyle = "#9aa";
+    gameContext.font = "12px sans-serif";
+    gameContext.fillText("applies next race", x + w / 2, y + h - 14);
 }
 
 // Skin picker body: a grid of palette swatches. The cursor is ringed white, the

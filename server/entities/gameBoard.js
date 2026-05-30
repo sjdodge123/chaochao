@@ -876,6 +876,9 @@ class GameBoard {
 		var lobbyMapID = (this.currentMap != null && this.currentMap.cells != null) ? this.currentMap.id : null;
 		messenger.messageRoomBySig(this.roomSig, "startLobby", compressor.sendLobbyStart(this.lobbyStartButton, lobbyMapID));
 		messenger.messageRoomBySig(this.roomSig, "lobbyStations", compressor.sendLobbyStations(this.lobbyStations));
+			// Sync the room-wide playlist to everyone when the lobby (re)loads, so a
+			// late joiner / fresh lobby shows the current pick (default 'featured').
+			messenger.messageRoomBySig(this.roomSig, "lobbyPlaylistChanged", { id: this.playlistId });
 		// Deliver the lobby bumpers so the client creates them (gameUpdates only moves
 		// hazards the client already knows about; creation is via this applyHazards path,
 		// the same payload shape the newMap event uses for races).
@@ -891,7 +894,11 @@ class GameBoard {
 		var R = 60; // station radius (a little smaller than the 75px start button)
 		var defaults = [
 			{ id: "skin", kind: "skin", cx: this.world.width * 0.33, cy: this.world.height * 0.5, color: "#4aa3ff" },
-			{ id: "ai", kind: "ai", cx: this.world.width * 0.67, cy: this.world.height * 0.5, color: "#3ad17a" }
+			{ id: "ai", kind: "ai", cx: this.world.width * 0.67, cy: this.world.height * 0.5, color: "#3ad17a" },
+			// The playlist board sits above the central start button so three stations
+			// don't crowd the center row (fallback layout only; the real lobby authors
+			// station positions in _lobbyTutorial.json).
+			{ id: "playlist", kind: "playlist", cx: this.world.width * 0.5, cy: this.world.height * 0.28, color: "#FFCB30" }
 		];
 		var authored = (this.currentMap != null && Array.isArray(this.currentMap.stations))
 			? this.currentMap.stations

@@ -80,6 +80,14 @@ function registerLobbyHubHandlers(server) {
 		// player's change is never dropped. { auto:true } => Auto (null).
 		lobbyAISetting = (payload != null && payload.auto) ? null : payload;
 	});
+	server.on("lobbyPlaylistChanged", function (payload) {
+		// Room-wide playlist selection. Always apply so every client (and our own
+		// slots) stay in sync; the EMIT is debounced (lobbyHub.adjustPlaylist), not
+		// this broadcast.
+		if (payload != null && typeof payload.id === "string") {
+			lobbyPlaylist = payload.id;
+		}
+	});
 	server.on("stationEnter", function (payload) {
 		if (payload != null && typeof setSlotNearStation === "function") {
 			setSlotNearStation(primarySlot, payload.id);
@@ -296,6 +304,10 @@ function registerConnectionHandlers(server) {
 		var payload = JSON.parse(payload);
 		var mapnames = payload.mapnames;
 		var imagenames = payload.imagenames;
+		// Boot-time playlist summary ([{id,name,desc,count}]) for the lobby hub board.
+		if (typeof lobbyPlaylistInfo !== "undefined" && Array.isArray(payload.playlists)) {
+			lobbyPlaylistInfo = payload.playlists;
+		}
 		for (var i = 0; i < imagenames.length; i++) {
 			promises.push($.get("../assets/img/" + imagenames[i]));
 		}

@@ -85,7 +85,7 @@ function isAllowedAvatarUrl(url) {
 
 function checkForMail(client) {
 	client.emit("welcome", client.id);
-	client.emit("contentDelivery", JSON.stringify({ count: utils.getContentCount(), mapnames: utils.getMapListings(), soundnames: utils.getSoundListings(), imagenames: utils.getImageListings() }));
+	client.emit("contentDelivery", JSON.stringify({ count: utils.getContentCount(), mapnames: utils.getMapListings(), soundnames: utils.getSoundListings(), imagenames: utils.getImageListings(), playlists: utils.getPlaylistSummary() }));
 
 	client.on("getMaps", function () {
 		// getMaps is the editor's listing request; hide lobbyOnly maps from it.
@@ -472,6 +472,23 @@ function checkForMail(client) {
 		if (count > max) { count = max; }
 		room.game.botOverride = { enabled: enabled, count: count };
 		messageRoomBySig(room.sig, "lobbyAIChanged", { enabled: enabled, count: count });
+	});
+
+	// Room-wide playlist pick from the lobby hub board. Last-writer-wins: validate
+	// against the configured playlists (setPlaylist does this), and only echo the
+	// change to the room when it actually changed.
+	client.on('setLobbyPlaylist', function (payload) {
+		var room = hostess.getRoomBySig(roomMailList[client.id]);
+		if (room == undefined || room.game.currentState != c.stateMap.lobby) {
+			return;
+		}
+		var id = payload && payload.id;
+		if (typeof id !== "string") {
+			return;
+		}
+		if (room.game.gameBoard.setPlaylist(id)) {
+			messageRoomBySig(room.sig, "lobbyPlaylistChanged", { id: id });
+		}
 	});
 
 
