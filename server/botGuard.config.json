@@ -1,0 +1,19 @@
+{
+  "_comment": "SERVER-ONLY anti-bot tuning. UNLIKE server/config.json this file is NEVER delivered to the client, so a bot can't read the verification distance or the datacenter policy and tune around it. Edit + restart to apply. See server/botGuard.js.",
+  "enabled": true,
+  "datacenter": {
+    "_comment": "Policy for connections whose IP falls inside server/data/datacenter-cidrs.json. action: 'tarpit' = shadow-segment into the dead room (recommended); 'block' = hard-reject the socket handshake; 'measure' = tag only, let them play (observation-only rollout). bypassForAuthed: a signed-in Supabase user is almost certainly human, so skip the datacenter check for them.",
+    "enabled": true,
+    "action": "tarpit",
+    "bypassForAuthed": true
+  },
+  "honeypot": {
+    "_comment": "Policy when a client trips the invisible decoy control (a human never sees/clicks it). action: 'tarpit' or 'measure' (GA bot_trap event still fires either way).",
+    "action": "tarpit"
+  },
+  "humanVerify": {
+    "_comment": "Emit the one-shot 'verifiedHuman' signal (-> GA verified_human key event) once a client's kart has actually travelled minTravelPx under its own server-simulated input. A pageview-only bot that never opens a socket / never drives a kart never crosses this and never counts as a verified human.",
+    "enabled": true,
+    "minTravelPx": 600
+  }
+}

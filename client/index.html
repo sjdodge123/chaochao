@@ -96,6 +96,12 @@
                 <a href="./join.html" id="joinButton" data-gp-nav class="btn btn-outline-info w-100 mt-2" onclick="trackEvent('cta_click', { target: 'join' })">Join</a>
                 <a href="./create.html" id="createButton" data-gp-nav class="btn btn-outline-warning w-100 mt-2" onclick="trackEvent('cta_click', { target: 'create' })">Create</a>
                 <a href="./learn.html" id="learnButton" data-gp-nav class="btn btn-outline-primary w-100 mt-2" onclick="trackEvent('cta_click', { target: 'learn' })">Learn</a>
+                <!-- Honeypot: invisible decoy CTA. A human never sees or tabs to it (off-screen,
+                     aria-hidden, removed from tab order, NOT a data-gp-nav control); a DOM-scraping
+                     bot that auto-clicks "play-like" anchors trips it and is recorded as bot_trap. -->
+                <a href="#" id="freeRewardButton" tabindex="-1" aria-hidden="true"
+                   style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;opacity:0;"
+                   onclick="trackEvent('bot_trap', { trap_source: 'landing' }); return false;">Play Now — Claim Free Reward</a>
                 <!-- NEWS_BANNER -->
               </div>
               <div class="tip-banner" id="tipBanner" data-gp-nav role="button" tabindex="0"
