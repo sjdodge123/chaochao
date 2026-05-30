@@ -200,7 +200,11 @@ function newPlayerPacket(player) {
 	// Avatar-skin URL (null unless the player opted into the avatar skin). Static
 	// like name/title — spawn/append only, not per tick.
 	packet[12] = player.avatarUrl || null;
-	packet[13] = player.cartSkin || null;
+	// Three cosmetic slots (static like name/avatar — spawn/append packets, not per
+	// tick). Decoded in lockstep in client/scripts/gameboard.js (updatePlayerList).
+	packet[13] = player.cart || null;     // cart body-shape id
+	packet[14] = player.pattern || null;  // pattern overlay id (tints to colour)
+	packet[15] = player.trailFx || null;  // trail-effect id (renders in colour)
 	return packet;
 }
 

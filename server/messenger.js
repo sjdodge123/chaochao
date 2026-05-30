@@ -11,10 +11,69 @@ var debug = require('./debug.js');
 var mapFormat = require('./mapFormat.js');
 var mapClassifier = require('./mapClassifier.js');
 var ratings = require('./ratings.js');
+var auth = require('./auth.js');
+var progression = require('./progression.js');
+var skinRegistry = require('./skinRegistry.js');
+// Maps a cosmetic slot to the Player field that holds its equipped id. `trail` uses
+// `trailFx` (the EFFECT id) so it never collides with the client's `player.trail`
+// motion-trail object. Also the allow-list of valid slot names for setCosmetic.
+var COSMETIC_SLOT_FIELD = { cart: 'cart', pattern: 'pattern', trail: 'trailFx' };
 var mailBoxList = {},
 	identityList = {},
 	roomMailList = {},
 	io;
+
+// Persist one cosmetic-slot equip for a signed-in player (best-effort, behind the
+// global writes gate inside auth.saveCosmetic). Guests / writes-off are a no-op.
+function persistCosmetic(userId, slot, id) {
+	if (!userId) {
+		return;
+	}
+	auth.saveCosmetic(userId, slot, id).catch(function (e) {
+		console.log('[cosmetic] persist failed:', e && e.message);
+	});
+}
+
+// Returns true if a player with the given progression row qualifies to equip `id`
+// (exists, belongs to `slot`, and the level/achievement unlock is met). Shared by the
+// restore path; the live setCosmetic handler inlines the same checks (it also emits
+// per-reason rejections, which restore doesn't need).
+function cosmeticUnlocked(prog, slot, id) {
+	var skin = skinRegistry.getSkin(id);
+	if (!skin || skin.slot !== slot) {
+		return false;
+	}
+	if (skin.unlock.kind === 'open') {
+		return true; // unlock-all-for-testing: always equippable (re-gate before ship)
+	}
+	if (skin.unlock.kind === 'level') {
+		return (prog ? (prog.level || 1) : 1) >= skin.unlock.level;
+	}
+	if (skin.unlock.kind === 'achievement') {
+		var unlocked = (prog && Array.isArray(prog.unlocked_skins)) ? prog.unlocked_skins : [];
+		return unlocked.indexOf(id) !== -1;
+	}
+	return false;
+}
+
+// Apply a signed-in player's persisted cosmetic slots (from their progression row) to the
+// live Player, skipping any the player no longer qualifies for, and broadcast each so the
+// room reflects the restored look. Called once the row loads.
+function restorePersistedCosmetics(client, player, prog) {
+	var room = hostess.getRoomBySig(roomMailList[client.id]);
+	var slots = skinRegistry.SLOTS;
+	for (var i = 0; i < slots.length; i++) {
+		var slot = slots[i];
+		var id = prog ? prog['selected_' + slot] : null;
+		if (!id || !cosmeticUnlocked(prog, slot, id)) {
+			continue;
+		}
+		player[COSMETIC_SLOT_FIELD[slot]] = id;
+		if (room) {
+			messageRoomBySig(room.sig, "playerCosmeticChanged", { id: client.id, slot: slot, value: id });
+		}
+	}
+}
 
 exports.build = function (mainIO) {
 	io = mainIO;
@@ -64,6 +123,41 @@ exports.getTotalPlayers = function () {
 	}
 	return count;
 }
+// Push a player's authoritative progression row to just that client (after a DB
+// write or initial load). No-op if the client has since disconnected. Drives the
+// lobby Lv/XP badge + skin-unlock UI; the server stays authoritative.
+exports.sendProgressionToClient = function (sig, row) {
+	var client = mailBoxList[sig];
+	if (!client) {
+		return;
+	}
+	var payload = buildProgressionPayload(row);
+	if (payload) {
+		client.emit('progressionUpdate', payload);
+	}
+}
+
+// In-memory pending celebration toasts for the LOCAL-DEV (writes-off) path only,
+// keyed by userId. With writes ON the durable queue lives in the DB's pending_toasts
+// column (auth.addProgression / drainPendingToasts); this fallback just keeps the
+// toast UI testable locally. Lost on server restart — fine for dev.
+var pendingToastsMem = {};
+exports.enqueueToastsInMemory = function (userId, events) {
+	if (!userId || !events || !events.length) {
+		return;
+	}
+	if (!pendingToastsMem[userId]) { pendingToastsMem[userId] = []; }
+	pendingToastsMem[userId] = pendingToastsMem[userId].concat(events);
+}
+function drainToastsInMemory(userId) {
+	var t = (userId && pendingToastsMem[userId]) ? pendingToastsMem[userId] : [];
+	if (userId) { delete pendingToastsMem[userId]; }
+	return t;
+}
+// Test-only: lets the headless progression test read what a match queued (the live
+// drain happens inside loadPlayerProgression on lobby join, which the test doesn't
+// drive). Not used by production code.
+exports._drainToastsInMemoryForTest = drainToastsInMemory;
 
 // Avatar-skin URLs must be https images on a known provider CDN (Discord/Google).
 // A signed-in player picks their avatar client-side, but the server can't trust the
@@ -294,6 +388,11 @@ function checkForMail(client) {
 		// Stable guest identity (localStorage deviceId from the handshake) so an
 		// anonymous player still gets one effective map-rating vote (see rateMap).
 		room.playerList[client.id].deviceId = client.deviceId || null;
+		// Load this signed-in player's progression (XP/level/unlocked skins) for
+		// skin-unlock gating + the lobby Lv/XP badge. Defaults immediately so gating
+		// has something to check, then pushes the real row via progressionUpdate when
+		// it loads. Guests get no progression. Reads work even with writes gated off.
+		loadPlayerProgression(client, room.playerList[client.id]);
 		room.game.determineGameState(room.playerList[client.id]);
 		// Bots yield to the joining human so humans + bots can never exceed the room
 		// cap (no-op in normal flow — there are no bots while a room is joinable).
@@ -487,10 +586,15 @@ function checkForMail(client) {
 		messageRoomBySig(room.sig, "playerAvatarChanged", { id: client.id, avatarUrl: player.avatarUrl, name: player.name });
 	});
 
-	// Cosmetic cart skin (procedural overlay). Independent of color/avatar: equipping
-	// one does NOT clear them. Available to everyone (no ownership gating yet).
-	// Validated against an allowlist; "" / null clears back to the plain colored cart.
-	client.on('setCartSkin', function (payload) {
+	// Equip one of the three independent cosmetic slots (cart / pattern / trail). Each
+	// slot is set independently — equipping one NEVER clears another, and it's all
+	// independent of color/avatar. Server-authoritative unlock gating: an id must exist
+	// in the registry AND belong to the requested slot, and the player must meet its
+	// level (level cosmetics) or own it (achievement cosmetics, tracked in
+	// progression.unlocked_skins). Guests have no progression -> level 1, no achievement
+	// unlocks. "" / null clears the slot back to its default. Persisted per-slot for
+	// signed-in players (behind the writes gate). Rejections emit cosmeticRejected.
+	client.on('setCosmetic', function (payload) {
 		var room = hostess.getRoomBySig(roomMailList[client.id]);
 		if (room == undefined || room.game.currentState != c.stateMap.lobby) {
 			return;
@@ -499,15 +603,47 @@ function checkForMail(client) {
 		if (player == null) {
 			return;
 		}
-		var cartSkin = payload && payload.cartSkin;
-		var allowed = ["firetruck", "dino"];
-		if (cartSkin === "" || cartSkin == null) {
-			cartSkin = null;
-		} else if (allowed.indexOf(cartSkin) === -1) {
-			return; // unknown skin id
+		var slot = payload && payload.slot;
+		if (COSMETIC_SLOT_FIELD[slot] == null) {
+			client.emit("cosmeticRejected", { slot: slot, reason: "slot" });
+			return;
 		}
-		player.cartSkin = cartSkin;
-		messageRoomBySig(room.sig, "playerCartSkinChanged", { id: client.id, cartSkin: player.cartSkin });
+		var field = COSMETIC_SLOT_FIELD[slot];
+		var id = payload && payload.id;
+		if (id === "" || id == null) {
+			player[field] = null;
+			persistCosmetic(client.userId, slot, null);
+			messageRoomBySig(room.sig, "playerCosmeticChanged", { id: client.id, slot: slot, value: null });
+			return;
+		}
+		var skin = skinRegistry.getSkin(id);
+		if (!skin || skin.slot !== slot) {
+			client.emit("cosmeticRejected", { slot: slot, id: id, reason: "unknown" });
+			return;
+		}
+		var prog = player.progression || null;
+		if (skin.unlock.kind === "level") {
+			var level = prog ? (prog.level || 1) : 1;
+			if (level < skin.unlock.level) {
+				client.emit("cosmeticRejected", { slot: slot, id: id, reason: "level", required: skin.unlock.level });
+				return;
+			}
+		} else if (skin.unlock.kind === "achievement") {
+			var unlocked = (prog && Array.isArray(prog.unlocked_skins)) ? prog.unlocked_skins : [];
+			if (unlocked.indexOf(id) === -1) {
+				client.emit("cosmeticRejected", { slot: slot, id: id, reason: "achievement" });
+				return;
+			}
+		} else if (skin.unlock.kind === "open") {
+			// unlock-all-for-testing: always equippable (operator re-gates before ship).
+		} else {
+			// Any other unlock kind (e.g. 'pool') is never equippable until promoted.
+			client.emit("cosmeticRejected", { slot: slot, id: id, reason: "locked" });
+			return;
+		}
+		player[field] = id;
+		persistCosmetic(client.userId, slot, id);
+		messageRoomBySig(room.sig, "playerCosmeticChanged", { id: client.id, slot: slot, value: id });
 	});
 
 	// Lobby AI station: set the room-wide bot override. { auto:true } => clear the
@@ -604,6 +740,101 @@ function checkForMail(client) {
 	});
 
 
+}
+// Shape a stored/normalized progression row into the client payload: raw totals
+// plus the precomputed level-bar values (so the client never re-derives the XP
+// curve — the server stays the single source of truth).
+function buildProgressionPayload(row) {
+	if (!row) {
+		return null;
+	}
+	var prog = progression.levelProgress(row.xp || 0);
+	return {
+		xp: row.xp || 0,
+		level: row.level || prog.level,
+		unlocked_skins: row.unlocked_skins || [],
+		medal_counts: row.medal_counts || {},
+		wins: row.wins || 0,
+		xpThisLevel: prog.xpThisLevel,
+		xpForNextLevel: prog.xpForNextLevel
+	};
+}
+// Attach a signed-in player's progression to the player object (for server-side
+// equip gating) and emit it to the client (for the lobby UI). Guests are skipped.
+function loadPlayerProgression(client, player) {
+	if (!client.userId) {
+		return;
+	}
+	player.progression = progression.defaultProgression();
+	player.progressionLoaded = false;
+	auth.getProgression(client.userId).then(function (row) {
+		var prog = row || progression.defaultProgression();
+		player.progression = prog;
+		player.progressionLoaded = true;
+		// Restore each persisted cosmetic slot the player still qualifies for. The
+		// client also re-equips from localStorage (instant, idempotent); this is the
+		// cross-device source of truth. Broadcast so the room sees the spawn-time look.
+		restorePersistedCosmetics(client, player, prog);
+		if (mailBoxList[client.id]) {
+			var payload = buildProgressionPayload(prog);
+			if (payload) {
+				mailBoxList[client.id].emit('progressionUpdate', payload);
+			}
+		}
+	}).catch(function (e) {
+		// Leave the default row in place; mark loaded so gameOver doesn't keep
+		// treating it as still-loading.
+		player.progressionLoaded = true;
+		console.log('[progression] load failed:', e && e.message);
+	});
+	// Drain + deliver any celebration toasts earned in a prior match (shown on lobby
+	// arrival, not on the game-over screen). DB queue (writes-on) + in-memory queue
+	// (dev). Best-effort: a failed DB drain just yields no toasts this time.
+	deliverPendingToasts(client);
+}
+// Collect a signed-in client's pending toasts (durable DB queue + dev in-memory
+// queue) and emit them as one ordered `progressionToasts` batch. The client
+// sequences them. Cleared as they're read so they show once.
+function deliverPendingToasts(client) {
+	if (client && client.userId) {
+		deliverToastsTo(client.userId, client.id);
+	}
+}
+// Core drain+emit, keyed by (userId, clientId) so it serves both the enterGame path
+// (a re-joining socket) and the same-room lobby-return path (existing sockets that
+// never re-enter). Drains the DB queue (writes-on) + the in-memory queue (dev).
+function deliverToastsTo(userId, clientId) {
+	if (!userId) {
+		return;
+	}
+	var memToasts = drainToastsInMemory(userId);
+	auth.drainPendingToasts(userId).then(function (dbToasts) {
+		var all = (dbToasts || []).concat(memToasts);
+		if (all.length && mailBoxList[clientId]) {
+			mailBoxList[clientId].emit('progressionToasts', { events: all });
+		}
+	}).catch(function (e) {
+		// DB drain failed — still deliver any in-memory ones so dev isn't blocked.
+		if (memToasts.length && mailBoxList[clientId]) {
+			mailBoxList[clientId].emit('progressionToasts', { events: memToasts });
+		}
+		console.log('[progression] toast drain failed:', e && e.message);
+	});
+}
+// Deliver pending celebration toasts to every signed-in player in a room. Called on
+// the match->lobby transition (Game.startLobby) so players who STAY in the same room
+// — and thus never re-enter via enterGame — still get their lobby-arrival toasts.
+// playerList is keyed by client id (== sig); verifiedUserId is the Supabase user id.
+exports.deliverRoomToasts = function (playerList) {
+	if (!playerList) {
+		return;
+	}
+	for (var id in playerList) {
+		var p = playerList[id];
+		if (p && !p.isAI && p.verifiedUserId && mailBoxList[id]) {
+			deliverToastsTo(p.verifiedUserId, id);
+		}
+	}
 }
 function messageRoomBySig(sig, header, payload) {
 	io.to(String(sig)).emit(header, payload);

@@ -212,7 +212,13 @@ class Player extends Circle {
 		// their Discord/Google picture (and `name`) shown on their kart for everyone.
 		// null = default colour skin, nameless. Set/cleared via messenger setAvatarSkin/setSkin.
 		this.avatarUrl = null;
-		this.cartSkin = null;
+		// Three independent cosmetic slots (null = the slot's default: plain cart /
+		// no pattern / basic trail). Equipped via messenger setCosmetic, validated
+		// server-side, sent in the spawn packet. `trailFx` is the trail-EFFECT id —
+		// named to avoid colliding with the client's `player.trail` motion object.
+		this.cart = null;
+		this.pattern = null;
+		this.trailFx = null;
 		this.profile = null;
 		this.emoteReadyAt = 0;
 		//Steering outputs the engine's isAI branch reads each tick.

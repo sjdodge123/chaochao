@@ -1,0 +1,842 @@
+/* ============================================================================
+ * chaochao — TRAIL EFFECT RENDERERS  (PORT-READY — approved 2026-05-30)
+ * ----------------------------------------------------------------------------
+ * Output of the trails asset-design session (docs/asset-prototypes/trails.html).
+ * These are the finished per-effect renderers for the main session to wire into
+ * the trail-effect switch in client/scripts/draw.js (drawTrail, ~line 3211).
+ *
+ * THE COLOR RULE (locked): a trail is ALWAYS rendered in the player's color.
+ * What an equipped trail changes is the EFFECT/shape, never the color. Every
+ * function below takes `color` (= player.color) and renders entirely in it; the
+ * only non-color pixels are small white "hot-core"/specular highlights, exactly
+ * like the existing kart-skin specular dots.
+ *
+ * CONTRACT (call one per frame, per kart, in place of the basic stroke):
+ *
+ *     drawSparkleTrail(ctx, verts, color, now, fadeMs, anim)
+ *
+ *   ctx     — the canvas context (gameContext in draw.js).
+ *   verts   — player.trail.vertices: [{x,y,t}], NEWEST LAST. t is a Date.now()
+ *             ms timestamp. A vertex is dropped once (now - t) > fadeMs. These
+ *             are world coords AFTER the camera offset has been applied by the
+ *             caller (drawTrail already strokes raw verts.x/​.y), so pass them
+ *             through unchanged — do NOT add camera offset again.
+ *   color   — player.color (CSS string).
+ *   now     — Date.now() (drawTrail already computes this).
+ *   fadeMs  — TRAIL_FADE_MS (drawTrail already resolves this).
+ *   anim    — a rolling clock in MILLISECONDS. Pass `cartSkinAnimTime * 1000`
+ *             (cartSkinAnimTime is the seconds accumulator in draw.js). Do NOT
+ *             pass the speed-scaled skin-painter `anim` — trails shouldn't speed
+ *             up their shimmer. now/.t and anim are independent on purpose.
+ *
+ * Particle effects derive ALL jitter deterministically from the vertex
+ * timestamp (tfxHash(v.t + salt)) — never Math.random per frame — so particles
+ * are stable frame-to-frame, matching how the real buffer carries a fixed .t.
+ *
+ * PERF (already validated): glow (shadowBlur) is the dominant cost and is gated
+ * behind tfxGlow() → perfGlow(), the same flag draw.js uses elsewhere. Radial
+ * gradients are cached per-color (one unit gradient positioned by transform).
+ * Comet/Aurora bound their per-segment work with a stride. With glow off these
+ * run at vsync; 18 simultaneous distinct effects (more than a real ≤16 room)
+ * stayed comfortable.
+ *
+ * NON-LOCAL DIMMING: draw.js draws other players' trails fainter
+ * (NONLOCAL_TRAIL_ALPHA). Each function routes alpha through tfxAlpha(ctx, a),
+ * which multiplies by the module-level tfxBaseAlpha. The integrator sets that
+ * once before each call (see the wiring example at the bottom); default 1.
+ * ============================================================================ */
+
+var TFX_TAU = 6.2831853;
+var TFX_BUCKETS = 6;            // mirrors draw.js TRAIL_DRAW_BUCKETS
+var tfxBaseAlpha = 1;           // set by drawTrail per kart (1 local, dim non-local)
+
+// perfGlow() if present (draw.js), else assume on (e.g. headless tests)
+function tfxGlow() { return (typeof perfGlow === "function") ? perfGlow() : true; }
+// every alpha goes through here so non-local trails dim uniformly
+function tfxAlpha(ctx, a) { ctx.globalAlpha = a * tfxBaseAlpha; }
+
+// ---- color helpers (parse any CSS color → rgb once, cached) ----------------
+var _tfxRGB = {};
+function tfxRGB(color) {
+  if (_tfxRGB[color] != null) return _tfxRGB[color];
+  var cv = document.createElement("canvas"); cv.width = cv.height = 1;
+  var cx = cv.getContext("2d");
+  cx.fillStyle = "#000"; cx.fillStyle = color; cx.fillRect(0, 0, 1, 1);
+  var d = cx.getImageData(0, 0, 1, 1).data;
+  var rgb = { r: d[0], g: d[1], b: d[2] };
+  _tfxRGB[color] = rgb; return rgb;
+}
+function tfxRGBA(color, a) {
+  var c = tfxRGB(color);
+  return "rgba(" + c.r + "," + c.g + "," + c.b + "," + a + ")";
+}
+// mix toward WHITE by t (hot cores / specular highlights)
+function tfxHot(color, t, a) {
+  var c = tfxRGB(color);
+  return "rgba(" + Math.round(c.r + (255 - c.r) * t) + "," +
+    Math.round(c.g + (255 - c.g) * t) + "," +
+    Math.round(c.b + (255 - c.b) * t) + "," + (a == null ? 1 : a) + ")";
+}
+// mix toward BLACK by t (ribbon back-face shading)
+function tfxDark(color, t, a) {
+  var c = tfxRGB(color);
+  return "rgba(" + Math.round(c.r * (1 - t)) + "," + Math.round(c.g * (1 - t)) +
+    "," + Math.round(c.b * (1 - t)) + "," + (a == null ? 1 : a) + ")";
+}
+// deterministic 0..1 hash from a numeric seed
+function tfxHash(seed) {
+  var x = Math.sin(seed * 0.0001 * 12.9898 + 78.233) * 43758.5453;
+  return x - Math.floor(x);
+}
+function tfxClamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
+function tfxAgeAlpha(t, now, fadeMs) { return tfxClamp01(1 - (now - t) / fadeMs); }
+function tfxTangent(verts, i) {
+  var a = verts[Math.max(0, i - 1)], b = verts[Math.min(verts.length - 1, i + 1)];
+  var dx = b.x - a.x, dy = b.y - a.y;
+  var len = Math.hypot(dx, dy) || 1;
+  return { x: dx / len, y: dy / len };
+}
+
+// ---- cached unit gradients (origin, radius 1; positioned via translate+scale) ----
+var _tfxBlob = {};   // hot core → transparent (comet head flare, survivor embers)
+function tfxBlobGrad(ctx, color) {
+  if (_tfxBlob[color]) return _tfxBlob[color];
+  var g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+  g.addColorStop(0, tfxHot(color, 0.6, 1));
+  g.addColorStop(0.45, tfxRGBA(color, 0.8));
+  g.addColorStop(1, tfxRGBA(color, 0));
+  _tfxBlob[color] = g; return g;
+}
+var _tfxHalo = {};   // hollow ring glow (guardian halo)
+function tfxHaloGrad(ctx, color) {
+  if (_tfxHalo[color]) return _tfxHalo[color];
+  var g = ctx.createRadialGradient(0, 0, 0.45, 0, 0, 1);
+  g.addColorStop(0, tfxRGBA(color, 0));
+  g.addColorStop(0.7, tfxRGBA(color, 0.18));
+  g.addColorStop(0.92, tfxRGBA(color, 0.6));
+  g.addColorStop(1, tfxRGBA(color, 0));
+  _tfxHalo[color] = g; return g;
+}
+var _tfxPuff = {};   // soft uniform puff, no hot core (smoke)
+function tfxPuffGrad(ctx, color) {
+  if (_tfxPuff[color]) return _tfxPuff[color];
+  var g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+  g.addColorStop(0, tfxRGBA(color, 0.65));
+  g.addColorStop(0.6, tfxRGBA(color, 0.28));
+  g.addColorStop(1, tfxRGBA(color, 0));
+  _tfxPuff[color] = g; return g;
+}
+// unit glyph paths, filled by the caller
+function tfxHeartPath(ctx, sz) {
+  ctx.beginPath();
+  ctx.moveTo(0, sz * 0.35);
+  ctx.bezierCurveTo(sz, -sz * 0.3, sz * 0.5, -sz, 0, -sz * 0.25);
+  ctx.bezierCurveTo(-sz * 0.5, -sz, -sz, -sz * 0.3, 0, sz * 0.35);
+  ctx.closePath();
+}
+function tfxNoteGlyph(ctx, sz) {
+  ctx.beginPath(); ctx.ellipse(0, 0, sz * 0.55, sz * 0.4, -0.4, 0, TFX_TAU); ctx.fill();
+  ctx.fillRect(sz * 0.36, -sz * 1.7, sz * 0.16, sz * 1.7);
+  ctx.beginPath();
+  ctx.moveTo(sz * 0.52, -sz * 1.7);
+  ctx.quadraticCurveTo(sz * 1.2, -sz * 1.35, sz * 0.52, -sz * 0.8);
+  ctx.quadraticCurveTo(sz * 0.9, -sz * 1.25, sz * 0.52, -sz * 1.35);
+  ctx.closePath(); ctx.fill();
+}
+
+/* ============================================================================
+ * EFFECT RENDERERS  (id → display)
+ *   basic→Basic  dashes→Dashes  sparkle→Sparkle  comet→Comet  bubbles→Bubbles
+ *   aurora→Aurora  guardian→Guardian  survivor→Survivor
+ *   ribbon→Ribbon  bolt→Lightning  hearts→Hearts  smoke→Smoke  confetti→Confetti
+ *   snow→Crystals  tracks→Tire Tracks  notes→Music Notes  neon→Neon Wall
+ *   ripple→Ripples
+ * ============================================================================ */
+
+// basic — solid fading stroke. This equals the EXISTING drawTrail bucketed
+// stroke; included only so a 'basic' id can route through the same dispatch. The
+// real drawTrail keeps near-victory dashing + dim handling around it.
+function drawBasicTrail(ctx, verts, color, now, fadeMs, anim) {
+  if (verts.length < 2) return;
+  ctx.save();
+  ctx.lineWidth = 3; ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.strokeStyle = color;
+  var bucketMs = fadeMs / TFX_BUCKETS;
+  var segBucket = new Array(verts.length); segBucket[0] = -1;
+  for (var i = 1; i < verts.length; i++) {
+    var age = now - verts[i].t;
+    segBucket[i] = (age >= fadeMs) ? TFX_BUCKETS : Math.floor(age / bucketMs);
+  }
+  for (var b = 0; b < TFX_BUCKETS; b++) {
+    var bucketAlpha = 1 - (b + 0.5) / TFX_BUCKETS;
+    if (bucketAlpha <= 0.01) continue;
+    tfxAlpha(ctx, bucketAlpha);
+    var runStart = -1;
+    for (var j = 1; j <= verts.length; j++) {
+      var inBucket = (j < verts.length) && (segBucket[j] === b);
+      if (inBucket) {
+        if (runStart === -1) { runStart = j - 1; ctx.beginPath(); ctx.moveTo(verts[runStart].x, verts[runStart].y); }
+        ctx.lineTo(verts[j].x, verts[j].y);
+      } else if (runStart !== -1) { ctx.stroke(); runStart = -1; }
+    }
+  }
+  ctx.restore();
+}
+
+// dashes (Lv4) — uniform marching dashes (arc-length offset keeps them even).
+function drawDashesTrail(ctx, verts, color, now, fadeMs, anim) {
+  if (verts.length < 2) return;
+  var DASH = 16, GAP = 12, WIDTH = 4;
+  ctx.save();
+  ctx.lineWidth = WIDTH; ctx.lineCap = "butt"; ctx.lineJoin = "round";
+  ctx.strokeStyle = color;
+  ctx.setLineDash([DASH, GAP]);
+  var cumLen = new Array(verts.length); cumLen[0] = 0;
+  for (var k = 1; k < verts.length; k++)
+    cumLen[k] = cumLen[k - 1] + Math.hypot(verts[k].x - verts[k - 1].x, verts[k].y - verts[k - 1].y);
+  var bucketMs = fadeMs / TFX_BUCKETS;
+  var segBucket = new Array(verts.length); segBucket[0] = -1;
+  for (var i = 1; i < verts.length; i++) {
+    var age = now - verts[i].t;
+    segBucket[i] = (age >= fadeMs) ? TFX_BUCKETS : Math.floor(age / bucketMs);
+  }
+  for (var b = 0; b < TFX_BUCKETS; b++) {
+    var bucketAlpha = 1 - (b + 0.5) / TFX_BUCKETS;
+    if (bucketAlpha <= 0.01) continue;
+    tfxAlpha(ctx, bucketAlpha);
+    var runStart = -1;
+    for (var j = 1; j <= verts.length; j++) {
+      var inBucket = (j < verts.length) && (segBucket[j] === b);
+      if (inBucket) {
+        if (runStart === -1) { runStart = j - 1; ctx.lineDashOffset = cumLen[runStart]; ctx.beginPath(); ctx.moveTo(verts[runStart].x, verts[runStart].y); }
+        ctx.lineTo(verts[j].x, verts[j].y);
+      } else if (runStart !== -1) { ctx.stroke(); runStart = -1; }
+    }
+  }
+  ctx.restore();
+}
+
+// sparkle (Lv10) — scattered 4-point stars twinkling in place.
+function drawSparkleTrail(ctx, verts, color, now, fadeMs, anim) {
+  if (verts.length < 2) return;
+  var DENSITY = 16, SIZE = 5, TWINKLE = 0.55, SPREAD = 14;
+  ctx.save();
+  ctx.lineCap = "round";
+  var step = Math.max(1, Math.floor(verts.length / Math.max(1, DENSITY)));
+  for (var i = 0; i < verts.length; i += step) {
+    var v = verts[i];
+    var a0 = tfxAgeAlpha(v.t, now, fadeMs);
+    if (a0 <= 0.02) continue;
+    var tan = tfxTangent(verts, i);
+    var nx = -tan.y, ny = tan.x;
+    for (var s = 0; s < 2; s++) {
+      var seed = v.t + s * 9301 + i * 49297;
+      var off = (tfxHash(seed) - 0.5) * 2 * SPREAD;
+      var along = (tfxHash(seed + 7) - 0.5) * 6;
+      var px = v.x + nx * off + tan.x * along;
+      var py = v.y + ny * off + tan.y * along;
+      var phase = tfxHash(seed + 3) * TFX_TAU;
+      var tw = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(anim * 0.001 * (4 + TWINKLE * 8) + phase));
+      var alpha = a0 * tw;
+      if (alpha <= 0.03) continue;
+      var sz = SIZE * (0.5 + tfxHash(seed + 5) * 0.8) * (0.4 + 0.6 * tw);
+      tfxAlpha(ctx, alpha);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = Math.max(0.6, sz * 0.18);
+      ctx.beginPath();
+      ctx.moveTo(px - sz, py); ctx.lineTo(px + sz, py);
+      ctx.moveTo(px, py - sz); ctx.lineTo(px, py + sz);
+      ctx.stroke();
+      tfxAlpha(ctx, alpha);
+      ctx.fillStyle = tfxHot(color, 0.6, 1);
+      ctx.beginPath(); ctx.arc(px, py, Math.max(0.6, sz * 0.22), 0, TFX_TAU); ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+// comet (Lv16) — wide glowing tapered streak; bright head → thin tail.
+function drawCometTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length;
+  if (n < 2) return;
+  var WIDTH = 16, GLOW = 14, TAPER = 0.80;
+  var stride = Math.max(1, Math.floor(n / 50));
+  var idx = [];
+  for (var i = 0; i < n; i += stride) idx.push(i);
+  if (idx[idx.length - 1] !== n - 1) idx.push(n - 1);
+  var m = idx.length;
+  var hw = new Array(m), nx = new Array(m), ny = new Array(m), af = new Array(m);
+  for (var j = 0; j < m; j++) {
+    var ii = idx[j];
+    var f = tfxAgeAlpha(verts[ii].t, now, fadeMs);
+    af[j] = f;
+    hw[j] = (WIDTH * 0.5) * Math.pow(f, TAPER);
+    var tan = tfxTangent(verts, ii);
+    nx[j] = -tan.y; ny[j] = tan.x;
+  }
+  ctx.save();
+  if (tfxGlow()) { ctx.shadowColor = color; ctx.shadowBlur = GLOW; }
+  ctx.lineJoin = "round";
+  ctx.fillStyle = color;
+  for (var s = 1; s < m; s++) {
+    var alpha = af[s] * 0.5;
+    if (alpha <= 0.02) continue;
+    var p0 = verts[idx[s - 1]], p1 = verts[idx[s]];
+    tfxAlpha(ctx, alpha);
+    ctx.beginPath();
+    ctx.moveTo(p0.x + nx[s - 1] * hw[s - 1], p0.y + ny[s - 1] * hw[s - 1]);
+    ctx.lineTo(p1.x + nx[s] * hw[s],         p1.y + ny[s] * hw[s]);
+    ctx.lineTo(p1.x - nx[s] * hw[s],         p1.y - ny[s] * hw[s]);
+    ctx.lineTo(p0.x - nx[s - 1] * hw[s - 1], p0.y - ny[s - 1] * hw[s - 1]);
+    ctx.closePath();
+    ctx.fill();
+  }
+  if (tfxGlow()) ctx.shadowBlur = GLOW * 0.5;
+  var coreStart = -1;
+  for (var c = 0; c < m; c++) { if (af[c] > 0.35) { coreStart = c; break; } }
+  if (coreStart >= 0 && coreStart < m - 1) {
+    tfxAlpha(ctx, 0.85);
+    ctx.strokeStyle = tfxHot(color, 0.55, 1);
+    ctx.lineCap = "round";
+    ctx.lineWidth = Math.max(0.8, WIDTH * 0.18);
+    ctx.beginPath();
+    ctx.moveTo(verts[idx[coreStart]].x, verts[idx[coreStart]].y);
+    for (var cc = coreStart + 1; cc < m; cc++) ctx.lineTo(verts[idx[cc]].x, verts[idx[cc]].y);
+    ctx.stroke();
+  }
+  var head = verts[n - 1];
+  var R = WIDTH * 0.9;
+  tfxAlpha(ctx, 1);
+  if (tfxGlow()) ctx.shadowBlur = 0;
+  ctx.save();
+  ctx.translate(head.x, head.y); ctx.scale(R, R);
+  ctx.fillStyle = tfxBlobGrad(ctx, color);
+  ctx.beginPath(); ctx.arc(0, 0, 1, 0, TFX_TAU); ctx.fill();
+  ctx.restore();
+  ctx.restore();
+}
+
+// bubbles (Lv22) — rising rings that drift up and pop.
+function drawBubblesTrail(ctx, verts, color, now, fadeMs, anim) {
+  if (verts.length < 2) return;
+  var DENSITY = 10, SIZE = 8, RISE = 0.48;
+  ctx.save();
+  ctx.lineWidth = 1.5;
+  var step = Math.max(1, Math.floor(verts.length / Math.max(1, DENSITY)));
+  for (var i = 0; i < verts.length; i += step) {
+    var v = verts[i];
+    var age = now - v.t;
+    var life = tfxClamp01(age / fadeMs);
+    if (life >= 1) continue;
+    for (var k = 0; k < 2; k++) {
+      var seed = v.t + k * 6151 + i * 3911;
+      var rise = (40 + RISE * 120) * (age / 1000);
+      var drift = Math.sin(age * 0.002 + tfxHash(seed) * TFX_TAU) * 8;
+      var px = v.x + drift + (tfxHash(seed + 1) - 0.5) * 10;
+      var py = v.y - rise * (0.5 + tfxHash(seed + 2) * 0.8);
+      var r = SIZE * (0.5 + tfxHash(seed + 4) * 0.9);
+      var alpha = tfxClamp01((1 - life) * 1.3) * (0.4 + 0.6 * tfxHash(seed + 6));
+      if (alpha <= 0.03) continue;
+      tfxAlpha(ctx, alpha);
+      ctx.strokeStyle = color;
+      ctx.beginPath(); ctx.arc(px, py, r, 0, TFX_TAU); ctx.stroke();
+      tfxAlpha(ctx, alpha * 0.9);
+      ctx.fillStyle = tfxHot(color, 0.75, 1);
+      ctx.beginPath(); ctx.arc(px - r * 0.35, py - r * 0.35, Math.max(0.6, r * 0.22), 0, TFX_TAU); ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+// aurora (Lv28) — soft SINGLE waving band (concentric layers, same phase).
+function drawAuroraTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length;
+  if (n < 2) return;
+  var AMP = 14, FREQ = 16, GLOW = 16, SOFT = 3;
+  var layers = Math.max(1, Math.round(SOFT));
+  var cum = new Array(n); cum[0] = 0;
+  for (var k = 1; k < n; k++) cum[k] = cum[k - 1] + Math.hypot(verts[k].x - verts[k - 1].x, verts[k].y - verts[k - 1].y);
+  var bucketMs = fadeMs / TFX_BUCKETS;
+  var wx = new Array(n), wy = new Array(n), bk = new Array(n);
+  for (var i = 0; i < n; i++) {
+    var w = AMP * Math.sin(cum[i] * (FREQ * 0.01) - anim * 0.003);
+    var tn = tfxTangent(verts, i);
+    wx[i] = verts[i].x - tn.y * w;
+    wy[i] = verts[i].y + tn.x * w;
+    var age = now - verts[i].t;
+    bk[i] = (age >= fadeMs) ? TFX_BUCKETS : Math.floor(age / bucketMs);
+  }
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  if (tfxGlow()) { ctx.shadowColor = color; ctx.shadowBlur = GLOW; }
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  for (var L = 0; L < layers; L++) {
+    var inner = layers > 1 ? L / (layers - 1) : 1;
+    ctx.lineWidth = (5 + AMP * 0.55) * (1 - inner * 0.72);
+    ctx.strokeStyle = (L === layers - 1) ? tfxHot(color, 0.35, 1) : color;
+    var layerA = 0.12 + 0.20 * inner;
+    for (var b = 0; b < TFX_BUCKETS; b++) {
+      tfxAlpha(ctx, layerA * (1 - (b + 0.5) / TFX_BUCKETS));
+      var run = false;
+      for (var vv = 1; vv < n; vv++) {
+        if (bk[vv] !== b) { if (run) { ctx.stroke(); run = false; } continue; }
+        if (!run) { ctx.beginPath(); ctx.moveTo(wx[vv - 1], wy[vv - 1]); run = true; }
+        ctx.lineTo(wx[vv], wy[vv]);
+      }
+      if (run) ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+// guardian (achievement) — pulsing halo + counter-rotating shield arcs + orbit dots.
+function drawGuardianTrail(ctx, verts, color, now, fadeMs, anim) {
+  if (verts.length < 2) return;
+  var RADIUS = 28, PULSE = 0.50, DOTS = 4;
+  var head = verts[verts.length - 1];
+  ctx.save();
+  ctx.lineCap = "round"; ctx.lineWidth = 3; ctx.strokeStyle = color;
+  var bucketMs = fadeMs / TFX_BUCKETS;
+  for (var b = 0; b < TFX_BUCKETS; b++) {
+    tfxAlpha(ctx, (1 - (b + 0.5) / TFX_BUCKETS) * 0.35);
+    var run = false;
+    for (var i = 1; i < verts.length; i++) {
+      var age = now - verts[i].t;
+      var seg = (age >= fadeMs) ? TFX_BUCKETS : Math.floor(age / bucketMs);
+      if (seg !== b) { if (run) { ctx.stroke(); run = false; } continue; }
+      if (!run) { ctx.beginPath(); ctx.moveTo(verts[i - 1].x, verts[i - 1].y); run = true; }
+      ctx.lineTo(verts[i].x, verts[i].y);
+    }
+    if (run) ctx.stroke();
+  }
+  var pulse = 0.5 + 0.5 * Math.sin(anim * 0.001 * (2 + PULSE * 5));
+  var R = RADIUS * (0.85 + 0.15 * pulse);
+  tfxAlpha(ctx, 0.6 + 0.4 * pulse);
+  ctx.save();
+  ctx.translate(head.x, head.y); ctx.scale(R, R);
+  ctx.fillStyle = tfxHaloGrad(ctx, color);
+  ctx.beginPath(); ctx.arc(0, 0, 1, 0, TFX_TAU); ctx.fill();
+  ctx.restore();
+  ctx.lineCap = "round";
+  ctx.strokeStyle = tfxHot(color, 0.25, 1);
+  if (tfxGlow()) { ctx.shadowColor = color; ctx.shadowBlur = 8; }
+  for (var s = 0; s < 2; s++) {
+    var dir = s === 0 ? 1 : -1;
+    var rot = anim * 0.001 * dir * 1.4;
+    tfxAlpha(ctx, 0.55 + 0.25 * pulse);
+    ctx.lineWidth = 2.5;
+    var ar = R * (0.78 + s * 0.12);
+    ctx.beginPath(); ctx.arc(head.x, head.y, ar, rot, rot + 1.7); ctx.stroke();
+    ctx.beginPath(); ctx.arc(head.x, head.y, ar, rot + Math.PI, rot + Math.PI + 1.7); ctx.stroke();
+  }
+  var dots = Math.round(DOTS);
+  if (tfxGlow()) ctx.shadowBlur = 6;
+  for (var d = 0; d < dots; d++) {
+    var ang = anim * 0.001 * 1.1 + (d / dots) * TFX_TAU;
+    var dx = head.x + Math.cos(ang) * R * 0.95;
+    var dy = head.y + Math.sin(ang) * R * 0.95;
+    tfxAlpha(ctx, 0.65 + 0.3 * pulse);
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(dx, dy, 2.6, 0, TFX_TAU); ctx.fill();
+    ctx.fillStyle = tfxHot(color, 0.7, 1);
+    ctx.beginPath(); ctx.arc(dx, dy, 1.1, 0, TFX_TAU); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// survivor (achievement) — embers that rise, flicker, and linger before snuffing.
+function drawSurvivorTrail(ctx, verts, color, now, fadeMs, anim) {
+  if (verts.length < 2) return;
+  var DENSITY = 14, SIZE = 7, FLICK = 0.60, LINGER = 0.55;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  var step = Math.max(1, Math.floor(verts.length / Math.max(1, DENSITY)));
+  for (var i = 0; i < verts.length; i += step) {
+    var v = verts[i];
+    var age = now - v.t;
+    var lifeRaw = tfxClamp01(age / fadeMs);
+    var hold = 0.4 + LINGER * 0.5;
+    var life = lifeRaw < hold ? lifeRaw * 0.25 / hold : 0.25 + (lifeRaw - hold) / (1 - hold) * 0.75;
+    if (life >= 1) continue;
+    for (var k = 0; k < 2; k++) {
+      var seed = v.t + k * 7193 + i * 2657;
+      var rise = (20 + 70) * (age / 1000) * (0.4 + tfxHash(seed) * 0.8);
+      var sway = Math.sin(age * 0.003 + tfxHash(seed + 1) * TFX_TAU) * 10;
+      var px = v.x + sway + (tfxHash(seed + 2) - 0.5) * 8;
+      var py = v.y - rise;
+      var flick = 0.55 + 0.45 * Math.sin(anim * 0.001 * (6 + FLICK * 10) + tfxHash(seed + 3) * TFX_TAU);
+      var alpha = tfxClamp01(1 - life) * (0.4 + 0.6 * flick);
+      if (alpha <= 0.03) continue;
+      var r = SIZE * (0.5 + tfxHash(seed + 4) * 0.9) * (0.6 + 0.4 * flick);
+      tfxAlpha(ctx, alpha);
+      ctx.save();
+      ctx.translate(px, py); ctx.scale(r, r);
+      ctx.fillStyle = tfxBlobGrad(ctx, color);
+      ctx.beginPath(); ctx.arc(0, 0, 1, 0, TFX_TAU); ctx.fill();
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+
+// ribbon — flat banner that twists (back face shades darker).
+function drawRibbonTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length; if (n < 2) return;
+  var WIDTH = 18, TWIST = 16;
+  var stride = Math.max(1, Math.floor(n / 60));
+  var idx = []; for (var i = 0; i < n; i += stride) idx.push(i);
+  if (idx[idx.length - 1] !== n - 1) idx.push(n - 1);
+  var m = idx.length;
+  var cum = new Array(n); cum[0] = 0;
+  for (var k = 1; k < n; k++) cum[k] = cum[k - 1] + Math.hypot(verts[k].x - verts[k - 1].x, verts[k].y - verts[k - 1].y);
+  ctx.save(); ctx.lineJoin = "round";
+  var hw = WIDTH * 0.5;
+  for (var s = 1; s < m; s++) {
+    var i0 = idx[s - 1], i1 = idx[s];
+    var f = tfxAgeAlpha(verts[i1].t, now, fadeMs); if (f <= 0.02) continue;
+    var c0 = Math.cos(cum[i0] * (TWIST * 0.01) - anim * 0.004);
+    var c1 = Math.cos(cum[i1] * (TWIST * 0.01) - anim * 0.004);
+    var t0 = tfxTangent(verts, i0), t1 = tfxTangent(verts, i1);
+    var p0 = verts[i0], p1 = verts[i1];
+    var w0 = hw * Math.abs(c0) + 0.6, w1 = hw * Math.abs(c1) + 0.6;
+    tfxAlpha(ctx, f * 0.9);
+    ctx.fillStyle = (c0 + c1) < 0 ? tfxDark(color, 0.5, 1) : color;
+    ctx.beginPath();
+    ctx.moveTo(p0.x - t0.y * w0, p0.y + t0.x * w0);
+    ctx.lineTo(p1.x - t1.y * w1, p1.y + t1.x * w1);
+    ctx.lineTo(p1.x + t1.y * w1, p1.y - t1.x * w1);
+    ctx.lineTo(p0.x + t0.y * w0, p0.y - t0.x * w0);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// bolt — jagged electric arc, re-randomizes each flicker quantum, with forks.
+function drawBoltTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length; if (n < 2) return;
+  var AMP = 12, GLOW = 12, FORKS = 1;
+  var fstep = Math.floor(anim / 55);
+  var stride = Math.max(1, Math.floor(n / 40));
+  var idx = []; for (var i = 0; i < n; i += stride) idx.push(i);
+  if (idx[idx.length - 1] !== n - 1) idx.push(n - 1);
+  var m = idx.length;
+  var px = new Array(m), py = new Array(m), af = new Array(m);
+  for (var j = 0; j < m; j++) {
+    var ii = idx[j]; af[j] = tfxAgeAlpha(verts[ii].t, now, fadeMs);
+    var t = tfxTangent(verts, ii);
+    var endpoint = (j === 0 || j === m - 1) ? 0.15 : 1;
+    var jit = (tfxHash(verts[ii].t + fstep * 131 + j * 977) - 0.5) * 2 * AMP * endpoint;
+    px[j] = verts[ii].x - t.y * jit; py[j] = verts[ii].y + t.x * jit;
+  }
+  ctx.save(); ctx.lineCap = "round"; ctx.lineJoin = "round";
+  if (tfxGlow()) { ctx.shadowColor = color; ctx.shadowBlur = GLOW; }
+  ctx.strokeStyle = tfxRGBA(color, 0.5); ctx.lineWidth = 4; tfxAlpha(ctx, 0.55);
+  ctx.beginPath(); ctx.moveTo(px[0], py[0]);
+  for (var s = 1; s < m; s++) ctx.lineTo(px[s], py[s]);
+  ctx.stroke();
+  if (tfxGlow()) ctx.shadowBlur = GLOW * 0.5;
+  ctx.strokeStyle = tfxHot(color, 0.65, 1); ctx.lineWidth = 1.6;
+  for (var c = 1; c < m; c++) {
+    if (af[c] <= 0.04) continue;
+    tfxAlpha(ctx, af[c]);
+    ctx.beginPath(); ctx.moveTo(px[c - 1], py[c - 1]); ctx.lineTo(px[c], py[c]); ctx.stroke();
+  }
+  var forks = Math.round(FORKS);
+  if (forks > 0) {
+    ctx.lineWidth = 1.1; ctx.strokeStyle = tfxRGBA(color, 0.8);
+    var gap = Math.max(2, Math.floor(m / (forks * 2 + 1)));
+    for (var s2 = 2; s2 < m - 1; s2 += gap) {
+      if (af[s2] < 0.3) continue;
+      var t2 = tfxTangent(verts, idx[s2]);
+      var dir = (tfxHash(verts[idx[s2]].t + fstep * 51) < 0.5) ? 1 : -1;
+      var fl = 8 + tfxHash(verts[idx[s2]].t + fstep) * 12;
+      tfxAlpha(ctx, af[s2] * 0.7);
+      ctx.beginPath(); ctx.moveTo(px[s2], py[s2]);
+      ctx.lineTo(px[s2] - t2.y * fl * dir + t2.x * fl * 0.4, py[s2] + t2.x * fl * dir + t2.y * fl * 0.4);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+// hearts — heart particles floating up off the path.
+function drawHeartsTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length; if (n < 2) return;
+  var DENSITY = 10, SIZE = 9;
+  var step = Math.max(1, Math.floor(n / DENSITY));
+  ctx.save();
+  for (var i = 0; i < n; i += step) {
+    var v = verts[i]; var age = now - v.t; var life = tfxClamp01(age / fadeMs); if (life >= 1) continue;
+    var seed = v.t;
+    var rise = 70 * (age / 1000) * (0.4 + tfxHash(seed) * 0.7);
+    var sway = Math.sin(age * 0.002 + tfxHash(seed + 1) * TFX_TAU) * 10;
+    var x = v.x + sway + (tfxHash(seed + 2) - 0.5) * 8;
+    var y = v.y - rise;
+    var sz = SIZE * (0.6 + tfxHash(seed + 3) * 0.7);
+    var rot = Math.sin(age * 0.002 + tfxHash(seed + 4) * TFX_TAU) * 0.4;
+    var alpha = tfxClamp01((1 - life) * 1.2); if (alpha <= 0.03) continue;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(rot); tfxAlpha(ctx, alpha);
+    ctx.fillStyle = color; tfxHeartPath(ctx, sz); ctx.fill();
+    tfxAlpha(ctx, alpha * 0.8); ctx.fillStyle = tfxHot(color, 0.6, 1);
+    ctx.beginPath(); ctx.arc(-sz * 0.22, -sz * 0.32, sz * 0.14, 0, TFX_TAU); ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+// smoke — soft puffs billowing outward and drifting up (no hot core).
+function drawSmokeTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length; if (n < 2) return;
+  var DENSITY = 10, SIZE = 15;
+  var step = Math.max(1, Math.floor(n / DENSITY));
+  ctx.save();
+  for (var i = 0; i < n; i += step) {
+    var v = verts[i]; var age = now - v.t; var life = tfxClamp01(age / fadeMs); if (life >= 1) continue;
+    for (var k = 0; k < 2; k++) {
+      var seed = v.t + k * 5333;
+      var rise = 55 * (age / 1000) * (0.4 + tfxHash(seed) * 0.8);
+      var drift = Math.sin(age * 0.0015 + tfxHash(seed + 1) * TFX_TAU) * 12;
+      var x = v.x + drift + (tfxHash(seed + 2) - 0.5) * 10;
+      var y = v.y - rise;
+      var r = SIZE * (0.4 + life * 1.7) * (0.6 + tfxHash(seed + 3) * 0.6);
+      var alpha = tfxClamp01(1 - life) * 0.35 * (0.5 + tfxHash(seed + 4) * 0.6);
+      if (alpha <= 0.02) continue;
+      tfxAlpha(ctx, alpha);
+      ctx.save(); ctx.translate(x, y); ctx.scale(r, r);
+      ctx.fillStyle = tfxPuffGrad(ctx, color);
+      ctx.beginPath(); ctx.arc(0, 0, 1, 0, TFX_TAU); ctx.fill();
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+
+// confetti — rectangles tumbling and fluttering down.
+function drawConfettiTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length; if (n < 2) return;
+  var DENSITY = 12, SIZE = 8, SPIN = 50;
+  var step = Math.max(1, Math.floor(n / DENSITY));
+  ctx.save();
+  for (var i = 0; i < n; i += step) {
+    var v = verts[i]; var age = now - v.t; var life = tfxClamp01(age / fadeMs); if (life >= 1) continue;
+    for (var k = 0; k < 2; k++) {
+      var seed = v.t + k * 8101;
+      var fall = 50 * (age / 1000) * (0.5 + tfxHash(seed) * 0.9);
+      var sway = Math.sin(age * 0.003 + tfxHash(seed + 1) * TFX_TAU) * 14;
+      var x = v.x + sway + (tfxHash(seed + 2) - 0.5) * 12;
+      var y = v.y + fall - 6;
+      var w = SIZE * (0.6 + tfxHash(seed + 3) * 0.8), h = w * 0.5;
+      var spin = anim * 0.001 * (SPIN * 0.06) + tfxHash(seed + 4) * TFX_TAU;
+      var squash = Math.abs(Math.cos(spin * 2)) * 0.8 + 0.2;
+      var alpha = tfxClamp01((1 - life) * 1.2); if (alpha <= 0.03) continue;
+      ctx.save(); ctx.translate(x, y); ctx.rotate(spin); ctx.scale(1, squash);
+      tfxAlpha(ctx, alpha);
+      ctx.fillStyle = (k % 2 === 0) ? color : tfxHot(color, 0.5, 1);
+      ctx.fillRect(-w / 2, -h / 2, w, h);
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+
+// snow (Crystals) — 6-point ice crystals rotating and drifting down.
+function drawSnowTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length; if (n < 2) return;
+  var DENSITY = 10, SIZE = 9, SPIN = 30;
+  var step = Math.max(1, Math.floor(n / DENSITY));
+  ctx.save(); ctx.lineCap = "round";
+  for (var i = 0; i < n; i += step) {
+    var v = verts[i]; var age = now - v.t; var life = tfxClamp01(age / fadeMs); if (life >= 1) continue;
+    var seed = v.t;
+    var fall = 28 * (age / 1000) * (0.5 + tfxHash(seed) * 0.7);
+    var sway = Math.sin(age * 0.0016 + tfxHash(seed + 1) * TFX_TAU) * 12;
+    var x = v.x + sway + (tfxHash(seed + 2) - 0.5) * 8;
+    var y = v.y + fall - 4;
+    var sz = SIZE * (0.6 + tfxHash(seed + 3) * 0.6);
+    var rot = anim * 0.001 * (SPIN * 0.04) * (tfxHash(seed + 4) < 0.5 ? 1 : -1) + tfxHash(seed + 5) * TFX_TAU;
+    var alpha = tfxClamp01((1 - life) * 1.2); if (alpha <= 0.03) continue;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(rot); tfxAlpha(ctx, alpha);
+    ctx.strokeStyle = color; ctx.lineWidth = Math.max(0.8, sz * 0.12);
+    for (var a = 0; a < 3; a++) {
+      ctx.rotate(Math.PI / 3);
+      ctx.beginPath();
+      ctx.moveTo(-sz, 0); ctx.lineTo(sz, 0);
+      ctx.moveTo(sz * 0.55, 0); ctx.lineTo(sz * 0.4, sz * 0.18);
+      ctx.moveTo(sz * 0.55, 0); ctx.lineTo(sz * 0.4, -sz * 0.18);
+      ctx.moveTo(-sz * 0.55, 0); ctx.lineTo(-sz * 0.4, sz * 0.18);
+      ctx.moveTo(-sz * 0.55, 0); ctx.lineTo(-sz * 0.4, -sz * 0.18);
+      ctx.stroke();
+    }
+    ctx.fillStyle = tfxHot(color, 0.5, 1);
+    ctx.beginPath(); ctx.arc(0, 0, sz * 0.16, 0, TFX_TAU); ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+// tracks (Tire Tracks) — two offset rails + cross-tread ticks at constant spacing.
+function drawTracksTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length; if (n < 2) return;
+  var GAUGE = 10, TREAD = 16;
+  ctx.save(); ctx.strokeStyle = color; ctx.lineCap = "butt";
+  var bucketMs = fadeMs / TFX_BUCKETS;
+  for (var rail = -1; rail <= 1; rail += 2) {
+    ctx.lineWidth = 2.4;
+    for (var b = 0; b < TFX_BUCKETS; b++) {
+      tfxAlpha(ctx, (1 - (b + 0.5) / TFX_BUCKETS) * 0.8);
+      var run = false;
+      for (var i = 1; i < n; i++) {
+        var age = now - verts[i].t; var seg = (age >= fadeMs) ? TFX_BUCKETS : Math.floor(age / bucketMs);
+        if (seg !== b) { if (run) { ctx.stroke(); run = false; } continue; }
+        var t0 = tfxTangent(verts, i - 1), t1 = tfxTangent(verts, i);
+        if (!run) { ctx.beginPath(); ctx.moveTo(verts[i - 1].x - t0.y * GAUGE * rail, verts[i - 1].y + t0.x * GAUGE * rail); run = true; }
+        ctx.lineTo(verts[i].x - t1.y * GAUGE * rail, verts[i].y + t1.x * GAUGE * rail);
+      }
+      if (run) ctx.stroke();
+    }
+  }
+  var cum = 0, nextTick = 0;
+  ctx.lineWidth = 2;
+  for (var j = 1; j < n; j++) {
+    cum += Math.hypot(verts[j].x - verts[j - 1].x, verts[j].y - verts[j - 1].y);
+    if (cum < nextTick) continue;
+    nextTick = cum + TREAD;
+    var f = tfxAgeAlpha(verts[j].t, now, fadeMs); if (f <= 0.05) continue;
+    var t = tfxTangent(verts, j);
+    tfxAlpha(ctx, f * 0.7);
+    ctx.beginPath();
+    ctx.moveTo(verts[j].x - t.y * (GAUGE + 2), verts[j].y + t.x * (GAUGE + 2));
+    ctx.lineTo(verts[j].x + t.y * (GAUGE + 2), verts[j].y - t.x * (GAUGE + 2));
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// notes (Music Notes) — note glyphs floating up, rocking.
+function drawNotesTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length; if (n < 2) return;
+  var DENSITY = 9, SIZE = 8;
+  var step = Math.max(1, Math.floor(n / DENSITY));
+  ctx.save();
+  for (var i = 0; i < n; i += step) {
+    var v = verts[i]; var age = now - v.t; var life = tfxClamp01(age / fadeMs); if (life >= 1) continue;
+    var seed = v.t;
+    var rise = 75 * (age / 1000) * (0.4 + tfxHash(seed) * 0.7);
+    var sway = Math.sin(age * 0.0022 + tfxHash(seed + 1) * TFX_TAU) * 12;
+    var x = v.x + sway + (tfxHash(seed + 2) - 0.5) * 8;
+    var y = v.y - rise;
+    var sz = SIZE * (0.7 + tfxHash(seed + 3) * 0.6);
+    var rot = Math.sin(age * 0.0022 + tfxHash(seed + 4) * TFX_TAU) * 0.35;
+    var alpha = tfxClamp01((1 - life) * 1.2); if (alpha <= 0.03) continue;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(rot); tfxAlpha(ctx, alpha);
+    ctx.fillStyle = color; tfxNoteGlyph(ctx, sz);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+// neon (Neon Wall) — crisp constant-width light ribbon (faint body + bright core).
+function drawNeonTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length; if (n < 2) return;
+  var WIDTH = 10, GLOW = 12;
+  var bucketMs = fadeMs / TFX_BUCKETS;
+  ctx.save(); ctx.lineCap = "round"; ctx.lineJoin = "round";
+  if (tfxGlow()) { ctx.shadowColor = color; ctx.shadowBlur = GLOW; }
+  function strokeBuckets(width, style) {
+    ctx.lineWidth = width; ctx.strokeStyle = style;
+    for (var b = 0; b < TFX_BUCKETS; b++) {
+      tfxAlpha(ctx, (1 - (b + 0.5) / TFX_BUCKETS));
+      var run = false;
+      for (var i = 1; i < n; i++) {
+        var age = now - verts[i].t; var seg = (age >= fadeMs) ? TFX_BUCKETS : Math.floor(age / bucketMs);
+        if (seg !== b) { if (run) { ctx.stroke(); run = false; } continue; }
+        if (!run) { ctx.beginPath(); ctx.moveTo(verts[i - 1].x, verts[i - 1].y); run = true; }
+        ctx.lineTo(verts[i].x, verts[i].y);
+      }
+      if (run) ctx.stroke();
+    }
+  }
+  strokeBuckets(WIDTH, tfxRGBA(color, 0.32));
+  if (tfxGlow()) ctx.shadowBlur = GLOW * 0.4;
+  strokeBuckets(Math.max(1.5, WIDTH * 0.28), tfxHot(color, 0.7, 1));
+  ctx.restore();
+}
+
+// ripple (Ripples) — sonar rings dropped along the path, expanding + fading.
+function drawRippleTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length; if (n < 2) return;
+  var SPACING = 9, GLOW = 8;
+  ctx.save();
+  if (tfxGlow()) { ctx.shadowColor = color; ctx.shadowBlur = GLOW; }
+  ctx.strokeStyle = color;
+  var step = Math.max(1, Math.floor(n / SPACING));
+  for (var i = 0; i < n; i += step) {
+    var v = verts[i]; var life = tfxClamp01((now - v.t) / fadeMs); if (life >= 1) continue;
+    var R = 4 + life * 46;
+    var alpha = tfxClamp01(1 - life) * 0.8; if (alpha <= 0.03) continue;
+    tfxAlpha(ctx, alpha); ctx.lineWidth = Math.max(1, 2.5 * (1 - life));
+    ctx.beginPath(); ctx.arc(v.x, v.y, R, 0, TFX_TAU); ctx.stroke();
+  }
+  var head = verts[n - 1];
+  tfxAlpha(ctx, 0.9); ctx.fillStyle = tfxHot(color, 0.5, 1);
+  ctx.beginPath(); ctx.arc(head.x, head.y, 2.4, 0, TFX_TAU); ctx.fill();
+  ctx.restore();
+}
+
+/* ============================================================================
+ * WIRING — how the main session ports these into draw.js drawTrail()
+ * ----------------------------------------------------------------------------
+ * 1) Dispatch map (id string from the trail registry → renderer). New ids
+ *    (ribbon/bolt/hearts/smoke/confetti/snow/tracks/notes/neon/ripple) must be
+ *    added to the trail registry by the registry owner; 'snow' displays as
+ *    "Crystals", 'bolt' as "Lightning".
+ *
+ *      var TRAIL_FX = {
+ *        dashes: drawDashesTrail, sparkle: drawSparkleTrail, comet: drawCometTrail,
+ *        bubbles: drawBubblesTrail, aurora: drawAuroraTrail, guardian: drawGuardianTrail,
+ *        survivor: drawSurvivorTrail, ribbon: drawRibbonTrail, bolt: drawBoltTrail,
+ *        hearts: drawHeartsTrail, smoke: drawSmokeTrail, confetti: drawConfettiTrail,
+ *        snow: drawSnowTrail, tracks: drawTracksTrail, notes: drawNotesTrail,
+ *        neon: drawNeonTrail, ripple: drawRippleTrail
+ *      };
+ *
+ * 2) Inside drawTrail(), AFTER it has computed `verts`, `now`, `fadeMs`, the
+ *    `dashed` (near-victory) flag and `trailEffect`, and BEFORE the existing
+ *    lightweight stroke-style block, branch to the rich renderer:
+ *
+ *      // near-victory dashing keeps priority for legibility (leave that path as-is)
+ *      var fx = (!dashed && trailEffect) ? TRAIL_FX[trailEffect] : null;
+ *      if (fx) {
+ *        tfxBaseAlpha = isLocalId(player.id) ? 1 : NONLOCAL_TRAIL_ALPHA; // dim others
+ *        fx(gameContext, verts, player.color, now, fadeMs, cartSkinAnimTime * 1000);
+ *        tfxBaseAlpha = 1;
+ *        gameContext.restore();   // matches the gameContext.save() at the top of drawTrail
+ *        return;                  // the renderer drew the whole trail
+ *      }
+ *      // else fall through to the existing basic bucketed stroke.
+ *
+ *    The renderers do their own save()/restore() internally, so they won't leak
+ *    state — but drawTrail already did one save() at the top; the early return
+ *    above balances it with a restore(). (Or hoist the rich branch above that
+ *    save(); either is fine as long as save/restore stay balanced.)
+ *
+ * 3) Delete the now-obsolete lightweight per-effect stroke tweaks (setLineDash/
+ *    lineWidth/shadow keyed off trailEffect) — these renderers replace them. The
+ *    `getSkinTrailColor` override is already gone per the locked design (color is
+ *    always player.color).
+ *
+ * 4) BUILD: add this file to the play bundle in build.js AND a <script> tag in
+ *    play.html's BUILD block, placed BEFORE draw.js (draw.js calls these).
+ * ============================================================================ */
+
+// Dispatch map: trail-effect id (from the trail registry / getTrailEffect) → renderer.
+// drawTrail() (draw.js) branches here for the rich effects; ids must match skinRegistry.
+var TRAIL_FX = {
+  basic: drawBasicTrail,
+  dashes: drawDashesTrail, sparkle: drawSparkleTrail, comet: drawCometTrail,
+  bubbles: drawBubblesTrail, aurora: drawAuroraTrail, guardian: drawGuardianTrail,
+  survivor: drawSurvivorTrail, ribbon: drawRibbonTrail, bolt: drawBoltTrail,
+  hearts: drawHeartsTrail, smoke: drawSmokeTrail, confetti: drawConfettiTrail,
+  snow: drawSnowTrail, tracks: drawTracksTrail, notes: drawNotesTrail,
+  neon: drawNeonTrail, ripple: drawRippleTrail
+};

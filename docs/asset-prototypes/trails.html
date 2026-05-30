@@ -1,0 +1,1289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>chaochao — trail-effect prototype</title>
+<style>
+  :root { --bg:#11141b; --panel:#1a1f2b; --ink:#e7ecf5; --muted:#8b97ad; --accent:#5ad0ff; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+    font:14px/1.45 -apple-system, system-ui, sans-serif; }
+  header { padding:14px 18px; border-bottom:1px solid #232a38; }
+  header h1 { margin:0 0 2px; font-size:16px; }
+  header p { margin:0; color:var(--muted); font-size:12px; }
+  .wrap { display:flex; gap:0; align-items:flex-start; }
+  .stage { flex:1 1 auto; padding:14px 18px; }
+  canvas#stage { width:100%; max-width:1120px; height:auto; background:
+    radial-gradient(120% 120% at 50% 30%, #1c2333 0%, #0d1016 100%);
+    border:1px solid #232a38; border-radius:10px; display:block; }
+  .panel { flex:0 0 320px; padding:14px 16px; border-left:1px solid #232a38;
+    min-height:100vh; background:var(--panel); }
+  .panel h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em;
+    color:var(--muted); margin:18px 0 8px; }
+  .panel h2:first-child { margin-top:0; }
+  .swatches { display:flex; flex-wrap:wrap; gap:6px; }
+  .swatch { width:24px; height:24px; border-radius:6px; cursor:pointer;
+    border:2px solid transparent; }
+  .swatch.active { border-color:#fff; box-shadow:0 0 0 2px #000 inset; }
+  .row { display:flex; align-items:center; gap:8px; margin:6px 0; }
+  .row label { flex:0 0 120px; color:var(--muted); font-size:12px; }
+  .row input[type=range] { flex:1 1 auto; }
+  .row .val { flex:0 0 40px; text-align:right; font-variant-numeric:tabular-nums;
+    color:var(--ink); font-size:12px; }
+  .toggles { display:flex; gap:14px; align-items:center; color:var(--muted); flex-wrap:wrap; }
+  .custom { display:flex; align-items:center; gap:8px; margin-top:8px; }
+  .custom input[type=color] { width:34px; height:28px; border:none; background:none; }
+  .group { border-top:1px dashed #2a3142; padding-top:6px; margin-top:10px; }
+  .group .name { color:var(--accent); font-weight:600; font-size:12px; margin-bottom:2px; }
+  button.reset { margin-top:14px; background:#232c3d; color:var(--ink);
+    border:1px solid #34405a; border-radius:6px; padding:6px 10px; cursor:pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1>chaochao — trail-effect prototype</h1>
+  <p>18 trails in MOTION (8 ladder + 10 more). Rule: every trail renders in the player color — only the EFFECT/shape varies. Pick a swatch to recolor all 18 live. Real timestamped vertex buffer fading over TRAIL_FADE_MS, same conventions as draw.js drawTrail(). Scroll the canvas for the rest.</p>
+</header>
+<div class="wrap">
+  <div class="stage"><canvas id="stage" width="1120" height="660"></canvas></div>
+  <div class="panel">
+    <h2>Player color (recolors all 8)</h2>
+    <div class="swatches" id="swatches"></div>
+    <div class="custom">
+      <input type="color" id="customColor" value="#5ad0ff" />
+      <span style="color:var(--muted);font-size:12px">custom color</span>
+    </div>
+
+    <h2>Sim</h2>
+    <div class="toggles">
+      <label><input type="checkbox" id="run" checked /> animate</label>
+      <label><input type="checkbox" id="glow" checked /> glow (perfGlow)</label>
+      <label><input type="checkbox" id="showPath" /> show raw polyline</label>
+    </div>
+    <div class="row"><label>fps</label><span class="val" id="fps" style="flex:0 0 auto">—</span>
+      <span style="color:var(--muted);font-size:11px">(18 karts here; a room is up to ~16)</span></div>
+    <div class="row"><label>kart speed</label><input type="range" id="g_speed" min="20" max="200" value="100"><span class="val" id="g_speedV"></span></div>
+    <div class="row"><label>trail fade (s)</label><input type="range" id="g_fade" min="20" max="90" value="50"><span class="val" id="g_fadeV"></span></div>
+
+    <div class="group">
+      <div class="name">Dashes (Lv4)</div>
+      <div class="row"><label>dash length</label><input type="range" id="da_dash" min="6" max="40" value="16"><span class="val" id="da_dashV"></span></div>
+      <div class="row"><label>gap length</label><input type="range" id="da_gap" min="4" max="36" value="12"><span class="val" id="da_gapV"></span></div>
+      <div class="row"><label>width</label><input type="range" id="da_w" min="2" max="9" value="4"><span class="val" id="da_wV"></span></div>
+    </div>
+
+    <div class="group">
+      <div class="name">Sparkle (Lv10)</div>
+      <div class="row"><label>density</label><input type="range" id="sp_dens" min="4" max="40" value="16"><span class="val" id="sp_densV"></span></div>
+      <div class="row"><label>size</label><input type="range" id="sp_size" min="2" max="10" value="5"><span class="val" id="sp_sizeV"></span></div>
+      <div class="row"><label>twinkle speed</label><input type="range" id="sp_tw" min="0" max="100" value="55"><span class="val" id="sp_twV"></span></div>
+      <div class="row"><label>spread</label><input type="range" id="sp_spread" min="0" max="30" value="14"><span class="val" id="sp_spreadV"></span></div>
+    </div>
+
+    <div class="group">
+      <div class="name">Comet (Lv16)</div>
+      <div class="row"><label>head width</label><input type="range" id="co_w" min="6" max="28" value="16"><span class="val" id="co_wV"></span></div>
+      <div class="row"><label>glow blur</label><input type="range" id="co_glow" min="0" max="30" value="14"><span class="val" id="co_glowV"></span></div>
+      <div class="row"><label>taper</label><input type="range" id="co_taper" min="30" max="140" value="80"><span class="val" id="co_taperV"></span></div>
+    </div>
+
+    <div class="group">
+      <div class="name">Bubbles (Lv22)</div>
+      <div class="row"><label>density</label><input type="range" id="bu_dens" min="3" max="24" value="10"><span class="val" id="bu_densV"></span></div>
+      <div class="row"><label>size</label><input type="range" id="bu_size" min="3" max="16" value="8"><span class="val" id="bu_sizeV"></span></div>
+      <div class="row"><label>rise speed</label><input type="range" id="bu_rise" min="0" max="100" value="48"><span class="val" id="bu_riseV"></span></div>
+    </div>
+
+    <div class="group">
+      <div class="name">Aurora (Lv28)</div>
+      <div class="row"><label>wave amp</label><input type="range" id="au_amp" min="2" max="30" value="14"><span class="val" id="au_ampV"></span></div>
+      <div class="row"><label>wave freq</label><input type="range" id="au_freq" min="2" max="40" value="16"><span class="val" id="au_freqV"></span></div>
+      <div class="row"><label>glow blur</label><input type="range" id="au_glow" min="2" max="30" value="16"><span class="val" id="au_glowV"></span></div>
+      <div class="row"><label>softness</label><input type="range" id="au_bands" min="1" max="5" value="3"><span class="val" id="au_bandsV"></span></div>
+    </div>
+
+    <div class="group">
+      <div class="name">Guardian (achievement)</div>
+      <div class="row"><label>halo radius</label><input type="range" id="gu_r" min="16" max="48" value="28"><span class="val" id="gu_rV"></span></div>
+      <div class="row"><label>pulse speed</label><input type="range" id="gu_pulse" min="0" max="100" value="50"><span class="val" id="gu_pulseV"></span></div>
+      <div class="row"><label>orbit dots</label><input type="range" id="gu_dots" min="0" max="8" value="4"><span class="val" id="gu_dotsV"></span></div>
+    </div>
+
+    <div class="group">
+      <div class="name">Survivor (achievement)</div>
+      <div class="row"><label>density</label><input type="range" id="su_dens" min="4" max="30" value="14"><span class="val" id="su_densV"></span></div>
+      <div class="row"><label>ember size</label><input type="range" id="su_size" min="3" max="14" value="7"><span class="val" id="su_sizeV"></span></div>
+      <div class="row"><label>flicker speed</label><input type="range" id="su_flick" min="0" max="100" value="60"><span class="val" id="su_flickV"></span></div>
+      <div class="row"><label>linger</label><input type="range" id="su_linger" min="0" max="100" value="55"><span class="val" id="su_lingerV"></span></div>
+    </div>
+
+    <h2 style="color:var(--accent)">Batch 2 — 10 more</h2>
+
+    <div class="group">
+      <div class="name">Ribbon</div>
+      <div class="row"><label>width</label><input type="range" id="ri_w" min="8" max="32" value="18"><span class="val" id="ri_wV"></span></div>
+      <div class="row"><label>twist freq</label><input type="range" id="ri_tw" min="4" max="40" value="16"><span class="val" id="ri_twV"></span></div>
+    </div>
+
+    <div class="group">
+      <div class="name">Lightning</div>
+      <div class="row"><label>jag amount</label><input type="range" id="bo_amp" min="2" max="30" value="12"><span class="val" id="bo_ampV"></span></div>
+      <div class="row"><label>glow blur</label><input type="range" id="bo_glow" min="0" max="30" value="12"><span class="val" id="bo_glowV"></span></div>
+      <div class="row"><label>forks</label><input type="range" id="bo_forks" min="0" max="4" value="1"><span class="val" id="bo_forksV"></span></div>
+    </div>
+
+    <div class="group">
+      <div class="name">Hearts</div>
+      <div class="row"><label>density</label><input type="range" id="he_dens" min="4" max="24" value="10"><span class="val" id="he_densV"></span></div>
+      <div class="row"><label>size</label><input type="range" id="he_size" min="4" max="18" value="9"><span class="val" id="he_sizeV"></span></div>
+    </div>
+
+    <div class="group">
+      <div class="name">Smoke</div>
+      <div class="row"><label>density</label><input type="range" id="sm_dens" min="4" max="24" value="10"><span class="val" id="sm_densV"></span></div>
+      <div class="row"><label>puff size</label><input type="range" id="sm_size" min="6" max="28" value="15"><span class="val" id="sm_sizeV"></span></div>
+    </div>
+
+    <div class="group">
+      <div class="name">Confetti</div>
+      <div class="row"><label>density</label><input type="range" id="cf_dens" min="4" max="26" value="12"><span class="val" id="cf_densV"></span></div>
+      <div class="row"><label>size</label><input type="range" id="cf_size" min="4" max="16" value="8"><span class="val" id="cf_sizeV"></span></div>
+      <div class="row"><label>spin speed</label><input type="range" id="cf_spin" min="0" max="100" value="50"><span class="val" id="cf_spinV"></span></div>
+    </div>
+
+    <div class="group">
+      <div class="name">Crystals</div>
+      <div class="row"><label>density</label><input type="range" id="cr_dens" min="4" max="24" value="10"><span class="val" id="cr_densV"></span></div>
+      <div class="row"><label>size</label><input type="range" id="cr_size" min="4" max="18" value="9"><span class="val" id="cr_sizeV"></span></div>
+      <div class="row"><label>spin speed</label><input type="range" id="cr_spin" min="0" max="100" value="30"><span class="val" id="cr_spinV"></span></div>
+    </div>
+
+    <div class="group">
+      <div class="name">Tire Tracks</div>
+      <div class="row"><label>gauge</label><input type="range" id="tr_gauge" min="4" max="20" value="10"><span class="val" id="tr_gaugeV"></span></div>
+      <div class="row"><label>tread gap</label><input type="range" id="tr_tread" min="6" max="40" value="16"><span class="val" id="tr_treadV"></span></div>
+    </div>
+
+    <div class="group">
+      <div class="name">Music Notes</div>
+      <div class="row"><label>density</label><input type="range" id="no_dens" min="4" max="22" value="9"><span class="val" id="no_densV"></span></div>
+      <div class="row"><label>size</label><input type="range" id="no_size" min="4" max="14" value="8"><span class="val" id="no_sizeV"></span></div>
+    </div>
+
+    <div class="group">
+      <div class="name">Neon Wall</div>
+      <div class="row"><label>width</label><input type="range" id="ne_w" min="4" max="20" value="10"><span class="val" id="ne_wV"></span></div>
+      <div class="row"><label>glow blur</label><input type="range" id="ne_glow" min="0" max="30" value="12"><span class="val" id="ne_glowV"></span></div>
+    </div>
+
+    <div class="group">
+      <div class="name">Ripples</div>
+      <div class="row"><label>ring spacing</label><input type="range" id="rp_space" min="3" max="20" value="9"><span class="val" id="rp_spaceV"></span></div>
+      <div class="row"><label>glow blur</label><input type="range" id="rp_glow" min="0" max="24" value="8"><span class="val" id="rp_glowV"></span></div>
+    </div>
+
+    <button class="reset" id="reset">reset params</button>
+  </div>
+</div>
+
+<script>
+// ============================================================================
+// chaochao trail-effect prototype.
+//
+// Each drawXxxTrail(ctx, verts, color, now, fadeMs, anim) below is the SHAPE the
+// integrator ports into the trail-effect switch in client/scripts/draw.js. They
+// take the live trail vertex buffer + the player color and render entirely in
+// that color (only a few white "hot-core"/highlight pixels, the same way other
+// effects in draw.js add specular dots). Per-effect tuning lives in TUNE.* so
+// the sliders can drive them; when porting, bake the approved TUNE values as
+// literals. NO Math.random per frame — all particle jitter is hashed off the
+// vertex timestamp so it's stable frame-to-frame (matches the real buffer where
+// each vertex carries a fixed .t).
+//
+// Conventions matched from draw.js drawTrail():
+//   - verts: [{x,y,t}], newest LAST. t = ms timestamp (Date.now() in game).
+//   - a vertex's age = now - t; it is dropped once age > fadeMs (TRAIL_FADE_MS).
+//   - alpha falls off with age. Basic below replicates draw.js' 6-bucket fade
+//     exactly as the reference baseline.
+// ============================================================================
+
+// ---- color helpers (parse any CSS color → rgb once, cached) ----------------
+var _rgbCache = {};
+function toRGB(color) {
+  if (_rgbCache[color] != null) return _rgbCache[color];
+  var cv = document.createElement("canvas"); cv.width = cv.height = 1;
+  var cx = cv.getContext("2d");
+  cx.fillStyle = "#000"; cx.fillStyle = color; cx.fillRect(0, 0, 1, 1);
+  var d = cx.getImageData(0, 0, 1, 1).data;
+  var rgb = { r: d[0], g: d[1], b: d[2] };
+  _rgbCache[color] = rgb; return rgb;
+}
+function rgba(color, a) {
+  var c = toRGB(color);
+  return "rgba(" + c.r + "," + c.g + "," + c.b + "," + a + ")";
+}
+// mix the color toward white by t (0..1) — for hot cores / specular highlights
+function hot(color, t, a) {
+  var c = toRGB(color);
+  var r = Math.round(c.r + (255 - c.r) * t);
+  var g = Math.round(c.g + (255 - c.g) * t);
+  var b = Math.round(c.b + (255 - c.b) * t);
+  return "rgba(" + r + "," + g + "," + b + "," + (a == null ? 1 : a) + ")";
+}
+// deterministic 0..1 hash from a numeric seed (timestamp + salt). Stable: same
+// vertex.t always yields the same jitter, so particles don't dance per frame.
+function hash(seed) {
+  var x = Math.sin(seed * 0.0001 * 12.9898 + 78.233) * 43758.5453;
+  return x - Math.floor(x);
+}
+function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
+
+var TAU = 6.2831853;
+// PERF: in draw.js, glow (shadowBlur) is gated behind perfGlow() so low-end
+// devices skip it. Mirror that here so the operator can A/B the cost; when
+// porting, replace PERF_GLOW reads with perfGlow().
+var PERF_GLOW = true;
+
+// PERF: radial gradients are EXPENSIVE to build, and the old per-particle code
+// rebuilt one per ember/flare every frame. Cache a single UNIT gradient (centred
+// at origin, radius 1) per color and position it with translate()+scale(r,r) at
+// fill time — the gradient is transformed by the CTM, so one cached object
+// serves every particle of that color at any size. Caches are bounded by the
+// palette (~21 colors).
+var _blobGrad = {};   // hot core -> transparent (comet head flare, survivor embers)
+function blobGrad(ctx, color) {
+  if (_blobGrad[color]) return _blobGrad[color];
+  var g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+  g.addColorStop(0, hot(color, 0.6, 1));
+  g.addColorStop(0.45, rgba(color, 0.8));
+  g.addColorStop(1, rgba(color, 0));
+  _blobGrad[color] = g; return g;
+}
+var _haloGrad = {};   // hollow ring glow (guardian halo); baked alpha, pulse via globalAlpha
+function haloGrad(ctx, color) {
+  if (_haloGrad[color]) return _haloGrad[color];
+  var g = ctx.createRadialGradient(0, 0, 0.45, 0, 0, 1);
+  g.addColorStop(0, rgba(color, 0));
+  g.addColorStop(0.7, rgba(color, 0.18));
+  g.addColorStop(0.92, rgba(color, 0.6));
+  g.addColorStop(1, rgba(color, 0));
+  _haloGrad[color] = g; return g;
+}
+var _puffGrad = {};   // soft uniform puff (smoke) — NO hot core, just color → transparent
+function puffGrad(ctx, color) {
+  if (_puffGrad[color]) return _puffGrad[color];
+  var g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+  g.addColorStop(0, rgba(color, 0.65));
+  g.addColorStop(0.6, rgba(color, 0.28));
+  g.addColorStop(1, rgba(color, 0));
+  _puffGrad[color] = g; return g;
+}
+// mix the color toward BLACK by t (0..1) — back-face shading for the ribbon
+function dark(color, t, a) {
+  var c = toRGB(color);
+  return "rgba(" + Math.round(c.r * (1 - t)) + "," + Math.round(c.g * (1 - t)) + "," +
+    Math.round(c.b * (1 - t)) + "," + (a == null ? 1 : a) + ")";
+}
+
+// per-effect tuning (driven by sliders; bake as literals when porting)
+var TUNE = {
+  dashes:  { dash: 16, gap: 12, width: 4 },
+  sparkle: { density: 16, size: 5, twinkle: 0.55, spread: 14 },
+  comet:   { width: 16, glow: 14, taper: 0.80 },
+  bubbles: { density: 10, size: 8, rise: 0.48 },
+  aurora:  { amp: 14, freq: 16, glow: 16, bands: 3 },
+  guardian:{ radius: 28, pulse: 0.50, dots: 4 },
+  survivor:{ density: 14, size: 7, flick: 0.60, linger: 0.55 },
+  // --- batch 2 (10 more) ---
+  ribbon:  { width: 18, twist: 16 },
+  bolt:    { amp: 12, glow: 12, forks: 1 },
+  hearts:  { density: 10, size: 9 },
+  smoke:   { density: 10, size: 15 },
+  confetti:{ density: 12, size: 8, spin: 50 },
+  snow:    { density: 10, size: 9, spin: 30 },
+  tracks:  { gauge: 10, tread: 16 },
+  notes:   { density: 9, size: 8 },
+  neon:    { width: 10, glow: 12 },
+  ripple:  { spacing: 9, glow: 8 }
+};
+
+var TRAIL_DRAW_BUCKETS = 6; // mirrors draw.js
+
+// Per-vertex normalized age alpha: 1 at the kart, 0 at the fade horizon.
+function ageAlpha(t, now, fadeMs) { return clamp01(1 - (now - t) / fadeMs); }
+
+// Unit tangent at vertex i along the polyline (central difference).
+function tangent(verts, i) {
+  var a = verts[Math.max(0, i - 1)], b = verts[Math.min(verts.length - 1, i + 1)];
+  var dx = b.x - a.x, dy = b.y - a.y;
+  var len = Math.hypot(dx, dy) || 1;
+  return { x: dx / len, y: dy / len };
+}
+
+// ============================================================================
+// 0. BASIC — solid fading stroke. Faithful port of draw.js drawTrail() so the
+//    operator sees the true current baseline next to the new effects.
+// ============================================================================
+function drawBasicTrail(ctx, verts, color, now, fadeMs, anim) {
+  if (verts.length < 2) return;
+  ctx.save();
+  ctx.lineWidth = 3; ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.strokeStyle = color;
+  var bucketMs = fadeMs / TRAIL_DRAW_BUCKETS;
+  var segBucket = new Array(verts.length); segBucket[0] = -1;
+  for (var i = 1; i < verts.length; i++) {
+    var age = now - verts[i].t;
+    segBucket[i] = (age >= fadeMs) ? TRAIL_DRAW_BUCKETS : Math.floor(age / bucketMs);
+  }
+  for (var b = 0; b < TRAIL_DRAW_BUCKETS; b++) {
+    var bucketAlpha = 1 - (b + 0.5) / TRAIL_DRAW_BUCKETS;
+    if (bucketAlpha <= 0.01) continue;
+    ctx.globalAlpha = bucketAlpha;
+    var runStart = -1;
+    for (var j = 1; j <= verts.length; j++) {
+      var inBucket = (j < verts.length) && (segBucket[j] === b);
+      if (inBucket) {
+        if (runStart === -1) { runStart = j - 1; ctx.beginPath(); ctx.moveTo(verts[runStart].x, verts[runStart].y); }
+        ctx.lineTo(verts[j].x, verts[j].y);
+      } else if (runStart !== -1) { ctx.stroke(); runStart = -1; }
+    }
+  }
+  ctx.restore();
+}
+
+// ============================================================================
+// 1. DASHES (Lv4) — broken dash segments marching along the path. Uniform dash
+//    geometry regardless of how densely the buffer was sampled, via cumulative
+//    arc length + lineDashOffset (same trick as draw.js' near-victory dashing).
+// ============================================================================
+function drawDashesTrail(ctx, verts, color, now, fadeMs, anim) {
+  if (verts.length < 2) return;
+  var T = TUNE.dashes;
+  ctx.save();
+  ctx.lineWidth = T.width; ctx.lineCap = "butt"; ctx.lineJoin = "round";
+  ctx.strokeStyle = color;
+  ctx.setLineDash([T.dash, T.gap]);
+  // cumulative length so dashes stay continuous across age buckets
+  var cumLen = new Array(verts.length); cumLen[0] = 0;
+  for (var k = 1; k < verts.length; k++)
+    cumLen[k] = cumLen[k - 1] + Math.hypot(verts[k].x - verts[k - 1].x, verts[k].y - verts[k - 1].y);
+  var bucketMs = fadeMs / TRAIL_DRAW_BUCKETS;
+  var segBucket = new Array(verts.length); segBucket[0] = -1;
+  for (var i = 1; i < verts.length; i++) {
+    var age = now - verts[i].t;
+    segBucket[i] = (age >= fadeMs) ? TRAIL_DRAW_BUCKETS : Math.floor(age / bucketMs);
+  }
+  for (var b = 0; b < TRAIL_DRAW_BUCKETS; b++) {
+    var bucketAlpha = 1 - (b + 0.5) / TRAIL_DRAW_BUCKETS;
+    if (bucketAlpha <= 0.01) continue;
+    ctx.globalAlpha = bucketAlpha;
+    var runStart = -1;
+    for (var j = 1; j <= verts.length; j++) {
+      var inBucket = (j < verts.length) && (segBucket[j] === b);
+      if (inBucket) {
+        if (runStart === -1) { runStart = j - 1; ctx.lineDashOffset = cumLen[runStart]; ctx.beginPath(); ctx.moveTo(verts[runStart].x, verts[runStart].y); }
+        ctx.lineTo(verts[j].x, verts[j].y);
+      } else if (runStart !== -1) { ctx.stroke(); runStart = -1; }
+    }
+  }
+  ctx.restore();
+}
+
+// ============================================================================
+// 2. SPARKLE (Lv10) — scattered twinkling 4-point stars trailing off the path.
+//    Each vertex deterministically scatters `density` sparkles to its sides;
+//    each twinkles via sin(anim + hashedPhase) so they shimmer in place.
+// ============================================================================
+function drawSparkleTrail(ctx, verts, color, now, fadeMs, anim) {
+  if (verts.length < 2) return;
+  var T = TUNE.sparkle;
+  ctx.save();
+  ctx.lineCap = "round";
+  // sample a subset of vertices as emitters; each emits a few sparkles
+  var step = Math.max(1, Math.floor(verts.length / Math.max(1, T.density)));
+  for (var i = 0; i < verts.length; i += step) {
+    var v = verts[i];
+    var a0 = ageAlpha(v.t, now, fadeMs);
+    if (a0 <= 0.02) continue;
+    var tan = tangent(verts, i);
+    var nx = -tan.y, ny = tan.x;            // perpendicular
+    for (var s = 0; s < 2; s++) {           // 2 sparkles per emitter side
+      var seed = v.t + s * 9301 + i * 49297;
+      var off = (hash(seed) - 0.5) * 2 * T.spread;        // perpendicular offset
+      var along = (hash(seed + 7) - 0.5) * 6;             // small along-jitter
+      var px = v.x + nx * off + tan.x * along;
+      var py = v.y + ny * off + tan.y * along;
+      // twinkle: 0..1, phase hashed per sparkle so they don't blink in unison
+      var phase = hash(seed + 3) * 6.2831853;
+      var tw = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(anim * 0.001 * (4 + T.twinkle * 8) + phase));
+      var alpha = a0 * tw;
+      if (alpha <= 0.03) continue;
+      var sz = T.size * (0.5 + hash(seed + 5) * 0.8) * (0.4 + 0.6 * tw);
+      // 4-point star = two crossed tapered strokes + a hot core dot
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = Math.max(0.6, sz * 0.18);
+      ctx.beginPath();
+      ctx.moveTo(px - sz, py); ctx.lineTo(px + sz, py);
+      ctx.moveTo(px, py - sz); ctx.lineTo(px, py + sz);
+      ctx.stroke();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = hot(color, 0.6, 1);
+      ctx.beginPath(); ctx.arc(px, py, Math.max(0.6, sz * 0.22), 0, 6.2831853); ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+// ============================================================================
+// 3. COMET (Lv16) — wide glowing tapered streak: bright + wide at the kart,
+//    thinning to nothing at the tail. Built as a filled ribbon (per-segment
+//    quads so width AND alpha taper smoothly) under a soft glow, plus a thin
+//    hot core line and a radial flare at the head.
+// ============================================================================
+function drawCometTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length;
+  if (n < 2) return;
+  var T = TUNE.comet;
+  // PERF: bound the ribbon to ~50 quads regardless of how many vertices the
+  // buffer holds (it can reach ~125 at a 5s fade). Sample stride'd indices once
+  // and compute width/normals only at those — was O(verts) fills + tangents.
+  var stride = Math.max(1, Math.floor(n / 50));
+  var idx = [];
+  for (var i = 0; i < n; i += stride) idx.push(i);
+  if (idx[idx.length - 1] !== n - 1) idx.push(n - 1);
+  var m = idx.length;
+  var hw = new Array(m), nx = new Array(m), ny = new Array(m), af = new Array(m);
+  for (var j = 0; j < m; j++) {
+    var ii = idx[j];
+    var f = ageAlpha(verts[ii].t, now, fadeMs);     // 1 at head, 0 at tail
+    af[j] = f;
+    hw[j] = (T.width * 0.5) * Math.pow(f, T.taper);  // taper exponent shapes the cone
+    var tan = tangent(verts, ii);
+    nx[j] = -tan.y; ny[j] = tan.x;
+  }
+  ctx.save();
+  if (PERF_GLOW) { ctx.shadowColor = color; ctx.shadowBlur = T.glow; }
+  ctx.lineJoin = "round";
+  ctx.fillStyle = color;
+  // ribbon body: one quad per sampled segment, alpha = segment age
+  for (var s = 1; s < m; s++) {
+    var alpha = af[s] * 0.5;
+    if (alpha <= 0.02) continue;
+    var p0 = verts[idx[s - 1]], p1 = verts[idx[s]];
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.moveTo(p0.x + nx[s - 1] * hw[s - 1], p0.y + ny[s - 1] * hw[s - 1]);
+    ctx.lineTo(p1.x + nx[s] * hw[s],         p1.y + ny[s] * hw[s]);
+    ctx.lineTo(p1.x - nx[s] * hw[s],         p1.y - ny[s] * hw[s]);
+    ctx.lineTo(p0.x - nx[s - 1] * hw[s - 1], p0.y - ny[s - 1] * hw[s - 1]);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // hot core line — only the fresh head stretch (high age-alpha verts are
+  // contiguous at the end since newest is last), as ONE stroke not per-segment.
+  if (PERF_GLOW) ctx.shadowBlur = T.glow * 0.5;
+  var coreStart = -1;
+  for (var c = 0; c < m; c++) { if (af[c] > 0.35) { coreStart = c; break; } }
+  if (coreStart >= 0 && coreStart < m - 1) {
+    ctx.globalAlpha = 0.85;
+    ctx.strokeStyle = hot(color, 0.55, 1);
+    ctx.lineCap = "round";
+    ctx.lineWidth = Math.max(0.8, T.width * 0.18);
+    ctx.beginPath();
+    ctx.moveTo(verts[idx[coreStart]].x, verts[idx[coreStart]].y);
+    for (var cc = coreStart + 1; cc < m; cc++) ctx.lineTo(verts[idx[cc]].x, verts[idx[cc]].y);
+    ctx.stroke();
+  }
+  // head flare — cached unit gradient positioned by transform (no per-frame build)
+  var head = verts[n - 1];
+  var R = T.width * 0.9;
+  ctx.globalAlpha = 1;
+  if (PERF_GLOW) ctx.shadowBlur = 0;
+  ctx.save();
+  ctx.translate(head.x, head.y); ctx.scale(R, R);
+  ctx.fillStyle = blobGrad(ctx, color);
+  ctx.beginPath(); ctx.arc(0, 0, 1, 0, TAU); ctx.fill();
+  ctx.restore();
+  ctx.restore();
+}
+
+// ============================================================================
+// 4. BUBBLES (Lv22) — rising bubble rings that drift up and off the path. Each
+//    emitter vertex spawns bubbles whose vertical rise grows with the vertex's
+//    age, so old bubbles have floated furthest up before popping (fading out).
+// ============================================================================
+function drawBubblesTrail(ctx, verts, color, now, fadeMs, anim) {
+  if (verts.length < 2) return;
+  var T = TUNE.bubbles;
+  ctx.save();
+  ctx.lineWidth = 1.5;
+  var step = Math.max(1, Math.floor(verts.length / Math.max(1, T.density)));
+  for (var i = 0; i < verts.length; i += step) {
+    var v = verts[i];
+    var age = now - v.t;
+    var life = clamp01(age / fadeMs);            // 0 fresh → 1 about to pop
+    if (life >= 1) continue;
+    for (var k = 0; k < 2; k++) {
+      var seed = v.t + k * 6151 + i * 3911;
+      var rise = (40 + T.rise * 120) * (age / 1000);          // px risen so far
+      var drift = Math.sin(age * 0.002 + hash(seed) * 6.283) * 8;
+      var px = v.x + drift + (hash(seed + 1) - 0.5) * 10;
+      var py = v.y - rise * (0.5 + hash(seed + 2) * 0.8);     // up = -y
+      var r = T.size * (0.5 + hash(seed + 4) * 0.9);
+      // fade in fast, hold, then pop
+      var alpha = clamp01((1 - life) * 1.3) * (0.4 + 0.6 * hash(seed + 6));
+      if (alpha <= 0.03) continue;
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = color;
+      ctx.beginPath(); ctx.arc(px, py, r, 0, 6.2831853); ctx.stroke();
+      // specular highlight pip (upper-left of the bubble)
+      ctx.globalAlpha = alpha * 0.9;
+      ctx.fillStyle = hot(color, 0.75, 1);
+      ctx.beginPath(); ctx.arc(px - r * 0.35, py - r * 0.35, Math.max(0.6, r * 0.22), 0, 6.2831853); ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+// ============================================================================
+// 5. AURORA (Lv28) — soft single waving band. ONE travelling sine wave displaces
+//    the path; it's drawn as a few CONCENTRIC layers on the SAME wave (wide+faint
+//    outer glow → narrow+bright inner core) so it reads as one soft curtain, not
+//    a braid. Additive compositing + blur give the bloom. Width/alpha taper with
+//    age via the standard age buckets.
+//    PERF: the displaced wave point + normal at each vertex is computed ONCE (was
+//    recomputed per layer per bucket), and the points are stride-sampled.
+// ============================================================================
+function drawAuroraTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length;
+  if (n < 2) return;
+  var T = TUNE.aurora;
+  var layers = Math.max(1, Math.round(T.bands));   // "softness" — concentric glow layers
+  // arc length per vertex so the wave travels at a constant spatial frequency
+  var cum = new Array(n); cum[0] = 0;
+  for (var k = 1; k < n; k++) cum[k] = cum[k - 1] + Math.hypot(verts[k].x - verts[k - 1].x, verts[k].y - verts[k - 1].y);
+  // PERF: precompute the single displaced centreline + per-vertex bucket once
+  var bucketMs = fadeMs / TRAIL_DRAW_BUCKETS;
+  var wx = new Array(n), wy = new Array(n), bk = new Array(n);
+  for (var i = 0; i < n; i++) {
+    var w = T.amp * Math.sin(cum[i] * (T.freq * 0.01) - anim * 0.003);
+    var tn = tangent(verts, i);
+    wx[i] = verts[i].x - tn.y * w;
+    wy[i] = verts[i].y + tn.x * w;
+    var age = now - verts[i].t;
+    bk[i] = (age >= fadeMs) ? TRAIL_DRAW_BUCKETS : Math.floor(age / bucketMs);
+  }
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";   // additive → soft bloom
+  if (PERF_GLOW) { ctx.shadowColor = color; ctx.shadowBlur = T.glow; }
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  for (var L = 0; L < layers; L++) {
+    // L = 0 outermost (wide + faint glow), L = layers-1 innermost (thin + bright)
+    var inner = layers > 1 ? L / (layers - 1) : 1;
+    ctx.lineWidth = (5 + T.amp * 0.55) * (1 - inner * 0.72);
+    ctx.strokeStyle = (L === layers - 1) ? hot(color, 0.35, 1) : color;
+    var layerA = 0.12 + 0.20 * inner;
+    for (var b = 0; b < TRAIL_DRAW_BUCKETS; b++) {
+      ctx.globalAlpha = layerA * (1 - (b + 0.5) / TRAIL_DRAW_BUCKETS);
+      var run = false;
+      for (var v = 1; v < n; v++) {
+        if (bk[v] !== b) { if (run) { ctx.stroke(); run = false; } continue; }
+        if (!run) { ctx.beginPath(); ctx.moveTo(wx[v - 1], wy[v - 1]); run = true; }
+        ctx.lineTo(wx[v], wy[v]);
+      }
+      if (run) ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+// ============================================================================
+// 6. GUARDIAN (achievement) — protective halo/shield following the kart. A
+//    faint trail for continuity, then a pulsing radial halo at the head, two
+//    counter-rotating shield arcs, and orbiting guard dots. Reads as a aura the
+//    kart carries, not a streak it leaves.
+// ============================================================================
+function drawGuardianTrail(ctx, verts, color, now, fadeMs, anim) {
+  if (verts.length < 2) return;
+  var T = TUNE.guardian;
+  var head = verts[verts.length - 1];
+  ctx.save();
+  // faint continuity trail
+  ctx.lineCap = "round"; ctx.lineWidth = 3; ctx.strokeStyle = color;
+  var bucketMs = fadeMs / TRAIL_DRAW_BUCKETS;
+  for (var b = 0; b < TRAIL_DRAW_BUCKETS; b++) {
+    ctx.globalAlpha = (1 - (b + 0.5) / TRAIL_DRAW_BUCKETS) * 0.35;
+    var run = false;
+    for (var i = 1; i < verts.length; i++) {
+      var age = now - verts[i].t;
+      var seg = (age >= fadeMs) ? TRAIL_DRAW_BUCKETS : Math.floor(age / bucketMs);
+      if (seg !== b) { if (run) { ctx.stroke(); run = false; } continue; }
+      if (!run) { ctx.beginPath(); ctx.moveTo(verts[i - 1].x, verts[i - 1].y); run = true; }
+      ctx.lineTo(verts[i].x, verts[i].y);
+    }
+    if (run) ctx.stroke();
+  }
+  // pulsing halo — cached unit ring gradient positioned by transform; pulse
+  // modulates brightness via globalAlpha (no per-frame gradient build)
+  var pulse = 0.5 + 0.5 * Math.sin(anim * 0.001 * (2 + T.pulse * 5));
+  var R = T.radius * (0.85 + 0.15 * pulse);
+  ctx.globalAlpha = 0.6 + 0.4 * pulse;
+  ctx.save();
+  ctx.translate(head.x, head.y); ctx.scale(R, R);
+  ctx.fillStyle = haloGrad(ctx, color);
+  ctx.beginPath(); ctx.arc(0, 0, 1, 0, TAU); ctx.fill();
+  ctx.restore();
+  // two counter-rotating shield arcs
+  ctx.lineCap = "round";
+  ctx.strokeStyle = hot(color, 0.25, 1);
+  if (PERF_GLOW) { ctx.shadowColor = color; ctx.shadowBlur = 8; }
+  for (var s = 0; s < 2; s++) {
+    var dir = s === 0 ? 1 : -1;
+    var rot = anim * 0.001 * dir * 1.4;
+    ctx.globalAlpha = 0.55 + 0.25 * pulse;
+    ctx.lineWidth = 2.5;
+    var ar = R * (0.78 + s * 0.12);
+    ctx.beginPath();
+    ctx.arc(head.x, head.y, ar, rot, rot + 1.7);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(head.x, head.y, ar, rot + Math.PI, rot + Math.PI + 1.7);
+    ctx.stroke();
+  }
+  // orbiting guard dots
+  var dots = Math.round(T.dots);
+  if (PERF_GLOW) ctx.shadowBlur = 6;
+  for (var d = 0; d < dots; d++) {
+    var ang = anim * 0.001 * 1.1 + (d / dots) * TAU;
+    var dx = head.x + Math.cos(ang) * R * 0.95;
+    var dy = head.y + Math.sin(ang) * R * 0.95;
+    ctx.globalAlpha = 0.65 + 0.3 * pulse;
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(dx, dy, 2.6, 0, TAU); ctx.fill();
+    ctx.fillStyle = hot(color, 0.7, 1);
+    ctx.beginPath(); ctx.arc(dx, dy, 1.1, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ============================================================================
+// 7. SURVIVOR (achievement) — ember / phoenix persistence. Glowing soft embers
+//    lift off the path and LINGER (their fade is eased so they hold then snuff),
+//    flickering like firelight. Warm hot-cores over the player color so it reads
+//    as living fire while still obeying the color rule.
+// ============================================================================
+function drawSurvivorTrail(ctx, verts, color, now, fadeMs, anim) {
+  if (verts.length < 2) return;
+  var T = TUNE.survivor;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";   // embers bloom where they pile up
+  var step = Math.max(1, Math.floor(verts.length / Math.max(1, T.density)));
+  for (var i = 0; i < verts.length; i += step) {
+    var v = verts[i];
+    var age = now - v.t;
+    var lifeRaw = clamp01(age / fadeMs);
+    // linger easing: hold brightness, then drop off near the end
+    var hold = 0.4 + T.linger * 0.5;            // fraction of life held bright
+    var life = lifeRaw < hold ? lifeRaw * 0.25 / hold : 0.25 + (lifeRaw - hold) / (1 - hold) * 0.75;
+    if (life >= 1) continue;
+    for (var k = 0; k < 2; k++) {
+      var seed = v.t + k * 7193 + i * 2657;
+      var rise = (20 + 70) * (age / 1000) * (0.4 + hash(seed) * 0.8);
+      var sway = Math.sin(age * 0.003 + hash(seed + 1) * 6.283) * 10;
+      var px = v.x + sway + (hash(seed + 2) - 0.5) * 8;
+      var py = v.y - rise;
+      // flicker
+      var flick = 0.55 + 0.45 * Math.sin(anim * 0.001 * (6 + T.flick * 10) + hash(seed + 3) * 6.283);
+      var alpha = clamp01((1 - life)) * (0.4 + 0.6 * flick);
+      if (alpha <= 0.03) continue;
+      var r = T.size * (0.5 + hash(seed + 4) * 0.9) * (0.6 + 0.4 * flick);
+      // soft ember — cached unit gradient (hot core → transparent) positioned by
+      // transform; brightness/flicker ride on globalAlpha (no per-ember build)
+      ctx.globalAlpha = alpha;
+      ctx.save();
+      ctx.translate(px, py); ctx.scale(r, r);
+      ctx.fillStyle = blobGrad(ctx, color);
+      ctx.beginPath(); ctx.arc(0, 0, 1, 0, TAU); ctx.fill();
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+
+// ============================================================================
+// ============  BATCH 2 — 10 more effects (all render in `color`)  ============
+// ============================================================================
+
+// 8. RIBBON — a flat banner streamer that TWISTS. Half-width oscillates along
+//    arc length (edge-on where it flips) and the back face shades toward black,
+//    so it reads as a 3-D ribbon flipping over, not a flat stroke.
+function drawRibbonTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length; if (n < 2) return;
+  var T = TUNE.ribbon;
+  var stride = Math.max(1, Math.floor(n / 60));
+  var idx = []; for (var i = 0; i < n; i += stride) idx.push(i);
+  if (idx[idx.length - 1] !== n - 1) idx.push(n - 1);
+  var m = idx.length;
+  var cum = new Array(n); cum[0] = 0;
+  for (var k = 1; k < n; k++) cum[k] = cum[k - 1] + Math.hypot(verts[k].x - verts[k - 1].x, verts[k].y - verts[k - 1].y);
+  ctx.save(); ctx.lineJoin = "round";
+  var hw = T.width * 0.5;
+  for (var s = 1; s < m; s++) {
+    var i0 = idx[s - 1], i1 = idx[s];
+    var f = ageAlpha(verts[i1].t, now, fadeMs); if (f <= 0.02) continue;
+    var c0 = Math.cos(cum[i0] * (T.twist * 0.01) - anim * 0.004);
+    var c1 = Math.cos(cum[i1] * (T.twist * 0.01) - anim * 0.004);
+    var t0 = tangent(verts, i0), t1 = tangent(verts, i1);
+    var p0 = verts[i0], p1 = verts[i1];
+    var w0 = hw * Math.abs(c0) + 0.6, w1 = hw * Math.abs(c1) + 0.6;
+    ctx.globalAlpha = f * 0.9;
+    ctx.fillStyle = (c0 + c1) < 0 ? dark(color, 0.5, 1) : color;  // back face = darker
+    ctx.beginPath();
+    ctx.moveTo(p0.x - t0.y * w0, p0.y + t0.x * w0);
+    ctx.lineTo(p1.x - t1.y * w1, p1.y + t1.x * w1);
+    ctx.lineTo(p1.x + t1.y * w1, p1.y - t1.x * w1);
+    ctx.lineTo(p0.x + t0.y * w0, p0.y - t0.x * w0);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// 9. LIGHTNING — a jagged electric arc that re-randomizes its zig-zag every
+//    flicker quantum (quantized time → stable WITHIN a frame). Wide faint glow
+//    pass + thin hot core, plus a few short forks. Core fades along its age.
+function drawBoltTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length; if (n < 2) return;
+  var T = TUNE.bolt;
+  var fstep = Math.floor(anim / 55);                 // ~18 flickers/sec
+  var stride = Math.max(1, Math.floor(n / 40));
+  var idx = []; for (var i = 0; i < n; i += stride) idx.push(i);
+  if (idx[idx.length - 1] !== n - 1) idx.push(n - 1);
+  var m = idx.length;
+  var px = new Array(m), py = new Array(m), af = new Array(m);
+  for (var j = 0; j < m; j++) {
+    var ii = idx[j]; af[j] = ageAlpha(verts[ii].t, now, fadeMs);
+    var t = tangent(verts, ii);
+    var endpoint = (j === 0 || j === m - 1) ? 0.15 : 1;   // pin the ends, jitter the middle
+    var jit = (hash(verts[ii].t + fstep * 131 + j * 977) - 0.5) * 2 * T.amp * endpoint;
+    px[j] = verts[ii].x - t.y * jit; py[j] = verts[ii].y + t.x * jit;
+  }
+  ctx.save(); ctx.lineCap = "round"; ctx.lineJoin = "round";
+  if (PERF_GLOW) { ctx.shadowColor = color; ctx.shadowBlur = T.glow; }
+  // glow pass (single wide faint stroke)
+  ctx.strokeStyle = rgba(color, 0.5); ctx.lineWidth = 4; ctx.globalAlpha = 0.55;
+  ctx.beginPath(); ctx.moveTo(px[0], py[0]);
+  for (var s = 1; s < m; s++) ctx.lineTo(px[s], py[s]);
+  ctx.stroke();
+  // hot core, per-segment so the tail fades with age
+  if (PERF_GLOW) ctx.shadowBlur = T.glow * 0.5;
+  ctx.strokeStyle = hot(color, 0.65, 1); ctx.lineWidth = 1.6;
+  for (var c = 1; c < m; c++) {
+    if (af[c] <= 0.04) continue;
+    ctx.globalAlpha = af[c];
+    ctx.beginPath(); ctx.moveTo(px[c - 1], py[c - 1]); ctx.lineTo(px[c], py[c]); ctx.stroke();
+  }
+  // forks
+  var forks = Math.round(T.forks);
+  if (forks > 0) {
+    ctx.lineWidth = 1.1; ctx.strokeStyle = rgba(color, 0.8);
+    var fstepGap = Math.max(2, Math.floor(m / (forks * 2 + 1)));
+    for (var s2 = 2; s2 < m - 1; s2 += fstepGap) {
+      if (af[s2] < 0.3) continue;
+      var t2 = tangent(verts, idx[s2]);
+      var dir = (hash(verts[idx[s2]].t + fstep * 51) < 0.5) ? 1 : -1;
+      var fl = 8 + hash(verts[idx[s2]].t + fstep) * 12;
+      ctx.globalAlpha = af[s2] * 0.7;
+      ctx.beginPath(); ctx.moveTo(px[s2], py[s2]);
+      ctx.lineTo(px[s2] - t2.y * fl * dir + t2.x * fl * 0.4, py[s2] + t2.x * fl * dir + t2.y * fl * 0.4);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+// helper: unit heart path (point down), filled by the caller
+function heartPath(ctx, sz) {
+  ctx.beginPath();
+  ctx.moveTo(0, sz * 0.35);
+  ctx.bezierCurveTo(sz, -sz * 0.3, sz * 0.5, -sz, 0, -sz * 0.25);
+  ctx.bezierCurveTo(-sz * 0.5, -sz, -sz, -sz * 0.3, 0, sz * 0.35);
+  ctx.closePath();
+}
+
+// 10. HEARTS — heart particles that float up off the path, sway, and fade. A
+//     little specular pip keeps them reading as glossy hearts in any color.
+function drawHeartsTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length; if (n < 2) return;
+  var T = TUNE.hearts;
+  var step = Math.max(1, Math.floor(n / T.density));
+  ctx.save();
+  for (var i = 0; i < n; i += step) {
+    var v = verts[i]; var age = now - v.t; var life = clamp01(age / fadeMs); if (life >= 1) continue;
+    var seed = v.t;
+    var rise = 70 * (age / 1000) * (0.4 + hash(seed) * 0.7);
+    var sway = Math.sin(age * 0.002 + hash(seed + 1) * TAU) * 10;
+    var x = v.x + sway + (hash(seed + 2) - 0.5) * 8;
+    var y = v.y - rise;
+    var sz = T.size * (0.6 + hash(seed + 3) * 0.7);
+    var rot = Math.sin(age * 0.002 + hash(seed + 4) * TAU) * 0.4;
+    var alpha = clamp01((1 - life) * 1.2); if (alpha <= 0.03) continue;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.globalAlpha = alpha;
+    ctx.fillStyle = color; heartPath(ctx, sz); ctx.fill();
+    ctx.globalAlpha = alpha * 0.8; ctx.fillStyle = hot(color, 0.6, 1);
+    ctx.beginPath(); ctx.arc(-sz * 0.22, -sz * 0.32, sz * 0.14, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+// 11. SMOKE — soft puffs that billow OUTWARD (radius grows with age) and drift
+//     up as they thin to nothing. Uses the cached puff gradient (no hot core).
+function drawSmokeTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length; if (n < 2) return;
+  var T = TUNE.smoke;
+  var step = Math.max(1, Math.floor(n / T.density));
+  ctx.save();
+  for (var i = 0; i < n; i += step) {
+    var v = verts[i]; var age = now - v.t; var life = clamp01(age / fadeMs); if (life >= 1) continue;
+    for (var k = 0; k < 2; k++) {
+      var seed = v.t + k * 5333;
+      var rise = 55 * (age / 1000) * (0.4 + hash(seed) * 0.8);
+      var drift = Math.sin(age * 0.0015 + hash(seed + 1) * TAU) * 12;
+      var x = v.x + drift + (hash(seed + 2) - 0.5) * 10;
+      var y = v.y - rise;
+      var r = T.size * (0.4 + life * 1.7) * (0.6 + hash(seed + 3) * 0.6);
+      var alpha = clamp01(1 - life) * 0.35 * (0.5 + hash(seed + 4) * 0.6);
+      if (alpha <= 0.02) continue;
+      ctx.globalAlpha = alpha;
+      ctx.save(); ctx.translate(x, y); ctx.scale(r, r);
+      ctx.fillStyle = puffGrad(ctx, color);
+      ctx.beginPath(); ctx.arc(0, 0, 1, 0, TAU); ctx.fill();
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+
+// 12. CONFETTI — little rectangles that tumble (Y-squash on spin) and flutter
+//     downward off the path. Alternating bright/base shade for sparkle.
+function drawConfettiTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length; if (n < 2) return;
+  var T = TUNE.confetti;
+  var step = Math.max(1, Math.floor(n / T.density));
+  ctx.save();
+  for (var i = 0; i < n; i += step) {
+    var v = verts[i]; var age = now - v.t; var life = clamp01(age / fadeMs); if (life >= 1) continue;
+    for (var k = 0; k < 2; k++) {
+      var seed = v.t + k * 8101;
+      var fall = 50 * (age / 1000) * (0.5 + hash(seed) * 0.9);
+      var sway = Math.sin(age * 0.003 + hash(seed + 1) * TAU) * 14;
+      var x = v.x + sway + (hash(seed + 2) - 0.5) * 12;
+      var y = v.y + fall - 6;
+      var w = T.size * (0.6 + hash(seed + 3) * 0.8), h = w * 0.5;
+      var spin = anim * 0.001 * (T.spin * 0.06) + hash(seed + 4) * TAU;
+      var squash = Math.abs(Math.cos(spin * 2)) * 0.8 + 0.2;   // tumble
+      var alpha = clamp01((1 - life) * 1.2); if (alpha <= 0.03) continue;
+      ctx.save(); ctx.translate(x, y); ctx.rotate(spin); ctx.scale(1, squash);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = (k % 2 === 0) ? color : hot(color, 0.5, 1);
+      ctx.fillRect(-w / 2, -h / 2, w, h);
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+
+// 13. CRYSTALS — 6-point snow/ice crystals that rotate and drift down. Drawn as
+//     three crossed spokes with branch ticks + a bright centre; distinct from
+//     Sparkle (4-point, twinkles in place) and Survivor (soft blobs).
+function drawSnowTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length; if (n < 2) return;
+  var T = TUNE.snow;
+  var step = Math.max(1, Math.floor(n / T.density));
+  ctx.save(); ctx.lineCap = "round";
+  for (var i = 0; i < n; i += step) {
+    var v = verts[i]; var age = now - v.t; var life = clamp01(age / fadeMs); if (life >= 1) continue;
+    var seed = v.t;
+    var fall = 28 * (age / 1000) * (0.5 + hash(seed) * 0.7);
+    var sway = Math.sin(age * 0.0016 + hash(seed + 1) * TAU) * 12;
+    var x = v.x + sway + (hash(seed + 2) - 0.5) * 8;
+    var y = v.y + fall - 4;
+    var sz = T.size * (0.6 + hash(seed + 3) * 0.6);
+    var rot = anim * 0.001 * (T.spin * 0.04) * (hash(seed + 4) < 0.5 ? 1 : -1) + hash(seed + 5) * TAU;
+    var alpha = clamp01((1 - life) * 1.2); if (alpha <= 0.03) continue;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.globalAlpha = alpha;
+    ctx.strokeStyle = color; ctx.lineWidth = Math.max(0.8, sz * 0.12);
+    for (var a = 0; a < 3; a++) {
+      ctx.rotate(Math.PI / 3);
+      ctx.beginPath();
+      ctx.moveTo(-sz, 0); ctx.lineTo(sz, 0);
+      ctx.moveTo(sz * 0.55, 0); ctx.lineTo(sz * 0.4, sz * 0.18);
+      ctx.moveTo(sz * 0.55, 0); ctx.lineTo(sz * 0.4, -sz * 0.18);
+      ctx.moveTo(-sz * 0.55, 0); ctx.lineTo(-sz * 0.4, sz * 0.18);
+      ctx.moveTo(-sz * 0.55, 0); ctx.lineTo(-sz * 0.4, -sz * 0.18);
+      ctx.stroke();
+    }
+    ctx.fillStyle = hot(color, 0.5, 1);
+    ctx.beginPath(); ctx.arc(0, 0, sz * 0.16, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+// 14. TIRE TRACKS — two offset rails (age-bucketed like the basic trail) with
+//     cross-tread ticks marched at a constant arc-length spacing. Reads as skid
+//     marks the kart leaves behind.
+function drawTracksTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length; if (n < 2) return;
+  var T = TUNE.tracks;
+  var gauge = T.gauge;
+  ctx.save(); ctx.strokeStyle = color; ctx.lineCap = "butt";
+  var bucketMs = fadeMs / TRAIL_DRAW_BUCKETS;
+  for (var rail = -1; rail <= 1; rail += 2) {
+    ctx.lineWidth = 2.4;
+    for (var b = 0; b < TRAIL_DRAW_BUCKETS; b++) {
+      ctx.globalAlpha = (1 - (b + 0.5) / TRAIL_DRAW_BUCKETS) * 0.8;
+      var run = false;
+      for (var i = 1; i < n; i++) {
+        var age = now - verts[i].t; var seg = (age >= fadeMs) ? TRAIL_DRAW_BUCKETS : Math.floor(age / bucketMs);
+        if (seg !== b) { if (run) { ctx.stroke(); run = false; } continue; }
+        var t0 = tangent(verts, i - 1), t1 = tangent(verts, i);
+        if (!run) { ctx.beginPath(); ctx.moveTo(verts[i - 1].x - t0.y * gauge * rail, verts[i - 1].y + t0.x * gauge * rail); run = true; }
+        ctx.lineTo(verts[i].x - t1.y * gauge * rail, verts[i].y + t1.x * gauge * rail);
+      }
+      if (run) ctx.stroke();
+    }
+  }
+  // tread ticks at constant arc-length spacing
+  var cum = 0, nextTick = 0;
+  ctx.lineWidth = 2;
+  for (var j = 1; j < n; j++) {
+    cum += Math.hypot(verts[j].x - verts[j - 1].x, verts[j].y - verts[j - 1].y);
+    if (cum < nextTick) continue;
+    nextTick = cum + T.tread;
+    var f = ageAlpha(verts[j].t, now, fadeMs); if (f <= 0.05) continue;
+    var t = tangent(verts, j);
+    ctx.globalAlpha = f * 0.7;
+    ctx.beginPath();
+    ctx.moveTo(verts[j].x - t.y * (gauge + 2), verts[j].y + t.x * (gauge + 2));
+    ctx.lineTo(verts[j].x + t.y * (gauge + 2), verts[j].y - t.x * (gauge + 2));
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// helper: unit eighth-note glyph (head + stem + flag), filled by the caller
+function noteGlyph(ctx, sz) {
+  ctx.beginPath(); ctx.ellipse(0, 0, sz * 0.55, sz * 0.4, -0.4, 0, TAU); ctx.fill();
+  ctx.fillRect(sz * 0.36, -sz * 1.7, sz * 0.16, sz * 1.7);
+  ctx.beginPath();
+  ctx.moveTo(sz * 0.52, -sz * 1.7);
+  ctx.quadraticCurveTo(sz * 1.2, -sz * 1.35, sz * 0.52, -sz * 0.8);
+  ctx.quadraticCurveTo(sz * 0.9, -sz * 1.25, sz * 0.52, -sz * 1.35);
+  ctx.closePath(); ctx.fill();
+}
+
+// 15. MUSIC NOTES — note glyphs that float up, sway and rock as they fade.
+function drawNotesTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length; if (n < 2) return;
+  var T = TUNE.notes;
+  var step = Math.max(1, Math.floor(n / T.density));
+  ctx.save();
+  for (var i = 0; i < n; i += step) {
+    var v = verts[i]; var age = now - v.t; var life = clamp01(age / fadeMs); if (life >= 1) continue;
+    var seed = v.t;
+    var rise = 75 * (age / 1000) * (0.4 + hash(seed) * 0.7);
+    var sway = Math.sin(age * 0.0022 + hash(seed + 1) * TAU) * 12;
+    var x = v.x + sway + (hash(seed + 2) - 0.5) * 8;
+    var y = v.y - rise;
+    var sz = T.size * (0.7 + hash(seed + 3) * 0.6);
+    var rot = Math.sin(age * 0.0022 + hash(seed + 4) * TAU) * 0.35;
+    var alpha = clamp01((1 - life) * 1.2); if (alpha <= 0.03) continue;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.globalAlpha = alpha;
+    ctx.fillStyle = color; noteGlyph(ctx, sz);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+// 16. NEON WALL — a crisp CONSTANT-width light ribbon (lightcycle wall): faint
+//     wide body + bright hot core, both age-bucketed. No taper, unlike Comet.
+function drawNeonTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length; if (n < 2) return;
+  var T = TUNE.neon;
+  var bucketMs = fadeMs / TRAIL_DRAW_BUCKETS;
+  ctx.save(); ctx.lineCap = "round"; ctx.lineJoin = "round";
+  if (PERF_GLOW) { ctx.shadowColor = color; ctx.shadowBlur = T.glow; }
+  function strokeBuckets(width, style) {
+    ctx.lineWidth = width; ctx.strokeStyle = style;
+    for (var b = 0; b < TRAIL_DRAW_BUCKETS; b++) {
+      ctx.globalAlpha = (1 - (b + 0.5) / TRAIL_DRAW_BUCKETS);
+      var run = false;
+      for (var i = 1; i < n; i++) {
+        var age = now - verts[i].t; var seg = (age >= fadeMs) ? TRAIL_DRAW_BUCKETS : Math.floor(age / bucketMs);
+        if (seg !== b) { if (run) { ctx.stroke(); run = false; } continue; }
+        if (!run) { ctx.beginPath(); ctx.moveTo(verts[i - 1].x, verts[i - 1].y); run = true; }
+        ctx.lineTo(verts[i].x, verts[i].y);
+      }
+      if (run) ctx.stroke();
+    }
+  }
+  strokeBuckets(T.width, rgba(color, 0.32));                    // wide faint body
+  if (PERF_GLOW) ctx.shadowBlur = T.glow * 0.4;
+  strokeBuckets(Math.max(1.5, T.width * 0.28), hot(color, 0.7, 1)); // bright core
+  ctx.restore();
+}
+
+// 17. RIPPLES — a sonar ring is dropped at points along the path; each ring
+//     expands and fades over its own vertex's lifetime, so fresh = small/bright,
+//     old = wide/faint. Bright pip marks the kart.
+function drawRippleTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length; if (n < 2) return;
+  var T = TUNE.ripple;
+  ctx.save();
+  if (PERF_GLOW) { ctx.shadowColor = color; ctx.shadowBlur = T.glow; }
+  ctx.strokeStyle = color;
+  var step = Math.max(1, Math.floor(n / T.spacing));
+  for (var i = 0; i < n; i += step) {
+    var v = verts[i]; var life = clamp01((now - v.t) / fadeMs); if (life >= 1) continue;
+    var R = 4 + life * 46;
+    var alpha = clamp01(1 - life) * 0.8; if (alpha <= 0.03) continue;
+    ctx.globalAlpha = alpha; ctx.lineWidth = Math.max(1, 2.5 * (1 - life));
+    ctx.beginPath(); ctx.arc(v.x, v.y, R, 0, TAU); ctx.stroke();
+  }
+  var head = verts[n - 1];
+  ctx.globalAlpha = 0.9; ctx.fillStyle = hot(color, 0.5, 1);
+  ctx.beginPath(); ctx.arc(head.x, head.y, 2.4, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+// ============================================================================
+// ---- prototype harness: cells, each a kart auto-driving a looping path -------
+// ============================================================================
+var PALETTE = ["#e6194B","#3cb44b","#ffe119","#4363d8","#f58231","#911eb4",
+  "#42d4f4","#f032e6","#bfef45","#fabed4","#469990","#dcbeff","#9A6324",
+  "#fffac8","#800000","#aaffc3","#808000","#ffd8b1","#000075","#8A8A8A","#ffffff"];
+
+var CELLS = [
+  { id:"basic",    label:"Basic (default)",        fn:drawBasicTrail,    shape:"fig8"   },
+  { id:"dashes",   label:"Dashes — Lv4",           fn:drawDashesTrail,   shape:"circle" },
+  { id:"sparkle",  label:"Sparkle — Lv10",         fn:drawSparkleTrail,  shape:"loop"   },
+  { id:"comet",    label:"Comet — Lv16",           fn:drawCometTrail,    shape:"fig8"   },
+  { id:"bubbles",  label:"Bubbles — Lv22",         fn:drawBubblesTrail,  shape:"circle" },
+  { id:"aurora",   label:"Aurora — Lv28",          fn:drawAuroraTrail,   shape:"loop"   },
+  { id:"guardian", label:"Guardian — achievement", fn:drawGuardianTrail, shape:"circle" },
+  { id:"survivor", label:"Survivor — achievement", fn:drawSurvivorTrail, shape:"fig8"   },
+  // --- batch 2 (10 more) ---
+  { id:"ribbon",   label:"Ribbon",       fn:drawRibbonTrail,   shape:"fig8"   },
+  { id:"bolt",     label:"Lightning",    fn:drawBoltTrail,     shape:"circle" },
+  { id:"hearts",   label:"Hearts",       fn:drawHeartsTrail,   shape:"loop"   },
+  { id:"smoke",    label:"Smoke",        fn:drawSmokeTrail,    shape:"fig8"   },
+  { id:"confetti", label:"Confetti",     fn:drawConfettiTrail, shape:"circle" },
+  { id:"snow",     label:"Crystals",     fn:drawSnowTrail,     shape:"loop"   },
+  { id:"tracks",   label:"Tire Tracks",  fn:drawTracksTrail,   shape:"fig8"   },
+  { id:"notes",    label:"Music Notes",  fn:drawNotesTrail,    shape:"loop"   },
+  { id:"neon",     label:"Neon Wall",    fn:drawNeonTrail,     shape:"circle" },
+  { id:"ripple",   label:"Ripples",      fn:drawRippleTrail,   shape:"loop"   }
+];
+
+var canvas = document.getElementById("stage");
+var ctx = canvas.getContext("2d");
+// grid sizes to the cell count; canvas is native-res (page scrolls) so cells
+// stay legible rather than being squished to one screen.
+var COLS = 4;
+var ROWS = Math.ceil(CELLS.length / COLS);
+var CELLH = 300;
+canvas.width = 1120;
+canvas.height = ROWS * CELLH;
+var cellW = canvas.width / COLS, cellH = CELLH;
+
+// each cell carries its own trail buffer + path phase
+CELLS.forEach(function (cell, idx) {
+  cell.verts = [];
+  cell.phase = idx * 0.9;
+  cell.col = idx % COLS; cell.row = Math.floor(idx / COLS);
+});
+
+var state = {
+  color: "#42d4f4",
+  speed: 100,
+  fadeMs: 5000,
+  running: true,
+  showPath: false,
+  simTime: 0
+};
+
+// path within a cell, centered, returns {x,y} in cell-local coords
+function pathPoint(shape, cx, cy, rx, ry, u) {
+  if (shape === "fig8") return { x: cx + Math.sin(u) * rx, y: cy + Math.sin(u * 2) * ry * 0.6 };
+  if (shape === "loop") return { x: cx + Math.cos(u) * rx + Math.cos(u * 3) * rx * 0.18,
+                                 y: cy + Math.sin(u) * ry + Math.sin(u * 2) * ry * 0.22 };
+  return { x: cx + Math.cos(u) * rx, y: cy + Math.sin(u) * ry }; // circle
+}
+
+function drawKart(cx, cy, ang, color) {
+  ctx.save();
+  ctx.translate(cx, cy); ctx.rotate(ang);
+  ctx.fillStyle = color;
+  ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(9, 0); ctx.lineTo(-6, -6); ctx.lineTo(-3, 0); ctx.lineTo(-6, 6);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.restore();
+}
+
+var lastTs = null;
+var fpsEl = document.getElementById("fps");
+var fpsAccum = 0, fpsFrames = 0, fpsEma = 0;
+function frame(ts) {
+  if (lastTs == null) lastTs = ts;
+  var dt = ts - lastTs; lastTs = ts;
+  if (state.running) state.simTime += dt;
+  // rolling FPS (EMA over ~0.5s) so the operator can see the perf pass effect
+  if (dt > 0) { fpsEma = fpsEma ? fpsEma * 0.9 + (1000 / dt) * 0.1 : 1000 / dt; }
+  fpsAccum += dt; fpsFrames++;
+  if (fpsAccum >= 250) { fpsEl.textContent = Math.round(fpsEma); fpsAccum = 0; fpsFrames = 0; }
+  var now = state.simTime;
+  var anim = now;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  CELLS.forEach(function (cell) {
+    var ox = cell.col * cellW, oy = cell.row * cellH;
+    var cx = cellW / 2, cy = cellH / 2 + 8;
+    var rx = cellW * 0.30, ry = cellH * 0.26;
+
+    // advance kart, push vertex
+    var u = now * 0.001 * (state.speed / 100) * 1.1 + cell.phase;
+    var p = pathPoint(cell.shape, cx, cy, rx, ry, u);
+    var prev = cell.verts[cell.verts.length - 1];
+    if (prev == null || Math.hypot(p.x - prev.x, p.y - prev.y) > 2.0 || (now - prev.t) > 40) {
+      cell.verts.push({ x: p.x, y: p.y, t: now });
+    }
+    // expire
+    while (cell.verts.length > 0 && now - cell.verts[0].t > state.fadeMs) cell.verts.shift();
+
+    ctx.save();
+    ctx.translate(ox, oy);
+    // cell frame + label
+    ctx.strokeStyle = "rgba(255,255,255,0.06)";
+    ctx.strokeRect(2, 2, cellW - 4, cellH - 4);
+    // clip to the cell so rising particles (bubbles/embers) don't bleed into the
+    // neighbouring cell — prototype-grid concern only; in-game there is no cell.
+    ctx.beginPath(); ctx.rect(2, 2, cellW - 4, cellH - 4); ctx.clip();
+    ctx.fillStyle = "rgba(231,236,245,0.75)";
+    ctx.font = "12px system-ui, sans-serif";
+    ctx.fillText(cell.label, 10, 18);
+
+    if (state.showPath && cell.verts.length > 1) {
+      ctx.save(); ctx.strokeStyle = "rgba(255,255,255,0.18)"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(cell.verts[0].x, cell.verts[0].y);
+      for (var i = 1; i < cell.verts.length; i++) ctx.lineTo(cell.verts[i].x, cell.verts[i].y);
+      ctx.stroke(); ctx.restore();
+    }
+
+    // the trail effect (renders in player color)
+    if (cell.verts.length > 1) cell.fn(ctx, cell.verts, state.color, now, state.fadeMs, anim);
+
+    // kart on top
+    var head = cell.verts[cell.verts.length - 1];
+    if (head) {
+      var pNext = pathPoint(cell.shape, cx, cy, rx, ry, u + 0.02);
+      var ang = Math.atan2(pNext.y - head.y, pNext.x - head.x);
+      drawKart(head.x, head.y, ang, state.color);
+    }
+    ctx.restore();
+  });
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ---- UI wiring -------------------------------------------------------------
+var sw = document.getElementById("swatches");
+PALETTE.forEach(function (col) {
+  var d = document.createElement("div");
+  d.className = "swatch" + (col === state.color ? " active" : "");
+  d.style.background = col; d.title = col;
+  d.addEventListener("click", function () {
+    state.color = col;
+    document.getElementById("customColor").value = col;
+    [].forEach.call(sw.children, function (c) { c.classList.remove("active"); });
+    d.classList.add("active");
+  });
+  sw.appendChild(d);
+});
+document.getElementById("customColor").addEventListener("input", function (e) {
+  state.color = e.target.value;
+  [].forEach.call(sw.children, function (c) { c.classList.remove("active"); });
+});
+
+document.getElementById("run").addEventListener("change", function (e) { state.running = e.target.checked; });
+document.getElementById("showPath").addEventListener("change", function (e) { state.showPath = e.target.checked; });
+document.getElementById("glow").addEventListener("change", function (e) { PERF_GLOW = e.target.checked; });
+
+function bindSlider(id, apply) {
+  var el = document.getElementById(id);
+  var vEl = document.getElementById(id + "V");
+  function upd() { apply(parseFloat(el.value)); if (vEl) vEl.textContent = el.value; }
+  el.addEventListener("input", upd); upd();
+}
+bindSlider("g_speed", function (v) { state.speed = v; });
+bindSlider("g_fade",  function (v) { state.fadeMs = v * 100; });   // 20..90 → 2..9s
+bindSlider("da_dash", function (v) { TUNE.dashes.dash = v; });
+bindSlider("da_gap",  function (v) { TUNE.dashes.gap = v; });
+bindSlider("da_w",    function (v) { TUNE.dashes.width = v; });
+bindSlider("sp_dens", function (v) { TUNE.sparkle.density = v; });
+bindSlider("sp_size", function (v) { TUNE.sparkle.size = v; });
+bindSlider("sp_tw",   function (v) { TUNE.sparkle.twinkle = v / 100; });
+bindSlider("sp_spread", function (v) { TUNE.sparkle.spread = v; });
+bindSlider("co_w",    function (v) { TUNE.comet.width = v; });
+bindSlider("co_glow", function (v) { TUNE.comet.glow = v; });
+bindSlider("co_taper",function (v) { TUNE.comet.taper = v / 100; });
+bindSlider("bu_dens", function (v) { TUNE.bubbles.density = v; });
+bindSlider("bu_size", function (v) { TUNE.bubbles.size = v; });
+bindSlider("bu_rise", function (v) { TUNE.bubbles.rise = v / 100; });
+bindSlider("au_amp",  function (v) { TUNE.aurora.amp = v; });
+bindSlider("au_freq", function (v) { TUNE.aurora.freq = v; });
+bindSlider("au_glow", function (v) { TUNE.aurora.glow = v; });
+bindSlider("au_bands",function (v) { TUNE.aurora.bands = v; });
+bindSlider("gu_r",    function (v) { TUNE.guardian.radius = v; });
+bindSlider("gu_pulse",function (v) { TUNE.guardian.pulse = v / 100; });
+bindSlider("gu_dots", function (v) { TUNE.guardian.dots = v; });
+bindSlider("su_dens", function (v) { TUNE.survivor.density = v; });
+bindSlider("su_size", function (v) { TUNE.survivor.size = v; });
+bindSlider("su_flick",function (v) { TUNE.survivor.flick = v / 100; });
+bindSlider("su_linger",function (v) { TUNE.survivor.linger = v / 100; });
+// --- batch 2 ---
+bindSlider("ri_w",    function (v) { TUNE.ribbon.width = v; });
+bindSlider("ri_tw",   function (v) { TUNE.ribbon.twist = v; });
+bindSlider("bo_amp",  function (v) { TUNE.bolt.amp = v; });
+bindSlider("bo_glow", function (v) { TUNE.bolt.glow = v; });
+bindSlider("bo_forks",function (v) { TUNE.bolt.forks = v; });
+bindSlider("he_dens", function (v) { TUNE.hearts.density = v; });
+bindSlider("he_size", function (v) { TUNE.hearts.size = v; });
+bindSlider("sm_dens", function (v) { TUNE.smoke.density = v; });
+bindSlider("sm_size", function (v) { TUNE.smoke.size = v; });
+bindSlider("cf_dens", function (v) { TUNE.confetti.density = v; });
+bindSlider("cf_size", function (v) { TUNE.confetti.size = v; });
+bindSlider("cf_spin", function (v) { TUNE.confetti.spin = v; });
+bindSlider("cr_dens", function (v) { TUNE.snow.density = v; });
+bindSlider("cr_size", function (v) { TUNE.snow.size = v; });
+bindSlider("cr_spin", function (v) { TUNE.snow.spin = v; });
+bindSlider("tr_gauge",function (v) { TUNE.tracks.gauge = v; });
+bindSlider("tr_tread",function (v) { TUNE.tracks.tread = v; });
+bindSlider("no_dens", function (v) { TUNE.notes.density = v; });
+bindSlider("no_size", function (v) { TUNE.notes.size = v; });
+bindSlider("ne_w",    function (v) { TUNE.neon.width = v; });
+bindSlider("ne_glow", function (v) { TUNE.neon.glow = v; });
+bindSlider("rp_space",function (v) { TUNE.ripple.spacing = v; });
+bindSlider("rp_glow", function (v) { TUNE.ripple.glow = v; });
+
+document.getElementById("reset").addEventListener("click", function () {
+  location.reload();
+});
+</script>
+</body>
+</html>

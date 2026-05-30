@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>chaochao — Border cosmetics prototype</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #10131a; color: #e7ecf3;
+    font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  header { padding: 14px 18px 6px; }
+  h1 { font-size: 17px; margin: 0 0 2px; }
+  .sub { color: #8b93a3; font-size: 12px; }
+  .bar {
+    display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start;
+    padding: 8px 18px 12px; border-bottom: 1px solid #222936;
+  }
+  .group { display: flex; flex-direction: column; gap: 6px; }
+  .group > .label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #7b8494; }
+  .swatches { display: flex; gap: 6px; align-items: center; }
+  .swatch {
+    width: 26px; height: 26px; border-radius: 6px; cursor: pointer;
+    border: 2px solid transparent; padding: 0;
+  }
+  .swatch.active { border-color: #fff; box-shadow: 0 0 0 1px #000; }
+  input[type=color] { width: 34px; height: 26px; border: none; background: none; padding: 0; cursor: pointer; }
+  .toggles { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  label.chk { display: flex; gap: 5px; align-items: center; cursor: pointer; font-size: 12px; color: #c4cad6; }
+  .fps { font-variant-numeric: tabular-nums; font-size: 12px; color: #9aa3b2; }
+  .fps b { color: #6ee7a0; font-size: 15px; }
+  .fps.warn b { color: #ffcf5f; }
+  .fps.bad b { color: #ff7a7a; }
+  .sliders { display: flex; flex-wrap: wrap; gap: 12px 22px; padding: 10px 18px; border-bottom: 1px solid #222936; }
+  .slider { display: flex; flex-direction: column; gap: 2px; min-width: 150px; }
+  .slider .label { font-size: 11px; color: #9aa3b2; display: flex; justify-content: space-between; }
+  .slider input { width: 100%; }
+  canvas { display: block; margin: 0 auto; max-width: 100%; }
+  .hint { color: #6f7889; font-size: 11px; padding: 6px 18px 18px; }
+  code { background: #1b212c; padding: 1px 5px; border-radius: 4px; color: #b6c2d6; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Border cosmetics — rim overlay prototype</h1>
+  <div class="sub">18 borders drawn AROUND the kart rim (never over the body). Each tints to the player color and composes on the plain sphere + a detailed cart. Kart rotates slowly.</div>
+</header>
+
+<div class="bar">
+  <div class="group">
+    <div class="label">Player color (re-tints borders + carts)</div>
+    <div class="swatches" id="swatches"></div>
+  </div>
+  <div class="group">
+    <div class="label">View</div>
+    <div class="toggles">
+      <label class="chk"><input type="checkbox" id="tBg" checked> map backdrop</label>
+      <label class="chk"><input type="checkbox" id="tSpin" checked> rotate karts</label>
+      <label class="chk"><input type="checkbox" id="tLabels" checked> labels</label>
+    </div>
+  </div>
+  <div class="group">
+    <div class="label">Perf (draw-loop CPU — immune to tab throttling)</div>
+    <div class="fps" id="fps"><b id="ms">—</b> ms draw · <span id="per">—</span> µs/painter · <span id="calls">—</span> calls/frame</div>
+  </div>
+</div>
+
+<div class="sliders" id="sliders"></div>
+
+<canvas id="cv" width="1180" height="640"></canvas>
+<div class="hint">Each border shown over <b>plain sphere</b> (top) and <b>detailed truck</b> (bottom). Crank <b>Stress</b> to redraw every border N× per frame (simulates many karts on screen) and watch the FPS / ms hold. Approved painters live at the bottom of this file's <code>&lt;script&gt;</code> and in <code>borders.painters.js</code>.</div>
+
+<script>
+// ============================================================================
+//  Helpers mirrored from client/scripts/draw.js so painters are copy-paste ready
+// ============================================================================
+var _rgbCache = {};
+function cartSkinRGB(color) {
+  if (_rgbCache[color] != null) return _rgbCache[color];
+  var c = document.createElement("canvas"); c.width = c.height = 1;
+  var cx = c.getContext("2d");
+  cx.fillStyle = "#000"; cx.fillStyle = color;
+  cx.fillRect(0, 0, 1, 1);
+  var d = cx.getImageData(0, 0, 1, 1).data;
+  var rgb = { r: d[0], g: d[1], b: d[2] };
+  _rgbCache[color] = rgb; return rgb;
+}
+function cartSkinShade(color, amt) {
+  var c = cartSkinRGB(color);
+  var t = amt < 0 ? 0 : 255;
+  var f = amt < 0 ? -amt : amt;
+  return "rgb(" + Math.round(c.r + (t - c.r) * f) + "," +
+    Math.round(c.g + (t - c.g) * f) + "," + Math.round(c.b + (t - c.b) * f) + ")";
+}
+function cartSkinRGBA(color, a) {
+  var c = cartSkinRGB(color);
+  return "rgba(" + c.r + "," + c.g + "," + c.b + "," + a + ")";
+}
+var TAU = Math.PI * 2;
+
+// ============================================================================
+//  Sample karts (copied/condensed from draw.js) — the border's "backdrop"
+// ============================================================================
+function cartRoundRectPath(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y); ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r); ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h); ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r); ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+function drawPlainSphere(ctx, anim, paint) {
+  paint = paint || "#cf3030";
+  var g = ctx.createRadialGradient(-0.3, -0.3, 0.1, 0, 0, 1);
+  g.addColorStop(0, cartSkinShade(paint, 0.4));
+  g.addColorStop(1, cartSkinShade(paint, -0.15));
+  ctx.beginPath(); ctx.arc(0, 0, 0.95, 0, TAU);
+  ctx.fillStyle = g; ctx.fill();
+  ctx.lineWidth = 0.05; ctx.strokeStyle = cartSkinShade(paint, -0.4); ctx.stroke();
+}
+function drawTruckSkin(ctx, anim, paint) {
+  paint = paint || "#c0182b";
+  var wheelR = 0.32;
+  var wheels = [[0.46, 0.6], [0.46, -0.6], [-0.46, 0.6], [-0.46, -0.6]];
+  for (var i = 0; i < wheels.length; i++) {
+    ctx.save(); ctx.translate(wheels[i][0], wheels[i][1]);
+    ctx.beginPath(); ctx.arc(0, 0, wheelR, 0, TAU);
+    ctx.fillStyle = "#1a1a1a"; ctx.fill();
+    ctx.rotate(anim * 3); ctx.strokeStyle = "#666"; ctx.lineWidth = 0.05;
+    for (var s = 0; s < 4; s++) {
+      var a = (s * Math.PI) / 2;
+      ctx.beginPath(); ctx.moveTo(0, 0);
+      ctx.lineTo(Math.cos(a) * wheelR * 0.8, Math.sin(a) * wheelR * 0.8); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  ctx.save();
+  cartRoundRectPath(ctx, -0.74, -0.5, 1.48, 1.0, 0.2); ctx.clip();
+  ctx.fillStyle = paint; ctx.fillRect(-0.85, -0.6, 1.7, 1.2);
+  ctx.restore();
+  ctx.fillStyle = "rgba(190,230,255,0.85)";
+  cartRoundRectPath(ctx, 0.26, -0.3, 0.34, 0.6, 0.08); ctx.fill();
+  ctx.strokeStyle = "rgba(0,0,0,0.55)"; ctx.lineWidth = 0.07;
+  cartRoundRectPath(ctx, -0.74, -0.5, 1.48, 1.0, 0.2); ctx.stroke();
+}
+
+// ============================================================================
+//  Tunable params (driven by sliders)
+// ============================================================================
+var P = {
+  ringThickness: 0.12,
+  studCount: 12,
+  dashCount: 10,
+  glowRadius: 0.35,
+  spikeLen: 0.34,
+  spikeCount: 14,
+  gearTeeth: 14,
+  spinSpeed: 1.0,
+  stress: 1,
+};
+
+// ============================================================================
+//  BORDER PAINTERS  — drawXxxBorder(ctx, anim, paint)
+//  Normalized space: radius == 1 == kart rim, forward = +X.
+//  Draw AT/OUTSIDE the rim (~1.0 .. ~1.4). NEVER fill interior (r < ~0.9).
+//
+//  PERF CONTRACT (this pass): NO gradient/object allocation inside element
+//  loops; same-style elements share ONE path + ONE fill/stroke; no per-element
+//  save/restore; invariant shade strings hoisted above loops. Matches the
+//  flat-shade style of drawFiretruckSkin / drawDinoSkin in draw.js.
+// ============================================================================
+
+// 1. ring — 3 concentric strokes, no loop, no allocation.
+function drawRingBorder(ctx, anim, paint) {
+  paint = paint || "#cf3030";
+  var t = P.ringThickness;
+  var mid = 1.0 + t * 0.5;
+  ctx.beginPath(); ctx.arc(0, 0, mid, 0, TAU);
+  ctx.lineWidth = t; ctx.strokeStyle = paint; ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, mid + t * 0.5, 0, TAU);
+  ctx.lineWidth = t * 0.22; ctx.strokeStyle = cartSkinShade(paint, -0.45); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, mid - t * 0.42, 0, TAU);
+  ctx.lineWidth = t * 0.2; ctx.strokeStyle = cartSkinShade(paint, 0.5); ctx.stroke();
+}
+
+// 2. studs — riveted band. Bodies batched (1 fill+1 stroke), catchlights batched (1 fill).
+function drawStudsBorder(ctx, anim, paint) {
+  paint = paint || "#cf3030";
+  var r = 1.06, n = Math.max(4, Math.round(P.studCount));
+  var band = cartSkinShade(paint, -0.2);
+  var body = cartSkinShade(paint, 0.1);
+  var edge = cartSkinShade(paint, -0.5);
+  var hi = cartSkinShade(paint, 0.6);
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU);
+  ctx.lineWidth = 0.1; ctx.strokeStyle = band; ctx.stroke();
+  ctx.beginPath();
+  for (var i = 0; i < n; i++) {
+    var a = (i / n) * TAU, x = Math.cos(a) * r, y = Math.sin(a) * r;
+    ctx.moveTo(x + 0.075, y); ctx.arc(x, y, 0.075, 0, TAU);
+  }
+  ctx.fillStyle = body; ctx.fill();
+  ctx.lineWidth = 0.018; ctx.strokeStyle = edge; ctx.stroke();
+  ctx.beginPath();
+  for (var j = 0; j < n; j++) {
+    var a2 = (j / n) * TAU, x2 = Math.cos(a2) * r - 0.022, y2 = Math.sin(a2) * r - 0.022;
+    ctx.moveTo(x2 + 0.03, y2); ctx.arc(x2, y2, 0.03, 0, TAU);
+  }
+  ctx.fillStyle = hi; ctx.fill();
+}
+
+// 3. dashed — rotating dashes; batched into two paths by parity (2 strokes total).
+function drawDashedBorder(ctx, anim, paint) {
+  paint = paint || "#cf3030";
+  var r = 1.08, n = Math.max(3, Math.round(P.dashCount));
+  var spin = anim * 0.6 * P.spinSpeed;
+  var arc = (TAU / n) * 0.55;
+  var alt = cartSkinShade(paint, 0.35);
+  ctx.lineWidth = 0.12; ctx.lineCap = "round";
+  for (var pass = 0; pass < 2; pass++) {
+    ctx.beginPath();
+    for (var i = pass; i < n; i += 2) {
+      var a0 = spin + (i / n) * TAU;
+      ctx.moveTo(Math.cos(a0) * r, Math.sin(a0) * r);
+      ctx.arc(0, 0, r, a0, a0 + arc);
+    }
+    ctx.strokeStyle = pass === 0 ? paint : alt; ctx.stroke();
+  }
+  ctx.lineCap = "butt";
+}
+
+// 4. glow — soft pulsing aura. One whole-kart gradient per call (not per element).
+function drawGlowBorder(ctx, anim, paint) {
+  paint = paint || "#cf3030";
+  var pulse = 0.5 + 0.5 * Math.sin(anim * 1.6 * P.spinSpeed);
+  var outer = 1.0 + P.glowRadius * (0.7 + pulse * 0.5);
+  var g = ctx.createRadialGradient(0, 0, 0.85, 0, 0, outer);
+  g.addColorStop(0, cartSkinRGBA(paint, 0));
+  g.addColorStop(0.55, cartSkinRGBA(paint, 0.32 + pulse * 0.25));
+  g.addColorStop(1, cartSkinRGBA(paint, 0));
+  ctx.beginPath(); ctx.arc(0, 0, outer, 0, TAU);
+  ctx.fillStyle = g; ctx.fill();
+  ctx.beginPath(); ctx.arc(0, 0, 0.99, 0, TAU);
+  ctx.lineWidth = 0.05; ctx.strokeStyle = cartSkinRGBA(paint, 0.5 + pulse * 0.35); ctx.stroke();
+}
+
+// 5. spikes — radiating triangles. All spikes one path (1 fill+1 stroke); shine batched.
+function drawSpikesBorder(ctx, anim, paint) {
+  paint = paint || "#cf3030";
+  var n = Math.max(4, Math.round(P.spikeCount));
+  var base = 1.0, tip = 1.0 + P.spikeLen, half = (Math.PI / n) * 0.6;
+  var fill = cartSkinShade(paint, 0.2);
+  var edge = cartSkinShade(paint, -0.5);
+  var shine = cartSkinShade(paint, 0.6);
+  var collar = cartSkinShade(paint, -0.2);
+  ctx.beginPath();
+  for (var i = 0; i < n; i++) {
+    var a = (i / n) * TAU;
+    ctx.moveTo(Math.cos(a - half) * base, Math.sin(a - half) * base);
+    ctx.lineTo(Math.cos(a) * tip, Math.sin(a) * tip);
+    ctx.lineTo(Math.cos(a + half) * base, Math.sin(a + half) * base);
+    ctx.closePath();
+  }
+  ctx.fillStyle = fill; ctx.fill();
+  ctx.lineWidth = 0.02; ctx.strokeStyle = edge; ctx.stroke();
+  ctx.beginPath();
+  for (var j = 0; j < n; j++) {
+    var a2 = (j / n) * TAU;
+    ctx.moveTo(Math.cos(a2) * base, Math.sin(a2) * base);
+    ctx.lineTo(Math.cos(a2) * (tip - 0.03), Math.sin(a2) * (tip - 0.03));
+  }
+  ctx.lineWidth = 0.02; ctx.strokeStyle = shine; ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, 1.0, 0, TAU);
+  ctx.lineWidth = 0.05; ctx.strokeStyle = collar; ctx.stroke();
+}
+
+// 6. gear — rotating cog. Already one path for all teeth; shades hoisted.
+function drawGearBorder(ctx, anim, paint) {
+  paint = paint || "#cf3030";
+  var n = Math.max(6, Math.round(P.gearTeeth));
+  var spin = anim * 0.5 * P.spinSpeed;
+  var rIn = 1.02, rOut = 1.16, step = TAU / n;
+  var body = cartSkinShade(paint, -0.05);
+  var edge = cartSkinShade(paint, -0.5);
+  var hub = cartSkinShade(paint, 0.4);
+  ctx.beginPath();
+  for (var i = 0; i < n; i++) {
+    var a0 = spin + i * step, aTooth = a0 + step * 0.5, aNext = a0 + step;
+    ctx.lineTo(Math.cos(a0) * rIn, Math.sin(a0) * rIn);
+    ctx.lineTo(Math.cos(a0) * rOut, Math.sin(a0) * rOut);
+    ctx.lineTo(Math.cos(aTooth) * rOut, Math.sin(aTooth) * rOut);
+    ctx.lineTo(Math.cos(aTooth) * rIn, Math.sin(aTooth) * rIn);
+    ctx.lineTo(Math.cos(aNext) * rIn, Math.sin(aNext) * rIn);
+  }
+  ctx.closePath();
+  ctx.fillStyle = body; ctx.fill();
+  ctx.lineWidth = 0.025; ctx.strokeStyle = edge; ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, 0.99, 0, TAU);
+  ctx.lineWidth = 0.06; ctx.strokeStyle = hub; ctx.stroke();
+}
+
+// 7. electric — crackling arcs. Polyline built ONCE, stroked twice (glow+core); sparks batched.
+function drawElectricBorder(ctx, anim, paint) {
+  paint = paint || "#cf3030";
+  var bright = cartSkinShade(paint, 0.65);
+  var glow = cartSkinRGBA(paint, 0.35);
+  var ring = cartSkinRGBA(paint, 0.4);
+  var arcs = 5, segs = 6;
+  ctx.beginPath(); ctx.arc(0, 0, 1.04, 0, TAU);
+  ctx.lineWidth = 0.03; ctx.strokeStyle = ring; ctx.stroke();
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  for (var k = 0; k < arcs; k++) {
+    var phase = anim * (2.2 + k * 0.5) * P.spinSpeed + k * 2.399;
+    var center = phase % TAU;
+    var span = 0.5 + 0.3 * Math.sin(phase * 1.7);
+    for (var s = 0; s <= segs; s++) {
+      var f = s / segs;
+      var a = center - span / 2 + span * f;
+      var jitter = Math.sin(phase * 9 + s * 4.3) * 0.07 * (s % 2 ? 1 : -1);
+      var rr = 1.06 + jitter + 0.04 * Math.sin(f * Math.PI);
+      var x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+      if (s === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+  }
+  ctx.lineWidth = 0.09; ctx.strokeStyle = glow; ctx.stroke();   // glow pass
+  ctx.lineWidth = 0.03; ctx.strokeStyle = bright; ctx.stroke(); // core pass (same path)
+  ctx.beginPath();
+  for (var m = 0; m < arcs; m++) {
+    var ph = anim * (2.2 + m * 0.5) * P.spinSpeed + m * 2.399;
+    var ta = (ph % TAU) + (0.5 + 0.3 * Math.sin(ph * 1.7)) / 2;
+    var sx = Math.cos(ta) * 1.06, sy = Math.sin(ta) * 1.06;
+    ctx.moveTo(sx + 0.035, sy); ctx.arc(sx, sy, 0.035, 0, TAU);
+  }
+  ctx.fillStyle = bright; ctx.fill();
+  ctx.lineCap = "butt";
+}
+
+// 8. laurel — prestige wreath. Leaves batched via ctx.ellipse (no save/restore, no per-leaf gradient).
+function drawLaurelBorder(ctx, anim, paint) {
+  paint = paint || "#cf3030";
+  var leafDark = cartSkinShade(paint, -0.1);
+  var leafLite = cartSkinShade(paint, 0.45);
+  var edge = cartSkinShade(paint, -0.45);
+  var leaves = 8, side, i, f, a, bx, by, size, lean, cx, cy;
+  ctx.beginPath();
+  for (side = -1; side <= 1; side += 2) {
+    var aEnd = Math.PI * (side < 0 ? 0.02 : 0.98);
+    for (i = 0; i < leaves; i++) {
+      f = i / (leaves - 1);
+      a = Math.PI * 0.5 + (aEnd - Math.PI * 0.5) * f;
+      bx = Math.cos(a) * 1.05; by = Math.sin(a) * 1.05;
+      size = 0.26 * (1 - f * 0.55);
+      lean = a + side * 0.9;
+      cx = bx + Math.cos(lean) * size * 0.7;
+      cy = by + Math.sin(lean) * size * 0.7;
+      ctx.moveTo(cx + Math.cos(lean) * size, cy + Math.sin(lean) * size);
+      ctx.ellipse(cx, cy, size, size * 0.42, lean, 0, TAU);
+    }
+  }
+  ctx.fillStyle = leafDark; ctx.fill();
+  ctx.lineWidth = 0.012; ctx.strokeStyle = edge; ctx.stroke();
+  // batched leaf highlights (smaller, offset toward outer edge)
+  ctx.beginPath();
+  for (side = -1; side <= 1; side += 2) {
+    var aEnd2 = Math.PI * (side < 0 ? 0.02 : 0.98);
+    for (i = 0; i < leaves; i++) {
+      f = i / (leaves - 1);
+      a = Math.PI * 0.5 + (aEnd2 - Math.PI * 0.5) * f;
+      bx = Math.cos(a) * 1.05; by = Math.sin(a) * 1.05;
+      size = 0.26 * (1 - f * 0.55);
+      lean = a + side * 0.9;
+      cx = bx + Math.cos(lean) * size * 0.85;
+      cy = by + Math.sin(lean) * size * 0.85;
+      ctx.moveTo(cx + Math.cos(lean) * size * 0.5, cy + Math.sin(lean) * size * 0.5);
+      ctx.ellipse(cx, cy, size * 0.5, size * 0.22, lean, 0, TAU);
+    }
+  }
+  ctx.fillStyle = leafLite; ctx.fill();
+  // vines (one path, two arcs) + tie jewel
+  ctx.beginPath();
+  for (side = -1; side <= 1; side += 2) {
+    var s1 = Math.PI * (side < 0 ? 0.02 : 0.98);
+    for (var j = 0; j <= 16; j++) {
+      var aa = Math.PI * 0.5 + (s1 - Math.PI * 0.5) * (j / 16);
+      var vx = Math.cos(aa) * 1.04, vy = Math.sin(aa) * 1.04;
+      if (j === 0) ctx.moveTo(vx, vy); else ctx.lineTo(vx, vy);
+    }
+  }
+  ctx.lineWidth = 0.035; ctx.strokeStyle = leafDark; ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 1.05, 0.1, 0, TAU);
+  ctx.fillStyle = leafLite; ctx.fill();
+  ctx.lineWidth = 0.02; ctx.strokeStyle = edge; ctx.stroke();
+}
+
+// 9. chevrons — speed arrows; batched into two paths by parity.
+function drawChevronsBorder(ctx, anim, paint) {
+  paint = paint || "#cf3030";
+  var n = 12, r = 1.12, drift = anim * 0.5 * P.spinSpeed;
+  var alt = cartSkinShade(paint, 0.4), w = 0.16, depth = 0.1;
+  ctx.lineWidth = 0.07; ctx.lineCap = "round"; ctx.lineJoin = "round";
+  for (var pass = 0; pass < 2; pass++) {
+    ctx.beginPath();
+    for (var i = pass; i < n; i += 2) {
+      var a = drift + (i / n) * TAU, tan = a + Math.PI / 2;
+      var cx = Math.cos(a) * r, cy = Math.sin(a) * r;
+      var nx = Math.cos(a), ny = Math.sin(a), tx = Math.cos(tan), ty = Math.sin(tan);
+      ctx.moveTo(cx - tx * w - nx * depth, cy - ty * w - ny * depth);
+      ctx.lineTo(cx + tx * w, cy + ty * w);
+      ctx.lineTo(cx - tx * w + nx * depth, cy - ty * w + ny * depth);
+    }
+    ctx.strokeStyle = pass === 0 ? paint : alt; ctx.stroke();
+  }
+  ctx.lineCap = "butt"; ctx.lineJoin = "miter";
+}
+
+// 10. double — concentric twin ring (3 strokes, no loop).
+function drawDoubleBorder(ctx, anim, paint) {
+  paint = paint || "#cf3030";
+  ctx.beginPath(); ctx.arc(0, 0, 1.04, 0, TAU);
+  ctx.lineWidth = 0.06; ctx.strokeStyle = paint; ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, 1.17, 0, TAU);
+  ctx.lineWidth = 0.04; ctx.strokeStyle = cartSkinShade(paint, 0.4); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, 1.105, 0, TAU);
+  ctx.lineWidth = 0.012; ctx.strokeStyle = cartSkinShade(paint, -0.5); ctx.stroke();
+}
+
+// 11. ticks — bezel marks; majors + minors each one batched path.
+function drawTicksBorder(ctx, anim, paint) {
+  paint = paint || "#cf3030";
+  var n = 32;
+  ctx.beginPath(); ctx.arc(0, 0, 1.02, 0, TAU);
+  ctx.lineWidth = 0.03; ctx.strokeStyle = cartSkinShade(paint, -0.2); ctx.stroke();
+  ctx.beginPath();
+  for (var i = 0; i < n; i++) {
+    if (i % 4 === 0) continue;
+    var a = (i / n) * TAU;
+    ctx.moveTo(Math.cos(a) * 1.03, Math.sin(a) * 1.03);
+    ctx.lineTo(Math.cos(a) * 1.11, Math.sin(a) * 1.11);
+  }
+  ctx.lineWidth = 0.022; ctx.strokeStyle = paint; ctx.stroke();
+  ctx.beginPath();
+  for (var j = 0; j < n; j += 4) {
+    var a2 = (j / n) * TAU;
+    ctx.moveTo(Math.cos(a2) * 1.03, Math.sin(a2) * 1.03);
+    ctx.lineTo(Math.cos(a2) * 1.19, Math.sin(a2) * 1.19);
+  }
+  ctx.lineWidth = 0.04; ctx.strokeStyle = cartSkinShade(paint, 0.4); ctx.stroke();
+}
+
+// 12. scales — armor scallops; all bodies one path, highlights one path (no save/restore, no gradient).
+function drawScalesBorder(ctx, anim, paint) {
+  paint = paint || "#cf3030";
+  var n = 16, r = 1.02, sc = 0.16;
+  var body = cartSkinShade(paint, 0.05);
+  var edge = cartSkinShade(paint, -0.5);
+  var hi = cartSkinShade(paint, 0.45);
+  ctx.beginPath();
+  for (var i = 0; i < n; i++) {
+    var a = (i / n) * TAU, x = Math.cos(a) * r, y = Math.sin(a) * r;
+    var sa = a - Math.PI / 2;
+    ctx.moveTo(x + Math.cos(sa) * sc, y + Math.sin(sa) * sc);
+    ctx.arc(x, y, sc, sa, a + Math.PI / 2);
+    ctx.closePath();
+  }
+  ctx.fillStyle = body; ctx.fill();
+  ctx.lineWidth = 0.015; ctx.strokeStyle = edge; ctx.stroke();
+  ctx.beginPath();
+  for (var j = 0; j < n; j++) {
+    var a2 = (j / n) * TAU, x2 = Math.cos(a2) * (r + 0.03), y2 = Math.sin(a2) * (r + 0.03);
+    var sa2 = a2 - Math.PI / 2, sc2 = sc * 0.6;
+    ctx.moveTo(x2 + Math.cos(sa2) * sc2, y2 + Math.sin(sa2) * sc2);
+    ctx.arc(x2, y2, sc2, sa2, a2 + Math.PI / 2);
+    ctx.closePath();
+  }
+  ctx.fillStyle = hi; ctx.fill();
+}
+
+// 13. sawblade — angled teeth, spins. One path for the blade; flat fill (no per-call gradient).
+function drawSawbladeBorder(ctx, anim, paint) {
+  paint = paint || "#cf3030";
+  var n = 18, spin = anim * 1.1 * P.spinSpeed, step = TAU / n;
+  var rIn = 1.0, rOut = 1.18;
+  var body = cartSkinShade(paint, 0.1);
+  var edge = cartSkinShade(paint, -0.5);
+  var hub = cartSkinShade(paint, 0.45);
+  ctx.beginPath();
+  for (var i = 0; i < n; i++) {
+    var a0 = spin + i * step;
+    ctx.lineTo(Math.cos(a0) * rIn, Math.sin(a0) * rIn);
+    ctx.lineTo(Math.cos(a0) * rOut, Math.sin(a0) * rOut);
+    var aMid = a0 + step * 0.5;
+    ctx.lineTo(Math.cos(aMid) * rIn, Math.sin(aMid) * rIn);
+  }
+  ctx.closePath();
+  ctx.fillStyle = body; ctx.fill();
+  ctx.lineWidth = 0.02; ctx.strokeStyle = edge; ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, 0.98, 0, TAU);
+  ctx.lineWidth = 0.05; ctx.strokeStyle = hub; ctx.stroke();
+}
+
+// 14. flames — flickering tongues; bodies one path, bright tips one path (no per-tongue gradient).
+function drawFlamesBorder(ctx, anim, paint) {
+  paint = paint || "#cf3030";
+  var n = 14, w = 0.11;
+  var tipCol = cartSkinShade(paint, 0.6);
+  ctx.beginPath();
+  for (var i = 0; i < n; i++) {
+    var a = (i / n) * TAU;
+    var flick = 0.22 + 0.16 * (0.5 + 0.5 * Math.sin(anim * 3 * P.spinSpeed + i * 1.7));
+    var bx = Math.cos(a), by = Math.sin(a);
+    var tan = a + Math.PI / 2, tx = Math.cos(tan), ty = Math.sin(tan);
+    var lean = 0.12 * Math.sin(anim * 2 + i);
+    var tipX = bx * (1.0 + flick) + tx * lean, tipY = by * (1.0 + flick) + ty * lean;
+    var ctlX = bx + tx * lean, ctlY = by + ty * lean;
+    ctx.moveTo(bx - tx * w, by - ty * w);
+    ctx.quadraticCurveTo(ctlX, ctlY, tipX, tipY);
+    ctx.quadraticCurveTo(ctlX, ctlY, bx + tx * w, by + ty * w);
+    ctx.closePath();
+  }
+  ctx.fillStyle = paint; ctx.fill();
+  ctx.beginPath();
+  for (var j = 0; j < n; j++) {
+    var a2 = (j / n) * TAU;
+    var flick2 = 0.22 + 0.16 * (0.5 + 0.5 * Math.sin(anim * 3 * P.spinSpeed + j * 1.7));
+    var bx2 = Math.cos(a2), by2 = Math.sin(a2);
+    var tan2 = a2 + Math.PI / 2, tx2 = Math.cos(tan2), ty2 = Math.sin(tan2);
+    var lean2 = 0.12 * Math.sin(anim * 2 + j);
+    var tipX2 = bx2 * (1.0 + flick2) + tx2 * lean2, tipY2 = by2 * (1.0 + flick2) + ty2 * lean2;
+    var mx = (bx2 + tipX2) / 2, my = (by2 + tipY2) / 2, w2 = 0.05;
+    ctx.moveTo(mx - tx2 * w2, my - ty2 * w2);
+    ctx.quadraticCurveTo(mx, my, tipX2, tipY2);
+    ctx.quadraticCurveTo(mx, my, mx + tx2 * w2, my + ty2 * w2);
+    ctx.closePath();
+  }
+  ctx.fillStyle = tipCol; ctx.fill();
+}
+
+// Hoisted glyph templates for runes (no per-call array allocation). s == 0.1.
+var RUNE_GLYPHS = [
+  [[-0.1, -0.1], [0, 0.1], [0.1, -0.1], null, [-0.06, 0], [0.06, 0]],
+  [[0, -0.1], [0, 0.1], null, [-0.1, -0.03], [0.1, -0.03], null, [-0.06, 0.1], [0.06, 0.1]],
+  [[-0.1, 0.1], [0, -0.1], [0.1, 0.1], null, [-0.1, -0.1], [0.1, 0.1]]
+];
+
+// 15. runes — glowing sigils; all glyphs one path + one stroke (alpha set once).
+function drawRunesBorder(ctx, anim, paint) {
+  paint = paint || "#cf3030";
+  var pulse = 0.5 + 0.5 * Math.sin(anim * 1.5 * P.spinSpeed);
+  var bright = cartSkinShade(paint, 0.6);
+  ctx.beginPath(); ctx.arc(0, 0, 1.08, 0, TAU);
+  ctx.lineWidth = 0.02; ctx.strokeStyle = cartSkinRGBA(paint, 0.35); ctx.stroke();
+  var n = 8, r = 1.08;
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.beginPath();
+  for (var i = 0; i < n; i++) {
+    var a = (i / n) * TAU, rot = a + Math.PI / 2;
+    var cr = Math.cos(rot), sr = Math.sin(rot);
+    var cx = Math.cos(a) * r, cy = Math.sin(a) * r;
+    var segs = RUNE_GLYPHS[i % 3], pen = false;
+    for (var p = 0; p < segs.length; p++) {
+      var seg = segs[p];
+      if (seg === null) { pen = false; continue; }
+      var wx = cx + seg[0] * cr - seg[1] * sr;
+      var wy = cy + seg[0] * sr + seg[1] * cr;
+      if (!pen) { ctx.moveTo(wx, wy); pen = true; } else ctx.lineTo(wx, wy);
+    }
+  }
+  ctx.lineWidth = 0.035; ctx.strokeStyle = bright;
+  ctx.globalAlpha = 0.55 + pulse * 0.45;
+  ctx.stroke();
+  ctx.globalAlpha = 1; ctx.lineCap = "butt"; ctx.lineJoin = "miter";
+}
+
+// 16. orbit — satellites on a track; trails batched (1 stroke), heads batched (1 fill).
+function drawOrbitBorder(ctx, anim, paint) {
+  paint = paint || "#cf3030";
+  var track = 1.22, sats = 3, base = anim * 1.2 * P.spinSpeed;
+  ctx.beginPath(); ctx.arc(0, 0, track, 0, TAU);
+  ctx.lineWidth = 0.015; ctx.strokeStyle = cartSkinRGBA(paint, 0.3); ctx.stroke();
+  ctx.beginPath();
+  for (var i = 0; i < sats; i++) {
+    var a = base + (i / sats) * TAU;
+    ctx.moveTo(Math.cos(a) * track, Math.sin(a) * track);
+    ctx.arc(0, 0, track, a, a - 0.6, true);
+  }
+  ctx.lineWidth = 0.06; ctx.lineCap = "round";
+  ctx.strokeStyle = cartSkinRGBA(paint, 0.35); ctx.stroke();
+  ctx.lineCap = "butt";
+  ctx.beginPath();
+  for (var j = 0; j < sats; j++) {
+    var a2 = base + (j / sats) * TAU, x = Math.cos(a2) * track, y = Math.sin(a2) * track;
+    ctx.moveTo(x + 0.075, y); ctx.arc(x, y, 0.075, 0, TAU);
+  }
+  ctx.fillStyle = cartSkinShade(paint, 0.55); ctx.fill();
+}
+
+// 17. crown — royal points; all points one path, jewels one batched fill.
+function drawCrownBorder(ctx, anim, paint) {
+  paint = paint || "#cf3030";
+  var n = 10, rIn = 1.02, rTip = 1.26, step = TAU / n;
+  var body = cartSkinShade(paint, 0.2);
+  var edge = cartSkinShade(paint, -0.5);
+  var jewel = cartSkinShade(paint, 0.75);
+  ctx.beginPath(); ctx.arc(0, 0, rIn, 0, TAU);
+  ctx.lineWidth = 0.08; ctx.strokeStyle = paint; ctx.stroke();
+  ctx.beginPath();
+  for (var i = 0; i < n; i++) {
+    var a = (i / n) * TAU, aL = a - step * 0.5, aR = a + step * 0.5;
+    ctx.moveTo(Math.cos(aL) * rIn, Math.sin(aL) * rIn);
+    ctx.lineTo(Math.cos(a) * rTip, Math.sin(a) * rTip);
+    ctx.lineTo(Math.cos(aR) * rIn, Math.sin(aR) * rIn);
+    ctx.closePath();
+  }
+  ctx.fillStyle = body; ctx.fill();
+  ctx.lineWidth = 0.015; ctx.strokeStyle = edge; ctx.stroke();
+  ctx.beginPath();
+  for (var j = 0; j < n; j++) {
+    var a2 = (j / n) * TAU, jx = Math.cos(a2) * (rTip - 0.02), jy = Math.sin(a2) * (rTip - 0.02);
+    ctx.moveTo(jx + 0.045, jy); ctx.arc(jx, jy, 0.045, 0, TAU);
+  }
+  ctx.fillStyle = jewel; ctx.fill();
+}
+
+// 18. plasma — wavy aura ribbon. One whole-kart gradient/call + 3 wavy strokes (no per-element alloc).
+function drawPlasmaBorder(ctx, anim, paint) {
+  paint = paint || "#cf3030";
+  var lobes = 7, steps = 56;
+  function edge(rBase, amp, phase) {
+    ctx.beginPath();
+    for (var s = 0; s <= steps; s++) {
+      var a = (s / steps) * TAU;
+      var r = rBase + amp * Math.sin(a * lobes + phase);
+      var x = Math.cos(a) * r, y = Math.sin(a) * r;
+      if (s === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+  }
+  var rGlow = 1.0 + 0.12 + 0.05 * Math.sin(anim * 1.3 * P.spinSpeed);
+  var g = ctx.createRadialGradient(0, 0, 0.9, 0, 0, rGlow + 0.18);
+  g.addColorStop(0, cartSkinRGBA(paint, 0));
+  g.addColorStop(0.6, cartSkinRGBA(paint, 0.3));
+  g.addColorStop(1, cartSkinRGBA(paint, 0));
+  edge(rGlow, 0.1, anim * 1.6 * P.spinSpeed);
+  ctx.fillStyle = g; ctx.fill();
+  edge(1.06, 0.07, anim * 2.0 * P.spinSpeed);
+  ctx.lineWidth = 0.04; ctx.strokeStyle = cartSkinShade(paint, 0.55); ctx.stroke();
+  edge(1.02, 0.05, -anim * 1.4 * P.spinSpeed);
+  ctx.lineWidth = 0.025; ctx.strokeStyle = cartSkinRGBA(paint, 0.6); ctx.stroke();
+}
+
+// ============================================================================
+//  Harness
+// ============================================================================
+var BORDERS = [
+  { id: "ring",     name: "Ring",     rarity: "common",    fn: drawRingBorder },
+  { id: "studs",    name: "Studs",    rarity: "common",    fn: drawStudsBorder },
+  { id: "dashed",   name: "Dashed",   rarity: "uncommon",  fn: drawDashedBorder },
+  { id: "glow",     name: "Glow",     rarity: "uncommon",  fn: drawGlowBorder },
+  { id: "spikes",   name: "Spikes",   rarity: "rare",      fn: drawSpikesBorder },
+  { id: "gear",     name: "Gear",     rarity: "rare",      fn: drawGearBorder },
+  { id: "electric", name: "Electric", rarity: "epic",      fn: drawElectricBorder },
+  { id: "laurel",   name: "Laurel",   rarity: "legendary", fn: drawLaurelBorder },
+  { id: "chevrons", name: "Chevrons", rarity: "common",    fn: drawChevronsBorder },
+  { id: "double",   name: "Double",   rarity: "common",    fn: drawDoubleBorder },
+  { id: "ticks",    name: "Ticks",    rarity: "uncommon",  fn: drawTicksBorder },
+  { id: "scales",   name: "Scales",   rarity: "uncommon",  fn: drawScalesBorder },
+  { id: "sawblade", name: "Sawblade", rarity: "rare",      fn: drawSawbladeBorder },
+  { id: "flames",   name: "Flames",   rarity: "epic",      fn: drawFlamesBorder },
+  { id: "runes",    name: "Runes",    rarity: "epic",      fn: drawRunesBorder },
+  { id: "orbit",    name: "Orbit",    rarity: "epic",      fn: drawOrbitBorder },
+  { id: "crown",    name: "Crown",    rarity: "legendary", fn: drawCrownBorder },
+  { id: "plasma",   name: "Plasma",   rarity: "legendary", fn: drawPlasmaBorder },
+];
+
+var PALETTE = ["#e6432e","#ff8c1a","#ffd23f","#3fcf5a","#27c4d6","#3b82f6","#9b5cf6","#ff5fa8","#f5f5f5","#2b2f3a"];
+var state = { color: PALETTE[5], bg: true, spin: true, labels: true };
+
+var swWrap = document.getElementById("swatches");
+PALETTE.forEach(function (col) {
+  var b = document.createElement("button");
+  b.className = "swatch" + (col === state.color ? " active" : "");
+  b.style.background = col; b.title = col;
+  b.onclick = function () {
+    state.color = col;
+    [].forEach.call(swWrap.querySelectorAll(".swatch"), function (s) { s.classList.remove("active"); });
+    b.classList.add("active"); picker.value = col;
+  };
+  swWrap.appendChild(b);
+});
+var picker = document.createElement("input");
+picker.type = "color"; picker.value = state.color;
+picker.oninput = function () {
+  state.color = picker.value;
+  [].forEach.call(swWrap.querySelectorAll(".swatch"), function (s) { s.classList.remove("active"); });
+};
+swWrap.appendChild(picker);
+
+document.getElementById("tBg").onchange = function (e) { state.bg = e.target.checked; };
+document.getElementById("tSpin").onchange = function (e) { state.spin = e.target.checked; };
+document.getElementById("tLabels").onchange = function (e) { state.labels = e.target.checked; };
+
+var SLIDERS = [
+  { key: "ringThickness", label: "Ring thickness", min: 0.04, max: 0.3, step: 0.01 },
+  { key: "studCount",     label: "Stud count",     min: 4,    max: 28,  step: 1 },
+  { key: "dashCount",     label: "Dash count",      min: 4,    max: 20,  step: 1 },
+  { key: "glowRadius",    label: "Glow radius",     min: 0.12, max: 0.6, step: 0.02 },
+  { key: "spikeLen",      label: "Spike length",    min: 0.12, max: 0.55,step: 0.01 },
+  { key: "spikeCount",    label: "Spike count",     min: 5,    max: 28,  step: 1 },
+  { key: "gearTeeth",     label: "Gear teeth",      min: 6,    max: 26,  step: 1 },
+  { key: "spinSpeed",     label: "Spin / anim speed",min: 0,   max: 2.5, step: 0.05 },
+  { key: "stress",        label: "Stress (× karts/cell)", min: 1, max: 60, step: 1 },
+];
+var slWrap = document.getElementById("sliders");
+SLIDERS.forEach(function (s) {
+  var wrap = document.createElement("div"); wrap.className = "slider";
+  var lab = document.createElement("div"); lab.className = "label";
+  var val = document.createElement("span");
+  lab.innerHTML = "<span>" + s.label + "</span>"; lab.appendChild(val);
+  var inp = document.createElement("input");
+  inp.type = "range"; inp.min = s.min; inp.max = s.max; inp.step = s.step; inp.value = P[s.key];
+  val.textContent = (+P[s.key]).toFixed(s.step < 1 ? 2 : 0);
+  inp.oninput = function () { P[s.key] = +inp.value; val.textContent = (+inp.value).toFixed(s.step < 1 ? 2 : 0); };
+  wrap.appendChild(lab); wrap.appendChild(inp); slWrap.appendChild(wrap);
+});
+
+var cv = document.getElementById("cv");
+var ctx = cv.getContext("2d");
+var cols = 4;
+var rows = Math.ceil(BORDERS.length / cols);
+var cellH = 300;
+cv.height = rows * cellH;
+var cellW = cv.width / cols;
+var t0 = performance.now();
+
+// perf meter — measure CPU time spent INSIDE the draw loop (not rAF cadence,
+// which the browser throttles when the tab isn't focused/visible).
+var fpsEl = document.getElementById("fps");
+var msEl = document.getElementById("ms");
+var perEl = document.getElementById("per");
+var callsEl = document.getElementById("calls");
+var smDraw = 0, lastReport = t0;
+
+function drawKartWithBorder(cx, cy, R, anim, heading, cartFn, borderFn, paint) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(heading);
+  ctx.scale(R, R);
+  cartFn(ctx, anim, paint);
+  borderFn(ctx, anim, paint);
+  ctx.restore();
+}
+
+function frame(now) {
+  var anim = (now - t0) / 1000 * 3.0;
+  var heading = state.spin ? ((now - t0) / 1000) * 0.5 : 0;
+  ctx.clearRect(0, 0, cv.width, cv.height);
+
+  var stress = Math.max(1, Math.round(P.stress));
+  var painterCalls = 0;
+  var drawStart = performance.now();
+
+  for (var i = 0; i < BORDERS.length; i++) {
+    var bd = BORDERS[i];
+    var col = i % cols, row = (i / cols) | 0;
+    var x0 = col * cellW, y0 = row * cellH;
+    var cx = x0 + cellW / 2;
+
+    if (state.bg) {
+      ctx.fillStyle = (col + row) % 2 ? "#161b24" : "#131820";
+      ctx.fillRect(x0, y0, cellW, cellH);
+    }
+    ctx.strokeStyle = "#222a36"; ctx.lineWidth = 1;
+    ctx.strokeRect(x0 + 0.5, y0 + 0.5, cellW - 1, cellH - 1);
+
+    var R = Math.min(cellW, cellH) * 0.18;
+    var yTop = y0 + cellH * 0.34;
+    var yBot = y0 + cellH * 0.74;
+
+    // Stress: redraw each kart `stress` times in place to simulate a busy scene.
+    for (var k = 0; k < stress; k++) {
+      drawKartWithBorder(cx, yTop, R, anim, heading, drawPlainSphere, bd.fn, state.color);
+      drawKartWithBorder(cx, yBot, R, anim, heading, drawTruckSkin, bd.fn, state.color);
+      painterCalls += 2;
+    }
+
+    if (state.labels) {
+      ctx.fillStyle = "#e7ecf3"; ctx.font = "600 14px system-ui"; ctx.textAlign = "center";
+      ctx.fillText(bd.name, cx, y0 + 22);
+      ctx.fillStyle = "#7b8494"; ctx.font = "11px system-ui";
+      ctx.fillText(bd.rarity + "  ·  plain / truck", cx, y0 + 38);
+    }
+  }
+
+  // CPU time to submit this frame's draw calls — this is where allocation /
+  // command-count cost (the target of this perf pass) lives.
+  var drawMs = performance.now() - drawStart;
+  smDraw = smDraw === 0 ? drawMs : smDraw * 0.9 + drawMs * 0.1;
+
+  if (now - lastReport > 250) {
+    msEl.textContent = smDraw.toFixed(2);
+    perEl.textContent = (smDraw * 1000 / Math.max(1, painterCalls)).toFixed(1);
+    callsEl.textContent = painterCalls;
+    // budget read against a 16.7ms frame: green if the whole grid costs < 1/3 frame
+    fpsEl.className = "fps" + (smDraw > 11 ? " bad" : smDraw > 5.5 ? " warn" : "");
+    lastReport = now;
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

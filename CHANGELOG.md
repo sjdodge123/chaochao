@@ -10,7 +10,15 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- [headline] Every match now earns you XP — play to level up and unlock cosmetics. Win for a fat XP bonus (and runner-up gets a little something too).
+- Mix-and-match cosmetics: your kart now has three separate slots — a **cart** body, a **pattern**, and a **trail** — and you can wear one of each at the same time, all in your chosen colour. Patterns paint over your colour and trails fly in your colour, so a Dino body + Checkered pattern + Sparkle trail in blue all reads as one kart.
+- New unlock ladder: a fresh cosmetic every two levels, rotating pattern → trail → cart. To level 30 that's 5 carts (Truck, Drone, Dino, Hoverbike, Starfighter), 5 patterns (Racing Stripes, Polka, Checkered, Flames, Nebula), and 5 trails (Dashes, Sparkle, Comet, Bubbles, Aurora) to chase.
+- The lobby skin station is now four groups — Colour, Carts, Patterns, Trails — each cell showing a live preview and a 🔒 with what unlocks it. Equip each slot independently; your picks are remembered between sessions.
+- Medal cosmetics: stacking up honours over time unlocks special items in matching slots — Golden Champion and Warlord carts, Executioner and Punching Bag patterns, and Guardian and Survivor trails. The thresholds are a long-haul grind (50–100 of a medal).
+- Tons more cart bodies to drive — from a Hoverbike and Starfighter to a whole zoo of novelty karts (8-Ball, Donut, Disco Ball, Compass, Pizza, and dozens more), each tinted to your colour.
+- New motion trails with real personality: Ribbon, Lightning, Hearts, Smoke, Confetti, Crystals, Tire Tracks, Music Notes, Neon Wall, and Ripples — all flying in your colour.
 
 ## v0.26.0 — 2026-05-31
 

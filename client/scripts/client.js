@@ -184,10 +184,11 @@ function registerLobbyHubHandlers(server) {
 			preloadAvatarImage(p.avatarUrl);
 		}
 	});
-	// A player equipped/cleared a cosmetic cart skin (room broadcast — like color,
-	// cartSkin isn't in the per-tick updates, only the spawn packet). Independent of
-	// color/avatar, so we touch nothing else here.
-	server.on("playerCartSkinChanged", function (payload) {
+	// A player equipped/cleared one of the three cosmetic slots (room broadcast — like
+	// color, the slots aren't in the per-tick updates, only the spawn packet). Each slot
+	// is independent of the others (and of color/avatar), so we set only the named slot:
+	// cart -> p.cart, pattern -> p.pattern, trail -> p.trailFx.
+	server.on("playerCosmeticChanged", function (payload) {
 		if (payload == null) {
 			return;
 		}
@@ -195,7 +196,10 @@ function registerLobbyHubHandlers(server) {
 		if (p == null) {
 			return;
 		}
-		p.cartSkin = payload.cartSkin || null;
+		var field = COSMETIC_SLOT_FIELD[payload.slot];
+		if (field) {
+			p[field] = payload.value || null;
+		}
 	});
 	// The primary's skin request was rejected (color taken). Flash the picker.
 	server.on("skinRejected", function (payload) {
@@ -203,14 +207,102 @@ function registerLobbyHubHandlers(server) {
 			flagSkinRejected(primarySlot, payload != null ? payload.color : null);
 		}
 	});
+	// A cosmetic equip was rejected (locked / not unlocked / wrong slot). Show the
+	// requirement on the relevant lobby group.
+	server.on("cosmeticRejected", function (payload) {
+		if (typeof flagCosmeticRejected === "function") {
+			flagCosmeticRejected(primarySlot, payload);
+		}
+	});
 }
+// Local signed-in player's progression (server-authoritative, pushed via
+// progressionUpdate on join + after each match). null = guest / not yet loaded.
+// Drives the lobby Lv/XP badge + the skin-unlock UI; never trusted for equips.
+var myProgression = null;
+
+// --- Progression celebration toasts (shown on lobby arrival) -----------------
+// A sequenced queue: one toast at a time, auto-advancing, so a match that earned
+// XP + a level-up + a couple of skins reads as a short reward sequence rather than
+// a wall. Reuses the cc-toast styling family (css/styles.css). DOM-based so it
+// layers over the canvas without touching the render loop.
+var progressionToastQueue = [];
+var progressionToastShowing = false;
+var PROGRESSION_TOAST_MS = 2600;
+
+function progressionToastText(ev) {
+	if (!ev || !ev.type) { return null; }
+	if (ev.type === "xp") {
+		return ev.amount > 0 ? ("+" + ev.amount + " XP") : null;
+	}
+	if (ev.type === "level") {
+		return "⬆️ Level up!  Lv " + ev.level;
+	}
+	var nm = (typeof skinDisplayName === "function") ? skinDisplayName(ev.id) : ev.id;
+	// Name the cosmetic by its slot so the toast reads "New cart/pattern/trail unlocked".
+	var slot = (typeof getSkinSlot === "function") ? getSkinSlot(ev.id) : null;
+	var slotWord = slot === "cart" ? "cart" : slot === "pattern" ? "pattern" : slot === "trail" ? "trail" : "cosmetic";
+	if (ev.type === "skin") {
+		return "🎨 New " + slotWord + " unlocked: " + nm;
+	}
+	if (ev.type === "achievement") {
+		return "🏆 Achievement " + slotWord + ": " + nm;
+	}
+	return null;
+}
+function enqueueProgressionToasts(events) {
+	for (var i = 0; i < events.length; i++) {
+		var txt = progressionToastText(events[i]);
+		if (txt) { progressionToastQueue.push(txt); }
+	}
+	if (!progressionToastShowing) { showNextProgressionToast(); }
+}
+function showNextProgressionToast() {
+	if (progressionToastQueue.length === 0) { progressionToastShowing = false; return; }
+	if (!document.body) { progressionToastShowing = false; return; }
+	progressionToastShowing = true;
+	var txt = progressionToastQueue.shift();
+	var el = document.createElement("div");
+	el.className = "cc-toast cc-progression-toast";
+	el.setAttribute("role", "status");
+	el.innerHTML = '<span class="cc-toast-msg"></span>';
+	el.querySelector(".cc-toast-msg").textContent = txt; // textContent: never inject
+	document.body.appendChild(el);
+	// next frame -> add .visible so the CSS transition runs
+	requestAnimationFrame(function () { el.classList.add("visible"); });
+	setTimeout(function () {
+		el.classList.remove("visible");
+		setTimeout(function () {
+			if (el.parentNode) { el.parentNode.removeChild(el); }
+			showNextProgressionToast();
+		}, 400); // matches the cc-toast fade-out transition
+	}, PROGRESSION_TOAST_MS);
+}
+
 function registerConnectionHandlers(server) {
 	server.on('welcome', function (id) {
 		debugLog("welcome, myID=", id);
 		myID = id;
 		if (localPlayers[primarySlot]) {
 			localPlayers[primarySlot].myID = id;
+			// Re-apply the locally-saved cosmetic slots so the player's picks persist
+			// across reloads/rejoins without reopening the picker (server re-validates).
+			if (typeof reEquipSavedCosmetics === "function") {
+				reEquipSavedCosmetics(localPlayers[primarySlot]);
+			}
 		}
+	});
+	// Authoritative progression for the signed-in player (XP/level/unlocked skins).
+	server.on('progressionUpdate', function (prog) {
+		myProgression = prog || null;
+		debugLog("progressionUpdate level=", prog && prog.level, "xp=", prog && prog.xp);
+	});
+	// Celebration toasts earned in a prior match, delivered on lobby arrival (NOT on
+	// the game-over screen). Server sends an ordered batch; we sequence them as
+	// individual toasts. Each event: {type:'xp',amount} | {type:'level',level} |
+	// {type:'skin',id} | {type:'achievement',id}.
+	server.on('progressionToasts', function (payload) {
+		var events = (payload && Array.isArray(payload.events)) ? payload.events : [];
+		if (events.length) { enqueueProgressionToasts(events); }
 	});
 
 	// botGuard: the server confirmed this client actually drove a kart (not a pageview-only
@@ -738,6 +830,8 @@ function registerStateHandlers(server) {
 		// this match — even when the same player wins back-to-back (playerWon
 		// unchanged). drawGameOverScreen watches this (see draw.js).
 		if (typeof medalRevealNonce === "number") { medalRevealNonce++; }
+		// Progression XP/level/skin celebration is NOT shown here — it's delivered as
+		// toasts when the player next arrives in the lobby (progressionToasts handler).
 		recapHarvestRound();      // fold the final round's clips into the archive first
 		recapBuild(achievements); // then assemble the montage from the whole-match archive
 		stopAllSounds();
@@ -1282,6 +1376,9 @@ function registerSecondaryHandlers(sock, slot) {
 		debugLog("[localmp] slot", slot, "welcome, myID=", id);
 		if (localPlayers[slot]) {
 			localPlayers[slot].myID = id;
+			if (typeof reEquipSavedCosmetics === "function") {
+				reEquipSavedCosmetics(localPlayers[slot]);
+			}
 		}
 	});
 	sock.on('gameState', function (gs) {
@@ -1344,6 +1441,11 @@ function registerSecondaryHandlers(sock, slot) {
 	sock.on('skinRejected', function (payload) {
 		if (typeof flagSkinRejected === "function") {
 			flagSkinRejected(slot, payload != null ? payload.color : null);
+		}
+	});
+	sock.on('cosmeticRejected', function (payload) {
+		if (typeof flagCosmeticRejected === "function") {
+			flagCosmeticRejected(slot, payload);
 		}
 	});
 	sock.on('roomNotFound', function () {

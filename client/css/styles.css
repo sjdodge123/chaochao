@@ -259,6 +259,23 @@ nav .auth-control ~ .theme-toggle {
 }
 .cc-toast-close:hover { opacity: 1; }
 
+/* progression celebration toast (client.js) — top-centre so it never collides with
+   the bottom login nudge, gold-accented, slides down from the top edge. */
+.cc-progression-toast {
+    top: 24px;
+    bottom: auto;
+    transform: translateX(-50%) translateY(-20px);
+    border-color: rgba(255, 211, 77, 0.85);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 211, 77, 0.25);
+}
+.cc-progression-toast.visible {
+    transform: translateX(-50%) translateY(0);
+}
+.cc-progression-toast .cc-toast-msg {
+    font-size: 15px;
+    font-weight: 600;
+}
+
   section {
     /* navbar offset comes from body { padding-top } so margins don't
        collapse out and inflate the page height. `dvh` mirrors html/body. */

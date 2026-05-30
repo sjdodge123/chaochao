@@ -165,7 +165,7 @@ function skinPanelNav(lp, dx, dy) {
     var sp = lp.stationPanel;
     var base = skinOptionCount(lp);
     if (!base) { return; }
-    var cartN = CART_SKIN_OPTIONS.length;
+    var cartN = COSMETIC_OPTIONS.length;
     var cols = SKIN_COLS;
     var cur = sp.cursor || 0;
     var maxRow = Math.floor((base - 1) / cols);
@@ -215,8 +215,8 @@ function skinPanelConfirm(lp) {
     var base = skinOptionCount(lp);
     var cur = sp.cursor || 0;
     if (cur >= base) {
-        var opt = CART_SKIN_OPTIONS[cur - base];
-        if (opt) { stationPickCartSkin(lp, opt.id); } // id === null clears to the plain cart
+        var opt = COSMETIC_OPTIONS[cur - base];
+        if (opt) { stationPickCosmetic(lp, opt); } // id === null clears the slot to default
         return;
     }
     if (isAvatarIndex(lp, cur)) {
@@ -249,8 +249,13 @@ function stationPanelAction(lp, action) {
         closeStationPanel(lp);
     } else if (action === "pickAvatar") {
         stationPickAvatar(lp);
-    } else if (action != null && action.indexOf("cartskin:") === 0) {
-        stationPickCartSkin(lp, action.slice("cartskin:".length) || null);
+    } else if (action != null && action.indexOf("cosmetic:") === 0) {
+        // "cosmetic:<slot>:<id>" (id may be empty for the slot default).
+        var rest = action.slice("cosmetic:".length);
+        var sep = rest.indexOf(":");
+        var slot = sep >= 0 ? rest.slice(0, sep) : rest;
+        var id = sep >= 0 ? rest.slice(sep + 1) : "";
+        stationPickCosmetic(lp, { slot: slot, id: id || null });
     } else if (action != null && action.indexOf("pick:") === 0) {
         stationPickSkin(lp, action.slice(5));
     }
@@ -402,13 +407,59 @@ function flushLobbyPlaylistEmit() {
 // --- skin station model ------------------------------------------------------
 
 var SKIN_COLS = 6; // swatches per row in the picker grid
-var CART_SKIN_CELL_H = 46; // height of a cart-skin picker cell
-// Cosmetic cart skins (available to everyone). id null == plain colored cart.
-var CART_SKIN_OPTIONS = [
-    { id: null, label: "Default" },
-    { id: "firetruck", label: "Fire Truck" },
-    { id: "dino", label: "Dino" },
+var CART_SKIN_CELL_H = 40; // height of a cosmetic picker cell
+// The three independent cosmetic slots, each its own labeled group with a "default"
+// (slot-empty) option first, then its unlockables in ladder order — built from the
+// registry (skinRegistry.js, concatenated before this file) so new cosmetics show up
+// automatically. Order is cart → pattern → trail; the cursor/hit-test index is linear
+// over this whole array (the layout groups them visually under headers). Each option:
+//   { id, label, slot, effect? }   (id null = the slot's default; effect set for trails)
+var COSMETIC_GROUPS = [
+    { slot: 'cart', header: 'Carts' },
+    { slot: 'pattern', header: 'Patterns' },
+    { slot: 'trail', header: 'Trails' }
 ];
+var COSMETIC_OPTIONS = (function () {
+    var out = [];
+    var defaults = (typeof COSMETIC_SLOT_DEFAULT_NAME !== "undefined") ? COSMETIC_SLOT_DEFAULT_NAME : { cart: 'Plain', pattern: 'None', trail: 'Basic' };
+    for (var g = 0; g < COSMETIC_GROUPS.length; g++) {
+        var slot = COSMETIC_GROUPS[g].slot;
+        out.push({ id: null, label: defaults[slot] || "Default", slot: slot });
+        var list = (typeof getSkinsForSlot === "function") ? getSkinsForSlot(slot) : [];
+        for (var i = 0; i < list.length; i++) {
+            out.push({ id: list[i].id, label: list[i].name, slot: slot, effect: list[i].effect || null });
+        }
+    }
+    return out;
+})();
+
+// --- per-slot localStorage persistence (instant re-equip; server re-validates) -------
+function cosmeticStorageKey(slot) { return "cc_cosmetic_" + slot; }
+function saveCosmeticLocal(slot, id) {
+    try {
+        if (id == null) { localStorage.removeItem(cosmeticStorageKey(slot)); }
+        else { localStorage.setItem(cosmeticStorageKey(slot), id); }
+    } catch (e) { /* private mode / disabled storage — non-fatal */ }
+}
+function readCosmeticLocal(slot) {
+    try { return localStorage.getItem(cosmeticStorageKey(slot)) || null; } catch (e) { return null; }
+}
+// Re-send each saved cosmetic slot for a local player on (re)join so their picks apply
+// instantly without reopening the picker. The server re-validates + rejects silently if
+// the player no longer qualifies (e.g. signed out of the account that unlocked it).
+function reEquipSavedCosmetics(lp) {
+    if (!lp || !lp.socket) { return; }
+    for (var g = 0; g < COSMETIC_GROUPS.length; g++) {
+        var slot = COSMETIC_GROUPS[g].slot;
+        var id = readCosmeticLocal(slot);
+        if (!id) { continue; }
+        lp.socket.emit("setCosmetic", { slot: slot, id: id });
+        var p = (lp.myID != null && typeof playerList !== "undefined" && playerList) ? playerList[lp.myID] : null;
+        if (p && typeof COSMETIC_SLOT_FIELD !== "undefined" && COSMETIC_SLOT_FIELD[slot]) {
+            p[COSMETIC_SLOT_FIELD[slot]] = id; // optimistic; server confirms via playerCosmeticChanged
+        }
+    }
+}
 
 function skinPalette() {
     return (typeof config !== "undefined" && config && Array.isArray(config.colorPalette))
@@ -843,10 +894,15 @@ function drawStationPanel(lp, sp) {
         h = 150; // room for the playlist name + map count + one-line description
     }
     if (kind === "skin") {
-        var rows = Math.max(1, Math.ceil(skinOptionCount(lp) / SKIN_COLS));
-        w = 272;
-        // base swatch grid height + an extra row for the cart-skin picker.
-        h = 78 + rows * 34 + CART_SKIN_CELL_H + 8;
+        w = 300;
+        // Mirror drawSkinPanelBody's layout exactly so the panel is tall enough:
+        // title/padding + the colour swatch grid + the Lv/XP badge + the grouped
+        // cart-skin grid (Karts + Paints, computed by the shared cartSkinLayout).
+        var spad = 14, sgap = 6;
+        var scell = (w - spad * 2 - sgap * (SKIN_COLS - 1)) / SKIN_COLS;
+        var srows = Math.max(1, Math.ceil(skinOptionCount(lp) / SKIN_COLS));
+        var cg = cartSkinLayout(w - spad * 2);
+        h = 44 + srows * (scell + sgap) + sgap + 24 + cg.height + 14;
     }
     var x = lhClamp(sp.x - w / 2, 8, LOGICAL_WIDTH - w - 8);
     var y = lhClamp(sp.y - h - 46, 8, LOGICAL_HEIGHT - h - 8);
@@ -1072,95 +1128,256 @@ function drawSkinPanelBody(lp, x, y, w, h, hit) {
     drawCartSkinRow(lp, x + pad, csY, w - pad * 2, hit);
 }
 
-// Default / Fire Truck / Dino cells with a tiny procedural preview + label. Each
-// cell pushes a "cartskin:<id>" hit action, handled by stationPanelAction.
+// Three labeled groups — "Carts" / "Patterns" / "Trails" — each a grid of square cells
+// with a procedural preview + label + lock badge. Each cell pushes a "cosmetic:<slot>:<id>"
+// hit action handled by stationPanelAction. The three slots are independent: selecting in
+// one group never clears another (selection is read per-slot off the player object).
 function drawCartSkinRow(lp, x, y, w, hit) {
-    var ch = CART_SKIN_CELL_H;
-    var n = CART_SKIN_OPTIONS.length;
-    var cgap = 8;
-    var cellW = (w - cgap * (n - 1)) / n;
-    var current = currentCartSkin(lp);
+    // Lv / XP badge (signed-in) or a sign-in nudge (guest) above the grid.
+    drawProgressionBadge(lp, x, y, w);
+    var gridY = y + 24;
+    var lay = cartSkinLayout(w);
+    var cellW = lay.cellW, ch = lay.ch;
+    var n = COSMETIC_OPTIONS.length;
     var currentColor = skinCurrentColor(lp);
     // Which cart cell the keyboard/gamepad cursor is on (-1 = cursor is up in the
     // swatch grid), so pad/keyboard users can see the highlighted cart option.
     var sp = lp.stationPanel || {};
-    var cursorCart = (typeof sp.cursor === "number" && sp.cursor >= skinOptionCount(lp))
-        ? (sp.cursor - skinOptionCount(lp)) : -1;
+    var base = skinOptionCount(lp);
+    var cursorCart = (typeof sp.cursor === "number" && sp.cursor >= base) ? (sp.cursor - base) : -1;
+    // Group headers ("Karts" / "Paints").
+    gameContext.textAlign = "left";
+    gameContext.textBaseline = "middle";
+    for (var h = 0; h < lay.headers.length; h++) {
+        gameContext.fillStyle = "rgba(255,255,255,0.55)";
+        gameContext.font = "bold 10px sans-serif";
+        gameContext.fillText(lay.headers[h].label, x, gridY + lay.headers[h].y + CART_GROUP_HEADER_H / 2);
+    }
     for (var i = 0; i < n; i++) {
-        var opt = CART_SKIN_OPTIONS[i];
-        var cx = x + i * (cellW + cgap);
-        var sel = current === opt.id;
+        var opt = COSMETIC_OPTIONS[i];
+        var cx = x + lay.cells[i].x;
+        var cy = gridY + lay.cells[i].y;
+        var sel = currentCosmetic(lp, opt.slot) === opt.id;
+        var lock = cartSkinUnlock(opt.id);
         gameContext.fillStyle = sel ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.06)";
-        lhRoundRect(gameContext, cx, y, cellW, ch, 6);
+        lhRoundRect(gameContext, cx, cy, cellW, ch, 6);
         gameContext.fill();
         gameContext.lineWidth = sel ? 2 : 1;
-        gameContext.strokeStyle = sel ? "#ffd34d" : "rgba(255,255,255,0.2)";
-        lhRoundRect(gameContext, cx, y, cellW, ch, 6);
+        gameContext.strokeStyle = sel ? "#ffd34d" : (lock.locked ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.2)");
+        lhRoundRect(gameContext, cx, cy, cellW, ch, 6);
         gameContext.stroke();
         if (i === cursorCart) {
             gameContext.strokeStyle = "#fff";
             gameContext.lineWidth = 2.5;
-            lhRoundRect(gameContext, cx - 1, y - 1, cellW + 2, ch + 2, 7);
+            lhRoundRect(gameContext, cx - 1, cy - 1, cellW + 2, ch + 2, 7);
             gameContext.stroke();
         }
-        drawCartSkinPreview(opt.id, cx + cellW / 2, y + ch * 0.34, ch * 0.22, currentColor);
-        gameContext.fillStyle = "#fff";
-        gameContext.font = "11px sans-serif";
+        drawCosmeticPreview(opt, cx + cellW / 2, cy + ch * 0.32, ch * 0.2, currentColor, lock.locked);
+        gameContext.fillStyle = lock.locked ? "rgba(255,255,255,0.5)" : "#fff";
+        gameContext.font = "9px sans-serif";
         gameContext.textAlign = "center";
         gameContext.textBaseline = "middle";
-        gameContext.fillText(opt.label, cx + cellW / 2, y + ch * 0.76);
-        hit.options.push({ rect: { x: cx, y: y, w: cellW, h: ch }, action: "cartskin:" + (opt.id == null ? "" : opt.id) });
+        gameContext.fillText(opt.label, cx + cellW / 2, cy + ch * 0.7);
+        if (lock.locked && lock.text) {
+            gameContext.fillStyle = "#ffd34d";
+            gameContext.font = "bold 9px sans-serif";
+            gameContext.fillText("🔒 " + lock.text, cx + cellW / 2, cy + ch * 0.9);
+        }
+        hit.options.push({ rect: { x: cx, y: cy, w: cellW, h: ch }, action: "cosmetic:" + opt.slot + ":" + (opt.id == null ? "" : opt.id) });
+    }
+    // Transient "locked" toast after trying to equip a locked skin.
+    if (lp._cartLockAt && (Date.now() - lp._cartLockAt) < 1600 && lp._cartLockMsg) {
+        gameContext.fillStyle = "#ff6b6b";
+        gameContext.textAlign = "center";
+        gameContext.font = "bold 12px sans-serif";
+        gameContext.fillText(lp._cartLockMsg, x + w / 2, gridY + lay.height + 14);
     }
 }
 
-// Tiny procedural preview swatch for a cart-skin cell.
-function drawCartSkinPreview(id, cx, cy, r, paint) {
-    // Preview in the player's own cart colour so the thumbnail matches what they'll
-    // drive; fall back to representative colours when no colour is known.
-    var canShade = (typeof cartSkinShade === "function" && paint);
-    if (id === "firetruck") {
-        gameContext.fillStyle = canShade ? cartSkinShade(paint, -0.05) : "#d11f1f";
-        gameContext.fillRect(cx - r, cy - r * 0.6, r * 2, r * 1.2);
-        gameContext.fillStyle = "#1a1a1a";
-        gameContext.beginPath();
-        gameContext.arc(cx - r * 0.6, cy + r * 0.6, r * 0.4, 0, Math.PI * 2);
-        gameContext.arc(cx + r * 0.6, cy + r * 0.6, r * 0.4, 0, Math.PI * 2);
-        gameContext.fill();
-    } else if (id === "dino") {
-        gameContext.fillStyle = paint || "#43b047";
-        gameContext.beginPath();
-        gameContext.ellipse(cx - r * 0.2, cy, r * 0.9, r * 0.6, 0, 0, Math.PI * 2);
-        gameContext.fill();
-        gameContext.beginPath();
-        gameContext.ellipse(cx + r * 0.7, cy - r * 0.1, r * 0.4, r * 0.35, 0, 0, Math.PI * 2);
-        gameContext.fill();
-    } else {
-        // The plain "regular" cart: preview it in the player's chosen colour so it
-        // re-tints live as they change colour, matching the skin previews above.
-        gameContext.fillStyle = paint || "rgba(255,255,255,0.4)";
-        gameContext.beginPath();
-        gameContext.arc(cx, cy, r * 0.7, 0, Math.PI * 2);
-        gameContext.fill();
-    }
-}
-
-// This local player's currently-equipped cart skin (server-authoritative), else null.
-function currentCartSkin(lp) {
-    var p = (lp && lp.myID != null && typeof playerList !== "undefined" && playerList) ? playerList[lp.myID] : null;
-    return (p && p.cartSkin) || null;
-}
-
-// Commit a cart-skin pick: emit on this slot's own socket. The change lands for
-// everyone via playerCartSkinChanged. "" clears back to the plain colored cart.
-function stationPickCartSkin(lp, skinId) {
-    if (!lp || !lp.socket) {
+// Procedural preview thumbnail for a cosmetic cell, rendered in the player's current
+// colour and greyed when locked. Cart/pattern previews run the real registry painter
+// (pattern over a tinted disc so it reads as "on a body"); trail previews draw a short
+// stroke styled by the effect — so every cell previews close to how it drives.
+function drawCosmeticPreview(opt, cx, cy, r, paint, locked) {
+    var slot = opt.slot;
+    var color = paint || "#cccccc";
+    gameContext.save();
+    if (locked) { gameContext.globalAlpha = 0.4; }
+    if (opt.id == null) {
+        // Slot default: a plain disc (cart/pattern) or a plain short stroke (trail).
+        if (slot === "trail") {
+            gameContext.strokeStyle = color; gameContext.lineWidth = 2; gameContext.lineCap = "round";
+            gameContext.beginPath(); gameContext.moveTo(cx - r, cy); gameContext.lineTo(cx + r, cy); gameContext.stroke();
+        } else {
+            gameContext.fillStyle = slot === "cart" ? color : "rgba(255,255,255,0.4)";
+            gameContext.beginPath(); gameContext.arc(cx, cy, r * 0.7, 0, Math.PI * 2); gameContext.fill();
+        }
+        gameContext.restore();
         return;
     }
-    lp.socket.emit("setCartSkin", { cartSkin: skinId || null });
-    var p = (lp.myID != null && typeof playerList !== "undefined" && playerList) ? playerList[lp.myID] : null;
-    if (p) {
-        p.cartSkin = skinId || null; // optimistic local update
+    if (slot === "trail") {
+        var effect = (typeof getTrailEffect === "function") ? getTrailEffect(opt.id) : null;
+        gameContext.strokeStyle = color; gameContext.lineCap = "round";
+        gameContext.lineWidth = (effect === "comet" || effect === "aurora" || effect === "guardian") ? 4 : 2;
+        if (effect === "dashes") { gameContext.setLineDash([4, 3]); }
+        gameContext.beginPath(); gameContext.moveTo(cx - r, cy + r * 0.3); gameContext.quadraticCurveTo(cx, cy - r * 0.6, cx + r, cy + r * 0.3); gameContext.stroke();
+        gameContext.restore();
+        return;
     }
+    var painter = (typeof getSkinPainter === "function") ? getSkinPainter(opt.id) : null;
+    if (!painter) {
+        gameContext.fillStyle = "rgba(255,255,255,0.25)";
+        gameContext.beginPath(); gameContext.arc(cx, cy, r * 0.7, 0, Math.PI * 2); gameContext.fill();
+        gameContext.restore();
+        return;
+    }
+    gameContext.translate(cx, cy);
+    gameContext.rotate(-Math.PI / 2); // forward (+X) points up in the thumbnail
+    gameContext.scale(r * 1.5, r * 1.5);
+    var anim = (typeof cartSkinAnimTime !== "undefined") ? cartSkinAnimTime : 0;
+    if (slot === "pattern") {
+        // Patterns are body overlays — draw a tinted disc base, then the texture clipped to it.
+        gameContext.fillStyle = color;
+        gameContext.beginPath(); gameContext.arc(0, 0, 0.95, 0, Math.PI * 2); gameContext.fill();
+        gameContext.save();
+        gameContext.beginPath(); gameContext.arc(0, 0, 0.95, 0, Math.PI * 2); gameContext.clip();
+        painter(gameContext, anim, color);
+        gameContext.restore();
+    } else {
+        painter(gameContext, anim, color);
+    }
+    gameContext.restore();
+}
+
+// This local player's currently-equipped id for a slot (server-authoritative), else null.
+function currentCosmetic(lp, slot) {
+    var p = (lp && lp.myID != null && typeof playerList !== "undefined" && playerList) ? playerList[lp.myID] : null;
+    var field = (typeof COSMETIC_SLOT_FIELD !== "undefined") ? COSMETIC_SLOT_FIELD[slot] : null;
+    return (p && field && p[field]) || null;
+}
+
+// Commit a cosmetic pick for one slot: emit setCosmetic on this slot's socket. The change
+// lands for everyone via playerCosmeticChanged; "" / null clears the slot to its default.
+// Persisted to localStorage for instant re-equip on next join. The other two slots are
+// untouched (three independent slots).
+function stationPickCosmetic(lp, opt) {
+    if (!lp || !lp.socket || !opt) {
+        return;
+    }
+    // Don't burn a round-trip on a locked cosmetic — show the requirement (the server
+    // re-validates on equip regardless; this is just UX).
+    var lock = cartSkinUnlock(opt.id || null);
+    if (lock.locked) {
+        lp._cartLockMsg = lock.text ? ("Unlock at " + lock.text) : "Locked";
+        lp._cartLockAt = Date.now();
+        return;
+    }
+    var id = opt.id || null;
+    lp.socket.emit("setCosmetic", { slot: opt.slot, id: id });
+    saveCosmeticLocal(opt.slot, id);
+    var p = (lp.myID != null && typeof playerList !== "undefined" && playerList) ? playerList[lp.myID] : null;
+    var field = (typeof COSMETIC_SLOT_FIELD !== "undefined") ? COSMETIC_SLOT_FIELD[opt.slot] : null;
+    if (p && field) {
+        p[field] = id; // optimistic local update
+    }
+}
+// Cosmetic-picker layout: positions each option in one of three labeled groups —
+// "Carts" / "Patterns" / "Trails" — each starting on a fresh row under a small header.
+// Returns per-option {x,y} offsets (relative to the row's x/gridY origin), the group
+// header positions, and total height. Shared by the panel-height calc and the renderer
+// so they never disagree. cellW/ch are the cell size. Groups by COSMETIC_OPTIONS[i].slot.
+var CART_GROUP_HEADER_H = 16;
+var COSMETIC_GROUP_LABEL = { cart: 'Carts', pattern: 'Patterns', trail: 'Trails' };
+function cartSkinLayout(innerW) {
+    var cgap = 6;
+    var minCellW = 46;
+    var n = COSMETIC_OPTIONS.length;
+    var cols = Math.max(1, Math.floor((innerW + cgap) / (minCellW + cgap)));
+    if (cols > n) { cols = Math.max(1, n); }
+    var cellW = (innerW - cgap * (cols - 1)) / cols;
+    var ch = CART_SKIN_CELL_H;
+    var cells = [];
+    var headers = [];
+    var yCursor = 0;
+    var lastSlot = null;
+    var colInGroup = 0;
+    var rowTopY = 0;
+    for (var i = 0; i < n; i++) {
+        var slot = COSMETIC_OPTIONS[i].slot;
+        if (slot !== lastSlot) {
+            // New group: header line, then reset to the start of a fresh row.
+            if (lastSlot !== null) { yCursor += cgap; }
+            headers.push({ label: COSMETIC_GROUP_LABEL[slot] || slot, y: yCursor });
+            yCursor += CART_GROUP_HEADER_H;
+            rowTopY = yCursor;
+            colInGroup = 0;
+            lastSlot = slot;
+        } else if (colInGroup >= cols) {
+            colInGroup = 0;
+            rowTopY += ch + cgap;
+            yCursor = rowTopY;
+        }
+        cells.push({ x: colInGroup * (cellW + cgap), y: rowTopY });
+        colInGroup++;
+        yCursor = rowTopY + ch; // bottom of current row
+    }
+    return { cols: cols, cellW: cellW, ch: ch, cgap: cgap, cells: cells, headers: headers, height: yCursor };
+}
+// Unlock state for a cosmetic id, derived from the local progression cache.
+// Display only — the server is authoritative and re-checks every equip.
+function cartSkinUnlock(id) {
+    if (id == null) { return { locked: false }; }
+    var skin = (typeof getSkin === "function") ? getSkin(id) : null;
+    if (!skin) { return { locked: true, text: "?" }; }
+    var prog = (typeof myProgression !== "undefined") ? myProgression : null;
+    if (skin.unlock.kind === "open") { return { locked: false }; } // unlock-all-for-testing
+    if (skin.unlock.kind === "level") {
+        var lvl = prog ? (prog.level || 1) : 1;
+        if (lvl >= skin.unlock.level) { return { locked: false }; }
+        return { locked: true, text: "Lv " + skin.unlock.level };
+    }
+    if (skin.unlock.kind !== "achievement") { return { locked: true, text: "?" }; }
+    var owned = !!(prog && prog.unlocked_skins && prog.unlocked_skins.indexOf(id) !== -1);
+    return owned ? { locked: false } : { locked: true, text: "🏆" };
+}
+// Lv badge + an XP-to-next-level bar for signed-in players; a sign-in nudge for guests.
+function drawProgressionBadge(lp, x, y, w) {
+    var prog = (typeof myProgression !== "undefined") ? myProgression : null;
+    gameContext.textAlign = "left";
+    gameContext.textBaseline = "middle";
+    if (!prog) {
+        gameContext.fillStyle = "rgba(255,255,255,0.6)";
+        gameContext.font = "11px sans-serif";
+        gameContext.fillText("Sign in to earn XP & unlock skins", x, y + 10);
+        return;
+    }
+    gameContext.fillStyle = "#ffd34d";
+    gameContext.font = "bold 12px sans-serif";
+    gameContext.fillText("Lv " + (prog.level || 1), x, y + 10);
+    var barX = x + 46, barW = Math.max(20, w - 46), barH = 7, barY = y + 5;
+    var frac = 0;
+    if (prog.xpForNextLevel) {
+        frac = Math.max(0, Math.min(1, (prog.xpThisLevel || 0) / prog.xpForNextLevel));
+    }
+    gameContext.fillStyle = "rgba(255,255,255,0.15)";
+    lhRoundRect(gameContext, barX, barY, barW, barH, 4); gameContext.fill();
+    gameContext.fillStyle = "#ffd34d";
+    lhRoundRect(gameContext, barX, barY, Math.max(2, barW * frac), barH, 4); gameContext.fill();
+}
+// Surface a server-side cosmetic rejection on the (lobby-)slot's open panel. `slot` here
+// is the LOCAL-PLAYER slot (primary/couch), not the cosmetic slot; payload.slot/reason
+// describe the cosmetic-slot + why it was rejected.
+function flagCosmeticRejected(slot, payload) {
+    var lp = (typeof localPlayers !== "undefined" && localPlayers) ? localPlayers[slot] : null;
+    if (!lp) { return; }
+    var msg = "Locked";
+    if (payload && payload.reason === "level" && payload.required) {
+        msg = "Unlock at Lv " + payload.required;
+    } else if (payload && payload.reason === "achievement") {
+        msg = "Earn the medal to unlock";
+    }
+    lp._cartLockMsg = msg;
+    lp._cartLockAt = Date.now();
 }
 
 function drawStubPanelBody(x, y, w, h, msg) {

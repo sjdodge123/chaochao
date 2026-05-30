@@ -19,6 +19,8 @@ var { Projectile, CloudProj, SnowFlakeProj, BombProj, Puck } = require('./entiti
 var { Ability, Blindfold, Swap, IceCannon, Bomb, SpeedBuff, SpeedDebuff, TileSwap, Cut, BombTrigger } = require('./entities/abilities.js');
 var { GameBoard } = require('./entities/gameBoard.js');
 var auth = require('./auth.js');
+var progression = require('./progression.js');
+var skinRegistry = require('./skinRegistry.js');
 var leaderboard = require('./leaderboard.js');
 
 exports.getRoom = function (sig, size) {
@@ -708,6 +710,10 @@ class Game {
 		this.currentState = this.stateMap.lobby;
 		this.world.resize();
 		this.gameBoard.startLobby();
+		// Deliver any celebration toasts earned last match to players who STAYED in the
+		// room (they never re-enter via enterGame, so loadPlayerProgression's drain never
+		// runs for them). Lobby arrival is the promised moment for these.
+		messenger.deliverRoomToasts(this.playerList);
 	}
 	startGated() {
 		console.log("Start Gated");
@@ -1136,16 +1142,133 @@ class Game {
 		}
 		messenger.messageRoomBySig(this.roomSig, 'gameLength', this.notchesToWin);
 	}
+	// End-of-match XP / medal / win awards. Server-authoritative: computes a
+	// per-player breakdown (only for signed-in humans — bots + guests earn
+	// nothing), updates the in-memory progression cache so a same-lobby re-equip is
+	// gated on the freshly-earned level/unlocks, fires the (writes-gated) Supabase
+	// persist, and returns the breakdowns for the startGameover packet. With writes
+	// disabled (local dev) XP is still computed + emitted so the gameOver UI works;
+	// nothing is persisted.
+	awardProgression(achievements, winnerSig) {
+		var xpEarned = {};
+		// The match winner is the player passed to gameOver(). The match-ending tick
+		// calls gameOver() and returns BEFORE firstPlaceSig/secondPlaceSig are assigned
+		// for that final race, so those round-placement fields are null here — relying
+		// on them would deny the winner their win bonus and never increment `wins`.
+		var winnerId = (winnerSig != null) ? String(winnerSig) : null;
+		// Runner-up = the non-winner with the most notches (match standing). secondPlaceSig
+		// is null on the match-ending tick (and resetForRace clears it), so derive it from
+		// notches instead, which IS the durable match score. Ties: first found.
+		var runnerUpId = null;
+		var bestNotches = -1;
+		for (var rid in this.playerList) {
+			if (rid === winnerId) { continue; }
+			var rp = this.playerList[rid];
+			if (rp == null) { continue; }
+			var rn = rp.notches || 0;
+			if (rn > bestNotches) { bestNotches = rn; runnerUpId = rid; }
+		}
+
+		// Per-player medal deltas: each medal a player holds this match counts +1
+		// toward that lifetime medal counter.
+		var medalDeltas = {};
+		for (var medalName in achievements) {
+			var medalIds = achievements[medalName].ids || [];
+			for (var m = 0; m < medalIds.length; m++) {
+				var mid = medalIds[m];
+				if (!medalDeltas[mid]) { medalDeltas[mid] = {}; }
+				medalDeltas[mid][medalName] = (medalDeltas[mid][medalName] || 0) + 1;
+			}
+		}
+
+		for (var id in this.playerList) {
+			var p = this.playerList[id];
+			if (p == null || p.isAI || !p.verifiedUserId) {
+				continue; // bots + guests earn no progression
+			}
+			var isWinner = (id === winnerId);
+			var isRunnerUp = (id === runnerUpId);
+			var breakdown = {
+				participation: c.xpParticipate,
+				notches: c.xpPerNotch * (p.notches || 0),
+				winBonus: isWinner ? c.xpWinBonus : 0,
+				runnerUp: isRunnerUp ? c.xpRunnerUpBonus : 0
+			};
+			breakdown.total = breakdown.participation + breakdown.notches + breakdown.winBonus + breakdown.runnerUp;
+			xpEarned[id] = breakdown;
+
+			var deltas = medalDeltas[id] || {};
+
+			// Update the in-memory cache (so a same-lobby re-equip is gated on the
+			// freshly-earned level/unlocks) and build this match's celebration toasts.
+			// Toasts are SHOWN on the player's next lobby arrival (not the busy game-over
+			// screen). With writes ON, addProgression persists xp/level/unlocks AND the
+			// toast queue to the DB authoritatively. With writes OFF (local dev), we keep
+			// the cache + queue toasts in memory so the UI is still testable.
+			var events = [{ type: 'xp', amount: breakdown.total }];
+			if (p.progressionLoaded && p.progression) {
+				var prog = p.progression;
+				var newXp = (prog.xp || 0) + breakdown.total;
+				var oldLevel = prog.level || 1;
+				var newLevel = progression.levelForXp(newXp);
+				var newWins = (prog.wins || 0) + (isWinner ? 1 : 0);
+				var newMedalCounts = progression.mergeMedalCounts(prog.medal_counts, deltas);
+				var earned = progression.achievementsUnlocked(newMedalCounts, newWins);
+				var had = prog.unlocked_skins || [];
+				var fresh = [];
+				for (var e = 0; e < earned.length; e++) {
+					if (had.indexOf(earned[e]) === -1) { fresh.push(earned[e]); }
+				}
+				events = progression.buildToastEvents({
+					xpDelta: breakdown.total,
+					oldLevel: oldLevel,
+					newLevel: newLevel,
+					levelSkinsUnlocked: skinRegistry.levelSkinsUnlockedBetween,
+					freshAchievementSkins: fresh
+				});
+				p.progression = {
+					xp: newXp,
+					level: newLevel,
+					unlocked_skins: had.concat(fresh),
+					medal_counts: newMedalCounts,
+					wins: newWins
+				};
+			}
+
+			if (auth.writesEnabled) {
+				// DB path: addProgression recomputes + persists (incl. pending_toasts)
+				// authoritatively from the stored row; don't also queue in memory.
+				this.persistProgression(p.verifiedUserId, id, breakdown.total, deltas, isWinner);
+			} else {
+				messenger.enqueueToastsInMemory(p.verifiedUserId, events);
+			}
+		}
+		// xpEarned kept for any caller/telemetry; the packet no longer carries it.
+		return { xpEarned: xpEarned };
+	}
+	// Fire-and-forget persist for one player. A method (not an inline closure) so the
+	// per-call params are captured correctly across the async boundary — a `var` loop
+	// body would leak the last iteration's values into every .then. On success the
+	// authoritative row is pushed back to just that client.
+	persistProgression(userId, sig, xpDelta, medalDeltas, win) {
+		auth.addProgression(userId, { xpDelta: xpDelta, medalDeltas: medalDeltas, win: win })
+			.then(function (row) {
+				if (row) { messenger.sendProgressionToClient(sig, row); }
+			})
+			.catch(function (err) { console.log('[progression] persist failed:', err && err.message); });
+	}
 	gameOver(player) {
 		console.log("Game Over");
 		this.currentState = this.stateMap.gameOver;
-		// Carry the just-played map's id/name so the game-over screen can offer a
-		// star rating for it (the rating itself is server-authoritative — rateMap
-		// uses the room's current map, not this id).
+		var achievements = this.gatherAchievements();
+		// Award XP/medals/unlocks and queue this match's celebration toasts (shown on next
+		// lobby arrival), then carry the just-played map's id/name so the game-over screen
+		// can offer a star rating (rateMap uses the room's current map, not this id).
+		this.awardProgression(achievements, player);
 		var ratedMap = (this.gameBoard && this.gameBoard.currentMap) ? this.gameBoard.currentMap : null;
 		messenger.messageRoomBySig(this.roomSig, 'startGameover', {
 			winner: player,
-			achievements: this.gatherAchievements(),
+			achievements: achievements,
 			mapId: ratedMap ? ratedMap.id : null,
 			mapName: ratedMap ? ratedMap.name : null
 		});
