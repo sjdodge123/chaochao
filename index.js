@@ -232,6 +232,7 @@ app.use(express.static(htmlPath, {
 var utils = require('./server/utils.js');
 var messenger = require('./server/messenger.js');
 var hostess = require('./server/hostess.js');
+var botGuard = require('./server/botGuard.js');
 var c = utils.loadConfig();
 
 //Base Server vars
@@ -309,15 +310,33 @@ io.use(async (socket, next) => {
             console.log('[auth] handshake resolution error (continuing as guest):', e.message);
         }
     }
-    next(); // never reject — guests are allowed
+    // Resolve the real client IP for botGuard's datacenter check. Behind Heroku's router
+    // socket.handshake.address is the shared PROXY ip, so the originating client is the
+    // left-most x-forwarded-for hop. Only used to segment automated cloud/VPS traffic;
+    // never for a per-IP throttle (see the note above).
+    var xff = socket.handshake.headers['x-forwarded-for'];
+    socket.clientIp = (xff ? String(xff).split(',')[0].trim() : '') || socket.handshake.address;
+    // Hard-block only when botGuard.config.json sets datacenter.action='block' (default is
+    // the softer 'tarpit', which lets them connect and then dead-ends them). Signed-in
+    // users are exempt via bypassForAuthed.
+    if (botGuard.shouldHardBlock(socket.clientIp, socket.userId != null)) {
+        console.log('[botGuard] refusing datacenter handshake', socket.id, socket.clientIp);
+        return next(new Error('connection refused'));
+    }
+    next(); // never reject guests
 });
 
 io.on('connection', (client) => {
     checkForWake();
     clientCount++;
+    var verdict = botGuard.register(client.id, client.clientIp, client.userId != null);
+    if (verdict.datacenter) {
+        console.log('[botGuard] datacenter connection', client.id, client.clientIp, '-> action:', verdict.action);
+    }
     messenger.addMailBox(client.id, client, { userId: client.userId, deviceId: client.deviceId });
 
     client.on('disconnect', () => {
+      botGuard.unregister(client.id);
       hostess.kickFromRoom(client.id);
       messenger.removeMailBox(client.id);
       clientCount--;

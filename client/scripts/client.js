@@ -209,6 +209,15 @@ function registerConnectionHandlers(server) {
 		}
 	});
 
+	// botGuard: the server confirmed this client actually drove a kart (not a pageview-only
+	// bot). Fire the trustworthy human KPI exactly once per page session. trackEvent is the
+	// shared gtag helper defined in the page head; it no-ops if gtag is blocked.
+	server.on("verifiedHuman", function () {
+		if (window.__verifiedHumanSent) { return; }
+		window.__verifiedHumanSent = true;
+		trackEvent('verified_human');
+	});
+
 	server.on("drop", function () {
 		calcPing();
 	});

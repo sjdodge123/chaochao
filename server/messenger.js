@@ -1,5 +1,6 @@
 var utils = require('./utils.js');
 var hostess = require('./hostess.js');
+var botGuard = require('./botGuard.js');
 var c = utils.loadConfig();
 // Skin station: expose the curated named-color palette to the client (via the
 // config payload that already ships to every client) so the skin picker's swatches
@@ -265,6 +266,13 @@ function checkForMail(client) {
 		// branch). joinARoom enforces capacity; matchmaking (id == -1) still avoids
 		// locked rooms in findARoom. The legacy `coop` event arg is no longer needed
 		// server-side but clients may still send it — accepted and ignored.
+		// botGuard: a flagged client (datacenter connection in tarpit mode, or one that
+		// tripped the invisible honeypot) is diverted into the dead tarpit room instead of
+		// any real match. This overrides both matchmaking AND a direct ?gameid= join, so a
+		// flagged bot can't pick its own way into a live room.
+		if (botGuard.shouldTarpit(client.id)) {
+			roomSig = hostess.getTarpitRoom();
+		}
 		var room = hostess.joinARoom(roomSig, client.id);
 		if (room == false) {
 			debug.log("enterGame: joinARoom FAILED for client=", client.id, " roomSig=", roomSig);
@@ -333,6 +341,15 @@ function checkForMail(client) {
 		hostess.kickFromRoom(client.id);
 	});
 
+	// The invisible honeypot decoy was tripped (a human never sees or clicks it). Flag the
+	// client so its NEXT matchmake (enterGame) is diverted into the tarpit. We don't yank an
+	// already-in-game socket mid-session — decoy trips happen at page load, well before
+	// enterGame — which keeps this off the hot path and avoids a risky live room migration.
+	client.on('honeypotTriggered', function () {
+		botGuard.flag(client.id, 'honeypot');
+		console.log('[botGuard] honeypot tripped by', client.id);
+	});
+
 	client.on('musicTrackEnded', function (trackName) {
 		var room = hostess.getRoomBySig(roomMailList[client.id]);
 		if (room == undefined) {
@@ -381,6 +398,14 @@ function checkForMail(client) {
 				// otherwise see only the trailing attack=false and drop the punch.
 				if (packet.attack && !player.attack) { player.attackQueued = true; }
 				player.attack = packet.attack;
+			}
+			// botGuard human-verify: once this client's kart has actually travelled far
+			// enough under its own server-simulated input, emit a one-shot signal so the
+			// client fires the verified_human GA event. A pageview-only bot that never opens
+			// a socket (or sits frozen in the tarpit, which is never ticked) never moves and
+			// so never verifies — making verified_human a trustworthy human KPI.
+			if (botGuard.noteMovement(client.id, player)) {
+				client.emit('verifiedHuman');
 			}
 		}
 	});

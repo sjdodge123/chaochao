@@ -18,6 +18,10 @@ exports.getRooms = function () {
 		if (room.isPreview) {
 			continue;
 		}
+		// Tarpit is a dead room for flagged bots — never advertise it on the join page.
+		if (room.isTarpit) {
+			continue;
+		}
 		// Late-join: a started (locked) match is now joinable as long as it has
 		// space — the joiner spectates the current round and races from the next
 		// (determineGameState's racing branch). Only a FULL room is unjoinable, and
@@ -71,7 +75,7 @@ exports.findARoom = function (clientID) {
 		// hold several local-co-op players (capacity > 1), and they get unlocked at
 		// game-over (resetGame), so the old "locked + capacity 1" implicit guard no
 		// longer keeps them private — exclude them explicitly here.
-		if (roomList[sig2].hasSpace() && !roomList[sig2].isLocked() && !roomList[sig2].isPreview) {
+		if (roomList[sig2].hasSpace() && !roomList[sig2].isLocked() && !roomList[sig2].isPreview && !roomList[sig2].isTarpit) {
 			return sig2;
 		}
 	}
@@ -120,6 +124,13 @@ exports.updateRooms = function (dt) {
 			delete roomList[sig];
 			continue;
 		}
+		// The tarpit is intentionally NEVER ticked: a flagged bot diverted here gets a
+		// valid waiting-room gameState and then sits forever — no state transitions, no
+		// gameUpdates, no AI fill, no real match. This is the whole tarpit mechanism and
+		// it keeps game.js untouched.
+		if (room.isTarpit) {
+			continue;
+		}
 		room.update(dt);
 		/*
 		if(!room.game.gameEnded){
@@ -134,6 +145,23 @@ exports.updateRooms = function (dt) {
 }
 exports.getRoomBySig = function (sig) {
 	return roomList[sig];
+}
+// Lazily create (and re-create if reclaimed) the singleton tarpit room — a high-capacity
+// room that findARoom never matchmakes into, getRooms never lists, and updateRooms never
+// ticks. messenger.enterGame diverts botGuard-flagged clients here so they sit in a dead
+// waiting room instead of polluting real matches. Returns its sig.
+var tarpitSig = null;
+exports.getTarpitRoom = function () {
+	if (tarpitSig != null && roomList[tarpitSig] != null) {
+		return tarpitSig;
+	}
+	var sig = generateRoomSig();
+	var room = game.getRoom(sig, 500);
+	room.isTarpit = true;
+	roomList[sig] = room;
+	tarpitSig = sig;
+	console.log("Created tarpit room: " + sig);
+	return sig;
 }
 // Local co-op cap for a preview play-test, mirroring the client's LOCAL_PLAYER_CAP
 // (client/scripts/game.js). Keep the two in lockstep if either changes.

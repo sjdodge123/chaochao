@@ -25,6 +25,12 @@
       "displayName": "Playlist",
       "scope": "EVENT",
       "description": "Active map playlist on round_start/round_complete/match_end (featured | hardcore | pure | all | …). Lets gameplay be segmented by playlist and surfaces per-playlist skew."
+    },
+    {
+      "parameterName": "trap_source",
+      "displayName": "Bot Trap Source",
+      "scope": "EVENT",
+      "description": "Which page's invisible honeypot decoy a bot tripped (landing | play). Attached to bot_trap events."
     }
   ],
   "customMetrics": [
@@ -46,6 +52,10 @@
   "keyEvents": [
     {
       "eventName": "match_end",
+      "countingMethod": "ONCE_PER_EVENT"
+    },
+    {
+      "eventName": "verified_human",
       "countingMethod": "ONCE_PER_EVENT"
     }
   ]

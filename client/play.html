@@ -119,5 +119,25 @@
         <script src="scripts/joystick.js"></script>
         <script src="scripts/utils.js"></script>
         <!-- BUILD: bundle-end -->
+        <!-- Honeypot: invisible decoy control. A human never sees or tabs to it (off-screen,
+             aria-hidden, removed from tab order); a DOM-scraping bot that auto-clicks
+             "play-like" elements trips it, firing the bot_trap GA event and telling the
+             server to divert this socket into the tarpit on its next matchmake. -->
+        <a href="#" id="freeRewardButton" tabindex="-1" aria-hidden="true"
+           style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;opacity:0;">Play Now — Claim Free Reward</a>
+        <script>
+            (function () {
+                var decoy = document.getElementById('freeRewardButton');
+                if (!decoy) { return; }
+                decoy.addEventListener('click', function (e) {
+                    if (e && e.preventDefault) { e.preventDefault(); }
+                    trackEvent('bot_trap', { trap_source: 'play' });
+                    // `server` is client.js's socket global; may be null very early — the GA
+                    // event still fires, and bots trip this after the socket is up.
+                    try { if (typeof server !== 'undefined' && server) { server.emit('honeypotTriggered'); } } catch (err) {}
+                    return false;
+                });
+            })();
+        </script>
     </body>
 </html>
