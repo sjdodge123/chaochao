@@ -312,7 +312,7 @@ function checkForMail(client) {
 			// Credit the mapsSubmitted medal (writes-gated; atomic via addProgression's CAS).
 			if (client.userId) {
 				auth.addProgression(client.userId, { medalDeltas: { mapsSubmitted: 1 } })
-					.then(function (row) { if (row) { sendProgressionToClient(client.id, row); } })
+					.then(function (row) { if (row) { exports.sendProgressionToClient(client.id, row); } })
 					.catch(function (e) { console.log('[progression] mapsSubmitted bump failed:', e && e.message); });
 			}
 		})(client.id).catch(function (e) {

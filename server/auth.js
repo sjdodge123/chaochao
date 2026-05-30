@@ -390,7 +390,7 @@ async function addProgression(userId, opts) {
             var newXp = cur.xp + (opts.xpDelta || 0);
             var newWins = cur.wins + (opts.win ? 1 : 0);
             var newMedalCounts = progression.mergeMedalCounts(cur.medal_counts, opts.medalDeltas);
-            progression.applyWinStreak(newMedalCounts, !!opts.win);
+            if (opts.win !== undefined) { progression.applyWinStreak(newMedalCounts, opts.win); } // match writes only; a bare medal bump (e.g. mapsSubmitted) must not reset the streak
             var newLevel = progression.levelForXp(newXp);
             // Level skins aren't stored; unlocked_skins holds only achievement skins.
             var earned = progression.achievementsUnlocked(newMedalCounts, newWins);

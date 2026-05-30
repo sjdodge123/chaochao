@@ -631,7 +631,7 @@ class Player extends Circle {
 		// lobby otherwise kicks an "awake" idler immediately, which made shop browsing (no
 		// movement packets) eject players. nearStation latches the parked station (cleared on
 		// exit), so this lapses the moment they leave the station.
-		if (this.nearStation != null) {
+		if (this.nearStation != null && currentState == c.stateMap.lobby) {
 			this.wakeUp();
 			return;
 		}
@@ -780,7 +780,7 @@ class Player extends Circle {
 				this.bumperHitCount += 1;
 			}
 		}
-		if (object.mapOwned) { this.bumpersHitMatch += 1; } // knocked by a bumper/hazard
+		if (object.mapOwned && this.currentState != c.stateMap.lobby) { this.bumpersHitMatch += 1; } // knocked by a bumper/hazard
 		_engine.punchPlayer(this, object);
 		var charged = object.chargeFrac != null && object.chargeFrac >= c.punchCharge.chargedHitFrac;
 		messenger.messageRoomBySig(this.roomSig, "playerPunched", { owner: object.ownerId, victim: this.id, x: this.x, y: this.y, charged: charged });
@@ -916,7 +916,7 @@ class Player extends Circle {
 			if ((this.currentState == c.stateMap.racing || this.currentState == c.stateMap.collapsing) && this.dt) {
 				this.iceDistanceTravelled += utils.getMag(this.velX, this.velY) * this.dt;
 			}
-				this.iceDistanceMatch += Math.hypot(this.velX, this.velY); // distance slid on ice
+				if (this.currentState != c.stateMap.lobby) { this.iceDistanceMatch += Math.hypot(this.velX, this.velY); } // slide activity, in-match only
 			return;
 		}
 		if (object.id == c.tileMap.goal.id) {
@@ -1130,6 +1130,13 @@ class Player extends Circle {
 			this.heavyHitCount = 0;
 			this.bumperHitCount = 0;
 			this.iceDistanceTravelled = 0;
+			// New per-match medal counters — zero them too, else they re-accumulate across
+			// matches in a persistent room and over-credit the lifetime medals at every gameOver.
+			this.abilitiesUsedMatch = 0;
+			this.windupPunchHitsMatch = 0;
+			this.zombieKillsMatch = 0;
+			this.bumpersHitMatch = 0;
+			this.iceDistanceMatch = 0;
 		}
 	}
 }
