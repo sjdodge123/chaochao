@@ -296,6 +296,10 @@ function getRandomBranchCode() {
 function getRandomInt(min, max) {
     min = Math.ceil(min);
     max = Math.floor(max);
+    // Tolerate a swapped range: a caller passing min > max would otherwise get a
+    // negative span (max - min + 1 <= 0), which yields a value BELOW min rather
+    // than a draw in [min,max]. Normalize so the inclusive, ordered contract holds.
+    if (min > max) { var t = min; min = max; max = t; }
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
@@ -480,6 +484,12 @@ exports.normalizedVectorFromAngle = function (angle) {
 exports.normalizedVectorFromPoint = function (point) {
     /// Calculate magnitude of vector
     const magnitude = Math.sqrt(point.x * point.x + point.y * point.y);
+    // A zero-length vector has no direction; dividing by magnitude 0 yields NaN,
+    // which would propagate into physics/aim and silently corrupt a tick. Return
+    // the zero vector instead so the caller stays finite.
+    if (magnitude === 0) {
+        return { x: 0, y: 0 };
+    }
     // Normalize vector by dividing each component by magnitude
     return {
         x: point.x / magnitude,
