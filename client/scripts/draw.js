@@ -1723,6 +1723,73 @@ function drawBackground() {
     // The sky vista is painted as the play-field floor in drawWorld (the world
     // rect fills the whole canvas, so there's no separate backdrop layer).
 }
+// --- gameOver medals card ------------------------------------------------
+// Persistent reveal clock for the end-of-game medals card. Keyed to the
+// winning player id so the staggered entrance replays exactly once per match
+// (drawGameOverScreen runs every tick, so we can't restart on each frame).
+var medalRevealFor = null;
+var medalRevealElapsed = 0;
+
+// Rounded-rect path builder (caller fills/strokes it).
+function gameOverRoundRect(ctx, x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+}
+
+// A small gold medal disc with a ribbon + embossed star, used as the marker
+// on the medals card. cx/cy is the disc centre; r its radius.
+function drawMedalDisc(ctx, cx, cy, r) {
+    ctx.save();
+    // Ribbon tails tucked behind the disc.
+    ctx.fillStyle = "#c8423a";
+    ctx.beginPath();
+    ctx.moveTo(cx - r * 0.55, cy - r * 0.2);
+    ctx.lineTo(cx - r * 0.15, cy + r * 1.5);
+    ctx.lineTo(cx + r * 0.15, cy + r * 0.9);
+    ctx.lineTo(cx - r * 0.05, cy + r * 0.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#e0584f";
+    ctx.beginPath();
+    ctx.moveTo(cx + r * 0.55, cy - r * 0.2);
+    ctx.lineTo(cx + r * 0.15, cy + r * 1.5);
+    ctx.lineTo(cx - r * 0.15, cy + r * 0.9);
+    ctx.lineTo(cx + r * 0.05, cy + r * 0.2);
+    ctx.closePath();
+    ctx.fill();
+    // Disc: warm gold radial.
+    var grad = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.35, r * 0.2, cx, cy, r);
+    grad.addColorStop(0, "#fff2b0");
+    grad.addColorStop(0.5, "#f6c64b");
+    grad.addColorStop(1, "#b9831f");
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, 2 * Math.PI);
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.lineWidth = Math.max(1.5, r * 0.12);
+    ctx.strokeStyle = "rgba(120,80,10,0.85)";
+    ctx.stroke();
+    // Embossed 5-point star.
+    ctx.fillStyle = "rgba(140,92,10,0.9)";
+    ctx.beginPath();
+    for (var s = 0; s < 5; s++) {
+        var ang = -Math.PI / 2 + s * (2 * Math.PI / 5);
+        var ax = cx + Math.cos(ang) * r * 0.5;
+        var ay = cy + Math.sin(ang) * r * 0.5;
+        if (s === 0) { ctx.moveTo(ax, ay); } else { ctx.lineTo(ax, ay); }
+        var ang2 = ang + Math.PI / 5;
+        ctx.lineTo(cx + Math.cos(ang2) * r * 0.22, cy + Math.sin(ang2) * r * 0.22);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+}
 // Pick a text colour + contrasting outline that stays readable on an arbitrary
 // background. The gameOver screen paints its backdrop in the winner's kart
 // colour (anything from near-black navy to bright yellow), so the old hard-coded
@@ -1773,52 +1840,133 @@ function drawGameOverScreen(dt) {
     gameContext.restore();
 
     if (achievements != null) {
-        var xOffset = 200;
-        var yOffset = -200;
-        var startingHeight = (LOGICAL_HEIGHT + 48) / 2;
-        gameContext.save();
-        gameContext.fillStyle = ink.fill;
-        gameContext.strokeStyle = ink.stroke;
-        gameContext.lineWidth = 3;
-        gameContext.lineJoin = "round";
-        gameContext.font = '28px serif';
-        gameContext.strokeText("-- Medals -- ", (LOGICAL_WIDTH / 2) + xOffset, startingHeight + yOffset);
-        gameContext.fillText("-- Medals -- ", (LOGICAL_WIDTH / 2) + xOffset, startingHeight + yOffset);
-
-
-        var lineHeight = 40;
-        var count = 1;
+        // Collect only the medals actually earned this match so the card can be
+        // sized + vertically centred around real content (skip empty medals).
+        var earnedMedals = [];
         for (var medal in achievements) {
-            if (achievements[medal].ids.length == 0) {
-                continue;
+            if (achievements[medal].ids && achievements[medal].ids.length > 0) {
+                earnedMedals.push(achievements[medal]);
             }
-            // Re-assert the ink each title: the medalist-dot loop below overwrites
-            // strokeStyle (to the dot's colour), so without this the 2nd+ title would
-            // be outlined in a leftover dot colour instead of the readable ink.
-            gameContext.fillStyle = ink.fill;
-            gameContext.strokeStyle = ink.stroke;
-            gameContext.strokeText(achievements[medal].title, (LOGICAL_WIDTH / 2) + xOffset, startingHeight + (lineHeight * count) + yOffset);
-            gameContext.fillText(achievements[medal].title, (LOGICAL_WIDTH / 2) + xOffset, startingHeight + (lineHeight * count) + yOffset);
-            count++;
-            for (var i = 0; i < achievements[medal].ids.length; i++) {
-                var player = playerList[achievements[medal].ids[i]];
-
-                gameContext.beginPath();
-                gameContext.arc((LOGICAL_WIDTH / 2) + (xOffset + (35 * (i + 1))), startingHeight + (lineHeight * count) - 15 + yOffset, 15, 0, 2 * Math.PI);
-                if (player != null) {
-                    gameContext.fillStyle = player.color;
-                    gameContext.strokeStyle = "black";
-                } else {
-                    gameContext.fillStyle = "grey";
-                    gameContext.strokeStyle = "grey";
-                }
-                gameContext.lineWidth = 3;
-                gameContext.fill();
-                gameContext.stroke();
-            }
-            count++;
         }
-        gameContext.restore();
+
+        if (earnedMedals.length > 0) {
+            // Reveal clock: reset when a new match's winner is shown so the
+            // staggered entrance replays each game; advance in seconds (dt).
+            if (medalRevealFor !== playerWon) {
+                medalRevealFor = playerWon;
+                medalRevealElapsed = 0;
+            }
+            medalRevealElapsed += (dt || 0);
+
+            // Card geometry, anchored to the right edge so it never overlaps the
+            // recap montage (which owns the left/centre of the screen).
+            var rowH = 48;
+            var headH = 58;
+            var padX = 24;
+            var padTop = 20;
+            var padBot = 22;
+            var cardW = 430;
+            var cardH = padTop + headH + earnedMedals.length * rowH + padBot;
+            var cardX = LOGICAL_WIDTH - cardW - 40;
+            var cardY = Math.max(24, (LOGICAL_HEIGHT - cardH) / 2);
+
+            // Card entrance: quick fade + rise.
+            var cardT = Math.min(1, medalRevealElapsed / 0.28);
+            var cardEase = 1 - Math.pow(1 - cardT, 3);
+
+            gameContext.save();
+            gameContext.textBaseline = "alphabetic";
+            gameContext.globalAlpha = cardEase;
+            gameContext.translate(0, (1 - cardEase) * 16);
+
+            // Panel: dark translucent so the fixed light text stays readable on
+            // any winner colour, with a soft drop shadow.
+            gameContext.save();
+            gameContext.shadowColor = "rgba(0,0,0,0.45)";
+            gameContext.shadowBlur = 24;
+            gameContext.shadowOffsetY = 8;
+            gameOverRoundRect(gameContext, cardX, cardY, cardW, cardH, 18);
+            gameContext.fillStyle = "rgba(18,20,28,0.86)";
+            gameContext.fill();
+            gameContext.restore();
+
+            // Gold border.
+            gameOverRoundRect(gameContext, cardX + 0.5, cardY + 0.5, cardW - 1, cardH - 1, 18);
+            gameContext.lineWidth = 1.5;
+            gameContext.strokeStyle = "rgba(246,198,75,0.55)";
+            gameContext.stroke();
+
+            // Header: trophy disc + "MEDALS" + subtitle, divider beneath.
+            var headBaseY = cardY + padTop;
+            drawMedalDisc(gameContext, cardX + padX + 15, headBaseY + 16, 15);
+            gameContext.textAlign = "left";
+            gameContext.fillStyle = "#f6c64b";
+            gameContext.font = "bold 26px Arial";
+            gameContext.fillText("MEDALS", cardX + padX + 42, headBaseY + 22);
+            gameContext.fillStyle = "rgba(220,226,236,0.6)";
+            gameContext.font = "13px Arial";
+            gameContext.fillText("Match awards", cardX + padX + 42, headBaseY + 40);
+            gameContext.beginPath();
+            gameContext.moveTo(cardX + padX, cardY + padTop + headH - 8);
+            gameContext.lineTo(cardX + cardW - padX, cardY + padTop + headH - 8);
+            gameContext.lineWidth = 1;
+            gameContext.strokeStyle = "rgba(255,255,255,0.12)";
+            gameContext.stroke();
+
+            // Medal rows: each fades + slides in, staggered after the card.
+            var rowTop = cardY + padTop + headH;
+            for (var m = 0; m < earnedMedals.length; m++) {
+                var rowT = Math.min(1, Math.max(0, (medalRevealElapsed - 0.18 - m * 0.09) / 0.34));
+                var rowEase = 1 - Math.pow(1 - rowT, 3);
+                if (rowEase <= 0) { continue; }
+
+                var rowCy = rowTop + m * rowH + rowH / 2;
+
+                gameContext.save();
+                gameContext.globalAlpha = cardEase * rowEase;
+                gameContext.translate((1 - rowEase) * 22, 0);
+
+                // Medal marker.
+                drawMedalDisc(gameContext, cardX + padX + 14, rowCy - 2, 13);
+
+                // Title.
+                gameContext.textAlign = "left";
+                gameContext.fillStyle = "#eef2f8";
+                gameContext.font = "bold 19px Arial";
+                gameContext.fillText(earnedMedals[m].title, cardX + padX + 38, rowCy + 5);
+
+                // Winner chips, right-aligned. Cap the visible chips and show a
+                // "+N" overflow tag so a popular medal can't run off the card.
+                var ids = earnedMedals[m].ids;
+                var chipR = 11;
+                var chipGap = 28;
+                var maxChips = 4;
+                var shown = Math.min(ids.length, maxChips);
+                var chipRight = cardX + cardW - padX - chipR;
+                for (var c = 0; c < shown; c++) {
+                    var chipX = chipRight - (shown - 1 - c) * chipGap;
+                    var cp = playerList[ids[c]];
+                    gameContext.beginPath();
+                    gameContext.arc(chipX, rowCy, chipR, 0, 2 * Math.PI);
+                    gameContext.fillStyle = (cp != null) ? cp.color : "#7a7a7a";
+                    gameContext.fill();
+                    gameContext.lineWidth = 2;
+                    gameContext.strokeStyle = "rgba(255,255,255,0.85)";
+                    gameContext.stroke();
+                }
+                if (ids.length > maxChips) {
+                    var firstChipX = chipRight - (shown - 1) * chipGap;
+                    gameContext.textAlign = "right";
+                    gameContext.fillStyle = "rgba(220,226,236,0.75)";
+                    gameContext.font = "bold 13px Arial";
+                    gameContext.fillText("+" + (ids.length - maxChips), firstChipX - chipR - 8, rowCy + 5);
+                }
+
+                gameContext.restore();
+            }
+
+            gameContext.restore();
+        }
     }
 
     // Recap montage overlay. Guarded so a replay-render error can never break
