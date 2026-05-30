@@ -107,18 +107,22 @@ async function recordRating(mapId, voter, stars, config) {
 
 // Pull the aggregate view and fold it into { mapId: rating }. No-op ({}) when auth
 // is disabled, so local dev simply has no ratings.
+// Returns {mapId: rating} on success (possibly empty = genuinely no votes yet),
+// or null on a READ ERROR so the caller can keep the last good summaries instead
+// of wiping every aggregate + Favorites membership on a transient blip. Auth-off
+// is a real (empty) success, not an error.
 async function loadSummaries(config) {
     if (!auth.enabled || !auth.supabase) { return {}; }
     try {
         var res = await auth.supabase.from('map_rating_summary').select('*');
         if (res.error) {
             console.log('[ratings] summary read failed:', res.error.message);
-            return {};
+            return null;
         }
         return summarize(res.data, config);
     } catch (e) {
         console.log('[ratings] summary read error:', e.message);
-        return {};
+        return null;
     }
 }
 

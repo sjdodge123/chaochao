@@ -309,6 +309,10 @@ function clientConnect() {
                         loadMapById(id);
                     }
                 })
+                // Cards arrive via parallel AJAX; if a filter chip / search is already
+                // active, re-apply it so this late-arriving card respects it instead of
+                // showing unconditionally.
+                if (typeof applyMapSearch === "function") { applyMapSearch(); }
             });
         }
     });
@@ -323,7 +327,14 @@ function mapBadgeHtml(meta) {
     var star = (meta.tier === "featured") ? "★ " : "";
     var trait = meta.dominantTrait ? (meta.dominantTrait.charAt(0).toUpperCase() + meta.dominantTrait.slice(1)) : "";
     var label = star + (trait ? trait + " · " : "") + meta.balanceScore;
-    return '<div class="map-badge ' + cls + '" title="Balance score ' + meta.balanceScore + '/100">' + label + "</div>";
+    var html = '<div class="map-badge ' + cls + '" title="Balance score ' + meta.balanceScore + '/100">' + label + "</div>";
+    // Player rating aggregate (Bayesian avg + vote count), shown once there are votes.
+    if (meta.rating && meta.rating.count > 0) {
+        var avg = (typeof meta.rating.bayesian === "number") ? meta.rating.bayesian.toFixed(1) : meta.rating.avg;
+        html += '<div class="map-badge mb-rating" title="' + meta.rating.count + ' player rating' +
+            (meta.rating.count === 1 ? '' : 's') + '">★ ' + avg + '</div>';
+    }
+    return html;
 }
 
 function tryStart() {

@@ -18,6 +18,11 @@ var mailBoxList = {},
 exports.build = function (mainIO) {
 	io = mainIO;
 }
+// Broadcast an event to every connected socket (not room-scoped). Used for global
+// state refreshes like the recomputed playlist summary.
+exports.broadcastAll = function (header, payload) {
+	if (io) { io.emit(header, payload); }
+}
 // `identity` is { userId, deviceId } resolved by the io.use() auth middleware
 // (both null for guests). We keep it in a parallel map so the socket-id mailbox
 // keeps storing the raw socket — existing consumers (getClient, game.js) are
@@ -308,7 +313,10 @@ function checkForMail(client) {
 				? compressor.sendLobbyStations(room.game.gameBoard.lobbyStations)
 				: null,
 			// Live AI override so a late joiner's AI panel reflects the room setting.
-			lobbyAI: room.game.botOverride
+			lobbyAI: room.game.botOverride,
+			// Room-wide playlist so a late joiner sees the real selection (not the
+			// default Featured) and can't overwrite it by stepping the board.
+			lobbyPlaylist: room.game.gameBoard.playlistId
 		};
 		client.emit("gameState", gameState);
 		//Update all existing players with the new player's info
@@ -533,6 +541,12 @@ function checkForMail(client) {
 		if (board == null || board.currentMap == null || board.currentMap.id == null) {
 			return;
 		}
+		// Never record ratings from an editor preview room: its map id is a throwaway
+		// preview-* (or a committed id played on injected geometry), so a vote there
+		// would poison the real aggregate. Mirrors the leaderboard's isPreview skip.
+		if (board.isPreview) {
+			return;
+		}
 		var stars = (payload && typeof payload.stars === "number") ? Math.floor(payload.stars) : 0;
 		if (!ratings.validStars(stars)) {
 			return;
@@ -541,6 +555,13 @@ function checkForMail(client) {
 		var voter = ratings.deriveVoter(player);
 		if (voter == null) {
 			return; // bot or identity-less socket — may not vote
+		}
+		// Must have actually raced the map being rated. racedCurrentMap is stamped at
+		// startRace for everyone in the gate and is never set for a late-join spectator
+		// (who joins after startRace during racing/collapsing, or during game-over), so
+		// a drive-by joiner can't rate a map it never played.
+		if (!player.racedCurrentMap) {
+			return;
 		}
 		// Per-socket cooldown: at most one rate write per ~800ms (the upsert dedups
 		// re-votes anyway; this just blunts a spam loop).

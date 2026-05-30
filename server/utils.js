@@ -719,7 +719,8 @@ exports.getEditorMapMeta = function () {
             length: m.meta.length,
             balanceScore: m.meta.balanceScore,
             playlists: m.meta.playlists,
-            parTime: m.meta.parTime
+            parTime: m.meta.parTime,
+            rating: m.meta.rating
         };
     });
     return out;
