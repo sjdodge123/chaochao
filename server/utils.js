@@ -484,12 +484,6 @@ exports.normalizedVectorFromAngle = function (angle) {
 exports.normalizedVectorFromPoint = function (point) {
     /// Calculate magnitude of vector
     const magnitude = Math.sqrt(point.x * point.x + point.y * point.y);
-    // A zero-length vector has no direction; dividing by magnitude 0 yields NaN,
-    // which would propagate into physics/aim and silently corrupt a tick. Return
-    // the zero vector instead so the caller stays finite.
-    if (magnitude === 0) {
-        return { x: 0, y: 0 };
-    }
     // Normalize vector by dividing each component by magnitude
     return {
         x: point.x / magnitude,
