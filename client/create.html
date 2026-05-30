@@ -486,11 +486,16 @@
       max-width: 720px;
     }
     .map-chip {
+      /* >=44px touch target (input.js standard / button-gate); inline-flex centers
+         the label in the taller pill. */
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
       border: thin solid var(--border);
       background: var(--surface);
       color: var(--text-muted);
       border-radius: 999px;
-      padding: 5px 12px;
+      padding: 6px 14px;
       font-size: 0.82rem;
       cursor: pointer;
       transition: background 0.12s, color 0.12s, border-color 0.12s;
