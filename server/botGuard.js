@@ -42,6 +42,8 @@ var DC = cfg.datacenter || {};
 var DC_ENABLED = DC.enabled !== false;
 var DC_ACTION = DC.action || 'tarpit';                 // 'tarpit' | 'block' | 'measure'
 var DC_BYPASS_AUTHED = DC.bypassForAuthed !== false;   // signed-in users skip the DC check
+var DC_TRUSTED_PROXY_DEPTH = (typeof DC.trustedProxyDepth === 'number' && DC.trustedProxyDepth >= 1)
+    ? Math.floor(DC.trustedProxyDepth) : 1;             // trusted proxy hops in front (Heroku = 1)
 var HP = cfg.honeypot || {};
 var HP_ACTION = HP.action || 'tarpit';                 // 'tarpit' | 'measure'
 var HV = cfg.humanVerify || {};
@@ -92,6 +94,26 @@ function normalizeIp(ip) {
     return m ? m[1] : ip;
 }
 
+// Resolve the trustworthy client IP from an X-Forwarded-For header. Each proxy in the
+// chain APPENDS the peer address it saw, so the right-most entries were observed by our own
+// trusted infrastructure while the left-most are attacker-controllable (a bot can prepend a
+// fake residential hop). We therefore count DC_TRUSTED_PROXY_DEPTH hops in FROM THE RIGHT
+// (Heroku's router = 1) and take that entry, ignoring anything spoofed to its left. Falls
+// back to the socket address when there's no XFF header.
+exports.resolveClientIp = function (xffHeader, fallback) {
+    if (!xffHeader) { return fallback || null; }
+    var parts = String(xffHeader).split(',');
+    var cleaned = [];
+    for (var i = 0; i < parts.length; i++) {
+        var p = parts[i].trim();
+        if (p) { cleaned.push(p); }
+    }
+    if (cleaned.length === 0) { return fallback || null; }
+    var idx = cleaned.length - DC_TRUSTED_PROXY_DEPTH;
+    if (idx < 0) { idx = 0; }
+    return cleaned[idx];
+};
+
 function isDatacenterIp(ip) {
     var n = ipv4ToInt(normalizeIp(ip) || '');
     if (n == null) { return false; } // unparseable / non-mapped IPv6 — treat as non-DC
@@ -104,13 +126,16 @@ exports.isDatacenterIp = isDatacenterIp;
 
 // ---- per-client state ------------------------------------------------------------
 
-var clients = {}; // id -> { ip, datacenter, authed, flagged, reason, verified, travelled, lastX, lastY }
+var clients = {}; // id -> { ip, datacenter, authed, flagged, reasons, verified, travelled, lastX, lastY }
 
 function ensure(id) {
     if (clients[id] == null) {
         clients[id] = {
             ip: null, datacenter: false, authed: false,
-            flagged: false, reason: null,
+            // A client can accrue SEVERAL reasons (e.g. datacenter + honeypot); keep them all
+            // so switching one layer to 'tarpit' can't be cancelled by a later flag from a
+            // layer that's still in 'measure'.
+            flagged: false, reasons: {},
             verified: false, travelled: 0, lastX: null, lastY: null
         };
     }
@@ -126,7 +151,7 @@ exports.register = function (id, ip, authed) {
     st.datacenter = ENABLED && DC_ENABLED && isDatacenterIp(ip) && !(DC_BYPASS_AUTHED && authed);
     if (st.datacenter && DC_ACTION === 'tarpit') {
         st.flagged = true;
-        st.reason = 'datacenter';
+        st.reasons.datacenter = true;
     }
     return { datacenter: st.datacenter, action: DC_ACTION };
 };
@@ -140,20 +165,25 @@ exports.shouldHardBlock = function (ip, authed) {
     return isDatacenterIp(ip);
 };
 
-// Trip the honeypot (or any future heuristic).
+// Trip the honeypot (or any future heuristic). Reasons accumulate — never overwrite an
+// existing one, so a datacenter flag already enforced as 'tarpit' survives a later honeypot
+// trip even while honeypot.action is still 'measure'.
 exports.flag = function (id, reason) {
     var st = ensure(id);
     st.flagged = true;
-    st.reason = reason || 'flagged';
+    st.reasons[reason || 'flagged'] = true;
 };
 
-// Should this client be diverted into the tarpit on matchmaking?
+// Should this client be diverted into the tarpit on matchmaking? A client may carry several
+// reasons; trap it if ANY currently-enforced reason applies.
 exports.shouldTarpit = function (id) {
     if (!ENABLED) { return false; }
     var st = clients[id];
     if (st == null || !st.flagged) { return false; }
-    if (st.reason === 'honeypot' && HP_ACTION !== 'tarpit') { return false; }
-    return true;
+    if (st.reasons.datacenter && DC_ACTION === 'tarpit') { return true; }
+    if (st.reasons.honeypot && HP_ACTION === 'tarpit') { return true; }
+    if (st.reasons.flagged) { return true; } // generic/manual flag — always trap
+    return false;
 };
 
 exports.isFlagged = function (id) {
@@ -163,7 +193,9 @@ exports.isFlagged = function (id) {
 
 exports.flagReason = function (id) {
     var st = clients[id];
-    return st != null ? st.reason : null;
+    if (st == null) { return null; }
+    var keys = Object.keys(st.reasons);
+    return keys.length ? keys.join(',') : null;
 };
 
 // Accumulate authentic gameplay displacement. Returns true EXACTLY ONCE — the tick the

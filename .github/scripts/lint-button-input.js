@@ -37,6 +37,8 @@ const ALLOWLIST = [
       why: 'icon emoji-cancel link (has aria-label); reachable via gamepad.js "#emojiMenu a"' },
     { page: 'create.html', match: (e) => e.id === 'createNew', skip: ['class'],
       why: 'id-styled "Create a new map" tile; reachable via editorGamepad "#loadWindow button"' },
+    { page: 'index.html', match: (e) => e.id === 'freeRewardButton', skip: ['class', 'reach'],
+      why: 'invisible anti-bot honeypot decoy: deliberately off-screen, aria-hidden, NOT styled or gamepad-reachable so only a DOM-scraping bot can trip it (see botGuard.js)' },
 ];
 
 function attr(s, n) {

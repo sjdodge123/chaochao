@@ -34,8 +34,14 @@ const CONTROL_RULES = ['button-name', 'link-name', 'input-button-name', 'aria-co
 
 // Pre-existing, documented exceptions. New controls are NOT here — they comply.
 const ALLOW = {
-    size: { themeToggle: 'JS-injected navbar theme button, pre-existing 34px — recommend bump to 44px' },
-    reach: { themeToggle: 'reachable in-game via the Settings panel (gamepad.js); secondary navbar affordance on menu pages' },
+    size: {
+        themeToggle: 'JS-injected navbar theme button, pre-existing 34px — recommend bump to 44px',
+        freeRewardButton: 'invisible anti-bot honeypot decoy — intentionally a 1px off-screen trap, never a real touch target (see botGuard.js)',
+    },
+    reach: {
+        themeToggle: 'reachable in-game via the Settings panel (gamepad.js); secondary navbar affordance on menu pages',
+        freeRewardButton: 'invisible anti-bot honeypot decoy — must NOT be gamepad-reachable; only a DOM-scraping bot should ever reach it (see botGuard.js)',
+    },
 };
 
 // Read the gamepad nav selectors from source so the gate tracks them if they change.
