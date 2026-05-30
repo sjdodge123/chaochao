@@ -105,6 +105,17 @@ var ACHIEVEMENT_UNLOCKS = [
     { id: 'checkered', name: "Checkered", slot: 'pattern', stat: 'mapsSubmitted', threshold: 5 },
 ];
 
+// winStreak is a MAX/streak, not a count: maintained explicitly after the additive medal
+// merge. `_streak` (underscore = internal, not a cosmetic stat) is the current run; `winStreak`
+// is the best-ever, which the achievement ladder gates on. Call once per match after merging.
+function applyWinStreak(medalCounts, win) {
+    if (!medalCounts) { return medalCounts; }
+    var cur = win ? (medalCounts._streak || 0) + 1 : 0;
+    medalCounts._streak = cur;
+    medalCounts.winStreak = Math.max(medalCounts.winStreak || 0, cur);
+    return medalCounts;
+}
+
 // Set of achievement-skin ids whose threshold the given lifetime totals satisfy.
 function achievementsUnlocked(medalCounts, wins) {
     var mc = medalCounts || {};
@@ -170,6 +181,7 @@ module.exports = {
     levelProgress: levelProgress,
     ACHIEVEMENT_UNLOCKS: ACHIEVEMENT_UNLOCKS,
     achievementsUnlocked: achievementsUnlocked,
+    applyWinStreak: applyWinStreak,
     mergeMedalCounts: mergeMedalCounts,
     defaultProgression: defaultProgression,
     buildToastEvents: buildToastEvents

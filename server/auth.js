@@ -366,73 +366,110 @@ async function addProgression(userId, opts) {
     if (!writesEnabled || !userId || !supabase) {
         return null;
     }
+    // Compare-and-swap retry: read the row (incl. updated_at), compute the derived totals
+    // in JS, then write CONDITIONED on updated_at being unchanged. If the same account
+    // finished concurrently (two tabs/devices) and wrote in between, the conditional update
+    // touches 0 rows and we retry against fresh values — so XP/medals/wins/unlocks/toasts are
+    // never silently discarded by a last-writer-wins upsert.
+    var MAX_ATTEMPTS = 5;
     try {
-        var existing = await supabase
-            .from('progression')
-            .select('xp, level, unlocked_skins, medal_counts, wins, pending_toasts, unlock_dates')
-            .eq('user_id', userId)
-            .maybeSingle();
-        if (existing.error) {
-            console.log('[auth] addProgression select failed:', existing.error.message);
-            return null;
+        for (var attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+            var existing = await supabase
+                .from('progression')
+                .select('xp, level, unlocked_skins, medal_counts, wins, pending_toasts, unlock_dates, updated_at')
+                .eq('user_id', userId)
+                .maybeSingle();
+            if (existing.error) {
+                console.log('[auth] addProgression select failed:', existing.error.message);
+                return null;
+            }
+            var rowExists = !!existing.data;
+            var oldUpdatedAt = rowExists ? existing.data.updated_at : null;
+            var cur = normalizeProgression(existing.data || {});
+            var oldLevel = cur.level;
+            var newXp = cur.xp + (opts.xpDelta || 0);
+            var newWins = cur.wins + (opts.win ? 1 : 0);
+            var newMedalCounts = progression.mergeMedalCounts(cur.medal_counts, opts.medalDeltas);
+            progression.applyWinStreak(newMedalCounts, !!opts.win);
+            var newLevel = progression.levelForXp(newXp);
+            // Level skins aren't stored; unlocked_skins holds only achievement skins.
+            var earned = progression.achievementsUnlocked(newMedalCounts, newWins);
+            var unlocked = (cur.unlocked_skins || []).slice();
+            var freshAchievementSkins = [];
+            for (var i = 0; i < earned.length; i++) {
+                if (unlocked.indexOf(earned[i]) === -1) { unlocked.push(earned[i]); freshAchievementSkins.push(earned[i]); }
+            }
+            // Build the celebration toasts for this match (shown on next lobby arrival, not
+            // on the game-over screen). Appended to the durable pending_toasts queue.
+            var newToasts = progression.buildToastEvents({
+                xpDelta: opts.xpDelta || 0,
+                oldLevel: oldLevel,
+                newLevel: newLevel,
+                levelSkinsUnlocked: skinRegistry.levelSkinsUnlockedBetween,
+                freshAchievementSkins: freshAchievementSkins
+            });
+            var existingToasts = (existing.data && Array.isArray(existing.data.pending_toasts))
+                ? existing.data.pending_toasts : [];
+            var mergedToasts = existingToasts.concat(newToasts);
+            // Stamp the first-unlock date for every cosmetic newly earned this match (level
+            // skins + achievement skins). Never overwrite an existing date. Analytics only.
+            var unlockDates = (cur.unlock_dates && typeof cur.unlock_dates === 'object')
+                ? Object.assign({}, cur.unlock_dates) : {};
+            var nowIso = new Date().toISOString();
+            var freshLevelSkins = skinRegistry.levelSkinsUnlockedBetween(oldLevel, newLevel);
+            var allFresh = freshAchievementSkins.concat(freshLevelSkins);
+            for (var f = 0; f < allFresh.length; f++) {
+                if (!unlockDates[allFresh[f]]) { unlockDates[allFresh[f]] = nowIso; }
+            }
+            var payload = {
+                user_id: userId,
+                xp: newXp,
+                level: newLevel,
+                wins: newWins,
+                medal_counts: newMedalCounts,
+                unlocked_skins: unlocked,
+                pending_toasts: mergedToasts,
+                unlock_dates: unlockDates,
+                updated_at: new Date().toISOString()
+            };
+            if (rowExists) {
+                // CAS: only succeeds if no one else wrote since our read.
+                var upd = await supabase
+                    .from('progression')
+                    .update(payload)
+                    .eq('user_id', userId)
+                    .eq('updated_at', oldUpdatedAt)
+                    .select('user_id');
+                if (upd.error) {
+                    console.log('[auth] addProgression update failed:', upd.error.message);
+                    return null;
+                }
+                if (upd.data && upd.data.length > 0) {
+                    var out = normalizeProgression(payload);
+                    out.newToasts = newToasts; // durable copy is in pending_toasts
+                    return out;
+                }
+                // 0 rows updated -> a concurrent writer moved updated_at; retry.
+            } else {
+                var ins = await supabase
+                    .from('progression')
+                    .insert(payload)
+                    .select('user_id');
+                if (!ins.error) {
+                    var outIns = normalizeProgression(payload);
+                    outIns.newToasts = newToasts;
+                    return outIns;
+                }
+                // Unique-violation -> someone inserted the row first; retry as an update.
+                if (ins.error.code === '23505' || /duplicate|unique/i.test(ins.error.message || '')) {
+                    continue;
+                }
+                console.log('[auth] addProgression insert failed:', ins.error.message);
+                return null;
+            }
         }
-        var cur = normalizeProgression(existing.data || {});
-        var oldLevel = cur.level;
-        var newXp = cur.xp + (opts.xpDelta || 0);
-        var newWins = cur.wins + (opts.win ? 1 : 0);
-        var newMedalCounts = progression.mergeMedalCounts(cur.medal_counts, opts.medalDeltas);
-        var newLevel = progression.levelForXp(newXp);
-        // Level skins aren't stored; unlocked_skins holds only achievement skins.
-        var earned = progression.achievementsUnlocked(newMedalCounts, newWins);
-        var unlocked = (cur.unlocked_skins || []).slice();
-        var freshAchievementSkins = [];
-        for (var i = 0; i < earned.length; i++) {
-            if (unlocked.indexOf(earned[i]) === -1) { unlocked.push(earned[i]); freshAchievementSkins.push(earned[i]); }
-        }
-        // Build the celebration toasts for this match (shown on next lobby arrival, not
-        // on the game-over screen). Appended to the durable pending_toasts queue.
-        var newToasts = progression.buildToastEvents({
-            xpDelta: opts.xpDelta || 0,
-            oldLevel: oldLevel,
-            newLevel: newLevel,
-            levelSkinsUnlocked: skinRegistry.levelSkinsUnlockedBetween,
-            freshAchievementSkins: freshAchievementSkins
-        });
-        var existingToasts = (existing.data && Array.isArray(existing.data.pending_toasts))
-            ? existing.data.pending_toasts : [];
-        var mergedToasts = existingToasts.concat(newToasts);
-        // Stamp the first-unlock date for every cosmetic newly earned this match (level skins
-        // + achievement skins). Never overwrite an existing date. Analytics only — adoption
-        // curves per cosmetic. ISO timestamp; one stamp covers all of this match's unlocks.
-        var unlockDates = (cur.unlock_dates && typeof cur.unlock_dates === 'object')
-            ? Object.assign({}, cur.unlock_dates) : {};
-        var nowIso = new Date().toISOString();
-        var freshLevelSkins = skinRegistry.levelSkinsUnlockedBetween(oldLevel, newLevel);
-        var allFresh = freshAchievementSkins.concat(freshLevelSkins);
-        for (var f = 0; f < allFresh.length; f++) {
-            if (!unlockDates[allFresh[f]]) { unlockDates[allFresh[f]] = nowIso; }
-        }
-        var payload = {
-            user_id: userId,
-            xp: newXp,
-            level: newLevel,
-            wins: newWins,
-            medal_counts: newMedalCounts,
-            unlocked_skins: unlocked,
-            pending_toasts: mergedToasts,
-            unlock_dates: unlockDates,
-            updated_at: new Date().toISOString()
-        };
-        var upd = await supabase
-            .from('progression')
-            .upsert(payload, { onConflict: 'user_id' });
-        if (upd.error) {
-            console.log('[auth] addProgression write failed:', upd.error.message);
-            return null;
-        }
-        var out = normalizeProgression(payload);
-        out.newToasts = newToasts; // caller may use these; durable copy is in pending_toasts
-        return out;
+        console.log('[auth] addProgression: gave up after', MAX_ATTEMPTS, 'contended attempts for', userId);
+        return null;
     } catch (e) {
         console.log('[auth] addProgression error:', e.message);
         return null;
