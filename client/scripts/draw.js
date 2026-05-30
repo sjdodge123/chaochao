@@ -1844,13 +1844,13 @@ function drawGameOverScreen(dt) {
 // hit rects into ratingStarHits (logical coords) for input.js to test. Click/tap a
 // star to vote (one vote per map; re-voting overwrites). No-op render when the server
 // didn't tell us which map to rate.
-function drawMapRating(cxOverride) {
+function drawMapRating(cxOverride, bottomY) {
     if (typeof ratingMapId === "undefined" || ratingMapId == null) {
         ratingStarHits = [];
         return;
     }
-    // Centre by default (game-over); callers can shift it (the overview shifts left so
-    // the strip clears the right-side next-map/leaderboard cards).
+    // Centre/bottom by default (game-over); callers can override both (the overview
+    // pins it above the next-map preview, clear of the controls glyph at the bottom).
     var cx = (typeof cxOverride === "number") ? cxOverride : LOGICAL_WIDTH / 2;
     var n = 5, starSize = 36, gap = 8;
     var rowW = n * starSize + (n - 1) * gap;
@@ -1866,7 +1866,7 @@ function drawMapRating(cxOverride) {
     var panelW = Math.max(tw + 44, rowW + 44);
     var panelH = 78;
     var px = cx - panelW / 2;
-    var py = LOGICAL_HEIGHT - panelH - 16;
+    var py = (typeof bottomY === "number") ? (bottomY - panelH) : (LOGICAL_HEIGHT - panelH - 16);
 
     // panel
     gameContext.globalAlpha = 0.88;
@@ -5312,11 +5312,16 @@ function drawOverviewBoard() {
     // them; this overview-context render catches them anchored to notch rows.
     drawRecordFloatsOverview();
     drawHUD();
-    // "Rate this map" star strip for the map just played — bottom, shifted left of
-    // centre so it clears the next-map/leaderboard cards on the right. Drawn last so it
-    // sits over the board; guarded so a render error can't break the overview.
+    // "Rate this map" star strip for the map just played — pinned ABOVE the next-map
+    // preview card (centred over it), clear of the controls glyph at the bottom. Mirrors
+    // drawNextMap's previewWindow geometry. Drawn last so it sits over the board; guarded
+    // so a render error can't break the overview.
     try {
-        drawMapRating(LOGICAL_WIDTH / 2 - 150);
+        var pvX = LOGICAL_WIDTH / 2 + 100;
+        var pvY = (LOGICAL_HEIGHT / 2 - (world.height / 10)) - 100;
+        var thumbCx = pvX + (world.width / 3) / 2;     // centre over the preview thumbnail
+        var stripBottom = pvY - 35 - 12;               // just above the "Next map" title
+        drawMapRating(thumbCx, stripBottom);
     } catch (e) {
         debugLog("rating draw error", e);
     }
