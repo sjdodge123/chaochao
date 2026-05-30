@@ -1,0 +1,46 @@
+{
+  "_comment": "Declarative GA4 config-as-code. Edited here, applied to PROD by .github/workflows/ga-config.yml via analytics/reconcile-ga.js. See docs/ga-config.md. The count*/average* metric variants seen in the GA reporting API are auto-derived by GA from the base custom metric and must NOT be listed here.",
+  "propertyId": "454757771",
+  "customDimensions": [
+    {
+      "parameterName": "map",
+      "displayName": "Map Name",
+      "scope": "EVENT",
+      "description": "Map name/id attached to gameplay events (e.g. match_start, round_complete)."
+    },
+    {
+      "parameterName": "target",
+      "displayName": "CTA Target",
+      "scope": "EVENT",
+      "description": "Which landing CTA was clicked: play | join | create."
+    },
+    {
+      "parameterName": "won",
+      "displayName": "Match Won",
+      "scope": "EVENT",
+      "description": "Whether the local player won the completed match (match_end)."
+    }
+  ],
+  "customMetrics": [
+    {
+      "parameterName": "players",
+      "displayName": "Players in match",
+      "scope": "EVENT",
+      "measurementUnit": "STANDARD",
+      "description": "Human players present in a match."
+    },
+    {
+      "parameterName": "bots",
+      "displayName": "Bots in a match",
+      "scope": "EVENT",
+      "measurementUnit": "STANDARD",
+      "description": "Bots present in a match (used to separate humans-only metrics)."
+    }
+  ],
+  "keyEvents": [
+    {
+      "eventName": "match_end",
+      "countingMethod": "ONCE_PER_EVENT"
+    }
+  ]
+}

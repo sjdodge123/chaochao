@@ -1,0 +1,71 @@
+name: GA config (prod)
+
+# Applies GA4 config-as-code (analytics/ga-config.json) to the PRODUCTION property
+# via the GA4 Admin API. Same model as db-migrate.yml: the GA property is hand-edited
+# nowhere; the only writer of GA custom dimensions/metrics/key events is this CI runner,
+# acting only on config that landed on main. See docs/ga-config.md.
+#
+# Required repo secrets (Settings -> Secrets and variables -> Actions):
+#   GA_SERVICE_ACCOUNT_KEY  - full JSON key of a GCP service account that has the
+#                             Editor role on the GA4 property (Admin -> Property Access
+#                             Management). Paste the entire key file as the secret value.
+
+on:
+  push:
+    branches: [main]
+    paths: ['analytics/ga-config.json', 'analytics/reconcile-ga.js']
+  pull_request:
+    paths: ['analytics/ga-config.json', 'analytics/reconcile-ga.js']
+
+# Never let two reconciles race against the same property.
+concurrency:
+  group: ga-config-prod
+  cancel-in-progress: false
+
+jobs:
+  # PR safety net: show exactly what would change in GA, without applying it.
+  # Skipped for fork PRs (secrets are not exposed to forks).
+  dry-run:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # The reconcile script needs only the GA Admin client — nothing from the app's
+      # own deps. Installing it standalone keeps this heavy Google library out of
+      # package.json (and off the Heroku dyno).
+      - run: npm install --no-save @google-analytics/admin@^9.1.0
+      - name: Write service-account key
+        env:
+          GA_SERVICE_ACCOUNT_KEY: ${{ secrets.GA_SERVICE_ACCOUNT_KEY }}
+        run: printf '%s' "$GA_SERVICE_ACCOUNT_KEY" > "$RUNNER_TEMP/ga-key.json"
+      - name: Preview GA config changes
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/ga-key.json
+        run: node analytics/reconcile-ga.js --dry-run
+
+  # On merge to main: apply config to the prod property.
+  apply:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # The reconcile script needs only the GA Admin client — nothing from the app's
+      # own deps. Installing it standalone keeps this heavy Google library out of
+      # package.json (and off the Heroku dyno).
+      - run: npm install --no-save @google-analytics/admin@^9.1.0
+      - name: Write service-account key
+        env:
+          GA_SERVICE_ACCOUNT_KEY: ${{ secrets.GA_SERVICE_ACCOUNT_KEY }}
+        run: printf '%s' "$GA_SERVICE_ACCOUNT_KEY" > "$RUNNER_TEMP/ga-key.json"
+      - name: Apply GA config to prod
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/ga-key.json
+        run: node analytics/reconcile-ga.js
