@@ -1729,6 +1729,21 @@ function drawBackground() {
 // (drawGameOverScreen runs every tick, so we can't restart on each frame).
 var medalRevealFor = null;
 var medalRevealElapsed = 0;
+// One-line, player-facing blurb shown under each medal name on the gameOver card.
+// Keyed by the achievement key the server sends (see server/achievements.js); the
+// meanings mirror how the stats are earned in server/{game,entities/player}.js.
+var MEDAL_DESC = {
+    mostKills: "Most eliminations",
+    savior: "Toppled a frontrunner",
+    survivalist: "Reached the most goals",
+    brutalist: "Most goals in brutal rounds",
+    mostMurdered: "Everyone's favourite target",
+    resourceful: "Used the most abilities",
+    bully: "Threw the most punches",
+    doubleKill: "Two kills in a flash",
+    tripleKill: "Three kills in a flash",
+    megaKill: "A relentless killing spree"
+};
 
 // Rounded-rect path builder (caller fills/strokes it).
 function gameOverRoundRect(ctx, x, y, w, h, r) {
@@ -1844,8 +1859,9 @@ function drawGameOverScreen(dt) {
         // sized + vertically centred around real content (skip empty medals).
         var earnedMedals = [];
         for (var medal in achievements) {
-            if (achievements[medal].ids && achievements[medal].ids.length > 0) {
-                earnedMedals.push(achievements[medal]);
+            var a = achievements[medal];
+            if (a.ids && a.ids.length > 0) {
+                earnedMedals.push({ title: a.title, ids: a.ids, desc: MEDAL_DESC[medal] || "" });
             }
         }
 
@@ -1860,7 +1876,7 @@ function drawGameOverScreen(dt) {
 
             // Card geometry, anchored to the right edge so it never overlaps the
             // recap montage (which owns the left/centre of the screen).
-            var rowH = 48;
+            var rowH = 58;
             var headH = 58;
             var padX = 24;
             var padTop = 20;
@@ -1929,11 +1945,22 @@ function drawGameOverScreen(dt) {
                 // Medal marker.
                 drawMedalDisc(gameContext, cardX + padX + 14, rowCy - 2, 13);
 
-                // Title.
+                // Title + one-line description. With a description, the two lines
+                // straddle the row centre; without one, the title sits centred.
+                var textX = cardX + padX + 38;
                 gameContext.textAlign = "left";
-                gameContext.fillStyle = "#eef2f8";
-                gameContext.font = "bold 19px Arial";
-                gameContext.fillText(earnedMedals[m].title, cardX + padX + 38, rowCy + 5);
+                if (earnedMedals[m].desc) {
+                    gameContext.fillStyle = "#eef2f8";
+                    gameContext.font = "bold 19px Arial";
+                    gameContext.fillText(earnedMedals[m].title, textX, rowCy - 3);
+                    gameContext.fillStyle = "rgba(220,226,236,0.6)";
+                    gameContext.font = "12px Arial";
+                    gameContext.fillText(earnedMedals[m].desc, textX, rowCy + 15);
+                } else {
+                    gameContext.fillStyle = "#eef2f8";
+                    gameContext.font = "bold 19px Arial";
+                    gameContext.fillText(earnedMedals[m].title, textX, rowCy + 5);
+                }
 
                 // Winner chips, right-aligned. Cap the visible chips and show a
                 // "+N" overflow tag so a popular medal can't run off the card.
