@@ -2367,8 +2367,52 @@ function drawMapTitle() {
 // Accumulated time (seconds) driving cart-skin animation (fire-truck wheel spin,
 // dino leg cycle). Advanced once per frame in drawPlayers, NOT per player.
 var cartSkinAnimTime = 0;
+// Set of player ids currently targeted by some aimer (telegraph). Rebuilt once
+// per frame in drawPlayers so drawPlayer can do an O(1) lookup instead of an
+// O(aimers) for-in + targetList.indexOf per kart per frame.
+// Nearest-cell id for a player, cached on the player. The map is a Voronoi
+// diagram so the cell a point sits in is the one whose site is nearest — an
+// O(cells) scan. The on-fire-on-lava flash needs it every frame for every
+// burning kart (worst case a whole pack in a volcano round), so cache it and
+// only rescan when the kart has moved appreciably or the cache is stale (cells
+// mutate to lava during collapse, so refresh on a short interval too).
+function nearestCellIdCached(player) {
+    if (currentMap == null || currentMap.cells == null) { return -1; }
+    var now = Date.now();
+    var hasCache = (player._nearCellId !== undefined);
+    var dx = hasCache ? (player.x - player._nearCellX) : 1e9;
+    var dy = hasCache ? (player.y - player._nearCellY) : 1e9;
+    if (hasCache && dx * dx + dy * dy <= 64 && now - player._nearCellAt < 150) {
+        return player._nearCellId;
+    }
+    var cells = currentMap.cells, nearestId = -1, nd = Infinity;
+    for (var ci = 0; ci < cells.length; ci++) {
+        var cdx = player.x - cells[ci].site.x;
+        var cdy = player.y - cells[ci].site.y;
+        var cd = cdx * cdx + cdy * cdy;
+        if (cd < nd) { nd = cd; nearestId = cells[ci].id; }
+    }
+    player._nearCellId = nearestId;
+    player._nearCellX = player.x;
+    player._nearCellY = player.y;
+    player._nearCellAt = now;
+    return nearestId;
+}
+var targetedPlayerIds = {};
+function rebuildTargetedPlayerIds() {
+    targetedPlayerIds = {};
+    for (var aid in aimerList) {
+        var a = aimerList[aid];
+        var tl = a != null ? a.targetList : null;
+        if (tl == null) { continue; }
+        for (var ti = 0; ti < tl.length; ti++) {
+            targetedPlayerIds[tl[ti]] = true;
+        }
+    }
+}
 function drawPlayers(dt) {
     cartSkinAnimTime += (dt || 0) / 1000; // dt is milliseconds; this accumulator is seconds
+    rebuildTargetedPlayerIds();
     // Draw remote players first, then ALL local players (the primary plus any
     // couch co-op slots) on top — so your own karts always read clearly over
     // other players' floating emojis and name labels.
@@ -2444,12 +2488,7 @@ function drawPlayer(player, dt) {
     // coming), plus a momentum self-preview on your own idle kart.
     drawPunchCharge(player);
 
-    var playerStrokeColor = "black";
-    for (var aimerID in aimerList) {
-        if (aimerList[aimerID].targetList.indexOf(player.id) != -1) {
-            playerStrokeColor = "red"
-        }
-    }
+    var playerStrokeColor = targetedPlayerIds[player.id] ? "red" : "black";
     var sprite = getPlayerSprite(player.color, player.radius, playerStrokeColor);
     // Lobby respawn invulnerability: pulse the sprite's alpha so the grace window is
     // legible. The sprite is a cached image with no alpha, so wrap the blit.
@@ -2475,14 +2514,7 @@ function drawPlayer(player, dt) {
     // cells when on fire (cheap/rare). The flash ramps with the fire timer below.
     var onFireOnLava = false;
     if (player.onFire != null && player.onFire > 0 && currentMap != null && currentMap.cells != null) {
-        var nearestId = -1, nd = Infinity;
-        for (var ci = 0; ci < currentMap.cells.length; ci++) {
-            var cdx = player.x - currentMap.cells[ci].site.x;
-            var cdy = player.y - currentMap.cells[ci].site.y;
-            var cd = cdx * cdx + cdy * cdy;
-            if (cd < nd) { nd = cd; nearestId = currentMap.cells[ci].id; }
-        }
-        onFireOnLava = (nearestId == config.tileMap.lava.id);
+        onFireOnLava = (nearestCellIdCached(player) == config.tileMap.lava.id);
     }
     // Flash while immune to fire/lava damage: lobby respawn-invuln (timed or held in the
     // start circle), or on-fire-on-lava. The pulse quickens over the final 2s of whichever
