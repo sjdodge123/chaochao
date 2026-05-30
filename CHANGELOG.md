@@ -13,6 +13,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 ### General
 
 - Maps are now sorted into playlists. A new **Featured** mix gives you the better-balanced maps by default, and there are themed packs too — Slip & Slide (ice), Hardcore (lava), Pinball (bumpers), Pure Racing, Quick Sprints, Marathon, and Wild for the wild ones. Pick one at the lobby playlist board.
+- Rate the map you just played with 1–5 stars on the game-over screen. The best-loved maps rise into a new **Crowd Favorites** playlist, and the map editor now shows each map's rating and balance.
 
 ## v0.25.5 — 2026-05-30
 

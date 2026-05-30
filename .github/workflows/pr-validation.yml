@@ -87,6 +87,9 @@ jobs:
       - name: Classify maps (balance tier + playlist membership)
         run: node .github/scripts/classifier-test.js
 
+      - name: Map ratings logic test (gating + weighted Bayesian)
+        run: node .github/scripts/ratings-test.js
+
   smoke-test:
     # Boots the server and ticks the game — proves it still *runs*, not just that
     # it parses and builds. Catches runtime breakage in game.js / engine.js /

@@ -1829,6 +1829,83 @@ function drawGameOverScreen(dt) {
         debugLog("recap draw error", e);
     }
 
+    // "Rate this map" star widget, pinned bottom-centre. Guarded for the same
+    // reason as the recap — it must never take down the game-over screen.
+    try {
+        drawGameOverRating();
+    } catch (e) {
+        debugLog("rating draw error", e);
+    }
+
+}
+
+// A 5-star "rate this map" strip at the bottom of the game-over screen. Records
+// per-star hit rects into ratingStarHits (logical coords) for input.js to test.
+// Click/tap a star to vote (one vote per map; re-voting overwrites). No-op render
+// when the server didn't tell us which map to rate.
+function drawGameOverRating() {
+    if (typeof ratingMapId === "undefined" || ratingMapId == null) {
+        ratingStarHits = [];
+        return;
+    }
+    var cx = LOGICAL_WIDTH / 2;
+    var n = 5, starSize = 36, gap = 8;
+    var rowW = n * starSize + (n - 1) * gap;
+    var rated = (myMapRating > 0);
+    var label = rated
+        ? ("Thanks — you rated this map " + myMapRating + "/5")
+        : ("Rate this map" + (ratingMapName ? ": " + ratingMapName : ""));
+
+    gameContext.save();
+    gameContext.font = "bold 15px sans-serif";
+    gameContext.textAlign = "center";
+    var tw = gameContext.measureText(label).width;
+    var panelW = Math.max(tw + 44, rowW + 44);
+    var panelH = 78;
+    var px = cx - panelW / 2;
+    var py = LOGICAL_HEIGHT - panelH - 16;
+
+    // panel
+    gameContext.globalAlpha = 0.88;
+    gameContext.fillStyle = "rgba(18,20,26,0.9)";
+    drawRoundRectPath(px, py, panelW, panelH, 12);
+    gameContext.fill();
+    gameContext.globalAlpha = 1;
+    gameContext.lineWidth = 2;
+    gameContext.strokeStyle = "#FFCB30";
+    gameContext.stroke();
+
+    // label
+    gameContext.fillStyle = "#fff";
+    gameContext.textBaseline = "middle";
+    gameContext.fillText(label, cx, py + 20);
+
+    // stars row
+    ratingStarHits = [];
+    var startX = cx - rowW / 2;
+    var starY = py + 50;
+    gameContext.textBaseline = "middle";
+    gameContext.textAlign = "center";
+    gameContext.font = (starSize - 4) + "px sans-serif";
+    for (var i = 0; i < n; i++) {
+        var sx = startX + i * (starSize + gap);
+        var filled = (i < myMapRating);
+        gameContext.fillStyle = filled ? "#FFCB30" : "rgba(255,255,255,0.4)";
+        gameContext.fillText(filled ? "★" : "☆", sx + starSize / 2, starY);
+        ratingStarHits.push({ x: sx, y: starY - starSize / 2, w: starSize, h: starSize, stars: i + 1 });
+    }
+    gameContext.restore();
+}
+
+// Local rounded-rect path helper (draw.js has no shared one in this scope).
+function drawRoundRectPath(x, y, w, h, r) {
+    gameContext.beginPath();
+    gameContext.moveTo(x + r, y);
+    gameContext.arcTo(x + w, y, x + w, y + h, r);
+    gameContext.arcTo(x + w, y + h, x, y + h, r);
+    gameContext.arcTo(x, y + h, x, y, r);
+    gameContext.arcTo(x, y, x + w, y, r);
+    gameContext.closePath();
 }
 function preShake() {
     if (currentState == config.stateMap.gameOver || currentState == config.stateMap.overview) {

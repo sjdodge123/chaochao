@@ -9,6 +9,7 @@ var compressor = require('./compressor.js');
 var debug = require('./debug.js');
 var mapFormat = require('./mapFormat.js');
 var mapClassifier = require('./mapClassifier.js');
+var ratings = require('./ratings.js');
 var mailBoxList = {},
 	identityList = {},
 	roomMailList = {},
@@ -277,6 +278,9 @@ function checkForMail(client) {
 		// whose finish to record (null for guests). Bots never get a user id —
 		// world.createNewBot sets isAI but leaves verifiedUserId undefined.
 		room.playerList[client.id].verifiedUserId = client.userId || null;
+		// Stable guest identity (localStorage deviceId from the handshake) so an
+		// anonymous player still gets one effective map-rating vote (see rateMap).
+		room.playerList[client.id].deviceId = client.deviceId || null;
 		room.game.determineGameState(room.playerList[client.id]);
 		// Bots yield to the joining human so humans + bots can never exceed the room
 		// cap (no-op in normal flow — there are no bots while a room is joinable).
@@ -513,6 +517,42 @@ function checkForMail(client) {
 		if (room.game.gameBoard.setPlaylist(id)) {
 			messageRoomBySig(room.sig, "lobbyPlaylistChanged", { id: id });
 		}
+	});
+
+	// Star-rate the map you just finished (game-over screen). Server-authoritative:
+	// the rated map is the room's current map, not a client-supplied id. One vote per
+	// voter per map (UPSERT); bots and identity-less sockets can't vote; a short
+	// per-socket cooldown stops spam. The write itself is gated on ALLOW_SUPABASE_WRITES
+	// inside ratings.recordRating, so this is a no-op locally.
+	client.on('rateMap', function (payload) {
+		var room = hostess.getRoomBySig(roomMailList[client.id]);
+		if (room == undefined || room.game.currentState != c.stateMap.gameOver) {
+			return;
+		}
+		var board = room.game.gameBoard;
+		if (board == null || board.currentMap == null || board.currentMap.id == null) {
+			return;
+		}
+		var stars = (payload && typeof payload.stars === "number") ? Math.floor(payload.stars) : 0;
+		if (!ratings.validStars(stars)) {
+			return;
+		}
+		var player = room.playerList[client.id];
+		var voter = ratings.deriveVoter(player);
+		if (voter == null) {
+			return; // bot or identity-less socket — may not vote
+		}
+		// Per-socket cooldown: at most one rate write per ~800ms (the upsert dedups
+		// re-votes anyway; this just blunts a spam loop).
+		var now = Date.now();
+		if (player._lastRateAt && (now - player._lastRateAt) < 800) {
+			return;
+		}
+		player._lastRateAt = now;
+		var mapId = board.currentMap.id;
+		ratings.recordRating(mapId, voter, stars, c).then(function (res) {
+			client.emit("mapRated", { mapId: mapId, stars: stars, ok: !!(res && res.wrote) });
+		});
 	});
 
 

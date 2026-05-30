@@ -183,12 +183,17 @@ function handleClick(event) {
     }
     switch (event.which) {
         case 1: {
+            var rect = gameCanvas.getBoundingClientRect();
+            var lx = ((event.clientX - rect.left) / newWidth) * LOGICAL_WIDTH;
+            var ly = ((event.clientY - rect.top) / newHeight) * LOGICAL_HEIGHT;
+            // Game-over screen: a click on the star widget rates the map — consume it.
+            if (typeof handleGameOverRatingTap === "function" && handleGameOverRatingTap(lx, ly)) {
+                event.preventDefault();
+                break;
+            }
             // Lobby hub: a left click on the primary's prompt/panel opens it, hits a
             // control, or dismisses it — consume the click before it becomes an attack.
             if (typeof lobbyHubHandlePrimaryPointer === "function") {
-                var rect = gameCanvas.getBoundingClientRect();
-                var lx = ((event.clientX - rect.left) / newWidth) * LOGICAL_WIDTH;
-                var ly = ((event.clientY - rect.top) / newHeight) * LOGICAL_HEIGHT;
                 if (lobbyHubHandlePrimaryPointer(lx, ly)) {
                     event.preventDefault();
                     break;
@@ -583,6 +588,11 @@ function onTouchStart(evt) {
     // would offset hits once the lobby follow-camera zooms in on touch.
     if (typeof config !== "undefined" && config && currentState === config.stateMap.lobby &&
         typeof lobbyHubHandlePrimaryPointer === "function" && lobbyHubHandlePrimaryPointer(touchX, touchY)) {
+        evt.preventDefault();
+        return;
+    }
+    // Game-over screen: a tap on the star widget rates the map.
+    if (typeof handleGameOverRatingTap === "function" && handleGameOverRatingTap(touchX, touchY)) {
         evt.preventDefault();
         return;
     }

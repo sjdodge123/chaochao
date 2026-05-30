@@ -11,6 +11,37 @@ var config,
 	nextFightReactionTime = 0,
 	playerWon = null;
 
+// Game-over map-rating widget state (see drawGameOverRating / handleClick).
+// ratingMapId/Name: which map the stars rate; myMapRating: stars this player
+// picked (0 = none yet); ratingStarHits: per-star screen rects for hit-testing.
+var ratingMapId = null,
+	ratingMapName = null,
+	myMapRating = 0,
+	ratingStarHits = [];
+
+// Hit-test a pointer (logical coords) against the game-over star widget. On a hit,
+// optimistically fills the stars and emits the vote (server confirms via mapRated).
+// Returns true if the tap was consumed by the widget.
+function handleGameOverRatingTap(lx, ly) {
+	if (typeof config === "undefined" || config == null || currentState !== config.stateMap.gameOver) {
+		return false;
+	}
+	if (!ratingMapId || !Array.isArray(ratingStarHits)) {
+		return false;
+	}
+	for (var i = 0; i < ratingStarHits.length; i++) {
+		var h = ratingStarHits[i];
+		if (lx >= h.x && lx <= h.x + h.w && ly >= h.y && ly <= h.y + h.h) {
+			myMapRating = h.stars; // optimistic; mapRated reflects the server ack
+			if (typeof server !== "undefined" && server) {
+				server.emit("rateMap", { stars: h.stars });
+			}
+			return true;
+		}
+	}
+	return false;
+}
+
 // Socket.IO auth-callback form: invoked right before each (re)connection
 // handshake, so the Supabase access token is read at connection time (after
 // auth.js's getSession() microtask has settled) rather than at io() call time.
@@ -629,6 +660,12 @@ function registerStateHandlers(server) {
 			};
 		}
 	});
+	server.on("mapRated", function (payload) {
+		// Server confirmation of our star vote — reflect the acknowledged value.
+		if (payload != null && typeof payload.stars === "number") {
+			myMapRating = payload.stars;
+		}
+	});
 	server.on("startGameover", function (packet) {
 		// Match over (solo creator hit the winning notch) — schedule the editor
 		// return first so the calls below can't strand the creator if they throw.
@@ -645,6 +682,11 @@ function registerStateHandlers(server) {
 		blindfold = {};
 		playerWon = packet.winner;
 		achievements = packet.achievements;
+		// Set up the "rate this map" widget for the game-over screen.
+		ratingMapId = (packet.mapId != null) ? packet.mapId : ((currentMap && currentMap.id) || null);
+		ratingMapName = (packet.mapName != null) ? packet.mapName : ((currentMap && currentMap.name) || null);
+		myMapRating = 0;
+		ratingStarHits = [];
 		recapHarvestRound();      // fold the final round's clips into the archive first
 		recapBuild(achievements); // then assemble the montage from the whole-match archive
 		stopAllSounds();
