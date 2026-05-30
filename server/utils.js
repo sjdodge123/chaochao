@@ -732,7 +732,14 @@ exports.getPlaylistSummary = function () {
         if (m.lobbyOnly || !m.meta || !Array.isArray(m.meta.playlists)) { return; }
         m.meta.playlists.forEach(function (id) { if (counts[id] != null) { counts[id]++; } });
     });
-    return defs.map(function (p) {
+    // Only surface a playlist once it has enough maps to be worth picking (avoids
+    // thin, skew-prone packs cluttering the hub/editor). Featured and Everything are
+    // structural and always shown. As the map library grows, themed packs unlock.
+    var min = (c.balance && c.balance.playlistMinMaps != null) ? c.balance.playlistMinMaps : 20;
+    var alwaysShow = { featured: true, all: true };
+    return defs.filter(function (p) {
+        return alwaysShow[p.id] || (counts[p.id] || 0) >= min;
+    }).map(function (p) {
         return { id: p.id, name: p.name, desc: p.desc, count: counts[p.id] || 0 };
     });
 }

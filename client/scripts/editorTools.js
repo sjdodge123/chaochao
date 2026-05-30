@@ -195,7 +195,12 @@ function installPlaylistChips(playlists) {
     var bar = document.getElementById("mapFilterChips");
     if (bar == null) { return; }
     bar.innerHTML = "";
-    var defs = [{ id: "all", name: "All" }].concat(playlists || []);
+    // The server summary already includes "Everything" (id "all") as the show-all
+    // option, so use it directly — don't prepend a duplicate "All" chip.
+    var defs = playlists || [];
+    if (!defs.some(function (p) { return p.id === "all"; })) {
+        defs = [{ id: "all", name: "All" }].concat(defs);
+    }
     if (activePlaylistFilter == null) { activePlaylistFilter = "all"; }
     for (var i = 0; i < defs.length; i++) {
         (function (def) {

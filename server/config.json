@@ -64,7 +64,8 @@
         "lengthMarathonMin": 45,
         "traitThresholds": { "ice": 0.28, "lava": 0.30, "bumper": 0.12, "ability": 0.10, "bumperHazardDensity": 0.20 },
         "ratingAuthedWeight": 3,
-        "ratingConfidenceFloor": 5
+        "ratingConfidenceFloor": 5,
+        "playlistMinMaps": 20
     },
     "defaultPlaylist": "featured",
     "playlists": [
