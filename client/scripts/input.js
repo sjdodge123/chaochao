@@ -247,6 +247,18 @@ function handleDblClick(event) {
     if (isTouchScreen) {
         return;
     }
+    // A double-click landing on a lobby hub prompt/panel is the player operating
+    // the menu (e.g. tapping a stepper or swatch twice), not the "toggle mouse-drive"
+    // gesture. The mousedown path already routes these through the hub; the separate
+    // dblclick event must ignore them too, or mouse-drive silently flips on mid-menu.
+    if (typeof lobbyHubPointHitsActive === "function") {
+        var rect = gameCanvas.getBoundingClientRect();
+        var lx = ((event.clientX - rect.left) / newWidth) * LOGICAL_WIDTH;
+        var ly = ((event.clientY - rect.top) / newHeight) * LOGICAL_HEIGHT;
+        if (lobbyHubPointHitsActive(lx, ly)) {
+            return;
+        }
+    }
     claimPrimaryForKbm(); // mouse-move play claims P1 -> controllers are P2+
     if (movingByMouse) {
         cancelMovement(event);
