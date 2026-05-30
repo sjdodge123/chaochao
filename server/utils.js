@@ -9,6 +9,7 @@ var imgListing = [];
 var c = require('./config.json');
 var cellGraph = require('./cellGraph.js');
 var mapFormat = require('./mapFormat.js');
+var mapClassifier = require('./mapClassifier.js');
 c.port = process.env.PORT || c.port;
 
 // Test-only config override seam (CI perf harness). When CHAO_PERF_OVERRIDE is a
@@ -736,6 +737,18 @@ function loadMaps() {
         // copies (currentMap) preserve the number.
         if (loadedMap.parTime == null) {
             loadedMap.parTime = cellGraph.computeMapParTime(loadedMap);
+        }
+        // Classify race maps once at boot (geometry-derived character + balance
+        // tier) and resolve their playlist membership. Wrapped so a classifier
+        // hiccup degrades to "no meta" (selection falls back to the full pool)
+        // rather than taking down boot. lobbyOnly maps aren't raced, so skip them.
+        if (!loadedMap.lobbyOnly) {
+            try {
+                loadedMap.meta = mapClassifier.classify(loadedMap, c);
+                loadedMap.meta.playlists = mapClassifier.resolvePlaylists(loadedMap.meta, c.playlists);
+            } catch (mc) {
+                console.error("Classify failed for " + file + " — " + mc.message);
+            }
         }
         maps.push(loadedMap);
         // The editor list excludes lobbyOnly maps (e.g. _lobbyTutorial.json).
