@@ -294,12 +294,15 @@ function getRandomBranchCode() {
 }
 
 function getRandomInt(min, max) {
+    // Tolerate a swapped range, normalizing on the RAW bounds BEFORE rounding: a
+    // caller passing min > max would otherwise get a negative span
+    // (max - min + 1 <= 0), yielding a value below min. Swapping must precede
+    // ceil/floor — rounding first would widen a reversed fractional range
+    // (getRandomInt(5.8, 3.2): ceil 6 / floor 3 -> [3,6]) instead of keeping it
+    // equivalent to the ordered call (3.2, 5.8 -> ceil 4 / floor 5 -> [4,5]).
+    if (min > max) { var t = min; min = max; max = t; }
     min = Math.ceil(min);
     max = Math.floor(max);
-    // Tolerate a swapped range: a caller passing min > max would otherwise get a
-    // negative span (max - min + 1 <= 0), which yields a value BELOW min rather
-    // than a draw in [min,max]. Normalize so the inclusive, ordered contract holds.
-    if (min > max) { var t = min; min = max; max = t; }
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
