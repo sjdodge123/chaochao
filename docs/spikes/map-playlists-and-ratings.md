@@ -1,7 +1,30 @@
 # Spike: Map Playlists + Star Ratings
 
-**Status:** Design converged, not yet built.
+**Status:** IMPLEMENTED on branch `worktree-map-playlists-spike` (Phases 0–4), not pushed.
 **Author:** design pass (Claude) with operator decisions, 2026-05-30.
+
+## Implementation summary (commits on worktree-map-playlists-spike)
+
+- **Phase 0** `9f028f4` — `server/mapClassifier.js` (geometry meta + balanceScore + tier),
+  `config.json` balance thresholds + `playlists[]`, wired into `utils.loadMaps`;
+  `.github/scripts/classifier-test.js`. Result: 43/51 Featured at threshold 90.
+- **Phase 1** `4fcd330` — playlist-aware rotation in `gameBoard` (`playlistId`,
+  `getEligibleMapIndices`, `setPlaylist`, fallback to full pool); fixed a latent
+  wrap-boundary repeat; `playlist-selection-test.js`.
+- **Phase 2** `e6852a1` — lobby playlist hub board (`playlist` station, `lobbyHub.js`
+  panel + status banner, `setLobbyPlaylist`/`lobbyPlaylistChanged`, summary in
+  contentDelivery, station authored in `_lobbyTutorial.json` at a verified-walkable spot).
+- **Phase 3** `6ccbd3d` — editor filter chips + per-card badges (`editorMapMeta`),
+  read-only `scoreMap` → soft submit warning (submit/PR path untouched).
+- **Phase 4** `4885b34` — star ratings: `supabase/migrations/..._map_ratings.sql`,
+  `server/ratings.js` (weighted Bayesian), `rateMap` handler (gated, dedup, anti-bot),
+  boot+interval refresh, Crowd Favorites, game-over star widget; `ratings-test.js`.
+
+**Remaining operator/follow-up work:** apply the Supabase migration via the CI migration
+pipeline (not MCP); set `ALLOW_SUPABASE_WRITES=true` on Heroku to enable rating writes;
+playtest the lobby hub board (confirm the playlist station's authored position on clear
+ground) and the game-over star widget; add gamepad nav for the star widget; then rebase +
+PR with operator go-ahead.
 
 ## Problem
 
