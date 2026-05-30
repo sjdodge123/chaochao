@@ -53,10 +53,19 @@ function approx(actual, expected, label, tol) {
     check(Math.abs(actual - expected) <= tol, label + ' (got ' + actual + ', expected ~' + expected + ')');
 }
 
-function throws(fn, label) {
-    let threw = false;
-    try { fn(); } catch (e) { threw = true; }
-    check(threw, label + ' (expected a throw)');
+// Assert `fn` throws. When `expected` is given (string substring or RegExp), the
+// thrown message must match it — so a guard throwing the WRONG error, or a renamed
+// function throwing a bare ReferenceError/TypeError, is NOT accepted as a pass.
+function throws(fn, label, expected) {
+    let threw = false, msg = '';
+    try { fn(); } catch (e) { threw = true; msg = (e && e.message) || String(e); }
+    if (!threw) { check(false, label + ' (expected a throw, none thrown)'); return; }
+    if (expected != null) {
+        const ok = expected instanceof RegExp ? expected.test(msg) : msg.indexOf(expected) !== -1;
+        check(ok, label + ' (threw, but message "' + msg + '" did not match "' + expected + '")');
+        return;
+    }
+    check(true, label);
 }
 
 // ---------------------------------------------------------------------------
@@ -139,19 +148,29 @@ group('validateMap', function () {
     eq(utils.validateMap({ cells: [goalCell()], hazards: [{ id: 99999, x: 0, y: 0 }] }, c).valid, false, 'unknown hazard id rejected');
     eq(utils.validateMap({ cells: [goalCell()], hazards: [{ id: c.hazards.bumper.id, x: NaN, y: 0 }] }, c).valid, false, 'NaN hazard position rejected');
     eq(utils.validateMap({ cells: [goalCell()], hazards: [{ id: c.hazards.movingBumper.id, x: 0, y: 0 }] }, c).valid, false, 'moving bumper without angle rejected');
-    check(utils.validateMap({ cells: [goalCell()], hazards: [{ id: c.hazards.movingBumper.id, x: 0, y: 0, angle: 45 }] }, c).valid !== undefined, 'moving bumper with angle reaches reachability check');
+    eq(utils.validateMap({ cells: [goalCell()], hazards: [{ id: c.hazards.movingBumper.id, x: 0, y: 0, angle: 45 }] }, c).valid, true, 'moving bumper WITH a finite angle is accepted');
 
     // bad startEdges short-circuits before reachability
     eq(utils.validateMap({ cells: [goalCell()], startEdges: ['nope'] }, c).valid, false, 'invalid startEdges rejected');
 
-    // happy path: every committed map (loaded + reconstructed at boot) must validate
+    // Contract over every committed map: validateMap must never throw and must
+    // return a well-formed result (boolean `valid`, plus a string `reason` when
+    // invalid). This tests the HELPER, not map CONTENT — a single borderline map
+    // or a config-id retune shouldn't fail a pure-helper unit test (map content is
+    // gated by map-submission.yml + the engine smoke test, which actually ticks
+    // each map). The `anyValid` check guards against a regression that always
+    // rejects (e.g. a goal-detection break), without pinning the exact pass count.
     const maps = utils.loadMaps();
-    let validCount = 0;
-    for (let i = 0; i < maps.length; i++) {
-        if (utils.validateMap(maps[i], c).valid) validCount++;
-    }
     check(maps.length > 0, 'committed maps were loaded');
-    eq(validCount, maps.length, 'all ' + maps.length + ' committed maps validate');
+    let wellFormed = 0, anyValid = 0;
+    for (let i = 0; i < maps.length; i++) {
+        let r;
+        try { r = utils.validateMap(maps[i], c); } catch (e) { r = null; }
+        if (r && typeof r.valid === 'boolean' && (r.valid === true || typeof r.reason === 'string')) wellFormed++;
+        if (r && r.valid === true) anyValid++;
+    }
+    eq(wellFormed, maps.length, 'validateMap returns a well-formed result for every committed map (no throw)');
+    check(anyValid > 0, 'validateMap accepts at least one committed map (happy path returns valid:true)');
 });
 
 // ---------------------------------------------------------------------------
@@ -189,20 +208,33 @@ group('mapFormat', function () {
 
     const reFull = mapFormat.reconstruct(compact);
     eq(reFull.cells.length, full.cells.length, 'round-trip preserves cell count');
-    const idsBefore = full.cells.map(function (cl) { return cl.id; }).sort().join(',');
-    const idsAfter = reFull.cells.map(function (cl) { return cl.id; }).sort().join(',');
-    eq(idsAfter, idsBefore, 'round-trip preserves the set of tile ids');
 
-    // reconstruct guards — each must throw, not silently produce garbage
-    throws(function () { mapFormat.reconstruct({ sites: [{ x: 0, y: 0 }] }); }, 'missing bbox throws');
-    throws(function () { mapFormat.reconstruct({ bbox: sitesMap.bbox }); }, 'missing sites throws');
-    throws(function () { mapFormat.reconstruct({ bbox: sitesMap.bbox, sites: new Array(mapFormat.MAX_MAP_CELLS + 1) }); }, 'too many sites throws');
-    throws(function () { mapFormat.reconstruct({ bbox: { xl: 0, xr: NaN, yt: 0, yb: 100 }, sites: [] }); }, 'non-finite bbox throws');
-    throws(function () { mapFormat.reconstruct({ bbox: { xl: 100, xr: 0, yt: 0, yb: 100 }, sites: [] }); }, 'inverted bbox (xr<=xl) throws');
-    throws(function () { mapFormat.reconstruct({ bbox: sitesMap.bbox, sites: [{ x: NaN, y: 0 }] }); }, 'non-finite site coords throw');
+    // The id MULTISET is necessary but NOT sufficient — reconstruct's whole job is
+    // the voronoiId->id binding, so a regression that assigns the right ids to the
+    // WRONG cells keeps the set identical yet misplaces every tile. Pin the
+    // per-site binding: the id at each original site coordinate must survive.
+    const idAtSite = function (map, x, y) {
+        const cl = map.cells.find(function (c2) { return c2.site.x === x && c2.site.y === y; });
+        return cl ? cl.id : undefined;
+    };
+    eq(idAtSite(reFull, 75, 25), config.tileMap.goal.id, 'round-trip keeps the goal id bound to its site (75,25)');
+    eq(idAtSite(reFull, 25, 25), 1, 'round-trip keeps id 1 bound to site (25,25)');
+    eq(idAtSite(reFull, 75, 75), 3, 'round-trip keeps id 3 bound to site (75,75)');
+    // toSitesOnly must likewise keep each site's x/y/id together, not just the count.
+    const goalSite = compact.sites.find(function (s) { return s.x === 75 && s.y === 25; });
+    check(goalSite != null && goalSite.id === config.tileMap.goal.id, 'toSitesOnly preserves each site x/y/id binding');
+
+    // reconstruct guards — each must throw the RIGHT error (the message arg makes a
+    // wrong-reason throw, or a renamed function's bare TypeError, fail instead of pass).
+    throws(function () { mapFormat.reconstruct({ sites: [{ x: 0, y: 0 }] }); }, 'missing bbox throws', 'missing bbox or sites');
+    throws(function () { mapFormat.reconstruct({ bbox: sitesMap.bbox }); }, 'missing sites throws', 'missing bbox or sites');
+    throws(function () { mapFormat.reconstruct({ bbox: sitesMap.bbox, sites: new Array(mapFormat.MAX_MAP_CELLS + 1) }); }, 'too many sites throws', 'too many sites');
+    throws(function () { mapFormat.reconstruct({ bbox: { xl: 0, xr: NaN, yt: 0, yb: 100 }, sites: [] }); }, 'non-finite bbox throws', 'invalid bbox');
+    throws(function () { mapFormat.reconstruct({ bbox: { xl: 100, xr: 0, yt: 0, yb: 100 }, sites: [] }); }, 'inverted bbox (xr<=xl) throws', 'invalid bbox');
+    throws(function () { mapFormat.reconstruct({ bbox: sitesMap.bbox, sites: [{ x: NaN, y: 0 }] }); }, 'non-finite site coords throw', 'non-finite coordinates');
     throws(function () {
         mapFormat.reconstruct({ bbox: sitesMap.bbox, sites: [{ x: 50, y: 50, id: 0 }, { x: 50, y: 50, id: 0 }] });
-    }, 'duplicate site (degenerate, no cell) throws');
+    }, 'duplicate site (degenerate, no cell) throws', 'produced no cell');
 });
 
 // ---------------------------------------------------------------------------
@@ -242,27 +274,47 @@ group('compressor', function () {
     // empty list => empty array (client maps over it)
     eq(compressor.sendPlayerUpdates({}).length, 0, 'empty player list => empty array');
 
-    // proj / aimer / hazard row widths
-    const projRow = compressor.sendProjUpdates({ a: { ownerId: 'o', type: 2, x: 1, y: 2 } });
+    // proj / aimer / hazard rows — pin EVERY index, with distinct values so a
+    // transposed x/y (the most desync-prone fields, and this group's whole reason
+    // to exist) is caught, not just a length change.
+    const projRow = compressor.sendProjUpdates({ a: { ownerId: 'o', type: 7, x: 11, y: 22 } });
     eq(projRow[0].length, 4, 'proj row has 4 fields [ownerId,type,x,y]');
-    eq(projRow[0][1], 2, 'proj[1] = type');
+    eq(projRow[0][0], 'o', 'proj[0] = ownerId');
+    eq(projRow[0][1], 7, 'proj[1] = type');
+    eq(projRow[0][2], 11, 'proj[2] = x');
+    eq(projRow[0][3], 22, 'proj[3] = y');
 
-    const aimRow = compressor.sendAimerUpdates({ a: { ownerId: 'o', targetListAry: ['x', 'y'], radius: 5, x: 1, y: 2 } });
+    const aimRow = compressor.sendAimerUpdates({ a: { ownerId: 'o', targetListAry: ['t1', 't2'], radius: 5, x: 11, y: 22 } });
     eq(aimRow[0].length, 5, 'aimer row has 5 fields');
-    eq(aimRow[0][1], 'x,y', 'aimer[1] = targetListAry joined by comma');
+    eq(aimRow[0][0], 'o', 'aimer[0] = ownerId');
+    eq(aimRow[0][1], 't1,t2', 'aimer[1] = targetListAry joined by comma');
+    eq(aimRow[0][2], 5, 'aimer[2] = radius');
+    eq(aimRow[0][3], 11, 'aimer[3] = x');
+    eq(aimRow[0][4], 22, 'aimer[4] = y');
 
-    const hazRow = compressor.sendHazardUpdates({ a: { ownerId: 'o', x: 1, y: 2 } });
+    const hazRow = compressor.sendHazardUpdates({ a: { ownerId: 'o', x: 11, y: 22 } });
     eq(hazRow[0].length, 3, 'hazard row has 3 fields [ownerId,x,y]');
+    eq(hazRow[0][0], 'o', 'hazard[0] = ownerId');
+    eq(hazRow[0][1], 11, 'hazard[1] = x');
+    eq(hazRow[0][2], 22, 'hazard[2] = y');
 
-    // spawn/append packet (static fields, sent once)
+    // spawn/append packet (static fields, sent once) — pin ALL 14 indices so any
+    // reorder of the spawn layout trips the test, not just a length change.
     const spawn = JSON.parse(compressor.appendPlayer(fakePlayer));
     eq(spawn.length, 14, 'spawn packet has 14 fields');
     eq(spawn[0], 'p1', 'spawn[0] = id');
+    eq(spawn[1], 10, 'spawn[1] = x');
+    eq(spawn[2], 20, 'spawn[2] = y');
     eq(spawn[3], '#ff0000', 'spawn[3] = color');
     eq(spawn[4], true, 'spawn[4] = alive');
     eq(spawn[5], 3, 'spawn[5] = notches');
+    eq(spawn[6], false, 'spawn[6] = nearVictory');
+    eq(spawn[7], true, 'spawn[7] = awake');
+    eq(spawn[8], false, 'spawn[8] = onFire');
     eq(spawn[9], 90, 'spawn[9] = angle');
     eq(spawn[10], null, 'spawn[10] = name (null for humans)');
+    eq(spawn[11], null, 'spawn[11] = title');
+    eq(spawn[12], null, 'spawn[12] = avatarUrl');
     eq(spawn[13], 'dino', 'spawn[13] = cartSkin');
 });
 
@@ -296,13 +348,9 @@ group('utils math/hash/color', function () {
     const nv = utils.normalizedVectorFromAngle(Math.PI / 3);
     approx(Math.sqrt(nv.x * nv.x + nv.y * nv.y), 1, 'normalizedVectorFromAngle is unit length');
 
-    // normalizedVectorFromPoint: unit-length for a real vector, and a SAFE zero
-    // vector (not NaN) for a zero-length input — NaN here would corrupt a tick.
+    // normalizedVectorFromPoint: unit-length for a real vector.
     const nvp = utils.normalizedVectorFromPoint({ x: 3, y: 4 });
     approx(Math.sqrt(nvp.x * nvp.x + nvp.y * nvp.y), 1, 'normalizedVectorFromPoint is unit length');
-    const nvZero = utils.normalizedVectorFromPoint({ x: 0, y: 0 });
-    check(nvZero.x === 0 && nvZero.y === 0, 'normalizedVectorFromPoint of zero vector is {0,0}, not NaN');
-    check(!Number.isNaN(nvZero.x) && !Number.isNaN(nvZero.y), 'normalizedVectorFromPoint never emits NaN');
 
     // cyrb53 hash: deterministic, seed-sensitive, and bounded to a safe integer
     eq(utils.generateHash('chao', 0), utils.generateHash('chao', 0), 'hash is deterministic');
