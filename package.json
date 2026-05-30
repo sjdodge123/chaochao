@@ -23,6 +23,7 @@
         "start": "node index.js",
         "start:prod": "NODE_ENV=production node index.js",
         "heroku-postbuild": "npm run build",
+        "test:unit": "node .github/scripts/unit-tests.js",
         "test:smoke": "node .github/scripts/smoke-test.js",
         "test:perf-tick": "node .github/scripts/perf-tick-budget.js",
         "test:perf-client": "node .github/scripts/perf-client.js",
