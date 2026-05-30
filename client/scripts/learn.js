@@ -223,7 +223,19 @@
                   detail: "Awarded for throwing more punches than anyone else — less interested in racing, more interested in shoving. Whether they connected is beside the point." },
                 { id: "medal-multikill", name: "Multi-Kills", icon: emoji("💥"), anim: "medalShine",
                   blurb: "Double, Triple and Mega Kills.",
-                  detail: "For stacking eliminations in a single breath: take out two in quick succession for a Double Kill, three for a Triple, and four or more for a Mega Kill. The more you fell before the dust settles, the louder the call-out." }
+                  detail: "For stacking eliminations in a single breath: take out two in quick succession for a Double Kill, three for a Triple, and four or more for a Mega Kill. The more you fell before the dust settles, the louder the call-out." },
+                { id: "medal-zombieslayer", name: "Zombie Slayer", icon: emoji("🧟"), anim: "medalShine",
+                  blurb: "Most kills while infected.",
+                  detail: "Earned during infection rounds for landing the most bites as a zombie — turning the tables and dragging the most rivals into undeath before the round ends." },
+                { id: "medal-heavyhitter", name: "Heavy Hitter", icon: emoji("🥊"), anim: "medalShine",
+                  blurb: "Most fully-charged punches.",
+                  detail: "For the racer who threw the most fully wound-up punches — holding the charge to the top before letting fly, again and again. Patience rewarded with knockback." },
+                { id: "medal-pinball", name: "Pinball", icon: emoji("🔵"), anim: "medalShine",
+                  blurb: "Bounced off the most bumpers.",
+                  detail: "Awarded to whoever got knocked around by bumpers more than anyone else — ricocheting across the arena like a ball in a pinball machine. Not necessarily on purpose." },
+                { id: "medal-iceskater", name: "Ice Skater", icon: emoji("⛸️"), anim: "medalShine",
+                  blurb: "Slid the furthest on ice.",
+                  detail: "For covering the most distance gliding across ice tiles — embracing the slip instead of fighting it, and racking up the longest total slide of the match." }
             ]
         }
     ];

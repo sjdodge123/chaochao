@@ -734,6 +734,10 @@ function registerStateHandlers(server) {
 		myMapRating = 0;
 		ratingStarHits = [];
 		ratingPadCursor = 0;
+		// Bump the medals-card reveal nonce so its entrance animation replays for
+		// this match — even when the same player wins back-to-back (playerWon
+		// unchanged). drawGameOverScreen watches this (see draw.js).
+		if (typeof medalRevealNonce === "number") { medalRevealNonce++; }
 		recapHarvestRound();      // fold the final round's clips into the archive first
 		recapBuild(achievements); // then assemble the montage from the whole-match archive
 		stopAllSounds();

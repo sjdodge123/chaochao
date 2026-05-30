@@ -1724,9 +1724,12 @@ function drawBackground() {
     // rect fills the whole canvas, so there's no separate backdrop layer).
 }
 // --- gameOver medals card ------------------------------------------------
-// Persistent reveal clock for the end-of-game medals card. Keyed to the
-// winning player id so the staggered entrance replays exactly once per match
-// (drawGameOverScreen runs every tick, so we can't restart on each frame).
+// Persistent reveal clock for the end-of-game medals card. The startGameover
+// handler bumps `medalRevealNonce` each match; drawGameOverScreen restarts its
+// staggered entrance whenever the nonce it last drew differs (so even a repeat
+// winner replays the animation). drawGameOverScreen runs every tick, hence the
+// latch rather than a per-frame reset.
+var medalRevealNonce = 0;
 var medalRevealFor = null;
 var medalRevealElapsed = 0;
 // One-line, player-facing blurb shown under each medal name on the gameOver card.
@@ -1898,12 +1901,15 @@ function drawGameOverScreen(dt) {
 
         if (earnedMedals.length > 0) {
             // Reveal clock: reset when a new match's winner is shown so the
-            // staggered entrance replays each game; advance in seconds (dt).
-            if (medalRevealFor !== playerWon) {
-                medalRevealFor = playerWon;
+            // staggered entrance replays each game. `medalRevealNonce` is bumped by
+            // the startGameover handler so a repeat winner (same playerWon) still
+            // restarts the animation. dt is MILLISECONDS (Date.now() delta) — the
+            // thresholds below are in seconds, so convert here.
+            if (medalRevealFor !== medalRevealNonce) {
+                medalRevealFor = medalRevealNonce;
                 medalRevealElapsed = 0;
             }
-            medalRevealElapsed += (dt || 0);
+            medalRevealElapsed += (dt || 0) / 1000;
 
             // Card geometry, anchored to the right edge so it never overlaps the
             // recap montage (which owns the left/centre of the screen).
