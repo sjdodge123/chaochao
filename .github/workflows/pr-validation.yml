@@ -127,6 +127,9 @@ jobs:
           fi
           echo "Server booted and is listening."
 
+      - name: Edge-case unit tests (pure helpers — validation, map format, wire layout, math)
+        run: node .github/scripts/unit-tests.js
+
       - name: Headless game-loop smoke test
         run: node .github/scripts/smoke-test.js
 
