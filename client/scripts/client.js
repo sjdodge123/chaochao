@@ -557,7 +557,9 @@ function registerStateHandlers(server) {
 		mapLeaderboardData = null;
 		mapLeaderboardJustPlayed = null;
 		currentState = config.stateMap.overview;
-		trackEvent('round_complete');
+		trackEvent('round_complete', {
+			map: (currentMap && currentMap.name) || 'unknown'
+		});
 	});
 	// Map leaderboard for the JUST-PLAYED map (rank/time per logged-in racer in
 	// this room). Drives the inline rank/time shown alongside each notch row on
@@ -629,7 +631,11 @@ function registerStateHandlers(server) {
 			? Colors.decode((winner._serverColor != null) ? winner._serverColor : winner.color)
 			: "";
 		currentState = config.stateMap.gameOver;
-		trackEvent('match_end', { won: (packet.winner === myID) });
+		trackEvent('match_end', {
+			won: (packet.winner === myID),
+			map: (currentMap && currentMap.name) || 'unknown',
+			players: clientList ? Object.keys(clientList).length : 0
+		});
 		// Nudge signed-out players to log in (save progress / earn skins). No-op
 		// when auth is off or already signed in. Primary screen only.
 		if (window.chaochaoAuth && typeof window.chaochaoAuth.showLoginNudge === "function") {
