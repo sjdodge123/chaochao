@@ -19,6 +19,12 @@
       "displayName": "Match Won",
       "scope": "EVENT",
       "description": "Whether the local player won the completed match (match_end)."
+    },
+    {
+      "parameterName": "playlist",
+      "displayName": "Playlist",
+      "scope": "EVENT",
+      "description": "Active map playlist on round_start/round_complete/match_end (featured | hardcore | pure | all | …). Lets gameplay be segmented by playlist and surfaces per-playlist skew."
     }
   ],
   "customMetrics": [
