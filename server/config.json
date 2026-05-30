@@ -64,6 +64,7 @@
         "lengthMarathonMin": 45,
         "traitThresholds": { "ice": 0.28, "lava": 0.30, "bumper": 0.12, "ability": 0.10, "bumperHazardDensity": 0.20 }
     },
+    "defaultPlaylist": "featured",
     "playlists": [
         { "id": "featured", "name": "Featured", "desc": "Balanced, fair maps — the default mix", "filter": { "tier": "featured" } },
         { "id": "all", "name": "Everything", "desc": "Every map in rotation", "filter": {} },
