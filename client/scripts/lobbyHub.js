@@ -1139,10 +1139,33 @@ function skinTabItems(lp, tabKey) {
         if (avatarSkinProfile(lp)) { out.push({ kind: 'avatar' }); }
         return out;
     }
+    var cosmetics = [];
     for (var j = 0; j < COSMETIC_OPTIONS.length; j++) {
-        if (COSMETIC_OPTIONS[j].slot === tabKey) { out.push({ kind: 'cosmetic', opt: COSMETIC_OPTIONS[j] }); }
+        if (COSMETIC_OPTIONS[j].slot === tabKey) { cosmetics.push(COSMETIC_OPTIONS[j]); }
     }
+    cosmetics.sort(cosmeticPickerCompare);
+    for (var k = 0; k < cosmetics.length; k++) { out.push({ kind: 'cosmetic', opt: cosmetics[k] }); }
     return out;
+}
+// Picker grid order: slot DEFAULT first, then UNLOCKED items before locked ones, and within
+// each group by unlock level ascending with achievement unlocks last. Re-evaluated on every
+// build (cartSkinUnlock reads live progression), so an item jumps above the locked ones the
+// moment it unlocks.
+function cosmeticUnlockRank(opt) {
+    if (opt.id == null) { return -1; } // slot default ("None"/"Plain") — always first
+    var skin = (typeof getSkin === "function") ? getSkin(opt.id) : null;
+    if (skin && skin.unlock) {
+        if (skin.unlock.kind === "level") { return skin.unlock.level; }   // 2..100
+        if (skin.unlock.kind === "achievement") { return 1000000; }       // after all levels
+    }
+    return 1000001;
+}
+function cosmeticPickerCompare(a, b) {
+    if ((a.id == null) !== (b.id == null)) { return a.id == null ? -1 : 1; }
+    var la = cartSkinUnlock(a.id).locked ? 1 : 0;
+    var lb = cartSkinUnlock(b.id).locked ? 1 : 0;
+    if (la !== lb) { return la - lb; }                                     // unlocked before locked
+    return cosmeticUnlockRank(a) - cosmeticUnlockRank(b);                  // then level asc, achievements last
 }
 // Full fixed panel height: title gap + tab row + grid + badge + page row.
 function skinPanelHeight() {
