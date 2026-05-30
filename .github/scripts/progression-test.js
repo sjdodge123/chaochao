@@ -56,9 +56,9 @@ function testPureHelpers() {
     check(progression.levelForXp(progression.cumulativeXpForLevel(5) - 1) === 4, 'one XP short of L5 === level 4');
     const lp = progression.levelProgress(progression.cumulativeXpForLevel(3) + 10);
     check(lp.level === 3 && lp.xpThisLevel === 10, 'levelProgress reports xpThisLevel within the level');
-    check(progression.achievementsUnlocked({ mostKills: 75 }, 0).indexOf('executioner') !== -1, 'mostKills>=75 unlocks executioner');
-    check(progression.achievementsUnlocked({ mostKills: 74 }, 0).indexOf('executioner') === -1, 'mostKills<75 does NOT unlock executioner');
-    check(progression.achievementsUnlocked({}, 50).indexOf('golden_champion') !== -1, 'wins>=50 unlocks golden_champion');
+    check(progression.achievementsUnlocked({ mostKills: 30 }, 0).indexOf('executioner') !== -1, 'mostKills>=30 unlocks executioner');
+    check(progression.achievementsUnlocked({ mostKills: 29 }, 0).indexOf('executioner') === -1, 'mostKills<30 does NOT unlock executioner');
+    check(progression.achievementsUnlocked({}, 100).indexOf('golden_champion') !== -1, 'wins>=100 unlocks golden_champion');
     const merged = progression.mergeMedalCounts({ savior: 2 }, { savior: 1, mostKills: 3 });
     check(merged.savior === 3 && merged.mostKills === 3, 'mergeMedalCounts adds deltas');
 }
@@ -180,11 +180,11 @@ function testLevelUp() {
 
 function testAchievementUnlock() {
     console.log('Achievement-skin unlock + toast:');
-    // p1 holds Most Kills this match (totalKills highest) and already has 74 lifetime
-    // -> crossing the scaled threshold (75) unlocks "executioner".
+    // p1 holds Most Kills this match (totalKills highest) and already has 29 lifetime
+    // -> crossing the threshold (30) unlocks "executioner".
     const r = runMatch({
         sig: 'prog-ach',
-        p1: { id: 'prog-ach-1', notches: 3, totalKills: 5, progression: { xp: 0, level: 1, unlocked_skins: [], medal_counts: { mostKills: 74 }, wins: 0 } },
+        p1: { id: 'prog-ach-1', notches: 3, totalKills: 5, progression: { xp: 0, level: 1, unlocked_skins: [], medal_counts: { mostKills: 29 }, wins: 0 } },
         p2: { id: 'prog-ach-2', notches: 1, totalKills: 0, progression: progression.defaultProgression() }
     });
     check(r.p1.progression.unlocked_skins.indexOf('executioner') !== -1, 'in-memory cache records the executioner unlock');
@@ -301,33 +301,39 @@ function testSetCosmeticGating() {
     // Guest (no progression) — treated as level 1. Every level cosmetic rejects.
     player.progression = null;
     equip('pattern', 'stripes'); { const r = rejection(); check(!!r && r.reason === 'level' && r.required === 2 && changedTo('pattern') === '__none__', 'guest rejected from Stripes (pattern Lv 2)'); }
-    equip('cart', 'firetruck'); { const r = rejection(); check(!!r && r.reason === 'level' && r.required === 12 && changedTo('cart') === '__none__', 'guest rejected from Drone (cart Lv 12)'); }
+    equip('cart', 'firetruck'); { const r = rejection(); check(!!r && r.reason === 'level' && r.required === 58 && changedTo('cart') === '__none__', 'guest rejected from Drone (cart Lv 58)'); }
     equip('bogusSlot', 'stripes'); { const r = rejection(); check(!!r && r.reason === 'slot', 'unknown slot rejected'); }
     equip('pattern', 'bogus-id'); { const r = rejection(); check(!!r && r.reason === 'unknown', 'unknown id rejected'); }
     equip('pattern', 'firetruck'); { const r = rejection(); check(!!r && r.reason === 'unknown', 'wrong-slot id rejected (cart id in pattern slot)'); }
-    equip('cart', 'eight_ball'); check(changedTo('cart') === 'eight_ball', 'open cart (unlock-all-for-testing) equips for anyone, even a guest');
+    equip('cart', 'eight_ball'); { const r = rejection(); check(!!r && r.reason === 'level' && r.required === 40, 'guest rejected from a level-gated cart (eight_ball Lv 40)'); }
 
     // Signed-in level 1: still nothing free; empty id clears a slot.
     player.progression = { xp: 0, level: 1, unlocked_skins: [], medal_counts: {}, wins: 0 };
     equip('pattern', 'stripes'); { const r = rejection(); check(!!r && r.reason === 'level', 'level-1 player rejected from Stripes'); }
     equip('pattern', ''); check(changedTo('pattern') === null, 'empty id clears the pattern slot back to default');
 
-    // Level 5 — Stripes (pattern Lv2) + Dashes (trail Lv4) ok; Drone (cart Lv12) +
-    // Polka (pattern Lv8) rejected.
-    player.progression = { xp: 99999, level: 5, unlocked_skins: [], medal_counts: {}, wins: 0 };
-    equip('pattern', 'stripes'); check(changedTo('pattern') === 'stripes', 'level-5 player equips Stripes (pattern Lv 2)');
-    equip('trail', 'dashes'); check(changedTo('trail') === 'dashes', 'level-5 player equips Dashes (trail Lv 4)');
-    equip('cart', 'firetruck'); { const r = rejection(); check(!!r && r.reason === 'level' && r.required === 12, 'level-5 player rejected from Drone (cart Lv 12)'); }
-    equip('pattern', 'polka'); { const r = rejection(); check(!!r && r.reason === 'level' && r.required === 8, 'level-5 player rejected from Polka (pattern Lv 8)'); }
+    // Level 10 — Stripes (pattern Lv2) + Dashes (trail Lv6) + Pizza (cart Lv4) unlock;
+    // Cookie (cart Lv12) + Hazard (pattern Lv14) rejected.
+    player.progression = { xp: 99999, level: 10, unlocked_skins: [], medal_counts: {}, wins: 0 };
+    equip('pattern', 'stripes'); check(changedTo('pattern') === 'stripes', 'level-10 player equips Stripes (pattern Lv 2)');
+    equip('trail', 'dashes'); check(changedTo('trail') === 'dashes', 'level-10 player equips Dashes (trail Lv 6)');
+    equip('cart', 'pizza'); check(changedTo('cart') === 'pizza', 'level-10 player equips Pizza (cart Lv 4)');
+    equip('cart', 'cookie'); { const r = rejection(); check(!!r && r.reason === 'level' && r.required === 12, 'level-10 player rejected from Cookie (cart Lv 12)'); }
+    equip('pattern', 'hazard'); { const r = rejection(); check(!!r && r.reason === 'level' && r.required === 14, 'level-10 player rejected from Hazard (pattern Lv 14)'); }
 
     // INDEPENDENCE: pattern + trail set above must BOTH still be equipped — equipping
     // one slot never clears another. (player fields: pattern, trailFx.)
-    check(player.pattern === 'stripes' && player.trailFx === 'dashes', 'equipping the trail slot did not clear the pattern slot (3 independent slots)');
+    check(player.pattern === 'stripes' && player.trailFx === 'dashes', 'equipping the trail slot did not clear the pattern slot (independent slots)');
 
-    // Level 12 — Drone (cart Lv12) ok; Dino (cart Lv18) rejected.
+    // BORDER is an independent 4th slot (player.border): equipping it must NOT clear the
+    // pattern — the two coexist (border rings the rim, pattern textures the body).
+    equip('border', 'border_ring');
+    check(player.border === 'border_ring' && player.pattern === 'stripes', 'equipping a border kept the pattern (border + pattern coexist, 4 independent slots)');
+
+    // Level 12 — Cookie (cart Lv12) ok; Hazard (pattern Lv14) rejected.
     player.progression = { xp: 99999, level: 12, unlocked_skins: [], medal_counts: {}, wins: 0 };
-    equip('cart', 'firetruck'); check(changedTo('cart') === 'firetruck', 'level-12 player equips Drone (cart Lv 12)');
-    equip('cart', 'dino'); { const r = rejection(); check(!!r && r.reason === 'level' && r.required === 18, 'level-12 player rejected from Dino (cart Lv 18)'); }
+    equip('cart', 'cookie'); check(changedTo('cart') === 'cookie', 'level-12 player equips Cookie (cart Lv 12)');
+    equip('pattern', 'hazard'); { const r = rejection(); check(!!r && r.reason === 'level' && r.required === 14, 'level-12 player rejected from Hazard (pattern Lv 14)'); }
 
     // Achievement cosmetic — gated on unlocked_skins, not level, and slot-checked.
     player.progression = { xp: 99999, level: 30, unlocked_skins: [], medal_counts: {}, wins: 0 };
