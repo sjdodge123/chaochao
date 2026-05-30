@@ -1744,6 +1744,20 @@ var MEDAL_DESC = {
     tripleKill: "Three kills in a flash",
     megaKill: "A relentless killing spree"
 };
+// Per-medal glyph stamped into the gold disc, so each award reads at a glance.
+// Mirrors the icons on the Learn/Codex medals page (client/scripts/learn.js).
+var MEDAL_ICON = {
+    mostKills: "🔪",
+    savior: "🛡️",
+    survivalist: "🏁",
+    brutalist: "🔥",
+    mostMurdered: "🎯",
+    resourceful: "🧰",
+    bully: "👊",
+    doubleKill: "💥",
+    tripleKill: "💥",
+    megaKill: "💥"
+};
 
 // Rounded-rect path builder (caller fills/strokes it).
 function gameOverRoundRect(ctx, x, y, w, h, r) {
@@ -1759,7 +1773,7 @@ function gameOverRoundRect(ctx, x, y, w, h, r) {
 
 // A small gold medal disc with a ribbon + embossed star, used as the marker
 // on the medals card. cx/cy is the disc centre; r its radius.
-function drawMedalDisc(ctx, cx, cy, r) {
+function drawMedalDisc(ctx, cx, cy, r, icon) {
     ctx.save();
     // Ribbon tails tucked behind the disc.
     ctx.fillStyle = "#c8423a";
@@ -1790,19 +1804,28 @@ function drawMedalDisc(ctx, cx, cy, r) {
     ctx.lineWidth = Math.max(1.5, r * 0.12);
     ctx.strokeStyle = "rgba(120,80,10,0.85)";
     ctx.stroke();
-    // Embossed 5-point star.
-    ctx.fillStyle = "rgba(140,92,10,0.9)";
-    ctx.beginPath();
-    for (var s = 0; s < 5; s++) {
-        var ang = -Math.PI / 2 + s * (2 * Math.PI / 5);
-        var ax = cx + Math.cos(ang) * r * 0.5;
-        var ay = cy + Math.sin(ang) * r * 0.5;
-        if (s === 0) { ctx.moveTo(ax, ay); } else { ctx.lineTo(ax, ay); }
-        var ang2 = ang + Math.PI / 5;
-        ctx.lineTo(cx + Math.cos(ang2) * r * 0.22, cy + Math.sin(ang2) * r * 0.22);
+    // Center mark: the medal's own emoji glyph when given, else an embossed star.
+    if (icon) {
+        ctx.save();
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.font = (r * 1.4) + "px serif";
+        ctx.fillText(icon, cx, cy + r * 0.08);
+        ctx.restore();
+    } else {
+        ctx.fillStyle = "rgba(140,92,10,0.9)";
+        ctx.beginPath();
+        for (var s = 0; s < 5; s++) {
+            var ang = -Math.PI / 2 + s * (2 * Math.PI / 5);
+            var ax = cx + Math.cos(ang) * r * 0.5;
+            var ay = cy + Math.sin(ang) * r * 0.5;
+            if (s === 0) { ctx.moveTo(ax, ay); } else { ctx.lineTo(ax, ay); }
+            var ang2 = ang + Math.PI / 5;
+            ctx.lineTo(cx + Math.cos(ang2) * r * 0.22, cy + Math.sin(ang2) * r * 0.22);
+        }
+        ctx.closePath();
+        ctx.fill();
     }
-    ctx.closePath();
-    ctx.fill();
     ctx.restore();
 }
 // Pick a text colour + contrasting outline that stays readable on an arbitrary
@@ -1861,7 +1884,7 @@ function drawGameOverScreen(dt) {
         for (var medal in achievements) {
             var a = achievements[medal];
             if (a.ids && a.ids.length > 0) {
-                earnedMedals.push({ title: a.title, ids: a.ids, desc: MEDAL_DESC[medal] || "" });
+                earnedMedals.push({ title: a.title, ids: a.ids, desc: MEDAL_DESC[medal] || "", icon: MEDAL_ICON[medal] || "" });
             }
         }
 
@@ -1914,7 +1937,7 @@ function drawGameOverScreen(dt) {
 
             // Header: trophy disc + "MEDALS" + subtitle, divider beneath.
             var headBaseY = cardY + padTop;
-            drawMedalDisc(gameContext, cardX + padX + 15, headBaseY + 16, 15);
+            drawMedalDisc(gameContext, cardX + padX + 15, headBaseY + 16, 15, "🏆");
             gameContext.textAlign = "left";
             gameContext.fillStyle = "#f6c64b";
             gameContext.font = "bold 26px Arial";
@@ -1942,8 +1965,8 @@ function drawGameOverScreen(dt) {
                 gameContext.globalAlpha = cardEase * rowEase;
                 gameContext.translate((1 - rowEase) * 22, 0);
 
-                // Medal marker.
-                drawMedalDisc(gameContext, cardX + padX + 14, rowCy - 2, 13);
+                // Medal marker with the award's own icon.
+                drawMedalDisc(gameContext, cardX + padX + 14, rowCy - 2, 13, earnedMedals[m].icon);
 
                 // Title + one-line description. With a description, the two lines
                 // straddle the row centre; without one, the title sits centred.
