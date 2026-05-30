@@ -526,6 +526,12 @@ function pollPadForSlot(pad, lp) {
         pollStationPanel(pad, lp);
     } else if (iOwnWheel) {
         pollEmojiWheel(pad, lp);
+    } else if (lp.isPrimary && typeof config !== "undefined" && config &&
+        (currentState === config.stateMap.overview || currentState === config.stateMap.gameOver) &&
+        pollMapRatingPad(pad, lp)) {
+        // Map-rating star strip (primary pad only — one shared widget). pollMapRatingPad
+        // returns true only when it consumed a D-pad/A press this frame, so B/Start/emoji
+        // still fall through to their branches at the overview.
     } else if (!wheelOpen && buttonPressedThisFrame(pad, GP_BTN_B, lp)) {
         if (blocks) {
             openLeaveConfirm(lp);  // inline confirm in this player's block
@@ -853,6 +859,52 @@ function clearEmojiHighlight(items) {
 // stick, A confirms (dismisses — changes apply live as you step), B / emoji
 // closes. Per-slot, so two pads can configure two panels simultaneously. The
 // open/nav/confirm/close logic itself lives in lobbyHub.js (input-agnostic).
+// Drive the map-rating star strip with the pad: D-pad ◄ ► (or left stick) moves the
+// highlighted star, Ⓐ confirms the vote. Returns true ONLY when it consumed an input
+// this frame, so the caller's else-if chain still falls through to B/Start/emoji when
+// those are pressed instead. The cursor is lazily initialised to the middle star (or a
+// prior pick) so the first nav starts somewhere sensible.
+function pollMapRatingPad(pad, lp) {
+    if (typeof ratingMapId === "undefined" || ratingMapId == null) {
+        return false;
+    }
+    if (typeof ratingPadCursor === "undefined") {
+        return false;
+    }
+    if (ratingPadCursor < 1 || ratingPadCursor > 5) {
+        ratingPadCursor = (typeof myMapRating === "number" && myMapRating > 0) ? myMapRating : 3;
+    }
+    if (buttonPressedThisFrame(pad, GP_DPAD_LEFT, lp)) {
+        ratingPadCursor = Math.max(1, ratingPadCursor - 1);
+        return true;
+    }
+    if (buttonPressedThisFrame(pad, GP_DPAD_RIGHT, lp)) {
+        ratingPadCursor = Math.min(5, ratingPadCursor + 1);
+        return true;
+    }
+    if (buttonPressedThisFrame(pad, GP_BTN_A, lp)) {
+        myMapRating = ratingPadCursor;
+        if (typeof server !== "undefined" && server) {
+            server.emit("rateMap", { stars: ratingPadCursor });
+        }
+        return true;
+    }
+    // Left stick: one step per push, throttled like the station panel.
+    var lx = pad.axes[0] || 0;
+    if (Math.abs(lx) > 0.6) {
+        var now = Date.now();
+        if (!lp._ratingStickActive || (now - (lp._ratingStickAt || 0)) > 250) {
+            ratingPadCursor = (lx > 0) ? Math.min(5, ratingPadCursor + 1) : Math.max(1, ratingPadCursor - 1);
+            lp._ratingStickActive = true;
+            lp._ratingStickAt = now;
+            return true;
+        }
+    } else {
+        lp._ratingStickActive = false;
+    }
+    return false;
+}
+
 function pollStationPanel(pad, lp) {
     if (typeof stationPanelNav !== "function") {
         return;

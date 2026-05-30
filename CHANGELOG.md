@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- You can now rate the map you just played right on the round-results screen, while it's fresh — a 5-star strip above the next-map preview. Works with mouse, touch, and controller (◄ ► to pick a star, Ⓐ to confirm). It's still on the match-over screen too.
 
 ## v0.25.6 — 2026-05-30
 

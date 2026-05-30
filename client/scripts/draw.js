@@ -1887,14 +1887,23 @@ function drawMapRating(cxOverride, bottomY) {
     ratingStarHits = [];
     var startX = cx - rowW / 2;
     var starY = py + 50;
-    gameContext.textBaseline = "middle";
-    gameContext.textAlign = "center";
-    gameContext.font = (starSize - 4) + "px sans-serif";
+    // Controller mode: highlight the pad-selected star (◄ ► to move, Ⓐ to confirm) while
+    // it hasn't been voted yet. Touch/mouse users tap directly and see no cursor.
+    var padActive = (typeof activeInputMethod !== "undefined" && activeInputMethod === "pad");
+    var showCursor = padActive && myMapRating === 0 && ratingPadCursor >= 1 && ratingPadCursor <= 5;
     for (var i = 0; i < n; i++) {
         var sx = startX + i * (starSize + gap);
         var filled = (i < myMapRating);
+        gameContext.textBaseline = "middle";
+        gameContext.textAlign = "center";
+        gameContext.font = (starSize - 4) + "px sans-serif";
         gameContext.fillStyle = filled ? "#FFCB30" : "rgba(255,255,255,0.4)";
         gameContext.fillText(filled ? "★" : "☆", sx + starSize / 2, starY);
+        if (showCursor && (i + 1) === ratingPadCursor) {
+            gameContext.strokeStyle = "#FFCB30";
+            gameContext.lineWidth = 2;
+            gameContext.strokeRect(sx - 2, starY - starSize / 2 - 2, starSize + 4, starSize + 4);
+        }
         ratingStarHits.push({ x: sx, y: starY - starSize / 2, w: starSize, h: starSize, stars: i + 1 });
     }
     gameContext.restore();
