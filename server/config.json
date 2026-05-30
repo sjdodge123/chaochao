@@ -53,6 +53,29 @@
     "maxTotalBrutals": 3,
     "TESTSingleMap": false,
     "submitViaMail": "chaochaothegame@gmail.com",
+    "balance": {
+        "featuredScore": 90,
+        "minDrivableFrac": 0.40,
+        "parMin": 8,
+        "parMax": 90,
+        "idealParLow": 18,
+        "idealParHigh": 40,
+        "lengthSprintMax": 14,
+        "lengthMarathonMin": 45,
+        "traitThresholds": { "ice": 0.28, "lava": 0.30, "bumper": 0.12, "ability": 0.10, "bumperHazardDensity": 0.20 }
+    },
+    "playlists": [
+        { "id": "featured", "name": "Featured", "desc": "Balanced, fair maps — the default mix", "filter": { "tier": "featured" } },
+        { "id": "all", "name": "Everything", "desc": "Every map in rotation", "filter": {} },
+        { "id": "sprint", "name": "Quick Sprints", "desc": "Short and snappy", "filter": { "length": "sprint" } },
+        { "id": "marathon", "name": "Marathon", "desc": "The long haul", "filter": { "length": "marathon" } },
+        { "id": "ice", "name": "Slip & Slide", "desc": "Ice everywhere", "filter": { "trait": "ice" } },
+        { "id": "pinball", "name": "Pinball", "desc": "Bumper chaos", "filter": { "trait": "bumper" } },
+        { "id": "hardcore", "name": "Hardcore", "desc": "Lava gauntlets", "filter": { "trait": "lava" } },
+        { "id": "pure", "name": "Pure Racing", "desc": "Clean, low-hazard", "filter": { "trait": "pure" } },
+        { "id": "favorites", "name": "Crowd Favorites", "desc": "Top player-rated maps", "filter": { "minRating": 3.5 } },
+        { "id": "wild", "name": "Wild", "desc": "The spicy, unsorted pile", "filter": { "tier": "community" } }
+    ],
     "music": {
         "calm": ["slowstride", "slow-pipes"],
         "exciting": ["mind_in_motion", "the-rush", "beastv2", "bumpinbits1", "bumpinbits2", "bumpinbits3", "bumpinbits4", "bumpinbits5"],

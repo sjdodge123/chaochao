@@ -84,6 +84,9 @@ jobs:
       - name: Validate maps and config
         run: node .github/scripts/validate-content.js
 
+      - name: Classify maps (balance tier + playlist membership)
+        run: node .github/scripts/classifier-test.js
+
   smoke-test:
     # Boots the server and ticks the game — proves it still *runs*, not just that
     # it parses and builds. Catches runtime breakage in game.js / engine.js /
