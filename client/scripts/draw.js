@@ -5320,7 +5320,9 @@ function drawOverviewBoard() {
         var pvX = LOGICAL_WIDTH / 2 + 100;
         var pvY = (LOGICAL_HEIGHT / 2 - (world.height / 10)) - 100;
         var thumbCx = pvX + (world.width / 3) / 2;     // centre over the preview thumbnail
-        var stripBottom = pvY - 35 - 12;               // just above the "Next map" title
+        // Sit clear ABOVE the whole preview header ("Next map" is a 32px label at
+        // pvY-35, so its top is ~pvY-67) — clamp so it never runs off the top edge.
+        var stripBottom = Math.max(86, pvY - 80);
         drawMapRating(thumbCx, stripBottom);
     } catch (e) {
         debugLog("rating draw error", e);
