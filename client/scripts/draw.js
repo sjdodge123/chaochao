@@ -1854,10 +1854,13 @@ function drawMapRating(cxOverride, bottomY) {
     var cx = (typeof cxOverride === "number") ? cxOverride : LOGICAL_WIDTH / 2;
     var n = 5, starSize = 36, gap = 8;
     var rowW = n * starSize + (n - 1) * gap;
+    // Name the map explicitly so it's clear you're rating the map you JUST PLAYED,
+    // not the next-map preview shown right below on the overview.
     var rated = (myMapRating > 0);
+    var mapLabel = ratingMapName ? ("“" + ratingMapName + "”") : "the map you just played";
     var label = rated
-        ? ("Thanks — you rated this map " + myMapRating + "/5")
-        : ("Rate this map" + (ratingMapName ? ": " + ratingMapName : ""));
+        ? ("Thanks! You rated " + mapLabel + " " + myMapRating + "/5")
+        : (ratingMapName ? ("Rate the map you just played: " + mapLabel) : "Rate the map you just played");
 
     gameContext.save();
     gameContext.font = "bold 15px sans-serif";
