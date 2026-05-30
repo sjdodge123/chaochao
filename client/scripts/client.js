@@ -430,6 +430,16 @@ function registerScoreHandlers(server) {
 
 	//Game State Map changes
 }
+// Bot count for analytics — playerList[id].name is the spawn-packet bot marker
+// (compressor.js sets player.name only on bot append; humans stay null).
+function countBotsInPlayerList() {
+	if (playerList == null) { return 0; }
+	var n = 0;
+	for (var id in playerList) {
+		if (playerList[id] != null && playerList[id].name != null) { n++; }
+	}
+	return n;
+}
 function registerStateHandlers(server) {
 	server.on("startWaiting", function (packet) {
 		debugLog("startWaiting");
@@ -516,10 +526,13 @@ function registerStateHandlers(server) {
 		raceStartTime = Date.now();
 		currentState = config.stateMap.racing;
 		// Fires once per round (racing state is re-entered each round), so this is a
-		// round-start signal. `players` counts humans only: clientList is the room's
-		// client roster and excludes bots (the per-tick compressor never sends isAI).
+		// round-start signal. `players` counts humans only (clientList = room's
+		// client roster, excludes bots); `bots` counts AI fill via the spawn-packet
+		// `name` marker (server compressor sets player.name only on bot append; humans
+		// stay null — see compressor.js gameState).
 		trackEvent('round_start', {
 			players: clientList ? Object.keys(clientList).length : 0,
+			bots: countBotsInPlayerList(),
 			map: (currentMap && currentMap.name) || 'unknown'
 		});
 	});
@@ -634,7 +647,8 @@ function registerStateHandlers(server) {
 		trackEvent('match_end', {
 			won: (packet.winner === myID),
 			map: (currentMap && currentMap.name) || 'unknown',
-			players: clientList ? Object.keys(clientList).length : 0
+			players: clientList ? Object.keys(clientList).length : 0,
+			bots: countBotsInPlayerList()
 		});
 		// Nudge signed-out players to log in (save progress / earn skins). No-op
 		// when auth is off or already signed in. Primary screen only.
