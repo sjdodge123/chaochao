@@ -626,6 +626,15 @@ class Player extends Circle {
 		}
 	}
 	checkForSleep(currentState) {
+		// Browsing a hub station (skin shop / AI / map picker) IS activity: keep the player
+		// awake while a station panel is open so menu navigation never reads as AFK — the
+		// lobby otherwise kicks an "awake" idler immediately, which made shop browsing (no
+		// movement packets) eject players. nearStation latches the parked station (cleared on
+		// exit), so this lapses the moment they leave the station.
+		if (this.nearStation != null) {
+			this.wakeUp();
+			return;
+		}
 		if (this.sleepTimer != null) {
 			this.sleepTimeLeft = ((this.sleepWaitTime * 1000 - (Date.now() - this.sleepTimer)) / (1000)).toFixed(1);
 			if (this.sleepTimeLeft > 0) {

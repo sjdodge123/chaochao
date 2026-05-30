@@ -623,6 +623,7 @@ function checkForMail(client) {
 		if (player == null) {
 			return;
 		}
+		player.wakeUp(); // picking a cosmetic is activity — don't AFK a browsing player
 		var slot = payload && payload.slot;
 		if (COSMETIC_SLOT_FIELD[slot] == null) {
 			client.emit("cosmeticRejected", { slot: slot, reason: "slot" });
