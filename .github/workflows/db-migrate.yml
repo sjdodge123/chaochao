@@ -36,6 +36,8 @@ jobs:
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need base branch history to diff migration files
       - uses: supabase/setup-cli@v1
         with:
           version: latest
@@ -43,11 +45,24 @@ jobs:
         run: supabase link --project-ref "${{ secrets.PROD_PROJECT_REF }}"
       - name: Preview pending migrations
         run: |
-          echo "Migrations local vs. prod:"
+          echo "::group::Migrations local vs. prod"
           supabase migration list --linked
-          echo "---"
-          echo "SQL that would be applied to prod on merge:"
+          echo "::endgroup::"
+          echo "::group::Migrations the CLI would push"
           supabase db push --dry-run
+          echo "::endgroup::"
+          echo "Full SQL of migration files added/changed in this PR:"
+          base="origin/${{ github.base_ref }}"
+          changed="$(git diff --name-only --diff-filter=d "$base"...HEAD -- supabase/migrations || true)"
+          if [ -z "$changed" ]; then
+            echo "(no migration files changed in this PR)"
+          else
+            for f in $changed; do
+              echo "::group::$f"
+              cat "$f"
+              echo "::endgroup::"
+            done
+          fi
 
   # On merge to main: apply any not-yet-applied migrations to prod.
   migrate:

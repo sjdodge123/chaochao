@@ -71,16 +71,32 @@ Two consequences, both requiring action before the first CI run:
 
 ## Day-to-day: adding a migration
 
-1. Write the change in dev first (MCP/dashboard) to prototype, then capture it as a file:
+**Create the file FIRST, then apply it — never the other way around.** The `0001`/`0002`
+drift this doc untangles happened because schema was applied to the DB *before* a matching
+migration file existed. Do not repeat it. In particular, do **not** prototype via the MCP
+`apply_migration` tool and then run `supabase migration new`: MCP records its own timestamp
+version on the remote, and `migration new` generates a *different* one — leaving a remote-only
+migration plus a local file that looks unapplied. That is exactly the mismatch we just repaired.
+
+1. Generate the file first, so the filename's timestamp IS the version of record:
    ```bash
    supabase migration new descriptive_name     # creates supabase/migrations/<timestamp>_descriptive_name.sql
    ```
    (Or hand-author the file, but it MUST use a 14-digit timestamp prefix — `<YYYYMMDDHHMMSS>_name.sql`
    — matching the existing files and the recorded history. A plain `0001_` name will not match.)
-2. Make migrations **idempotent / forward-only** (`create ... if not exists`, `alter table ... add column if not exists`). There is no automatic down-migration; roll back by committing a new corrective migration.
-3. Open a PR. The `dry-run` job posts the exact SQL that will hit prod and the local-vs-remote
-   diff — review it.
-4. Merge to `main`. The `migrate` job applies only the not-yet-applied versions to prod.
+2. Write the SQL into that file. Make it **idempotent / forward-only** (`create ... if not exists`,
+   `alter table ... add column if not exists`). There is no automatic down-migration; roll back by
+   committing a new corrective migration.
+3. Apply it to **dev** with the CLI so dev's history records the *same* version the file carries:
+   ```bash
+   supabase link --project-ref ukfecygtfghiybasqgtl   # DEV
+   supabase db push                                    # applies the new file to dev
+   ```
+   Iterate here as needed. Reserve the MCP/dashboard SQL editor for throwaway exploration that
+   does **not** write migration history — once you settle on a change, it must live in a file.
+4. Open a PR. The `dry-run` job prints the SQL of the migration files added in the PR plus the
+   local-vs-remote diff — review it.
+5. Merge to `main`. The `migrate` job applies only the not-yet-applied versions to prod.
 
 ## Notes
 
