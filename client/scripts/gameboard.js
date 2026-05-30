@@ -1648,7 +1648,7 @@ function positionEmojiSlots() {
 // kart's vertex buffer at ~150 entries — small enough to re-stroke cheaply on
 // the main canvas, so the previous per-kart offscreen-canvas + direct-mode
 // split is gone (perfTrailDirect now no-ops; both render paths converge here).
-var TRAIL_FADE_MS = 5000;
+var TRAIL_FADE_MS = 1700;
 class Trail {
 	constructor(initialPosition) {
 		this.vertices = []; // each entry: { x, y, t }

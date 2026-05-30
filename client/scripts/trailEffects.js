@@ -54,6 +54,12 @@ var tfxBaseAlpha = 1;           // set by drawTrail per kart (1 local, dim non-l
 function tfxGlow() { return (typeof perfGlow === "function") ? perfGlow() : true; }
 // every alpha goes through here so non-local trails dim uniformly
 function tfxAlpha(ctx, a) { ctx.globalAlpha = a * tfxBaseAlpha; }
+// Per-effect tuning param: returns the baked default in-game (window.TFX_PARAMS undefined),
+// or a live-tuned value in the trails-review prototype (which sets window.TFX_PARAMS[effect]).
+function TP(effect, key, def) {
+  var P = (typeof window !== "undefined") ? window.TFX_PARAMS : null;
+  return (P && P[effect] && P[effect][key] != null) ? P[effect][key] : def;
+}
 
 // ---- color helpers (parse any CSS color → rgb once, cached) ----------------
 var _tfxRGB = {};
@@ -66,22 +72,40 @@ function tfxRGB(color) {
   var rgb = { r: d[0], g: d[1], b: d[2] };
   _tfxRGB[color] = rgb; return rgb;
 }
+// tfxRGBA/tfxHot/tfxDark build an rgba STRING from (color, t, a). They're called per-particle
+// with constant args inside the renderers' hot loops, so allocating a fresh string every call
+// churned the GC (the trail "lag spike"). Memoize each result on the per-colour RGB object
+// (already cached) under a NUMERIC composite key — after warm-up they return the cached string
+// with zero allocation, and the lookup key never allocates either.
+function _tfxKey(t, a) { return (((t * 1000) | 0) * 100000) + (((a == null ? 1 : a) * 1000) | 0); }
 function tfxRGBA(color, a) {
   var c = tfxRGB(color);
-  return "rgba(" + c.r + "," + c.g + "," + c.b + "," + a + ")";
+  var cache = c._rgba || (c._rgba = {});
+  var k = ((a == null ? 1 : a) * 1000) | 0;
+  var s = cache[k]; if (s != null) return s;
+  s = "rgba(" + c.r + "," + c.g + "," + c.b + "," + a + ")";
+  cache[k] = s; return s;
 }
 // mix toward WHITE by t (hot cores / specular highlights)
 function tfxHot(color, t, a) {
   var c = tfxRGB(color);
-  return "rgba(" + Math.round(c.r + (255 - c.r) * t) + "," +
+  var cache = c._hot || (c._hot = {});
+  var k = _tfxKey(t, a);
+  var s = cache[k]; if (s != null) return s;
+  s = "rgba(" + Math.round(c.r + (255 - c.r) * t) + "," +
     Math.round(c.g + (255 - c.g) * t) + "," +
     Math.round(c.b + (255 - c.b) * t) + "," + (a == null ? 1 : a) + ")";
+  cache[k] = s; return s;
 }
 // mix toward BLACK by t (ribbon back-face shading)
 function tfxDark(color, t, a) {
   var c = tfxRGB(color);
-  return "rgba(" + Math.round(c.r * (1 - t)) + "," + Math.round(c.g * (1 - t)) +
+  var cache = c._dark || (c._dark = {});
+  var k = _tfxKey(t, a);
+  var s = cache[k]; if (s != null) return s;
+  s = "rgba(" + Math.round(c.r * (1 - t)) + "," + Math.round(c.g * (1 - t)) +
     "," + Math.round(c.b * (1 - t)) + "," + (a == null ? 1 : a) + ")";
+  cache[k] = s; return s;
 }
 // deterministic 0..1 hash from a numeric seed
 function tfxHash(seed) {
@@ -186,7 +210,7 @@ function drawBasicTrail(ctx, verts, color, now, fadeMs, anim) {
 // dashes (Lv4) — uniform marching dashes (arc-length offset keeps them even).
 function drawDashesTrail(ctx, verts, color, now, fadeMs, anim) {
   if (verts.length < 2) return;
-  var DASH = 16, GAP = 12, WIDTH = 4;
+  var DASH = TP('dashes','DASH',7), GAP = TP('dashes','GAP',23), WIDTH = TP('dashes','WIDTH',4);
   ctx.save();
   ctx.lineWidth = WIDTH; ctx.lineCap = "butt"; ctx.lineJoin = "round";
   ctx.strokeStyle = color;
@@ -219,7 +243,7 @@ function drawDashesTrail(ctx, verts, color, now, fadeMs, anim) {
 // sparkle (Lv10) — scattered 4-point stars twinkling in place.
 function drawSparkleTrail(ctx, verts, color, now, fadeMs, anim) {
   if (verts.length < 2) return;
-  var DENSITY = 16, SIZE = 5, TWINKLE = 0.55, SPREAD = 14;
+  var DENSITY = TP('sparkle','DENSITY',32), SIZE = TP('sparkle','SIZE',4), TWINKLE = TP('sparkle','TWINKLE',0.75), SPREAD = TP('sparkle','SPREAD',16);
   ctx.save();
   ctx.lineCap = "round";
   var step = Math.max(1, Math.floor(verts.length / Math.max(1, DENSITY)));
@@ -259,7 +283,7 @@ function drawSparkleTrail(ctx, verts, color, now, fadeMs, anim) {
 function drawCometTrail(ctx, verts, color, now, fadeMs, anim) {
   var n = verts.length;
   if (n < 2) return;
-  var WIDTH = 16, GLOW = 14, TAPER = 0.80;
+  var WIDTH = TP('comet','WIDTH',22), GLOW = TP('comet','GLOW',22), TAPER = TP('comet','TAPER',0.8);
   var stride = Math.max(1, Math.floor(n / 50));
   var idx = [];
   for (var i = 0; i < n; i += stride) idx.push(i);
@@ -319,9 +343,17 @@ function drawCometTrail(ctx, verts, color, now, fadeMs, anim) {
 // bubbles (Lv22) — rising rings that drift up and pop.
 function drawBubblesTrail(ctx, verts, color, now, fadeMs, anim) {
   if (verts.length < 2) return;
-  var DENSITY = 10, SIZE = 8, RISE = 0.48;
+  // Tuning knobs. RISE is now the TOTAL px a bubble drifts up over its whole life (bounded),
+  // so bubbles hug the trail and fade instead of streaming hundreds of px up the screen.
+  var DENSITY = TP('bubbles','DENSITY',15);   // samples along the trail (fewer = lighter)
+  var SIZE = TP('bubbles','SIZE',8);      // base bubble radius (px)
+  var RISE = TP('bubbles','RISE',26);     // total rise over a bubble's life (px)
+  var PEAK = TP('bubbles','PEAK',0.7);   // max opacity (lower = subtler)
   ctx.save();
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 1.2;
+  // Constant colours/styles hoisted out of the per-bubble loop (only globalAlpha varies).
+  ctx.strokeStyle = color;
+  ctx.fillStyle = tfxHot(color, 0.75, 1);
   var step = Math.max(1, Math.floor(verts.length / Math.max(1, DENSITY)));
   for (var i = 0; i < verts.length; i += step) {
     var v = verts[i];
@@ -330,19 +362,17 @@ function drawBubblesTrail(ctx, verts, color, now, fadeMs, anim) {
     if (life >= 1) continue;
     for (var k = 0; k < 2; k++) {
       var seed = v.t + k * 6151 + i * 3911;
-      var rise = (40 + RISE * 120) * (age / 1000);
-      var drift = Math.sin(age * 0.002 + tfxHash(seed) * TFX_TAU) * 8;
-      var px = v.x + drift + (tfxHash(seed + 1) - 0.5) * 10;
-      var py = v.y - rise * (0.5 + tfxHash(seed + 2) * 0.8);
-      var r = SIZE * (0.5 + tfxHash(seed + 4) * 0.9);
-      var alpha = tfxClamp01((1 - life) * 1.3) * (0.4 + 0.6 * tfxHash(seed + 6));
+      var rise = RISE * life * (0.6 + tfxHash(seed + 2) * 0.7);     // bounded (~ up to 30px)
+      var drift = Math.sin(life * 5 + tfxHash(seed) * TFX_TAU) * 4; // gentle horizontal wobble
+      var px = v.x + drift + (tfxHash(seed + 1) - 0.5) * 8;
+      var py = v.y - rise;
+      var r = SIZE * (0.45 + tfxHash(seed + 4) * 0.7);             // ~ up to 5.7px
+      var alpha = tfxClamp01(1 - life) * PEAK * (0.55 + 0.45 * tfxHash(seed + 6));
       if (alpha <= 0.03) continue;
       tfxAlpha(ctx, alpha);
-      ctx.strokeStyle = color;
       ctx.beginPath(); ctx.arc(px, py, r, 0, TFX_TAU); ctx.stroke();
-      tfxAlpha(ctx, alpha * 0.9);
-      ctx.fillStyle = tfxHot(color, 0.75, 1);
-      ctx.beginPath(); ctx.arc(px - r * 0.35, py - r * 0.35, Math.max(0.6, r * 0.22), 0, TFX_TAU); ctx.fill();
+      tfxAlpha(ctx, alpha * 0.85);
+      ctx.beginPath(); ctx.arc(px - r * 0.35, py - r * 0.35, Math.max(0.5, r * 0.22), 0, TFX_TAU); ctx.fill();
     }
   }
   ctx.restore();
@@ -352,7 +382,7 @@ function drawBubblesTrail(ctx, verts, color, now, fadeMs, anim) {
 function drawAuroraTrail(ctx, verts, color, now, fadeMs, anim) {
   var n = verts.length;
   if (n < 2) return;
-  var AMP = 14, FREQ = 16, GLOW = 16, SOFT = 3;
+  var AMP = TP('aurora','AMP',7), FREQ = TP('aurora','FREQ',32), GLOW = TP('aurora','GLOW',27), SOFT = TP('aurora','SOFT',2);
   var layers = Math.max(1, Math.round(SOFT));
   var cum = new Array(n); cum[0] = 0;
   for (var k = 1; k < n; k++) cum[k] = cum[k - 1] + Math.hypot(verts[k].x - verts[k - 1].x, verts[k].y - verts[k - 1].y);
@@ -392,7 +422,7 @@ function drawAuroraTrail(ctx, verts, color, now, fadeMs, anim) {
 // guardian (achievement) — pulsing halo + counter-rotating shield arcs + orbit dots.
 function drawGuardianTrail(ctx, verts, color, now, fadeMs, anim) {
   if (verts.length < 2) return;
-  var RADIUS = 28, PULSE = 0.50, DOTS = 4;
+  var RADIUS = TP('guardian','RADIUS',20), PULSE = TP('guardian','PULSE',0.9), DOTS = TP('guardian','DOTS',3);
   var head = verts[verts.length - 1];
   ctx.save();
   ctx.lineCap = "round"; ctx.lineWidth = 3; ctx.strokeStyle = color;
@@ -447,7 +477,7 @@ function drawGuardianTrail(ctx, verts, color, now, fadeMs, anim) {
 // survivor (achievement) — embers that rise, flicker, and linger before snuffing.
 function drawSurvivorTrail(ctx, verts, color, now, fadeMs, anim) {
   if (verts.length < 2) return;
-  var DENSITY = 14, SIZE = 7, FLICK = 0.60, LINGER = 0.55;
+  var DENSITY = TP('survivor','DENSITY',20), SIZE = TP('survivor','SIZE',4), FLICK = TP('survivor','FLICK',0.1), LINGER = TP('survivor','LINGER',0);
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
   var step = Math.max(1, Math.floor(verts.length / Math.max(1, DENSITY)));
@@ -482,7 +512,7 @@ function drawSurvivorTrail(ctx, verts, color, now, fadeMs, anim) {
 // ribbon — flat banner that twists (back face shades darker).
 function drawRibbonTrail(ctx, verts, color, now, fadeMs, anim) {
   var n = verts.length; if (n < 2) return;
-  var WIDTH = 18, TWIST = 16;
+  var WIDTH = TP('ribbon','WIDTH',13), TWIST = TP('ribbon','TWIST',8);
   var stride = Math.max(1, Math.floor(n / 60));
   var idx = []; for (var i = 0; i < n; i += stride) idx.push(i);
   if (idx[idx.length - 1] !== n - 1) idx.push(n - 1);
@@ -514,7 +544,7 @@ function drawRibbonTrail(ctx, verts, color, now, fadeMs, anim) {
 // bolt — jagged electric arc, re-randomizes each flicker quantum, with forks.
 function drawBoltTrail(ctx, verts, color, now, fadeMs, anim) {
   var n = verts.length; if (n < 2) return;
-  var AMP = 12, GLOW = 12, FORKS = 1;
+  var AMP = TP('bolt','AMP',10), GLOW = TP('bolt','GLOW',12), FORKS = TP('bolt','FORKS',2);
   var fstep = Math.floor(anim / 55);
   var stride = Math.max(1, Math.floor(n / 40));
   var idx = []; for (var i = 0; i < n; i += stride) idx.push(i);
@@ -562,7 +592,7 @@ function drawBoltTrail(ctx, verts, color, now, fadeMs, anim) {
 // hearts — heart particles floating up off the path.
 function drawHeartsTrail(ctx, verts, color, now, fadeMs, anim) {
   var n = verts.length; if (n < 2) return;
-  var DENSITY = 10, SIZE = 9;
+  var DENSITY = TP('hearts','DENSITY',15), SIZE = TP('hearts','SIZE',8.5);
   var step = Math.max(1, Math.floor(n / DENSITY));
   ctx.save();
   for (var i = 0; i < n; i += step) {
@@ -587,7 +617,7 @@ function drawHeartsTrail(ctx, verts, color, now, fadeMs, anim) {
 // smoke — soft puffs billowing outward and drifting up (no hot core).
 function drawSmokeTrail(ctx, verts, color, now, fadeMs, anim) {
   var n = verts.length; if (n < 2) return;
-  var DENSITY = 10, SIZE = 15;
+  var DENSITY = TP('smoke','DENSITY',21), SIZE = TP('smoke','SIZE',14);
   var step = Math.max(1, Math.floor(n / DENSITY));
   ctx.save();
   for (var i = 0; i < n; i += step) {
@@ -614,7 +644,7 @@ function drawSmokeTrail(ctx, verts, color, now, fadeMs, anim) {
 // confetti — rectangles tumbling and fluttering down.
 function drawConfettiTrail(ctx, verts, color, now, fadeMs, anim) {
   var n = verts.length; if (n < 2) return;
-  var DENSITY = 12, SIZE = 8, SPIN = 50;
+  var DENSITY = TP('confetti','DENSITY',17), SIZE = TP('confetti','SIZE',3), SPIN = TP('confetti','SPIN',10);
   var step = Math.max(1, Math.floor(n / DENSITY));
   ctx.save();
   for (var i = 0; i < n; i += step) {
@@ -642,7 +672,7 @@ function drawConfettiTrail(ctx, verts, color, now, fadeMs, anim) {
 // snow (Crystals) — 6-point ice crystals rotating and drifting down.
 function drawSnowTrail(ctx, verts, color, now, fadeMs, anim) {
   var n = verts.length; if (n < 2) return;
-  var DENSITY = 10, SIZE = 9, SPIN = 30;
+  var DENSITY = TP('snow','DENSITY',15), SIZE = TP('snow','SIZE',5), SPIN = TP('snow','SPIN',30);
   var step = Math.max(1, Math.floor(n / DENSITY));
   ctx.save(); ctx.lineCap = "round";
   for (var i = 0; i < n; i += step) {
@@ -677,7 +707,7 @@ function drawSnowTrail(ctx, verts, color, now, fadeMs, anim) {
 // tracks (Tire Tracks) — two offset rails + cross-tread ticks at constant spacing.
 function drawTracksTrail(ctx, verts, color, now, fadeMs, anim) {
   var n = verts.length; if (n < 2) return;
-  var GAUGE = 10, TREAD = 16;
+  var GAUGE = TP('tracks','GAUGE',4), TREAD = TP('tracks','TREAD',4);
   ctx.save(); ctx.strokeStyle = color; ctx.lineCap = "butt";
   var bucketMs = fadeMs / TFX_BUCKETS;
   for (var rail = -1; rail <= 1; rail += 2) {
@@ -715,19 +745,26 @@ function drawTracksTrail(ctx, verts, color, now, fadeMs, anim) {
 // notes (Music Notes) — note glyphs floating up, rocking.
 function drawNotesTrail(ctx, verts, color, now, fadeMs, anim) {
   var n = verts.length; if (n < 2) return;
-  var DENSITY = 9, SIZE = 8;
-  var step = Math.max(1, Math.floor(n / DENSITY));
-  ctx.save();
-  for (var i = 0; i < n; i += step) {
-    var v = verts[i]; var age = now - v.t; var life = tfxClamp01(age / fadeMs); if (life >= 1) continue;
+  var SIZE = TP('notes','SIZE',3.5);
+  var INTERVAL = TP('notes','INTERVAL',95);  // ms between notes — STABLE spawn cadence keyed on
+  var RISE = TP('notes','RISE',34);          // v.t (not array index), so notes don't flicker as
+  ctx.save();                                 // the vertex buffer slides. RISE = total px drift.
+  var lastBucket = null;
+  for (var i = 0; i < n; i++) {
+    var v = verts[i];
+    var bucket = Math.floor(v.t / INTERVAL);
+    if (bucket === lastBucket) continue;     // one note per INTERVAL — identical set every frame
+    lastBucket = bucket;
+    var age = now - v.t; var life = tfxClamp01(age / fadeMs); if (life >= 1) continue;
     var seed = v.t;
-    var rise = 75 * (age / 1000) * (0.4 + tfxHash(seed) * 0.7);
-    var sway = Math.sin(age * 0.0022 + tfxHash(seed + 1) * TFX_TAU) * 12;
-    var x = v.x + sway + (tfxHash(seed + 2) - 0.5) * 8;
+    var rise = RISE * Math.pow(life, 1.5) * (0.7 + tfxHash(seed) * 0.5); // ease-in: barely moves on spawn
+    var sway = Math.sin(age * 0.0018 + tfxHash(seed + 1) * TFX_TAU) * 6;
+    var x = v.x + sway + (tfxHash(seed + 2) - 0.5) * 6;
     var y = v.y - rise;
     var sz = SIZE * (0.7 + tfxHash(seed + 3) * 0.6);
-    var rot = Math.sin(age * 0.0022 + tfxHash(seed + 4) * TFX_TAU) * 0.35;
-    var alpha = tfxClamp01((1 - life) * 1.2); if (alpha <= 0.03) continue;
+    var rot = Math.sin(age * 0.0018 + tfxHash(seed + 4) * TFX_TAU) * 0.3;
+    var fadeIn = tfxClamp01(age / 160);      // ease alpha in so notes don't pop at full strength
+    var alpha = tfxClamp01(fadeIn * (1 - life) * 1.2); if (alpha <= 0.03) continue;
     ctx.save(); ctx.translate(x, y); ctx.rotate(rot); tfxAlpha(ctx, alpha);
     ctx.fillStyle = color; tfxNoteGlyph(ctx, sz);
     ctx.restore();
@@ -738,7 +775,7 @@ function drawNotesTrail(ctx, verts, color, now, fadeMs, anim) {
 // neon (Neon Wall) — crisp constant-width light ribbon (faint body + bright core).
 function drawNeonTrail(ctx, verts, color, now, fadeMs, anim) {
   var n = verts.length; if (n < 2) return;
-  var WIDTH = 10, GLOW = 12;
+  var WIDTH = TP('neon','WIDTH',8), GLOW = TP('neon','GLOW',11);
   var bucketMs = fadeMs / TFX_BUCKETS;
   ctx.save(); ctx.lineCap = "round"; ctx.lineJoin = "round";
   if (tfxGlow()) { ctx.shadowColor = color; ctx.shadowBlur = GLOW; }
@@ -765,7 +802,7 @@ function drawNeonTrail(ctx, verts, color, now, fadeMs, anim) {
 // ripple (Ripples) — sonar rings dropped along the path, expanding + fading.
 function drawRippleTrail(ctx, verts, color, now, fadeMs, anim) {
   var n = verts.length; if (n < 2) return;
-  var SPACING = 9, GLOW = 8;
+  var SPACING = TP('ripple','SPACING',21), GLOW = TP('ripple','GLOW',3);
   ctx.save();
   if (tfxGlow()) { ctx.shadowColor = color; ctx.shadowBlur = GLOW; }
   ctx.strokeStyle = color;
