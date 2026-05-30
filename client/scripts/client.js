@@ -19,6 +19,14 @@ var ratingMapId = null,
 	myMapRating = 0,
 	ratingStarHits = [];
 
+// The room's active playlist id for analytics, so rounds/matches can be segmented
+// by playlist (defaults to the configured default until a lobbyPlaylistChanged
+// arrives). Lets us tell whether wins/plays/skew concentrate in a given playlist.
+function currentPlaylistIdForMetrics() {
+	if (typeof lobbyPlaylist !== "undefined" && lobbyPlaylist) { return lobbyPlaylist; }
+	return (typeof config !== "undefined" && config && config.defaultPlaylist) ? config.defaultPlaylist : "featured";
+}
+
 // Hit-test a pointer (logical coords) against the game-over star widget. On a hit,
 // optimistically fills the stars and emits the vote (server confirms via mapRated).
 // Returns true if the tap was consumed by the widget.
@@ -576,7 +584,8 @@ function registerStateHandlers(server) {
 		trackEvent('round_start', {
 			players: clientList ? Object.keys(clientList).length : 0,
 			bots: countBotsInPlayerList(),
-			map: (currentMap && currentMap.name) || 'unknown'
+			map: (currentMap && currentMap.name) || 'unknown',
+			playlist: currentPlaylistIdForMetrics()
 		});
 	});
 	//Server-driven mood change (near-victory) or next track (previous one ended).
@@ -614,7 +623,8 @@ function registerStateHandlers(server) {
 		mapLeaderboardJustPlayed = null;
 		currentState = config.stateMap.overview;
 		trackEvent('round_complete', {
-			map: (currentMap && currentMap.name) || 'unknown'
+			map: (currentMap && currentMap.name) || 'unknown',
+			playlist: currentPlaylistIdForMetrics()
 		});
 	});
 	// Map leaderboard for the JUST-PLAYED map (rank/time per logged-in racer in
@@ -701,6 +711,7 @@ function registerStateHandlers(server) {
 		trackEvent('match_end', {
 			won: (packet.winner === myID),
 			map: (currentMap && currentMap.name) || 'unknown',
+			playlist: currentPlaylistIdForMetrics(),
 			players: clientList ? Object.keys(clientList).length : 0,
 			bots: countBotsInPlayerList()
 		});

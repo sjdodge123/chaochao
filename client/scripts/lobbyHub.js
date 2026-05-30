@@ -348,7 +348,14 @@ function flushLobbyAIEmit() {
 // so the client already has their ids/names/filters. lobbyPlaylistInfo adds the
 // per-playlist map count computed at boot.
 function playlistDefList() {
-    return (typeof config !== "undefined" && config && Array.isArray(config.playlists)) ? config.playlists : [];
+    var all = (typeof config !== "undefined" && config && Array.isArray(config.playlists)) ? config.playlists : [];
+    // Step only through the VISIBLE playlists (those the server included in the
+    // summary — i.e. that met the minimum map count). Preserve config order; fall
+    // back to the full list if the summary hasn't arrived yet.
+    if (!lobbyPlaylistInfo || !lobbyPlaylistInfo.length) { return all; }
+    var visible = {};
+    lobbyPlaylistInfo.forEach(function (p) { visible[p.id] = true; });
+    return all.filter(function (p) { return visible[p.id]; });
 }
 function defaultPlaylistId() {
     return (typeof config !== "undefined" && config && config.defaultPlaylist) ? config.defaultPlaylist : "featured";
