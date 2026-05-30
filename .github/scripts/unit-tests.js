@@ -376,6 +376,15 @@ group('utils math/hash/color', function () {
         if (r < 3 || r > 5 || !Number.isInteger(r)) { swapInRange = false; break; }
     }
     check(swapInRange, 'getRandomInt(5,3) (swapped) still stays in [3,5]');
+    // a swapped FRACTIONAL range must normalize the RAW bounds before rounding:
+    // getRandomInt(5.8, 3.2) is the reverse of (3.2, 5.8) -> only integers [4,5].
+    // (Rounding before swapping would widen this to [3,6].)
+    let fracSwapInRange = true;
+    for (let i = 0; i < 2000; i++) {
+        const r = utils.getRandomInt(5.8, 3.2);
+        if (r < 4 || r > 5 || !Number.isInteger(r)) { fracSwapInRange = false; break; }
+    }
+    check(fracSwapInRange, 'getRandomInt(5.8,3.2) (swapped fractional) stays in [4,5], not [3,6]');
 
     // getUniqueColor: palette pick when empty; avoids used + dodges look-alikes;
     // falls back to hsl() once the named palette is exhausted.
