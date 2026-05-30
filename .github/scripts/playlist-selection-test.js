@@ -11,6 +11,9 @@
 
 const path = require('path');
 const repoRoot = path.join(__dirname, '..', '..');
+// Require game.js first so the game<->gameBoard circular dependency fully resolves
+// before we destructure GameBoard (otherwise it can be undefined mid-cycle).
+require(path.join(repoRoot, 'server', 'game.js'));
 const { GameBoard } = require(path.join(repoRoot, 'server', 'entities', 'gameBoard.js'));
 const utils = require(path.join(repoRoot, 'server', 'utils.js'));
 const config = require(path.join(repoRoot, 'server', 'config.json'));

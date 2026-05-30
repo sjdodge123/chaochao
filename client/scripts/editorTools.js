@@ -166,10 +166,14 @@ function installMapSearch() {
     }
 }
 
+// Active playlist filter chip (null/"all" = show everything). Combined with the
+// name/author search: a card must match BOTH to show.
+var activePlaylistFilter = null;
+
 function applyMapSearch() {
     var input = document.getElementById("mapSearch");
-    if (input == null) { return; }
-    var q = (input.value || "").trim().toLowerCase();
+    var q = (input != null) ? (input.value || "").trim().toLowerCase() : "";
+    var pl = activePlaylistFilter;
     var tiles = document.querySelectorAll("#loadWindow .map-image");
     for (var i = 0; i < tiles.length; i++) {
         var tile = tiles[i];
@@ -177,6 +181,39 @@ function applyMapSearch() {
             continue; // never hide the New / Continue tile
         }
         var hay = (tile.getAttribute("data-search") || "").toLowerCase();
-        tile.style.display = (q === "" || hay.indexOf(q) !== -1) ? "" : "none";
+        var matchSearch = (q === "" || hay.indexOf(q) !== -1);
+        var pls = (" " + (tile.getAttribute("data-playlists") || "") + " ");
+        var matchPlaylist = (!pl || pl === "all" || pls.indexOf(" " + pl + " ") !== -1);
+        tile.style.display = (matchSearch && matchPlaylist) ? "" : "none";
+    }
+}
+
+// Build the playlist filter chips (called when the editor receives the playlist
+// summary). Chips filter the saved-map grid client-side via data-playlists. Each
+// chip is data-gp-nav so a controller can reach it like the rest of the editor.
+function installPlaylistChips(playlists) {
+    var bar = document.getElementById("mapFilterChips");
+    if (bar == null) { return; }
+    bar.innerHTML = "";
+    var defs = [{ id: "all", name: "All" }].concat(playlists || []);
+    if (activePlaylistFilter == null) { activePlaylistFilter = "all"; }
+    for (var i = 0; i < defs.length; i++) {
+        (function (def) {
+            var chip = document.createElement("button");
+            chip.className = "map-chip" + (def.id === activePlaylistFilter ? " active" : "");
+            chip.setAttribute("data-gp-nav", "");
+            chip.setAttribute("data-pl", def.id);
+            var count = (def.count != null) ? (" (" + def.count + ")") : "";
+            chip.textContent = def.name + count;
+            chip.title = def.desc || def.name;
+            chip.addEventListener("click", function () {
+                activePlaylistFilter = def.id;
+                var all = bar.querySelectorAll(".map-chip");
+                for (var k = 0; k < all.length; k++) { all[k].classList.remove("active"); }
+                chip.classList.add("active");
+                applyMapSearch();
+            }, false);
+            bar.appendChild(chip);
+        })(defs[i]);
     }
 }

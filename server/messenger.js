@@ -8,6 +8,7 @@ c.colorPalette = utils.getColorPalette();
 var compressor = require('./compressor.js');
 var debug = require('./debug.js');
 var mapFormat = require('./mapFormat.js');
+var mapClassifier = require('./mapClassifier.js');
 var mailBoxList = {},
 	identityList = {},
 	roomMailList = {},
@@ -89,7 +90,30 @@ function checkForMail(client) {
 
 	client.on("getMaps", function () {
 		// getMaps is the editor's listing request; hide lobbyOnly maps from it.
+		// Send the classifier meta + playlist summary FIRST so the client has them
+		// when it renders the map cards (socket preserves emit order).
+		client.emit("editorMapMeta", { meta: utils.getEditorMapMeta(), playlists: utils.getPlaylistSummary() });
 		client.emit("maplisting", utils.getEditorMapListings());
+	});
+
+	// Read-only: classify an in-editor map and return its balance so the editor can
+	// show a soft "this looks unbalanced" nudge before submit. Does NOT touch the
+	// submit/PR path; purely informational.
+	client.on("scoreMap", function (package) {
+		try {
+			var map = JSON.parse(package);
+			if (mapFormat.isSitesOnly(map)) { map = mapFormat.reconstruct(map); }
+			var meta = mapClassifier.classify(map, c);
+			client.emit("mapScore", {
+				balanceScore: meta.balanceScore,
+				tier: meta.tier,
+				featuredScore: (c.balance && c.balance.featuredScore) || 90,
+				deductions: meta.deductions,
+				hardFail: meta.hardFail
+			});
+		} catch (e) {
+			client.emit("mapScore", { error: true });
+		}
 	});
 
 	client.on("getRooms", function () {

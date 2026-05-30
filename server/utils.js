@@ -692,6 +692,25 @@ exports.getEditorMapListings = function () {
 // once from the classified pool. Returns [{id, name, desc, count}] in config order.
 // Counts only race maps that actually classified (have meta); lobbyOnly maps are
 // already excluded from `maps` membership via their lack of meta.playlists.
+// Per-map classifier summary for the editor browser, keyed by map id, so the
+// editor can badge each card with its tier/trait/score and filter by playlist.
+// (The raw map JSON the editor fetches has no meta — it's computed at boot.)
+exports.getEditorMapMeta = function () {
+    var out = {};
+    maps.forEach(function (m) {
+        if (m.lobbyOnly || !m.meta || m.id == null) { return; }
+        out[m.id] = {
+            tier: m.meta.tier,
+            dominantTrait: m.meta.dominantTrait,
+            traits: m.meta.traits,
+            length: m.meta.length,
+            balanceScore: m.meta.balanceScore,
+            playlists: m.meta.playlists,
+            parTime: m.meta.parTime
+        };
+    });
+    return out;
+}
 exports.getPlaylistSummary = function () {
     var defs = (c.playlists || []);
     var counts = {};
