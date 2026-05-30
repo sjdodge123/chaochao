@@ -296,6 +296,14 @@ group('utils math/hash/color', function () {
     const nv = utils.normalizedVectorFromAngle(Math.PI / 3);
     approx(Math.sqrt(nv.x * nv.x + nv.y * nv.y), 1, 'normalizedVectorFromAngle is unit length');
 
+    // normalizedVectorFromPoint: unit-length for a real vector, and a SAFE zero
+    // vector (not NaN) for a zero-length input — NaN here would corrupt a tick.
+    const nvp = utils.normalizedVectorFromPoint({ x: 3, y: 4 });
+    approx(Math.sqrt(nvp.x * nvp.x + nvp.y * nvp.y), 1, 'normalizedVectorFromPoint is unit length');
+    const nvZero = utils.normalizedVectorFromPoint({ x: 0, y: 0 });
+    check(nvZero.x === 0 && nvZero.y === 0, 'normalizedVectorFromPoint of zero vector is {0,0}, not NaN');
+    check(!Number.isNaN(nvZero.x) && !Number.isNaN(nvZero.y), 'normalizedVectorFromPoint never emits NaN');
+
     // cyrb53 hash: deterministic, seed-sensitive, and bounded to a safe integer
     eq(utils.generateHash('chao', 0), utils.generateHash('chao', 0), 'hash is deterministic');
     check(utils.generateHash('chao', 0) !== utils.generateHash('chao', 1), 'hash varies with seed');
@@ -313,6 +321,13 @@ group('utils math/hash/color', function () {
         if (r < 3 || r > 5 || !Number.isInteger(r)) { inRange = false; break; }
     }
     check(inRange, 'getRandomInt(3,5) stays in [3,5] over 2000 draws');
+    // a swapped range must be normalized, not produce a value below min
+    let swapInRange = true;
+    for (let i = 0; i < 2000; i++) {
+        const r = utils.getRandomInt(5, 3);
+        if (r < 3 || r > 5 || !Number.isInteger(r)) { swapInRange = false; break; }
+    }
+    check(swapInRange, 'getRandomInt(5,3) (swapped) still stays in [3,5]');
 
     // getUniqueColor: palette pick when empty; avoids used + dodges look-alikes;
     // falls back to hsl() once the named palette is exhausted.
