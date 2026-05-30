@@ -309,6 +309,12 @@ function checkForMail(client) {
 				return;
 			}
 			client.emit("githubSuccess", returnToClient.message);
+			// Credit the mapsSubmitted medal (writes-gated; atomic via addProgression's CAS).
+			if (client.userId) {
+				auth.addProgression(client.userId, { medalDeltas: { mapsSubmitted: 1 } })
+					.then(function (row) { if (row) { sendProgressionToClient(client.id, row); } })
+					.catch(function (e) { console.log('[progression] mapsSubmitted bump failed:', e && e.message); });
+			}
 		})(client.id).catch(function (e) {
 			// Backstop: submitPullRequest resolves with {status,message} on its own
 			// errors, but never let an unexpected throw become an unhandled
@@ -390,6 +396,11 @@ function checkForMail(client) {
 
 		//Spawn a player for the new player
 		room.playerList[client.id] = room.world.createNewPlayer(client.id);
+		// Joined a match already underway? Flag it for the joinInProgress medal (consumed +
+		// cleared at the next gameOver). racing/collapsing == a live match.
+		if (room.game.currentState === c.stateMap.racing || room.game.currentState === c.stateMap.collapsing) {
+			room.playerList[client.id].joinedInProgress = true;
+		}
 		// Stamp the verified Supabase user id so the map-time leaderboard knows
 		// whose finish to record (null for guests). Bots never get a user id —
 		// world.createNewBot sets isAI but leaves verifiedUserId undefined.
@@ -811,6 +822,13 @@ function deliverPendingToasts(client) {
 		deliverToastsTo(client.userId, client.id);
 	}
 }
+// In-flight DB-drain guard, keyed by userId. A joining player and the very next
+// waiting->lobby transition can both call deliverToastsTo for the same user; since the
+// DB drain is a non-atomic read-then-clear, two concurrent drains could read the same
+// queue and emit the rewards twice. The first drain holds the lock; a concurrent second
+// caller skips the DB drain (delivering only its sync in-memory toasts, which are already
+// cleared on first read so they can't duplicate either).
+var toastDrainInFlight = {};
 // Core drain+emit, keyed by (userId, clientId) so it serves both the enterGame path
 // (a re-joining socket) and the same-room lobby-return path (existing sockets that
 // never re-enter). Drains the DB queue (writes-on) + the in-memory queue (dev).
@@ -819,12 +837,22 @@ function deliverToastsTo(userId, clientId) {
 		return;
 	}
 	var memToasts = drainToastsInMemory(userId);
+	if (toastDrainInFlight[userId]) {
+		// A DB drain is already running for this user — don't read the queue again.
+		if (memToasts.length && mailBoxList[clientId]) {
+			mailBoxList[clientId].emit('progressionToasts', { events: memToasts });
+		}
+		return;
+	}
+	toastDrainInFlight[userId] = true;
 	auth.drainPendingToasts(userId).then(function (dbToasts) {
+		delete toastDrainInFlight[userId];
 		var all = (dbToasts || []).concat(memToasts);
 		if (all.length && mailBoxList[clientId]) {
 			mailBoxList[clientId].emit('progressionToasts', { events: all });
 		}
 	}).catch(function (e) {
+		delete toastDrainInFlight[userId];
 		// DB drain failed — still deliver any in-memory ones so dev isn't blocked.
 		if (memToasts.length && mailBoxList[clientId]) {
 			mailBoxList[clientId].emit('progressionToasts', { events: memToasts });

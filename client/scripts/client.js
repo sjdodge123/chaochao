@@ -361,6 +361,14 @@ function registerConnectionHandlers(server) {
 		if (localPlayers[primarySlot]) {
 			localPlayers[primarySlot].myID = myID;
 			localPlayers[primarySlot].joined = true;
+			// Re-equip saved cosmetics NOW that we're actually in the room. The `welcome`
+			// re-equip fires before enterGame (roomMailList unset server-side), so those
+			// setCosmetic emits are dropped; this is the effective restore, esp. for guests
+			// and the writes-off path (no server-side restorePersistedCosmetics). setCosmetic
+			// is lobby-only, so guard on the lobby state.
+			if (currentState === config.stateMap.lobby && typeof reEquipSavedCosmetics === "function") {
+				reEquipSavedCosmetics(localPlayers[primarySlot]);
+			}
 		}
 		if (playerList[myID] != null) {
 			myPlayer = playerList[myID];
@@ -1419,6 +1427,12 @@ function registerSecondaryHandlers(sock, slot) {
 			}
 			lp.lateJoinSpectating = config != null && gsRoomState != null &&
 				(gsRoomState == config.stateMap.racing || gsRoomState == config.stateMap.collapsing);
+			// Re-equip this pad seat's saved cosmetics now it's actually in the room (the
+			// `welcome` re-equip fired pre-enterGame and was dropped). setCosmetic is
+			// lobby-only, so guard on this snapshot's room state.
+			if (config != null && gsRoomState === config.stateMap.lobby && typeof reEquipSavedCosmetics === "function") {
+				reEquipSavedCosmetics(lp);
+			}
 			if (lp.reconnectTimer) {
 				clearTimeout(lp.reconnectTimer);
 				lp.reconnectTimer = null;

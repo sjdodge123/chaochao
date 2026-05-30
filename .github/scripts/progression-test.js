@@ -59,6 +59,17 @@ function testPureHelpers() {
     check(progression.achievementsUnlocked({ mostKills: 30 }, 0).indexOf('executioner') !== -1, 'mostKills>=30 unlocks executioner');
     check(progression.achievementsUnlocked({ mostKills: 29 }, 0).indexOf('executioner') === -1, 'mostKills<30 does NOT unlock executioner');
     check(progression.achievementsUnlocked({}, 100).indexOf('golden_champion') !== -1, 'wins>=100 unlocks golden_champion');
+    // New self-counter medals are now PRODUCED in gameplay (Codex P2: previously unlockable
+    // by no path). Spot-check a few + the winStreak max-logic helper.
+    check(progression.achievementsUnlocked({ gamesPlayed: 10 }, 0).indexOf('turtle') !== -1, 'gamesPlayed>=10 unlocks turtle');
+    check(progression.achievementsUnlocked({ iceDistance: 2000 }, 0).indexOf('ripple') !== -1, 'iceDistance>=2000 unlocks ripple');
+    check(progression.achievementsUnlocked({ mapsSubmitted: 1 }, 0).indexOf('carbon') !== -1, 'mapsSubmitted>=1 unlocks carbon');
+    var streakMc = {};
+    progression.applyWinStreak(streakMc, true); progression.applyWinStreak(streakMc, true); progression.applyWinStreak(streakMc, true);
+    check(streakMc.winStreak === 3, 'applyWinStreak: 3 wins -> winStreak 3');
+    progression.applyWinStreak(streakMc, false);
+    check(streakMc._streak === 0 && streakMc.winStreak === 3, 'applyWinStreak: loss resets current, keeps best');
+    check(progression.achievementsUnlocked({ winStreak: 3 }, 0).indexOf('comet') !== -1, 'winStreak>=3 unlocks comet');
     const merged = progression.mergeMedalCounts({ savior: 2 }, { savior: 1, mostKills: 3 });
     check(merged.savior === 3 && merged.mostKills === 3, 'mergeMedalCounts adds deltas');
 }

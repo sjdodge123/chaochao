@@ -1198,6 +1198,18 @@ class Game {
 			xpEarned[id] = breakdown;
 
 			var deltas = medalDeltas[id] || {};
+			// Self-counter medals (not best-in-match): fold this player's own per-match tallies
+			// into their lifetime medal_counts so the new achievement cosmetics are earnable.
+			deltas.gamesPlayed = (deltas.gamesPlayed || 0) + 1;
+			deltas.recapAppearances = (deltas.recapAppearances || 0) + 1;
+			if (p.reachedGoal) { deltas.goalsReached = (deltas.goalsReached || 0) + 1; }
+			if (p.cart || p.pattern || p.trailFx || p.border) { deltas.cosmeticGames = (deltas.cosmeticGames || 0) + 1; }
+			if (p.joinedInProgress) { deltas.joinInProgress = (deltas.joinInProgress || 0) + 1; p.joinedInProgress = false; }
+			if (p.abilitiesUsedMatch) { deltas.abilitiesUsed = (deltas.abilitiesUsed || 0) + p.abilitiesUsedMatch; }
+			if (p.windupPunchHitsMatch) { deltas.windupPunchHits = (deltas.windupPunchHits || 0) + p.windupPunchHitsMatch; }
+			if (p.zombieKillsMatch) { deltas.zombieKills = (deltas.zombieKills || 0) + p.zombieKillsMatch; }
+			if (p.bumpersHitMatch) { deltas.bumpersHit = (deltas.bumpersHit || 0) + p.bumpersHitMatch; }
+			if (p.iceDistanceMatch) { deltas.iceDistance = (deltas.iceDistance || 0) + Math.round(p.iceDistanceMatch); }
 
 			// Update the in-memory cache (so a same-lobby re-equip is gated on the
 			// freshly-earned level/unlocks) and build this match's celebration toasts.
@@ -1213,6 +1225,7 @@ class Game {
 				var newLevel = progression.levelForXp(newXp);
 				var newWins = (prog.wins || 0) + (isWinner ? 1 : 0);
 				var newMedalCounts = progression.mergeMedalCounts(prog.medal_counts, deltas);
+				progression.applyWinStreak(newMedalCounts, isWinner);
 				var earned = progression.achievementsUnlocked(newMedalCounts, newWins);
 				var had = prog.unlocked_skins || [];
 				var fresh = [];
