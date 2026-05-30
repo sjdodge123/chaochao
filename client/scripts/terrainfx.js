@@ -91,26 +91,41 @@ function tfxBBox(verts) {
     }
     return { minX: minX, minY: minY, maxX: maxX, maxY: maxY };
 }
+// World-space rect currently visible on screen, or null if it can't be computed
+// (cull disabled). The active transform is applyWorldTransform (draw.js): a world
+// point wx maps to logical `scale*(wx - worldView.cx) + LOGICAL_WIDTH/2`, so the
+// visible half-extent is LOGICAL_W/H / (2*scale) centred on worldView.cx/cy. With
+// no zoom (worldView null) world maps ~1:1 into the logical viewport, so the
+// visible world rect is just [-cam, -cam + LOGICAL] (cam offset is 0 in practice,
+// but kept for correctness). A margin keeps partial-edge cells from popping.
+function tfxVisibleWorldRect(camX, camY) {
+    var W = (typeof LOGICAL_WIDTH === "number") ? LOGICAL_WIDTH : 0;
+    var H = (typeof LOGICAL_HEIGHT === "number") ? LOGICAL_HEIGHT : 0;
+    if (!(W > 0 && H > 0)) { return null; }
+    var M = 96;
+    if (typeof worldView !== "undefined" && worldView != null && worldView.cx != null) {
+        var s = worldView.scale || 1;
+        var hw = W / (2 * s) + M, hh = H / (2 * s) + M;
+        return { loX: worldView.cx - hw, hiX: worldView.cx + hw,
+                 loY: worldView.cy - hh, hiY: worldView.cy + hh };
+    }
+    return { loX: -camX - M, hiX: -camX + W + M, loY: -camY - M, hiY: -camY + H + M };
+}
 // Path a list of cells' polygons into the current ctx path (world coords + cam),
 // ready for clip() or fill(). Each cell is a verts array (or a record with a
 // `.verts` field plus a precomputed bbox). On a big/collapsing map the lava/ice
-// lists can be most of the board; the camera is pure translation (scale === 1,
-// visible world span === LOGICAL_WIDTH/HEIGHT), so cells whose bbox is fully off
-// the screen contribute nothing to a clip/fill and are skipped. Records without a
-// bbox (e.g. goal clusters, a handful) are always included.
+// lists can be most of the board, so cells whose bbox is fully outside the visible
+// world rect contribute nothing to a clip/fill and are skipped — the win shows up
+// when zoomed in (scale > 1 shrinks the rect). Records without a bbox (e.g. goal
+// clusters, a handful) are always included.
 function tfxPathCells(ctx, cells, camX, camY) {
-    var W = (typeof LOGICAL_WIDTH === "number") ? LOGICAL_WIDTH : 0;
-    var H = (typeof LOGICAL_HEIGHT === "number") ? LOGICAL_HEIGHT : 0;
-    var cull = (W > 0 && H > 0);
-    var M = 96; // margin so partial-edge cells never pop
-    var loX = -camX - M, hiX = -camX + W + M;
-    var loY = -camY - M, hiY = -camY + H + M;
+    var vr = tfxVisibleWorldRect(camX, camY);
     ctx.beginPath();
     for (var i = 0; i < cells.length; i++) {
         var cell = cells[i];
         var verts = cell.verts || cell;
-        if (cull && cell.maxX !== undefined &&
-            (cell.maxX < loX || cell.minX > hiX || cell.maxY < loY || cell.minY > hiY)) {
+        if (vr != null && cell.maxX !== undefined &&
+            (cell.maxX < vr.loX || cell.minX > vr.hiX || cell.maxY < vr.loY || cell.minY > vr.hiY)) {
             continue;
         }
         ctx.moveTo(verts[0].x + camX, verts[0].y + camY);
