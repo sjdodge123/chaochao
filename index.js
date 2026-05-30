@@ -246,6 +246,21 @@ server.listen(c.port, () => {
   messenger.build(io);
 });
 
+// Refresh per-map rating aggregates from Supabase into each map's classifier meta
+// (drives the Crowd Favorites playlist + editor scores). No-op when auth is off, so
+// local dev just shows no ratings. Once at boot, then on a slow interval — ratings
+// change far slower than a tick, and the read is one small aggregate query.
+var ratings = require('./server/ratings.js');
+function refreshMapRatings() {
+    ratings.loadSummaries(c).then(function (summaries) {
+        utils.applyRatingSummaries(summaries);
+    }).catch(function (e) {
+        console.log('[ratings] refresh error:', e.message);
+    });
+}
+refreshMapRatings();
+setInterval(refreshMapRatings, 5 * 60 * 1000);
+
 // Accept only a sane deviceId from the handshake (an opaque client UUID): a
 // string of bounded length. Rejects junk/oversized values that would otherwise
 // be persisted into the progression row's device_ids array.

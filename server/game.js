@@ -1120,7 +1120,16 @@ class Game {
 	gameOver(player) {
 		console.log("Game Over");
 		this.currentState = this.stateMap.gameOver;
-		messenger.messageRoomBySig(this.roomSig, 'startGameover', { winner: player, achievements: this.gatherAchievements() });
+		// Carry the just-played map's id/name so the game-over screen can offer a
+		// star rating for it (the rating itself is server-authoritative — rateMap
+		// uses the room's current map, not this id).
+		var ratedMap = (this.gameBoard && this.gameBoard.currentMap) ? this.gameBoard.currentMap : null;
+		messenger.messageRoomBySig(this.roomSig, 'startGameover', {
+			winner: player,
+			achievements: this.gatherAchievements(),
+			mapId: ratedMap ? ratedMap.id : null,
+			mapName: ratedMap ? ratedMap.name : null
+		});
 		// The match-ending finish skips startOverview, but the player still
 		// crossed a goal — record their PB so a record-setting run on the final
 		// round isn't lost. The emitted mapLeaderboard message arrives during

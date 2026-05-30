@@ -688,6 +688,19 @@ exports.getMapListings = function () {
 exports.getEditorMapListings = function () {
     return editorMapListing;
 }
+// Attach a freshly-loaded rating summary ({mapId: {count,avg,bayesian}}) onto each
+// race map's meta and re-resolve playlist membership so a map crossing the Crowd
+// Favorites threshold joins (or leaves) that playlist live. Safe to call repeatedly
+// on an interval. Loads the maps first if they haven't been yet.
+exports.applyRatingSummaries = function (summaries) {
+    if (maps.length === 0) { exports.loadMaps(); }
+    summaries = summaries || {};
+    maps.forEach(function (m) {
+        if (m.lobbyOnly || !m.meta) { return; }
+        m.meta.rating = summaries[m.id] || null;
+        m.meta.playlists = mapClassifier.resolvePlaylists(m.meta, c.playlists);
+    });
+}
 // Per-playlist map counts for the lobby hub board + editor filter chips, computed
 // once from the classified pool. Returns [{id, name, desc, count}] in config order.
 // Counts only race maps that actually classified (have meta); lobbyOnly maps are
