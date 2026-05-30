@@ -119,6 +119,13 @@ function registerLobbyHubHandlers(server) {
 		// player's change is never dropped. { auto:true } => Auto (null).
 		lobbyAISetting = (payload != null && payload.auto) ? null : payload;
 	});
+	server.on("playlistInfo", function (payload) {
+		// Server pushed a refreshed playlist summary (counts / newly-visible
+		// playlists after a ratings refresh) — update the lobby board's source list.
+		if (typeof lobbyPlaylistInfo !== "undefined" && Array.isArray(payload)) {
+			lobbyPlaylistInfo = payload;
+		}
+	});
 	server.on("lobbyPlaylistChanged", function (payload) {
 		// Room-wide playlist selection. Always apply so every client (and our own
 		// slots) stay in sync; the EMIT is debounced (lobbyHub.adjustPlaylist), not
@@ -272,6 +279,11 @@ function registerConnectionHandlers(server) {
 			applyLobbyStations(gameState.lobbyStations);
 		}
 		lobbyAISetting = (gameState.lobbyAI != null) ? gameState.lobbyAI : null;
+		// Sync the room-wide playlist on mid-join so a late joiner shows the real
+		// selection (not the default) and doesn't clobber it when stepping the board.
+		if (gameState.lobbyPlaylist != null) {
+			lobbyPlaylist = gameState.lobbyPlaylist;
+		}
 		// Refresh the hint UI now the primary has joined (solo bottom bar by
 		// default; switches to per-player blocks once a 2nd local player joins).
 		if (typeof onLocalPlayersChanged === "function") {

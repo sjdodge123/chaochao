@@ -253,7 +253,14 @@ server.listen(c.port, () => {
 var ratings = require('./server/ratings.js');
 function refreshMapRatings() {
     ratings.loadSummaries(c).then(function (summaries) {
+        // null = transient read error: keep the last good summaries (don't wipe
+        // every aggregate + Favorites membership over a blip). {} = genuinely empty.
+        if (summaries == null) { return; }
         utils.applyRatingSummaries(summaries);
+        // Push the refreshed playlist summary to every connected client so active
+        // lobbies pick up new counts / a Favorites playlist that crossed the
+        // visibility threshold without needing to reconnect.
+        messenger.broadcastAll("playlistInfo", utils.getPlaylistSummary());
     }).catch(function (e) {
         console.log('[ratings] refresh error:', e.message);
     });

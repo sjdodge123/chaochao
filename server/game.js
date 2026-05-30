@@ -736,6 +736,10 @@ class Game {
 		for (var rid in this.playerList) {
 			if (this.playerList[rid] != null) {
 				this.playerList[rid].raceStartedAt = this.raceStartedAt;
+				// Mark everyone in the gate as a racer of this round's map. Late-join
+				// spectators join AFTER this loop, so they never get the flag — the
+				// rateMap handler uses it to reject ratings from non-participants.
+				this.playerList[rid].racedCurrentMap = true;
 			}
 		}
 
