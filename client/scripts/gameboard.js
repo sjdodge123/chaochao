@@ -925,7 +925,7 @@ function changeTilesBulk(tileChanges) {
 			delete pendingSwapCells.set[prop];
 		}
 	}
-	if (pendingSwapCells != null && Object.keys(pendingSwapCells.set).length === 0) {
+	if (pendingSwapCells != null && !hasAnyKey(pendingSwapCells.set)) {
 		pendingSwapCells = null;
 	}
 	invalidateMapCache();
@@ -968,7 +968,7 @@ function tileSwapLanded(ids) {
 			delete pendingSwapCells.set[ids[i]];
 		}
 	}
-	if (Object.keys(pendingSwapCells.set).length === 0) {
+	if (!hasAnyKey(pendingSwapCells.set)) {
 		pendingSwapCells = null;
 	}
 }
