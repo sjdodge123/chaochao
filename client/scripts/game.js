@@ -258,7 +258,7 @@ function setupPage() {
 
     window.addEventListener('blur', cancelAllLocalMovement);
     window.addEventListener('focus', onTabRefocus);
-    window.addEventListener('resize', resize, false);
+    window.addEventListener('resize', onResizeEvent, false);
     window.requestAnimFrame = (function () {
         return window.requestAnimationFrame ||
             window.webkitRequestAnimationFrame ||

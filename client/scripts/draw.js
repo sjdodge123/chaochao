@@ -244,6 +244,13 @@ var mapCacheRev = 0;
 // + island depth + terrain) baked into one canvas and blitted in a single pass
 // per frame — see ensureArenaCache.
 var arenaCanvas = null;
+// Throttle full map-cache re-bakes (see drawMap). A collapse streams tile changes
+// roughly every server tick; without this the whole world-sized cache re-bakes +
+// re-uploads up to 60×/s. Coalesce to ~25×/s — terrain lags a change by at most
+// this interval (imperceptible; karts/effects still render every frame). A
+// discarded cache (mapCanvas == null, e.g. perf-tier change) re-bakes immediately.
+var MAP_BAKE_MIN_MS = 40;
+var lastMapBakeAt = 0;
 function invalidateMapCache() {
     mapDirty = true;
 }
