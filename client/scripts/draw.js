@@ -3282,6 +3282,9 @@ function drawArmedRing(x, y, color, radius) {
 // (matters for the near-victory dashed style; the codex review caught that the
 // per-segment subpaths were killing the dash cue at our 30Hz sample cadence).
 var TRAIL_DRAW_BUCKETS = 6;
+// Reused scratch for drawTrail's per-segment bucket indices (see usage below) so
+// the trail draw doesn't allocate a fresh array per kart per frame.
+var _trailSegBucketScratch = [];
 function drawTrail(player) {
     var trail = player.trail;
     if (trail == null || trail.vertices == null || trail.vertices.length < 2) {
@@ -3331,8 +3334,10 @@ function drawTrail(player) {
     }
     var bucketMs = fadeMs / TRAIL_DRAW_BUCKETS;
     // Bucket-index for the segment ENDING at vertex i (the segment verts[i-1] →
-    // verts[i] is in this bucket). >= TRAIL_DRAW_BUCKETS marks "expired".
-    var segBucket = new Array(verts.length);
+    // verts[i] is in this bucket). >= TRAIL_DRAW_BUCKETS marks "expired". Reuse a
+    // module-scope scratch array so this isn't a per-kart per-frame allocation;
+    // only indices [0, verts.length) are written and read each call.
+    var segBucket = _trailSegBucketScratch;
     segBucket[0] = -1;
     for (var ii = 1; ii < verts.length; ii++) {
         var age = now - verts[ii].t;
@@ -3520,7 +3525,7 @@ function drawWorld() {
         if (themed) {
             gameContext.strokeStyle = 'rgba(235,250,255,0.7)';
             gameContext.shadowColor = 'rgba(180,230,255,0.7)';
-            gameContext.shadowBlur = 8;
+            gameContext.shadowBlur = (typeof perfGlow !== "function" || perfGlow()) ? 8 : 0;
         } else {
             gameContext.strokeStyle = themeColor('ink', 'black');
         }
@@ -3971,7 +3976,7 @@ function drawIslandWater(dx, dy, dw, dh) {
     gameContext.save();
     gameContext.globalAlpha = 0.55;
     gameContext.shadowColor = isDarkTheme() ? 'rgba(140,215,255,0.9)' : 'rgba(205,245,255,0.95)';
-    gameContext.shadowBlur = 13;
+    gameContext.shadowBlur = (typeof perfGlow !== "function" || perfGlow()) ? 13 : 0;
     gameContext.drawImage(mapCanvas, dx, dy, dw, dh);
     gameContext.restore();
 }
