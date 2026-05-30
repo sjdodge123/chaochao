@@ -78,12 +78,41 @@ function tfxMaxRadius(verts, cx, cy) {
     }
     return r;
 }
+// Axis-aligned bounds of a verts polygon (world coords). Precomputed per cell at
+// build time so tfxPathCells can frustum-cull without re-scanning verts.
+function tfxBBox(verts) {
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (var i = 0; i < verts.length; i++) {
+        var p = verts[i];
+        if (p.x < minX) { minX = p.x; }
+        if (p.x > maxX) { maxX = p.x; }
+        if (p.y < minY) { minY = p.y; }
+        if (p.y > maxY) { maxY = p.y; }
+    }
+    return { minX: minX, minY: minY, maxX: maxX, maxY: maxY };
+}
 // Path a list of cells' polygons into the current ctx path (world coords + cam),
-// ready for clip() or fill(). Each cell is a verts array.
+// ready for clip() or fill(). Each cell is a verts array (or a record with a
+// `.verts` field plus a precomputed bbox). On a big/collapsing map the lava/ice
+// lists can be most of the board; the camera is pure translation (scale === 1,
+// visible world span === LOGICAL_WIDTH/HEIGHT), so cells whose bbox is fully off
+// the screen contribute nothing to a clip/fill and are skipped. Records without a
+// bbox (e.g. goal clusters, a handful) are always included.
 function tfxPathCells(ctx, cells, camX, camY) {
+    var W = (typeof LOGICAL_WIDTH === "number") ? LOGICAL_WIDTH : 0;
+    var H = (typeof LOGICAL_HEIGHT === "number") ? LOGICAL_HEIGHT : 0;
+    var cull = (W > 0 && H > 0);
+    var M = 96; // margin so partial-edge cells never pop
+    var loX = -camX - M, hiX = -camX + W + M;
+    var loY = -camY - M, hiY = -camY + H + M;
     ctx.beginPath();
     for (var i = 0; i < cells.length; i++) {
-        var verts = cells[i].verts || cells[i];
+        var cell = cells[i];
+        var verts = cell.verts || cell;
+        if (cull && cell.maxX !== undefined &&
+            (cell.maxX < loX || cell.minX > hiX || cell.maxY < loY || cell.minY > hiY)) {
+            continue;
+        }
         ctx.moveTo(verts[0].x + camX, verts[0].y + camY);
         for (var v = 1; v < verts.length; v++) {
             ctx.lineTo(verts[v].x + camX, verts[v].y + camY);
@@ -103,7 +132,9 @@ function tfxBuildCells() {
         var verts = tfxCellVerts(cell);
         if (!verts) { continue; }
         var c = tfxCentroid(verts);
-        var rec = { verts: verts, cx: c.x, cy: c.y, vid: (cell.site ? cell.site.voronoiId : i) };
+        var bb = tfxBBox(verts);
+        var rec = { verts: verts, cx: c.x, cy: c.y, vid: (cell.site ? cell.site.voronoiId : i),
+            minX: bb.minX, minY: bb.minY, maxX: bb.maxX, maxY: bb.maxY };
         if (cell.id === tm.ice.id) { terrainFX.ice.push(rec); }
         else if (cell.id === tm.lava.id) { terrainFX.lava.push(rec); }
         else if (cell.id === tm.goal.id) { terrainFX.goal.push(rec); }
