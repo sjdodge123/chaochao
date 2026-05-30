@@ -1742,7 +1742,11 @@ var MEDAL_DESC = {
     bully: "Threw the most punches",
     doubleKill: "Two kills in a flash",
     tripleKill: "Three kills in a flash",
-    megaKill: "A relentless killing spree"
+    megaKill: "A relentless killing spree",
+    zombieSlayer: "Most kills as a zombie",
+    heavyHitter: "Most charged-up punches",
+    pinball: "Bounced off the most bumpers",
+    iceSkater: "Slid the furthest on ice"
 };
 // Per-medal glyph stamped into the gold disc, so each award reads at a glance.
 // Mirrors the icons on the Learn/Codex medals page (client/scripts/learn.js).
@@ -1756,7 +1760,11 @@ var MEDAL_ICON = {
     bully: "👊",
     doubleKill: "💥",
     tripleKill: "💥",
-    megaKill: "💥"
+    megaKill: "💥",
+    zombieSlayer: "🧟",
+    heavyHitter: "🥊",
+    pinball: "🔵",
+    iceSkater: "⛸️"
 };
 
 // Rounded-rect path builder (caller fills/strokes it).
