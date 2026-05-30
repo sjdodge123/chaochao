@@ -1188,7 +1188,7 @@ function spawnSinkingCorpse(player) {
 			var t = age / maxAge;
 			// Embers ride on the same per-tier embers knob that the running flame uses,
 			// so a Balanced profile that already dims live-fire embers also dims these.
-			if (t < 0.9 && age - lastEmberAt >= 110) {
+			if (t < 0.9 && age - lastEmberAt >= ((typeof perfCooldown === "function") ? perfCooldown(110) : 110)) {
 				lastEmberAt = age;
 				if (typeof perfEmbers !== "function" || perfEmbers()) {
 					spawnEmber(cx + (Math.random() * 2 - 1) * radius0 * 0.6,
@@ -1197,7 +1197,7 @@ function spawnSinkingCorpse(player) {
 			}
 			// Lava bubble pops: orange droplets that rise + fade. perfCount thins them
 			// on Balanced (0.6) and would on Low too — but Low never reaches this code.
-			if (t < 0.95 && age - lastBubbleAt >= 220) {
+			if (t < 0.95 && age - lastBubbleAt >= ((typeof perfCooldown === "function") ? perfCooldown(220) : 220)) {
 				lastBubbleAt = age;
 				var n = (typeof perfCount === "function") ? perfCount(2) : 2;
 				for (var i = 0; i < n; i++) {
