@@ -1207,7 +1207,7 @@ function drawOffscreenGoalIndicator() {
     gameContext.shadowColor = goalColor;
     // Skip the per-frame glow on profiles that disable it (the arrow still reads
     // via its bright fill + dark outline).
-    gameContext.shadowBlur = (typeof perfGlow !== "function" || perfGlow()) ? (12 + 12 * pulse) : 0;
+    gameContext.shadowBlur = glowBlur(12 + 12 * pulse);
     // Same chunky block arrow as the lobby arrows, tip at origin pointing +x.
     gameContext.beginPath();
     gameContext.moveTo(0, 0);
@@ -2054,7 +2054,7 @@ function spawnSlashEffect(x, y, angleDeg, color) {
             ctx.strokeStyle = color || "white";
             ctx.lineWidth = (10 * (1 - t)) + 2;
             ctx.shadowColor = color || "white";
-            ctx.shadowBlur = (typeof perfGlow !== "function" || perfGlow()) ? (12 * (1 - t)) : 0;
+            ctx.shadowBlur = glowBlur(12 * (1 - t));
             ctx.beginPath();
             ctx.moveTo(x - dx, y - dy);
             ctx.lineTo(x + dx, y + dy);
@@ -2384,6 +2384,12 @@ function hasAnyKey(o) {
     for (var k in o) { if (Object.prototype.hasOwnProperty.call(o, k)) { return true; } }
     return false;
 }
+// perfGlow-gated shadowBlur amount: n when glow is on (or perf.js is absent, which
+// means run at full detail), 0 when the low tier sheds glow. Single-sources the
+// gate that was otherwise copy-pasted at every per-frame shadowBlur site.
+function glowBlur(n) {
+    return (typeof perfGlow !== "function" || perfGlow()) ? n : 0;
+}
 // Nearest-cell id for a player, cached on the player. The map is a Voronoi
 // diagram so the cell a point sits in is the one whose site is nearest — an
 // O(cells) scan. The on-fire-on-lava flash needs it every frame for every
@@ -2399,28 +2405,29 @@ function nearestCellIdCached(player) {
     if (hasCache && dx * dx + dy * dy <= 64 && now - player._nearCellAt < 150) {
         return player._nearCellId;
     }
-    var cells = currentMap.cells, nearestId = -1, nd = Infinity;
-    for (var ci = 0; ci < cells.length; ci++) {
-        var cdx = player.x - cells[ci].site.x;
-        var cdy = player.y - cells[ci].site.y;
-        var cd = cdx * cdx + cdy * cdy;
-        if (cd < nd) { nd = cd; nearestId = cells[ci].id; }
-    }
+    // Reuse gameboard's single Voronoi nearest-site scan rather than a second copy.
+    var cell = (typeof nearestCell === "function") ? nearestCell(player.x, player.y) : null;
+    var nearestId = (cell != null) ? cell.id : -1;
     player._nearCellId = nearestId;
     player._nearCellX = player.x;
     player._nearCellY = player.y;
     player._nearCellAt = now;
     return nearestId;
 }
+// Map of player id -> the frame generation in which it was last seen targeted.
+// A player is "targeted this frame" iff its stamp === the current generation, so
+// the set is reused across frames (a bumped counter invalidates last frame's
+// entries) instead of allocating a fresh object every frame.
 var targetedPlayerIds = {};
+var _targetGen = 0;
 function rebuildTargetedPlayerIds() {
-    targetedPlayerIds = {};
+    _targetGen++;
     for (var aid in aimerList) {
         var a = aimerList[aid];
         var tl = a != null ? a.targetList : null;
         if (tl == null) { continue; }
         for (var ti = 0; ti < tl.length; ti++) {
-            targetedPlayerIds[tl[ti]] = true;
+            targetedPlayerIds[tl[ti]] = _targetGen;
         }
     }
 }
@@ -2502,7 +2509,7 @@ function drawPlayer(player, dt) {
     // coming), plus a momentum self-preview on your own idle kart.
     drawPunchCharge(player);
 
-    var playerStrokeColor = targetedPlayerIds[player.id] ? "red" : "black";
+    var playerStrokeColor = (targetedPlayerIds[player.id] === _targetGen) ? "red" : "black";
     var sprite = getPlayerSprite(player.color, player.radius, playerStrokeColor);
     // Lobby respawn invulnerability: pulse the sprite's alpha so the grace window is
     // legible. The sprite is a cached image with no alpha, so wrap the blit.
@@ -3224,7 +3231,7 @@ function drawCutAimer(x, y, angle, color) {
         gameContext.strokeStyle = color;
     }
     gameContext.shadowColor = color;
-    gameContext.shadowBlur = (typeof perfGlow !== "function" || perfGlow()) ? 12 : 0;
+    gameContext.shadowBlur = glowBlur(12);
     gameContext.lineWidth = 4;
     gameContext.beginPath();
     gameContext.moveTo(bwd.x, bwd.y);
@@ -3318,8 +3325,9 @@ function drawTrail(player) {
     // Trail always uses the player's own colour, even with a cart skin equipped — the
     // colour is the player's identity, so a blue dino trails blue (not skin-themed).
     gameContext.strokeStyle = player.color;
-    if (typeof perfGlow === "function" && perfGlow()) {
-        gameContext.shadowBlur = 3;
+    var trailBlur = glowBlur(3);
+    if (trailBlur) {
+        gameContext.shadowBlur = trailBlur;
         gameContext.shadowColor = "black";
     }
     if (dashed) {
@@ -3532,7 +3540,7 @@ function drawWorld() {
         if (themed) {
             gameContext.strokeStyle = 'rgba(235,250,255,0.7)';
             gameContext.shadowColor = 'rgba(180,230,255,0.7)';
-            gameContext.shadowBlur = (typeof perfGlow !== "function" || perfGlow()) ? 8 : 0;
+            gameContext.shadowBlur = glowBlur(8);
         } else {
             gameContext.strokeStyle = themeColor('ink', 'black');
         }
@@ -3983,7 +3991,7 @@ function drawIslandWater(dx, dy, dw, dh) {
     gameContext.save();
     gameContext.globalAlpha = 0.55;
     gameContext.shadowColor = isDarkTheme() ? 'rgba(140,215,255,0.9)' : 'rgba(205,245,255,0.95)';
-    gameContext.shadowBlur = (typeof perfGlow !== "function" || perfGlow()) ? 13 : 0;
+    gameContext.shadowBlur = glowBlur(13);
     gameContext.drawImage(mapCanvas, dx, dy, dw, dh);
     gameContext.restore();
 }
@@ -4263,13 +4271,13 @@ function renderMapToCache() {
 // The vignette gradient depends only on the world rect, so build it once and
 // reuse it every frame (createRadialGradient + addColorStop per frame is pure
 // waste when the world hasn't changed).
-var _vignetteGrad = null, _vignetteKey = "";
+var _vignetteGrad = null, _vgX = NaN, _vgY = NaN, _vgW = NaN, _vgH = NaN;
 function drawArenaVignette() {
     if (world == null) {
         return;
     }
-    var key = world.x + "," + world.y + "," + world.width + "," + world.height;
-    if (_vignetteGrad == null || key !== _vignetteKey) {
+    if (_vignetteGrad == null || world.x !== _vgX || world.y !== _vgY ||
+        world.width !== _vgW || world.height !== _vgH) {
         var cx = world.x + world.width / 2;
         var cy = world.y + world.height / 2;
         var inner = Math.min(world.width, world.height) * 0.45;
@@ -4277,7 +4285,7 @@ function drawArenaVignette() {
         _vignetteGrad = gameContext.createRadialGradient(cx, cy, inner, cx, cy, outer);
         _vignetteGrad.addColorStop(0, "rgba(0, 0, 0, 0)");
         _vignetteGrad.addColorStop(1, "rgba(8, 6, 14, 0.26)");
-        _vignetteKey = key;
+        _vgX = world.x; _vgY = world.y; _vgW = world.width; _vgH = world.height;
     }
     gameContext.save();
     gameContext.fillStyle = _vignetteGrad;
