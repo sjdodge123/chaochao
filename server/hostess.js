@@ -2,6 +2,7 @@ var utils = require('./utils.js');
 var c = utils.loadConfig();
 var messenger = require('./messenger.js');
 var game = require('./game.js');
+var botGuard = require('./botGuard.js');
 
 var roomList = {},
 	maxPlayersInRoom = c.maxPlayersInRoom;
@@ -94,6 +95,12 @@ exports.kickFromRoom = function (clientID) {
 exports.joinARoom = function (sig, clientID) {
 	var room = roomList[sig];
 	if (room == null) {
+		return false;
+	}
+	// Only a botGuard-flagged client may enter the tarpit. A normal player following a
+	// shared/guessed ?gameid= link that happens to hit the tarpit's ordinary room id is
+	// rejected here (-> roomNotFound) rather than being stranded in a room that never ticks.
+	if (room.isTarpit && !botGuard.shouldTarpit(clientID)) {
 		return false;
 	}
 	// A preview room is a private local-co-op play-test (capacity PREVIEW_COOP_CAP):

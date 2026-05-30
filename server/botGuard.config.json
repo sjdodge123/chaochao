@@ -2,10 +2,11 @@
   "_comment": "SERVER-ONLY anti-bot tuning. UNLIKE server/config.json this file is NEVER delivered to the client, so a bot can't read the verification distance or the datacenter policy and tune around it. Edit + restart to apply. See server/botGuard.js. ROLLOUT: started 2026-05-30 in OBSERVATION mode (datacenter+honeypot = 'measure') — tags + logs + fires GA but traps nobody, so real players are never affected. After validating hit-rate (~3 weeks, mid-June 2026) flip datacenter.action -> 'tarpit' (or 'block') and honeypot.action -> 'tarpit' to enforce.",
   "enabled": true,
   "datacenter": {
-    "_comment": "Policy for connections whose IP falls inside server/data/datacenter-cidrs.json. action: 'tarpit' = shadow-segment into the dead room; 'block' = hard-reject the socket handshake; 'measure' = tag + server-log only, let them play (OBSERVATION rollout — current). bypassForAuthed: a signed-in Supabase user is almost certainly human, so skip the datacenter check for them.",
+    "_comment": "Policy for connections whose IP falls inside server/data/datacenter-cidrs.json. action: 'tarpit' = shadow-segment into the dead room; 'block' = hard-reject the socket handshake; 'measure' = tag + server-log only, let them play (OBSERVATION rollout — current). bypassForAuthed: a signed-in Supabase user is almost certainly human, so skip the datacenter check for them. trustedProxyDepth: how many trusted proxies sit in front of the app (Heroku's router = 1); the real client IP is read that many hops in from the RIGHT of X-Forwarded-For so a bot can't spoof it by prepending a fake hop. Set to 2 if you add a CDN like Cloudflare in front of Heroku.",
     "enabled": true,
     "action": "measure",
-    "bypassForAuthed": true
+    "bypassForAuthed": true,
+    "trustedProxyDepth": 1
   },
   "honeypot": {
     "_comment": "Policy when a client trips the invisible decoy control (a human never sees/clicks it). action: 'tarpit' = divert to dead room; 'measure' = flag + log only (OBSERVATION rollout — current). GA bot_trap event fires either way.",

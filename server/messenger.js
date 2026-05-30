@@ -255,7 +255,14 @@ function checkForMail(client) {
 	client.on('enterGame', function (id, coop) {
 		debug.log("enterGame: client=", client.id, " requestedId=", id, " coop=", coop);
 		var roomSig = '';
-		if (id == -1) {
+		// botGuard: divert a flagged client (datacenter connection in tarpit mode, or one
+		// that tripped the invisible honeypot) into the dead tarpit room — checked BEFORE
+		// matchmaking so findARoom() never spins up and then abandons an empty real room on a
+		// bot's behalf. This overrides matchmaking AND a direct ?gameid= join, so a flagged
+		// bot can't pick its own way into a live room.
+		if (botGuard.shouldTarpit(client.id)) {
+			roomSig = hostess.getTarpitRoom();
+		} else if (id == -1) {
 			roomSig = hostess.findARoom(client.id);
 		} else {
 			roomSig = id;
@@ -266,13 +273,6 @@ function checkForMail(client) {
 		// branch). joinARoom enforces capacity; matchmaking (id == -1) still avoids
 		// locked rooms in findARoom. The legacy `coop` event arg is no longer needed
 		// server-side but clients may still send it — accepted and ignored.
-		// botGuard: a flagged client (datacenter connection in tarpit mode, or one that
-		// tripped the invisible honeypot) is diverted into the dead tarpit room instead of
-		// any real match. This overrides both matchmaking AND a direct ?gameid= join, so a
-		// flagged bot can't pick its own way into a live room.
-		if (botGuard.shouldTarpit(client.id)) {
-			roomSig = hostess.getTarpitRoom();
-		}
 		var room = hostess.joinARoom(roomSig, client.id);
 		if (room == false) {
 			debug.log("enterGame: joinARoom FAILED for client=", client.id, " roomSig=", roomSig);
