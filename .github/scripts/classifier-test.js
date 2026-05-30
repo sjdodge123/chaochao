@@ -14,6 +14,9 @@ const path = require('path');
 const repoRoot = path.join(__dirname, '..', '..');
 const utils = require(path.join(repoRoot, 'server', 'utils.js'));
 const config = require(path.join(repoRoot, 'server', 'config.json'));
+const mapFormat = require(path.join(repoRoot, 'server', 'mapFormat.js'));
+const cellGraph = require(path.join(repoRoot, 'server', 'cellGraph.js'));
+const mapClassifier = require(path.join(repoRoot, 'server', 'mapClassifier.js'));
 
 let failures = 0;
 function fail(msg) { failures++; console.log('::error::' + msg); }
@@ -74,6 +77,36 @@ console.log('\nPlaylist membership:');
 
 console.log('\n' + rows.length + ' race maps, ' + featured + ' Featured (threshold ' +
     ((config.balance && config.balance.featuredScore) || '?') + ')');
+
+// --- regression: a barren, unfair map must crater (not sail through) ---
+// A featureless field of one baseline tile, no hazards, opposite-edge starts, and
+// the goal jammed near one edge — the "2-second non-track" that used to score ~87.
+// Built on a real voronoi base so the geometry is valid; only ids/edges differ.
+(function () {
+    var base = require(path.join(repoRoot, 'client', 'maps', 'crossroads.json'));
+    if (mapFormat.isSitesOnly(base)) { base = mapFormat.reconstruct(base); }
+    var m = JSON.parse(JSON.stringify(base));
+    var NORMAL = config.tileMap.normal.id, GOAL = config.tileMap.goal.id;
+    m.cells.forEach(function (cell) { cell.id = NORMAL; });
+    // one goal cell near the TOP (off-centre for a top+bottom map)
+    var gx = config.worldWidth / 2, gy = config.worldHeight * 0.30, best = null, bd = Infinity;
+    m.cells.forEach(function (cell) {
+        var d = Math.pow(cell.site.x - gx, 2) + Math.pow(cell.site.y - gy, 2);
+        if (d < bd) { bd = d; best = cell; }
+    });
+    best.id = GOAL;
+    m.startEdges = ['top', 'bottom'];
+    m.hazards = [];
+    delete m.parTime;
+    m.parTime = cellGraph.computeMapParTime(m);
+    var meta = mapClassifier.classify(m, config);
+    if (meta.tier !== 'community') { fail('barren field classified as ' + meta.tier + ', expected community'); }
+    if (meta.balanceScore >= 40) { fail('barren field scored ' + meta.balanceScore + ' (>=40); blandness penalty too weak'); }
+    if (meta.deductions.indexOf('bland') === -1 && !meta.deductions.some(function (d) { return d.indexOf('bland') === 0; })) {
+        fail('barren field got no blandness deduction (' + meta.deductions.join(', ') + ')');
+    }
+    console.log('\nbarren-field regression: score ' + meta.balanceScore + ' (' + meta.tier + ') — ' + meta.deductions.join(', '));
+})();
 
 if (failures > 0) {
     console.log('\nclassifier-test FAILED with ' + failures + ' error(s)');

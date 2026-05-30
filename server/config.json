@@ -65,7 +65,10 @@
         "traitThresholds": { "ice": 0.28, "lava": 0.30, "bumper": 0.12, "ability": 0.10, "bumperHazardDensity": 0.20 },
         "ratingAuthedWeight": 3,
         "ratingConfidenceFloor": 5,
-        "playlistMinMaps": 20
+        "playlistMinMaps": 20,
+        "blandnessThreshold": 0.30,
+        "blandnessMax": 70,
+        "goalCentralityMax": 30
     },
     "defaultPlaylist": "featured",
     "playlists": [

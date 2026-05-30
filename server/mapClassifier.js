@@ -85,6 +85,25 @@ function lengthClass(par, config) {
     return 'standard';
 }
 
+// How centered the goal is between a pair of opposite start edges, 0..1 (1 =
+// dead centre, 0 = right against one edge). For top/bottom starts it measures the
+// goal centroid's Y; for left/right, its X. Used to flag unfair off-centre goals
+// on 2-edge maps. Returns 1 (no penalty) if there's no goal to locate.
+function goalCentrality(map, edges, config) {
+    var goalId = tileId(config, 'goal');
+    var cells = Array.isArray(map.cells) ? map.cells : [];
+    var gx = 0, gy = 0, gn = 0;
+    for (var i = 0; i < cells.length; i++) {
+        if (cells[i].id === goalId && cells[i].site) { gx += cells[i].site.x; gy += cells[i].site.y; gn++; }
+    }
+    if (gn === 0) { return 1; }
+    gx /= gn; gy /= gn;
+    var W = config.worldWidth || 1366, H = config.worldHeight || 768;
+    var vertical = (edges.indexOf('top') !== -1 || edges.indexOf('bottom') !== -1);
+    var c = vertical ? (1 - Math.abs(2 * gy / H - 1)) : (1 - Math.abs(2 * gx / W - 1));
+    return (c < 0) ? 0 : (c > 1 ? 1 : c);
+}
+
 // Main entry: map (reconstructed, full geometry) + config -> meta object.
 // `parTime` is read from the map if already computed (loadMaps does this) and
 // otherwise computed here, so the classifier is safe to call standalone.
@@ -148,6 +167,26 @@ function classify(map, config) {
     if (r.ice > 0.45) { deduct(Math.min(10, Math.round((r.ice - 0.45) * 30)), 'ice'); }
     // tiny boards collapse into a scrum
     if (comp.total < 120) { deduct(8, 'tiny'); }
+    // BLANDNESS: the scorer otherwise only punishes EXCESS, so a featureless field
+    // of one baseline tile with no hazards (a 2-second non-track) sailed through.
+    // Penalize the ABSENCE of interest: "interest" = the share of drivable cells
+    // that are non-baseline tiles (fast/lava/ice/ability/bumper/random) plus a
+    // hazard-density boost. Every committed map clears the threshold by a wide
+    // margin (min featureShare ~0.36), so this fires only on barren maps.
+    var featureShare = r.fast + r.lava + r.ice + r.ability + r.bumper + r.random;
+    var interest = featureShare + Math.min(0.40, hazardDensity * 2);
+    var blandT = bal(config, 'blandnessThreshold', 0.30);
+    if (interest < blandT) {
+        deduct(Math.round((blandT - interest) / blandT * bal(config, 'blandnessMax', 70)), 'bland');
+    }
+    // GOAL PLACEMENT: on opposite-edge starts (top+bottom / left+right) the goal
+    // should sit BETWEEN the two edges — jammed up against one side hands that
+    // side a near-instant win. The par-ratio fairness above samples both edges but
+    // averages out; this measures the goal's geometric position directly.
+    if (edges.length > 1) {
+        var centrality = goalCentrality(map, edges, config);
+        deduct(Math.round((1 - centrality) * bal(config, 'goalCentralityMax', 30)), 'goal');
+    }
 
     if (score < 0) { score = 0; }
     if (score > 100) { score = 100; }
