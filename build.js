@@ -13,6 +13,7 @@ const bundles = {
         'client/scripts/gamepad.js',
         'client/scripts/trailEffects.js',
         'client/scripts/draw.js',
+        'client/scripts/borderEffects.js',
         'client/scripts/terrainfx.js',
         'client/scripts/skinRegistry.js',
         'client/scripts/gameboard.js',
