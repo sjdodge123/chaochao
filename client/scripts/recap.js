@@ -963,7 +963,8 @@ function recapDrawKartParticles(pr, frameT) {
 	var rad = meta.radius || 12;
 	// Burn embers: a few rising, cooling sparks while on fire.
 	if (pr[RF_FIRE] > 0) {
-		for (var k = 0; k < 4; k++) {
+		var emberN = (typeof perfCount === "function") ? perfCount(4) : 4;
+		for (var k = 0; k < emberN; k++) {
 			var ph = (((frameT + k * 150) % 600) / 600);
 			var ex = x + Math.sin(k * 1.7 + frameT / 180) * rad * 0.5;
 			var ey = y - ph * (rad * 1.8 + 8);
@@ -981,7 +982,8 @@ function recapDrawKartParticles(pr, frameT) {
 	var walk = (typeof config !== "undefined" && config != null && config.playerMaxSpeed) ? config.playerMaxSpeed * 0.18 : 1.2;
 	if (sp > walk) {
 		var dir = Math.atan2(pr[RF_VY], pr[RF_VX]);
-		for (var d = 0; d < 3; d++) {
+		var dustN = (typeof perfCount === "function") ? perfCount(3) : 3;
+		for (var d = 0; d < dustN; d++) {
 			var dph = (((frameT + d * 130) % 420) / 420);
 			var dist = rad + dph * 16;
 			var jit = (d - 1) * rad * 0.4;

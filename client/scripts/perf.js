@@ -67,12 +67,6 @@ var PERF_PROFILES = {
     }
 };
 
-// Max trail vertices kept/stroked per kart in direct mode (~last few seconds of
-// tail). Bounds both memory and the per-frame re-stroke, and — unlike the old
-// offscreen canvas — never triggers a full-world texture upload or an unbounded
-// _redrawAll, so it kills both the GPU-paint and the main-thread trail spikes.
-var PERF_TRAIL_DIRECT_MAX = 240;
-
 var PERF_STORAGE_KEY = "perfPref";
 var PERF_ORDER = ["auto", "high", "balanced", "low"];
 var PERF_LABEL = { auto: "Auto", high: "High", balanced: "Balanced", low: "Low" };
@@ -245,7 +239,6 @@ function perfEmbers() { return !!PERF.embers; }
 // not gated here so the racing read still has terrain cues even on a phone.
 function perfExtraFx() { return !!PERF.extraFx; }
 function perfTrailDirect() { return !!PERF.trailDirect; }
-function perfTrailDirectMax() { return PERF_TRAIL_DIRECT_MAX; }
 function perfMapScale() { return PERF.mapScale || 1; }
 function perfExplosionSparks() { return PERF.explosionSparks; }
 function perfMaxEffects() { return PERF.maxEffects; }
