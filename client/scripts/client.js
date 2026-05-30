@@ -704,8 +704,11 @@ function registerStateHandlers(server) {
 		}
 	});
 	server.on("mapRated", function (payload) {
-		// Server confirmation of our star vote — reflect the acknowledged value.
-		if (payload != null && typeof payload.stars === "number") {
+		// Server confirmation of our star vote — reflect the acknowledged value, but
+		// only if it's for the map currently being rated. Ratings now happen every
+		// overview, so a slow ack from a previous round could otherwise resolve after
+		// ratingMapId moved on and overwrite the new map's selection with a stale one.
+		if (payload != null && typeof payload.stars === "number" && payload.mapId === ratingMapId) {
 			myMapRating = payload.stars;
 		}
 	});
