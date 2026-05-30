@@ -552,14 +552,16 @@ function checkForMail(client) {
 		}
 	});
 
-	// Star-rate the map you just finished (game-over screen). Server-authoritative:
-	// the rated map is the room's current map, not a client-supplied id. One vote per
-	// voter per map (UPSERT); bots and identity-less sockets can't vote; a short
-	// per-socket cooldown stops spam. The write itself is gated on ALLOW_SUPABASE_WRITES
-	// inside ratings.recordRating, so this is a no-op locally.
+	// Star-rate the map you just played. Allowed on the per-round OVERVIEW (rate it
+	// while fresh) and the match-over screen. Server-authoritative: the rated map is
+	// the room's current map (still the just-played map in both states — the next map
+	// only loads at the gate), not a client-supplied id. One vote per voter per map
+	// (UPSERT); bots and identity-less sockets can't vote; a short per-socket cooldown
+	// stops spam. The write is gated on ALLOW_SUPABASE_WRITES inside recordRating.
 	client.on('rateMap', function (payload) {
 		var room = hostess.getRoomBySig(roomMailList[client.id]);
-		if (room == undefined || room.game.currentState != c.stateMap.gameOver) {
+		if (room == undefined ||
+			(room.game.currentState != c.stateMap.overview && room.game.currentState != c.stateMap.gameOver)) {
 			return;
 		}
 		var board = room.game.gameBoard;

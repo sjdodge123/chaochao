@@ -11,9 +11,10 @@ var config,
 	nextFightReactionTime = 0,
 	playerWon = null;
 
-// Game-over map-rating widget state (see drawGameOverRating / handleClick).
-// ratingMapId/Name: which map the stars rate; myMapRating: stars this player
-// picked (0 = none yet); ratingStarHits: per-star screen rects for hit-testing.
+// Map-rating widget state (shown on the per-round overview + the match-over screen;
+// see drawMapRating / handleMapRatingTap). ratingMapId/Name: which map the stars
+// rate; myMapRating: stars this player picked (0 = none yet); ratingStarHits:
+// per-star screen rects for hit-testing.
 var ratingMapId = null,
 	ratingMapName = null,
 	myMapRating = 0,
@@ -27,11 +28,13 @@ function currentPlaylistIdForMetrics() {
 	return (typeof config !== "undefined" && config && config.defaultPlaylist) ? config.defaultPlaylist : "featured";
 }
 
-// Hit-test a pointer (logical coords) against the game-over star widget. On a hit,
+// Hit-test a pointer (logical coords) against the map-rating star widget. On a hit,
 // optimistically fills the stars and emits the vote (server confirms via mapRated).
-// Returns true if the tap was consumed by the widget.
-function handleGameOverRatingTap(lx, ly) {
-	if (typeof config === "undefined" || config == null || currentState !== config.stateMap.gameOver) {
+// Returns true if the tap was consumed by the widget. Shown on the per-round overview
+// (rate the map you just played) and the match-over screen.
+function handleMapRatingTap(lx, ly) {
+	if (typeof config === "undefined" || config == null ||
+		(currentState !== config.stateMap.overview && currentState !== config.stateMap.gameOver)) {
 		return false;
 	}
 	if (!ratingMapId || !Array.isArray(ratingStarHits)) {
@@ -643,6 +646,13 @@ function registerStateHandlers(server) {
 		mapLeaderboardData = null;
 		mapLeaderboardJustPlayed = null;
 		currentState = config.stateMap.overview;
+		// Set up the "rate this map" widget for the map JUST played (currentMap is
+		// still the played map here — the next map only loads at the next gate). Reset
+		// the picked stars so each round's overview rates its own map.
+		ratingMapId = (packet.mapId != null) ? packet.mapId : ((currentMap && currentMap.id) || null);
+		ratingMapName = (packet.mapName != null) ? packet.mapName : ((currentMap && currentMap.name) || null);
+		myMapRating = 0;
+		ratingStarHits = [];
 		trackEvent('round_complete', {
 			map: (currentMap && currentMap.name) || 'unknown',
 			playlist: currentPlaylistIdForMetrics()
