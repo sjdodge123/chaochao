@@ -14,6 +14,10 @@ module.exports = {
 			doubleKill: { ids: [], value: 0, title: "Double Kill" },
 			tripleKill: { ids: [], value: 0, title: "Triple Kill" },
 			megaKill: { ids: [], value: 0, title: "Mega Kill" },
+			zombieSlayer: { ids: [], value: 0, title: "Zombie Slayer" },
+			heavyHitter: { ids: [], value: 0, title: "Heavy Hitter" },
+			pinball: { ids: [], value: 0, title: "Pinball" },
+			iceSkater: { ids: [], value: 0, title: "Ice Skater" },
 		};
 		for (var id in this.playerList) {
 			var player = this.playerList[id];
@@ -37,6 +41,19 @@ module.exports = {
 
 			//Resourceful
 			this.checkForNewMedalHolder(achievements.resourceful, id, player.resourceful);
+
+			//Zombie Slayer — most kills landed while infected (zombie bites)
+			this.checkForNewMedalHolder(achievements.zombieSlayer, id, player.zombieKillCount);
+
+			//Heavy Hitter — most fully-charged wind-up punches thrown
+			this.checkForNewMedalHolder(achievements.heavyHitter, id, player.heavyHitCount);
+
+			//Pinball — most bumper bonks taken
+			this.checkForNewMedalHolder(achievements.pinball, id, player.bumperHitCount);
+
+			//Ice Skater — most distance slid across ice (rounded so a hair's
+			//difference doesn't split the medal; integer keeps the tie logic clean)
+			this.checkForNewMedalHolder(achievements.iceSkater, id, Math.round(player.iceDistanceTravelled));
 
 			//Picked on
 			var mostKilled = null;

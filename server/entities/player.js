@@ -182,6 +182,13 @@ class Player extends Circle {
 		this.survivalist = 0;
 		this.resourceful = 0;
 		this.bully = 0;
+		// Per-match medal counters (reset at gameOver, see reset()). Named distinctly
+		// from the progression branch's lifetime medal_counts keys so the two never
+		// collide: these are per-match tallies that feed gatherAchievements().
+		this.zombieKillCount = 0;       // kills landed while infected -> Zombie Slayer
+		this.heavyHitCount = 0;         // fully-charged punches thrown -> Heavy Hitter
+		this.bumperHitCount = 0;        // bumper bonks taken -> Pinball
+		this.iceDistanceTravelled = 0;  // distance slid on ice tiles -> Ice Skater
 
 		//Engine Variables
 		this.newX = this.x;
@@ -411,6 +418,12 @@ class Player extends Circle {
 		// No scoring in the lobby (the bully stat isn't gated by checkForWinners).
 		if (currentState != c.stateMap.lobby) {
 			this.bully += 1;
+			// Heavy Hitter: a committed, fully-charged swing (same threshold the client
+			// uses for the charged-hit SFX). Counted on throw, like bully — a zombie's
+			// free bite never charges, so it's naturally excluded.
+			if (frac >= c.punchCharge.chargedHitFrac) {
+				this.heavyHitCount += 1;
+			}
 		}
 		messenger.messageRoomBySig(this.roomSig, "punch", compressor.sendPunch(this.punch));
 		this.cancelCharge();
@@ -730,6 +743,17 @@ class Player extends Circle {
 		// punches) — otherwise a punch thrown a tick earlier could both hit a victim AND
 		// reflect, so only truly simultaneous (same-tick) mutual punches clash.
 		object.landed = true;
+		// Pinball: a bumper bonk. The bumper's punch lingers ~100ms (re-overlapping the
+		// same victim across ticks), so dedupe per victim on the punch object — one
+		// bonk = one tally. Real play only (lobby bumpers are a teaching prop).
+		if (object.type === "bumper"
+			&& (this.currentState == c.stateMap.racing || this.currentState == c.stateMap.collapsing)) {
+			if (object.pinballCountedFor == null) { object.pinballCountedFor = {}; }
+			if (!object.pinballCountedFor[this.id]) {
+				object.pinballCountedFor[this.id] = true;
+				this.bumperHitCount += 1;
+			}
+		}
 		_engine.punchPlayer(this, object);
 		var charged = object.chargeFrac != null && object.chargeFrac >= c.punchCharge.chargedHitFrac;
 		messenger.messageRoomBySig(this.roomSig, "playerPunched", { owner: object.ownerId, victim: this.id, x: this.x, y: this.y, charged: charged });
@@ -860,6 +884,11 @@ class Player extends Circle {
 			this.acel = object.acel;
 			this.brakeCoeff = object.brakeCoeff;
 			this.dragCoeff = object.dragCoeff;
+			// Ice Skater: clock the distance slid while on ice (speed x dt this tick).
+			// Only in real play — lobby ice is a teaching prop, not scored.
+			if ((this.currentState == c.stateMap.racing || this.currentState == c.stateMap.collapsing) && this.dt) {
+				this.iceDistanceTravelled += utils.getMag(this.velX, this.velY) * this.dt;
+			}
 			return;
 		}
 		if (object.id == c.tileMap.goal.id) {
@@ -1069,6 +1098,10 @@ class Player extends Circle {
 			this.onFire = 0;
 			this.savior = 0;
 			this.killedPlayerList = [];
+			this.zombieKillCount = 0;
+			this.heavyHitCount = 0;
+			this.bumperHitCount = 0;
+			this.iceDistanceTravelled = 0;
 		}
 	}
 }

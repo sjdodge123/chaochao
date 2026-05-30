@@ -10,7 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- Four new end-of-match medals to chase: Zombie Slayer (most kills while infected), Heavy Hitter (most fully-charged punches), Pinball (most bumper bonks), and Ice Skater (furthest slide across ice).
+- The end-of-game medals are now shown on a polished award card — each medal has its own icon and a one-line description of how it was earned.
 
 ## v0.25.7 — 2026-05-30
 

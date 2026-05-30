@@ -384,6 +384,12 @@ class Game {
 					var killer = this.playerList[this.playerList[player].murderedBy];
 					if (killer != null) {
 						this.playerList[player].murderedBy = null;
+						// Zombie Slayer: addKill() ignores zombie attackers (zombies don't
+						// rack up the normal kill stat), so tally infected kills here where
+						// both killer and victim are in hand.
+						if (killer.isZombie) {
+							killer.zombieKillCount += 1;
+						}
 						killer.addKill(this.playerList[player]);
 						this.gameBoard.checkForFirstBlood();
 					}
