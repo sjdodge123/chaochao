@@ -278,6 +278,9 @@ function showNextProgressionToast() {
 	}, PROGRESSION_TOAST_MS);
 }
 
+// Fire the `cosmetics_equipped` GA event once per MATCH (cosmetics are fixed for a match),
+// not once per round. Reset when a new match's lobby forms (startLobby).
+var cosmeticsTrackedThisMatch = false;
 function registerConnectionHandlers(server) {
 	server.on('welcome', function (id) {
 		debugLog("welcome, myID=", id);
@@ -625,6 +628,7 @@ function registerStateHandlers(server) {
 		// Set state first so loadNewMap doesn't run its gated-only goal-ping branch.
 		currentState = config.stateMap.lobby;
 		trackEvent('lobby_entered');
+		cosmeticsTrackedThisMatch = false; // new match forming — re-arm the cosmetics event
 		spawnLobbyStartButton(packet);
 		setLobbySfxDampen(true);
 		playSoundAfterFinish(lobbyMusic);
@@ -704,6 +708,21 @@ function registerStateHandlers(server) {
 			map: (currentMap && currentMap.name) || 'unknown',
 			playlist: currentPlaylistIdForMetrics()
 		});
+		// Once per match: which cosmetics the LOCAL player chose to race with. One event with
+		// all four slots so GA can chart per-slot popularity AND popular combinations.
+		// 'none' = the slot's default (no cart shape / pattern / trail / border).
+		if (!cosmeticsTrackedThisMatch) {
+			cosmeticsTrackedThisMatch = true;
+			var mp = (typeof myID !== "undefined" && typeof playerList !== "undefined" && playerList) ? playerList[myID] : null;
+			if (mp) {
+				trackEvent('cosmetics_equipped', {
+					cart: mp.cart || 'none',
+					pattern: mp.pattern || 'none',
+					trail: mp.trailFx || 'none',
+					border: mp.border || 'none'
+				});
+			}
+		}
 	});
 	//Server-driven mood change (near-victory) or next track (previous one ended).
 	server.on("musicMood", function (packet) {
