@@ -1274,7 +1274,9 @@ function stationPickCosmetic(lp, opt) {
     }
     var id = opt.id || null;
     lp.socket.emit("setCosmetic", { slot: opt.slot, id: id });
-    saveCosmeticLocal(opt.slot, id);
+    saveCosmeticLocal(lp, opt.slot, id);
+    // Patterns and borders are INDEPENDENT slots (player.pattern vs player.border) — equipping
+    // one no longer clears the other; both persist and re-equip on the next join.
     var p = (lp.myID != null && typeof playerList !== "undefined" && playerList) ? playerList[lp.myID] : null;
     var field = (typeof COSMETIC_SLOT_FIELD !== "undefined") ? COSMETIC_SLOT_FIELD[opt.slot] : null;
     if (p && field) {

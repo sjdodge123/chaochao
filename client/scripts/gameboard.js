@@ -251,6 +251,7 @@ function createPlayer(dataArray) {
 	playerList[index].cart = dataArray[13] || null;        // cart body-shape id (else null = plain)
 	playerList[index].pattern = dataArray[14] || null;     // pattern overlay id (tints to colour)
 	playerList[index].trailFx = dataArray[15] || null;     // trail-effect id (renders in colour)
+	playerList[index].border = dataArray[16] || null;      // border (rim) id — independent 4th slot
 	playerList[index].deathMessage = null;
 	playerList[index].trail = new Trail({ x: dataArray[1], y: dataArray[2] });
 	playerList[index].fizzle = function () {

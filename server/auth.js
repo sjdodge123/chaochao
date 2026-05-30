@@ -286,7 +286,7 @@ async function getProgression(userId) {
     try {
         var res = await supabase
             .from('progression')
-            .select('xp, level, unlocked_skins, medal_counts, wins, selected_cart, selected_pattern, selected_trail')
+            .select('xp, level, unlocked_skins, medal_counts, wins, selected_cart, selected_pattern, selected_trail, selected_border')
             .eq('user_id', userId)
             .maybeSingle();
         if (res.error) {
@@ -315,7 +315,10 @@ function normalizeProgression(row) {
         // live Player so equips persist across sessions/devices.
         selected_cart: (row && typeof row.selected_cart === 'string') ? row.selected_cart : null,
         selected_pattern: (row && typeof row.selected_pattern === 'string') ? row.selected_pattern : null,
-        selected_trail: (row && typeof row.selected_trail === 'string') ? row.selected_trail : null
+        selected_trail: (row && typeof row.selected_trail === 'string') ? row.selected_trail : null,
+        selected_border: (row && typeof row.selected_border === 'string') ? row.selected_border : null,
+        // { cosmetic_id: ISO8601 } — when each cosmetic was first unlocked (adoption analytics).
+        unlock_dates: (row && row.unlock_dates && typeof row.unlock_dates === 'object') ? row.unlock_dates : {}
     };
 }
 
@@ -323,7 +326,8 @@ function normalizeProgression(row) {
 // writes gate like every other writer — a no-op locally so dev never seeds the shared DB.
 // `id` null clears the slot. Upserts so a player with no row yet still records the pick.
 // Touches only the one selected_<slot> column; never the XP/medal columns.
-var COSMETIC_SLOT_COLUMN = { cart: 'selected_cart', pattern: 'selected_pattern', trail: 'selected_trail' };
+// `border` persists to its own selected_border column (independent 4th slot).
+var COSMETIC_SLOT_COLUMN = { cart: 'selected_cart', pattern: 'selected_pattern', trail: 'selected_trail', border: 'selected_border' };
 async function saveCosmetic(userId, slot, id) {
     var column = COSMETIC_SLOT_COLUMN[slot];
     if (!writesEnabled || !userId || !supabase || !column) {
@@ -365,7 +369,7 @@ async function addProgression(userId, opts) {
     try {
         var existing = await supabase
             .from('progression')
-            .select('xp, level, unlocked_skins, medal_counts, wins, pending_toasts')
+            .select('xp, level, unlocked_skins, medal_counts, wins, pending_toasts, unlock_dates')
             .eq('user_id', userId)
             .maybeSingle();
         if (existing.error) {
@@ -397,6 +401,17 @@ async function addProgression(userId, opts) {
         var existingToasts = (existing.data && Array.isArray(existing.data.pending_toasts))
             ? existing.data.pending_toasts : [];
         var mergedToasts = existingToasts.concat(newToasts);
+        // Stamp the first-unlock date for every cosmetic newly earned this match (level skins
+        // + achievement skins). Never overwrite an existing date. Analytics only — adoption
+        // curves per cosmetic. ISO timestamp; one stamp covers all of this match's unlocks.
+        var unlockDates = (cur.unlock_dates && typeof cur.unlock_dates === 'object')
+            ? Object.assign({}, cur.unlock_dates) : {};
+        var nowIso = new Date().toISOString();
+        var freshLevelSkins = skinRegistry.levelSkinsUnlockedBetween(oldLevel, newLevel);
+        var allFresh = freshAchievementSkins.concat(freshLevelSkins);
+        for (var f = 0; f < allFresh.length; f++) {
+            if (!unlockDates[allFresh[f]]) { unlockDates[allFresh[f]] = nowIso; }
+        }
         var payload = {
             user_id: userId,
             xp: newXp,
@@ -405,6 +420,7 @@ async function addProgression(userId, opts) {
             medal_counts: newMedalCounts,
             unlocked_skins: unlocked,
             pending_toasts: mergedToasts,
+            unlock_dates: unlockDates,
             updated_at: new Date().toISOString()
         };
         var upd = await supabase
