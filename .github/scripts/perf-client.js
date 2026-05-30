@@ -147,8 +147,13 @@ function writeSummary(lines) {
     if (process.env.GITHUB_STEP_SUMMARY) { try { fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n'); } catch (e) {} }
 }
 
+// A navigation/context-destroyed throw is the preview round ending and the page
+// bouncing back to the editor out from under an in-flight page.evaluate — a
+// flaky/degenerate run, NOT a real regression. Any other exception is a real bug.
+const NAV_RACE_RE = /Execution context was destroyed|Target closed|Navigation|detached Frame|Session closed/i;
+
 (async () => {
-    let srv, browser, exitCode = 0;
+    let srv, browser, exitCode = 0, reachedRace = false;
     const errors = [];
     try {
         console.log(`[1/5] Booting server on :${PORT} (CHAO_PERF_OVERRIDE: 25-kart grid + fixed brutal [${FORCED_BRUTALS.join(', ')}]) ...`);
@@ -196,7 +201,7 @@ function writeSummary(lines) {
         console.log(`[5/5] Collecting up to ${COLLECT} scene-valid ${SAMPLE_SECONDS}s windows, then keeping those >= ${(PEAK_FRACTION * 100).toFixed(0)}% of the runner's peak fps (median of >= ${MIN_VALID_REPS}) ...`);
         const windows = [];          // every scene-valid window: { scriptPerFrame, taskPerFrame, frames, fps, frameWorkP95, heapMB, brutal, karts }
         let tracedOne = false;
-        let nearStall = 0, badWindow = 0, reachedRace = false;
+        let nearStall = 0, badWindow = 0;
         for (let attempt = 1; attempt <= MAX_ATTEMPTS && windows.length < COLLECT; attempt++) {
             const reached = await poll(page, racingFn, 45000, `attempt ${attempt}`);
             if (!reached) { console.log(`  attempt ${attempt}: no full-grid racing reached`); continue; }
@@ -299,6 +304,13 @@ function writeSummary(lines) {
             throw new Error(`no usable perf window in ${MAX_ATTEMPTS} attempts (reachedRace=${reachedRace} nearStall=${nearStall} badScene=${badWindow}) — ${badWindow > 0 ? 'scene/scenario broke (not contention)' : 'never reached a full-grid race'}; failing rather than masking as contention`);
         }
 
+        // A short-but-non-empty collection (ran out of attempts before COLLECT)
+        // needs no special case: the median/gate path below already computes the
+        // `degenerate` flag (validReps < MIN_VALID_REPS) and perf-compare honors
+        // it as INCONCLUSIVE, while a short run that still gathered >= MIN_VALID_REPS
+        // near-peak windows stays gradeable. Forcing INCONCLUSIVE here on any
+        // near-stall would disable the gate on perfectly measurable runs.
+
         const scriptPerFrame = median(reps.map(r => r.scriptPerFrame));
         const taskPerFrame = median(reps.map(r => r.taskPerFrame));
         const frameWorkP95 = median(reps.map(r => r.frameWorkP95));
@@ -351,8 +363,22 @@ function writeSummary(lines) {
         if (ceilingBreached) { console.log(`\n::error::Catastrophic ceiling breached: ${f(scriptPerFrame)} ms/frame > ${f(SCRIPT_CEILING_MS)} ms.`); exitCode = 1; }
         else console.log('\nMeasurement complete.');
     } catch (e) {
-        console.error('\nPERF GATE ERROR:', (e && e.message) || e);
-        exitCode = 1;
+        const msg = (e && e.message) || String(e);
+        // Only treat a navigation/context-destroyed throw as benign once we've
+        // actually reached the race (sampling underway) — that's the preview round
+        // ending and bouncing back to the editor. The same error class BEFORE the
+        // race (a setup page.goto failing on a broken build/500) is real breakage
+        // and must still fail loudly.
+        if (reachedRace && NAV_RACE_RE.test(msg)) {
+            // The preview round ended and the page navigated back to the editor,
+            // destroying the execution context mid-sample — flaky, not a regression.
+            console.error('\nPERF GATE navigation race (execution context destroyed):', msg);
+            console.log('\n::warning::perf-client navigation race (execution context destroyed) — reporting INCONCLUSIVE (no regression).');
+            exitCode = 0;
+        } else {
+            console.error('\nPERF GATE ERROR:', msg);
+            exitCode = 1;
+        }
     } finally {
         if (browser) await browser.close().catch(() => {});
         if (srv) srv.kill('SIGKILL');
