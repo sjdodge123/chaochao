@@ -64,6 +64,12 @@ Tracked work that is known and intentionally deferred. The currently-in-progress
 
 <!-- ✅ RESOLVED — SHIPPED (released v0.14.0): in-game Codex / Learn page (`ec81c7f`) explaining abilities/brutal modes/achievements, with card descriptions shortened to stop layout shift (`d0468ac`). Original: - **In-game codex.** No reference screen exists for abilities, brutal-round modes, or achievements — achievements only surface in the end-match recap montage (`recap.js`). -->
 
+## Progression (`server/progression.js`, `client/scripts/skinRegistry.js`, `lobbyHub.js`)
+
+### Features
+
+- **Player profile view (level, XP, achievements, skin collection).** A dedicated screen surfacing the signed-in player's lifetime progression — level + XP bar, medal counts / wins, achievement-skin progress (`X / threshold`), and a locked/unlocked skin-collection grid. All data is already carried by the `progressionUpdate` payload (no new Supabase writes). Full spec + operator-injectable prompt: [`docs/progression-profile-followup.md`](docs/progression-profile-followup.md). Follow-up to the progression-system work (XP / levels / achievement counters / skin unlocks).
+
 ## Map editor (`client/scripts/create.js`, `client/create.html`)
 
 ### Bugs

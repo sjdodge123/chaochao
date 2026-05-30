@@ -248,7 +248,9 @@ function createPlayer(dataArray) {
 	playerList[index].name = dataArray[10] || null;   // AI racer identity (humans: null)
 	playerList[index].title = dataArray[11] || null;
 	playerList[index].avatarUrl = dataArray[12] || null;   // opt-in avatar skin (else null = colour skin)
-	playerList[index].cartSkin = dataArray[13] || null;    // cosmetic cart skin overlay (firetruck/dino), else null
+	playerList[index].cart = dataArray[13] || null;        // cart body-shape id (else null = plain)
+	playerList[index].pattern = dataArray[14] || null;     // pattern overlay id (tints to colour)
+	playerList[index].trailFx = dataArray[15] || null;     // trail-effect id (renders in colour)
 	playerList[index].deathMessage = null;
 	playerList[index].trail = new Trail({ x: dataArray[1], y: dataArray[2] });
 	playerList[index].fizzle = function () {

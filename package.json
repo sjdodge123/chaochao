@@ -25,6 +25,7 @@
         "heroku-postbuild": "npm run build",
         "test:unit": "node .github/scripts/unit-tests.js",
         "test:smoke": "node .github/scripts/smoke-test.js",
+        "test:progression": "node .github/scripts/progression-test.js",
         "test:perf-tick": "node .github/scripts/perf-tick-budget.js",
         "test:perf-client": "node .github/scripts/perf-client.js",
         "test:lint-buttons": "node .github/scripts/lint-button-input.js",

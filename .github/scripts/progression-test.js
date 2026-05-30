@@ -1,0 +1,360 @@
+'use strict';
+
+// Headless progression test. Boots the REAL server modules (no network/browser,
+// same approach as smoke-test.js), drives a match to gameOver, and asserts the
+// server-computed XP breakdown / level-up / achievement-unlock that ships in the
+// startGameover packet — with Supabase writes DISABLED (the local default), so it
+// also proves nothing is persisted off the gameplay path.
+//
+// What it covers (the pure, deterministic part of the progression system):
+//   - XP breakdown: participation + per-notch + win/runner-up bonuses.
+//   - Level curve + level-up detection from the in-memory progression cache.
+//   - Lifetime medal counters crossing an achievement-skin threshold.
+//   - The progression.js pure helpers (level curve, unlock thresholds).
+
+const path = require('path');
+const repoRoot = path.join(__dirname, '..', '..');
+const messenger = require(path.join(repoRoot, 'server', 'messenger.js'));
+const hostess = require(path.join(repoRoot, 'server', 'hostess.js'));
+const game = require(path.join(repoRoot, 'server', 'game.js'));
+const utils = require(path.join(repoRoot, 'server', 'utils.js'));
+const progression = require(path.join(repoRoot, 'server', 'progression.js'));
+const auth = require(path.join(repoRoot, 'server', 'auth.js'));
+const c = utils.loadConfig();
+
+let failures = 0;
+function check(cond, msg) {
+    if (cond) {
+        console.log('  ok: ' + msg);
+    } else {
+        failures++;
+        console.log('::error::FAIL: ' + msg);
+    }
+}
+
+// Recording io: messenger.messageRoomBySig -> io.to(sig).emit(header, payload).
+const events = [];
+const recordingIo = {
+    to() { return { emit(header, payload) { events.push({ header: header, payload: payload }); } }; },
+    sockets: { emit() { } }
+};
+messenger.build(recordingIo);
+
+function lastEvent(header) {
+    for (let i = events.length - 1; i >= 0; i--) {
+        if (events[i].header === header) { return events[i].payload; }
+    }
+    return null;
+}
+
+// --- Unit: pure progression helpers -----------------------------------------
+function testPureHelpers() {
+    console.log('Pure helpers:');
+    check(progression.levelForXp(0) === 1, 'levelForXp(0) === 1');
+    check(progression.levelForXp(progression.cumulativeXpForLevel(2)) === 2, 'reaching L2 floor === level 2');
+    check(progression.levelForXp(progression.cumulativeXpForLevel(5)) === 5, 'reaching L5 floor === level 5');
+    check(progression.levelForXp(progression.cumulativeXpForLevel(5) - 1) === 4, 'one XP short of L5 === level 4');
+    const lp = progression.levelProgress(progression.cumulativeXpForLevel(3) + 10);
+    check(lp.level === 3 && lp.xpThisLevel === 10, 'levelProgress reports xpThisLevel within the level');
+    check(progression.achievementsUnlocked({ mostKills: 75 }, 0).indexOf('executioner') !== -1, 'mostKills>=75 unlocks executioner');
+    check(progression.achievementsUnlocked({ mostKills: 74 }, 0).indexOf('executioner') === -1, 'mostKills<75 does NOT unlock executioner');
+    check(progression.achievementsUnlocked({}, 50).indexOf('golden_champion') !== -1, 'wins>=50 unlocks golden_champion');
+    const merged = progression.mergeMedalCounts({ savior: 2 }, { savior: 1, mostKills: 3 });
+    check(merged.savior === 3 && merged.mostKills === 3, 'mergeMedalCounts adds deltas');
+}
+
+// Build a room with two signed-in human players, force places, run gameOver.
+function runMatch(setup) {
+    events.length = 0;
+    const sig = setup.sig;
+    const room = game.getRoom(sig, 4);
+    const p1 = room.world.createNewPlayer(setup.p1.id);
+    const p2 = room.world.createNewPlayer(setup.p2.id);
+    room.playerList[setup.p1.id] = p1;
+    room.playerList[setup.p2.id] = p2;
+    // Mark as signed-in humans (gameOver awards only these). Use the player id AS the
+    // userId so the in-memory toast queue is drainable per-test by that same id.
+    p1.isAI = false; p1.verifiedUserId = setup.p1.id;
+    p2.isAI = false; p2.verifiedUserId = setup.p2.id;
+    p1.notches = setup.p1.notches;
+    p2.notches = setup.p2.notches;
+    // Medal inputs (gatherAchievements reads these).
+    p1.totalKills = setup.p1.totalKills || 0;
+    p2.totalKills = setup.p2.totalKills || 0;
+    if (setup.p1.progression) { p1.progression = setup.p1.progression; p1.progressionLoaded = true; }
+    if (setup.p2.progression) { p2.progression = setup.p2.progression; p2.progressionLoaded = true; }
+    room.game.firstPlaceSig = setup.p1.id;
+    room.game.secondPlaceSig = setup.p2.id;
+    // Call awardProgression directly to capture its return (xpEarned telemetry +
+    // cache mutation), then gameOver for the packet/state. gameOver also calls
+    // awardProgression, so to avoid double-applying we snapshot via a single path:
+    const awards = room.game.awardProgression(room.game.gatherAchievements(), setup.p1.id);
+    return { room: room, awards: awards, p1: p1, p2: p2 };
+}
+
+// Toasts are queued in-memory when writes are off (the test default). Drain a
+// user's queued toast events via the messenger's exported in-memory drain so we can
+// assert on what a match produced. (Mirrors the lobby-arrival delivery path.)
+function drainMem(userId) {
+    // messenger exposes enqueue; drain is internal, so pull via a fresh enterGame is
+    // heavy. Instead read the module's queue through enqueue's side: re-enqueue empty
+    // then use the test-only accessor if present, else fall back to deliver path.
+    return messenger._drainToastsInMemoryForTest
+        ? messenger._drainToastsInMemoryForTest(userId)
+        : [];
+}
+
+function testXpBreakdown() {
+    console.log('XP breakdown + win/runner-up (via awardProgression return + cache):');
+    const r = runMatch({
+        sig: 'prog-xp',
+        p1: { id: 'prog-xp-1', notches: 5, totalKills: 0, progression: progression.defaultProgression() },
+        p2: { id: 'prog-xp-2', notches: 2, totalKills: 0, progression: progression.defaultProgression() }
+    });
+    // awardProgression still returns xpEarned (telemetry), even though the packet no
+    // longer carries it. runMatch captures it via r.awards.
+    const x1 = r.awards.xpEarned['prog-xp-1'];
+    const x2 = r.awards.xpEarned['prog-xp-2'];
+    check(!!x1 && !!x2, 'both signed-in players have an xp breakdown');
+    const expected1 = c.xpParticipate + c.xpPerNotch * 5 + c.xpWinBonus;
+    const expected2 = c.xpParticipate + c.xpPerNotch * 2 + c.xpRunnerUpBonus;
+    check(x1.total === expected1, 'winner total = participation + 5 notches + win bonus (' + x1.total + ' === ' + expected1 + ')');
+    check(x1.winBonus === c.xpWinBonus && x1.runnerUp === 0, 'winner gets win bonus, no runner-up');
+    check(x2.total === expected2, 'runner-up total = participation + 2 notches + runner-up bonus (' + x2.total + ' === ' + expected2 + ')');
+    check(x2.winBonus === 0 && x2.runnerUp === c.xpRunnerUpBonus, 'runner-up gets runner-up bonus, no win bonus');
+    // Winner's in-memory cache advanced by the earned total.
+    check(r.p1.progression.xp === expected1, 'winner cache xp = earned total (' + r.p1.progression.xp + ')');
+}
+
+// Regression for the P1 bug: on the real match-ending tick, gameOver(winner) is
+// called BEFORE firstPlaceSig/secondPlaceSig are set for the final race, so they're
+// null. The win bonus + wins increment must come from gameOver's winner ARGUMENT,
+// not those round-placement fields. (The earlier tests pre-set the fields, which
+// masked this.)
+function testWinnerFromGameOverArg() {
+    console.log('Win bonus from gameOver arg (P1 regression):');
+    const room = game.getRoom('prog-p1', 4);
+    const w = room.world.createNewPlayer('prog-p1-win');
+    const l = room.world.createNewPlayer('prog-p1-lose');
+    room.playerList['prog-p1-win'] = w;
+    room.playerList['prog-p1-lose'] = l;
+    w.isAI = false; w.verifiedUserId = 'u-win'; w.notches = 5;
+    w.progression = progression.defaultProgression(); w.progressionLoaded = true;
+    l.isAI = false; l.verifiedUserId = 'u-lose'; l.notches = 2;
+    l.progression = progression.defaultProgression(); l.progressionLoaded = true;
+    // Reproduce the real match-end state: placement fields NULL at gameOver time.
+    room.game.firstPlaceSig = null;
+    room.game.secondPlaceSig = null;
+    const awards = room.game.awardProgression(room.game.gatherAchievements(), 'prog-p1-win');
+    const xw = awards.xpEarned['prog-p1-win'];
+    check(xw.winBonus === c.xpWinBonus, 'winner gets win bonus even with firstPlaceSig null (' + xw.winBonus + ')');
+    check(w.progression.wins === 1, 'winner wins incremented to 1 (was 0)');
+    check(awards.xpEarned['prog-p1-lose'].winBonus === 0, 'loser gets no win bonus');
+    // Runner-up reachability (Codex #1): secondPlaceSig is null at match end, so the
+    // runner-up bonus must come from notches (highest non-winner). The loser has the
+    // most notches among non-winners here, so they must get it.
+    check(awards.xpEarned['prog-p1-lose'].runnerUp === c.xpRunnerUpBonus,
+        'runner-up bonus reachable via notches when secondPlaceSig is null (' + awards.xpEarned['prog-p1-lose'].runnerUp + ')');
+}
+
+function testLevelUp() {
+    console.log('Level-up detection + lobby toast (in-memory queue):');
+    // Start 12 XP below the L2 floor so a single match (>=152 XP for a 5-notch win)
+    // crosses it. The Racing Stripes pattern (id 'stripes') unlocks at Lv2, so crossing
+    // into Lv2 should also queue a "skin" toast.
+    const startXp = progression.cumulativeXpForLevel(2) - 12;
+    const r = runMatch({
+        sig: 'prog-lvl',
+        p1: { id: 'prog-lvl-1', notches: 5, totalKills: 0, progression: { xp: startXp, level: 1, unlocked_skins: [], medal_counts: {}, wins: 0 } },
+        p2: { id: 'prog-lvl-2', notches: 1, totalKills: 0, progression: progression.defaultProgression() }
+    });
+    check(r.p1.progression.level >= 2, 'winner cache level advanced past 1 (-> ' + r.p1.progression.level + ')');
+    check(r.p2.progression.level === 1, 'low-XP runner-up stayed level 1');
+    const t1 = drainMem('prog-lvl-1');
+    check(t1.some(e => e.type === 'level' && e.level >= 2), 'winner queued a level-up toast');
+    check(t1.some(e => e.type === 'skin' && e.id === 'stripes'), 'winner queued a Racing Stripes (stripes, Lv2) new-cosmetic toast');
+    check(t1.some(e => e.type === 'xp'), 'winner queued an xp toast');
+    const t2 = drainMem('prog-lvl-2');
+    check(!t2.some(e => e.type === 'level'), 'runner-up queued no level-up toast');
+}
+
+function testAchievementUnlock() {
+    console.log('Achievement-skin unlock + toast:');
+    // p1 holds Most Kills this match (totalKills highest) and already has 74 lifetime
+    // -> crossing the scaled threshold (75) unlocks "executioner".
+    const r = runMatch({
+        sig: 'prog-ach',
+        p1: { id: 'prog-ach-1', notches: 3, totalKills: 5, progression: { xp: 0, level: 1, unlocked_skins: [], medal_counts: { mostKills: 74 }, wins: 0 } },
+        p2: { id: 'prog-ach-2', notches: 1, totalKills: 0, progression: progression.defaultProgression() }
+    });
+    check(r.p1.progression.unlocked_skins.indexOf('executioner') !== -1, 'in-memory cache records the executioner unlock');
+    const t1 = drainMem('prog-ach-1');
+    check(t1.some(e => e.type === 'achievement' && e.id === 'executioner'), 'winner queued an executioner achievement toast');
+}
+
+// Codex #2: players who STAY in the room get their toasts on the lobby return
+// (Game.startLobby -> messenger.deliverRoomToasts), not only on a re-join. async +
+// awaits a microtask because the emit happens inside auth.drainPendingToasts's
+// resolved promise (production doesn't care about that microtask; the test must).
+async function testSameRoomToastDelivery() {
+    console.log('Same-room lobby-return toast delivery (Codex #2):');
+    // A recording socket registered in the mailbox so deliverRoomToasts can emit to it.
+    const sock = makeRecordingSocket('prog-room-1');
+    sock.userId = 'u-room-1';
+    messenger.addMailBox(sock.id, sock, { userId: 'u-room-1', deviceId: null });
+    // Queue toasts for this user as a finished match would (writes-off in-memory path).
+    messenger.enqueueToastsInMemory('u-room-1', [{ type: 'xp', amount: 200 }, { type: 'level', level: 3 }]);
+    // Simulate the match->lobby transition for a room containing this still-present player.
+    const playerList = { 'prog-room-1': { isAI: false, verifiedUserId: 'u-room-1' } };
+    messenger.deliverRoomToasts(playerList);
+    await Promise.resolve(); await Promise.resolve(); // let the drain promise's .then run
+    const emit = sock.lastEmit('progressionToasts');
+    check(!!emit && Array.isArray(emit.events), 'staying player received a progressionToasts batch on lobby return');
+    check(emit && emit.events.some(e => e.type === 'level' && e.level === 3), 'batch carries the queued level toast');
+    // Drained: a second delivery sends nothing (toasts show once).
+    sock.emits.length = 0;
+    messenger.deliverRoomToasts(playerList);
+    await Promise.resolve(); await Promise.resolve();
+    check(!sock.lastEmit('progressionToasts'), 'toasts cleared after first delivery (not re-sent)');
+    messenger.removeMailBox(sock.id);
+}
+
+function testNoWritesByDefault() {
+    console.log('Writes gate:');
+    check(auth.writesEnabled === false, 'ALLOW_SUPABASE_WRITES off by default -> auth.writesEnabled === false (no persistence)');
+}
+
+// Bots and guests (no verifiedUserId) earn no progression at gameOver.
+function testGuestsAndBotsEarnNothing() {
+    console.log('Guests + bots earn no XP:');
+    events.length = 0;
+    const room = game.getRoom('prog-guest', 4);
+    const human = room.world.createNewPlayer('prog-guest-human');
+    const guest = room.world.createNewPlayer('prog-guest-guest');
+    const bot = room.world.createNewPlayer('prog-guest-bot');
+    room.playerList['prog-guest-human'] = human;
+    room.playerList['prog-guest-guest'] = guest;
+    room.playerList['prog-guest-bot'] = bot;
+    human.isAI = false; human.verifiedUserId = 'user-h'; human.notches = 5;
+    human.progression = progression.defaultProgression(); human.progressionLoaded = true;
+    guest.isAI = false; guest.verifiedUserId = null; guest.notches = 3;
+    bot.isAI = true; bot.verifiedUserId = null; bot.notches = 4;
+    room.game.firstPlaceSig = 'prog-guest-human';
+    room.game.secondPlaceSig = 'prog-guest-guest';
+    const awards = room.game.awardProgression(room.game.gatherAchievements(), 'prog-guest-human');
+    check(!!awards.xpEarned['prog-guest-human'], 'signed-in human earns XP');
+    check(!awards.xpEarned['prog-guest-guest'], 'guest (no verifiedUserId) earns nothing');
+    check(!awards.xpEarned['prog-guest-bot'], 'bot (isAI) earns nothing');
+    // And the game-over packet itself no longer carries progression fields.
+    events.length = 0;
+    room.game.gameOver('prog-guest-human');
+    const packet = lastEvent('startGameover');
+    check(packet && packet.xpEarned === undefined && packet.levelUps === undefined,
+        'startGameover packet no longer carries xp/level/unlock fields');
+}
+
+// A socket.io stand-in that RECORDS outbound emits so we can assert on the
+// cosmeticRejected / playerCosmeticChanged the real setCosmetic handler emits.
+function makeRecordingSocket(id) {
+    const handlers = {};
+    const emits = [];
+    return {
+        id: id, userId: null, handlers: handlers, emits: emits,
+        on(e, fn) { handlers[e] = fn; },
+        emit(h, p) { emits.push({ header: h, payload: p }); },
+        join() { }, leave() { },
+        broadcast: { to() { return { emit() { } }; } },
+        fire(e, p) { if (handlers[e]) handlers[e](p); },
+        lastEmit(h) { for (let i = emits.length - 1; i >= 0; i--) { if (emits[i].header === h) return emits[i].payload; } return null; }
+    };
+}
+
+// Drive the REAL messenger setCosmetic handler through every gate branch + the
+// three-independent-slot guarantees.
+function testSetCosmeticGating() {
+    console.log('setCosmetic gating (real messenger handler):');
+    const s = makeRecordingSocket('prog-skin-sock');
+    messenger.addMailBox(s.id, s, { userId: null, deviceId: null }); // registers handlers
+    s.fire('enterGame', -1); // real join + matchmake + spawn
+
+    let room = null, player = null;
+    for (const sig of Object.keys(hostess.getRooms())) {
+        const rm = hostess.getRoomBySig(sig);
+        if (rm && rm.playerList[s.id]) { room = rm; player = rm.playerList[s.id]; break; }
+    }
+    if (!room || !player) { check(false, 'joined a room via enterGame'); return; }
+    room.game.currentState = c.stateMap.lobby; // setCosmetic requires the lobby state
+
+    // setCosmetic emits the SUCCESS broadcast via messageRoomBySig (the recording
+    // `io` -> events), but REJECTIONS via client.emit (the socket -> s.emits). Read
+    // each from its real sink. Clear both before every equip. changedTo reads the
+    // last broadcast FOR THAT SLOT so we can prove per-slot independence.
+    const equip = function (slot, id) { s.emits.length = 0; events.length = 0; s.fire('setCosmetic', { slot: slot, id: id }); };
+    const changedTo = function (slot) {
+        for (let i = events.length - 1; i >= 0; i--) {
+            if (events[i].header === 'playerCosmeticChanged' && events[i].payload.slot === slot) { return events[i].payload.value; }
+        }
+        return '__none__';
+    };
+    const rejection = function () { return s.lastEmit('cosmeticRejected'); };
+
+    // Guest (no progression) — treated as level 1. Every level cosmetic rejects.
+    player.progression = null;
+    equip('pattern', 'stripes'); { const r = rejection(); check(!!r && r.reason === 'level' && r.required === 2 && changedTo('pattern') === '__none__', 'guest rejected from Stripes (pattern Lv 2)'); }
+    equip('cart', 'firetruck'); { const r = rejection(); check(!!r && r.reason === 'level' && r.required === 12 && changedTo('cart') === '__none__', 'guest rejected from Drone (cart Lv 12)'); }
+    equip('bogusSlot', 'stripes'); { const r = rejection(); check(!!r && r.reason === 'slot', 'unknown slot rejected'); }
+    equip('pattern', 'bogus-id'); { const r = rejection(); check(!!r && r.reason === 'unknown', 'unknown id rejected'); }
+    equip('pattern', 'firetruck'); { const r = rejection(); check(!!r && r.reason === 'unknown', 'wrong-slot id rejected (cart id in pattern slot)'); }
+    equip('cart', 'eight_ball'); check(changedTo('cart') === 'eight_ball', 'open cart (unlock-all-for-testing) equips for anyone, even a guest');
+
+    // Signed-in level 1: still nothing free; empty id clears a slot.
+    player.progression = { xp: 0, level: 1, unlocked_skins: [], medal_counts: {}, wins: 0 };
+    equip('pattern', 'stripes'); { const r = rejection(); check(!!r && r.reason === 'level', 'level-1 player rejected from Stripes'); }
+    equip('pattern', ''); check(changedTo('pattern') === null, 'empty id clears the pattern slot back to default');
+
+    // Level 5 — Stripes (pattern Lv2) + Dashes (trail Lv4) ok; Drone (cart Lv12) +
+    // Polka (pattern Lv8) rejected.
+    player.progression = { xp: 99999, level: 5, unlocked_skins: [], medal_counts: {}, wins: 0 };
+    equip('pattern', 'stripes'); check(changedTo('pattern') === 'stripes', 'level-5 player equips Stripes (pattern Lv 2)');
+    equip('trail', 'dashes'); check(changedTo('trail') === 'dashes', 'level-5 player equips Dashes (trail Lv 4)');
+    equip('cart', 'firetruck'); { const r = rejection(); check(!!r && r.reason === 'level' && r.required === 12, 'level-5 player rejected from Drone (cart Lv 12)'); }
+    equip('pattern', 'polka'); { const r = rejection(); check(!!r && r.reason === 'level' && r.required === 8, 'level-5 player rejected from Polka (pattern Lv 8)'); }
+
+    // INDEPENDENCE: pattern + trail set above must BOTH still be equipped — equipping
+    // one slot never clears another. (player fields: pattern, trailFx.)
+    check(player.pattern === 'stripes' && player.trailFx === 'dashes', 'equipping the trail slot did not clear the pattern slot (3 independent slots)');
+
+    // Level 12 — Drone (cart Lv12) ok; Dino (cart Lv18) rejected.
+    player.progression = { xp: 99999, level: 12, unlocked_skins: [], medal_counts: {}, wins: 0 };
+    equip('cart', 'firetruck'); check(changedTo('cart') === 'firetruck', 'level-12 player equips Drone (cart Lv 12)');
+    equip('cart', 'dino'); { const r = rejection(); check(!!r && r.reason === 'level' && r.required === 18, 'level-12 player rejected from Dino (cart Lv 18)'); }
+
+    // Achievement cosmetic — gated on unlocked_skins, not level, and slot-checked.
+    player.progression = { xp: 99999, level: 30, unlocked_skins: [], medal_counts: {}, wins: 0 };
+    equip('cart', 'golden_champion'); { const r = rejection(); check(!!r && r.reason === 'achievement', 'achievement cart rejected when not unlocked (even at Lv 30)'); }
+    equip('pattern', 'golden_champion'); { const r = rejection(); check(!!r && r.reason === 'unknown', 'achievement cart rejected in the wrong slot'); }
+    player.progression.unlocked_skins = ['golden_champion'];
+    equip('cart', 'golden_champion'); check(changedTo('cart') === 'golden_champion', 'achievement cart equips once unlocked');
+
+    hostess.kickFromRoom(s.id);
+    messenger.removeMailBox(s.id);
+}
+
+(async function run() {
+    testPureHelpers();
+    testXpBreakdown();
+    testWinnerFromGameOverArg();
+    testLevelUp();
+    testAchievementUnlock();
+    testGuestsAndBotsEarnNothing();
+    testSetCosmeticGating();
+    await testSameRoomToastDelivery();
+    testNoWritesByDefault();
+
+    if (failures > 0) {
+        console.log('\nProgression test FAILED with ' + failures + ' error(s).');
+        process.exit(1);
+    }
+    console.log('\nProgression test passed.');
+    process.exit(0);
+})();

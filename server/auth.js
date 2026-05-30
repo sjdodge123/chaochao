@@ -11,6 +11,9 @@
 //   SUPABASE_SERVICE_ROLE_KEY   — bypasses RLS; writes progression. SERVER ONLY.
 //   SUPABASE_JWT_SECRET         — verify access tokens locally (no network hop). SERVER ONLY.
 
+var progression = require('./progression.js');
+var skinRegistry = require('./skinRegistry.js');
+
 var SUPABASE_URL = process.env.SUPABASE_URL || null;
 var SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || null;
 var JWT_SECRET = process.env.SUPABASE_JWT_SECRET || null;
@@ -272,11 +275,205 @@ async function getDisplayName(userId) {
     }
 }
 
+// Read a user's progression row. A READ, so it works even when writes are gated
+// off (local dev still sees prod data) — only `enabled` (can we talk to Supabase
+// at all) gates it. Returns a normalized row, or null when auth is disabled / the
+// user has no row yet (caller falls back to a default).
+async function getProgression(userId) {
+    if (!enabled || !userId || !supabase) {
+        return null;
+    }
+    try {
+        var res = await supabase
+            .from('progression')
+            .select('xp, level, unlocked_skins, medal_counts, wins, selected_cart, selected_pattern, selected_trail')
+            .eq('user_id', userId)
+            .maybeSingle();
+        if (res.error) {
+            console.log('[auth] getProgression failed:', res.error.message);
+            return null;
+        }
+        if (!res.data) {
+            return null;
+        }
+        return normalizeProgression(res.data);
+    } catch (e) {
+        console.log('[auth] getProgression error:', e.message);
+        return null;
+    }
+}
+
+function normalizeProgression(row) {
+    var def = progression.defaultProgression();
+    return {
+        xp: (row && typeof row.xp === 'number') ? row.xp : def.xp,
+        level: (row && typeof row.level === 'number') ? row.level : def.level,
+        unlocked_skins: (row && Array.isArray(row.unlocked_skins)) ? row.unlocked_skins : def.unlocked_skins,
+        medal_counts: (row && row.medal_counts && typeof row.medal_counts === 'object') ? row.medal_counts : def.medal_counts,
+        wins: (row && typeof row.wins === 'number') ? row.wins : def.wins,
+        // Per-slot equipped cosmetic ids (null = the slot's default). Restored onto the
+        // live Player so equips persist across sessions/devices.
+        selected_cart: (row && typeof row.selected_cart === 'string') ? row.selected_cart : null,
+        selected_pattern: (row && typeof row.selected_pattern === 'string') ? row.selected_pattern : null,
+        selected_trail: (row && typeof row.selected_trail === 'string') ? row.selected_trail : null
+    };
+}
+
+// Persist ONE cosmetic-slot equip (cart/pattern/trail) for a signed-in player. Behind the
+// writes gate like every other writer — a no-op locally so dev never seeds the shared DB.
+// `id` null clears the slot. Upserts so a player with no row yet still records the pick.
+// Touches only the one selected_<slot> column; never the XP/medal columns.
+var COSMETIC_SLOT_COLUMN = { cart: 'selected_cart', pattern: 'selected_pattern', trail: 'selected_trail' };
+async function saveCosmetic(userId, slot, id) {
+    var column = COSMETIC_SLOT_COLUMN[slot];
+    if (!writesEnabled || !userId || !supabase || !column) {
+        return null;
+    }
+    try {
+        var payload = { user_id: userId, updated_at: new Date().toISOString() };
+        payload[column] = (id == null || id === '') ? null : id;
+        var upd = await supabase
+            .from('progression')
+            .upsert(payload, { onConflict: 'user_id' });
+        if (upd.error) {
+            console.log('[auth] saveCosmetic write failed:', upd.error.message);
+            return null;
+        }
+        return true;
+    } catch (e) {
+        console.log('[auth] saveCosmetic error:', e.message);
+        return null;
+    }
+}
+
+// Apply a match's XP / medal / win deltas to a user's progression row and persist.
+// Behind the global writes gate (ALLOW_SUPABASE_WRITES) like every other writer —
+// a no-op locally so dev never seeds the shared DB. Re-reads the row so the stored
+// value is authoritative (not the caller's possibly-stale cache), recomputes level
+// + achievement unlocks via the pure progression helpers, and writes the whole
+// columns back. Returns the new normalized row (so the caller can emit it), or null
+// when writes are gated/disabled.
+//
+// Not atomic (read-modify-write) — but a user only finishes one match at a time, so
+// contention is effectively nil; matches the same pragmatic stance as
+// ensureProgressionRow. The fully-atomic fix is a Postgres RPC if this ever races.
+async function addProgression(userId, opts) {
+    opts = opts || {};
+    if (!writesEnabled || !userId || !supabase) {
+        return null;
+    }
+    try {
+        var existing = await supabase
+            .from('progression')
+            .select('xp, level, unlocked_skins, medal_counts, wins, pending_toasts')
+            .eq('user_id', userId)
+            .maybeSingle();
+        if (existing.error) {
+            console.log('[auth] addProgression select failed:', existing.error.message);
+            return null;
+        }
+        var cur = normalizeProgression(existing.data || {});
+        var oldLevel = cur.level;
+        var newXp = cur.xp + (opts.xpDelta || 0);
+        var newWins = cur.wins + (opts.win ? 1 : 0);
+        var newMedalCounts = progression.mergeMedalCounts(cur.medal_counts, opts.medalDeltas);
+        var newLevel = progression.levelForXp(newXp);
+        // Level skins aren't stored; unlocked_skins holds only achievement skins.
+        var earned = progression.achievementsUnlocked(newMedalCounts, newWins);
+        var unlocked = (cur.unlocked_skins || []).slice();
+        var freshAchievementSkins = [];
+        for (var i = 0; i < earned.length; i++) {
+            if (unlocked.indexOf(earned[i]) === -1) { unlocked.push(earned[i]); freshAchievementSkins.push(earned[i]); }
+        }
+        // Build the celebration toasts for this match (shown on next lobby arrival, not
+        // on the game-over screen). Appended to the durable pending_toasts queue.
+        var newToasts = progression.buildToastEvents({
+            xpDelta: opts.xpDelta || 0,
+            oldLevel: oldLevel,
+            newLevel: newLevel,
+            levelSkinsUnlocked: skinRegistry.levelSkinsUnlockedBetween,
+            freshAchievementSkins: freshAchievementSkins
+        });
+        var existingToasts = (existing.data && Array.isArray(existing.data.pending_toasts))
+            ? existing.data.pending_toasts : [];
+        var mergedToasts = existingToasts.concat(newToasts);
+        var payload = {
+            user_id: userId,
+            xp: newXp,
+            level: newLevel,
+            wins: newWins,
+            medal_counts: newMedalCounts,
+            unlocked_skins: unlocked,
+            pending_toasts: mergedToasts,
+            updated_at: new Date().toISOString()
+        };
+        var upd = await supabase
+            .from('progression')
+            .upsert(payload, { onConflict: 'user_id' });
+        if (upd.error) {
+            console.log('[auth] addProgression write failed:', upd.error.message);
+            return null;
+        }
+        var out = normalizeProgression(payload);
+        out.newToasts = newToasts; // caller may use these; durable copy is in pending_toasts
+        return out;
+    } catch (e) {
+        console.log('[auth] addProgression error:', e.message);
+        return null;
+    }
+}
+
+// Read and CLEAR a user's pending celebration toasts (shown on lobby arrival).
+// A READ-then-clear: the read works whenever auth is enabled, but the clearing
+// write is gated like every other writer. When writes are off (local dev) we still
+// RETURN the toasts (so the UI is testable) but DON'T clear them — acceptable since
+// dev never accumulates real rows. Returns [] when auth is off / no row / empty.
+async function drainPendingToasts(userId) {
+    if (!enabled || !userId || !supabase) {
+        return [];
+    }
+    try {
+        var res = await supabase
+            .from('progression')
+            .select('pending_toasts')
+            .eq('user_id', userId)
+            .maybeSingle();
+        if (res.error || !res.data) {
+            if (res.error) { console.log('[auth] drainPendingToasts read failed:', res.error.message); }
+            return [];
+        }
+        var toasts = Array.isArray(res.data.pending_toasts) ? res.data.pending_toasts : [];
+        if (toasts.length === 0) {
+            return [];
+        }
+        if (writesEnabled) {
+            var upd = await supabase
+                .from('progression')
+                .update({ pending_toasts: [], updated_at: new Date().toISOString() })
+                .eq('user_id', userId);
+            if (upd.error) {
+                // Couldn't clear — return [] rather than risk showing the same toasts
+                // forever on every lobby join.
+                console.log('[auth] drainPendingToasts clear failed:', upd.error.message);
+                return [];
+            }
+        }
+        return toasts;
+    } catch (e) {
+        console.log('[auth] drainPendingToasts error:', e.message);
+        return [];
+    }
+}
+
 exports.enabled = enabled;
 exports.writesEnabled = writesEnabled;
 exports.supabase = supabase;
 exports.verifyToken = verifyToken;
 exports.ensureProgressionRow = ensureProgressionRow;
+exports.getProgression = getProgression;
+exports.addProgression = addProgression;
+exports.saveCosmetic = saveCosmetic;
+exports.drainPendingToasts = drainPendingToasts;
 exports.getDisplayName = getDisplayName;
 // Public, browser-safe config to inject into served pages. Returns null unless
 // the server is fully able to VERIFY tokens (`enabled`) AND the anon key is

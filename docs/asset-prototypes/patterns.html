@@ -1,0 +1,1233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>chaochao — pattern painter prototype (tint to player color)</title>
+<style>
+  :root { --bg:#11141b; --panel:#1a1f2b; --ink:#e7ecf5; --muted:#8b97ad; --accent:#5ad0ff; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 -apple-system, system-ui, sans-serif; }
+  header { padding: 14px 18px; border-bottom: 1px solid #232a38; }
+  header h1 { margin: 0 0 2px; font-size: 16px; }
+  header p { margin: 0; color: var(--muted); font-size: 12px; }
+  .wrap { display: flex; gap: 0; align-items: flex-start; }
+  .stage { flex: 1 1 auto; padding: 14px 18px; }
+  canvas#stage { width: 100%; height: auto; background:
+    radial-gradient(120% 120% at 50% 30%, #1c2333 0%, #0d1016 100%);
+    border: 1px solid #232a38; border-radius: 10px; display: block; }
+  .panel { flex: 0 0 300px; padding: 14px 16px; border-left: 1px solid #232a38;
+    min-height: 100vh; background: var(--panel); }
+  .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); margin: 18px 0 8px; }
+  .panel h2:first-child { margin-top: 0; }
+  .swatches { display: flex; flex-wrap: wrap; gap: 6px; }
+  .swatch { width: 26px; height: 26px; border-radius: 6px; cursor: pointer;
+    border: 2px solid transparent; }
+  .swatch.active { border-color: #fff; box-shadow: 0 0 0 2px #000 inset; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 7px 0; }
+  .row label { flex: 0 0 116px; color: var(--muted); font-size: 12px; }
+  .row input[type=range] { flex: 1 1 auto; }
+  .row .val { flex: 0 0 38px; text-align: right; font-variant-numeric: tabular-nums;
+    color: var(--ink); font-size: 12px; }
+  .toggles { display: flex; gap: 14px; align-items: center; color: var(--muted); flex-wrap: wrap; }
+  .custom { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .custom input[type=color] { width: 34px; height: 28px; border: none; background: none; }
+  .group { border-top: 1px dashed #2a3142; padding-top: 6px; margin-top: 10px; }
+  .group .name { color: var(--accent); font-weight: 600; font-size: 12px; margin-bottom: 2px; }
+  button.reset { margin-top: 14px; background: #232c3d; color: var(--ink);
+    border: 1px solid #34405a; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1>chaochao — pattern painter prototype</h1>
+  <p>17 equippable patterns, each a texture overlay that MUST tint to the player's color (paint). Pick any color (left) and every pattern re-tints live. Forward = +X. Patterns are drawn over a sample cart body and clipped to its silhouette, exactly like <code>drawPatternOverlay</code> in draw.js. (First 7 are the ladder/achievement set; the next 10 are extra options to choose from.)</p>
+</header>
+<div class="wrap">
+  <div class="stage"><canvas id="stage" width="1100" height="560"></canvas></div>
+  <div class="panel">
+    <h2>Player color (re-tints every pattern)</h2>
+    <div class="swatches" id="swatches"></div>
+    <div class="custom">
+      <input type="color" id="customColor" value="#5ad0ff" />
+      <span style="color:var(--muted);font-size:12px">custom tint</span>
+    </div>
+
+    <h2>View</h2>
+    <div class="toggles">
+      <label><input type="checkbox" id="spin" /> rotate bodies</label>
+      <label><input type="checkbox" id="clip" checked /> clip to body</label>
+      <label><input type="checkbox" id="ring" /> unit ring</label>
+    </div>
+    <div class="row">
+      <label>body shape</label>
+      <select id="bodyShape" style="flex:1 1 auto;background:#232c3d;color:var(--ink);border:1px solid #34405a;border-radius:6px;padding:4px">
+        <option value="round">Rounded cart</option>
+        <option value="disc">Disc</option>
+        <option value="basketball">Cart: Basketball</option>
+        <option value="earth">Cart: Earth</option>
+        <option value="eightball">Cart: 8-Ball</option>
+      </select>
+    </div>
+    <div class="row">
+      <label>anim speed</label>
+      <input type="range" id="animSpeed" min="0" max="200" value="100" />
+      <span class="val" id="animSpeedV"></span>
+    </div>
+    <div class="row">
+      <label>pattern opacity</label>
+      <input type="range" id="patOpacity" min="20" max="100" value="60" />
+      <span class="val" id="patOpacityV"></span>
+    </div>
+    <p style="color:var(--muted);font-size:11px;margin:2px 0 0">Opacity applies only to full-repaint patterns (Flames, Nebula, Carbon, Camo, Hazard, Circuit, Scales, Electric, Tiger, Waves, Honeycomb) so the cart shows through. See-through patterns &amp; badges stay solid.</p>
+
+    <div class="group">
+      <div class="name">Stripes (Lv2)</div>
+      <div class="row"><label>stripe width</label><input type="range" id="st_w" min="0" max="100" value="40"><span class="val" id="st_wV"></span></div>
+      <div class="row"><label>center gap</label><input type="range" id="st_gap" min="0" max="100" value="34"><span class="val" id="st_gapV"></span></div>
+    </div>
+    <div class="group">
+      <div class="name">Polka (Lv8)</div>
+      <div class="row"><label>dot size</label><input type="range" id="pk_size" min="0" max="100" value="42"><span class="val" id="pk_sizeV"></span></div>
+      <div class="row"><label>dot spacing</label><input type="range" id="pk_gap" min="0" max="100" value="46"><span class="val" id="pk_gapV"></span></div>
+    </div>
+    <div class="group">
+      <div class="name">Checkered (Lv14)</div>
+      <div class="row"><label>squares</label><input type="range" id="ck_n" min="0" max="100" value="42"><span class="val" id="ck_nV"></span></div>
+    </div>
+    <div class="group">
+      <div class="name">Flames (Lv20)</div>
+      <div class="row"><label>intensity</label><input type="range" id="fl_int" min="0" max="100" value="60"><span class="val" id="fl_intV"></span></div>
+      <div class="row"><label>tip brightness</label><input type="range" id="fl_ramp" min="0" max="100" value="62"><span class="val" id="fl_rampV"></span></div>
+    </div>
+    <div class="group">
+      <div class="name">Nebula (Lv26)</div>
+      <div class="row"><label>star density</label><input type="range" id="nb_stars" min="0" max="100" value="55"><span class="val" id="nb_starsV"></span></div>
+      <div class="row"><label>cloud drift</label><input type="range" id="nb_drift" min="0" max="100" value="50"><span class="val" id="nb_driftV"></span></div>
+    </div>
+    <div class="group">
+      <div class="name">Executioner (achievement)</div>
+      <div class="row"><label>menace</label><input type="range" id="ex_menace" min="0" max="100" value="55"><span class="val" id="ex_menaceV"></span></div>
+    </div>
+    <div class="group">
+      <div class="name">Punching Bag (achievement)</div>
+      <div class="row"><label>bruise amount</label><input type="range" id="pb_bruise" min="0" max="100" value="55"><span class="val" id="pb_bruiseV"></span></div>
+    </div>
+    <div class="group">
+      <div class="name">Carbon Fiber</div>
+      <div class="row"><label>weave fineness</label><input type="range" id="cf_scale" min="0" max="100" value="50"><span class="val" id="cf_scaleV"></span></div>
+    </div>
+    <div class="group">
+      <div class="name">Camo</div>
+      <div class="row"><label>patch scale</label><input type="range" id="cm_scale" min="0" max="100" value="50"><span class="val" id="cm_scaleV"></span></div>
+    </div>
+    <div class="group">
+      <div class="name">Hazard Stripes</div>
+      <div class="row"><label>stripe width</label><input type="range" id="hz_w" min="0" max="100" value="50"><span class="val" id="hz_wV"></span></div>
+    </div>
+    <div class="group">
+      <div class="name">Circuit Board</div>
+      <div class="row"><label>pulse glow</label><input type="range" id="ci_glow" min="0" max="100" value="60"><span class="val" id="ci_glowV"></span></div>
+    </div>
+    <div class="group">
+      <div class="name">Dragon Scales</div>
+      <div class="row"><label>scale size</label><input type="range" id="sc_size" min="0" max="100" value="50"><span class="val" id="sc_sizeV"></span></div>
+    </div>
+    <div class="group">
+      <div class="name">Electric</div>
+      <div class="row"><label>intensity</label><input type="range" id="lt_int" min="0" max="100" value="60"><span class="val" id="lt_intV"></span></div>
+    </div>
+    <div class="group">
+      <div class="name">Tiger</div>
+      <div class="row"><label>stripe boldness</label><input type="range" id="tg_bold" min="0" max="100" value="50"><span class="val" id="tg_boldV"></span></div>
+    </div>
+    <div class="group">
+      <div class="name">Waves</div>
+      <div class="row"><label>amplitude</label><input type="range" id="wv_amp" min="0" max="100" value="50"><span class="val" id="wv_ampV"></span></div>
+    </div>
+    <div class="group">
+      <div class="name">Honeycomb</div>
+      <div class="row"><label>cell size</label><input type="range" id="hc_size" min="0" max="100" value="50"><span class="val" id="hc_sizeV"></span></div>
+    </div>
+    <div class="group">
+      <div class="name">Splatter</div>
+      <div class="row"><label>density</label><input type="range" id="sp_dense" min="0" max="100" value="50"><span class="val" id="sp_denseV"></span></div>
+    </div>
+
+    <button class="reset" id="reset">reset params</button>
+  </div>
+</div>
+
+<script>
+// ============================================================================
+// Helpers copied (minimal) from client/scripts/draw.js so this runs standalone.
+// ============================================================================
+var _cartSkinRGB = {};
+function cartSkinRGB(color) {
+  if (_cartSkinRGB[color] != null) return _cartSkinRGB[color];
+  var c = document.createElement("canvas"); c.width = c.height = 1;
+  var cx = c.getContext("2d");
+  cx.fillStyle = "#000"; cx.fillStyle = color; cx.fillRect(0, 0, 1, 1);
+  var d = cx.getImageData(0, 0, 1, 1).data;
+  var rgb = { r: d[0], g: d[1], b: d[2] };
+  _cartSkinRGB[color] = rgb; return rgb;
+}
+// Lighten (amt>0, toward white) / darken (amt<0, toward black) by a 0..1 fraction.
+function cartSkinShade(color, amt) {
+  var c = cartSkinRGB(color);
+  var t = amt < 0 ? 0 : 255;
+  var f = amt < 0 ? -amt : amt;
+  return "rgb(" + Math.round(c.r + (t - c.r) * f) + "," +
+    Math.round(c.g + (t - c.g) * f) + "," + Math.round(c.b + (t - c.b) * f) + ")";
+}
+// rgba variant (same hue family as paint, with alpha) — used for glows/clouds.
+function cartSkinShadeA(color, amt, a) {
+  var c = cartSkinRGB(color);
+  var t = amt < 0 ? 0 : 255;
+  var f = amt < 0 ? -amt : amt;
+  return "rgba(" + Math.round(c.r + (t - c.r) * f) + "," +
+    Math.round(c.g + (t - c.g) * f) + "," + Math.round(c.b + (t - c.b) * f) + "," + a + ")";
+}
+function cartRoundRectPath(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+
+// ============================================================================
+// PARAMS — prototype-only live tuning. The ported painters inline these
+// constants (the chosen values are echoed in the PORT NOTE at the bottom).
+// ============================================================================
+var PARAMS = window.PARAMS = {
+  st_w: 0.4, st_gap: 0.34,
+  pk_size: 0.42, pk_gap: 0.46,
+  ck_n: 0.42,
+  fl_int: 0.6, fl_ramp: 0.62,
+  nb_stars: 0.55, nb_drift: 0.5,
+  ex_menace: 0.55,
+  pb_bruise: 0.55,
+  cf_scale: 0.5, cm_scale: 0.5, hz_w: 0.5, ci_glow: 0.6, sc_size: 0.5,
+  lt_int: 0.6, tg_bold: 0.5, wv_amp: 0.5, hc_size: 0.5, sp_dense: 0.5,
+};
+function P(k, d) { return (PARAMS[k] != null ? PARAMS[k] : d); }
+
+// ============================================================================
+// SAMPLE CART BASES — copied verbatim from carts.html so we can preview a
+// pattern composited over a real cart (cart drawn first, pattern clipped to the
+// silhouette on top — exactly how the game layers them). These are round carts,
+// so the pattern clips to a disc.
+// ============================================================================
+function drawBasketballSkin(ctx, anim, paint) {
+  paint = paint || "#e2802b";
+  ctx.beginPath(); ctx.arc(0, 0, 0.9, 0, Math.PI * 2);
+  var g = ctx.createRadialGradient(-0.25, -0.25, 0.1, 0, 0, 0.95);
+  g.addColorStop(0, cartSkinShade(paint, 0.28)); g.addColorStop(1, cartSkinShade(paint, -0.22));
+  ctx.fillStyle = g; ctx.fill();
+  ctx.strokeStyle = "#15100a"; ctx.lineWidth = 0.04; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(0, -0.9); ctx.lineTo(0, 0.9); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-0.9, 0); ctx.lineTo(0.9, 0); ctx.stroke();
+  ctx.beginPath(); ctx.arc(-1.25, 0, 0.95, -0.7, 0.7); ctx.stroke();
+  ctx.beginPath(); ctx.arc(1.25, 0, 0.95, Math.PI - 0.7, Math.PI + 0.7); ctx.stroke();
+}
+function drawEarthSkin(ctx, anim, paint, heading) {
+  paint = paint || "#4a78e0";
+  var halo = ctx.createRadialGradient(0, 0, 0.78, 0, 0, 1.0);
+  halo.addColorStop(0, cartSkinShadeA(paint, 0.4, 0));
+  halo.addColorStop(0.82, cartSkinShadeA(paint, 0.5, 0.45));
+  halo.addColorStop(1, cartSkinShadeA(paint, 0.5, 0));
+  ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(0, 0, 1.0, 0, Math.PI * 2); ctx.fill();
+  var oa = anim * 1.4;
+  var sxo = Math.cos(oa) * 0.98, syo = Math.sin(oa) * 0.34;
+  var behind = Math.sin(oa) < 0;
+  function drawMoon() {
+    ctx.fillStyle = cartSkinShade(paint, 0.1);
+    ctx.beginPath(); ctx.arc(sxo, syo, 0.07, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = cartSkinShade(paint, -0.4); ctx.lineWidth = 0.02; ctx.stroke();
+  }
+  if (behind) drawMoon();
+  ctx.save();
+  ctx.beginPath(); ctx.arc(0, 0, 0.82, 0, Math.PI * 2); ctx.clip();
+  var ocean = ctx.createRadialGradient(-0.28, -0.28, 0.1, 0, 0, 1.0);
+  ocean.addColorStop(0, "#41a6e6"); ocean.addColorStop(1, "#0b3a78");
+  ctx.fillStyle = ocean; ctx.fillRect(-1, -1, 2, 2);
+  var scroll = ((anim * 0.18) % 1.64) - 0.82;
+  function land(ox) {
+    ctx.save(); ctx.translate(ox, 0);
+    ctx.fillStyle = "#3f9b46";
+    var blobs = [[-0.2, -0.3, 0.26, 0.18], [0.05, -0.1, 0.2, 0.26], [-0.35, 0.25, 0.22, 0.16],
+                 [0.3, 0.3, 0.18, 0.22], [0.45, -0.35, 0.14, 0.12]];
+    for (var b = 0; b < blobs.length; b++) {
+      ctx.beginPath(); ctx.ellipse(blobs[b][0], blobs[b][1], blobs[b][2], blobs[b][3], 0.4, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.fillStyle = "#327d3a";
+    ctx.beginPath(); ctx.ellipse(0.0, -0.12, 0.1, 0.13, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+  land(scroll); land(scroll + 1.64); land(scroll - 1.64);
+  ctx.fillStyle = "rgba(255,255,255,0.55)";
+  var cl = ((anim * 0.26) % 1.8) - 0.9;
+  for (var c = 0; c < 3; c++) {
+    var cx2 = ((cl + c * 0.7 + 0.9) % 1.8) - 0.9;
+    var cy2 = -0.35 + c * 0.32;
+    ctx.beginPath(); ctx.ellipse(cx2, cy2, 0.22, 0.08, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx2 + 0.14, cy2 + 0.03, 0.12, 0.06, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  var term = ctx.createRadialGradient(-0.3, -0.3, 0.2, 0, 0, 1.05);
+  term.addColorStop(0, "rgba(255,255,255,0.18)");
+  term.addColorStop(0.6, "rgba(0,0,0,0)");
+  term.addColorStop(1, "rgba(0,0,20,0.5)");
+  ctx.fillStyle = term; ctx.fillRect(-1, -1, 2, 2);
+  ctx.restore();
+  if (!behind) drawMoon();
+}
+var EIGHTBALL_ANSWERS = ["YES", "NO", "MAYBE", "ASK\nAGAIN", "FOR\nSURE", "NOPE",
+  "IT IS\nCERTAIN", "DON'T\nCOUNT\nON IT", "MOST\nLIKELY", "OUTLOOK\nGOOD",
+  "VERY\nDOUBTFUL", "TRY\nLATER"];
+var eightBall = { init: false, phase: "rest", until: 0, answer: "YES" };
+function eightBallTick(anim) {
+  if (!eightBall.init) {
+    eightBall.init = true; eightBall.until = anim + 1.5 + Math.random() * 2;
+    eightBall.answer = EIGHTBALL_ANSWERS[(Math.random() * EIGHTBALL_ANSWERS.length) | 0];
+  }
+  if (anim >= eightBall.until) {
+    if (eightBall.phase === "rest") { eightBall.phase = "shake"; eightBall.until = anim + 0.75; }
+    else if (eightBall.phase === "shake") {
+      eightBall.phase = "reveal"; eightBall.until = anim + 2.8;
+      eightBall.answer = EIGHTBALL_ANSWERS[(Math.random() * EIGHTBALL_ANSWERS.length) | 0];
+    } else { eightBall.phase = "rest"; eightBall.until = anim + 2 + Math.random() * 3; }
+  }
+}
+function drawEightBallSkin(ctx, anim, paint, heading) {
+  paint = paint || "#3f6fe0";
+  eightBallTick(anim);
+  ctx.save();
+  if (eightBall.phase === "shake") {
+    ctx.translate((Math.random() - 0.5) * 0.09, (Math.random() - 0.5) * 0.09);
+    ctx.rotate((Math.random() - 0.5) * 0.07);
+  }
+  ctx.beginPath(); ctx.arc(0, 0, 0.9, 0, Math.PI * 2);
+  var ball = ctx.createRadialGradient(-0.3, -0.32, 0.1, 0, 0, 1.05);
+  ball.addColorStop(0, "#3a3a3a"); ball.addColorStop(0.5, "#161616"); ball.addColorStop(1, "#000");
+  ctx.fillStyle = ball; ctx.fill();
+  if (eightBall.phase === "reveal") {
+    ctx.beginPath(); ctx.arc(0, 0.04, 0.46, 0, Math.PI * 2);
+    ctx.fillStyle = cartSkinShade(paint, -0.05); ctx.fill();
+    ctx.beginPath(); ctx.arc(0, 0.04, 0.4, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(10,20,60,0.85)"; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(0, -0.32); ctx.lineTo(0.34, 0.26); ctx.lineTo(-0.34, 0.26); ctx.closePath();
+    var tri = ctx.createLinearGradient(0, -0.32, 0, 0.26);
+    tri.addColorStop(0, "#23409a"); tri.addColorStop(1, "#0e1f5c");
+    ctx.fillStyle = tri; ctx.fill();
+    ctx.strokeStyle = cartSkinShade(paint, 0.2); ctx.lineWidth = 0.02; ctx.stroke();
+    var lines = eightBall.answer.split("\n");
+    var fs = lines.length >= 3 ? 0.1 : (lines.length === 2 ? 0.12 : 0.16);
+    ctx.fillStyle = "#eaf0ff";
+    ctx.font = "bold " + fs + "px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    var lh = fs * 1.15, y0 = 0.06 - (lines.length - 1) * lh / 2;
+    for (var li = 0; li < lines.length; li++) ctx.fillText(lines[li], 0, y0 + li * lh);
+  } else if (eightBall.phase === "shake") {
+    ctx.beginPath(); ctx.arc(0, 0.04, 0.4, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(12,24,66,0.9)"; ctx.fill();
+    ctx.fillStyle = "rgba(120,150,220,0.5)";
+    for (var b = 0; b < 4; b++) {
+      var ba = anim * 6 + b * 1.7;
+      ctx.beginPath(); ctx.arc(Math.cos(ba) * 0.18, 0.04 + Math.sin(ba) * 0.16, 0.05, 0, Math.PI * 2); ctx.fill();
+    }
+  } else {
+    ctx.beginPath(); ctx.arc(0.04, 0.06, 0.42, 0, Math.PI * 2);
+    ctx.fillStyle = cartSkinShade(paint, -0.05); ctx.fill();
+    ctx.beginPath(); ctx.arc(0.04, 0.06, 0.36, 0, Math.PI * 2);
+    ctx.fillStyle = "#f4f4f4"; ctx.fill();
+    ctx.fillStyle = "#111";
+    ctx.save(); ctx.translate(0.04, 0.06);
+    ctx.font = "bold 0.5px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("8", 0, 0.02);
+    ctx.restore();
+  }
+  var ga = anim * 0.6;
+  var gx = -0.34 + Math.sin(ga) * 0.06, gy = -0.36 + Math.cos(ga) * 0.05;
+  var glint = ctx.createRadialGradient(gx, gy, 0.01, gx, gy, 0.32);
+  glint.addColorStop(0, "rgba(255,255,255,0.7)");
+  glint.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = glint;
+  ctx.beginPath(); ctx.ellipse(gx, gy, 0.3, 0.18, -0.6, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+// Cart bases selectable as the body under the pattern. clipR = silhouette radius
+// the pattern is clipped to (Earth clips to the globe, not its atmosphere halo).
+var CARTBASES = {
+  basketball: { fn: drawBasketballSkin, clipR: 0.9 },
+  earth:      { fn: drawEarthSkin,      clipR: 0.82 },
+  eightball:  { fn: drawEightBallSkin,  clipR: 0.9 },
+};
+
+// ============================================================================
+// THE 7 PATTERN PAINTERS — drawXxxPattern(ctx, anim, paint).
+//   • Normalized space: radius == 1, forward == +X.
+//   • Fill the body interior rect ~ [-0.85..0.85] x [-0.6..0.6]; the integrator
+//     clips to the equipped cart silhouette, so don't draw wheels/windshield.
+//   • paint = player CSS color (always present here). anim = rolling seconds.
+//   • EVERYTHING tints to paint via cartSkinShade(paint, ±) — no fixed schemes.
+// ============================================================================
+
+// --- 1. Racing Stripes (Lv2, common) ----------------------------------------
+// The player color is the base (already on the body); two bold darker stripes
+// run front-to-back down the centerline, each edged with a thin bright
+// pinstripe so they read crisply on any hue. Static (racing stripes don't move),
+// with a faint forward speed-sheen so it isn't dead flat.
+function drawStripesPattern(ctx, anim, paint) {
+  paint = paint || "#888";
+  var w = 0.10 + 0.20 * P("st_w", 0.4);      // each stripe's half-... no: full width
+  var gap = 0.04 + 0.30 * P("st_gap", 0.34); // gap between the two inner edges
+  var dark = cartSkinShade(paint, -0.42);    // the racing stripe color
+  var line = cartSkinShade(paint, 0.45);     // bright pinstripe edge
+
+  for (var s = -1; s <= 1; s += 2) {
+    var y0 = s > 0 ? gap / 2 : -gap / 2 - w;  // top edge of this stripe
+    // pinstripe underlay (slightly taller) then the dark stripe on top.
+    ctx.fillStyle = line;
+    ctx.fillRect(-0.9, y0 - 0.022, 1.8, w + 0.044);
+    ctx.fillStyle = dark;
+    ctx.fillRect(-0.9, y0, 1.8, w);
+  }
+  // Faint forward speed-sheen sweeping along the stripes.
+  var sh = (anim * 0.5) % 2 - 1;             // -1..1 travelling
+  var g = ctx.createLinearGradient(sh - 0.5, 0, sh + 0.5, 0);
+  g.addColorStop(0, "rgba(255,255,255,0)");
+  g.addColorStop(0.5, "rgba(255,255,255,0.10)");
+  g.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(-0.9, -gap / 2 - w, 1.8, gap + 2 * w);
+}
+
+// --- 2. Polka (Lv8, uncommon) -----------------------------------------------
+// Player color base + a tidy offset grid of LIGHT dots in the same hue family,
+// each with a soft highlight so they look like glossy spots. Dots gently
+// "breathe" (size pulse) and drift sideways for life.
+function drawPolkaPattern(ctx, anim, paint) {
+  paint = paint || "#888";
+  var r = 0.045 + 0.07 * P("pk_size", 0.42);
+  var sp = 0.18 + 0.18 * P("pk_gap", 0.46);   // grid spacing
+  var dot = cartSkinShade(paint, 0.62);
+  var hi = cartSkinShade(paint, 0.85);
+  var rim = cartSkinShadeA(paint, -0.25, 0.5);  // faint darker rim so dots read on light bases too
+  var drift = (anim * 0.06) % sp;             // slow sideways drift
+  var breathe = 1 + 0.06 * Math.sin(anim * 2.2);
+  var row = 0;
+  ctx.lineWidth = r * 0.18;
+  for (var dy = -0.6; dy <= 0.6; dy += sp) {
+    var off = (row % 2) ? sp / 2 : 0;
+    for (var dx = -0.95; dx <= 0.95; dx += sp) {
+      var x = dx + off + drift;
+      ctx.beginPath(); ctx.arc(x, dy, r * breathe, 0, Math.PI * 2);
+      ctx.fillStyle = dot; ctx.fill();
+      ctx.strokeStyle = rim; ctx.stroke();
+      ctx.beginPath(); ctx.arc(x - r * 0.32, dy - r * 0.32, r * 0.38, 0, Math.PI * 2);
+      ctx.fillStyle = hi; ctx.fill();
+    }
+    row++;
+  }
+}
+
+// --- 3. Checkered (Lv14, rare) ----------------------------------------------
+// Finish-line checkerboard: only the dark squares are painted, so the player
+// color shows through every other square and the pattern tints. A faint moving
+// gloss band sells the "race finish" feel. Squares are dark in the paint hue
+// (near-black but tinted) so it reads on dark colors too.
+function drawCheckeredPattern(ctx, anim, paint) {
+  paint = paint || "#888";
+  var n = Math.round(5 + 7 * P("ck_n", 0.42));   // squares across (5..12)
+  var dark = cartSkinShade(paint, -0.62);
+  var cw = 1.9 / n, chh = 1.3 / n;
+  for (var ix = 0; ix < n; ix++) {
+    for (var iy = 0; iy < n; iy++) {
+      if ((ix + iy) % 2) {
+        ctx.fillStyle = dark;
+        ctx.fillRect(-0.95 + ix * cw, -0.65 + iy * chh, cw + 0.01, chh + 0.01);
+      }
+    }
+  }
+  // Travelling finish-line gloss.
+  var sh = (anim * 0.6) % 2.2 - 1.1;
+  var g = ctx.createLinearGradient(sh - 0.4, -0.6, sh + 0.4, 0.6);
+  g.addColorStop(0, "rgba(255,255,255,0)");
+  g.addColorStop(0.5, "rgba(255,255,255,0.12)");
+  g.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = g; ctx.fillRect(-0.95, -0.65, 1.9, 1.3);
+}
+
+// --- 4. Flames (Lv20, epic) -------------------------------------------------
+// Hot-rod flames licking forward from the rear (-X). A subtle in-hue underlay
+// darkens toward the nose, then 3 layered passes of flame tongues ramp from a
+// dark root to a bright tip — all in the player's hue. Tongue heights flicker
+// with anim so it dances.
+function flameTongue(ctx, rx, ry, len, wid) {
+  // A pointed lick rooted at (rx,ry) reaching toward +X by `len`, width `wid`.
+  ctx.beginPath();
+  ctx.moveTo(rx, ry - wid / 2);
+  ctx.quadraticCurveTo(rx + len * 0.5, ry - wid * 0.55, rx + len, ry);
+  ctx.quadraticCurveTo(rx + len * 0.5, ry + wid * 0.55, rx, ry + wid / 2);
+  ctx.closePath();
+  ctx.fill();
+}
+function drawFlamesPattern(ctx, anim, paint) {
+  paint = paint || "#888";
+  var inten = P("fl_int", 0.6);
+  var ramp = P("fl_ramp", 0.62);
+  // In-hue underlay: brighter at the rear (where the fire is), shaded at the nose.
+  var ug = ctx.createLinearGradient(-0.85, 0, 0.85, 0);
+  ug.addColorStop(0, cartSkinShade(paint, 0.12));
+  ug.addColorStop(1, cartSkinShade(paint, -0.30));
+  ctx.fillStyle = ug; ctx.fillRect(-0.9, -0.65, 1.8, 1.3);
+
+  // Roots spread across the body height; each licks forward with its own flicker.
+  var roots = [-0.46, -0.28, -0.10, 0.08, 0.26, 0.46];
+  var baseLen = 0.7 + 0.55 * inten;
+  var layers = [
+    { lenK: 1.00, widK: 0.34, shade: -0.18 },  // outer / darkest
+    { lenK: 0.74, widK: 0.24, shade: 0.20 + 0.3 * ramp },   // mid
+    { lenK: 0.46, widK: 0.15, shade: 0.45 + 0.45 * ramp },  // inner / brightest tip
+  ];
+  for (var L = 0; L < layers.length; L++) {
+    ctx.fillStyle = cartSkinShade(paint, layers[L].shade);
+    for (var i = 0; i < roots.length; i++) {
+      var flick = 0.8 + 0.2 * Math.sin(anim * 6 + i * 1.7) + 0.1 * Math.sin(anim * 11 + i);
+      var len = baseLen * layers[L].lenK * flick;
+      flameTongue(ctx, -0.9, roots[i], len, 0.30 * layers[L].widK / 0.34 + 0.04);
+    }
+  }
+  // Hot bright cores right at the rear roots.
+  ctx.fillStyle = cartSkinShade(paint, 0.7 + 0.25 * ramp);
+  for (var c = 0; c < roots.length; c++) {
+    var fl2 = 0.8 + 0.2 * Math.sin(anim * 8 + c);
+    ctx.beginPath();
+    ctx.ellipse(-0.86, roots[c], 0.05 * fl2, 0.045, 0, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+// --- 5. Nebula (Lv26, epic, cosmic) -----------------------------------------
+// A cosmic cloud tinted to the player's hue: a radial nebula base, a couple of
+// drifting lighter wisps, and a sprinkled starfield where a few stars twinkle
+// as 4-point sparkles. Tints fully because both cloud and wisps derive from paint.
+var _nebStars = null;
+function nebStars(n) {
+  // Deterministic star field (no Math.random at draw time so it doesn't shimmer
+  // randomly). Generated once; golden-angle scatter across the body rect.
+  if (_nebStars && _nebStars.length >= n) return _nebStars;
+  var out = [];
+  for (var i = 0; i < n; i++) {
+    var a = i * 2.39996323, r = Math.sqrt((i + 0.5) / n);
+    out.push({
+      x: Math.cos(a) * r * 0.92,
+      y: Math.sin(a) * r * 0.62,
+      base: 0.35 + 0.4 * ((i * 7) % 5) / 5,   // base brightness
+      ph: (i * 1.7) % (Math.PI * 2),          // twinkle phase
+      big: (i % 6 === 0),                     // a few sparkle stars
+    });
+  }
+  _nebStars = out; return out;
+}
+function sparkle(ctx, x, y, r, alpha) {
+  ctx.fillStyle = "rgba(255,255,255," + alpha + ")";
+  ctx.beginPath();
+  for (var q = 0; q < 8; q++) {
+    var rr = (q % 2) ? r * 0.32 : r, aa = q * Math.PI / 4;
+    var X = x + Math.cos(aa) * rr, Y = y + Math.sin(aa) * rr;
+    if (q === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
+  }
+  ctx.closePath(); ctx.fill();
+}
+function drawNebulaPattern(ctx, anim, paint) {
+  paint = paint || "#888";
+  var drift = P("nb_drift", 0.5);
+  var density = P("nb_stars", 0.55);
+  // Deep base in the paint hue.
+  var g = ctx.createRadialGradient(-0.1, -0.05, 0.05, 0, 0, 1.0);
+  g.addColorStop(0, cartSkinShade(paint, 0.35));
+  g.addColorStop(0.55, cartSkinShade(paint, -0.15));
+  g.addColorStop(1, cartSkinShade(paint, -0.6));
+  ctx.fillStyle = g; ctx.fillRect(-0.95, -0.65, 1.9, 1.3);
+
+  // Drifting nebula wisps (soft lighter blobs in-hue), moving with anim.
+  var wisps = [
+    { x: -0.4, y: -0.25, r: 0.55, sh: 0.5, sp: 0.13 },
+    { x: 0.45, y: 0.18, r: 0.6, sh: 0.3, sp: -0.09 },
+    { x: 0.05, y: 0.35, r: 0.4, sh: 0.6, sp: 0.16 },
+  ];
+  for (var w = 0; w < wisps.length; w++) {
+    var ws = wisps[w];
+    var wx = ws.x + Math.sin(anim * ws.sp * (0.5 + drift) + w) * 0.12;
+    var wy = ws.y + Math.cos(anim * ws.sp * (0.5 + drift) + w) * 0.08;
+    var wg = ctx.createRadialGradient(wx, wy, 0.02, wx, wy, ws.r);
+    wg.addColorStop(0, cartSkinShadeA(paint, ws.sh, 0.5));
+    wg.addColorStop(1, cartSkinShadeA(paint, ws.sh, 0));
+    ctx.fillStyle = wg; ctx.fillRect(-0.95, -0.65, 1.9, 1.3);
+  }
+
+  // Starfield (white) with a few twinkling sparkle stars.
+  var n = Math.round(10 + 40 * density);
+  var stars = nebStars(n);
+  for (var i = 0; i < n; i++) {
+    var s = stars[i];
+    var tw = 0.5 + 0.5 * Math.sin(anim * 3 + s.ph);
+    var alpha = s.base * (0.45 + 0.55 * tw);
+    if (s.big && tw > 0.6) {
+      sparkle(ctx, s.x, s.y, 0.035 + 0.03 * tw, alpha);
+    } else {
+      ctx.fillStyle = "rgba(255,255,255," + alpha + ")";
+      ctx.beginPath(); ctx.arc(s.x, s.y, 0.014 + 0.01 * tw, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+}
+
+// --- 6. Executioner (achievement) -------------------------------------------
+// A menacing skull-and-crossbones emblem. Dark in-hue vignette, then a "bone"
+// skull (near-white but tinted to paint, so it stays in the player's family)
+// over crossed bones. The skull faces forward (+X). A slow ominous pulse.
+function bonePath(ctx, x0, y0, x1, y1, w) {
+  // A bone: a fat capsule with two knobs at each end.
+  var ang = Math.atan2(y1 - y0, x1 - x0);
+  ctx.save(); ctx.translate(x0, y0); ctx.rotate(ang);
+  var len = Math.hypot(x1 - x0, y1 - y0);
+  ctx.beginPath();
+  ctx.arc(0, -w * 0.6, w * 0.6, 0, Math.PI * 2);
+  ctx.arc(0, w * 0.6, w * 0.6, 0, Math.PI * 2);
+  ctx.arc(len, -w * 0.6, w * 0.6, 0, Math.PI * 2);
+  ctx.arc(len, w * 0.6, w * 0.6, 0, Math.PI * 2);
+  ctx.rect(0, -w * 0.5, len, w);
+  ctx.fill();
+  ctx.restore();
+}
+function drawExecutionerPattern(ctx, anim, paint) {
+  paint = paint || "#888";
+  var menace = P("ex_menace", 0.55);
+  // Dark in-hue vignette so the bone emblem pops on any color.
+  var g = ctx.createRadialGradient(0, 0, 0.15, 0, 0, 1.05);
+  g.addColorStop(0, cartSkinShade(paint, -0.2 - 0.2 * menace));
+  g.addColorStop(1, cartSkinShade(paint, -0.62));
+  ctx.fillStyle = g; ctx.fillRect(-0.95, -0.65, 1.9, 1.3);
+
+  var bone = cartSkinShade(paint, 0.78);     // "bone" — near white, in-hue
+  var boneSh = cartSkinShade(paint, -0.5);   // sockets / shadow
+  var pulse = 1 + 0.03 * Math.sin(anim * 2.5);
+
+  ctx.save();
+  ctx.rotate(-Math.PI / 2);                  // design skull upright, top -> +X (forward)
+  ctx.scale(pulse, pulse);
+
+  // Crossed bones behind the skull.
+  ctx.fillStyle = bone;
+  bonePath(ctx, -0.5, 0.46, 0.5, 0.18, 0.10);
+  bonePath(ctx, -0.5, 0.18, 0.5, 0.46, 0.10);
+
+  // Cranium.
+  ctx.fillStyle = bone;
+  ctx.beginPath(); ctx.arc(0, -0.18, 0.34, 0, Math.PI * 2); ctx.fill();
+  // Cheekbones / jaw block.
+  ctx.beginPath();
+  ctx.moveTo(-0.30, -0.04); ctx.lineTo(-0.22, 0.26); ctx.lineTo(0.22, 0.26);
+  ctx.lineTo(0.30, -0.04); ctx.closePath(); ctx.fill();
+  // Lower jaw.
+  ctx.beginPath(); ctx.ellipse(0, 0.22, 0.18, 0.12, 0, 0, Math.PI * 2); ctx.fill();
+
+  // Eye sockets (dark, angled = angry).
+  ctx.fillStyle = boneSh;
+  for (var e = -1; e <= 1; e += 2) {
+    ctx.save(); ctx.translate(e * 0.14, -0.2); ctx.rotate(e * -0.5);
+    ctx.beginPath(); ctx.ellipse(0, 0, 0.13, 0.10, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+  // Glowing pupils in the player hue (the menace tell).
+  ctx.fillStyle = cartSkinShade(paint, 0.1 + 0.3 * menace);
+  for (var p = -1; p <= 1; p += 2) {
+    ctx.beginPath(); ctx.arc(p * 0.14, -0.18, 0.035 + 0.015 * menace, 0, Math.PI * 2); ctx.fill();
+  }
+  // Nasal cavity.
+  ctx.fillStyle = boneSh;
+  ctx.beginPath(); ctx.moveTo(0, -0.06); ctx.lineTo(-0.05, 0.06); ctx.lineTo(0.05, 0.06); ctx.closePath(); ctx.fill();
+  // Teeth.
+  ctx.fillStyle = boneSh; ctx.lineWidth = 0;
+  for (var t = -2; t <= 2; t++) {
+    ctx.fillRect(t * 0.07 - 0.012, 0.14, 0.024, 0.12);
+  }
+  ctx.restore();
+}
+
+// --- 7. Punching Bag (achievement) ------------------------------------------
+// Comedic "you got beat up" target: a tinted bullseye to aim at, a couple of
+// goofy bruise splotches, a sticking-plaster bandage, and little impact stars
+// that pop. All in the paint hue (bruises = darker hue, target = light/dark hue
+// rings) so it tints.
+function drawPunchingBagPattern(ctx, anim, paint) {
+  paint = paint || "#888";
+  var bruise = P("pb_bruise", 0.55);
+  var wobble = Math.sin(anim * 3) * 0.02;
+
+  ctx.save();
+  ctx.translate(wobble, Math.cos(anim * 2.4) * 0.015);
+
+  // Bullseye target (slightly off-center, comedic), alternating in-hue rings.
+  var cxr = 0.06, cyr = -0.02;
+  var rings = [0.5, 0.4, 0.3, 0.2, 0.1];
+  for (var i = 0; i < rings.length; i++) {
+    ctx.beginPath(); ctx.arc(cxr, cyr, rings[i], 0, Math.PI * 2);
+    ctx.fillStyle = (i % 2) ? cartSkinShade(paint, 0.55) : cartSkinShade(paint, -0.5);
+    ctx.fill();
+  }
+  // Bright center pip.
+  ctx.beginPath(); ctx.arc(cxr, cyr, 0.05, 0, Math.PI * 2);
+  ctx.fillStyle = cartSkinShade(paint, 0.7); ctx.fill();
+
+  // Bruise splotches (darker hue, blotchy) — comedic "ow" marks.
+  var bruises = [[-0.55, 0.34], [0.5, 0.4], [-0.4, -0.42]];
+  for (var b = 0; b < bruises.length; b++) {
+    var bx = bruises[b][0], by = bruises[b][1];
+    var bg = ctx.createRadialGradient(bx, by, 0.02, bx, by, 0.22);
+    bg.addColorStop(0, cartSkinShadeA(paint, -0.55, 0.55 + 0.3 * bruise));
+    bg.addColorStop(1, cartSkinShadeA(paint, -0.55, 0));
+    ctx.fillStyle = bg;
+    ctx.beginPath(); ctx.ellipse(bx, by, 0.22, 0.17, b, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // Sticking-plaster bandage (X of two strips) over a corner.
+  ctx.save();
+  ctx.translate(-0.5, -0.3); ctx.rotate(0.5);
+  ctx.fillStyle = cartSkinShade(paint, 0.6);
+  ctx.fillRect(-0.04, -0.16, 0.08, 0.32);
+  ctx.fillRect(-0.16, -0.04, 0.32, 0.08);
+  ctx.fillStyle = cartSkinShade(paint, 0.35);
+  for (var h = -1; h <= 1; h++) { ctx.fillRect(-0.025, h * 0.05 - 0.0, 0.05, 0.012); }
+  ctx.restore();
+
+  // Little impact stars that pop in and out (the "POW" feel).
+  var pops = [[0.42, -0.34], [-0.18, 0.46]];
+  for (var pI = 0; pI < pops.length; pI++) {
+    var t = (anim * 1.3 + pI * 1.5) % 2;
+    var amp = Math.max(0, Math.sin(t * Math.PI));   // 0..1..0
+    if (amp < 0.05) continue;
+    ctx.fillStyle = cartSkinShadeA(paint, 0.85, amp);
+    var px = pops[pI][0], py = pops[pI][1], R = 0.07 + 0.05 * amp;
+    ctx.beginPath();
+    for (var q = 0; q < 10; q++) {
+      var rr = (q % 2) ? R * 0.4 : R, aa = q * Math.PI / 5 - 0.3;
+      var X = px + Math.cos(aa) * rr, Y = py + Math.sin(aa) * rr;
+      if (q === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
+    }
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ============================================================================
+// EXTRA PATTERNS (batch 2) — 10 more, same contract, all tint to paint.
+// Small deterministic RNG so blotchy/scattered patterns don't shimmer randomly
+// frame to frame (seed in, stable sequence out).
+// ============================================================================
+function srnd(seed) {
+  var s = (seed >>> 0) || 1;
+  return function () { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+}
+
+// --- 8. Carbon Fiber --------------------------------------------------------
+// Woven twill: a grid of small cells whose diagonal sheen direction alternates
+// in a 2x2 weave, all in dark shades of the paint hue. Reads as real carbon.
+function drawCarbonPattern(ctx, anim, paint) {
+  paint = paint || "#888";
+  var cs = 0.085 + 0.075 * (1 - P("cf_scale", 0.5));   // cell size (slider up = finer weave)
+  var lite = cartSkinShade(paint, -0.16), dark = cartSkinShade(paint, -0.52);
+  for (var iy = 0; iy * cs < 1.4; iy++) {
+    for (var ix = 0; ix * cs < 2.0; ix++) {
+      var x = -0.97 + ix * cs, y = -0.67 + iy * cs;
+      var dir = (ix + iy) % 2;
+      var g = dir ? ctx.createLinearGradient(x, y, x + cs, y + cs)
+                  : ctx.createLinearGradient(x + cs, y, x, y + cs);
+      g.addColorStop(0, lite); g.addColorStop(1, dark);
+      ctx.fillStyle = g; ctx.fillRect(x, y, cs + 0.006, cs + 0.006);
+    }
+  }
+  // Faint travelling sheen across the weave.
+  var sh = (anim * 0.4) % 2.4 - 1.2;
+  var gg = ctx.createLinearGradient(sh - 0.5, -0.6, sh + 0.5, 0.6);
+  gg.addColorStop(0, "rgba(255,255,255,0)");
+  gg.addColorStop(0.5, "rgba(255,255,255,0.07)");
+  gg.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = gg; ctx.fillRect(-0.95, -0.65, 1.9, 1.3);
+}
+
+// --- 9. Camo ----------------------------------------------------------------
+// Military camouflage: organic overlapping blobs in four shades of the paint
+// hue. Deterministic so it's a fixed pattern (camo doesn't crawl).
+function drawCamoPattern(ctx, anim, paint) {
+  paint = paint || "#888";
+  var scale = 0.7 + 0.9 * P("cm_scale", 0.5);
+  ctx.fillStyle = cartSkinShade(paint, -0.05); ctx.fillRect(-0.95, -0.65, 1.9, 1.3);
+  var shades = [cartSkinShade(paint, -0.4), cartSkinShade(paint, 0.2), cartSkinShade(paint, -0.62)];
+  var rnd = srnd(1234);
+  for (var s = 0; s < shades.length; s++) {
+    ctx.fillStyle = shades[s];
+    for (var b = 0; b < 7; b++) {
+      var bx = -0.9 + rnd() * 1.8, by = -0.6 + rnd() * 1.2;
+      var n = 4 + ((rnd() * 4) | 0);
+      ctx.beginPath();
+      for (var k = 0; k < n; k++) {
+        var ox = bx + (rnd() - 0.5) * 0.34 * scale;
+        var oy = by + (rnd() - 0.5) * 0.26 * scale;
+        var rr = (0.07 + rnd() * 0.13) * scale;
+        ctx.moveTo(ox + rr, oy); ctx.arc(ox, oy, rr, 0, Math.PI * 2);
+      }
+      ctx.fill();
+    }
+  }
+}
+
+// --- 10. Hazard Stripes -----------------------------------------------------
+// Caution/warning diagonal stripes alternating bright and dark paint, slowly
+// scrolling so it reads as a live hazard sign.
+function drawHazardPattern(ctx, anim, paint) {
+  paint = paint || "#888";
+  var w = 0.12 + 0.18 * P("hz_w", 0.5);
+  var a = cartSkinShade(paint, 0.12), d = cartSkinShade(paint, -0.55);
+  ctx.save();
+  ctx.rotate(-Math.PI / 4);
+  var scroll = (anim * 0.3) % (2 * w);
+  for (var x = -2.4 + scroll; x < 2.4; x += 2 * w) {
+    ctx.fillStyle = a; ctx.fillRect(x, -2.2, w, 4.4);
+    ctx.fillStyle = d; ctx.fillRect(x + w, -2.2, w, 4.4);
+  }
+  ctx.restore();
+}
+
+// --- 11. Circuit Board ------------------------------------------------------
+// Dark in-hue board with lighter right-angle traces, square solder pads, and a
+// bright data pulse travelling along each trace.
+function drawCircuitPattern(ctx, anim, paint) {
+  paint = paint || "#888";
+  var glow = P("ci_glow", 0.6);
+  ctx.fillStyle = cartSkinShade(paint, -0.52); ctx.fillRect(-0.95, -0.65, 1.9, 1.3);
+  var trace = cartSkinShade(paint, 0.32), node = cartSkinShade(paint, 0.55);
+  var rnd = srnd(77);
+  ctx.lineWidth = 0.022; ctx.lineCap = "round"; ctx.lineJoin = "round";
+  var paths = [];
+  for (var i = 0; i < 11; i++) {
+    var x = -0.85 + rnd() * 1.7, y = -0.55 + rnd() * 1.1;
+    var px = x, py = y, pts = [[px, py]];
+    var segs = 2 + ((rnd() * 3) | 0);
+    ctx.strokeStyle = trace; ctx.beginPath(); ctx.moveTo(px, py);
+    for (var s = 0; s < segs; s++) {
+      if (rnd() < 0.5) px += (rnd() - 0.5) * 0.7; else py += (rnd() - 0.5) * 0.7;
+      px = Math.max(-0.9, Math.min(0.9, px)); py = Math.max(-0.6, Math.min(0.6, py));
+      ctx.lineTo(px, py); pts.push([px, py]);
+    }
+    ctx.stroke();
+    ctx.fillStyle = node;
+    ctx.fillRect(x - 0.028, y - 0.028, 0.056, 0.056);
+    ctx.fillRect(px - 0.028, py - 0.028, 0.056, 0.056);
+    paths.push(pts);
+  }
+  ctx.fillStyle = cartSkinShadeA(paint, 0.85, 0.55 + 0.45 * glow);
+  for (var p = 0; p < paths.length; p++) {
+    var ps = paths[p]; if (ps.length < 2) continue;
+    var t = (anim * 0.4 + p * 0.31) % 1;
+    var seg = Math.floor(t * (ps.length - 1)), ft = t * (ps.length - 1) - seg;
+    var a0 = ps[seg], a1 = ps[seg + 1];
+    ctx.beginPath();
+    ctx.arc(a0[0] + (a1[0] - a0[0]) * ft, a0[1] + (a1[1] - a0[1]) * ft, 0.03, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// --- 12. Dragon Scales ------------------------------------------------------
+// Overlapping reptilian scales in offset rows, each shaded light-top to
+// dark-bottom in-hue, with a slow shimmer rolling down the rows.
+function drawScalesPattern(ctx, anim, paint) {
+  paint = paint || "#888";
+  var sz = 0.12 + 0.10 * P("sc_size", 0.5);
+  var rowH = sz * 0.72, row = 0;
+  for (var y = -0.66; y < 0.74; y += rowH) {
+    var off = (row % 2) ? sz : 0;
+    var shimmer = 0.28 + 0.16 * Math.sin(anim * 2 + row * 0.6);
+    for (var x = -1.0; x < 1.02; x += sz * 2) {
+      var cx = x + off;
+      ctx.beginPath(); ctx.arc(cx, y, sz, 0, Math.PI); ctx.closePath();
+      var g = ctx.createLinearGradient(cx, y, cx, y + sz);
+      g.addColorStop(0, cartSkinShade(paint, shimmer));
+      g.addColorStop(1, cartSkinShade(paint, -0.42));
+      ctx.fillStyle = g; ctx.fill();
+      ctx.strokeStyle = cartSkinShade(paint, -0.55); ctx.lineWidth = 0.012; ctx.stroke();
+    }
+    row++;
+  }
+}
+
+// --- 13. Electric -----------------------------------------------------------
+// Crackling lightning bolts in the bright paint hue over a dark in-hue base.
+// Bolts jitter and flicker on/off so the surface looks energised.
+function drawElectricPattern(ctx, anim, paint) {
+  paint = paint || "#888";
+  var inten = P("lt_int", 0.6);
+  var bg = ctx.createLinearGradient(0, -0.6, 0, 0.6);
+  bg.addColorStop(0, cartSkinShade(paint, -0.32)); bg.addColorStop(1, cartSkinShade(paint, -0.6));
+  ctx.fillStyle = bg; ctx.fillRect(-0.95, -0.65, 1.9, 1.3);
+  var bolts = 5;
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  for (var b = 0; b < bolts; b++) {
+    var phase = anim * 2 + b * 1.3;
+    if (Math.sin(phase * 1.7 + b) < (0.2 - 0.5 * inten)) continue;  // flicker on/off
+    var rnd = srnd((b * 97 + Math.floor(phase * 3)) >>> 0);         // re-seed over time = jitter
+    var x = -0.8 + (b / (bolts - 1)) * 1.6, y = -0.62;
+    ctx.beginPath(); ctx.moveTo(x, y);
+    while (y < 0.62) { y += 0.11 + rnd() * 0.1; x += (rnd() - 0.5) * 0.24; ctx.lineTo(x, y); }
+    ctx.strokeStyle = cartSkinShadeA(paint, 0.75, 0.9); ctx.lineWidth = 0.045;
+    ctx.shadowColor = cartSkinShade(paint, 0.6); ctx.shadowBlur = 8;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 0.014; ctx.stroke();
+  }
+}
+
+// --- 14. Tiger --------------------------------------------------------------
+// Bold organic animal stripes (dark, in-hue) sweeping in from the top and
+// bottom edges over the paint base. Tapered brush strokes.
+function tigerStripe(ctx, x, edgeY, tipY, w) {
+  ctx.beginPath();
+  ctx.moveTo(x - w, edgeY);
+  ctx.quadraticCurveTo(x - w * 0.3, (edgeY + tipY) * 0.5, x, tipY);
+  ctx.quadraticCurveTo(x + w * 0.3, (edgeY + tipY) * 0.5, x + w, edgeY);
+  ctx.closePath(); ctx.fill();
+}
+function drawTigerPattern(ctx, anim, paint) {
+  paint = paint || "#888";
+  var bold = 0.7 + 0.7 * P("tg_bold", 0.5);
+  ctx.fillStyle = cartSkinShadeA(paint, 0.12, 0.35); ctx.fillRect(-0.95, -0.65, 1.9, 1.3);
+  ctx.fillStyle = cartSkinShade(paint, -0.58);
+  // [x, edge(+1 bottom / -1 top), reach 0..1 of how far toward center, widthK]
+  var stripes = [
+    [-0.66, -1, 0.62, 1.1], [-0.5, 1, 0.5, 0.8], [-0.4, -1, 0.85, 0.7],
+    [-0.24, 1, 0.7, 1.2], [-0.12, -1, 0.55, 0.9], [0.02, 1, 0.9, 0.7],
+    [0.12, -1, 0.78, 1.0], [0.28, 1, 0.5, 0.85], [0.36, -1, 0.6, 1.2],
+    [0.52, 1, 0.82, 0.7], [0.62, -1, 0.7, 0.95], [0.78, 1, 0.55, 1.0],
+  ];
+  for (var i = 0; i < stripes.length; i++) {
+    var s = stripes[i], edgeY = s[1] * 0.72;
+    var tipY = s[1] * (0.72 - 1.1 * s[2]);   // reach toward / past center, varies per stripe
+    var sway = Math.sin(anim * 1.5 + i) * 0.015;   // faint living-coat sway
+    tigerStripe(ctx, s[0] + sway, edgeY, tipY, 0.05 * bold * s[3]);
+  }
+}
+
+// --- 15. Waves --------------------------------------------------------------
+// Flowing topographic wave bands in alternating in-hue shades, drifting
+// sideways. Reads as water / heat ripple.
+function drawWavesPattern(ctx, anim, paint) {
+  paint = paint || "#888";
+  var amp = 0.04 + 0.11 * P("wv_amp", 0.5);
+  var freq = 6, bandH = 0.17, drift = anim * 0.5, i = 0;
+  for (var base = -0.78; base < 0.85; base += bandH) {
+    ctx.beginPath();
+    ctx.moveTo(-0.97, base + Math.sin(-0.97 * freq + drift + i * 0.5) * amp);
+    for (var x = -0.97; x <= 0.97; x += 0.07) {
+      ctx.lineTo(x, base + Math.sin(x * freq + drift + i * 0.5) * amp);
+    }
+    ctx.lineTo(0.97, 0.72); ctx.lineTo(-0.97, 0.72); ctx.closePath();
+    ctx.fillStyle = (i % 2) ? cartSkinShade(paint, 0.22) : cartSkinShade(paint, -0.26);
+    ctx.fill(); i++;
+  }
+}
+
+// --- 16. Honeycomb ----------------------------------------------------------
+// Tessellated hexagon grid in shades of the paint hue, with a shimmer wave
+// sweeping diagonally across the cells.
+function hexPath(ctx, cx, cy, R) {
+  ctx.beginPath();
+  for (var k = 0; k < 6; k++) {
+    var a = Math.PI / 180 * (60 * k - 90);
+    var x = cx + Math.cos(a) * R, y = cy + Math.sin(a) * R;
+    if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+}
+function drawHoneycombPattern(ctx, anim, paint) {
+  paint = paint || "#888";
+  var R = 0.10 + 0.09 * P("hc_size", 0.5);
+  var w = Math.sqrt(3) * R, hh = 1.5 * R, edge = cartSkinShade(paint, 0.4), row = 0;
+  for (var y = -0.72; y < 0.82; y += hh) {
+    var off = (row % 2) ? w / 2 : 0;
+    for (var x = -1.02; x < 1.06; x += w) {
+      var cx = x + off;
+      hexPath(ctx, cx, y, R);
+      var sh = 0.5 + 0.5 * Math.sin(anim * 2 - cx * 2 + y * 2);
+      ctx.fillStyle = cartSkinShade(paint, -0.36 + 0.26 * sh);
+      ctx.fill();
+      ctx.strokeStyle = edge; ctx.lineWidth = 0.013; ctx.stroke();
+    }
+    row++;
+  }
+}
+
+// --- 17. Splatter -----------------------------------------------------------
+// Graffiti paint splatter: blobby splats in lighter & darker paint hues with
+// scattered droplets. Deterministic (a fixed, sprayed look).
+function drawSplatterPattern(ctx, anim, paint) {
+  paint = paint || "#888";
+  var dense = P("sp_dense", 0.5);
+  var rnd = srnd(909);
+  var n = Math.round(6 + 12 * dense);
+  for (var i = 0; i < n; i++) {
+    var x = -0.85 + rnd() * 1.7, y = -0.55 + rnd() * 1.1;
+    ctx.fillStyle = (rnd() < 0.5) ? cartSkinShade(paint, 0.5) : cartSkinShade(paint, -0.5);
+    var R = 0.05 + rnd() * 0.12, pts = 8;
+    ctx.beginPath();
+    for (var k = 0; k < pts; k++) {
+      var a = k / pts * Math.PI * 2, rr = R * (0.6 + rnd() * 0.8);
+      var px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr;
+      if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath(); ctx.fill();
+    var d = 3 + ((rnd() * 4) | 0);
+    for (var j = 0; j < d; j++) {
+      var da = rnd() * Math.PI * 2, dist = R + rnd() * 0.18;
+      ctx.beginPath();
+      ctx.arc(x + Math.cos(da) * dist, y + Math.sin(da) * dist, 0.01 + rnd() * 0.025, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+// `opaque: true` = a full-repaint pattern (covers the whole body). For these we
+// apply a wrapping globalAlpha (the "pattern opacity" slider) so the equipped
+// cart shows through. The see-through patterns (stripes/polka/checkered/splatter)
+// and the achievement badges (executioner/punching bag) are left fully opaque —
+// they already let the cart read, or are meant to be bold statements.
+var PATTERNS = [
+  { name: "Stripes (Lv2)",        fn: drawStripesPattern },
+  { name: "Polka (Lv8)",          fn: drawPolkaPattern },
+  { name: "Checkered (Lv14)",     fn: drawCheckeredPattern },
+  { name: "Flames (Lv20)",        fn: drawFlamesPattern,      opaque: true },
+  { name: "Nebula (Lv26)",        fn: drawNebulaPattern,      opaque: true },
+  { name: "Executioner (ach)",    fn: drawExecutionerPattern },
+  { name: "Punching Bag (ach)",   fn: drawPunchingBagPattern },
+  { name: "Carbon Fiber",         fn: drawCarbonPattern,      opaque: true },
+  { name: "Camo",                 fn: drawCamoPattern,        opaque: true },
+  { name: "Hazard Stripes",       fn: drawHazardPattern,      opaque: true },
+  { name: "Circuit Board",        fn: drawCircuitPattern,     opaque: true },
+  { name: "Dragon Scales",        fn: drawScalesPattern,      opaque: true },
+  { name: "Electric",             fn: drawElectricPattern,    opaque: true },
+  { name: "Tiger",                fn: drawTigerPattern,       opaque: true },
+  { name: "Waves",                fn: drawWavesPattern,       opaque: true },
+  { name: "Honeycomb",            fn: drawHoneycombPattern,   opaque: true },
+  { name: "Splatter",             fn: drawSplatterPattern },
+];
+
+// ============================================================================
+// Sample cart body + driver
+// ============================================================================
+// chaochao player palette (server/utils.js Colors.names) + a few extras to stress test.
+var PALETTE = ["#e6194B","#3cb44b","#ffe119","#4363d8","#f58231","#911eb4",
+               "#42d4f4","#f032e6","#bfef45","#fabed4","#469990","#9A6324",
+               "#800000","#808000","#000075","#ffffff","#8A8A8A","#454545"];
+
+var canvas = document.getElementById("stage");
+var ctx = canvas.getContext("2d");
+var activeColor = PALETTE[3];   // start on Blue
+var patternOpacity = 0.6;       // applied to `opaque:true` patterns so the cart shows through
+var DPR = Math.min(window.devicePixelRatio || 1, 2);
+var GRID_COLS = 4;
+
+function fitCanvas() {
+  var cssW = canvas.clientWidth;
+  var rows = Math.ceil(PATTERNS.length / GRID_COLS);
+  var cellW = cssW / GRID_COLS;
+  var cellH = cellW * 0.92;
+  canvas.style.height = (cellH * rows) + "px";
+  canvas.width = Math.round(cssW * DPR);
+  canvas.height = Math.round(cellH * rows * DPR);
+}
+window.addEventListener("resize", fitCanvas);
+
+// Draw a sample cart body in `paint`, set up the silhouette clip, run the painter.
+// `alpha` (0..1) is the overlay opacity for full-repaint patterns so the cart
+// shows through; 1 for see-through patterns.
+function drawBodyWithPattern(ctx, anim, paint, painter, shape, clip, alpha) {
+  if (alpha == null) alpha = 1;
+  ctx.save();
+  if (CARTBASES[shape]) {
+    // Real cart base: draw the cart, then composite the pattern on top, clipped
+    // to the cart silhouette — the exact layer order the game uses.
+    var cb = CARTBASES[shape];
+    cb.fn(ctx, anim, paint, anim * 0.8);
+    ctx.save();
+    if (clip) { ctx.beginPath(); ctx.arc(0, 0, cb.clipR, 0, Math.PI * 2); ctx.clip(); }
+    ctx.globalAlpha = alpha;
+    painter(ctx, anim, paint);
+    ctx.restore();
+    ctx.restore();
+    return;
+  }
+  if (shape === "disc") {
+    // Body.
+    ctx.beginPath(); ctx.arc(0, 0, 0.92, 0, Math.PI * 2);
+    var dg = ctx.createRadialGradient(-0.25, -0.25, 0.1, 0, 0, 1.0);
+    dg.addColorStop(0, cartSkinShade(paint, 0.18)); dg.addColorStop(1, cartSkinShade(paint, -0.18));
+    ctx.fillStyle = dg; ctx.fill();
+    // Pattern, clipped to body.
+    ctx.save();
+    if (clip) { ctx.beginPath(); ctx.arc(0, 0, 0.9, 0, Math.PI * 2); ctx.clip(); }
+    ctx.globalAlpha = alpha;
+    painter(ctx, anim, paint);
+    ctx.restore();
+    ctx.strokeStyle = cartSkinShade(paint, -0.45); ctx.lineWidth = 0.05;
+    ctx.beginPath(); ctx.arc(0, 0, 0.92, 0, Math.PI * 2); ctx.stroke();
+  } else {
+    // Rounded cart body.
+    var bx = -0.85, by = -0.6, bw = 1.7, bh = 1.2, br = 0.22;
+    var bg = ctx.createLinearGradient(0, by, 0, by + bh);
+    bg.addColorStop(0, cartSkinShade(paint, 0.12));
+    bg.addColorStop(1, cartSkinShade(paint, -0.16));
+    cartRoundRectPath(ctx, bx, by, bw, bh, br); ctx.fillStyle = bg; ctx.fill();
+    // Pattern, clipped to the body silhouette (mirrors drawPatternOverlay).
+    ctx.save();
+    if (clip) { cartRoundRectPath(ctx, bx, by, bw, bh, br); ctx.clip(); }
+    ctx.globalAlpha = alpha;
+    painter(ctx, anim, paint);
+    ctx.restore();
+    // Body outline + a hint of windshield so it reads as a kart (drawn over pattern).
+    ctx.strokeStyle = cartSkinShade(paint, -0.45); ctx.lineWidth = 0.06;
+    cartRoundRectPath(ctx, bx, by, bw, bh, br); ctx.stroke();
+    ctx.fillStyle = "rgba(190,230,255,0.30)";
+    cartRoundRectPath(ctx, 0.34, -0.3, 0.32, 0.6, 0.08); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function render(tMs) {
+  var anim = tMs / 1000 * (+document.getElementById("animSpeed").value / 100);
+  var spin = document.getElementById("spin").checked;
+  var clip = document.getElementById("clip").checked;
+  var showRing = document.getElementById("ring").checked;
+  var shape = document.getElementById("bodyShape").value;
+  var rot = spin ? anim * 0.5 : 0;
+
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  var cssW = canvas.clientWidth;
+  var cellW = cssW / GRID_COLS;
+  var cellH = cellW * 0.92;
+  var radius = Math.min(cellW, cellH) * 0.34;
+
+  for (var i = 0; i < PATTERNS.length; i++) {
+    var col = i % GRID_COLS, row = (i / GRID_COLS) | 0;
+    var cx = col * cellW + cellW / 2;
+    var cy = row * cellH + cellH / 2;
+
+    if (showRing) {
+      ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(255,255,255,0.08)"; ctx.lineWidth = 1; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + radius, cy);
+      ctx.strokeStyle = "rgba(255,255,255,0.06)"; ctx.stroke();
+    }
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    if (spin) ctx.rotate(rot);
+    ctx.scale(radius, radius);
+    var alpha = PATTERNS[i].opaque ? patternOpacity : 1;
+    drawBodyWithPattern(ctx, anim, activeColor, PATTERNS[i].fn, shape, clip, alpha);
+    ctx.restore();
+
+    ctx.fillStyle = "rgba(231,236,245,0.9)";
+    ctx.font = "13px system-ui, sans-serif"; ctx.textAlign = "center";
+    ctx.fillText(PATTERNS[i].name, cx, cy + cellH / 2 - 12);
+  }
+  requestAnimationFrame(render);
+}
+
+// --- swatches ---
+var sw = document.getElementById("swatches");
+function setColor(c, el) {
+  activeColor = c;
+  document.querySelectorAll(".swatch").forEach(function (s) { s.classList.remove("active"); });
+  if (el) el.classList.add("active");
+}
+PALETTE.forEach(function (c, idx) {
+  var d = document.createElement("div");
+  d.className = "swatch" + (c === activeColor ? " active" : "");
+  d.style.background = c; d.title = c;
+  d.onclick = function () { setColor(c, d); };
+  sw.appendChild(d);
+});
+document.getElementById("customColor").addEventListener("input", function (e) {
+  setColor(e.target.value, null);
+});
+
+// --- sliders ---
+var SLIDERS = ["animSpeed","patOpacity","st_w","st_gap","pk_size","pk_gap","ck_n","fl_int","fl_ramp","nb_stars","nb_drift","ex_menace","pb_bruise",
+  "cf_scale","cm_scale","hz_w","ci_glow","sc_size","lt_int","tg_bold","wv_amp","hc_size","sp_dense"];
+function syncSlider(id) {
+  var el = document.getElementById(id);
+  var v = el.value / 100;
+  if (id === "patOpacity") patternOpacity = v;
+  else if (id !== "animSpeed") PARAMS[id] = v;
+  var lbl = document.getElementById(id + "V");
+  if (lbl) lbl.textContent = (id === "animSpeed" || id === "patOpacity") ? (el.value + "%") : v.toFixed(2);
+}
+SLIDERS.forEach(function (id) {
+  var el = document.getElementById(id);
+  el.addEventListener("input", function () { syncSlider(id); });
+  syncSlider(id);
+});
+document.getElementById("reset").onclick = function () {
+  var defs = { animSpeed:100, patOpacity:60, st_w:40, st_gap:34, pk_size:42, pk_gap:46, ck_n:42,
+    fl_int:60, fl_ramp:62, nb_stars:55, nb_drift:50, ex_menace:55, pb_bruise:55,
+    cf_scale:50, cm_scale:50, hz_w:50, ci_glow:60, sc_size:50, lt_int:60,
+    tg_bold:50, wv_amp:50, hc_size:50, sp_dense:50 };
+  SLIDERS.forEach(function (id) { document.getElementById(id).value = defs[id]; syncSlider(id); });
+};
+
+fitCanvas();
+requestAnimationFrame(render);
+</script>
+<!--
+================================================================================
+PORT NOTE (for the main session)
+================================================================================
+The pattern functions above are the deliverable. The first 7 (drawStripesPattern,
+drawPolkaPattern, drawCheckeredPattern, drawFlamesPattern, drawNebulaPattern,
+drawExecutionerPattern, drawPunchingBagPattern) replace the placeholder stubs in
+client/scripts/draw.js (same names, same signature). The 10 extras (drawCarbonPattern,
+drawCamoPattern, drawHazardPattern, drawCircuitPattern, drawScalesPattern,
+drawElectricPattern, drawTigerPattern, drawWavesPattern, drawHoneycombPattern,
+drawSplatterPattern) are new pattern options to slot into the registry once chosen.
+Helpers to bring along: flameTongue, nebStars, sparkle, bonePath, srnd, tigerStripe,
+hexPath. All use (ctx, anim, paint), normalized radius==1 / forward==+X space.
+
+To port: drop the `P("key", default)` reads and inline the chosen value
+(the default passed to P is the current baked value). Keep cartSkinShade /
+cartSkinShadeA — both already exist in draw.js (cartSkinShadeA may need adding;
+it's the rgba twin of cartSkinShade). _nebStars is a module-level cache — declare
+it next to the other draw.js caches.
+
+OPACITY: the full-repaint patterns (Flames, Nebula, Carbon, Camo, Hazard, Circuit,
+Scales, Electric, Tiger, Waves, Honeycomb — the `opaque:true` entries) are drawn
+at a reduced globalAlpha (the "pattern opacity" slider, default ~0.6) so the
+equipped cart shows through. The painters themselves are unchanged — the alpha is
+applied by the integrator around the painter call. In draw.js, drawPatternOverlay
+should set ctx.globalAlpha for these pattern ids before invoking the painter (a
+per-pattern opacity field in the registry), exactly as drawBodyWithPattern does
+here. See-through patterns and the achievement badges stay at full alpha.
+
+NOT yet approved — iterate with the operator first.
+================================================================================
+-->
+</body>
+</html>
