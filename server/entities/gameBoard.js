@@ -1506,6 +1506,7 @@ class GameBoard {
 		// no-repeat-until-exhausted behaviour but scoped to that pool. Reset the
 		// played set once every eligible map has been seen.
 		var eligible = this.getEligibleMapIndices();
+		var lastId = this.mapsPlayed.length ? this.mapsPlayed[this.mapsPlayed.length - 1] : null;
 		var unplayed = [];
 		for (var ei = 0; ei < eligible.length; ei++) {
 			if (this.mapsPlayed.indexOf(this.maps[eligible[ei]].id) === -1) {
@@ -1513,8 +1514,15 @@ class GameBoard {
 			}
 		}
 		if (unplayed.length === 0) {
+			// Pool exhausted — start a fresh cycle, but keep the just-played map out of
+			// the first pick so the wrap never produces a back-to-back repeat (unless the
+			// pool is a single map, where a repeat is unavoidable).
 			this.mapsPlayed = [];
-			unplayed = eligible;
+			unplayed = [];
+			for (var fi = 0; fi < eligible.length; fi++) {
+				if (this.maps[eligible[fi]].id !== lastId) { unplayed.push(eligible[fi]); }
+			}
+			if (unplayed.length === 0) { unplayed = eligible; }
 		}
 		var nextMapId = unplayed[utils.getRandomInt(0, unplayed.length - 1)];
 		this.nextMap = JSON.parse(JSON.stringify(this.maps[nextMapId]));

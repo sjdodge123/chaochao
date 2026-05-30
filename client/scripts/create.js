@@ -1,5 +1,7 @@
 var server,
     maps = [],
+    editorMapMeta = {},      // map id -> classifier summary (tier/trait/score/playlists)
+    editorPlaylists = [],    // [{id,name,desc,count}] for the filter chips
     createCanvas,
     gameRunning = false,
     voronoi = new Voronoi(),
@@ -246,6 +248,38 @@ function clientConnect() {
         showPreviewError(payload && payload.reason ? payload.reason : "Map could not be previewed.");
     });
 
+    // Classifier meta + playlist summary for the browser (arrives before maplisting,
+    // see messenger getMaps). Drives the per-card quality badge and the filter chips.
+    server.on("editorMapMeta", function (payload) {
+        if (payload != null) {
+            editorMapMeta = payload.meta || {};
+            editorPlaylists = payload.playlists || [];
+        }
+        if (typeof installPlaylistChips === "function") {
+            installPlaylistChips(editorPlaylists);
+        }
+    });
+
+    // Reply to the pre-submit balance check (see submitToGithub). A featured-tier (or
+    // errored) score submits straight through; a lower score shows a NON-BLOCKING
+    // "submit anyway?" nudge listing the main deductions.
+    server.on("mapScore", function (payload) {
+        if (!submitPending) { return; }
+        if (payload == null || payload.error || payload.tier === "featured") {
+            performSubmit();
+            return;
+        }
+        var reasons = [];
+        if (Array.isArray(payload.hardFail) && payload.hardFail.length) { reasons = payload.hardFail.slice(); }
+        else if (Array.isArray(payload.deductions)) { reasons = payload.deductions.slice(); }
+        var why = reasons.length ? (" — " + reasons.slice(0, 3).join(", ")) : "";
+        var msg = "This map scored " + payload.balanceScore + "/100" + why +
+            ", so it won't make the Featured playlist. It'll still be playable in the themed/Wild lists. Submit anyway?";
+        submitPending = false;
+        showSubmitStatus("Map looks unbalanced — confirm to submit", "#8a6d00", "white");
+        openWipeConfirm(msg, function () { performSubmit(); }, "Submit anyway");
+    });
+
     server.on("maplisting", function (mapnames) {
         if (maps.length > 0) {
             return;
@@ -261,7 +295,9 @@ function clientConnect() {
                 // the data-search attribute and the visible caption) — quotes alone
                 // left & and < to corrupt the markup.
                 var nm = escapeHtml(loaded.name), au = escapeHtml(loaded.author);
-                $("#loadWindow").append('<div class="map-image" data-search="' + nm + ' ' + au + '"><button id="' + loaded.id + '" data-gp-nav><img src="' + renderMapThumbnail(loaded) + '"><div class="desc">' + nm + ' | ' + au + '</div></button></div>');
+                var meta = editorMapMeta[loaded.id] || null;
+                var plAttr = (meta && meta.playlists) ? meta.playlists.join(" ") : "";
+                $("#loadWindow").append('<div class="map-image" data-search="' + nm + ' ' + au + '" data-playlists="' + plAttr + '"><button id="' + loaded.id + '" data-gp-nav><img src="' + renderMapThumbnail(loaded) + '">' + mapBadgeHtml(meta) + '<div class="desc">' + nm + ' | ' + au + '</div></button></div>');
                 $("#" + loaded.id).on("click", function () {
                     var id = this.id;
                     // Loading a different map replaces the in-memory map, so warn first
@@ -277,6 +313,17 @@ function clientConnect() {
         }
     });
     return server;
+}
+
+// Small quality badge overlaid on a map card: tier + dominant trait + balance score.
+// Empty string when the map has no classifier meta (e.g. an unclassifiable map).
+function mapBadgeHtml(meta) {
+    if (!meta) { return ""; }
+    var cls = (meta.tier === "featured") ? "mb-featured" : "mb-community";
+    var star = (meta.tier === "featured") ? "★ " : "";
+    var trait = meta.dominantTrait ? (meta.dominantTrait.charAt(0).toUpperCase() + meta.dominantTrait.slice(1)) : "";
+    var label = star + (trait ? trait + " · " : "") + meta.balanceScore;
+    return '<div class="map-badge ' + cls + '" title="Balance score ' + meta.balanceScore + '/100">' + label + "</div>";
 }
 
 function tryStart() {
@@ -1679,6 +1726,25 @@ function submitToGithub() {
     }
     basicSanitize();
     vMap.email = email;
+    // Pre-submit balance check: ask the server to classify the map (read-only) so we
+    // can show a soft "looks unbalanced" nudge before publishing. The actual submit
+    // happens in performSubmit(), called from the mapScore reply (or its fallback).
+    // Set the indicator directly (not showSubmitStatus, which clears submitPending and
+    // auto-hides) so the pending guard survives until the reply.
+    var submitStatus = $("#submitStatus");
+    if (submitStatusTimer) { clearTimeout(submitStatusTimer); submitStatusTimer = null; }
+    submitStatus.show();
+    submitStatus.css("color", "black");
+    submitStatus.css("background-color", "#ADD8E6");
+    submitStatus.text("Checking balance..");
+    submitPending = true; // protect the indicator from input-change resets until the reply
+    server.emit('scoreMap', JSON.stringify(vMap));
+}
+
+// The real publish step — opens the PR via the server's submitNewMap handler.
+// Reached only after the balance check (auto for a good map, or on "Submit anyway").
+function performSubmit() {
+    submitPending = true;
     // Pending state stays put until githubSuccess/githubFailure replaces it (those
     // use the auto-resetting showSubmitStatus); don't auto-hide the "Submitting.."
     var submitStatus = $("#submitStatus");
@@ -1687,7 +1753,6 @@ function submitToGithub() {
     submitStatus.css("color", "black");
     submitStatus.css("background-color", "#ADD8E6");
     submitStatus.text("Submitting..");
-    submitPending = true; // protect this indicator from input-change resets until the reply
     server.emit('submitNewMap', JSON.stringify(vMap));
 }
 // Mirror of server/utils.js validateMap — gives fast inline feedback in the

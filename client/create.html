@@ -477,6 +477,49 @@
       color: var(--text);
     }
 
+    /* Playlist filter chips (below the search box). */
+    #mapFilterChips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+      max-width: 720px;
+    }
+    .map-chip {
+      border: thin solid var(--border);
+      background: var(--surface);
+      color: var(--text-muted);
+      border-radius: 999px;
+      padding: 5px 12px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: background 0.12s, color 0.12s, border-color 0.12s;
+    }
+    .map-chip:hover { color: var(--text); border-color: var(--ed-accent); }
+    .map-chip.active {
+      background: var(--ed-accent);
+      color: #1a1a1a;
+      border-color: var(--ed-accent);
+      font-weight: 600;
+    }
+
+    /* Per-card quality badge (top-left over the thumbnail). */
+    div.map-image button { position: relative; }
+    .map-badge {
+      position: absolute;
+      top: 6px;
+      left: 6px;
+      padding: 2px 7px;
+      border-radius: 8px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: #fff;
+      pointer-events: none;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    }
+    .map-badge.mb-featured { background: rgba(208, 162, 0, 0.92); color: #1a1a1a; }
+    .map-badge.mb-community { background: rgba(40, 44, 52, 0.85); }
+
     div.map-image {
       float: none;
       width: 100%;
@@ -708,6 +751,7 @@
           <input id="mapSearch" data-gp-nav type="text" placeholder="Search maps by name or author…" autocomplete="off" maxlength="100">
           <button id="mapSearchClear" data-gp-nav class="ed-icon-btn" title="Clear search">&times;</button>
         </div>
+        <div id="mapFilterChips"></div>
       </div>
       <div class="map-image" data-keep="1">
         <button id="createNew" data-gp-nav><img id="createNewImage" src="">
