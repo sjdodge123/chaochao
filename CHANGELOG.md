@@ -19,6 +19,8 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 - Medal cosmetics: stacking up honours over time unlocks special items in matching slots — Golden Champion and Warlord carts, Executioner and Punching Bag patterns, and Guardian and Survivor trails. The thresholds are a long-haul grind (50–100 of a medal).
 - Tons more cart bodies to drive — from a Hoverbike and Starfighter to a whole zoo of novelty karts (8-Ball, Donut, Disco Ball, Compass, Pizza, and dozens more), each tinted to your colour.
 - New motion trails with real personality: Ribbon, Lightning, Hearts, Smoke, Confetti, Crystals, Tire Tracks, Music Notes, Neon Wall, and Ripples — all flying in your colour.
+- More patterns for your kart, all tinted to your colour: Carbon Fiber, Camo, Hazard, Circuit, Scales, Electric, Tiger, Waves, Honeycomb, and Splatter.
+- New **Borders** cosmetic: a decorative rim that rings your kart in your colour and shows over any body — including the shaped carts. Pick from 18 styles, from a clean Ring, Studs, and Chevrons to animated Flames, Electric, Sawblade, and Orbit, up to a regal Laurel, Crown, and Plasma. The border shares the slot with patterns, so you wear one or the other.
 
 ## v0.26.0 — 2026-05-31
 

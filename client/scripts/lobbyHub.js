@@ -109,9 +109,9 @@ function openStationPanel(lp) {
         return;
     }
     var cursor = 0;
+    var tab = 'color';
     if (st.kind === "skin") {
-        // Open the picker "here": on the avatar cell if it's equipped, else on the
-        // player's current colour.
+        // Open on the Color tab "here": the avatar cell if equipped, else the current colour.
         if (playerHasAvatarSkin(lp) && avatarSkinProfile(lp)) {
             cursor = skinPalette().length;
         } else {
@@ -120,7 +120,7 @@ function openStationPanel(lp) {
             cursor = (idx >= 0) ? idx : 0;
         }
     }
-    lp.stationPanel = { id: st.id, kind: st.kind, cursor: cursor };
+    lp.stationPanel = { id: st.id, kind: st.kind, tab: tab, region: 'grid', cursor: cursor };
     // Stop driving while configuring (mirrors the emoji-wheel open), and emit the
     // stop on this slot's own socket so the kart doesn't coast off the zone.
     if (typeof cancelMovementForSlot === "function") {
@@ -157,76 +157,69 @@ function stationPanelNav(lp, dx, dy) {
     }
 }
 
-// Keyboard/gamepad nav over the skin panel's flat option space: the swatch+avatar
-// grid (SKIN_COLS wide) occupies [0, base-1], then the cart-skin row occupies
-// [base, base+cartN-1]. This keeps the cart cells reachable by pad/keyboard, not
-// just by pointer.
+// Keyboard/gamepad nav over the tabbed/paged skin picker. Three focus regions:
+//   'tabs' — the category row (◄► switch category, ▼ drops into the grid)
+//   'grid' — the current page's cells (▲ from the top row → tabs, ▼ from the last row →
+//            page arrows; ◄►/▲▼ move the cursor, crossing pages automatically)
+//   'page' — the ◄ ► page arrows (◄► flip pages, ▲ back to the grid)
 function skinPanelNav(lp, dx, dy) {
     var sp = lp.stationPanel;
-    var base = skinOptionCount(lp);
-    if (!base) { return; }
-    var cartN = COSMETIC_OPTIONS.length;
-    var cols = SKIN_COLS;
-    var cur = sp.cursor || 0;
-    var maxRow = Math.floor((base - 1) / cols);
+    if (!sp) { return; }
+    if (sp.region == null) { sp.region = 'grid'; }
+    skinValidateTab(lp);
+    var tabs = skinTabs(lp);
+    var items = skinTabItems(lp, sp.tab);
+    var cols = SKIN_PICKER_COLS, perPage = SKIN_PICKER_PER_PAGE;
+    var pageCount = Math.max(1, Math.ceil(items.length / perPage));
 
-    if (cur >= base) {
-        // Cursor is in the cart-skin row.
-        var cidx = cur - base;
+    if (sp.region === 'tabs') {
         if (dx !== 0) {
-            cidx += dx;
-            if (cidx < 0) { cidx = cartN - 1; }
-            if (cidx >= cartN) { cidx = 0; }
+            var ti = skinTabIndex(lp, sp.tab) + dx;
+            if (ti < 0) { ti = tabs.length - 1; }
+            if (ti >= tabs.length) { ti = 0; }
+            sp.tab = tabs[ti].key; sp.cursor = 0;
         }
-        if (dy < 0) {
-            var up = maxRow * cols + cidx;        // back up into the grid's last row
-            sp.cursor = (up >= base) ? base - 1 : up;
-            return;
-        }
-        sp.cursor = base + cidx;                  // down keeps us in the (bottom) cart row
+        if (dy > 0) { sp.region = 'grid'; sp.cursor = 0; }
         return;
     }
-
-    // Cursor is in the swatch/avatar grid.
-    var row = Math.floor(cur / cols);
-    var col = cur % cols;
-    if (dx !== 0) {
-        col += dx;
-        if (col < 0) { col = cols - 1; }
-        if (col >= cols) { col = 0; }
-    }
-    if (dy > 0 && row === maxRow) {
-        sp.cursor = base + Math.min(col, cartN - 1); // drop into the cart row
+    if (sp.region === 'page') {
+        if (dx !== 0) {
+            var pg = Math.floor((sp.cursor || 0) / perPage) + dx;
+            if (pg < 0) { pg = 0; }
+            if (pg > pageCount - 1) { pg = pageCount - 1; }
+            sp.cursor = Math.min(items.length - 1, pg * perPage);
+        }
+        if (dy < 0) { sp.region = 'grid'; }
         return;
     }
-    if (dy !== 0) {
-        row += dy;
-        if (row < 0) { row = 0; }
-        if (row > maxRow) { row = maxRow; }
+    // grid
+    var cur = sp.cursor || 0;
+    var posInPage = cur % perPage;
+    var rowInPage = Math.floor(posInPage / cols);
+    var pageStart = Math.floor(cur / perPage) * perPage;
+    var lastRowInPage = Math.floor((Math.min(perPage, items.length - pageStart) - 1) / cols);
+    if (dy < 0 && rowInPage === 0) { sp.region = 'tabs'; return; }
+    if (dy > 0 && rowInPage === lastRowInPage) {
+        if (pageCount > 1) { sp.region = 'page'; }
+        return;
     }
-    var idx = row * cols + col;
-    if (idx >= base) { idx = base - 1; }         // last grid row may be partially filled
-    sp.cursor = idx;
+    var nc = cur;
+    if (dx !== 0) { nc += dx; }
+    if (dy !== 0) { nc += dy * cols; }
+    if (nc < 0) { nc = 0; }
+    if (nc > items.length - 1) { nc = items.length - 1; }
+    sp.cursor = nc;
 }
 
-// Commit the cell under the cursor: colour swatch, avatar, or cart skin.
+// Commit the focused element: a tab switch, a page step, or the cell under the cursor.
 function skinPanelConfirm(lp) {
     var sp = lp.stationPanel;
-    var base = skinOptionCount(lp);
-    var cur = sp.cursor || 0;
-    if (cur >= base) {
-        var opt = COSMETIC_OPTIONS[cur - base];
-        if (opt) { stationPickCosmetic(lp, opt); } // id === null clears the slot to default
-        return;
-    }
-    if (isAvatarIndex(lp, cur)) {
-        stationPickAvatar(lp);
-        return;
-    }
-    var pal = skinPalette();
-    if (cur >= 0 && cur < pal.length) {
-        stationPickSkin(lp, pal[cur]);
-    }
+    if (!sp) { return; }
+    skinValidateTab(lp);
+    if (sp.region === 'tabs') { sp.region = 'grid'; sp.cursor = 0; return; }
+    if (sp.region === 'page') { return; }
+    var items = skinTabItems(lp, sp.tab);
+    activateSkinItem(lp, items[sp.cursor || 0]);
 }
 
 // Confirm (A / Enter): AI changes apply live as you step, so confirm just
@@ -239,6 +232,20 @@ function stationPanelConfirm(lp) {
     closeStationPanel(lp);
 }
 
+// Switch the open SKIN picker's tab/category by ±1, wrapping (controller bumpers). No-op on
+// the AI panel. Pages stay on the d-pad ◄ ► region.
+function stationPanelTab(lp, dir) {
+    if (!lp || !lp.stationPanel || lp.stationPanel.kind !== "skin") { return; }
+    var sp = lp.stationPanel;
+    var tabs = skinTabs(lp);
+    var idx = skinTabIndex(lp, sp.tab) + (dir < 0 ? -1 : 1);
+    if (idx < 0) { idx = tabs.length - 1; }
+    if (idx >= tabs.length) { idx = 0; }
+    sp.tab = tabs[idx].key;
+    sp.cursor = 0;
+    sp.region = 'grid';
+}
+
 // Map a pointer-hit action token to its effect. "pick:<hex>" commits a skin colour.
 function stationPanelAction(lp, action) {
     if (action === "inc") {
@@ -249,6 +256,22 @@ function stationPanelAction(lp, action) {
         closeStationPanel(lp);
     } else if (action === "pickAvatar") {
         stationPickAvatar(lp);
+    } else if (action != null && action.indexOf("tab:") === 0) {
+        // Switch the picker's active category (pointer tap on a tab).
+        if (lp.stationPanel) { lp.stationPanel.tab = action.slice(4); lp.stationPanel.cursor = 0; lp.stationPanel.region = 'grid'; }
+    } else if (action != null && action.indexOf("page:") === 0) {
+        // Step the page within the active tab (pointer tap on ◄ / ►).
+        if (lp.stationPanel) {
+            var dir = parseInt(action.slice(5), 10) || 0;
+            var items = skinTabItems(lp, lp.stationPanel.tab);
+            var perPage = SKIN_PICKER_PER_PAGE;
+            var pc = Math.max(1, Math.ceil(items.length / perPage));
+            var pg = Math.floor((lp.stationPanel.cursor || 0) / perPage) + dir;
+            if (pg < 0) { pg = 0; }
+            if (pg > pc - 1) { pg = pc - 1; }
+            lp.stationPanel.cursor = Math.min(items.length - 1, pg * perPage);
+            lp.stationPanel.region = 'grid';
+        }
     } else if (action != null && action.indexOf("cosmetic:") === 0) {
         // "cosmetic:<slot>:<id>" (id may be empty for the slot default).
         var rest = action.slice("cosmetic:".length);
@@ -417,7 +440,10 @@ var CART_SKIN_CELL_H = 40; // height of a cosmetic picker cell
 var COSMETIC_GROUPS = [
     { slot: 'cart', header: 'Carts' },
     { slot: 'pattern', header: 'Patterns' },
-    { slot: 'trail', header: 'Trails' }
+    { slot: 'trail', header: 'Trails' },
+    // Borders are an INDEPENDENT 4th slot (player.border / selected_border) with their own tab
+    // + "None" default; a border and a pattern can be equipped at the same time.
+    { slot: 'border', header: 'Borders' }
 ];
 var COSMETIC_OPTIONS = (function () {
     var out = [];
@@ -434,15 +460,21 @@ var COSMETIC_OPTIONS = (function () {
 })();
 
 // --- per-slot localStorage persistence (instant re-equip; server re-validates) -------
-function cosmeticStorageKey(slot) { return "cc_cosmetic_" + slot; }
-function saveCosmeticLocal(slot, id) {
+// Keyed PER COUCH-PLAYER SLOT (lp.slot), not just the cosmetic slot — otherwise local
+// co-op players on the same browser share one key and clobber each other (and the
+// welcome-time re-equip then applies one player's saved pick to everyone).
+function cosmeticStorageKey(lp, slot) {
+    var who = (lp && lp.slot != null) ? lp.slot : 'p';
+    return "cc_cosmetic_" + who + "_" + slot;
+}
+function saveCosmeticLocal(lp, slot, id) {
     try {
-        if (id == null) { localStorage.removeItem(cosmeticStorageKey(slot)); }
-        else { localStorage.setItem(cosmeticStorageKey(slot), id); }
+        if (id == null) { localStorage.removeItem(cosmeticStorageKey(lp, slot)); }
+        else { localStorage.setItem(cosmeticStorageKey(lp, slot), id); }
     } catch (e) { /* private mode / disabled storage — non-fatal */ }
 }
-function readCosmeticLocal(slot) {
-    try { return localStorage.getItem(cosmeticStorageKey(slot)) || null; } catch (e) { return null; }
+function readCosmeticLocal(lp, slot) {
+    try { return localStorage.getItem(cosmeticStorageKey(lp, slot)) || null; } catch (e) { return null; }
 }
 // Re-send each saved cosmetic slot for a local player on (re)join so their picks apply
 // instantly without reopening the picker. The server re-validates + rejects silently if
@@ -451,7 +483,7 @@ function reEquipSavedCosmetics(lp) {
     if (!lp || !lp.socket) { return; }
     for (var g = 0; g < COSMETIC_GROUPS.length; g++) {
         var slot = COSMETIC_GROUPS[g].slot;
-        var id = readCosmeticLocal(slot);
+        var id = readCosmeticLocal(lp, slot);
         if (!id) { continue; }
         lp.socket.emit("setCosmetic", { slot: slot, id: id });
         var p = (lp.myID != null && typeof playerList !== "undefined" && playerList) ? playerList[lp.myID] : null;
@@ -707,6 +739,9 @@ function drawLobbyHubHud() {
     if (typeof localPlayers === "undefined" || typeof gameContext === "undefined" || !gameContext) {
         return;
     }
+    // Room-wide AI status banner, drawn FIRST so an open station panel layers on top of it
+    // (otherwise it z-orders over the picker near the top of the screen).
+    drawLobbyAIStatus();
     for (var slot = 0; slot < localPlayers.length; slot++) {
         var lp = localPlayers[slot];
         if (!lp) {
@@ -851,6 +886,26 @@ function slotOpenHint(lp) {
     }
     return "Press E";
 }
+// The controller type a slot is driving with (Xbox/PlayStation/generic), or null when it's
+// on touch/keyboard. Shared by the close-glyph + bumper-glyph hints.
+function slotPadType(lp) {
+    var padActive = (typeof activeInputMethod !== "undefined" && activeInputMethod === "pad");
+    if (!lp.isPrimary || padActive) {
+        return (lp && lp.padType) ? lp.padType : (typeof gamepadType !== "undefined" ? gamepadType : "generic");
+    }
+    return null;
+}
+// The CLOSE/exit glyph for a slot when it's on a controller (Xbox B / PlayStation ○),
+// else null (touch/keyboard use the ✕ button + Esc).
+function slotCloseGlyph(lp) {
+    var type = slotPadType(lp);
+    if (type == null) { return null; }
+    return (typeof leaveGlyphFor === "function") ? leaveGlyphFor(type) : (type === "playstation" ? "○" : "B");
+}
+// Left/right bumper labels for the skin-shop tab switch (PlayStation L1/R1 vs Xbox LB/RB).
+function padBumperGlyphs(type) {
+    return type === "playstation" ? { l: "L1", r: "R1" } : { l: "LB", r: "RB" };
+}
 
 function drawStationPrompt(lp, sp) {
     var st = stationById(lp.nearStation);
@@ -895,14 +950,9 @@ function drawStationPanel(lp, sp) {
     }
     if (kind === "skin") {
         w = 300;
-        // Mirror drawSkinPanelBody's layout exactly so the panel is tall enough:
-        // title/padding + the colour swatch grid + the Lv/XP badge + the grouped
-        // cart-skin grid (Karts + Paints, computed by the shared cartSkinLayout).
-        var spad = 14, sgap = 6;
-        var scell = (w - spad * 2 - sgap * (SKIN_COLS - 1)) / SKIN_COLS;
-        var srows = Math.max(1, Math.ceil(skinOptionCount(lp) / SKIN_COLS));
-        var cg = cartSkinLayout(w - spad * 2);
-        h = 44 + srows * (scell + sgap) + sgap + 24 + cg.height + 14;
+        // FIXED size (tabbed/paged picker) — independent of how many cosmetics exist, so
+        // several of these fit on screen at once in couch co-op. See skinPanelHeight().
+        h = skinPanelHeight();
     }
     var x = lhClamp(sp.x - w / 2, 8, LOGICAL_WIDTH - w - 8);
     var y = lhClamp(sp.y - h - 46, 8, LOGICAL_HEIGHT - h - 8);
@@ -910,14 +960,22 @@ function drawStationPanel(lp, sp) {
     var hit = { prompt: null, options: [], close: null };
 
     gameContext.save();
-    gameContext.globalAlpha = 0.96;
-    gameContext.fillStyle = "rgba(18,20,26,0.96)";
+    // Solid, near-opaque panel + a soft drop shadow so it separates cleanly from the busy
+    // lobby behind it (the old translucent fill let the terrain bleed through and washed it
+    // out). Shadow is cleared before the border stroke so only the fill casts it.
+    gameContext.globalAlpha = 1;
+    gameContext.shadowColor = "rgba(0,0,0,0.55)";
+    gameContext.shadowBlur = 18;
+    gameContext.shadowOffsetY = 5;
+    gameContext.fillStyle = "rgba(14,16,22,0.985)";
     lhRoundRect(gameContext, x, y, w, h, 12);
     gameContext.fill();
+    gameContext.shadowColor = "transparent";
+    gameContext.shadowBlur = 0;
+    gameContext.shadowOffsetY = 0;
     gameContext.lineWidth = 3;
     gameContext.strokeStyle = tint;
     gameContext.stroke();
-    gameContext.globalAlpha = 1;
 
     // Title.
     gameContext.fillStyle = "#fff";
@@ -933,6 +991,24 @@ function drawStationPanel(lp, sp) {
     gameContext.fillStyle = "#bbb";
     gameContext.fillText("✕", cl.x + cl.w / 2, cl.y + cl.h / 2 + 1);
     hit.close = cl;
+    // Controller exit hint: the close-button glyph (Xbox B / PlayStation ○) in a small badge
+    // just left of the ✕, so pad players know how to back out. Touch/keyboard see only the ✕.
+    var closeGlyph = slotCloseGlyph(lp);
+    if (closeGlyph) {
+        var bcx = cl.x - 16, bcy = cl.y + cl.h / 2;
+        gameContext.beginPath();
+        gameContext.arc(bcx, bcy, 9, 0, 2 * Math.PI);
+        gameContext.fillStyle = "rgba(0,0,0,0.45)";
+        gameContext.fill();
+        gameContext.lineWidth = 1.5;
+        gameContext.strokeStyle = "rgba(255,255,255,0.55)";
+        gameContext.stroke();
+        gameContext.fillStyle = "#fff";
+        gameContext.font = "bold 11px sans-serif";
+        gameContext.textAlign = "center";
+        gameContext.textBaseline = "middle";
+        gameContext.fillText(closeGlyph, bcx, bcy + 0.5);
+    }
 
     if (kind === "ai") {
         drawAIPanelBody(x, y, w, h, hit);
@@ -1013,186 +1089,229 @@ function drawPlaylistPanelBody(x, y, w, h, hit) {
     gameContext.fillText("applies next race", x + w / 2, y + h - 14);
 }
 
-// Skin picker body: a grid of palette swatches. The cursor is ringed white, the
-// player's current colour gets a check, colours held by others are greyed +
-// crossed and can't be picked. Each swatch is a "pick:<hex>" pointer hit target.
-function drawSkinPanelBody(lp, x, y, w, h, hit) {
-    var pal = skinPalette();
-    if (!pal.length) {
-        drawStubPanelBody(x, y, w, h, "No palette");
-        return;
+// === Tabbed/paged skin picker ================================================
+// Fixed-size panel so 4-player couch co-op fits several of these on screen at once
+// (paging bounds the size regardless of how many cosmetics exist). Per-player state in
+// lp.stationPanel = { tab, region, cursor }: `tab` = active category, `cursor` = index into
+// that tab's item list (page = floor(cursor/PER_PAGE)), `region` = 'tabs'|'grid'|'page' for
+// keyboard/gamepad focus. Pointer (primary) taps tabs/cells/arrows directly.
+var SKIN_PICKER_COLS = 4;
+var SKIN_PICKER_ROWS = 3;
+var SKIN_PICKER_CELLH = 54;
+var SKIN_PICKER_PER_PAGE = SKIN_PICKER_COLS * SKIN_PICKER_ROWS;
+
+function skinTabs(lp) {
+    var tabs = [
+        { key: 'color', label: 'Color' },
+        { key: 'cart', label: 'Carts' }
+    ];
+    // Patterns only render on the plain/default cart (a shaped cart hides them), so drop the
+    // Patterns tab whenever a cart shape is equipped. Borders read cleanly over ANY cart, so
+    // they're always available.
+    if (!currentCosmetic(lp, 'cart')) { tabs.push({ key: 'pattern', label: 'Patterns' }); }
+    // Borders tab appears once any border cosmetic is registered (Phase B).
+    if (typeof getSkinsForSlot === "function" && getSkinsForSlot('border').length > 0) {
+        tabs.push({ key: 'border', label: 'Borders' });
     }
-    var taken = skinTakenColors(lp);
-    var current = skinCurrentColor(lp);
-    var hasAvatar = playerHasAvatarSkin(lp); // wearing the avatar skin → no colour is "current"
-    var cursor = lp.stationPanel.cursor || 0;
-    var pad = 14;
-    var gap = 6;
-    var cell = (w - pad * 2 - gap * (SKIN_COLS - 1)) / SKIN_COLS;
-    var top = y + 44;
-    for (var i = 0; i < pal.length; i++) {
-        var col = pal[i];
-        var r = Math.floor(i / SKIN_COLS);
-        var cIdx = i % SKIN_COLS;
-        var sx = x + pad + cIdx * (cell + gap);
-        var sy = top + r * (cell + gap);
-        var rect = { x: sx, y: sy, w: cell, h: cell };
-        var isTaken = !!taken[col];
-        gameContext.globalAlpha = isTaken ? 0.32 : 1;
-        gameContext.fillStyle = col;
-        lhRoundRect(gameContext, sx, sy, cell, cell, 5);
-        gameContext.fill();
-        gameContext.globalAlpha = 1;
-        if (col === current && !hasAvatar) {
-            gameContext.fillStyle = "#000";
-            gameContext.textAlign = "center";
-            gameContext.textBaseline = "middle";
-            gameContext.font = "bold 16px sans-serif";
-            gameContext.fillText("✓", sx + cell / 2, sy + cell / 2 + 1);
-        }
-        if (isTaken) {
-            gameContext.strokeStyle = "rgba(0,0,0,0.6)";
-            gameContext.lineWidth = 2;
-            gameContext.beginPath();
-            gameContext.moveTo(sx + 4, sy + 4);
-            gameContext.lineTo(sx + cell - 4, sy + cell - 4);
-            gameContext.stroke();
-        }
-        if (i === cursor) {
-            gameContext.strokeStyle = "#fff";
-            gameContext.lineWidth = 3;
-            lhRoundRect(gameContext, sx - 1, sy - 1, cell + 2, cell + 2, 6);
-            gameContext.stroke();
-        }
-        // Taken swatches aren't pickable, but still consume the tap so it doesn't
-        // fall through and dismiss the panel.
-        hit.options.push({ rect: rect, action: isTaken ? "noop" : ("pick:" + col) });
+    tabs.push({ key: 'trail', label: 'Trails' });
+    return tabs;
+}
+// Reset the active tab to a valid one if the current tab was just hidden (e.g. Patterns
+// after a cart got equipped). Keeps the picker from showing items for an absent tab.
+function skinValidateTab(lp) {
+    var sp = lp.stationPanel; if (!sp) { return; }
+    var tabs = skinTabs(lp);
+    for (var i = 0; i < tabs.length; i++) { if (tabs[i].key === sp.tab) { return; } }
+    sp.tab = 'cart'; sp.cursor = 0; sp.region = 'grid';
+}
+function skinTabIndex(lp, key) {
+    var tabs = skinTabs(lp);
+    for (var i = 0; i < tabs.length; i++) { if (tabs[i].key === key) { return i; } }
+    return 0;
+}
+// Item list for a tab. color -> swatches (+ an avatar cell when available);
+// cart/pattern/trail -> that slot's COSMETIC_OPTIONS (default + unlockables).
+function skinTabItems(lp, tabKey) {
+    var out = [];
+    if (tabKey === 'color') {
+        var pal = skinPalette();
+        for (var i = 0; i < pal.length; i++) { out.push({ kind: 'color', color: pal[i] }); }
+        if (avatarSkinProfile(lp)) { out.push({ kind: 'avatar' }); }
+        return out;
     }
-    // Avatar skin option (signed-in primary only): one extra cell at index ===
-    // palette length, the player's picture in the same gold frame used in-game.
-    var avProfile = avatarSkinProfile(lp);
-    if (avProfile) {
-        var ai = pal.length;
-        var asx = x + pad + (ai % SKIN_COLS) * (cell + gap);
-        var asy = top + Math.floor(ai / SKIN_COLS) * (cell + gap);
-        var arect = { x: asx, y: asy, w: cell, h: cell };
-        gameContext.fillStyle = "#f4c542"; // the "external skin" border colour
-        lhRoundRect(gameContext, asx, asy, cell, cell, 5);
-        gameContext.fill();
-        var inset = 3;
-        var av = (typeof preloadAvatarImage === "function") ? preloadAvatarImage(avProfile.avatarUrl) : null;
-        if (av && av.ready && !av.failed) {
-            gameContext.save();
-            lhRoundRect(gameContext, asx + inset, asy + inset, cell - inset * 2, cell - inset * 2, 4);
-            gameContext.clip();
-            gameContext.drawImage(av.img, asx + inset, asy + inset, cell - inset * 2, cell - inset * 2);
-            gameContext.restore();
-        } else {
-            gameContext.fillStyle = "#222";
-            gameContext.textAlign = "center";
-            gameContext.textBaseline = "middle";
-            gameContext.font = "16px sans-serif";
-            gameContext.fillText("👤", asx + cell / 2, asy + cell / 2 + 1);
-        }
-        if (hasAvatar) { // equipped — small check badge, top-right
-            var bx = asx + cell - 8, by = asy + 8;
-            gameContext.beginPath();
-            gameContext.arc(bx, by, 7, 0, 2 * Math.PI);
-            gameContext.fillStyle = "rgba(0,0,0,0.7)";
-            gameContext.fill();
-            gameContext.fillStyle = "#fff";
-            gameContext.textAlign = "center";
-            gameContext.textBaseline = "middle";
-            gameContext.font = "bold 10px sans-serif";
-            gameContext.fillText("✓", bx, by + 0.5);
-        }
-        if (cursor === ai) {
-            gameContext.strokeStyle = "#fff";
-            gameContext.lineWidth = 3;
-            lhRoundRect(gameContext, asx - 1, asy - 1, cell + 2, cell + 2, 6);
-            gameContext.stroke();
-        }
-        hit.options.push({ rect: arect, action: "pickAvatar" });
+    for (var j = 0; j < COSMETIC_OPTIONS.length; j++) {
+        if (COSMETIC_OPTIONS[j].slot === tabKey) { out.push({ kind: 'cosmetic', opt: COSMETIC_OPTIONS[j] }); }
     }
-    // "Taken!" flash after a rejected pick.
-    if (lp._skinRejectAt && (Date.now() - lp._skinRejectAt) < 1500) {
-        gameContext.fillStyle = "#ff6b6b";
-        gameContext.textAlign = "center";
-        gameContext.font = "bold 13px sans-serif";
-        gameContext.fillText("Colour taken", x + w / 2, y + h - 12);
-    }
-    // Cart-skin picker row, one row below the swatch/avatar grid. Cart skins are
-    // independent of colour/avatar and open to everyone, so this always shows.
-    var gridRows = Math.ceil(skinOptionCount(lp) / SKIN_COLS);
-    var csY = top + gridRows * (cell + gap) + gap;
-    drawCartSkinRow(lp, x + pad, csY, w - pad * 2, hit);
+    return out;
+}
+// Full fixed panel height: title gap + tab row + grid + badge + page row.
+function skinPanelHeight() {
+    return 38 + 26 + 10 + SKIN_PICKER_ROWS * (SKIN_PICKER_CELLH + 6) + 20 + 24;
 }
 
-// Three labeled groups — "Carts" / "Patterns" / "Trails" — each a grid of square cells
-// with a procedural preview + label + lock badge. Each cell pushes a "cosmetic:<slot>:<id>"
-// hit action handled by stationPanelAction. The three slots are independent: selecting in
-// one group never clears another (selection is read per-slot off the player object).
-function drawCartSkinRow(lp, x, y, w, hit) {
-    // Lv / XP badge (signed-in) or a sign-in nudge (guest) above the grid.
-    drawProgressionBadge(lp, x, y, w);
-    var gridY = y + 24;
-    var lay = cartSkinLayout(w);
-    var cellW = lay.cellW, ch = lay.ch;
-    var n = COSMETIC_OPTIONS.length;
-    var currentColor = skinCurrentColor(lp);
-    // Which cart cell the keyboard/gamepad cursor is on (-1 = cursor is up in the
-    // swatch grid), so pad/keyboard users can see the highlighted cart option.
-    var sp = lp.stationPanel || {};
-    var base = skinOptionCount(lp);
-    var cursorCart = (typeof sp.cursor === "number" && sp.cursor >= base) ? (sp.cursor - base) : -1;
-    // Group headers ("Karts" / "Paints").
-    gameContext.textAlign = "left";
-    gameContext.textBaseline = "middle";
-    for (var h = 0; h < lay.headers.length; h++) {
-        gameContext.fillStyle = "rgba(255,255,255,0.55)";
+function drawSkinPanelBody(lp, x, y, w, h, hit) {
+    var sp = lp.stationPanel;
+    if (sp.tab == null) { sp.tab = 'color'; }
+    if (sp.region == null) { sp.region = 'grid'; }
+    skinValidateTab(lp);
+    var pad = 14, gap = 6, cols = SKIN_PICKER_COLS;
+    var tabs = skinTabs(lp);
+    // tab row. On a controller, reserve a gutter on each side for the LB/RB bumper hints
+    // (bumpers switch tabs); touch/keyboard get the full width with no gutters.
+    var tabTop = y + 38, tabH = 26;
+    var padType = slotPadType(lp);
+    var gut = padType ? 22 : 0;
+    if (padType) {
+        var bg = padBumperGlyphs(padType);
+        gameContext.fillStyle = "rgba(255,255,255,0.7)";
         gameContext.font = "bold 10px sans-serif";
-        gameContext.fillText(lay.headers[h].label, x, gridY + lay.headers[h].y + CART_GROUP_HEADER_H / 2);
+        gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
+        gameContext.fillText(bg.l, x + pad + gut / 2, tabTop + tabH / 2 + 1);
+        gameContext.fillText(bg.r, x + w - pad - gut / 2, tabTop + tabH / 2 + 1);
     }
-    for (var i = 0; i < n; i++) {
-        var opt = COSMETIC_OPTIONS[i];
-        var cx = x + lay.cells[i].x;
-        var cy = gridY + lay.cells[i].y;
-        var sel = currentCosmetic(lp, opt.slot) === opt.id;
-        var lock = cartSkinUnlock(opt.id);
-        gameContext.fillStyle = sel ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.06)";
-        lhRoundRect(gameContext, cx, cy, cellW, ch, 6);
-        gameContext.fill();
-        gameContext.lineWidth = sel ? 2 : 1;
-        gameContext.strokeStyle = sel ? "#ffd34d" : (lock.locked ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.2)");
-        lhRoundRect(gameContext, cx, cy, cellW, ch, 6);
-        gameContext.stroke();
-        if (i === cursorCart) {
-            gameContext.strokeStyle = "#fff";
-            gameContext.lineWidth = 2.5;
-            lhRoundRect(gameContext, cx - 1, cy - 1, cellW + 2, ch + 2, 7);
-            gameContext.stroke();
+    var tabW = (w - pad * 2 - gut * 2) / tabs.length;
+    for (var t = 0; t < tabs.length; t++) {
+        var tx = x + pad + gut + t * tabW;
+        var active = tabs[t].key === sp.tab;
+        gameContext.fillStyle = active ? "rgba(255,211,77,0.22)" : "rgba(255,255,255,0.10)";
+        lhRoundRect(gameContext, tx + 1, tabTop, tabW - 2, tabH, 6); gameContext.fill();
+        if (sp.region === 'tabs' && active) {
+            gameContext.strokeStyle = "#fff"; gameContext.lineWidth = 2;
+            lhRoundRect(gameContext, tx + 1, tabTop, tabW - 2, tabH, 6); gameContext.stroke();
         }
-        drawCosmeticPreview(opt, cx + cellW / 2, cy + ch * 0.32, ch * 0.2, currentColor, lock.locked);
-        gameContext.fillStyle = lock.locked ? "rgba(255,255,255,0.5)" : "#fff";
-        gameContext.font = "9px sans-serif";
-        gameContext.textAlign = "center";
-        gameContext.textBaseline = "middle";
-        gameContext.fillText(opt.label, cx + cellW / 2, cy + ch * 0.7);
-        if (lock.locked && lock.text) {
-            gameContext.fillStyle = "#ffd34d";
-            gameContext.font = "bold 9px sans-serif";
-            gameContext.fillText("🔒 " + lock.text, cx + cellW / 2, cy + ch * 0.9);
-        }
-        hit.options.push({ rect: { x: cx, y: cy, w: cellW, h: ch }, action: "cosmetic:" + opt.slot + ":" + (opt.id == null ? "" : opt.id) });
+        gameContext.fillStyle = active ? "#ffd34d" : "rgba(255,255,255,0.82)";
+        gameContext.font = (active ? "bold " : "") + "11px sans-serif";
+        gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
+        gameContext.fillText(tabs[t].label, tx + tabW / 2, tabTop + tabH / 2 + 1);
+        hit.options.push({ rect: { x: tx, y: tabTop, w: tabW, h: tabH }, action: "tab:" + tabs[t].key });
     }
-    // Transient "locked" toast after trying to equip a locked skin.
-    if (lp._cartLockAt && (Date.now() - lp._cartLockAt) < 1600 && lp._cartLockMsg) {
-        gameContext.fillStyle = "#ff6b6b";
-        gameContext.textAlign = "center";
-        gameContext.font = "bold 12px sans-serif";
-        gameContext.fillText(lp._cartLockMsg, x + w / 2, gridY + lay.height + 14);
+    // grid for the active tab's current page
+    var items = skinTabItems(lp, sp.tab);
+    if (sp.cursor == null) { sp.cursor = 0; }
+    if (sp.cursor > items.length - 1) { sp.cursor = Math.max(0, items.length - 1); }
+    var perPage = SKIN_PICKER_PER_PAGE;
+    var page = Math.floor(sp.cursor / perPage);
+    var pageCount = Math.max(1, Math.ceil(items.length / perPage));
+    var cellW = (w - pad * 2 - gap * (cols - 1)) / cols;
+    var cellH = SKIN_PICKER_CELLH;
+    var gridTop = tabTop + tabH + 10;
+    var currentColor = skinCurrentColor(lp);
+    for (var k = 0; k < perPage; k++) {
+        var idx = page * perPage + k;
+        if (idx >= items.length) { break; }
+        var cx = x + pad + (k % cols) * (cellW + gap);
+        var cy = gridTop + Math.floor(k / cols) * (cellH + gap);
+        drawSkinCell(lp, items[idx], cx, cy, cellW, cellH, (sp.region === 'grid' && idx === sp.cursor), currentColor, hit);
+    }
+    // Lv/XP badge (or sign-in nudge)
+    var badgeY = gridTop + SKIN_PICKER_ROWS * (cellH + gap) + 2;
+    drawProgressionBadge(lp, x + pad, badgeY, w - pad * 2);
+    // page controls
+    var pgY = y + h - 22;
+    if (pageCount > 1) {
+        var arrowOn = (sp.region === 'page');
+        var lrect = { x: x + pad, y: pgY - 11, w: 30, h: 22 };
+        var rrect = { x: x + w - pad - 30, y: pgY - 11, w: 30, h: 22 };
+        gameContext.fillStyle = arrowOn ? "#fff" : "#9cdcff";
+        gameContext.font = "bold 18px sans-serif"; gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
+        gameContext.fillText("◄", lrect.x + lrect.w / 2, pgY);
+        gameContext.fillText("►", rrect.x + rrect.w / 2, pgY);
+        hit.options.push({ rect: lrect, action: "page:-1" });
+        hit.options.push({ rect: rrect, action: "page:1" });
+        var dotGap = 12, dx0 = x + w / 2 - (pageCount - 1) * dotGap / 2;
+        for (var d = 0; d < pageCount; d++) {
+            gameContext.beginPath();
+            gameContext.arc(dx0 + d * dotGap, pgY, d === page ? 3.5 : 2.5, 0, Math.PI * 2);
+            gameContext.fillStyle = d === page ? "#ffd34d" : "rgba(255,255,255,0.4)";
+            gameContext.fill();
+        }
+    }
+    // transient "locked"/"colour taken" toast
+    var msg = null;
+    if (lp._cartLockAt && (Date.now() - lp._cartLockAt) < 1600 && lp._cartLockMsg) { msg = lp._cartLockMsg; }
+    else if (lp._skinRejectAt && (Date.now() - lp._skinRejectAt) < 1500) { msg = "Colour taken"; }
+    if (msg) {
+        gameContext.fillStyle = "#ff6b6b"; gameContext.textAlign = "center"; gameContext.font = "bold 11px sans-serif";
+        gameContext.fillText(msg, x + w / 2, badgeY + 14);
     }
 }
+
+// Draw one picker cell (colour swatch / avatar / cosmetic) + push its hit target.
+function drawSkinCell(lp, item, cx, cy, cw, ch, focused, currentColor, hit) {
+    if (item.kind === 'color') {
+        var taken = skinTakenColors(lp);
+        var isTaken = !!taken[item.color];
+        var hasAvatar = playerHasAvatarSkin(lp);
+        gameContext.globalAlpha = isTaken ? 0.32 : 1;
+        gameContext.fillStyle = item.color;
+        lhRoundRect(gameContext, cx, cy, cw, ch, 6); gameContext.fill();
+        gameContext.globalAlpha = 1;
+        if (item.color === skinCurrentColor(lp) && !hasAvatar) {
+            gameContext.fillStyle = "#000"; gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
+            gameContext.font = "bold 18px sans-serif"; gameContext.fillText("✓", cx + cw / 2, cy + ch / 2 + 1);
+        }
+        if (isTaken) {
+            gameContext.strokeStyle = "rgba(0,0,0,0.6)"; gameContext.lineWidth = 2;
+            gameContext.beginPath(); gameContext.moveTo(cx + 5, cy + 5); gameContext.lineTo(cx + cw - 5, cy + ch - 5); gameContext.stroke();
+        }
+        if (focused) { gameContext.strokeStyle = "#fff"; gameContext.lineWidth = 3; lhRoundRect(gameContext, cx - 1, cy - 1, cw + 2, ch + 2, 7); gameContext.stroke(); }
+        hit.options.push({ rect: { x: cx, y: cy, w: cw, h: ch }, action: isTaken ? "noop" : ("pick:" + item.color) });
+        return;
+    }
+    if (item.kind === 'avatar') {
+        var hasAv = playerHasAvatarSkin(lp);
+        var avProfile = avatarSkinProfile(lp);
+        gameContext.fillStyle = "#f4c542";
+        lhRoundRect(gameContext, cx, cy, cw, ch, 6); gameContext.fill();
+        var inset = 3;
+        var av = (avProfile && typeof preloadAvatarImage === "function") ? preloadAvatarImage(avProfile.avatarUrl) : null;
+        if (av && av.ready && !av.failed) {
+            gameContext.save();
+            lhRoundRect(gameContext, cx + inset, cy + inset, cw - inset * 2, ch - inset * 2, 4); gameContext.clip();
+            gameContext.drawImage(av.img, cx + inset, cy + inset, cw - inset * 2, ch - inset * 2);
+            gameContext.restore();
+        } else {
+            gameContext.fillStyle = "#222"; gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
+            gameContext.font = "16px sans-serif"; gameContext.fillText("👤", cx + cw / 2, cy + ch / 2 + 1);
+        }
+        if (hasAv) {
+            gameContext.beginPath(); gameContext.arc(cx + cw - 8, cy + 8, 7, 0, 2 * Math.PI);
+            gameContext.fillStyle = "rgba(0,0,0,0.7)"; gameContext.fill();
+            gameContext.fillStyle = "#fff"; gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
+            gameContext.font = "bold 10px sans-serif"; gameContext.fillText("✓", cx + cw - 8, cy + 8.5);
+        }
+        if (focused) { gameContext.strokeStyle = "#fff"; gameContext.lineWidth = 3; lhRoundRect(gameContext, cx - 1, cy - 1, cw + 2, ch + 2, 7); gameContext.stroke(); }
+        hit.options.push({ rect: { x: cx, y: cy, w: cw, h: ch }, action: "pickAvatar" });
+        return;
+    }
+    var opt = item.opt;
+    var sel = currentCosmetic(lp, opt.slot) === opt.id;
+    var lock = cartSkinUnlock(opt.id);
+    gameContext.fillStyle = sel ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.06)";
+    lhRoundRect(gameContext, cx, cy, cw, ch, 6); gameContext.fill();
+    gameContext.lineWidth = sel ? 2 : 1;
+    gameContext.strokeStyle = sel ? "#ffd34d" : (lock.locked ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.2)");
+    lhRoundRect(gameContext, cx, cy, cw, ch, 6); gameContext.stroke();
+    if (focused) { gameContext.strokeStyle = "#fff"; gameContext.lineWidth = 2.5; lhRoundRect(gameContext, cx - 1, cy - 1, cw + 2, ch + 2, 7); gameContext.stroke(); }
+    drawCosmeticPreview(opt, cx + cw / 2, cy + ch * 0.34, ch * 0.22, currentColor, lock.locked);
+    gameContext.fillStyle = lock.locked ? "rgba(255,255,255,0.5)" : "#fff";
+    gameContext.font = "8.5px sans-serif"; gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
+    gameContext.fillText(opt.label, cx + cw / 2, cy + ch * 0.74);
+    if (lock.locked && lock.text) {
+        gameContext.fillStyle = "#ffd34d"; gameContext.font = "bold 8.5px sans-serif";
+        gameContext.fillText("🔒 " + lock.text, cx + cw / 2, cy + ch * 0.93);
+    }
+    hit.options.push({ rect: { x: cx, y: cy, w: cw, h: ch }, action: "cosmetic:" + opt.slot + ":" + (opt.id == null ? "" : opt.id) });
+}
+
+// Activate the focused item (pad/keyboard confirm or pointer tap).
+function activateSkinItem(lp, item) {
+    if (!item) { return; }
+    if (item.kind === 'color') { stationPickSkin(lp, item.color); }
+    else if (item.kind === 'avatar') { stationPickAvatar(lp); }
+    else if (item.kind === 'cosmetic') { stationPickCosmetic(lp, item.opt); }
+}
+
 
 // Procedural preview thumbnail for a cosmetic cell, rendered in the player's current
 // colour and greyed when locked. Cart/pattern previews run the real registry painter
@@ -1259,11 +1378,25 @@ function drawCosmeticPreview(opt, cx, cy, r, paint, locked) {
         return;
     }
     gameContext.translate(cx, cy);
-    gameContext.rotate(-Math.PI / 2); // forward (+X) points up in the thumbnail
-    gameContext.scale(r * 1.5, r * 1.5);
+    // Match the in-game orientation: drawCartSkin draws STATUE carts upright (native, no
+    // heading rotation), and everything else faces "forward" (+X). Rotate −90° so forward
+    // reads as up in the thumbnail — but NOT for statue carts, or they'd sit 90° off from
+    // how they actually look in game.
+    var previewSkin = (typeof getSkin === "function") ? getSkin(opt.id) : null;
+    var previewStatue = !!(slot === "cart" && previewSkin && previewSkin.statue);
+    if (!previewStatue) { gameContext.rotate(-Math.PI / 2); }
     var anim = (typeof cartSkinAnimTime !== "undefined") ? cartSkinAnimTime : 0;
-    if (slot === "pattern") {
+    if (slot === "border") {
+        // Borders ring the rim (~1.0..1.4 in normalized space) and compose over ANY cart.
+        // Scale tighter than patterns/carts so the wider rim stays inside the cell; draw a
+        // small tinted disc as a stand-in kart body, then the border painter UNCLIPPED.
+        gameContext.scale(r, r);
+        gameContext.fillStyle = color;
+        gameContext.beginPath(); gameContext.arc(0, 0, 0.7, 0, Math.PI * 2); gameContext.fill();
+        painter(gameContext, anim, color);
+    } else if (slot === "pattern") {
         // Patterns are body overlays — draw a tinted disc base, then the texture clipped to it.
+        gameContext.scale(r * 1.5, r * 1.5);
         gameContext.fillStyle = color;
         gameContext.beginPath(); gameContext.arc(0, 0, 0.95, 0, Math.PI * 2); gameContext.fill();
         gameContext.save();
@@ -1271,6 +1404,7 @@ function drawCosmeticPreview(opt, cx, cy, r, paint, locked) {
         painter(gameContext, anim, color);
         gameContext.restore();
     } else {
+        gameContext.scale(r * 1.5, r * 1.5);
         painter(gameContext, anim, color);
     }
     gameContext.restore();
@@ -1316,7 +1450,7 @@ function stationPickCosmetic(lp, opt) {
 // header positions, and total height. Shared by the panel-height calc and the renderer
 // so they never disagree. cellW/ch are the cell size. Groups by COSMETIC_OPTIONS[i].slot.
 var CART_GROUP_HEADER_H = 16;
-var COSMETIC_GROUP_LABEL = { cart: 'Carts', pattern: 'Patterns', trail: 'Trails' };
+var COSMETIC_GROUP_LABEL = { cart: 'Carts', pattern: 'Patterns', trail: 'Trails', border: 'Borders' };
 function cartSkinLayout(innerW) {
     var cgap = 6;
     var minCellW = 46;
@@ -1358,6 +1492,8 @@ function cartSkinUnlock(id) {
     if (id == null) { return { locked: false }; }
     var skin = (typeof getSkin === "function") ? getSkin(id) : null;
     if (!skin) { return { locked: true, text: "?" }; }
+    // Dev/testing seam (UNLOCK_ALL_COSMETICS): every cosmetic shows as unlocked locally.
+    if (typeof config !== "undefined" && config && config.unlockAllCosmetics) { return { locked: false }; }
     var prog = (typeof myProgression !== "undefined") ? myProgression : null;
     if (skin.unlock.kind === "open") { return { locked: false }; } // unlock-all-for-testing
     if (skin.unlock.kind === "level") {
@@ -1375,7 +1511,7 @@ function drawProgressionBadge(lp, x, y, w) {
     gameContext.textAlign = "left";
     gameContext.textBaseline = "middle";
     if (!prog) {
-        gameContext.fillStyle = "rgba(255,255,255,0.6)";
+        gameContext.fillStyle = "rgba(255,255,255,0.85)";
         gameContext.font = "11px sans-serif";
         gameContext.fillText("Sign in to earn XP & unlock skins", x, y + 10);
         return;

@@ -34,6 +34,8 @@ var GP_BTN_A = 0;     // attack / confirm
 var GP_BTN_B = 1;     // cancel (emoji wheel)
 var GP_BTN_EMOJI = 2; // X / Square -> open emoji wheel
 var GP_BTN_FULLSCREEN = 3; // Y / Triangle -> fullscreen (primary player only)
+var GP_BTN_LB = 4;    // left bumper  -> skin shop: previous tab/category
+var GP_BTN_RB = 5;    // right bumper -> skin shop: next tab/category
 var GP_BTN_RT = 7;    // right trigger (analog) -> attack
 var GP_BTN_SELECT = 8; // Select/Back/View -> restore faded hint bar
 var GP_BTN_START = 9; // Start / Options -> open the in-game settings panel (primary player only)
@@ -916,6 +918,12 @@ function pollStationPanel(pad, lp) {
     if (buttonPressedThisFrame(pad, GP_BTN_A, lp)) {
         stationPanelConfirm(lp);
         return;
+    }
+    // Bumpers switch the skin shop tab/category (skin panel only). Pages stay on the
+    // d-pad ◄ ► region. No-op on the AI panel.
+    if (typeof stationPanelTab === "function") {
+        if (buttonPressedThisFrame(pad, GP_BTN_LB, lp)) { stationPanelTab(lp, -1); return; }
+        if (buttonPressedThisFrame(pad, GP_BTN_RB, lp)) { stationPanelTab(lp, 1); return; }
     }
     if (buttonPressedThisFrame(pad, GP_DPAD_LEFT, lp)) { stationPanelNav(lp, -1, 0); return; }
     if (buttonPressedThisFrame(pad, GP_DPAD_RIGHT, lp)) { stationPanelNav(lp, 1, 0); return; }
