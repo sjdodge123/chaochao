@@ -1058,6 +1058,29 @@ function lobbyHubHandlePrimaryPointer(lx, ly) {
     return false;
 }
 
+// Read-only mirror of lobbyHubHandlePrimaryPointer: returns true if a pointer at
+// (lx, ly) WOULD be consumed by the hub, WITHOUT mutating any panel state. Used by
+// handleDblClick so a rapid double-click on a hub prompt/panel doesn't get treated
+// as the desktop "toggle mouse-drive" gesture. While a panel is open every click is
+// captured by the hub (control, close, or dismiss-away), so any point counts.
+function lobbyHubPointHitsActive(lx, ly) {
+    if (typeof config === "undefined" || config == null || currentState !== config.stateMap.lobby) {
+        return false;
+    }
+    if (typeof localPlayers === "undefined") {
+        return false;
+    }
+    var lp = localPlayers[primarySlot];
+    if (!lp) {
+        return false;
+    }
+    if (lp.stationPanel) {
+        return true;
+    }
+    var hit = stationHudHit[lp.slot];
+    return !!(lp.nearStation && hit && lhPointIn(hit.prompt, lx, ly));
+}
+
 // --- keyboard (primary slot only) --------------------------------------------
 
 // Returns true if the key was consumed by the hub (so keyDown stops processing it
