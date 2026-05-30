@@ -17,7 +17,9 @@ var skinRegistry = require('./skinRegistry.js');
 // Maps a cosmetic slot to the Player field that holds its equipped id. `trail` uses
 // `trailFx` (the EFFECT id) so it never collides with the client's `player.trail`
 // motion-trail object. Also the allow-list of valid slot names for setCosmetic.
-var COSMETIC_SLOT_FIELD = { cart: 'cart', pattern: 'pattern', trail: 'trailFx' };
+// `border` is its OWN 4th slot (player.border / selected_border) — a pattern and a border can
+// be equipped at once. Mirrors the client COSMETIC_SLOT_FIELD (skinRegistry.js).
+var COSMETIC_SLOT_FIELD = { cart: 'cart', pattern: 'pattern', trail: 'trailFx', border: 'border' };
 var mailBoxList = {},
 	identityList = {},
 	roomMailList = {},
@@ -65,12 +67,19 @@ function restorePersistedCosmetics(client, player, prog) {
 	for (var i = 0; i < slots.length; i++) {
 		var slot = slots[i];
 		var id = prog ? prog['selected_' + slot] : null;
-		if (!id || !cosmeticUnlocked(prog, slot, id)) {
+		if (!id) {
 			continue;
 		}
-		player[COSMETIC_SLOT_FIELD[slot]] = id;
+		// Validate the persisted id by ITS OWN registry slot. Each slot now has its own column
+		// (selected_cart/pattern/trail/border), so the nominal slot already matches; the
+		// getSkinSlot() guard stays as defence against a stale id parked in the wrong column.
+		var realSlot = skinRegistry.getSkinSlot(id);
+		if (!realSlot || COSMETIC_SLOT_FIELD[realSlot] == null || !cosmeticUnlocked(prog, realSlot, id)) {
+			continue;
+		}
+		player[COSMETIC_SLOT_FIELD[realSlot]] = id;
 		if (room) {
-			messageRoomBySig(room.sig, "playerCosmeticChanged", { id: client.id, slot: slot, value: id });
+			messageRoomBySig(room.sig, "playerCosmeticChanged", { id: client.id, slot: realSlot, value: id });
 		}
 	}
 }
@@ -622,7 +631,9 @@ function checkForMail(client) {
 			return;
 		}
 		var prog = player.progression || null;
-		if (skin.unlock.kind === "level") {
+		if (c.unlockAllCosmetics) {
+			// Dev/testing seam (UNLOCK_ALL_COSMETICS): any registry id is equippable.
+		} else if (skin.unlock.kind === "level") {
 			var level = prog ? (prog.level || 1) : 1;
 			if (level < skin.unlock.level) {
 				client.emit("cosmeticRejected", { slot: slot, id: id, reason: "level", required: skin.unlock.level });

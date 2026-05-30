@@ -173,9 +173,12 @@ function recapCaptureFrame() {
 			color: p.color,
 			radius: (p.radius != null) ? p.radius : 12,
 			name: p.name || null,
-			// Cart skin is fixed for the match, so the static look carries it (no need
-			// to spend a per-frame tuple slot). Lets the replay render the equipped skin.
-			cartSkin: (p.cartSkin != null) ? p.cartSkin : null
+			// Cosmetic slots are fixed for the match, so the static look carries them (no
+			// per-frame tuple slot). Lets the replay render the same cart + pattern + trail.
+			cart: (p.cart != null) ? p.cart : null,
+			pattern: (p.pattern != null) ? p.pattern : null,
+			trailFx: (p.trailFx != null) ? p.trailFx : null,
+			border: (p.border != null) ? p.border : null
 		};
 	}
 	if (players.length === 0) {
@@ -911,6 +914,7 @@ function recapRenderClip(item, winX, winY, winW, winH) {
 function recapDrawTrails(item, frameT) {
 	var frames = item.frames;
 	var tracks = {}; // id -> flat [x0,y0,x1,y1,...]
+	var vertsBy = {}; // id -> [{x,y,t}] for the rich trail renderers
 	var order = [];
 	for (var fi = 0; fi < frames.length; fi++) {
 		var f = frames[fi];
@@ -924,8 +928,9 @@ function recapDrawTrails(item, frameT) {
 				continue; // trail stops where the kart left play
 			}
 			var id = pr[RF_ID];
-			if (tracks[id] == null) { tracks[id] = []; order.push(id); }
+			if (tracks[id] == null) { tracks[id] = []; vertsBy[id] = []; order.push(id); }
 			tracks[id].push(pr[RF_X], pr[RF_Y]);
+			vertsBy[id].push({ x: pr[RF_X], y: pr[RF_Y], t: f.t });
 		}
 	}
 	for (var oi = 0; oi < order.length; oi++) {
@@ -934,6 +939,20 @@ function recapDrawTrails(item, frameT) {
 			continue;
 		}
 		var meta = recapMeta[order[oi]] || { color: "grey" };
+		// Cosmetic trail effect: dispatch to the same rich renderer as live racing using
+		// timestamped verts; falls back to the plain colour stroke.
+		var tfxId = (typeof getTrailEffect === "function" && meta.trailFx) ? getTrailEffect(meta.trailFx) : null;
+		var fx = (tfxId && typeof TRAIL_FX !== "undefined") ? TRAIL_FX[tfxId] : null;
+		if (fx) {
+			var verts = vertsBy[order[oi]];
+			if (verts && verts.length >= 2) {
+				var fadeMs = (typeof TRAIL_FADE_MS !== "undefined") ? TRAIL_FADE_MS : 5000;
+				var anim = (typeof cartSkinAnimTime !== "undefined") ? cartSkinAnimTime * 1000 : frameT;
+				if (typeof tfxBaseAlpha !== "undefined") { tfxBaseAlpha = 1; }
+				try { fx(gameContext, verts, meta.color, frameT, fadeMs, anim); } catch (e) {}
+			}
+			continue;
+		}
 		gameContext.save();
 		gameContext.lineWidth = 5;
 		gameContext.lineCap = "round";
@@ -1160,7 +1179,7 @@ function recapDrawCar(pr, exits, frameT) {
 		velX: pr[RF_VX], velY: pr[RF_VY], color: meta.color,
 		radius: meta.radius, onFire: pr[RF_FIRE], ability: pr[RF_ABILITY],
 		name: meta.name,
-		cartSkin: meta.cartSkin,
+		cart: meta.cart, pattern: meta.pattern, trailFx: meta.trailFx, border: meta.border,
 		// rebuild the buff/debuff window flags drawSpeedFx checks (future expiry = active)
 		speedBuffUntil: pr[RF_SPEEDFX] === 1 ? Date.now() + 99999 : null,
 		speedDebuffUntil: pr[RF_SPEEDFX] === 2 ? Date.now() + 99999 : null
@@ -1207,9 +1226,15 @@ function recapDrawCar(pr, exits, frameT) {
 
 	// Kart body: a procedural cart skin replaces the coloured disc (matches live play,
 	// where the skin is tinted by the player's colour and the base disc is suppressed).
-	var recapPainter = (p.cartSkin === "firetruck") ? (typeof drawFiretruckSkin === "function" ? drawFiretruckSkin : null)
-		: (p.cartSkin === "dino") ? (typeof drawDinoSkin === "function" ? drawDinoSkin : null)
-		: null;
+	// Independent body cosmetics: border (p.border) rings ANY cart; pattern (p.pattern) is
+	// sphere-only. Both can be present.
+	// Border FIRST (behind the body) so the cart always sits on top.
+	var recapBskin = (typeof getSkin === "function" && p.border) ? getSkin(p.border) : null;
+	if (recapBskin && recapBskin.slot === 'border' && typeof drawBorderOverlay === "function") {
+		var recapBorder0 = (typeof getSkinPainter === "function") ? getSkinPainter(p.border) : null;
+		if (recapBorder0 != null) { try { drawBorderOverlay(p, p.x, p.y, p.radius, recapBorder0); } catch (e) {} }
+	}
+	var recapPainter = (typeof cartSkinPainter === "function") ? cartSkinPainter(p.cart) : null;
 	if (recapPainter != null && typeof drawCartSkin === "function") {
 		try {
 			drawCartSkin(p, p.x, p.y, p.radius, recapPainter);
@@ -1220,6 +1245,14 @@ function recapDrawCar(pr, exits, frameT) {
 		try {
 			gameContext.drawImage(sprite, p.x - sprite.halfSize, p.y - sprite.halfSize);
 		} catch (e) { /* an undecoded sprite — skip this kart, keep the montage alive */ }
+		// Pattern overlay on the plain sphere cart (patterns are sphere-scoped).
+		var recapPskin = (typeof getSkin === "function" && p.pattern) ? getSkin(p.pattern) : null;
+		if (recapPskin && recapPskin.slot === 'pattern') {
+			var recapPat = (typeof getSkinPainter === "function") ? getSkinPainter(p.pattern) : null;
+			if (recapPat != null && typeof drawPatternOverlay === "function") {
+				try { drawPatternOverlay(p, p.x, p.y, p.radius, recapPat); } catch (e) {}
+			}
+		}
 	}
 
 	if (p.ability != null && typeof drawAbilityIndicator === "function") {

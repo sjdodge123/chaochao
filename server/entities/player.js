@@ -219,6 +219,7 @@ class Player extends Circle {
 		this.cart = null;
 		this.pattern = null;
 		this.trailFx = null;
+		this.border = null;     // 4th cosmetic slot: rim border (independent of pattern)
 		this.profile = null;
 		this.emoteReadyAt = 0;
 		//Steering outputs the engine's isAI branch reads each tick.

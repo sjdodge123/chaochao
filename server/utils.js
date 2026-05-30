@@ -11,6 +11,11 @@ var cellGraph = require('./cellGraph.js');
 var mapFormat = require('./mapFormat.js');
 var mapClassifier = require('./mapClassifier.js');
 c.port = process.env.PORT || c.port;
+// Dev/testing seam: when set, EVERY cosmetic is equippable regardless of level/achievement
+// gating (server accepts any equip; client shows all unlocked). Default OFF so prod stays
+// gated — set UNLOCK_ALL_COSMETICS=true only on a local test server. Delivered to the
+// client in the config payload as `config.unlockAllCosmetics`.
+c.unlockAllCosmetics = (process.env.UNLOCK_ALL_COSMETICS === 'true');
 
 // Test-only config override seam (CI perf harness). When CHAO_PERF_OVERRIDE is a
 // JSON object, deep-merge it over the loaded config so a separate-process server

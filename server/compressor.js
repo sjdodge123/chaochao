@@ -205,6 +205,7 @@ function newPlayerPacket(player) {
 	packet[13] = player.cart || null;     // cart body-shape id
 	packet[14] = player.pattern || null;  // pattern overlay id (tints to colour)
 	packet[15] = player.trailFx || null;  // trail-effect id (renders in colour)
+	packet[16] = player.border || null;   // border (rim) id — independent 4th slot
 	return packet;
 }
 
