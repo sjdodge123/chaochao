@@ -839,7 +839,16 @@ class Game {
 		this.currentState = this.stateMap.overview;
 		var nextMapID = this.gameBoard.determineNextMap();
 		this.collapseInitated = false;
-		messenger.messageRoomBySig(this.roomSig, 'startOverview', { notchUpdates: compressor.sendNotchUpdates(this.playerList), nextMapID: nextMapID });
+		// currentMap is still the JUST-PLAYED map here (determineNextMap only stashes
+		// nextMap; loadNextMap advances currentMap later at the gate). Pass it so the
+		// overview's rating widget rates the map you just played, not the upcoming one.
+		var justPlayed = this.gameBoard.currentMap;
+		messenger.messageRoomBySig(this.roomSig, 'startOverview', {
+			notchUpdates: compressor.sendNotchUpdates(this.playerList),
+			nextMapID: nextMapID,
+			mapId: (justPlayed != null) ? justPlayed.id : null,
+			mapName: (justPlayed != null) ? justPlayed.name : null
+		});
 		this.publishMapLeaderboard();
 	}
 

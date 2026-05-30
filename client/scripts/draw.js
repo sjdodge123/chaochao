@@ -1832,23 +1832,26 @@ function drawGameOverScreen(dt) {
     // "Rate this map" star widget, pinned bottom-centre. Guarded for the same
     // reason as the recap — it must never take down the game-over screen.
     try {
-        drawGameOverRating();
+        drawMapRating();
     } catch (e) {
         debugLog("rating draw error", e);
     }
 
 }
 
-// A 5-star "rate this map" strip at the bottom of the game-over screen. Records
-// per-star hit rects into ratingStarHits (logical coords) for input.js to test.
-// Click/tap a star to vote (one vote per map; re-voting overwrites). No-op render
-// when the server didn't tell us which map to rate.
-function drawGameOverRating() {
+// A 5-star "rate this map" strip pinned bottom-centre. Shown on the per-round
+// overview (rate the map you just played) and the match-over screen. Records per-star
+// hit rects into ratingStarHits (logical coords) for input.js to test. Click/tap a
+// star to vote (one vote per map; re-voting overwrites). No-op render when the server
+// didn't tell us which map to rate.
+function drawMapRating(cxOverride) {
     if (typeof ratingMapId === "undefined" || ratingMapId == null) {
         ratingStarHits = [];
         return;
     }
-    var cx = LOGICAL_WIDTH / 2;
+    // Centre by default (game-over); callers can shift it (the overview shifts left so
+    // the strip clears the right-side next-map/leaderboard cards).
+    var cx = (typeof cxOverride === "number") ? cxOverride : LOGICAL_WIDTH / 2;
     var n = 5, starSize = 36, gap = 8;
     var rowW = n * starSize + (n - 1) * gap;
     var rated = (myMapRating > 0);
@@ -5309,6 +5312,14 @@ function drawOverviewBoard() {
     // them; this overview-context render catches them anchored to notch rows.
     drawRecordFloatsOverview();
     drawHUD();
+    // "Rate this map" star strip for the map just played — bottom, shifted left of
+    // centre so it clears the next-map/leaderboard cards on the right. Drawn last so it
+    // sits over the board; guarded so a render error can't break the overview.
+    try {
+        drawMapRating(LOGICAL_WIDTH / 2 - 150);
+    } catch (e) {
+        debugLog("rating draw error", e);
+    }
 }
 
 // Format an elapsed-race time (milliseconds) as "m:ss.SS" — minutes are only

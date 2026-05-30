@@ -186,8 +186,8 @@ function handleClick(event) {
             var rect = gameCanvas.getBoundingClientRect();
             var lx = ((event.clientX - rect.left) / newWidth) * LOGICAL_WIDTH;
             var ly = ((event.clientY - rect.top) / newHeight) * LOGICAL_HEIGHT;
-            // Game-over screen: a click on the star widget rates the map — consume it.
-            if (typeof handleGameOverRatingTap === "function" && handleGameOverRatingTap(lx, ly)) {
+            // Overview / game-over screen: a click on the star widget rates the map.
+            if (typeof handleMapRatingTap === "function" && handleMapRatingTap(lx, ly)) {
                 event.preventDefault();
                 break;
             }
@@ -591,8 +591,8 @@ function onTouchStart(evt) {
         evt.preventDefault();
         return;
     }
-    // Game-over screen: a tap on the star widget rates the map.
-    if (typeof handleGameOverRatingTap === "function" && handleGameOverRatingTap(touchX, touchY)) {
+    // Overview / game-over screen: a tap on the star widget rates the map.
+    if (typeof handleMapRatingTap === "function" && handleMapRatingTap(touchX, touchY)) {
         evt.preventDefault();
         return;
     }
