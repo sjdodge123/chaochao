@@ -2203,7 +2203,7 @@ function spawnTriggerPulse(x, y, color) {
 
 function drawAbilties() {
 
-    if (Object.keys(aimerList).length > 0) {
+    if (hasAnyKey(aimerList)) {
         for (var id in aimerList) {
             drawAimer(aimerList[id]);
         }
@@ -2370,6 +2370,13 @@ var cartSkinAnimTime = 0;
 // Set of player ids currently targeted by some aimer (telegraph). Rebuilt once
 // per frame in drawPlayers so drawPlayer can do an O(1) lookup instead of an
 // O(aimers) for-in + targetList.indexOf per kart per frame.
+// Cheap "is this object/map non-empty?" test — stops at the first key instead of
+// allocating a throwaway array like Object.keys(o).length does each frame.
+function hasAnyKey(o) {
+    if (o == null) { return false; }
+    for (var k in o) { if (Object.prototype.hasOwnProperty.call(o, k)) { return true; } }
+    return false;
+}
 // Nearest-cell id for a player, cached on the player. The map is a Voronoi
 // diagram so the cell a point sits in is the one whose site is nearest — an
 // O(cells) scan. The on-fire-on-lava flash needs it every frame for every
@@ -3927,7 +3934,7 @@ function drawMap() {
             gameContext.drawImage(mapCanvas, mdx, mdy, mdw, mdh);
         }
     }
-    if (Object.keys(hazardList).length > 0) {
+    if (hasAnyKey(hazardList)) {
         for (var id in hazardList) {
             drawHazard(hazardList[id]);
         }
@@ -4116,7 +4123,7 @@ function drawPendingSwap() {
     }
     gameContext.restore();
     // Once every tile has flipped/cleared/expired, drop the telegraph.
-    if (Object.keys(set).length === 0) {
+    if (!hasAnyKey(set)) {
         pendingSwapCells = null;
     }
 }
@@ -4233,19 +4240,27 @@ function renderMapToCache() {
 // A subtle dark vignette over the play area, so the flat background reads as an
 // intentional frame rather than dead space. Drawn in world coords right after
 // the map (under players/FX) so it never dims karts. Cheap: one gradient fill.
+// The vignette gradient depends only on the world rect, so build it once and
+// reuse it every frame (createRadialGradient + addColorStop per frame is pure
+// waste when the world hasn't changed).
+var _vignetteGrad = null, _vignetteKey = "";
 function drawArenaVignette() {
     if (world == null) {
         return;
     }
-    var cx = world.x + world.width / 2;
-    var cy = world.y + world.height / 2;
-    var inner = Math.min(world.width, world.height) * 0.45;
-    var outer = Math.sqrt(world.width * world.width + world.height * world.height) / 2;
-    var g = gameContext.createRadialGradient(cx, cy, inner, cx, cy, outer);
-    g.addColorStop(0, "rgba(0, 0, 0, 0)");
-    g.addColorStop(1, "rgba(8, 6, 14, 0.26)");
+    var key = world.x + "," + world.y + "," + world.width + "," + world.height;
+    if (_vignetteGrad == null || key !== _vignetteKey) {
+        var cx = world.x + world.width / 2;
+        var cy = world.y + world.height / 2;
+        var inner = Math.min(world.width, world.height) * 0.45;
+        var outer = Math.sqrt(world.width * world.width + world.height * world.height) / 2;
+        _vignetteGrad = gameContext.createRadialGradient(cx, cy, inner, cx, cy, outer);
+        _vignetteGrad.addColorStop(0, "rgba(0, 0, 0, 0)");
+        _vignetteGrad.addColorStop(1, "rgba(8, 6, 14, 0.26)");
+        _vignetteKey = key;
+    }
     gameContext.save();
-    gameContext.fillStyle = g;
+    gameContext.fillStyle = _vignetteGrad;
     gameContext.fillRect(world.x, world.y, world.width, world.height);
     gameContext.restore();
 }

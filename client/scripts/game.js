@@ -451,6 +451,19 @@ function gameLoop(dt) {
 }
 
 
+// Mobile browsers fire 'resize' rapidly as the address bar shows/hides on scroll,
+// and resize() reallocates two canvas backing stores + rebuilds the camera — doing
+// that per event stutters. Coalesce a burst into one resize per animation frame.
+// (resize() itself is still called directly for the initial/synchronous layout.)
+var _resizePending = false;
+function onResizeEvent() {
+    if (_resizePending) { return; }
+    _resizePending = true;
+    var run = function () { _resizePending = false; resize(); };
+    if (typeof requestAnimationFrame === "function") { requestAnimationFrame(run); }
+    else { setTimeout(run, 16); }
+}
+
 function resize() {
     // LOGICAL_WIDTH/HEIGHT are captured in setupPage; if a resize fires before
     // that (early rotation/devtools), bail so we don't divide by 0 -> Infinity.
@@ -491,8 +504,17 @@ function resize() {
     // no gameplay math moves to device pixels.
     var dprCap = (typeof perfDprCap === "function") ? perfDprCap() : 2;
     var dpr = Math.min(window.devicePixelRatio || 1, dprCap);
-    gameCanvas.width = Math.round(newWidth * dpr);
-    gameCanvas.height = Math.round(newHeight * dpr);
+    var targetW = Math.round(newWidth * dpr);
+    var targetH = Math.round(newHeight * dpr);
+    // Nothing actually changed (a no-op resize event, e.g. mobile address-bar
+    // toggle at a settled size): skip the backing-store realloc + camera rebuild.
+    // Assigning canvas.width/height clears the backing store even when identical,
+    // so guarding it avoids a needless full repaint + camera reset.
+    if (gameCanvas.width === targetW && gameCanvas.height === targetH && camera != null) {
+        return;
+    }
+    gameCanvas.width = targetW;
+    gameCanvas.height = targetH;
     overlayCanvas.width = Math.round(newWidth * dpr);
     overlayCanvas.height = Math.round(newHeight * dpr);
 
