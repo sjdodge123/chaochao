@@ -31,37 +31,52 @@ the LLM/agent out of the prod-write business.
 ## One-time history reconciliation (important)
 
 The existing migrations (`0001_map_times`, `0002_upsert_map_time_if_better`) were applied
-to dev and prod **via the MCP `apply_migration` tool**, not via the CLI. The CLI tracks
-applied migrations in the remote `supabase_migrations.schema_migrations` table by *version*
-(the leading number before the first `_`). Before the first CI `db push`, local and remote
-history must agree, or `db push` will try to re-apply already-applied SQL.
+to dev and prod **via the MCP `apply_migration` tool**, not via the CLI. The CLI derives a
+migration's *version* from the leading numeric token of its filename and compares it against
+the remote `supabase_migrations.schema_migrations` table. Verified state (read via MCP, 2026-05-30):
 
-Run this locally once (CLI: `brew install supabase/tap/supabase` or `npx supabase`):
+| | dev (`ukfecygtfghiybasqgtl`) | prod (`spkwpkpiuzshrfwplzyg`) |
+|---|---|---|
+| `schema_migrations` history | 6 rows, versions `20260529035546`…`20260530003653` (`0001_map_times` … `0006_cosmetics_slots`) | **EMPTY** (`[]`) |
+| `map_times` table | present | present |
+| `progression` table | present, full schema through `0006` | present, **full schema through `0006`** (incl. `pending_toasts`, `selected_cart/pattern/trail`), 2 real rows |
 
-```bash
-export SUPABASE_ACCESS_TOKEN=...        # your token
-supabase link --project-ref spkwpkpiuzshrfwplzyg
-supabase migration list --linked        # compare Local vs Remote columns
-```
+Two consequences, both requiring action before the first CI run:
 
-- If `0001`/`0002` show as applied on **Remote** but missing **Local** linkage, mark them
-  applied so the CLI won't re-run them:
-  ```bash
-  supabase migration repair --status applied 0001 0002
-  ```
-- If a migration shows Local-only (not yet on prod), a `supabase db push --dry-run` will
-  show the SQL; running `db push` applies it.
+1. **Recorded versions are 14-digit timestamps, not `0001`.** The committed files were renamed
+   from `0001_*`/`0002_*` to `20260529035546_map_times.sql` /
+   `20260529035556_upsert_map_time_if_better.sql` so the CLI-derived version matches what dev
+   already recorded. **Keep this `<timestamp>_name.sql` convention for all future files** — a
+   plain `0001_` name will never match history and the CLI will treat it as unapplied forever.
 
-Repeat the same `migration list` check against **dev** (`ukfecygtfghiybasqgtl`) so dev and
-prod histories stay aligned. Once reconciled, CI handles everything going forward.
+2. **Prod already HAS the schema but has ZERO migration history.** If CI ran `db push` against
+   prod as-is, the CLI would think nothing is applied and try to re-run *every* migration. Prod
+   must instead be **back-filled by marking the existing migrations as applied — never pushed:**
+
+   ```bash
+   export SUPABASE_ACCESS_TOKEN=...                 # your token
+   supabase link --project-ref spkwpkpiuzshrfwplzyg # PROD
+   supabase migration list --linked                 # confirm Remote column is empty
+   # Mark the two migrations that live on main as applied WITHOUT running them:
+   supabase migration repair --status applied 20260529035546 20260529035556
+   ```
+
+   Dev needs **no repair** — its history already matches the renamed files.
+
+   ⚠️ Prod also physically has the effects of `0003`–`0006` (progression/cosmetics), but those
+   SQL files are not on `main` yet (they live on the progression feature branch). When that
+   branch merges and brings those files in, prod must likewise be `migration repair --status
+   applied <their versions>` **before** the merge build runs — do NOT let CI `db push` them, or
+   it will re-run progression DDL against a prod that already has it (and has 2 live rows).
 
 ## Day-to-day: adding a migration
 
 1. Write the change in dev first (MCP/dashboard) to prototype, then capture it as a file:
    ```bash
-   supabase migration new descriptive_name     # creates supabase/migrations/NNNN_descriptive_name.sql
+   supabase migration new descriptive_name     # creates supabase/migrations/<timestamp>_descriptive_name.sql
    ```
-   (Or hand-author the file. Keep the sequential `NNNN_` prefix consistent with existing files.)
+   (Or hand-author the file, but it MUST use a 14-digit timestamp prefix — `<YYYYMMDDHHMMSS>_name.sql`
+   — matching the existing files and the recorded history. A plain `0001_` name will not match.)
 2. Make migrations **idempotent / forward-only** (`create ... if not exists`, `alter table ... add column if not exists`). There is no automatic down-migration; roll back by committing a new corrective migration.
 3. Open a PR. The `dry-run` job posts the exact SQL that will hit prod and the local-vs-remote
    diff — review it.
