@@ -1915,7 +1915,16 @@ function drawGameOverScreen(dt) {
             var cardW = 430;
             var cardH = padTop + headH + earnedMedals.length * rowH + padBot;
             var cardX = LOGICAL_WIDTH - cardW - 40;
-            var cardY = Math.max(24, (LOGICAL_HEIGHT - cardH) / 2);
+            // Scale-to-fit: a full house of medals can be taller than the screen, so
+            // shrink the whole card uniformly to fit within top/bottom margins. The
+            // scale pivots on the card's right edge + vertical centre below, so it
+            // stays right-anchored and centred while it shrinks.
+            var topMargin = 24;
+            var availH = LOGICAL_HEIGHT - topMargin * 2;
+            var cardScale = (cardH > availH) ? (availH / cardH) : 1;
+            // Centre on-screen; when not scaling keep the old min-top-margin clamp.
+            var cardY = (LOGICAL_HEIGHT - cardH) / 2;
+            if (cardScale === 1) { cardY = Math.max(topMargin, cardY); }
 
             // Card entrance: quick fade + rise.
             var cardT = Math.min(1, medalRevealElapsed / 0.28);
@@ -1925,6 +1934,14 @@ function drawGameOverScreen(dt) {
             gameContext.textBaseline = "alphabetic";
             gameContext.globalAlpha = cardEase;
             gameContext.translate(0, (1 - cardEase) * 16);
+            // Apply the fit scale around the card's right edge + vertical centre.
+            if (cardScale !== 1) {
+                var pivotX = cardX + cardW;
+                var pivotY = LOGICAL_HEIGHT / 2;
+                gameContext.translate(pivotX, pivotY);
+                gameContext.scale(cardScale, cardScale);
+                gameContext.translate(-pivotX, -pivotY);
+            }
 
             // Panel: dark translucent so the fixed light text stays readable on
             // any winner colour, with a soft drop shadow.
