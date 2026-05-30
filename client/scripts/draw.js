@@ -3911,9 +3911,17 @@ function drawMap() {
     if (currentMap == null || currentMap.cells == null || currentMap.cells.length === 0) {
         return;
     }
-    if (mapDirty || mapCanvas == null) {
+    if (mapCanvas == null) {
         renderMapToCache();
         mapDirty = false;
+        lastMapBakeAt = Date.now();
+    } else if (mapDirty) {
+        var nowBake = Date.now();
+        if (nowBake - lastMapBakeAt >= MAP_BAKE_MIN_MS) {
+            renderMapToCache();
+            mapDirty = false;
+            lastMapBakeAt = nowBake;
+        }
     }
     if (mapCanvas != null) {
         var mdx = world.x - mapCanvasPad, mdy = world.y - mapCanvasPad;
