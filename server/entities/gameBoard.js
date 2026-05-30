@@ -1712,6 +1712,16 @@ class GameBoard {
 			this.brutalRound = true;
 			return { brutal: true, brutalTypes: [c.brutalRounds.blackout.id] };
 		}
+		// CI perf harness only: pin the exact brutal set so the base and PR halves
+		// of the render-perf gate measure an IDENTICAL scene (otherwise the unseeded
+		// shuffle below hands each half a different brutal combo with different FX
+		// cost, which the gate misreads as a regression). `brutalTypesForce` only
+		// exists when injected via the CHAO_PERF_OVERRIDE seam — never in prod, and
+		// not present in config.json — so normal play is unaffected.
+		if (Array.isArray(c.brutalTypesForce) && c.brutalTypesForce.length > 0) {
+			this.brutalRound = true;
+			return { brutal: true, brutalTypes: c.brutalTypesForce.slice() };
+		}
 		var brutalChance = utils.getRandomInt(1, 100);
 
 		//console.log("Initial roll: " + brutalChance);

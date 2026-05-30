@@ -232,6 +232,15 @@ jobs:
     # PR that can't touch client render would still trip the gate). Measuring both
     # halves on the same runner in the same job cancels the shared runner-speed
     # term out of the ratio, so only a real code-driven delta survives.
+    #
+    # Same-runner alone wasn't enough — the metric is scripting-ms/FRAME, and under
+    # CPU contention the software rasterizer renders ~10x fewer frames, so the
+    # per-frame denominator (and the metric) swung several-fold on identical code.
+    # perf-client.js now: (1) pins the brutal scene so both halves render identical
+    # FX, (2) DISCARDS any window below an fps floor (a starved window = contended
+    # runner, not a regression), and (3) reports the MEDIAN of several valid windows.
+    # If a half can't collect enough clean windows, perf-compare calls the run
+    # INCONCLUSIVE instead of inventing a regression.
     # continue-on-error keeps it advisory while CI variance is learned.
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -288,7 +297,8 @@ jobs:
         run: node head/.github/scripts/perf-compare.js perf-baseline.json perf-pr.json
         env:
           PERF_COMMENT_OUT: perf-comment.md
-          PERF_REGRESS_PCT: "15"
+          PERF_REGRESS_PCT: "20"
+          PERF_MIN_VALID_REPS: "3"
       - name: Upload perf trace
         if: always()
         uses: actions/upload-artifact@v7
