@@ -52,6 +52,8 @@
 
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css" integrity="sha384-MCw98/SFnGE8fJT3GXwEOngsV7Zt27NXFoaoApmYm81iuXoPkFOJwJ8ERdknLPMO" crossorigin="anonymous">
     <link rel="stylesheet" type="text/css" href="css/styles.css">
+    <!-- On-screen keyboard styles, so the feedback widget is typeable by controller here too. -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/simple-keyboard@3/build/css/index.css">
     <link rel="icon" type="image/svg+xml" href="assets/img/favicon.svg">
     <title>Chao Chao — Free Multiplayer Browser Arena Racing</title>
     <!-- isEmbedded() + portal-embed chrome trimming; standalone (not bundled) so
@@ -116,9 +118,14 @@
     </section>
 
     <script src="scripts/controllerIdentity.js"></script>
+    <!-- On-screen keyboard for controller text entry (used by the feedback widget). -->
+    <script src="https://cdn.jsdelivr.net/npm/simple-keyboard@3/build/index.js"></script>
+    <script src="scripts/osk.js"></script>
     <script src="scripts/menuGamepad.js"></script>
     <script src="scripts/controllerHeader.js"></script>
     <script src="scripts/theme.js"></script>
+    <!-- Feedback / bug-report widget (floating button + modal → POST /feedback → GitHub issue). -->
+    <script src="scripts/feedback.js"></script>
     <script src="scripts/landingTips.js" defer></script>
     <!-- Auth: browser-safe Supabase config injected server-side; stripped when disabled. -->
     <!-- SUPABASE_CONFIG -->

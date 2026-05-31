@@ -290,6 +290,116 @@ exports.submitPullRequest = async function (map) {
 
 }
 
+// In-browser feedback / bug report → a GitHub issue on the repo, using the same
+// server-side credentials (GITHUB_AUTH) that submitPullRequest uses for map PRs.
+// The submitter is unauthenticated and untrusted, so everything is length-capped
+// and control-char-stripped here at the trust boundary; the client's <input>/
+// <textarea> caps are a courtesy, the only enforcement that matters is below.
+// `feedback` = { type, message, email?, page?, context? }. Returns the same
+// { status, message } shape as submitPullRequest (message is the issue URL on
+// success, or a player-actionable reason on failure).
+exports.submitIssue = async function (feedback) {
+    var returnToClient = { status: false, message: "" };
+    if (process.env.GITHUB_AUTH == null) {
+        console.log("github auth env variable not set; cannot file feedback issue");
+        returnToClient.message = "Feedback isn't available right now. Please try again later.";
+        return returnToClient;
+    }
+    if (feedback == null || typeof feedback !== "object") {
+        returnToClient.message = "Could not read your feedback.";
+        return returnToClient;
+    }
+
+    // Type drives the issue label so you can triage bug vs idea vs other in the
+    // GitHub issues list. Anything unrecognised falls back to "other".
+    var TYPES = { bug: "bug", idea: "enhancement", other: "feedback" };
+    var type = String(feedback.type || "").toLowerCase();
+    if (!Object.prototype.hasOwnProperty.call(TYPES, type)) {
+        type = "other";
+    }
+
+    // Strip C0 control chars + DEL from single-line fields (email, page) so a
+    // crafted payload can't smuggle newlines into the title/metadata. The body
+    // keeps newlines (it's a multi-line description) but still drops the other
+    // control bytes.
+    var message = String(feedback.message == null ? "" : feedback.message)
+        .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "").trim();
+    var email = String(feedback.email == null ? "" : feedback.email)
+        .replace(/[\x00-\x1f\x7f]/g, "").trim();
+    var page = String(feedback.page == null ? "" : feedback.page)
+        .replace(/[\x00-\x1f\x7f]/g, "").trim();
+    var context = String(feedback.context == null ? "" : feedback.context)
+        .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "").trim();
+
+    if (message.length < 5) {
+        returnToClient.message = "Please describe the bug or idea (at least a few words).";
+        return returnToClient;
+    }
+    if (message.length > 5000) {
+        returnToClient.message = "That's a lot of feedback — please keep it under 5000 characters.";
+        return returnToClient;
+    }
+    // Email is optional (lets you follow up). When given, mirror submitPullRequest's
+    // non-backtracking pattern so an invalid address is rejected with a clear reason.
+    if (email !== "") {
+        if (email.length > 254 || !/^[\w.+-]+@[\w-]+(\.[\w-]+)+$/.test(email)) {
+            returnToClient.message = "That email address looks invalid (leave it blank to skip).";
+            return returnToClient;
+        }
+    }
+    if (page.length > 200) { page = page.slice(0, 200); }
+    if (context.length > 500) { context = context.slice(0, 500); }
+
+    const owner = 'sjdodge123';
+    const repo = 'chaochao';
+
+    // Title: first line of the message, trimmed to a sane length, prefixed by type.
+    var firstLine = message.split("\n")[0].slice(0, 80).trim();
+    if (firstLine === "") { firstLine = "Player feedback"; }
+    var prefix = type === "bug" ? "Bug" : (type === "idea" ? "Idea" : "Feedback");
+    var title = "[" + prefix + "] " + firstLine;
+
+    // Body: the full message plus the small metadata footer the widget collected.
+    // Everything here is already control-char-stripped and length-capped above.
+    // NOTE: the optional contact email is deliberately NOT written here — the repo
+    // issues are public and scrapeable. It's logged server-side below (operator-only)
+    // so follow-up is still possible without publishing the address.
+    var bodyLines = [message, "", "---"];
+    if (page !== "") { bodyLines.push("**Page:** " + page); }
+    if (context !== "") { bodyLines.push("**Context:** " + context); }
+    if (email !== "") { bodyLines.push("_Reporter left a contact email (kept private; see server logs)._"); }
+    bodyLines.push("_Submitted from the in-game feedback widget._");
+    var body = bodyLines.join("\n");
+
+    try {
+        const octokit = await getOctokit();
+        var issue = await octokit.request('POST /repos/{owner}/{repo}/issues', {
+            owner,
+            repo,
+            title,
+            body,
+            labels: [TYPES[type]]
+        });
+        if (issue.status === 201) {
+            returnToClient.status = true;
+            returnToClient.message = issue.data.html_url;
+            // Operator-only contact trail: never goes into the public issue body.
+            if (email !== "") {
+                console.log("[feedback] contact email for " + issue.data.html_url + ": " + email);
+            }
+            return returnToClient;
+        }
+        returnToClient.message = "Couldn't send your feedback right now. Please try again in a moment.";
+        return returnToClient;
+    } catch (e) {
+        // Same policy as submitPullRequest: log the real GitHub/network error for
+        // debugging, return a friendly generic to the player.
+        console.log(e);
+        returnToClient.message = "Couldn't send your feedback right now. Please try again in a moment.";
+        return returnToClient;
+    }
+};
+
 function getRandomBranchCode() {
     const codeLength = 6;
     var code = [];

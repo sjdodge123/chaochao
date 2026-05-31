@@ -235,6 +235,65 @@ var hostess = require('./server/hostess.js');
 var botGuard = require('./server/botGuard.js');
 var c = utils.loadConfig();
 
+// In-browser feedback / bug-report endpoint. The widget (client/scripts/feedback.js)
+// POSTs here and utils.submitIssue files it as a GitHub issue using the server's
+// GITHUB_AUTH token (same credential map-submit uses). Because it's unauthenticated
+// and writes to GitHub, it's guarded by: a tight JSON body cap, a hidden honeypot
+// field (any value = a bot, silently accepted-and-dropped), and a per-IP rate limit.
+var feedbackHits = {}; // ip -> [timestamps] within the window
+var FEEDBACK_WINDOW_MS = 10 * 60 * 1000;
+var FEEDBACK_MAX_PER_WINDOW = 5;
+function feedbackRateLimited(ip) {
+    var now = Date.now();
+    var hits = (feedbackHits[ip] || []).filter(function (t) { return now - t < FEEDBACK_WINDOW_MS; });
+    if (hits.length >= FEEDBACK_MAX_PER_WINDOW) {
+        feedbackHits[ip] = hits;
+        return true;
+    }
+    hits.push(now);
+    feedbackHits[ip] = hits;
+    return false;
+}
+// Sweep expired keys so a public endpoint hit by many distinct IPs can't grow
+// feedbackHits without bound (entries are otherwise only pruned when that same IP
+// submits again). Cheap (runs once per window) and harmless while the server sleeps.
+setInterval(function () {
+    var now = Date.now();
+    for (var ip in feedbackHits) {
+        var hits = feedbackHits[ip].filter(function (t) { return now - t < FEEDBACK_WINDOW_MS; });
+        if (hits.length === 0) { delete feedbackHits[ip]; }
+        else { feedbackHits[ip] = hits; }
+    }
+}, FEEDBACK_WINDOW_MS).unref();
+app.post('/feedback', express.json({ limit: '16kb' }), function (req, res) {
+    var body = req.body || {};
+    // Honeypot: a real form leaves `website` empty (it's hidden off-screen). Any
+    // value means a bot filled every field — respond 200 so it thinks it worked,
+    // but file nothing.
+    if (body.website) {
+        return res.json({ status: true, message: "" });
+    }
+    // Resolve the client IP from the TRUSTED proxy hop (counting in from the right),
+    // not the left-most X-Forwarded-For entry — a caller can forge that and rotate it
+    // every request to bypass the limit. Reuses the same resolver the socket path uses.
+    var ip = botGuard.resolveClientIp(req.headers['x-forwarded-for'], req.ip) || 'unknown';
+    if (feedbackRateLimited(ip)) {
+        return res.status(429).json({ status: false, message: "You've sent a lot of feedback — please wait a few minutes and try again." });
+    }
+    utils.submitIssue({
+        type: body.type,
+        message: body.message,
+        email: body.email,
+        page: body.page,
+        context: body.context
+    }).then(function (result) {
+        res.json(result);
+    }).catch(function (e) {
+        console.log(e);
+        res.json({ status: false, message: "Couldn't send your feedback right now. Please try again in a moment." });
+    });
+});
+
 //Base Server vars
 var serverSleeping = true,
     pendingReboot = false,
