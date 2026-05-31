@@ -62,7 +62,12 @@ function testPureHelpers() {
     // New self-counter medals are now PRODUCED in gameplay (Codex P2: previously unlockable
     // by no path). Spot-check a few + the winStreak max-logic helper.
     check(progression.achievementsUnlocked({ gamesPlayed: 10 }, 0).indexOf('turtle') !== -1, 'gamesPlayed>=10 unlocks turtle');
-    check(progression.achievementsUnlocked({ iceDistance: 2000 }, 0).indexOf('ripple') !== -1, 'iceDistance>=2000 unlocks ripple');
+    check(progression.achievementsUnlocked({ iceSkater: 20 }, 0).indexOf('ripple') !== -1, 'iceSkater>=20 unlocks ripple');
+    // The 4 v0.26.0 competitive medals (zombieSlayer/heavyHitter/pinball/iceSkater) gate our
+    // cosmetics directly via medal_counts (no dup counter). Spot-check the re-points.
+    check(progression.achievementsUnlocked({ zombieSlayer: 15 }, 0).indexOf('bolt') !== -1, 'zombieSlayer>=15 unlocks bolt');
+    check(progression.achievementsUnlocked({ heavyHitter: 20 }, 0).indexOf('gear') !== -1, 'heavyHitter>=20 unlocks gear');
+    check(progression.achievementsUnlocked({ pinball: 25 }, 0).indexOf('border_spikes') !== -1, 'pinball>=25 unlocks border_spikes');
     check(progression.achievementsUnlocked({ mapsSubmitted: 1 }, 0).indexOf('carbon') !== -1, 'mapsSubmitted>=1 unlocks carbon');
     var streakMc = {};
     progression.applyWinStreak(streakMc, true); progression.applyWinStreak(streakMc, true); progression.applyWinStreak(streakMc, true);

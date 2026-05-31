@@ -1206,10 +1206,6 @@ class Game {
 			if (p.cart || p.pattern || p.trailFx || p.border) { deltas.cosmeticGames = (deltas.cosmeticGames || 0) + 1; }
 			if (p.joinedInProgress) { deltas.joinInProgress = (deltas.joinInProgress || 0) + 1; p.joinedInProgress = false; }
 			if (p.abilitiesUsedMatch) { deltas.abilitiesUsed = (deltas.abilitiesUsed || 0) + p.abilitiesUsedMatch; }
-			if (p.windupPunchHitsMatch) { deltas.windupPunchHits = (deltas.windupPunchHits || 0) + p.windupPunchHitsMatch; }
-			if (p.zombieKillsMatch) { deltas.zombieKills = (deltas.zombieKills || 0) + p.zombieKillsMatch; }
-			if (p.bumpersHitMatch) { deltas.bumpersHit = (deltas.bumpersHit || 0) + p.bumpersHitMatch; }
-			if (p.iceDistanceMatch) { deltas.iceDistance = (deltas.iceDistance || 0) + Math.round(p.iceDistanceMatch); }
 
 			// Update the in-memory cache (so a same-lobby re-equip is gated on the
 			// freshly-earned level/unlocks) and build this match's celebration toasts.
