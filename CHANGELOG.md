@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.26.3 — 2026-05-31
+
 ### General
 
 - New **Feedback** button on the menu pages — report a bug or pitch an idea right from the site, and it lands straight in the dev's inbox. Works with touch and controller (on-screen keyboard) too.
