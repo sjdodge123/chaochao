@@ -64,7 +64,28 @@ function supabaseConfigTag() {
         .replace(/</g, '\\u003c')
         .replace(/\u2028/g, '\\u2028')
         .replace(/\u2029/g, '\\u2029');
-    return '<script>window.__SUPABASE__ = ' + json + ';</script>';
+    return '<script>window.__SUPABASE__ = ' + json + ';<\/script>';
+}
+
+// Browser-safe ad config injected via the <!-- ADS_CONFIG --> placeholder
+// (play.html only). Carries ONLY the network name + public publisher id — both
+// safe to expose (they end up in client SDK URLs anyway). Defaults to provider
+// 'none' so local dev (no env vars) makes every ad call a graceful no-op. The
+// client (ads.js) is network-agnostic; this is the single place the server tells
+// it which network, if any, is wired.
+function adsConfigTag() {
+    var cfg = {
+        provider: (process.env.ADS_PROVIDER || 'none'),
+        publisherId: (process.env.ADS_PUBLISHER_ID || null)
+    };
+    // Same escaping as the Supabase tag - defense-in-depth against an env value
+    // breaking out of the inline <script> (< closing the element; U+2028/U+2029
+    // line separators, valid JS but breaking inline JSON-in-HTML).
+    var json = JSON.stringify(cfg)
+        .replace(/</g, '\\u003c')
+        .replace(/\u2028/g, '\\u2028')
+        .replace(/\u2029/g, '\\u2029');
+    return '<script>window.__ADS__ = ' + json + ';<\/script>';
 }
 
 // Inject the running server's version and the latest release headline into
@@ -189,7 +210,8 @@ app.use(function (req, res, next) {
         var modified = html
             .replace(/<!-- VERSION -->/g, 'v' + APP_VERSION)
             .replace(/<!-- NEWS_BANNER -->/g, newsBannerHtml())
-            .replace(/<!-- SUPABASE_CONFIG -->/g, supabaseConfigTag());
+            .replace(/<!-- SUPABASE_CONFIG -->/g, supabaseConfigTag())
+            .replace(/<!-- ADS_CONFIG -->/g, adsConfigTag());
         if (process.env.NODE_ENV === 'production' && (url in bundleMap)) {
             var bundleTag = '<script src="' + bundleMap[url] + '"></script>';
             modified = modified.replace(/<!-- BUILD: bundle-start -->[\s\S]*?<!-- BUILD: bundle-end -->/g, bundleTag);

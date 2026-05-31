@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- Free play now shows the occasional short ad between matches (at most once every couple of matches). It runs on the results screen and never holds up the next match — if the ad fails to load it's simply skipped.
 
 ## v0.26.3 — 2026-05-31
 
