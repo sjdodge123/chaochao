@@ -131,7 +131,11 @@
 
     // Visible, actionable elements in document order.
     function collectItems() {
-        var all = document.querySelectorAll(NAV_SELECTOR);
+        // When a gamepad-aware modal is open (e.g. the feedback widget), scope
+        // navigation to the controls inside it so the pad can't reach the page
+        // behind the dimmed backdrop. Falls back to the whole document otherwise.
+        var modal = document.querySelector("[data-gp-modal].open");
+        var all = (modal || document).querySelectorAll(NAV_SELECTOR);
         var items = [];
         for (var i = 0; i < all.length; i++) {
             var el = all[i];
@@ -230,7 +234,8 @@
         if (!focusEl) {
             return;
         }
-        if (focusEl.tagName.toLowerCase() === "input") {
+        var tag = focusEl.tagName.toLowerCase();
+        if (tag === "input" || tag === "textarea") {
             // Pop the on-screen keyboard so the field is typeable with a pad;
             // fall back to a plain focus if the OSK module isn't present.
             if (typeof oskOpen === "function") {
@@ -244,6 +249,15 @@
     }
 
     function back() {
+        // If a gamepad-aware modal is open, B dismisses IT (not the page) so the
+        // draft isn't thrown away by navigating to index.html. Click its declared
+        // close control if present; otherwise just drop the .open class.
+        var modal = document.querySelector("[data-gp-modal].open");
+        if (modal) {
+            var closeBtn = modal.querySelector("[data-gp-modal-close]");
+            if (closeBtn) { closeBtn.click(); } else { modal.classList.remove("open"); }
+            return;
+        }
         var path = location.pathname;
         if (/index\.html$/.test(path) || path === "/" || path === "") {
             return; // already at the top of the menu tree

@@ -39,7 +39,7 @@ demand → each `Room` owns a `Game` + `GameBoard` + `World` + `Engine`.
 |---|---|---|
 | `game.js` | ~850 | Core orchestrators only: **`Room`** (per-room registry of player/projectile/aimer/hazard lists) and **`Game`** (the state machine over `c.stateMap`: waiting→lobby→overview→gated→racing→collapsing→gameOver; round/brutal/scoring rules; bot fill). Music & achievement methods are mixed into `Game.prototype` from `music.js`/`achievements.js`. **`GameBoard`** lives in `entities/gameBoard.js` (`Room` constructs it). Exports only `getRoom(sig,size)`. |
 | `engine.js` | ~730 | Physics & collision. Per-tick updates hazards/projectiles/players; `QuadTree` broadphase against active map tiles. Helpers used from game.js/entities: `preventEscape`, `checkCollideCells`, `punchPlayer`, `puckPlayer`, `explosion`, `bounceOffBoundry`, … |
-| `utils.js` | ~500 | Central config loader (`loadConfig()` returns cached `config.json`, `PORT` override), `dt` clock, math/RNG helpers; scans `client/{maps,assets}` at boot to build the `contentDelivery` manifests; `loadMaps()` reconstructs sites-only maps to full geometry (`mapFormat`); `submitPullRequest()` (octokit) reduces an editor-submitted map to sites-only and opens a GitHub PR; shared `validateMap()`. |
+| `utils.js` | ~500 | Central config loader (`loadConfig()` returns cached `config.json`, `PORT` override), `dt` clock, math/RNG helpers; scans `client/{maps,assets}` at boot to build the `contentDelivery` manifests; `loadMaps()` reconstructs sites-only maps to full geometry (`mapFormat`); `submitPullRequest()` (octokit) reduces an editor-submitted map to sites-only and opens a GitHub PR; `submitIssue()` (octokit) files an in-browser feedback/bug report as a GitHub issue (backs the `/feedback` route in `index.js`); shared `validateMap()`. |
 | `messenger.js` | ~210 | Socket.IO wrapper. Owns mailbox (client id→socket) and room-mailbox (id→room sig). `checkForMail()` registers every per-client handler (`enterGame`, `joinARoom`, `submitNewMap`, input events). The single place socket events are wired. |
 | `hostess.js` | ~140 | Room registry. Creates `Room`s on demand, matchmakes clients into rooms with space, drives `room.update(dt)` each tick, deletes empty rooms. |
 | `compressor.js` | ~230 | Serializes per-tick state into compact positional arrays (e.g. `[id,x,y,velX,velY,angle]`) before `gameUpdates`. **Edit client decoders in `client/scripts/client.js` in lockstep with any layout change.** |
@@ -107,7 +107,11 @@ block. Dev (`npm start`) serves the raw `<script>` tags; prod swaps in the bundl
 **Shared across pages** (in multiple bundle lists): `theme.js` (light/dark/auto
 toggle), `controllerHeader.js` (controller-detection header for index/join/create),
 `osk.js` (on-screen keyboard wrapping simple-keyboard), `menuGamepad.js` (DOM-menu
-controller navigation for landing/join).
+controller navigation for landing/join; scopes nav to an open `[data-gp-modal]`),
+`feedback.js` (floating Feedback button + modal on index/join/learn; POSTs to the
+`/feedback` endpoint → `utils.submitIssue` → a GitHub issue. Touch- and
+controller-friendly: tags its controls `data-gp-nav` and routes text fields through
+`osk.js`).
 
 ---
 
