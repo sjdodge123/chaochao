@@ -100,6 +100,17 @@ function clearSlotNearStation(slot, id) {
 
 // --- panel open / close / navigate / confirm (input-agnostic) ----------------
 
+// Tell the server the player is ACTIVELY using a hub station (open / navigate / tab /
+// page / confirm / close, from key, touch, or pad). This "pressing keys" signal defers
+// the lobby AFK kick — menu browsing emits no movement packets, so without it a player
+// flipping through the skin shop reads as idle. Merely standing in a station zone does
+// NOT call this, so a parked-and-walked-away kart still idles out normally.
+function noteHubActivity(lp) {
+    if (lp && lp.socket && typeof lp.socket.emit === "function") {
+        lp.socket.emit("lobbyActivity");
+    }
+}
+
 function openStationPanel(lp) {
     if (!lp || !lp.nearStation) {
         return;
@@ -108,6 +119,7 @@ function openStationPanel(lp) {
     if (!st) {
         return;
     }
+    noteHubActivity(lp);
     var cursor = 0;
     var tab = 'color';
     if (st.kind === "skin") {
@@ -130,6 +142,7 @@ function openStationPanel(lp) {
 
 function closeStationPanel(lp) {
     if (lp) {
+        noteHubActivity(lp);
         lp.stationPanel = null;
     }
 }
@@ -140,6 +153,7 @@ function stationPanelNav(lp, dx, dy) {
     if (!lp || !lp.stationPanel) {
         return;
     }
+    noteHubActivity(lp);
     if (lp.stationPanel.kind === "ai") {
         if (dx !== 0) {
             adjustAILevel(lp, dx > 0 ? 1 : -1);
@@ -225,7 +239,11 @@ function skinPanelConfirm(lp) {
 // Confirm (A / Enter): AI changes apply live as you step, so confirm just
 // dismisses; for the skin picker it commits the colour under the cursor.
 function stationPanelConfirm(lp) {
-    if (lp && lp.stationPanel && lp.stationPanel.kind === "skin") {
+    if (!lp || !lp.stationPanel) {
+        return;
+    }
+    noteHubActivity(lp);
+    if (lp.stationPanel.kind === "skin") {
         skinPanelConfirm(lp);
         return;
     }
@@ -236,6 +254,7 @@ function stationPanelConfirm(lp) {
 // the AI panel. Pages stay on the d-pad ◄ ► region.
 function stationPanelTab(lp, dir) {
     if (!lp || !lp.stationPanel || lp.stationPanel.kind !== "skin") { return; }
+    noteHubActivity(lp);
     var sp = lp.stationPanel;
     var tabs = skinTabs(lp);
     var idx = skinTabIndex(lp, sp.tab) + (dir < 0 ? -1 : 1);
@@ -248,6 +267,7 @@ function stationPanelTab(lp, dir) {
 
 // Map a pointer-hit action token to its effect. "pick:<hex>" commits a skin colour.
 function stationPanelAction(lp, action) {
+    noteHubActivity(lp); // pointer/tap interaction on the panel is activity (some branches re-ping via nav/close — harmless)
     if (action === "inc") {
         stationPanelNav(lp, 1, 0);
     } else if (action === "dec") {

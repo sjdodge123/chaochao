@@ -711,6 +711,23 @@ function checkForMail(client) {
 		}
 	});
 
+	// Lobby hub keepalive: the client fires this on any active station-panel interaction
+	// (open / navigate / tab / page / confirm / close — keyboard, touch, or pad). That is
+	// the "pressing keys" signal that defers the lobby AFK kick, since browsing the menus
+	// sends no movement packets. Proximity alone does NOT wake the player (see
+	// Player.checkForSleep): a kart parked in a station zone without touching the panel
+	// still idles out normally.
+	client.on('lobbyActivity', function () {
+		var room = hostess.getRoomBySig(roomMailList[client.id]);
+		if (room == undefined || room.game.currentState != c.stateMap.lobby) {
+			return;
+		}
+		var player = room.playerList[client.id];
+		if (player != null) {
+			player.wakeUp();
+		}
+	});
+
 	// Star-rate the map you just played. Allowed on the per-round OVERVIEW (rate it
 	// while fresh) and the match-over screen. Server-authoritative: the rated map is
 	// the room's current map (still the just-played map in both states — the next map
