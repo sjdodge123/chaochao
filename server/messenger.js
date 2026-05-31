@@ -810,10 +810,13 @@ function loadPlayerProgression(client, player) {
 		player.progressionLoaded = true;
 		console.log('[progression] load failed:', e && e.message);
 	});
-	// Drain + deliver any celebration toasts earned in a prior match (shown on lobby
-	// arrival, not on the game-over screen). DB queue (writes-on) + in-memory queue
-	// (dev). Best-effort: a failed DB drain just yields no toasts this time.
-	deliverPendingToasts(client);
+	// Drain + deliver any celebration toasts earned in a prior match — but ONLY when actually
+	// arriving in the lobby. Joining a racing/collapsing room mid-match must not overlay rewards
+	// during play; the next startLobby's deliverRoomToasts delivers them at the right moment.
+	var toastRoom = hostess.getRoomBySig(roomMailList[client.id]);
+	if (toastRoom && toastRoom.game && toastRoom.game.currentState === c.stateMap.lobby) {
+		deliverPendingToasts(client);
+	}
 }
 // Collect a signed-in client's pending toasts (durable DB queue + dev in-memory
 // queue) and emit them as one ordered `progressionToasts` batch. The client

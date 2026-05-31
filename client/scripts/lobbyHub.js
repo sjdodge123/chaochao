@@ -1566,6 +1566,17 @@ function flagCosmeticRejected(slot, payload) {
     }
     lp._cartLockMsg = msg;
     lp._cartLockAt = Date.now();
+    // Revert the optimistic re-equip: reEquipSavedCosmetics set the slot field immediately, but
+    // the server rejected it (e.g. a cosmetic saved under a different account). Clear the field
+    // so we render the server default (not a locked cosmetic peers don't see), and drop the
+    // saved pick so it can't re-apply on the next join. Signed-in players' real picks live in
+    // the DB (restorePersistedCosmetics), so nothing legit is lost.
+    var cosmeticSlot = payload && payload.slot;
+    if (cosmeticSlot && typeof COSMETIC_SLOT_FIELD !== "undefined" && COSMETIC_SLOT_FIELD[cosmeticSlot]) {
+        var p = (lp.myID != null && typeof playerList !== "undefined" && playerList) ? playerList[lp.myID] : null;
+        if (p) { p[COSMETIC_SLOT_FIELD[cosmeticSlot]] = null; }
+        if (typeof saveCosmeticLocal === "function") { saveCosmeticLocal(lp, cosmeticSlot, null); }
+    }
 }
 
 function drawStubPanelBody(x, y, w, h, msg) {
