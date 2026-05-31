@@ -532,6 +532,29 @@ async function drainPendingToasts(userId) {
     }
 }
 
+// Re-append toasts to the durable queue when delivery failed after a drain cleared them
+// (socket vanished mid-drain). Best-effort, CAS-guarded, writes-gated. Older toasts go first.
+async function requeuePendingToasts(userId, toasts) {
+    if (!writesEnabled || !userId || !supabase || !toasts || !toasts.length) {
+        return;
+    }
+    try {
+        for (var attempt = 0; attempt < 5; attempt++) {
+            var res = await supabase.from('progression').select('pending_toasts, updated_at').eq('user_id', userId).maybeSingle();
+            if (res.error || !res.data) { return; }
+            var cur = Array.isArray(res.data.pending_toasts) ? res.data.pending_toasts : [];
+            var upd = await supabase.from('progression')
+                .update({ pending_toasts: toasts.concat(cur), updated_at: new Date().toISOString() })
+                .eq('user_id', userId).eq('updated_at', res.data.updated_at).select('user_id');
+            if (upd.error) { return; }
+            if (upd.data && upd.data.length) { return; }
+        }
+    } catch (e) {
+        console.log('[auth] requeuePendingToasts error:', e.message);
+    }
+}
+
+exports.requeuePendingToasts = requeuePendingToasts;
 exports.enabled = enabled;
 exports.writesEnabled = writesEnabled;
 exports.supabase = supabase;
