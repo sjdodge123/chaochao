@@ -7,6 +7,7 @@ const bundles = {
         'client/scripts/rhill-voronoi-core.js',
         'client/scripts/game.js',
         'client/scripts/perf.js',
+        'client/scripts/ads.js',
         'client/scripts/client.js',
         'client/scripts/audio.js',
         'client/scripts/input.js',

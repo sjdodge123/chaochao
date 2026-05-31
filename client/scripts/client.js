@@ -882,6 +882,19 @@ function registerStateHandlers(server) {
 		if (window.chaochaoAuth && typeof window.chaochaoAuth.showLoginNudge === "function") {
 			window.chaochaoAuth.showLoginNudge();
 		}
+		// Monetization: a frequency-capped interstitial may run ON TOP OF the
+		// results screen. This is strictly fail-open and cosmetic — onClose is a
+		// no-op, so the existing gameOver -> lobby flow is NEVER gated on the ad
+		// (SDK missing, throwing, or timing out all proceed unchanged). onMatchEnded
+		// advances the per-match cadence counter regardless of whether one shows.
+		if (window.ads && typeof window.ads.onMatchEnded === "function") {
+			try {
+				window.ads.onMatchEnded();
+				if (window.ads.canShowInterstitial()) {
+					window.ads.showInterstitial({ placement: "gameover", onClose: function () {} });
+				}
+			} catch (e) { /* ads must never break the results screen */ }
+		}
 	});
 	server.on("startCollapse", function (info) {
 		currentState = config.stateMap.collapsing;
