@@ -836,6 +836,16 @@ var toastDrainInFlight = {};
 // Core drain+emit, keyed by (userId, clientId) so it serves both the enterGame path
 // (a re-joining socket) and the same-room lobby-return path (existing sockets that
 // never re-enter). Drains the DB queue (writes-on) + the in-memory queue (dev).
+// Resolve a user's CURRENTLY-connected socket id — the clientId captured when a drain began
+// can go stale across a disconnect/reconnect. null if the user has no live socket.
+function liveClientIdForUser(userId) {
+	for (var cid in identityList) {
+		if (identityList[cid] && identityList[cid].userId === userId && mailBoxList[cid]) {
+			return cid;
+		}
+	}
+	return null;
+}
 function deliverToastsTo(userId, clientId) {
 	if (!userId) {
 		return;
@@ -843,8 +853,10 @@ function deliverToastsTo(userId, clientId) {
 	var memToasts = drainToastsInMemory(userId);
 	if (toastDrainInFlight[userId]) {
 		// A DB drain is already running for this user — don't read the queue again.
-		if (memToasts.length && mailBoxList[clientId]) {
-			mailBoxList[clientId].emit('progressionToasts', { events: memToasts });
+		if (memToasts.length) {
+			var t0 = mailBoxList[clientId] ? clientId : liveClientIdForUser(userId);
+			if (t0 && mailBoxList[t0]) { mailBoxList[t0].emit('progressionToasts', { events: memToasts }); }
+			else { exports.enqueueToastsInMemory(userId, memToasts); } // no live socket -> keep for next join
 		}
 		return;
 	}
@@ -852,14 +864,24 @@ function deliverToastsTo(userId, clientId) {
 	auth.drainPendingToasts(userId).then(function (dbToasts) {
 		delete toastDrainInFlight[userId];
 		var all = (dbToasts || []).concat(memToasts);
-		if (all.length && mailBoxList[clientId]) {
-			mailBoxList[clientId].emit('progressionToasts', { events: all });
+		if (!all.length) { return; }
+		var target = mailBoxList[clientId] ? clientId : liveClientIdForUser(userId);
+		if (target && mailBoxList[target]) {
+			mailBoxList[target].emit('progressionToasts', { events: all });
+		} else {
+			// Socket vanished between the drain's read and here — re-queue so the rewards aren't
+			// lost; they deliver on the user's next join. Split back to their original queues
+			// (mem -> memory, DB -> durable re-append) so nothing duplicates.
+			exports.enqueueToastsInMemory(userId, memToasts);
+			auth.requeuePendingToasts(userId, dbToasts || []);
 		}
 	}).catch(function (e) {
 		delete toastDrainInFlight[userId];
-		// DB drain failed — still deliver any in-memory ones so dev isn't blocked.
-		if (memToasts.length && mailBoxList[clientId]) {
-			mailBoxList[clientId].emit('progressionToasts', { events: memToasts });
+		// DB drain failed (queue NOT cleared) — deliver in-memory ones, or keep them for next join.
+		if (memToasts.length) {
+			var t2 = mailBoxList[clientId] ? clientId : liveClientIdForUser(userId);
+			if (t2 && mailBoxList[t2]) { mailBoxList[t2].emit('progressionToasts', { events: memToasts }); }
+			else { exports.enqueueToastsInMemory(userId, memToasts); }
 		}
 		console.log('[progression] toast drain failed:', e && e.message);
 	});

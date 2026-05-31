@@ -1143,7 +1143,7 @@ function skinTabItems(lp, tabKey) {
     for (var j = 0; j < COSMETIC_OPTIONS.length; j++) {
         if (COSMETIC_OPTIONS[j].slot === tabKey) { cosmetics.push(COSMETIC_OPTIONS[j]); }
     }
-    cosmetics.sort(cosmeticPickerCompare);
+    cosmetics.sort(function (a, b) { return cosmeticPickerCompare(lp, a, b); });
     for (var k = 0; k < cosmetics.length; k++) { out.push({ kind: 'cosmetic', opt: cosmetics[k] }); }
     return out;
 }
@@ -1160,10 +1160,10 @@ function cosmeticUnlockRank(opt) {
     }
     return 1000001;
 }
-function cosmeticPickerCompare(a, b) {
+function cosmeticPickerCompare(lp, a, b) {
     if ((a.id == null) !== (b.id == null)) { return a.id == null ? -1 : 1; }
-    var la = cartSkinUnlock(a.id).locked ? 1 : 0;
-    var lb = cartSkinUnlock(b.id).locked ? 1 : 0;
+    var la = cartSkinUnlock(a.id, lp).locked ? 1 : 0;
+    var lb = cartSkinUnlock(b.id, lp).locked ? 1 : 0;
     if (la !== lb) { return la - lb; }                                     // unlocked before locked
     return cosmeticUnlockRank(a) - cosmeticUnlockRank(b);                  // then level asc, achievements last
 }
@@ -1309,7 +1309,7 @@ function drawSkinCell(lp, item, cx, cy, cw, ch, focused, currentColor, hit) {
     }
     var opt = item.opt;
     var sel = currentCosmetic(lp, opt.slot) === opt.id;
-    var lock = cartSkinUnlock(opt.id);
+    var lock = cartSkinUnlock(opt.id, lp);
     gameContext.fillStyle = sel ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.06)";
     lhRoundRect(gameContext, cx, cy, cw, ch, 6); gameContext.fill();
     gameContext.lineWidth = sel ? 2 : 1;
@@ -1450,7 +1450,7 @@ function stationPickCosmetic(lp, opt) {
     }
     // Don't burn a round-trip on a locked cosmetic — show the requirement (the server
     // re-validates on equip regardless; this is just UX).
-    var lock = cartSkinUnlock(opt.id || null);
+    var lock = cartSkinUnlock(opt.id || null, lp);
     if (lock.locked) {
         lp._cartLockMsg = lock.text ? ("Unlock at " + lock.text) : "Locked";
         lp._cartLockAt = Date.now();
@@ -1511,13 +1511,16 @@ function cartSkinLayout(innerW) {
 }
 // Unlock state for a cosmetic id, derived from the local progression cache.
 // Display only — the server is authoritative and re-checks every equip.
-function cartSkinUnlock(id) {
+function cartSkinUnlock(id, lp) {
     if (id == null) { return { locked: false }; }
     var skin = (typeof getSkin === "function") ? getSkin(id) : null;
     if (!skin) { return { locked: true, text: "?" }; }
     // Dev/testing seam (UNLOCK_ALL_COSMETICS): every cosmetic shows as unlocked locally.
     if (typeof config !== "undefined" && config && config.unlockAllCosmetics) { return { locked: false }; }
-    var prog = (typeof myProgression !== "undefined") ? myProgression : null;
+    // Per-seat: only the PRIMARY seat owns myProgression. Couch seats connect as guests, so
+    // they must gate at guest level (prog=null => Lv1, no achievement skins) — otherwise a pad
+    // player sees P1's unlocks, picks one, and the server just rejects it.
+    var prog = (lp && !lp.isPrimary) ? null : ((typeof myProgression !== "undefined") ? myProgression : null);
     if (skin.unlock.kind === "open") { return { locked: false }; } // unlock-all-for-testing
     if (skin.unlock.kind === "level") {
         var lvl = prog ? (prog.level || 1) : 1;

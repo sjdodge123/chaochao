@@ -714,6 +714,9 @@ class Game {
 		this.currentState = this.stateMap.lobby;
 		this.world.resize();
 		this.gameBoard.startLobby();
+		// New match forming: clear last match's "raced" flags so only players who actually race
+		// THIS match earn progression (a late-join spectator is never gated into a race).
+		for (var rcid in this.playerList) { if (this.playerList[rcid]) { this.playerList[rcid].racedCurrentMap = false; } }
 		// Deliver any celebration toasts earned last match to players who STAYED in the
 		// room (they never re-enter via enterGame, so loadPlayerProgression's drain never
 		// runs for them). Lobby arrival is the promised moment for these.
@@ -1193,13 +1196,13 @@ class Game {
 		// needs a real opponent: 2+ HUMANS present at gameOver. Guests count — only bots are
 		// excluded. Solo / you-and-bots still earns XP/levels + the participation self-medals.
 		var humanCount = 0;
-		for (var hid in this.playerList) { if (this.playerList[hid] && !this.playerList[hid].isAI) { humanCount++; } }
+		for (var hid in this.playerList) { if (this.playerList[hid] && !this.playerList[hid].isAI && this.playerList[hid].racedCurrentMap) { humanCount++; } }
 		var enoughHumans = (humanCount >= 2);
 
 		for (var id in this.playerList) {
 			var p = this.playerList[id];
-			if (p == null || p.isAI || !p.verifiedUserId) {
-				continue; // bots + guests earn no progression
+			if (p == null || p.isAI || !p.verifiedUserId || !p.racedCurrentMap) {
+				continue; // bots + guests + late-join spectators (never raced) earn no progression
 			}
 			var isWinner = (id === winnerId);
 			var countsAsWin = isWinner && enoughHumans; // a "win" requires real competition

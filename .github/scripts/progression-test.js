@@ -102,6 +102,8 @@ function runMatch(setup) {
     p2.goalsReachedMatch = setup.p2.goalsReachedMatch || 0;
     p1.recapWorthy = !!setup.p1.recapWorthy;
     p2.recapWorthy = !!setup.p2.recapWorthy;
+    p1.racedCurrentMap = setup.p1.racedCurrentMap !== false;
+    p2.racedCurrentMap = setup.p2.racedCurrentMap !== false;
     if (setup.p1.progression) { p1.progression = setup.p1.progression; p1.progressionLoaded = true; }
     if (setup.p2.progression) { p2.progression = setup.p2.progression; p2.progressionLoaded = true; }
     room.game.firstPlaceSig = setup.p1.id;
@@ -159,9 +161,9 @@ function testWinnerFromGameOverArg() {
     const l = room.world.createNewPlayer('prog-p1-lose');
     room.playerList['prog-p1-win'] = w;
     room.playerList['prog-p1-lose'] = l;
-    w.isAI = false; w.verifiedUserId = 'u-win'; w.notches = 5;
+    w.isAI = false; w.verifiedUserId = 'u-win'; w.notches = 5; w.racedCurrentMap = true;
     w.progression = progression.defaultProgression(); w.progressionLoaded = true;
-    l.isAI = false; l.verifiedUserId = 'u-lose'; l.notches = 2;
+    l.isAI = false; l.verifiedUserId = 'u-lose'; l.notches = 2; l.racedCurrentMap = true;
     l.progression = progression.defaultProgression(); l.progressionLoaded = true;
     // Reproduce the real match-end state: placement fields NULL at gameOver time.
     room.game.firstPlaceSig = null;
@@ -256,7 +258,7 @@ function testGuestsAndBotsEarnNothing() {
     room.playerList['prog-guest-human'] = human;
     room.playerList['prog-guest-guest'] = guest;
     room.playerList['prog-guest-bot'] = bot;
-    human.isAI = false; human.verifiedUserId = 'user-h'; human.notches = 5;
+    human.isAI = false; human.verifiedUserId = 'user-h'; human.notches = 5; human.racedCurrentMap = true;
     human.progression = progression.defaultProgression(); human.progressionLoaded = true;
     guest.isAI = false; guest.verifiedUserId = null; guest.notches = 3;
     bot.isAI = true; bot.verifiedUserId = null; bot.notches = 4;
@@ -391,6 +393,20 @@ function testGoalAccountingAndRecap() {
     check((r.p2.progression.medal_counts.recapAppearances || 0) === 1, 'a non-winner with a recap-worthy moment banks a recapAppearance');
 }
 
+function testSpectatorEarnsNothing() {
+    console.log('Late-join spectator earns no progression:');
+    const r = runMatch({
+        sig: 'prog-spec',
+        p1: { id: 'prog-spec-1', notches: 5, totalKills: 0, progression: { xp: 0, level: 1, unlocked_skins: [], medal_counts: {}, wins: 0 } },
+        // a signed-in player who joined mid-race as a spectator: never raced this match
+        p2: { id: 'prog-spec-2', notches: 0, totalKills: 0, racedCurrentMap: false, progression: { xp: 0, level: 1, unlocked_skins: [], medal_counts: {}, wins: 0 } }
+    });
+    check(!r.awards.xpEarned['prog-spec-2'], 'spectator (never raced) gets no XP/progression award');
+    check(!!r.awards.xpEarned['prog-spec-1'], 'the actual racer still earns');
+    // with only 1 real racer, competitive progression must NOT count (the spectator does not make it 2 humans)
+    check((r.p1.progression.wins || 0) === 0, '1 racer + 1 spectator is not "2 humans" — solo win does not count');
+}
+
 (async function run() {
     testPureHelpers();
     testXpBreakdown();
@@ -400,6 +416,7 @@ function testGoalAccountingAndRecap() {
     testGuestsAndBotsEarnNothing();
     testSoloCompetitionGate();
     testGoalAccountingAndRecap();
+    testSpectatorEarnsNothing();
     testSetCosmeticGating();
     await testSameRoomToastDelivery();
     testNoWritesByDefault();
