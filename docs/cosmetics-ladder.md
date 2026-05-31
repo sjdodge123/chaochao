@@ -162,7 +162,7 @@ the other 12 need a new `medal_counts` key + an increment hook (see §D for wher
 | 200 | cart | `hypno` | Hypno |
 | 500 | border | `border_orbit` | Orbit |
 
-**`goalsReached`** — reached the goal tile (3)
+**`goalsReached`** — goal crossings (counted every round, not just the last) (3)
 | Thr | Slot | Item id | Display |
 |----:|------|---------|---------|
 | 25  | cart | `ferris_wheel` | Ferris Wheel |
@@ -203,7 +203,7 @@ the other 12 need a new `medal_counts` key + an increment hook (see §D for wher
 | 20  | trail | `ripple` | Ripple |
 | 60  | border | `border_glow` | Glow |
 
-**`recapAppearances`** — featured in an end-game recap (2)
+**`recapAppearances`** — finished top-2 (winner/runner-up, the recap headline) (2)
 | Thr | Slot | Item id | Display |
 |----:|------|---------|---------|
 | 10  | cart | `helm` | Helm |

@@ -193,6 +193,7 @@ class Player extends Circle {
 		// ice medals are main's gatherAchievements medals (zombieSlayer/heavyHitter/pinball/
 		// iceSkater), which the award path already folds into medal_counts — no dup needed.
 		this.abilitiesUsedMatch = 0;
+		this.goalsReachedMatch = 0; // goals crossed this match (across all rounds)
 
 		//Engine Variables
 		this.newX = this.x;
@@ -931,6 +932,7 @@ class Player extends Circle {
 			}
 			this.alive = false;
 			this.reachedGoal = true;
+			this.goalsReachedMatch += 1; // count EVERY round's goal (reset clears reachedGoal per round)
 			this.timeReached = Date.now();
 			// "clutch" = beat the lava to the goal: only when the lava front was
 			// genuinely close (collapseMargin stamped each collapsing tick), so an
@@ -1124,6 +1126,7 @@ class Player extends Circle {
 			this.bumperHitCount = 0;
 			this.iceDistanceTravelled = 0;
 			this.abilitiesUsedMatch = 0; // per-match counter for the abilitiesUsed cosmetic medal
+			this.goalsReachedMatch = 0;
 		}
 	}
 }

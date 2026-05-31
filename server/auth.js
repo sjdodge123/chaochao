@@ -486,32 +486,46 @@ async function drainPendingToasts(userId) {
         return [];
     }
     try {
-        var res = await supabase
-            .from('progression')
-            .select('pending_toasts')
-            .eq('user_id', userId)
-            .maybeSingle();
-        if (res.error || !res.data) {
-            if (res.error) { console.log('[auth] drainPendingToasts read failed:', res.error.message); }
-            return [];
-        }
-        var toasts = Array.isArray(res.data.pending_toasts) ? res.data.pending_toasts : [];
-        if (toasts.length === 0) {
-            return [];
-        }
-        if (writesEnabled) {
+        for (var attempt = 0; attempt < 5; attempt++) {
+            var res = await supabase
+                .from('progression')
+                .select('pending_toasts, updated_at')
+                .eq('user_id', userId)
+                .maybeSingle();
+            if (res.error || !res.data) {
+                if (res.error) { console.log('[auth] drainPendingToasts read failed:', res.error.message); }
+                return [];
+            }
+            var toasts = Array.isArray(res.data.pending_toasts) ? res.data.pending_toasts : [];
+            if (toasts.length === 0) {
+                return [];
+            }
+            // Dev (writes off): hand the toasts to the UI but don't clear — acceptable that
+            // they re-show on the next join; the atomic clear below is writes-on only.
+            if (!writesEnabled) {
+                return toasts;
+            }
+            // Compare-and-swap clear: only wipe if no write landed since our read. If a
+            // concurrent match-end addProgression appended NEW toasts (moving updated_at), the
+            // clear touches 0 rows and we retry — the re-read then claims the fuller set, so an
+            // appended toast is always delivered, never erased by a stale clear.
             var upd = await supabase
                 .from('progression')
                 .update({ pending_toasts: [], updated_at: new Date().toISOString() })
-                .eq('user_id', userId);
+                .eq('user_id', userId)
+                .eq('updated_at', res.data.updated_at)
+                .select('user_id');
             if (upd.error) {
-                // Couldn't clear — return [] rather than risk showing the same toasts
-                // forever on every lobby join.
                 console.log('[auth] drainPendingToasts clear failed:', upd.error.message);
                 return [];
             }
+            if (upd.data && upd.data.length) {
+                return toasts; // cleared exactly what we read
+            }
+            // 0 rows updated -> a concurrent writer moved updated_at; retry.
         }
-        return toasts;
+        console.log('[auth] drainPendingToasts: gave up after contended attempts for', userId);
+        return [];
     } catch (e) {
         console.log('[auth] drainPendingToasts error:', e.message);
         return [];

@@ -1213,8 +1213,11 @@ class Game {
 			// Self-counter medals (not best-in-match): fold this player's own per-match tallies
 			// into their lifetime medal_counts so the new achievement cosmetics are earnable.
 			deltas.gamesPlayed = (deltas.gamesPlayed || 0) + 1;
-			deltas.recapAppearances = (deltas.recapAppearances || 0) + 1;
-			if (p.reachedGoal) { deltas.goalsReached = (deltas.goalsReached || 0) + 1; }
+			// Recap headlines the standings (winner + runner-up), so only they "appear" — the
+			// server can't see the client montage's per-clip subjects, so this is the trackable
+			// proxy (otherwise it's just a duplicate of gamesPlayed for every participant).
+			if (isWinner || isRunnerUp) { deltas.recapAppearances = (deltas.recapAppearances || 0) + 1; }
+			if (p.goalsReachedMatch) { deltas.goalsReached = (deltas.goalsReached || 0) + p.goalsReachedMatch; }
 			if (p.cart || p.pattern || p.trailFx || p.border) { deltas.cosmeticGames = (deltas.cosmeticGames || 0) + 1; }
 			if (p.joinedInProgress) { deltas.joinInProgress = (deltas.joinInProgress || 0) + 1; p.joinedInProgress = false; }
 			if (p.abilitiesUsedMatch) { deltas.abilitiesUsed = (deltas.abilitiesUsed || 0) + p.abilitiesUsedMatch; }
