@@ -138,16 +138,33 @@ GameMonetize's "Verify Game" inspects the LIVE page, so the order is:
   `auth.js`. ✅
 - Freq cap: fires on matches 1, 3 & 5 of 5 (first match pre-seeded eligible); 90 s
   cooldown blocks; counter resets. ✅
-- GameMonetize adapter (headless, 23/23): `SDK_READY`→ready, `SDK_GAME_PAUSE`→
+- GameMonetize adapter (headless, 33/33): `SDK_READY`→ready, `SDK_GAME_PAUSE`→
   impression (commits cadence + `ad_shown`), `SDK_GAME_START`→complete,
-  `SDK_ERROR`/loader-404→no-op, 8 s timeout→`ad_error` reason=timeout, missing
-  `window.sdk`→`ad_error` reason=error. ✅
+  `SDK_ERROR`/loader-404→no-op, 8 s request-timeout→`ad_error` reason=timeout,
+  missing `window.sdk`→`ad_error` reason=error. ✅
 - **No-fill honesty (Codex fix):** a `SDK_GAME_START` with no preceding
   `SDK_GAME_PAUSE` (no ad served), and any pre-start error, emit NO `ad_shown` /
   `ad_complete` and do NOT burn the frequency cap — so empty requests can't inflate
   the GA funnel or suppress the next genuine ad opportunity. Impression bookkeeping
   fires only on a real start. ✅
-- Fail-open: SDK timeout (8 s) / throw / 404 all fire `onClose`; gameplay proceeds.
-  Genuine errors still log `ad_error` (failure telemetry, never an impression). ✅
+- **Ad actually fires in the normal loop (Codex P1 fix):** the between-matches
+  trigger keys off an explicit `adPendingMatchEnd` flag set in `startGameover`, NOT
+  a `currentState` compare — because the server emits `startWaiting` between
+  `startGameover` and `startLobby`, a state-compare was always false and no ad ever
+  showed. ✅
+- **Long ads aren't cut off (Codex P2 fix):** the 8 s watchdog guards only the
+  *request* (waiting for an ad to begin); `onStart` clears it, so an interstitial
+  longer than 8 s runs to completion with no bogus `ad_error` and no premature
+  `onClose`. ✅
+- **Ad can't cover the next race (Codex P2 fix):** `startGated` / `startRace` call
+  `ads.dismissInterstitial()`, which tears down any in-flight ad (best-effort), then
+  settles it as `cancelled` — no `ad_complete`/`ad_error` telemetry, just `onClose`.
+  KNOWN LIMITATION: the GameMonetize preroll SDK has no documented programmatic
+  close, so a GM ad already on screen is dropped from our side (callbacks cleared)
+  but may finish its own visual lifecycle; AdinPlay's `destroy()` is called when
+  present. ✅
+- Fail-open: request timeout (8 s) / throw / 404 all fire `onClose`; gameplay
+  proceeds. Genuine errors still log `ad_error` (failure telemetry, never an
+  impression); deliberate dismiss logs nothing. ✅
 - `npm run build`, `npm run test:smoke`, `test:unit`, `test:lint-buttons`,
   `test:button-gate` all pass. ✅
