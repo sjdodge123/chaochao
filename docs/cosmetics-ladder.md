@@ -203,7 +203,7 @@ the other 12 need a new `medal_counts` key + an increment hook (see §D for wher
 | 20  | trail | `ripple` | Ripple |
 | 60  | border | `border_glow` | Glow |
 
-**`recapAppearances`** — finished top-2 (winner/runner-up, the recap headline) (2)
+**`recapAppearances`** — winner OR had a server-detected highlight moment (clutch/burning finish, multi-kill or kill streak, pinball death, horde escape) (2)
 | Thr | Slot | Item id | Display |
 |----:|------|---------|---------|
 | 10  | cart | `helm` | Helm |

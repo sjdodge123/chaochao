@@ -422,6 +422,10 @@ class Game {
 				// firing every tick while reachedGoal stays true is harmless).
 				this.recordPlayerFinish(this.playerList[player]);
 				this.playerList[player].survivalist += 1;
+				// Escaped the horde: a human reaching the goal during an infection round.
+				if (this.gameBoard.checkForActiveBrutal(c.brutalRounds.infection.id)) {
+					this.playerList[player].recapWorthy = true;
+				}
 				if (this.gameBoard.brutalRound) {
 					this.playerList[player].brutalist += 1;
 				}
@@ -1213,10 +1217,10 @@ class Game {
 			// Self-counter medals (not best-in-match): fold this player's own per-match tallies
 			// into their lifetime medal_counts so the new achievement cosmetics are earnable.
 			deltas.gamesPlayed = (deltas.gamesPlayed || 0) + 1;
-			// Recap headlines the standings (winner + runner-up), so only they "appear" — the
-			// server can't see the client montage's per-clip subjects, so this is the trackable
-			// proxy (otherwise it's just a duplicate of gamesPlayed for every participant).
-			if (isWinner || isRunnerUp) { deltas.recapAppearances = (deltas.recapAppearances || 0) + 1; }
+			// recapAppearances = the winner (always the recap headline) OR anyone who had a
+			// server-detected highlight this match (clutch/burning finish, multi-kill/streak,
+			// pinball death, horde escape) — p.recapWorthy is stamped at those moments.
+			if (p.recapWorthy || isWinner) { deltas.recapAppearances = (deltas.recapAppearances || 0) + 1; }
 			if (p.goalsReachedMatch) { deltas.goalsReached = (deltas.goalsReached || 0) + p.goalsReachedMatch; }
 			if (p.cart || p.pattern || p.trailFx || p.border) { deltas.cosmeticGames = (deltas.cosmeticGames || 0) + 1; }
 			if (p.joinedInProgress) { deltas.joinInProgress = (deltas.joinInProgress || 0) + 1; p.joinedInProgress = false; }
