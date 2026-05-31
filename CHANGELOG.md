@@ -10,7 +10,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+- Idle-kick fix: flipping through a lobby station's menus keeps you active as intended, but simply parking your kart on a station pad and stepping away no longer makes you immune to the idle kick — you have to actually be using the menu.
 
 ## v0.26.1 — 2026-05-31
 

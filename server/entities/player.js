@@ -625,15 +625,12 @@ class Player extends Circle {
 		}
 	}
 	checkForSleep(currentState) {
-		// Browsing a hub station (skin shop / AI / map picker) IS activity: keep the player
-		// awake while a station panel is open so menu navigation never reads as AFK — the
-		// lobby otherwise kicks an "awake" idler immediately, which made shop browsing (no
-		// movement packets) eject players. nearStation latches the parked station (cleared on
-		// exit), so this lapses the moment they leave the station.
-		if (this.nearStation != null && currentState == c.stateMap.lobby) {
-			this.wakeUp();
-			return;
-		}
+		// NOTE: merely standing in a hub station zone is NOT activity — proximity alone must
+		// still idle out normally. ACTIVELY using a station panel (open / navigate / tab /
+		// page / confirm / close, on key, touch, or pad) is what keeps a player awake: the
+		// client fires a `lobbyActivity` ping on each such interaction (see messenger.js),
+		// which calls wakeUp(). Shop browsing emits no movement packets, so without that ping
+		// it would read as AFK — but parking a kart on the pad and walking away should not.
 		if (this.sleepTimer != null) {
 			this.sleepTimeLeft = ((this.sleepWaitTime * 1000 - (Date.now() - this.sleepTimer)) / (1000)).toFixed(1);
 			if (this.sleepTimeLeft > 0) {
