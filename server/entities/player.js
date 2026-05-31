@@ -189,12 +189,10 @@ class Player extends Circle {
 		this.heavyHitCount = 0;         // fully-charged punches thrown -> Heavy Hitter
 		this.bumperHitCount = 0;        // bumper bonks taken -> Pinball
 		this.iceDistanceTravelled = 0;  // distance slid on ice tiles -> Ice Skater
-		// New medal counters (per-match; folded into lifetime medal_counts at gameOver)
+		// Per-match counter for the abilitiesUsed cosmetic medal. The zombie/heavy-hit/bumper/
+		// ice medals are main's gatherAchievements medals (zombieSlayer/heavyHitter/pinball/
+		// iceSkater), which the award path already folds into medal_counts — no dup needed.
 		this.abilitiesUsedMatch = 0;
-		this.windupPunchHitsMatch = 0;
-		this.zombieKillsMatch = 0;
-		this.bumpersHitMatch = 0;
-		this.iceDistanceMatch = 0;
 
 		//Engine Variables
 		this.newX = this.x;
@@ -339,7 +337,7 @@ class Player extends Circle {
 		this.punch.angle = this.angle;
 		this.punch.ox = this.x;
 		this.punch.oy = this.y;
-		if (currentState != c.stateMap.lobby) { this.bully += 1; this.zombieKillsMatch += 1; }
+		if (currentState != c.stateMap.lobby) { this.bully += 1; }
 		messenger.messageRoomBySig(this.roomSig, "punch", compressor.sendPunch(this.punch));
 		this.attack = false;
 	}
@@ -405,9 +403,6 @@ class Player extends Circle {
 	}
 	throwChargedPunch(currentState) {
 		var frac = this.chargeFrac;
-		if (currentState != c.stateMap.lobby && frac >= c.punchCharge.chargedHitFrac) {
-			this.windupPunchHitsMatch += 1; // committed a fully-charged (windup) punch
-		}
 		// Stamina was already drained while charging; latch exhaustion off what's left.
 		if (this.stamina < c.punchStamina.punchCost) {
 			this.stamina = Math.max(0, this.stamina);
@@ -780,7 +775,6 @@ class Player extends Circle {
 				this.bumperHitCount += 1;
 			}
 		}
-		if (object.mapOwned && this.currentState != c.stateMap.lobby) { this.bumpersHitMatch += 1; } // knocked by a bumper/hazard
 		_engine.punchPlayer(this, object);
 		var charged = object.chargeFrac != null && object.chargeFrac >= c.punchCharge.chargedHitFrac;
 		messenger.messageRoomBySig(this.roomSig, "playerPunched", { owner: object.ownerId, victim: this.id, x: this.x, y: this.y, charged: charged });
@@ -916,7 +910,6 @@ class Player extends Circle {
 			if ((this.currentState == c.stateMap.racing || this.currentState == c.stateMap.collapsing) && this.dt) {
 				this.iceDistanceTravelled += utils.getMag(this.velX, this.velY) * this.dt;
 			}
-				if (this.currentState != c.stateMap.lobby) { this.iceDistanceMatch += Math.hypot(this.velX, this.velY); } // slide activity, in-match only
 			return;
 		}
 		if (object.id == c.tileMap.goal.id) {
@@ -1130,13 +1123,7 @@ class Player extends Circle {
 			this.heavyHitCount = 0;
 			this.bumperHitCount = 0;
 			this.iceDistanceTravelled = 0;
-			// New per-match medal counters — zero them too, else they re-accumulate across
-			// matches in a persistent room and over-credit the lifetime medals at every gameOver.
-			this.abilitiesUsedMatch = 0;
-			this.windupPunchHitsMatch = 0;
-			this.zombieKillsMatch = 0;
-			this.bumpersHitMatch = 0;
-			this.iceDistanceMatch = 0;
+			this.abilitiesUsedMatch = 0; // per-match counter for the abilitiesUsed cosmetic medal
 		}
 	}
 }

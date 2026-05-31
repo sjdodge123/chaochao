@@ -5,8 +5,11 @@ Supersedes the original Lv1–30 draft. Approved direction (operator, 2026-05-30
 - **Unlock every 2 levels**, ladder runs **Lv2 → Lv100 = 50 level unlocks**.
 - The level ladder hands out the **commons + uncommons** (steady drip, low rarity).
 - **Achievements hand out the rares/epics/legendaries** — 47 items spread across
-  **18 medal counters** (6 already tracked + 12 new), so each medal has only 2–4
-  gentle tiers and there are many varied ways to earn cosmetics.
+  **18 medal counters** (6 original + 4 from main's v0.26.0 medal card —
+  `zombieSlayer`/`heavyHitter`/`pinball`/`iceSkater` — + 8 new ours), so each medal has
+  only 2–4 gentle tiers and there are many varied ways to earn cosmetics. The 4 v0.26.0
+  medals are competitive ("most in a match"); thresholds for them are "win the medal N
+  times," matching the other competitive-medal cosmetics.
 - **Borders are mixed into both** ladders like any other slot.
 
 Four independent equip slots: **cart** (shape) · **pattern** (texture, sphere only) ·
@@ -140,11 +143,11 @@ the other 12 need a new `medal_counts` key + an increment hook (see §D for wher
 | 75  | trail | `bubbles` | Bubbles |
 | 150 | pattern | `nebula` | Nebula |
 
-**`zombieKills`** — kills while infected/zombie (2)
+**`zombieSlayer`** — won the Zombie Slayer medal (main's medal, v0.26.0) (2)
 | Thr | Slot | Item id | Display |
 |----:|------|---------|---------|
-| 20  | trail | `bolt` | Bolt |
-| 75  | trail | `neon` | Neon |
+| 15  | trail | `bolt` | Bolt |
+| 50  | trail | `neon` | Neon |
 
 **`abilitiesUsed`** — abilities triggered (3)
 | Thr | Slot | Item id | Display |
@@ -170,11 +173,11 @@ the other 12 need a new `medal_counts` key + an increment hook (see §D for wher
 | 150 | cart | `saw_blade` | Saw Blade |
 | 400 | border | `border_gear` | Gear Rim |
 
-**`windupPunchHits`** — charged-punch landings (2) · *`throwChargedPunch` exists*
+**`heavyHitter`** — won the Heavy Hitter medal (main's medal, v0.26.0) (2)
 | Thr | Slot | Item id | Display |
 |----:|------|---------|---------|
-| 25  | cart | `gear` | Gear |
-| 100 | cart | `dino` | Dino |
+| 20  | cart | `gear` | Gear |
+| 60  | cart | `dino` | Dino |
 
 **`cosmeticGames`** — matches with a cart/pattern/border equipped (2)
 | Thr | Slot | Item id | Display |
@@ -182,17 +185,17 @@ the other 12 need a new `medal_counts` key + an increment hook (see §D for wher
 | 10  | pattern | `tiger` | Tiger |
 | 50  | cart | `pinwheel` | Pinwheel |
 
-**`bumpersHit`** — bumper collisions (2)
+**`pinball`** — won the Pinball medal (main's medal, v0.26.0) (2)
 | Thr | Slot | Item id | Display |
 |----:|------|---------|---------|
-| 50  | border | `border_spikes` | Spikes |
-| 250 | border | `border_sawblade` | Sawblade Rim |
+| 25  | border | `border_spikes` | Spikes |
+| 80  | border | `border_sawblade` | Sawblade Rim |
 
-**`iceDistance`** — distance traveled on ice (2)
+**`iceSkater`** — won the Ice Skater medal (main's medal, v0.26.0) (2)
 | Thr | Slot | Item id | Display |
 |----:|------|---------|---------|
-| 2000  | trail | `ripple` | Ripple |
-| 10000 | border | `border_glow` | Glow |
+| 20  | trail | `ripple` | Ripple |
+| 60  | border | `border_glow` | Glow |
 
 **`recapAppearances`** — featured in an end-game recap (2)
 | Thr | Slot | Item id | Display |
@@ -252,11 +255,7 @@ All viable today — each needs a `medal_counts` key + one increment site:
 | `gamesPlayed` | match-end tally, once per player per match |
 | `goalsReached` | when a player reaches the goal tile (`reachedGoal`) |
 | `winStreak` | match-end: bump on win, reset to 0 on loss; store best |
-| `zombieKills` | kill attribution while `attacker.isZombie` (infection round) |
-| `windupPunchHits` | in `player.throwChargedPunch` when the punch connects |
 | `abilitiesUsed` | ability-activation path (per trigger) |
-| `iceDistance` | accumulate per-tick movement while on an `ice` tile (engine) |
-| `bumpersHit` | bumper collision resolution in `engine.js` |
 | `recapAppearances` | match-end, for each player included in the recap payload |
 | `cosmeticGames` | match-end if any of cart/pattern/trail ≠ default |
 | `joinInProgress` | on join when room state is `racing` |
