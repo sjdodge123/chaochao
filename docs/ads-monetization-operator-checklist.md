@@ -6,7 +6,8 @@ and what only the operator can do.
 ## What shipped (interstitial half)
 
 - `client/scripts/ads.js` — network-agnostic ad layer. Interstitial at the
-  `gameOver` transition, frequency-capped (every 2 finished matches AND ≤ once /
+  `gameOver` -> `lobby` edge (between matches, AFTER the results/medals screen — it
+  does NOT cover the recap), frequency-capped (every 2 finished matches AND ≤ once /
   90 s, both tunable at the top of `ads.js`). Fail-open: 8 s hard timeout, every
   callback fires, gameplay is never blocked. Embedded mode (`isEmbedded()`) and
   `provider:'none'` both no-op cleanly.
@@ -15,7 +16,9 @@ and what only the operator can do.
   `<!-- ADS_CONFIG -->` placeholder, from the `ADS_PROVIDER` / `ADS_PUBLISHER_ID`
   env vars. No env vars → `provider:'none'` (no-op).
 - `ads.js` registered in `build.js` (play bundle) and the `play.html` BUILD block.
-- Interstitial hook in `client.js`'s `startGameover` handler.
+- Interstitial hook in `client.js`'s `startLobby` handler, gated on having just
+  come from `gameOver` (`cameFromGameOver`) — i.e. only between matches, after the
+  results screen, never over it.
 - GA events from `ads.js`: `ad_shown`, `ad_complete`, `ad_error` (with
   `reason: sdk|timeout|error`). (`ad_skipped` / `reward_claimed` belong to the
   rewarded half — see below.)

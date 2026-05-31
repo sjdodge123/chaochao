@@ -632,6 +632,11 @@ function registerStateHandlers(server) {
 	});
 	server.on("startLobby", function (packet) {
 		debugLog("startLobby, packet=", packet);
+		// Was the player just on the match-over results screen? If so this startLobby
+		// is the BETWEEN-MATCHES transition — the natural ad break. Capture it BEFORE
+		// currentState is reassigned to lobby below. (First lobby of a session comes
+		// from `waiting`, not `gameOver`, so no ad fires there.)
+		var cameFromGameOver = (currentState === config.stateMap.gameOver);
 		recapNewMatch(); // a fresh match is forming — drop last game's recap clips
 		// Set state first so loadNewMap doesn't run its gated-only goal-ping branch.
 		currentState = config.stateMap.lobby;
@@ -640,6 +645,21 @@ function registerStateHandlers(server) {
 		spawnLobbyStartButton(packet);
 		setLobbySfxDampen(true);
 		playSoundAfterFinish(lobbyMusic);
+		// Monetization: a frequency-capped interstitial may run HERE, at the
+		// gameOver -> lobby edge — AFTER the player has had the full game-over window
+		// to see their results/medals/recap, and as the next match's lobby comes up.
+		// Strictly fail-open and cosmetic: onClose is a no-op, the lobby is already
+		// live underneath, and the SDK missing/throwing/timing out all proceed
+		// unchanged. onMatchEnded advances the per-match cadence counter regardless of
+		// whether an ad actually shows.
+		if (cameFromGameOver && window.ads && typeof window.ads.onMatchEnded === "function") {
+			try {
+				window.ads.onMatchEnded();
+				if (window.ads.canShowInterstitial()) {
+					window.ads.showInterstitial({ placement: "between_matches", onClose: function () {} });
+				}
+			} catch (e) { /* ads must never break the lobby transition */ }
+		}
 		// Wait for the async map/asset loads to finish before loading the lobby map —
 		// otherwise on a fresh page load maps[] may not yet contain the tutorial map and
 		// it silently fails to render (the islands "disappear"). Mirrors the newMap path.
@@ -882,19 +902,9 @@ function registerStateHandlers(server) {
 		if (window.chaochaoAuth && typeof window.chaochaoAuth.showLoginNudge === "function") {
 			window.chaochaoAuth.showLoginNudge();
 		}
-		// Monetization: a frequency-capped interstitial may run ON TOP OF the
-		// results screen. This is strictly fail-open and cosmetic — onClose is a
-		// no-op, so the existing gameOver -> lobby flow is NEVER gated on the ad
-		// (SDK missing, throwing, or timing out all proceed unchanged). onMatchEnded
-		// advances the per-match cadence counter regardless of whether one shows.
-		if (window.ads && typeof window.ads.onMatchEnded === "function") {
-			try {
-				window.ads.onMatchEnded();
-				if (window.ads.canShowInterstitial()) {
-					window.ads.showInterstitial({ placement: "gameover", onClose: function () {} });
-				}
-			} catch (e) { /* ads must never break the results screen */ }
-		}
+		// NOTE: the interstitial ad is intentionally NOT shown here. It runs at the
+		// gameOver -> lobby edge (see the startLobby handler) so the player gets the
+		// full game-over window to see their results/medals/recap uninterrupted.
 	});
 	server.on("startCollapse", function (info) {
 		currentState = config.stateMap.collapsing;
