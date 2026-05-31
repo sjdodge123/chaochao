@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.26.1 — 2026-05-31
+
 ### General
 
 - [headline] Every match now earns you XP — play to level up and unlock cosmetics. Win for a fat XP bonus (and runner-up gets a little something too).
