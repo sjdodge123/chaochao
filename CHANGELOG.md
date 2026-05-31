@@ -26,6 +26,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 - You won't get kicked for being idle while you're browsing a lobby station (skin shop, AI, or map picker) — flipping through the menus now counts as being active.
 - End-of-match medals are now human-only — bots no longer take a medal off the card (or the progress it counts toward), so the awards reflect what the players actually did.
+- Wins and end-of-match medals now only count toward unlocks in matches with at least two human players — so racing alone (or against only bots) won't auto-grant competitive rewards. You still earn XP, level up, and progress the "play a lot" unlocks solo.
 
 ## v0.26.0 — 2026-05-31
 

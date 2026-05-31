@@ -1185,12 +1185,20 @@ class Game {
 			}
 		}
 
+		// Competitive progression (wins, winStreak, and the best-in-match medals folded above)
+		// needs a real opponent: 2+ HUMANS present at gameOver. Guests count — only bots are
+		// excluded. Solo / you-and-bots still earns XP/levels + the participation self-medals.
+		var humanCount = 0;
+		for (var hid in this.playerList) { if (this.playerList[hid] && !this.playerList[hid].isAI) { humanCount++; } }
+		var enoughHumans = (humanCount >= 2);
+
 		for (var id in this.playerList) {
 			var p = this.playerList[id];
 			if (p == null || p.isAI || !p.verifiedUserId) {
 				continue; // bots + guests earn no progression
 			}
 			var isWinner = (id === winnerId);
+			var countsAsWin = isWinner && enoughHumans; // a "win" requires real competition
 			var isRunnerUp = (id === runnerUpId);
 			var breakdown = {
 				participation: c.xpParticipate,
@@ -1223,9 +1231,9 @@ class Game {
 				var newXp = (prog.xp || 0) + breakdown.total;
 				var oldLevel = prog.level || 1;
 				var newLevel = progression.levelForXp(newXp);
-				var newWins = (prog.wins || 0) + (isWinner ? 1 : 0);
+				var newWins = (prog.wins || 0) + (countsAsWin ? 1 : 0);
 				var newMedalCounts = progression.mergeMedalCounts(prog.medal_counts, deltas);
-				progression.applyWinStreak(newMedalCounts, isWinner);
+				progression.applyWinStreak(newMedalCounts, countsAsWin);
 				var earned = progression.achievementsUnlocked(newMedalCounts, newWins);
 				var had = prog.unlocked_skins || [];
 				var fresh = [];
@@ -1251,7 +1259,7 @@ class Game {
 			if (auth.writesEnabled) {
 				// DB path: addProgression recomputes + persists (incl. pending_toasts)
 				// authoritatively from the stored row; don't also queue in memory.
-				this.persistProgression(p.verifiedUserId, id, breakdown.total, deltas, isWinner);
+				this.persistProgression(p.verifiedUserId, id, breakdown.total, deltas, countsAsWin);
 			} else {
 				messenger.enqueueToastsInMemory(p.verifiedUserId, events);
 			}

@@ -11,6 +11,12 @@ Supersedes the original Lv1–30 draft. Approved direction (operator, 2026-05-30
   medals are competitive ("most in a match"); thresholds for them are "win the medal N
   times," matching the other competitive-medal cosmetics.
 - **Borders are mixed into both** ladders like any other slot.
+- **Competitive progression needs real games:** `wins`, `winStreak`, and the best-in-match
+  medals (mostKills/savior/survivalist/brutalist/mostMurdered + zombieSlayer/heavyHitter/
+  pinball/iceSkater) only count in matches with **2+ humans present at gameOver** (guests
+  count; bots don't). Solo / you-and-bots still earns XP/levels + the participation medals
+  (gamesPlayed/abilitiesUsed/goalsReached/cosmeticGames/recapAppearances/joinInProgress/
+  mapsSubmitted).
 
 Four independent equip slots: **cart** (shape) · **pattern** (texture, sphere only) ·
 **border** (rim, shares the pattern column, composes over any cart) · **trail**.

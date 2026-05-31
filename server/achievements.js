@@ -19,13 +19,17 @@ module.exports = {
 			pinball: { ids: [], value: 0, title: "Pinball" },
 			iceSkater: { ids: [], value: 0, title: "Ice Skater" },
 		};
+		// Competitive medals need a real opponent — 2+ humans present (guests count; bots don't).
+		var humanCount = 0;
+		for (var hid in this.playerList) { if (this.playerList[hid] && !this.playerList[hid].isAI) { humanCount++; } }
+		var enoughHumans = (humanCount >= 2);
 		for (var id in this.playerList) {
 			var player = this.playerList[id];
 
 			// Medals are HUMAN-only: a bot holding a self-medal would deny every human credit
 			// for it that match (the progression award loop skips bots) and the card is a human
 			// achievement — so bots never contend for the self-medals below.
-			if (!player.isAI) {
+			if (!player.isAI && enoughHumans) {
 				//Best Murderer
 				this.checkForNewMedalHolder(achievements.mostKills, id, player.totalKills);
 				//Savior
@@ -61,7 +65,7 @@ module.exports = {
 					mostKilled[murderedID] += 1;
 				}
 			}
-			if (mostKilled != null) {
+			if (mostKilled != null && enoughHumans) {
 				for (var murderID in mostKilled) {
 					var victim = this.playerList[murderID];
 					if (victim && victim.isAI) { continue; }
