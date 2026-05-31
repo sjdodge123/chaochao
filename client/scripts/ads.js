@@ -120,12 +120,20 @@
     }
 
     // ---- Provider adapters ----------------------------------------------------
-    // Each adapter implements showInterstitial(onComplete, onError): it calls
-    // onComplete() on a genuine full/closed ad and onError() on an SDK throw. The
-    // adapter does NOT own the timeout or the exactly-once guarantee — that single
-    // settle authority lives in the public showInterstitial() below. The rewarded
-    // path is intentionally NOT implemented for any provider yet (deferred half —
-    // needs the progression engine in main).
+    // Each adapter implements showInterstitial(onStart, onComplete, onError):
+    //   onStart()    — MUST be called the moment a real ad actually begins playing
+    //                  (an impression). This — not the attempt — is what commits the
+    //                  frequency cap and emits ad_shown. If the network has no fill,
+    //                  onStart must NOT fire, so an empty request never burns the cap
+    //                  or distorts the GA funnel.
+    //   onComplete() — the ad finished or was closed. (If it arrives without onStart
+    //                  having fired, the public layer treats it as a no-fill: no
+    //                  impression, cadence left untouched.)
+    //   onError()    — the SDK threw / was unusable.
+    // The adapter does NOT own the timeout or the exactly-once guarantee — that
+    // single settle authority lives in the public showInterstitial() below. The
+    // rewarded path is intentionally NOT implemented for any provider yet (deferred
+    // half — needs the progression engine in main).
     var adapter = null;
 
     // AdinPlay (recommended default). Their SDK exposes a global `aiptag` queue
@@ -152,7 +160,7 @@
         (document.head || document.documentElement).appendChild(s);
 
         adapter = {
-            showInterstitial: function (onComplete, onError) {
+            showInterstitial: function (onStart, onComplete, onError) {
                 try {
                     window.aiptag.cmd.player.push(function () {
                         try {
@@ -161,6 +169,9 @@
                                 AD_HEIGHT: 540,
                                 AD_DISPLAY: "fullscreen",
                                 LOADING_TEXT: "Advertisement",
+                                // AIP_START fires only when an ad actually renders —
+                                // our impression signal. No-fill skips it.
+                                AIP_START: function () { onStart(); },
                                 AIP_COMPLETE: function () { onComplete(); },
                                 AIP_REMOVE: function () { onComplete(); }
                             });
@@ -181,13 +192,17 @@
     //   loader injects https://api.gamemonetize.com/sdk.js (id gamemonetize-sdk)
     //   onEvent(a) fires a.name: SDK_READY | SDK_ERROR | SDK_GAME_PAUSE | SDK_GAME_START
     //   show an ad: window.sdk.showBanner();
-    //   the sequence per showBanner() is SDK_GAME_PAUSE -> (ad) -> SDK_GAME_START;
-    //   SDK_GAME_START fires even when there's no fill, so it's our "ad done/closed"
-    //   completion signal. SDK_ERROR => SDK never became ready (stays no-op).
-    // Because onEvent is a singleton, we route SDK_GAME_START to a single pending
-    // completion callback; the public showInterstitial() still owns the 8s timeout
-    // and the exactly-once settle, so a missing/duplicate event can't wedge us.
-    var gmPendingComplete = null; // set while an interstitial is in flight
+    //   the sequence per showBanner() is SDK_GAME_PAUSE -> (ad) -> SDK_GAME_START.
+    //   SDK_GAME_PAUSE fires ONLY when an ad is actually about to play, so it's our
+    //   real START/impression signal. SDK_GAME_START fires when the ad finishes AND
+    //   also when there's NO FILL (no ad shown), so it's the completion signal but
+    //   NOT proof an ad ran — a START with no preceding PAUSE is a no-fill. SDK_ERROR
+    //   => SDK never became ready (stays no-op).
+    // Because onEvent is a singleton, we route PAUSE -> pending start and START ->
+    // pending complete; the public showInterstitial() owns the 8s timeout and the
+    // exactly-once settle, so a missing/duplicate event can't wedge us.
+    var gmPendingStart = null;    // fires on SDK_GAME_PAUSE (real impression)
+    var gmPendingComplete = null; // fires on SDK_GAME_START (ad done / no-fill)
     function initGameMonetize() {
         sdkReady = false;
         window.SDK_OPTIONS = {
@@ -199,13 +214,18 @@
                 } else if (name === "SDK_ERROR") {
                     sdkReady = false; // fail-open: stays a no-op
                 } else if (name === "SDK_GAME_PAUSE") {
-                    // Ad starting on top of the results screen — mute so no audio
-                    // bleeds under the ad (their TOS forbids it). stopAllSounds()
+                    // A real ad is about to play on top of the results screen — mute
+                    // so no audio bleeds under it (their TOS forbids it). stopAllSounds()
                     // already ran in the gameOver handler; guard in case it didn't.
                     try { if (typeof window.stopAllSounds === "function") { window.stopAllSounds(); } } catch (e) {}
+                    // This is the impression signal — commit the cap / emit ad_shown.
+                    var sb = gmPendingStart;
+                    gmPendingStart = null;
+                    if (typeof sb === "function") { sb(); }
                 } else if (name === "SDK_GAME_START") {
                     // Ad finished (or no fill) — resolve the in-flight interstitial.
                     var cb = gmPendingComplete;
+                    gmPendingStart = null; // a START without a prior PAUSE = no-fill
                     gmPendingComplete = null;
                     if (typeof cb === "function") { cb(); }
                 }
@@ -223,24 +243,28 @@
         } catch (e) { sdkReady = false; }
 
         adapter = {
-            showInterstitial: function (onComplete, onError) {
+            showInterstitial: function (onStart, onComplete, onError) {
                 try {
-                    // Stash the completion cb for the next SDK_GAME_START. If a
-                    // previous one is somehow still pending, fire it now so we never
-                    // strand a callback (the public timeout would have settled the
-                    // game side already; this just clears our slot).
+                    // Stash the start/complete cbs for the next PAUSE/START. If a
+                    // previous interstitial is somehow still pending, clear its slots
+                    // first (don't replay its start — that would double-count an
+                    // impression; the public timeout already settled the game side).
+                    gmPendingStart = null;
                     if (typeof gmPendingComplete === "function") {
                         var stale = gmPendingComplete; gmPendingComplete = null; stale();
                     }
+                    gmPendingStart = onStart;
                     gmPendingComplete = onComplete;
                     if (window.sdk && typeof window.sdk.showBanner === "function") {
                         window.sdk.showBanner();
                     } else {
                         // SDK object missing despite sdkReady — treat as error.
+                        gmPendingStart = null;
                         gmPendingComplete = null;
                         onError();
                     }
                 } catch (e) {
+                    gmPendingStart = null;
                     gmPendingComplete = null;
                     onError();
                 }
@@ -252,11 +276,11 @@
         if (provider === "adinplay") { initAdinPlay(); }
         else if (provider === "gamemonetize") { initGameMonetize(); }
         else {
-            // 'none' — pure no-op adapter; callback fires immediately. (In practice
-            // unreachable via showInterstitial(), which early-returns when
-            // canShowInterstitial() is false for provider 'none'.)
+            // 'none' — pure no-op adapter; completes immediately with NO start (no
+            // impression). (In practice unreachable via showInterstitial(), which
+            // early-returns when canShowInterstitial() is false for provider 'none'.)
             sdkReady = false;
-            adapter = { showInterstitial: function (onComplete) { onComplete(); } };
+            adapter = { showInterstitial: function (onStart, onComplete) { onComplete(); } };
         }
     }
 
@@ -287,8 +311,19 @@
         var placement = args.placement || "gameover";
         var onClose = (typeof args.onClose === "function") ? args.onClose : function () {};
         if (!canShowInterstitial()) { onClose(); return; }
-        markInterstitialShown();
-        track("ad_shown", { type: "interstitial", placement: placement });
+
+        // Impression/cadence are committed ONLY when the ad actually starts (onStart),
+        // NOT on the attempt. So a no-fill or a failed request never burns the 90s
+        // cooldown / match counter, and never emits ad_shown — keeping the GA funnel
+        // honest and not suppressing the next genuine opportunity. `started` gates
+        // ad_complete/ad_error too: a settle without a start is a silent no-fill.
+        var started = false;
+        function onStart() {
+            if (started) { return; }
+            started = true;
+            markInterstitialShown();
+            track("ad_shown", { type: "interstitial", placement: placement });
+        }
 
         // Single settle authority: fires exactly once. The hard timeout is the
         // fail-open guarantee — if the SDK never calls back, gameplay proceeds.
@@ -299,9 +334,18 @@
             settled = true;
             clearTimeout(timer);
             if (status === "complete") {
-                track("ad_complete", { type: "interstitial", placement: placement });
+                // Completion is only an impression if the ad actually started.
+                // A "complete" with no start is a NO-FILL (GameMonetize signals it
+                // as SDK_GAME_START without a prior PAUSE): emit nothing and leave
+                // the cadence untouched so the next match can try again.
+                if (started) {
+                    track("ad_complete", { type: "interstitial", placement: placement });
+                }
             } else {
-                // "error" (SDK threw) or "timeout" (SDK never returned).
+                // "error" (SDK threw) or "timeout" (SDK never returned). Always
+                // useful failure telemetry, and never an impression, so it can't
+                // inflate the ad_shown -> ad_complete funnel. A pre-start error does
+                // NOT burn the cadence (markInterstitialShown only runs in onStart).
                 track("ad_error", { type: "interstitial", placement: placement, reason: status });
             }
             try { onClose(); } catch (e) { /* gameplay must proceed */ }
@@ -309,6 +353,7 @@
 
         try {
             adapter.showInterstitial(
+                onStart,
                 function () { settle("complete"); },
                 function () { settle("error"); }
             );
