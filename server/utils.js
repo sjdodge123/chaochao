@@ -384,8 +384,13 @@ exports.submitIssue = async function (feedback) {
             returnToClient.status = true;
             returnToClient.message = issue.data.html_url;
             // Operator-only contact trail: never goes into the public issue body.
+            // email already has all control chars stripped above and must pass the
+            // strict regex to get here, so it can't contain CR/LF — strip them again
+            // explicitly at the log site as a defense-in-depth barrier against log
+            // forging (and so static analysis can see the sanitization).
             if (email !== "") {
-                console.log("[feedback] contact email for " + issue.data.html_url + ": " + email);
+                var safeEmail = email.replace(/[\r\n]/g, "");
+                console.log("[feedback] contact email for " + issue.data.html_url + ": " + safeEmail);
             }
             return returnToClient;
         }

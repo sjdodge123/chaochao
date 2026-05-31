@@ -240,18 +240,21 @@ var c = utils.loadConfig();
 // GITHUB_AUTH token (same credential map-submit uses). Because it's unauthenticated
 // and writes to GitHub, it's guarded by: a tight JSON body cap, a hidden honeypot
 // field (any value = a bot, silently accepted-and-dropped), and a per-IP rate limit.
-var feedbackHits = {}; // ip -> [timestamps] within the window
+// Keyed by client IP. A Map (not a plain object) so a hostile IP string can never
+// be a special property name (__proto__, constructor, …) — there's no prototype to
+// pollute and key lookups stay O(1) on arbitrary strings.
+var feedbackHits = new Map(); // ip -> [timestamps] within the window
 var FEEDBACK_WINDOW_MS = 10 * 60 * 1000;
 var FEEDBACK_MAX_PER_WINDOW = 5;
 function feedbackRateLimited(ip) {
     var now = Date.now();
-    var hits = (feedbackHits[ip] || []).filter(function (t) { return now - t < FEEDBACK_WINDOW_MS; });
+    var hits = (feedbackHits.get(ip) || []).filter(function (t) { return now - t < FEEDBACK_WINDOW_MS; });
     if (hits.length >= FEEDBACK_MAX_PER_WINDOW) {
-        feedbackHits[ip] = hits;
+        feedbackHits.set(ip, hits);
         return true;
     }
     hits.push(now);
-    feedbackHits[ip] = hits;
+    feedbackHits.set(ip, hits);
     return false;
 }
 // Sweep expired keys so a public endpoint hit by many distinct IPs can't grow
@@ -259,11 +262,11 @@ function feedbackRateLimited(ip) {
 // submits again). Cheap (runs once per window) and harmless while the server sleeps.
 setInterval(function () {
     var now = Date.now();
-    for (var ip in feedbackHits) {
-        var hits = feedbackHits[ip].filter(function (t) { return now - t < FEEDBACK_WINDOW_MS; });
-        if (hits.length === 0) { delete feedbackHits[ip]; }
-        else { feedbackHits[ip] = hits; }
-    }
+    feedbackHits.forEach(function (timestamps, ip) {
+        var hits = timestamps.filter(function (t) { return now - t < FEEDBACK_WINDOW_MS; });
+        if (hits.length === 0) { feedbackHits.delete(ip); }
+        else { feedbackHits.set(ip, hits); }
+    });
 }, FEEDBACK_WINDOW_MS).unref();
 app.post('/feedback', express.json({ limit: '16kb' }), function (req, res) {
     var body = req.body || {};
