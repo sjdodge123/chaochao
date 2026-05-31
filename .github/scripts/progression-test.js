@@ -100,6 +100,8 @@ function runMatch(setup) {
     p2.totalKills = setup.p2.totalKills || 0;
     p1.goalsReachedMatch = setup.p1.goalsReachedMatch || 0;
     p2.goalsReachedMatch = setup.p2.goalsReachedMatch || 0;
+    p1.recapWorthy = !!setup.p1.recapWorthy;
+    p2.recapWorthy = !!setup.p2.recapWorthy;
     if (setup.p1.progression) { p1.progression = setup.p1.progression; p1.progressionLoaded = true; }
     if (setup.p2.progression) { p2.progression = setup.p2.progression; p2.progressionLoaded = true; }
     room.game.firstPlaceSig = setup.p1.id;
@@ -382,10 +384,11 @@ function testGoalAccountingAndRecap() {
     const r = runMatch({
         sig: 'prog-goals',
         p1: { id: 'prog-goals-1', notches: 5, totalKills: 0, goalsReachedMatch: 3, progression: { xp: 0, level: 1, unlocked_skins: [], medal_counts: {}, wins: 0 } },
-        p2: { id: 'prog-goals-2', notches: 1, totalKills: 0, progression: progression.defaultProgression() }
+        p2: { id: 'prog-goals-2', notches: 1, totalKills: 0, recapWorthy: true, progression: progression.defaultProgression() }
     });
     check((r.p1.progression.medal_counts.goalsReached || 0) === 3, 'goalsReached folds the per-match accumulator (3 across rounds), not a single bool');
-    check((r.p1.progression.medal_counts.recapAppearances || 0) === 1, 'winner banks a recapAppearance (gated to top-2, not every participant)');
+    check((r.p1.progression.medal_counts.recapAppearances || 0) === 1, 'winner banks a recapAppearance (the recap headline)');
+    check((r.p2.progression.medal_counts.recapAppearances || 0) === 1, 'a non-winner with a recap-worthy moment banks a recapAppearance');
 }
 
 (async function run() {

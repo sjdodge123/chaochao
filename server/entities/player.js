@@ -194,6 +194,7 @@ class Player extends Circle {
 		// iceSkater), which the award path already folds into medal_counts — no dup needed.
 		this.abilitiesUsedMatch = 0;
 		this.goalsReachedMatch = 0; // goals crossed this match (across all rounds)
+		this.recapWorthy = false;   // had a recap-worthy "moment" this match (drives recapAppearances)
 
 		//Engine Variables
 		this.newX = this.x;
@@ -559,6 +560,8 @@ class Player extends Circle {
 		if (this.totalKills == 15) {
 			messenger.messageRoomBySig(this.roomSig, "godLike", this.id);
 		}
+		// A multi-kill or a kill streak is a recap highlight.
+		if (this.multiKillCount >= 2 || this.totalKills >= 5) { this.recapWorthy = true; }
 		var multiKillIndex = setTimeout(function (myself) {
 			myself.openMultiKillWindow = false;
 			myself.multiKillCount = 0;
@@ -938,6 +941,9 @@ class Player extends Circle {
 			// genuinely close (collapseMargin stamped each collapsing tick), so an
 			// uncontested slow-collapse stroll-in doesn't trigger the big eruption.
 			var clutch = this.collapseMargin != null && this.collapseMargin < c.audienceClutchMargin;
+			// A clutch finish (just beat the collapse) or crossing the line while still on fire
+			// is a recap moment — credit the recapAppearances medal for who actually had one.
+			if (clutch || this.onFire > 0) { this.recapWorthy = true; }
 			// Server-authoritative elapsed time at finish — sent down so the
 			// client can freeze the HUD timer at this exact value (avoiding
 			// any clock-skew drift between server Date.now() and the browser's
@@ -1002,6 +1008,8 @@ class Player extends Circle {
 		packet.removeNotch();
 		packet.enabled = false;
 		packet.alive = false;
+		// Bounced off a lot of bumpers and then died — a funny recap moment.
+		if ((packet.bumperHitCount || 0) >= 6) { packet.recapWorthy = true; }
 		// Clear any in-progress charge/exhaustion so a death mid-charge doesn't leak a
 		// frozen charge-fist on the corpse or, via the infection resurrect, revive a
 		// zombie with a stale charge (phantom punch / instant overcharge-lock).
@@ -1127,6 +1135,7 @@ class Player extends Circle {
 			this.iceDistanceTravelled = 0;
 			this.abilitiesUsedMatch = 0; // per-match counter for the abilitiesUsed cosmetic medal
 			this.goalsReachedMatch = 0;
+			this.recapWorthy = false;
 		}
 	}
 }
