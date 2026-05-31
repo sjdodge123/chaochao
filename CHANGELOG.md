@@ -25,6 +25,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 ### Bug fixes
 
 - You won't get kicked for being idle while you're browsing a lobby station (skin shop, AI, or map picker) — flipping through the menus now counts as being active.
+- End-of-match medals are now human-only — bots no longer take a medal off the card (or the progress it counts toward), so the awards reflect what the players actually did.
 
 ## v0.26.0 — 2026-05-31
 

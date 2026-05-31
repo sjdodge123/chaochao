@@ -1172,7 +1172,11 @@ class Game {
 		// Per-player medal deltas: each medal a player holds this match counts +1
 		// toward that lifetime medal counter.
 		var medalDeltas = {};
+		// Only persist medals a cosmetic actually gates on (skip resourceful/bully/double/
+		// triple/megaKill etc.) so medal_counts stays a lean ledger of unlock-relevant stats.
+		var TRACKED_MEDALS = new Set(progression.ACHIEVEMENT_UNLOCKS.map(function (u) { return u.stat; }));
 		for (var medalName in achievements) {
+			if (!TRACKED_MEDALS.has(medalName)) { continue; }
 			var medalIds = achievements[medalName].ids || [];
 			for (var m = 0; m < medalIds.length; m++) {
 				var mid = medalIds[m];
