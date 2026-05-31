@@ -739,9 +739,12 @@ function drawLobbyHubHud() {
     if (typeof localPlayers === "undefined" || typeof gameContext === "undefined" || !gameContext) {
         return;
     }
-    // Room-wide AI status banner, drawn FIRST so an open station panel layers on top of it
-    // (otherwise it z-orders over the picker near the top of the screen).
+    // The AI setting and playlist are both room-wide, so show them persistently to the
+    // whole lobby (not just inside a panel) — everyone sees a change before the race
+    // starts. Drawn FIRST so an open station panel layers on top of them, otherwise they
+    // z-order over the picker near the top of the screen.
     drawLobbyAIStatus();
+    drawLobbyPlaylistStatus();
     for (var slot = 0; slot < localPlayers.length; slot++) {
         var lp = localPlayers[slot];
         if (!lp) {
@@ -758,11 +761,6 @@ function drawLobbyHubHud() {
             drawStationPrompt(lp, sp);
         }
     }
-    // The AI setting and playlist are both room-wide, so show them persistently to
-    // the whole lobby (not just inside a panel) — everyone sees a change before the
-    // race starts.
-    drawLobbyAIStatus();
-    drawLobbyPlaylistStatus();
 }
 
 // A fixed top-centre banner showing the live room-wide playlist, just under the AI
