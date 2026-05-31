@@ -60,6 +60,38 @@ still own fail-open. AdinPlay adapter remains in the file as an alternative.
 
 **Game ID (game hash):** `elvluveq681cl5oop2bd54ls7oza2mxo` → goes in `ADS_PUBLISHER_ID`.
 
+### GameMonetize submission copy (for the dashboard form)
+
+Keep this truthful to what's live; if the distribution chunk's OG/SEO copy drifts,
+match that tone.
+
+- **Title:** Chao Chao
+- **Category:** Racing (alt: Action / Multiplayer / .io)
+- **Tags:** multiplayer, racing, arena, io, party, survival, browser
+- **Orientation:** Landscape
+- **Resolution:** 1366 × 768 (16:9)
+- **Controls:** Keyboard, mouse, touch, and gamepad
+- **Plays in browser:** Yes (HTML5, no download)
+
+**Short description (tagline):**
+> Free multiplayer arena racing — survive brutal rounds and race to the goal.
+
+**Game description (main body):**
+> Chao Chao is a fast, chaotic multiplayer arena racer you can jump into instantly
+> in your browser — no signup required. Race across tile-based maps to reach the
+> goal first, but every round throws something new at you: lava floors, ice slides,
+> bumpers, and "brutal rounds" like infection, lightning storms, blackouts, and
+> volcanoes. Grab power-ups — punches, bombs, ice cannons, blindfolds, and
+> tile-swaps — to knock rivals off course while the arena collapses around you.
+> Last one standing (or first to the goal) wins. Play with friends, climb the
+> medals, and build your kart with unlockable skins. Pure party-game chaos in
+> quick, replayable matches.
+
+**Instructions / How to play:**
+> Use WASD/arrows or the on-screen joystick to move. Reach the goal tile to win the
+> round. Pick up abilities and use them to knock opponents into hazards. Avoid lava
+> and the collapsing arena. First to the target score wins the match.
+
 ## Operator prerequisites (only you can do these)
 
 GameMonetize requires the game to be **uploaded + verified + activated on their
