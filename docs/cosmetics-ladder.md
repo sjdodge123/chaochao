@@ -241,7 +241,7 @@ replace `unlock: { kind: 'open' }` with either:
 - `unlock: { kind: 'achievement', stat: '<medal>', threshold: T }`.
 
 The 21 items that already have level/achievement homes get **re-pointed** to the rows
-above (several move — e.g. `firetruck` 12→58, `dino` 18→`windupPunchHits` 100, `checkered`
+above (several move — e.g. `firetruck` 12→58, `dino` 18→`heavyHitter` 60, `checkered`
 14→`mapsSubmitted` 5, the cosmic carts to medal ladders). `UNLOCK_ALL_COSMETICS` stays the
 local test override; nothing here changes the server-authoritative gate or the
 `ALLOW_SUPABASE_WRITES` kill-switch. Achievement gating reads `medal_counts[stat] >= threshold`.
