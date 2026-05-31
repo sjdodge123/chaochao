@@ -49,6 +49,10 @@
     var publisherId = null;
     var sdkReady = false;    // network SDK loaded + ready to serve
     var initialized = false;
+    // The settle() of the currently in-flight interstitial, or null. Lets
+    // dismissInterstitial() tear down an ad that's still up when the next race
+    // starts, so an interstitial can never sit over live gameplay.
+    var activeSettle = null;
 
     // ---- Small safe helpers ---------------------------------------------------
     function lsGet(key) {
@@ -179,6 +183,15 @@
                         } catch (e) { onError(); }
                     });
                 } catch (e) { onError(); }
+            },
+            // Best-effort teardown if we must reclaim the screen for the next race.
+            dismiss: function () {
+                try {
+                    if (window.aiptag && window.aiptag.adplayer &&
+                        typeof window.aiptag.adplayer.destroy === "function") {
+                        window.aiptag.adplayer.destroy();
+                    }
+                } catch (e) { /* best-effort */ }
             }
         };
     }
@@ -268,6 +281,16 @@
                     gmPendingComplete = null;
                     onError();
                 }
+            },
+            // Best-effort teardown for race-start cancellation. NOTE: the GameMonetize
+            // preroll SDK exposes no documented programmatic close, so we can only
+            // drop our pending callbacks here — visually dismissing an already-playing
+            // GM ad is a known limitation (the overlay closes on its own normal
+            // lifecycle). Clearing the slots still prevents a late SDK_GAME_START from
+            // re-resolving a cancelled request.
+            dismiss: function () {
+                gmPendingStart = null;
+                gmPendingComplete = null;
             }
         };
     }
@@ -321,18 +344,27 @@
         function onStart() {
             if (started) { return; }
             started = true;
+            // The watchdog guards the REQUEST (waiting for an ad to begin), not
+            // playback. Once an ad is actually on screen we must NOT time it out —
+            // a real interstitial can run well past AD_TIMEOUT_MS, and firing the
+            // timeout here would settle the request, log a bogus ad_error, suppress
+            // the genuine completion event, and call onClose while the ad is still
+            // visible. Clear it; from here we wait for the provider's complete/close.
+            clearTimeout(timer);
             markInterstitialShown();
             track("ad_shown", { type: "interstitial", placement: placement });
         }
 
         // Single settle authority: fires exactly once. The hard timeout is the
-        // fail-open guarantee — if the SDK never calls back, gameplay proceeds.
+        // fail-open guarantee — if no ad ever STARTS, gameplay proceeds. (It's
+        // cleared in onStart once playback begins — see above.)
         var settled = false;
         var timer = setTimeout(function () { settle("timeout"); }, AD_TIMEOUT_MS);
         function settle(status) {
             if (settled) { return; }
             settled = true;
             clearTimeout(timer);
+            activeSettle = null;
             if (status === "complete") {
                 // Completion is only an impression if the ad actually started.
                 // A "complete" with no start is a NO-FILL (GameMonetize signals it
@@ -341,8 +373,13 @@
                 if (started) {
                     track("ad_complete", { type: "interstitial", placement: placement });
                 }
+            } else if (status === "cancelled") {
+                // Deliberate teardown (the next race is starting — see
+                // dismissInterstitial): NOT a failure and NOT a completion, so emit
+                // no telemetry. The impression (ad_shown) already counted if it had
+                // started; we just close out so gameplay isn't covered.
             } else {
-                // "error" (SDK threw) or "timeout" (SDK never returned). Always
+                // "error" (SDK threw) or "timeout" (no ad started in time). Always
                 // useful failure telemetry, and never an impression, so it can't
                 // inflate the ad_shown -> ad_complete funnel. A pre-start error does
                 // NOT burn the cadence (markInterstitialShown only runs in onStart).
@@ -350,6 +387,9 @@
             }
             try { onClose(); } catch (e) { /* gameplay must proceed */ }
         }
+        // Expose this in-flight settle so dismissInterstitial() can tear it down if
+        // the next race starts before the ad closes on its own.
+        activeSettle = settle;
 
         try {
             adapter.showInterstitial(
@@ -360,6 +400,18 @@
         } catch (e) {
             settle("error");
         }
+    }
+
+    // Tear down any in-flight interstitial so it can't sit over live gameplay.
+    // Called when the next race is about to start (startGated / startRace). Asks the
+    // provider to drop the ad (best-effort — see each adapter's dismiss note), then
+    // settles the in-flight request as "cancelled" (no telemetry, fires onClose).
+    // No-op when nothing is showing.
+    function dismissInterstitial() {
+        try {
+            if (adapter && typeof adapter.dismiss === "function") { adapter.dismiss(); }
+        } catch (e) { /* best-effort */ }
+        if (typeof activeSettle === "function") { activeSettle("cancelled"); }
     }
 
     // ---- Rewarded (DEFERRED — stubbed until progression engine lands) ----------
@@ -379,6 +431,7 @@
         onMatchEnded: onMatchEnded,
         canShowInterstitial: canShowInterstitial,
         showInterstitial: showInterstitial,
+        dismissInterstitial: dismissInterstitial,
         shouldShow: shouldShow,
         isRewardedAvailable: isRewardedAvailable,
         showRewarded: showRewarded,

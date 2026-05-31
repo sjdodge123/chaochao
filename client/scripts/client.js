@@ -11,6 +11,12 @@ var config,
 	nextFightReactionTime = 0,
 	playerWon = null;
 
+// Set true when a match-over (startGameover) fires; consumed by the next startLobby
+// to gate the between-matches interstitial. An explicit flag is required because the
+// server emits startWaiting (currentState -> waiting) BETWEEN startGameover and the
+// next startLobby, so inferring "came from gameOver" from currentState is unreliable.
+var adPendingMatchEnd = false;
+
 // Map-rating widget state (shown on the per-round overview + the match-over screen;
 // see drawMapRating / handleMapRatingTap). ratingMapId/Name: which map the stars
 // rate; myMapRating: stars this player picked (0 = none yet); ratingStarHits:
@@ -633,10 +639,14 @@ function registerStateHandlers(server) {
 	server.on("startLobby", function (packet) {
 		debugLog("startLobby, packet=", packet);
 		// Was the player just on the match-over results screen? If so this startLobby
-		// is the BETWEEN-MATCHES transition — the natural ad break. Capture it BEFORE
-		// currentState is reassigned to lobby below. (First lobby of a session comes
-		// from `waiting`, not `gameOver`, so no ad fires there.)
-		var cameFromGameOver = (currentState === config.stateMap.gameOver);
+		// is the BETWEEN-MATCHES transition — the natural ad break. We read an explicit
+		// flag set in startGameover (NOT currentState): the server emits startWaiting
+		// between gameOver and this startLobby, so currentState is already `waiting`
+		// here and a state-compare would never be true for the normal match loop.
+		// (First lobby of a session is reached without a prior gameOver, so the flag
+		// is false and no ad fires there.)
+		var cameFromGameOver = adPendingMatchEnd;
+		adPendingMatchEnd = false;
 		recapNewMatch(); // a fresh match is forming — drop last game's recap clips
 		// Set state first so loadNewMap doesn't run its gated-only goal-ping branch.
 		currentState = config.stateMap.lobby;
@@ -674,6 +684,12 @@ function registerStateHandlers(server) {
 	});
 	server.on("startGated", function (packet) {
 		debugLog("startGated");
+		// The next round is starting — tear down any between-matches interstitial that
+		// is still up so an ad can never sit over live gameplay (other racers may have
+		// rallied the lobby while this client was watching). No-op if nothing's showing.
+		if (window.ads && typeof window.ads.dismissInterstitial === "function") {
+			try { window.ads.dismissInterstitial(); } catch (e) { /* never block the gate */ }
+		}
 		setLobbySfxDampen(false); // restore full SFX before the game-start cue
 		stopSound(lobbyMusic);
 		playSound(gameStart);
@@ -696,6 +712,12 @@ function registerStateHandlers(server) {
 		currentState = config.stateMap.gated;
 	});
 	server.on("startRace", function (packet) {
+		// Belt-and-suspenders: also tear down any lingering interstitial here, in case
+		// a client reaches racing without passing through gated (e.g. the preview
+		// play-test path skips the gate). No-op if nothing's showing or already torn down.
+		if (window.ads && typeof window.ads.dismissInterstitial === "function") {
+			try { window.ads.dismissInterstitial(); } catch (e) { /* never block the race */ }
+		}
 		playSound(countDownB);
 		if (packet != null && packet.music != null) {
 			setBackgroundMusic(packet.music.mood, packet.music.track);
@@ -902,9 +924,14 @@ function registerStateHandlers(server) {
 		if (window.chaochaoAuth && typeof window.chaochaoAuth.showLoginNudge === "function") {
 			window.chaochaoAuth.showLoginNudge();
 		}
-		// NOTE: the interstitial ad is intentionally NOT shown here. It runs at the
-		// gameOver -> lobby edge (see the startLobby handler) so the player gets the
-		// full game-over window to see their results/medals/recap uninterrupted.
+		// Monetization: arm the between-matches interstitial. The ad is intentionally
+		// NOT shown here — it runs at the gameOver -> lobby edge (see the startLobby
+		// handler) so the player gets the full game-over window to see their
+		// results/medals/recap uninterrupted. We only RECORD that a match just ended;
+		// startLobby consumes this flag. An explicit flag (not a currentState check) is
+		// required because the server emits startWaiting (currentState -> waiting)
+		// between this and the next startLobby, so a state-compare there is always false.
+		adPendingMatchEnd = true;
 	});
 	server.on("startCollapse", function (info) {
 		currentState = config.stateMap.collapsing;
