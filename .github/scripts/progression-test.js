@@ -91,7 +91,8 @@ function runMatch(setup) {
     // Mark as signed-in humans (gameOver awards only these). Use the player id AS the
     // userId so the in-memory toast queue is drainable per-test by that same id.
     p1.isAI = false; p1.verifiedUserId = setup.p1.id;
-    p2.isAI = false; p2.verifiedUserId = setup.p2.id;
+    if (setup.p2.isAI) { p2.isAI = true; p2.verifiedUserId = null; }
+    else { p2.isAI = false; p2.verifiedUserId = setup.p2.id; }
     p1.notches = setup.p1.notches;
     p2.notches = setup.p2.notches;
     // Medal inputs (gatherAchievements reads these).
@@ -362,6 +363,18 @@ function testSetCosmeticGating() {
     messenger.removeMailBox(s.id);
 }
 
+function testSoloCompetitionGate() {
+    console.log('Solo competition gate (wins/medals need 2+ humans):');
+    const r = runMatch({
+        sig: 'prog-solo',
+        p1: { id: 'prog-solo-1', notches: 5, totalKills: 9, progression: { xp: 0, level: 1, unlocked_skins: [], medal_counts: {}, wins: 99 } },
+        p2: { id: 'prog-solo-bot', isAI: true, notches: 1, totalKills: 0, progression: progression.defaultProgression() }
+    });
+    check(r.p1.progression.wins === 99, 'solo win does NOT increment wins (only 1 human in room)');
+    check((r.p1.progression.medal_counts.mostKills || 0) === 0, 'solo competitive medal (mostKills) is not awarded');
+    check(r.p1.progression.xp > 0, 'solo player still earns participation XP');
+}
+
 (async function run() {
     testPureHelpers();
     testXpBreakdown();
@@ -369,6 +382,7 @@ function testSetCosmeticGating() {
     testLevelUp();
     testAchievementUnlock();
     testGuestsAndBotsEarnNothing();
+    testSoloCompetitionGate();
     testSetCosmeticGating();
     await testSameRoomToastDelivery();
     testNoWritesByDefault();
