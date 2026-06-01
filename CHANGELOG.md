@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- Watch a short ad on the results screen to **double the XP you earned that match** — handy when you're close to a level-up. Signed-in players only; the bonus is credited once per match.
 
 ## v0.27.4 — 2026-06-01
 

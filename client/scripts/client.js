@@ -27,6 +27,71 @@ var ratingMapId = null,
 	ratingStarHits = [],
 	ratingPadCursor = 0;   // gamepad-highlighted star (1..5; 0 = uninitialised)
 
+// Rewarded "2× match XP" results-screen button state. currentMatchId: the server-stamped
+// id of the just-finished match (echoed back in claimXpMultiplier). rewardedClaimState:
+// 'idle' (button shown) | 'watching' (ad up — button hidden) | 'claimed' (done, button gone).
+// rewardButtonHit: the canvas hit-rect drawn by draw.js for input.js to test; rewardPadFocused:
+// the gamepad has the button highlighted (lets Ⓐ trigger it on the results screen).
+var currentMatchId = null,
+	rewardedClaimState = "idle",
+	rewardButtonHit = null,
+	rewardPadFocused = false;
+
+// True when the "📺 Watch ad to 2× your XP" button should render on the results screen:
+// signed-in (anonymous players have no server XP to multiply — hidden OUTRIGHT, never shown-
+// then-failed), a rewarded ad is loaded, we know which match to claim, and it isn't already
+// being watched / claimed.
+function rewardButtonAvailable() {
+	if (typeof config === "undefined" || config == null || currentState !== config.stateMap.gameOver) { return false; }
+	if (!currentMatchId || rewardedClaimState !== "idle") { return false; }
+	if (!(window.chaochaoAuth && typeof window.chaochaoAuth.isSignedIn === "function" && window.chaochaoAuth.isSignedIn())) { return false; }
+	if (!(window.ads && typeof window.ads.isRewardedAvailable === "function" && window.ads.isRewardedAvailable())) { return false; }
+	return true;
+}
+
+// Start the rewarded flow (click / tap / gamepad Ⓐ). Shows the ad; on a CONFIRMED full watch
+// the server is asked to credit the doubled XP; on skip/error the button returns for a retry.
+function triggerRewardButton() {
+	if (!rewardButtonAvailable()) { return; }
+	var matchId = currentMatchId;
+	rewardedClaimState = "watching"; // hide the button while the ad is up
+	window.ads.showRewarded({
+		placement: "xp_2x",
+		onReward: function () {
+			// Ad watched in full — ask the server to credit the bonus. The server validates
+			// matchId + TTL + single-claim and replies with `xpBonus` (multiplier is server-fixed;
+			// we send it only as a courtesy — the server ignores the client value).
+			rewardedClaimState = "claimed";
+			if (typeof server !== "undefined" && server) {
+				server.emit("claimXpMultiplier", { matchId: matchId, multiplier: 2 });
+			}
+		},
+		onSkip: function () {
+			// No-fill / closed before completing — leave the button up for a retry, no toast.
+			if (rewardedClaimState === "watching") { rewardedClaimState = "idle"; }
+		},
+		onError: function () {
+			// SDK error / timeout — retry allowed + a soft toast.
+			if (rewardedClaimState === "watching") { rewardedClaimState = "idle"; }
+			if (typeof enqueueProgressionToasts === "function") {
+				enqueueProgressionToasts([{ type: "xp_bonus_error" }]);
+			}
+		}
+	});
+}
+
+// Hit-test a pointer (logical coords) against the results-screen reward button. On a hit,
+// kicks off the rewarded flow. Returns true if the tap was consumed. Mirrors handleMapRatingTap.
+function handleRewardButtonTap(lx, ly) {
+	if (!rewardButtonAvailable() || !rewardButtonHit) { return false; }
+	var h = rewardButtonHit;
+	if (lx >= h.x && lx <= h.x + h.w && ly >= h.y && ly <= h.y + h.h) {
+		triggerRewardButton();
+		return true;
+	}
+	return false;
+}
+
 // The room's active playlist id for analytics, so rounds/matches can be segmented
 // by playlist (defaults to the configured default until a lobbyPlaylistChanged
 // arrives). Lets us tell whether wins/plays/skew concentrate in a given playlist.
@@ -240,6 +305,14 @@ function progressionToastText(ev) {
 	if (ev.type === "xp") {
 		return ev.amount > 0 ? ("+" + ev.amount + " XP") : null;
 	}
+	// Rewarded-video "2× match XP" claim feedback (results screen). The bonus is the EXTRA
+	// XP credited on top of what the match earned (2× total = +1× of the original).
+	if (ev.type === "xp_bonus") {
+		return ev.amount > 0 ? ("⭐ +" + ev.amount + " bonus XP — match XP doubled!") : "⭐ Match XP doubled!";
+	}
+	if (ev.type === "xp_bonus_error") {
+		return "Ad didn't finish — tap to try again for 2× XP.";
+	}
 	if (ev.type === "level") {
 		return "⬆️ Level up!  Lv " + ev.level;
 	}
@@ -333,6 +406,22 @@ function registerConnectionHandlers(server) {
 	server.on('progressionToasts', function (payload) {
 		var events = (payload && Array.isArray(payload.events)) ? payload.events : [];
 		if (events.length) { enqueueProgressionToasts(events); }
+	});
+	// Rewarded "2× match XP" claim acked by the server (after it validated + credited the
+	// bonus). Announce it immediately on the results screen and fire the reward_claimed GA
+	// event. The server already pushed a fresh progressionUpdate for the lobby badge (writes-on);
+	// we only handle the celebration + analytics here so the funnel match_end -> ad_shown ->
+	// ad_complete -> reward_claimed closes.
+	server.on('xpBonus', function (payload) {
+		var bonus = (payload && typeof payload.bonus === "number") ? payload.bonus : 0;
+		rewardedClaimState = "claimed";
+		if (typeof enqueueProgressionToasts === "function") {
+			enqueueProgressionToasts([{ type: "xp_bonus", amount: bonus }]);
+		}
+		trackEvent('reward_claimed', {
+			bonus: 'xp_2x',
+			match_id: (payload && payload.matchId) || currentMatchId || ''
+		});
 	});
 
 	// botGuard: the server confirmed this client actually drove a kart (not a pageview-only
@@ -919,6 +1008,13 @@ function registerStateHandlers(server) {
 		myMapRating = 0;
 		ratingStarHits = [];
 		ratingPadCursor = 0;
+		// Rewarded "2× match XP" button: bind it to THIS match and reset its claim state so
+		// it can be earned once. matchId is server-stamped (absent from an older server -> the
+		// button simply never offers, since rewardButtonAvailable() requires it).
+		currentMatchId = (packet && packet.matchId != null) ? packet.matchId : null;
+		rewardedClaimState = "idle";
+		rewardButtonHit = null;
+		rewardPadFocused = false;
 		// Bump the medals-card reveal nonce so its entrance animation replays for
 		// this match — even when the same player wins back-to-back (playerWon
 		// unchanged). drawGameOverScreen watches this (see draw.js).

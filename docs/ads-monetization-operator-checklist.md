@@ -25,31 +25,48 @@ and what only the operator can do.
 - CHANGELOG `## Unreleased` transparency bullet (occasional short ad between
   matches).
 
-## DEFERRED: rewarded-video "Watch to 2× XP" half
+## What shipped (rewarded-video "Watch to 2× XP" half)
 
-**Why:** it has a HARD dependency on the cosmetics progression engine
-(`server/progression.js` + `auth.addProgression`) being in `main`. As of this
-chunk that engine is NOT in `main` (it lives on `worktree-progression-system`).
-Per the plan's own fallback (plan §"Dependency"), only the interstitial half is
-built. The rewarded API surface exists in `ads.js` but is stubbed
-(`isRewardedAvailable()` returns `false`, `showRewarded()` fails open) and NO
-"Watch to 2× XP" button is rendered, NO `claimXpMultiplier` server handler is
-added, and NO 2× XP CHANGELOG bullet is written.
+The progression engine (`server/progression.js` + `auth.addProgression`, gated on
+`auth.writesEnabled`) is now in `main`, so the rewarded half is built:
 
-**To finish the rewarded half once progression lands in main:**
-1. Rebase this branch onto `origin/main`; confirm `server/progression.js` exports
-   `addProgression` (gated on `auth.writesEnabled`) with the expected signature.
-2. Implement `showRewarded()` / `isRewardedAvailable()` against the chosen
-   network's rewarded API in `ads.js`.
-3. Render the "📺 Watch ad to 2× your XP this match" button in
-   `drawGameOverScreen` (`client/scripts/draw.js`) — signed-in players only
-   (`window.chaochaoAuth.isSignedIn()`), only when `ads.isRewardedAvailable()`.
-4. Add the `claimXpMultiplier` handler in `server/messenger.js` (signed-in only,
-   match-id + TTL + single-claim guards, server-fixed multiplier, persistence via
-   `auth.addProgression` behind `writesEnabled`); put
-   `XP_MULTIPLIER_REWARDED = 2` in `server/progression.js`.
-5. Add `ad_skipped` + `reward_claimed` GA events and the `## Unreleased` 2× XP
-   CHANGELOG bullet from the plan.
+- `ads.js`: real `showRewarded({ placement, onReward, onSkip, onError })` +
+  `isRewardedAvailable()`. Same fail-open discipline as the interstitial half —
+  single settle authority, 8 s request timeout, exactly-once. `onReward` fires
+  ONLY on a CONFIRMED full watch (an ad actually started AND completed); a no-fill
+  or close-before-complete is `onSkip`; an SDK throw / timeout is `onError`. No
+  reward is credited on a mere attempt or a no-fill.
+  - **GameMonetize reality:** their HTML5 SDK exposes only `showBanner()` and the
+    `SDK_GAME_PAUSE`/`SDK_GAME_START` events — there is NO dedicated rewarded unit,
+    no "reward granted" event, and **no server-to-server completion postback**
+    (verified against their SDK source). So a rewarded ad reuses `showBanner()` and
+    a `PAUSE → START` (confirmed play) is the reward signal. The gold-standard S2S
+    postback is a documented **follow-up** if GameMonetize later exposes one; until
+    then the server's single-claim + TTL + server-fixed multiplier are the
+    anti-abuse guardrails.
+- Client UI: a canvas "📺 Watch ad to 2× your XP" button on the results screen
+  (`drawRewardButton` in `draw.js`), pinned above the rating widget. Rendered ONLY
+  for signed-in players (`window.chaochaoAuth.isSignedIn()`), only when
+  `ads.isRewardedAvailable()` AND the match's bonus hasn't been claimed. Anonymous
+  players never see it (hidden outright). Click/tap hit-tested in `input.js`;
+  gamepad-reachable on the results screen (D-pad ▲▼ toggles reward ↔ stars, Ⓐ
+  confirms — `pollGameOverPad` in `gamepad.js`). It's a canvas control (no DOM
+  element), so it sits outside the DOM button-compliance gates like the rating widget.
+- Server: `claimXpMultiplier` handler in `server/messenger.js` — signed-in only,
+  validates `matchId` == the room's most-recently-completed match, single-claim
+  flag, 90 s TTL (server-stamped `gameOverTs`), bonus computed server-side
+  (`originalXpDelta × (multiplier − 1)`, multiplier never from the client),
+  persisted via `auth.addProgression({ xpDelta, suppressToasts:true })` behind
+  `writesEnabled`, then emits `xpBonus` back. Per-match `{ userId → { xpDelta,
+  claimed } }` is stashed on the Room object when `startGameover` is emitted
+  (intercepted in `messenger.messageRoomBySig`, so **no `game.js` edit**) — avoids a
+  DB read per claim.
+- `XP_MULTIPLIER_REWARDED = 2` lives in `server/progression.js` (NOT `config.json`).
+- GA events: `ad_shown` / `ad_complete` / `ad_skipped` / `ad_error`
+  `{ type:'rewarded', placement:'xp_2x' }` from `ads.js`; `reward_claimed`
+  `{ bonus:'xp_2x', match_id }` from the client after the server `xpBonus` ack.
+  `type` / `placement` / `bonus` added to `analytics/ga-config.json`.
+- CHANGELOG `## Unreleased` 2× XP player-facing bullet.
 
 ## Chosen network: GameMonetize (decided 2026-05-30)
 
@@ -112,11 +129,14 @@ side against a real domain** before ads serve — there is no localhost path. St
    Leave unset locally → ads no-op (verified).
 3. **Accept GameMonetize's TOS / data terms** in the dashboard (their network
    handles consent; we build no custom CMP).
-4. To persist rewarded bonus XP later: `ALLOW_SUPABASE_WRITES=true` on Heroku
-   (local default OFF — see the Supabase writes-gate rule).
-5. Register the new GA event params (`type`, `placement`, later `bonus`) as
-   custom event-scoped dimensions, or add them to `analytics/ga-config.json` for
-   the GA-config-as-code workflow.
+4. The rewarded 2× bonus persists through the **same Supabase writes gate as all
+   progression** (`auth.writesEnabled`) — no new env var. With writes off the button +
+   ad + claim + `xpBonus` ack/toast all still work; only the DB persist no-ops. Sign-in
+   must be working too (anonymous players never see the button — there's no XP to
+   multiply).
+5. The new GA event params (`type`, `placement`, `bonus`) are already in
+   `analytics/ga-config.json`, so the GA-config-as-code workflow registers them as
+   custom event-scoped dimensions on deploy — no manual GA Admin step needed.
 
 ### Deploy → verify order (important)
 GameMonetize's "Verify Game" inspects the LIVE page, so the order is:
@@ -166,5 +186,20 @@ GameMonetize's "Verify Game" inspects the LIVE page, so the order is:
 - Fail-open: request timeout (8 s) / throw / 404 all fire `onClose`; gameplay
   proceeds. Genuine errors still log `ad_error` (failure telemetry, never an
   impression); deliberate dismiss logs nothing. ✅
-- `npm run build`, `npm run test:smoke`, `test:unit`, `test:lint-buttons`,
-  `test:button-gate` all pass. ✅
+### Rewarded "2× XP" verification (headless + manual)
+
+- Headless `test:ads` (`.github/scripts/ads-rewarded-test.js`) drives a REAL match
+  end-to-end and asserts: (a) the server-recomputed per-user match XP stash equals
+  the engine's own award (no drift in the duplicated breakdown); (b) a signed-in
+  claim credits exactly `+xpDelta` (2× total) via a fake `addProgression`; (c) a
+  second claim for the same match is rejected (single-claim); (d) a wrong/empty
+  `matchId` is rejected; (e) an expired claim (>90 s) is rejected; (f) an anonymous
+  (no `userId`) claim is rejected. ✅
+- Manual signed-in 2× credit (writes enabled, DEV Supabase): sign in, finish a match,
+  click "Watch ad to 2× your XP", confirm the `xp` row in Supabase jumped by
+  `2× xpDelta` (i.e. `+xpDelta` on top of the match award), then DELETE the test row
+  delta. (Persistence rides the existing progression writes gate — `auth.writesEnabled`.)
+- Manual anonymous: not signed in → the reward button never renders; a forged
+  `claimXpMultiplier` from a guest socket is rejected server-side.
+- `npm run build`, `npm run test:smoke`, `test:unit`, `test:ads`,
+  `test:lint-buttons`, `test:button-gate` all pass. ✅

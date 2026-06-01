@@ -529,8 +529,12 @@ function pollPadForSlot(pad, lp) {
     } else if (iOwnWheel) {
         pollEmojiWheel(pad, lp);
     } else if (lp.isPrimary && typeof config !== "undefined" && config &&
-        (currentState === config.stateMap.overview || currentState === config.stateMap.gameOver) &&
-        pollMapRatingPad(pad, lp)) {
+        currentState === config.stateMap.gameOver && pollGameOverPad(pad, lp)) {
+        // Results screen (primary pad only): the "Watch ad to 2× XP" reward button + the star
+        // rating share one focus model (D-pad ▲▼ switches, Ⓐ confirms). pollGameOverPad returns
+        // true only when it consumed an input, so B/Start/emoji still fall through.
+    } else if (lp.isPrimary && typeof config !== "undefined" && config &&
+        currentState === config.stateMap.overview && pollMapRatingPad(pad, lp)) {
         // Map-rating star strip (primary pad only — one shared widget). pollMapRatingPad
         // returns true only when it consumed a D-pad/A press this frame, so B/Start/emoji
         // still fall through to their branches at the overview.
@@ -861,6 +865,39 @@ function clearEmojiHighlight(items) {
 // stick, A confirms (dismisses — changes apply live as you step), B / emoji
 // closes. Per-slot, so two pads can configure two panels simultaneously. The
 // open/nav/confirm/close logic itself lives in lobbyHub.js (input-agnostic).
+// Results-screen focus model (primary pad). Two controls share the screen: the optional
+// "Watch ad to 2× XP" reward button (top) and the star-rating strip (bottom). Focus starts
+// on the reward button when it's offered; D-pad ▼ drops to the stars, ▲ returns. Ⓐ confirms
+// the focused control. Returns true ONLY when it consumed an input this frame (so B/Start/
+// emoji still fall through). Self-contained: reads the client globals rewardButtonAvailable /
+// rewardPadFocused / currentMatchId / triggerRewardButton.
+var goPadMatchId = null;
+function pollGameOverPad(pad, lp) {
+    var rewardAvail = (typeof rewardButtonAvailable === "function" && rewardButtonAvailable());
+    // Re-seed focus when a NEW match's results screen appears (currentMatchId changes): land on
+    // the reward button if it's offered, else the stars.
+    if (typeof currentMatchId !== "undefined" && currentMatchId !== goPadMatchId) {
+        goPadMatchId = (typeof currentMatchId !== "undefined") ? currentMatchId : null;
+        rewardPadFocused = rewardAvail;
+    }
+    if (!rewardAvail) {
+        // No reward button (anonymous / not loaded / already claimed) — just the star strip.
+        rewardPadFocused = false;
+        return pollMapRatingPad(pad, lp);
+    }
+    if (rewardPadFocused) {
+        if (buttonPressedThisFrame(pad, GP_DPAD_DOWN, lp)) { rewardPadFocused = false; return true; }
+        if (buttonPressedThisFrame(pad, GP_BTN_A, lp)) {
+            if (typeof triggerRewardButton === "function") { triggerRewardButton(); }
+            return true;
+        }
+        return false; // leave B/emoji/Start to their own branches
+    }
+    // Stars focused: ▲ jumps back to the reward button; otherwise the normal star nav.
+    if (buttonPressedThisFrame(pad, GP_DPAD_UP, lp)) { rewardPadFocused = true; return true; }
+    return pollMapRatingPad(pad, lp);
+}
+
 // Drive the map-rating star strip with the pad: D-pad ◄ ► (or left stick) moves the
 // highlighted star, Ⓐ confirms the vote. Returns true ONLY when it consumed an input
 // this frame, so the caller's else-if chain still falls through to B/Start/emoji when

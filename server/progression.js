@@ -6,6 +6,21 @@
 // the startGameover packet). Kept server-authoritative: the client only ever
 // renders values the server computed.
 
+// Rewarded-video "Watch to 2× match XP" multiplier. Lives HERE (not config.json) so
+// tuning it stays off the gameplay-mechanic CHANGELOG path. The server credits a BONUS
+// of originalXpDelta * (XP_MULTIPLIER_REWARDED - 1) on a confirmed ad watch — i.e. a 2×
+// multiplier tops up the match XP by another 1× of what the match originally earned.
+var XP_MULTIPLIER_REWARDED = 2;
+
+// The extra XP granted for watching the rewarded ad: the match's original earned XP times
+// (multiplier - 1). At 2× that's exactly the original delta again (total = 2× original).
+// Pure + server-authoritative (multiplier never comes from the client) so the claim handler
+// and the headless test compute the bonus the same way.
+function rewardedBonusXp(originalXpDelta) {
+    var base = (typeof originalXpDelta === 'number' && originalXpDelta > 0) ? originalXpDelta : 0;
+    return base * (XP_MULTIPLIER_REWARDED - 1);
+}
+
 // XP needed to advance FROM level n-1 TO level n. Fast-early, slow-late:
 //   xpRequiredForLevel(2) ≈ 152, (5) ≈ 657, (13) ≈ 3084.
 // Tuned (with the config XP awards, ~150-250 XP/match) for ~4-5 unlocks in a
@@ -175,6 +190,8 @@ function buildToastEvents(opts) {
 }
 
 module.exports = {
+    XP_MULTIPLIER_REWARDED: XP_MULTIPLIER_REWARDED,
+    rewardedBonusXp: rewardedBonusXp,
     xpRequiredForLevel: xpRequiredForLevel,
     cumulativeXpForLevel: cumulativeXpForLevel,
     levelForXp: levelForXp,
