@@ -260,9 +260,10 @@ nav .auth-control ~ .theme-toggle {
 .cc-toast-close:hover { opacity: 1; }
 
 /* progression celebration toast (client.js) — top-centre so it never collides with
-   the bottom login nudge, gold-accented, slides down from the top edge. */
+   the bottom login nudge, gold-accented, slides down from the top edge. `top` clears the
+   ~58px navbar so the toast sits in the canvas/play area rather than overlapping the header. */
 .cc-progression-toast {
-    top: 24px;
+    top: 72px;
     bottom: auto;
     transform: translateX(-50%) translateY(-20px);
     border-color: rgba(255, 211, 77, 0.85);

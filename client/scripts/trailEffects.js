@@ -820,6 +820,126 @@ function drawRippleTrail(ctx, verts, color, now, fadeMs, anim) {
   ctx.restore();
 }
 
+// ===========================================================================
+// SEASONAL: Solar Flare — the Early Adopter (Summer 2026) claim trail.
+// ---------------------------------------------------------------------------
+// DESIGN EXCEPTION (iteration knob): every OTHER trail renders in the player's
+// colour (the locked "color rule"). This one BLENDS gold with the player's colour
+// so it reads as a premium founder badge from across the map while still carrying a
+// hint of the player's identity. FOUNDERS_MIX = how far toward gold (0 = pure player
+// colour, 1 = pure gold). FOUNDERS_TAIL_PERSIST > 1 keeps the tail visible longer
+// (slower alpha falloff). FLARE_GOLD / FLARE_HOT are the iteration colours.
+var FOUNDERS_MIX = 0.38;                   // 0 = pure player colour … 1 = pure gold (0.38 = player-colour-dominant, gold-kissed)
+var FOUNDERS_TAIL_PERSIST = 1.6;           // >1 = tail fades out more slowly so the flare reads longer
+var FLARE_GOLD = '#ffae1f';               // molten body / embers
+var FLARE_HOT = '#fff3c8';               // white-hot core + specular
+// Blend the player's colour toward FLARE_GOLD by FOUNDERS_MIX, returning an "rgb()" string.
+// Memoised per player colour (one parse + one blend per colour, then zero-alloc) so the body
+// fill / embers / head can all reuse it cheaply each frame.
+var _foundersBlend = {};
+function foundersGold(color) {
+  var k = color + '|' + FOUNDERS_MIX;
+  var s = _foundersBlend[k];
+  if (s != null) return s;
+  var pc = tfxRGB(color), gc = tfxRGB(FLARE_GOLD), m = FOUNDERS_MIX;
+  s = "rgb(" + Math.round(pc.r + (gc.r - pc.r) * m) + "," +
+    Math.round(pc.g + (gc.g - pc.g) * m) + "," +
+    Math.round(pc.b + (gc.b - pc.b) * m) + ")";
+  _foundersBlend[k] = s; return s;
+}
+// A radiant, sun-like flare: a tapered molten-gold ribbon body, a white-hot core
+// stroke, drifting ember flecks (deterministic per vertex), and a glowing head blob.
+// Structure mirrors drawCometTrail (sampled-vertex ribbon) so perf/feel match the set.
+function drawFoundersFlareTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length;
+  if (n < 2) return;
+  var gold = foundersGold(color); // gold blended with the player's colour
+  // Slow the age-fade so the tail stays lit toward the buffer's end (reads as a longer flare).
+  // Geometry still spans the real buffer; this only softens how fast each segment dims out.
+  var fadeEff = fadeMs * TP('founders_flare', 'TAIL_PERSIST', FOUNDERS_TAIL_PERSIST);
+  var WIDTH = TP('founders_flare', 'WIDTH', 24), GLOW = TP('founders_flare', 'GLOW', 26), TAPER = TP('founders_flare', 'TAPER', 0.75);
+  var stride = Math.max(1, Math.floor(n / 50));
+  var idx = [];
+  for (var i = 0; i < n; i += stride) idx.push(i);
+  if (idx[idx.length - 1] !== n - 1) idx.push(n - 1);
+  var m = idx.length;
+  var hw = new Array(m), nx = new Array(m), ny = new Array(m), af = new Array(m);
+  for (var j = 0; j < m; j++) {
+    var ii = idx[j];
+    var f = tfxAgeAlpha(verts[ii].t, now, fadeEff);
+    af[j] = f;
+    // Flicker the half-width slightly so the flare licks like fire (anim-driven, vertex-stable).
+    var flick = 0.85 + 0.15 * Math.sin(anim * 0.012 + verts[ii].t * 0.02);
+    hw[j] = (WIDTH * 0.5) * Math.pow(f, TAPER) * flick;
+    var tan = tfxTangent(verts, ii);
+    nx[j] = -tan.y; ny[j] = tan.x;
+  }
+  ctx.save();
+  if (tfxGlow()) { ctx.shadowColor = gold; ctx.shadowBlur = GLOW; }
+  ctx.lineJoin = "round";
+  ctx.fillStyle = gold;
+  // Molten body ribbon.
+  for (var s = 1; s < m; s++) {
+    var alpha = af[s] * 0.55;
+    if (alpha <= 0.02) continue;
+    var p0 = verts[idx[s - 1]], p1 = verts[idx[s]];
+    tfxAlpha(ctx, alpha);
+    ctx.beginPath();
+    ctx.moveTo(p0.x + nx[s - 1] * hw[s - 1], p0.y + ny[s - 1] * hw[s - 1]);
+    ctx.lineTo(p1.x + nx[s] * hw[s], p1.y + ny[s] * hw[s]);
+    ctx.lineTo(p1.x - nx[s] * hw[s], p1.y - ny[s] * hw[s]);
+    ctx.lineTo(p0.x - nx[s - 1] * hw[s - 1], p0.y - ny[s - 1] * hw[s - 1]);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // White-hot inner core.
+  if (tfxGlow()) ctx.shadowBlur = GLOW * 0.45;
+  var coreStart = -1;
+  for (var c = 0; c < m; c++) { if (af[c] > 0.3) { coreStart = c; break; } }
+  if (coreStart >= 0 && coreStart < m - 1) {
+    tfxAlpha(ctx, 0.9);
+    ctx.strokeStyle = FLARE_HOT;
+    ctx.lineCap = "round";
+    ctx.lineWidth = Math.max(0.9, WIDTH * 0.16);
+    ctx.beginPath();
+    ctx.moveTo(verts[idx[coreStart]].x, verts[idx[coreStart]].y);
+    for (var cc = coreStart + 1; cc < m; cc++) ctx.lineTo(verts[idx[cc]].x, verts[idx[cc]].y);
+    ctx.stroke();
+  }
+  // Drifting ember flecks — deterministic per vertex (tfxHash), rising as they age.
+  ctx.fillStyle = gold;
+  for (var e = 1; e < m; e += 1) {
+    var fe = af[e];
+    if (fe <= 0.05) continue;
+    var h1 = tfxHash(verts[idx[e]].t);
+    if (h1 < 0.45) continue; // sparse — only some segments spit an ember
+    var age = 1 - fe;
+    var ev = verts[idx[e]];
+    var perp = (h1 - 0.5) * WIDTH * 1.6;
+    var rise = age * WIDTH * 1.1;
+    var ex = ev.x + nx[e] * perp;
+    var ey = ev.y + ny[e] * perp - rise;
+    var twinkle = 0.5 + 0.5 * Math.sin(anim * 0.02 + h1 * 31.0);
+    tfxAlpha(ctx, fe * twinkle * 0.9);
+    var er = Math.max(0.6, (1.8 * fe) * (0.6 + 0.4 * h1));
+    ctx.beginPath(); ctx.arc(ex, ey, er, 0, TFX_TAU); ctx.fill();
+  }
+  // Radiant head — bright sun-like blob.
+  var head = verts[n - 1];
+  var R = WIDTH * 1.0;
+  tfxAlpha(ctx, 1);
+  if (tfxGlow()) ctx.shadowBlur = 0;
+  ctx.save();
+  ctx.translate(head.x, head.y); ctx.scale(R, R);
+  ctx.fillStyle = tfxBlobGrad(ctx, gold);
+  ctx.beginPath(); ctx.arc(0, 0, 1, 0, TFX_TAU); ctx.fill();
+  ctx.restore();
+  // Hot pinpoint at the very head.
+  tfxAlpha(ctx, 0.95); ctx.fillStyle = FLARE_HOT;
+  ctx.beginPath(); ctx.arc(head.x, head.y, Math.max(1.2, WIDTH * 0.1), 0, TFX_TAU); ctx.fill();
+  ctx.restore();
+}
+
 /* ============================================================================
  * WIRING — how the main session ports these into draw.js drawTrail()
  * ----------------------------------------------------------------------------
@@ -875,5 +995,6 @@ var TRAIL_FX = {
   survivor: drawSurvivorTrail, ribbon: drawRibbonTrail, bolt: drawBoltTrail,
   hearts: drawHeartsTrail, smoke: drawSmokeTrail, confetti: drawConfettiTrail,
   snow: drawSnowTrail, tracks: drawTracksTrail, notes: drawNotesTrail,
-  neon: drawNeonTrail, ripple: drawRippleTrail
+  neon: drawNeonTrail, ripple: drawRippleTrail,
+  foundersFlare: drawFoundersFlareTrail
 };

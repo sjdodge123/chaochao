@@ -763,6 +763,10 @@ function drawLobbyHubHud() {
     // whole lobby (not just inside a panel) — everyone sees a change before the race
     // starts. Drawn FIRST so an open station panel layers on top of them, otherwise they
     // z-order over the picker near the top of the screen.
+    // Resolve the active seasonal claim ONCE per HUD frame (it can't change within a frame);
+    // all three banners read this cached value instead of re-scanning the registry each.
+    lobbyBannerSeasonalClaim = activeSeasonalClaim();
+    drawSeasonalClaimBanner(); // top slot when active; AI + playlist drop a row below it
     drawLobbyAIStatus();
     drawLobbyPlaylistStatus();
     for (var slot = 0; slot < localPlayers.length; slot++) {
@@ -783,33 +787,91 @@ function drawLobbyHubHud() {
     }
 }
 
-// A fixed top-centre banner showing the live room-wide playlist, just under the AI
-// banner. Synced to every client via lobbyPlaylistChanged.
-function drawLobbyPlaylistStatus() {
-    if (!playlistDefList().length) { return; }
-    var count = playlistCount(currentPlaylistId());
-    var text = "🗺️ Playlist: " + currentPlaylistLabel() + (count != null ? " (" + count + ")" : "");
-    var ink = hubInk();
+// The active seasonal claim for THIS HUD frame (or null), cached by drawLobbyHubHud so the
+// registry isn't re-scanned by each banner. Read by all three lobby banners.
+var lobbyBannerSeasonalClaim = null;
+
+// Draws ONE fixed top-centre lobby banner (rounded pill, centered bold text) at row `y`. Backs
+// all three lobby banners so their geometry stays identical. theme overrides the neutral hub
+// panel look: { fill, ink (border), text (defaults to ink), alpha, pad, glow }.
+function drawLobbyBanner(text, y, theme) {
+    theme = theme || {};
+    var ink = theme.ink || hubInk();
+    var pad = (theme.pad != null) ? theme.pad : 30;
     gameContext.save();
     gameContext.font = "bold 16px sans-serif";
     var tw = gameContext.measureText(text).width;
-    var w = tw + 30;
+    var w = tw + pad;
     var h = 32;
     var x = (LOGICAL_WIDTH - w) / 2;
-    var y = 128; // just under the AI-bots banner (y=92, h=32)
-    gameContext.globalAlpha = 0.92;
-    gameContext.fillStyle = hubSurface();
+    if (theme.glow) { gameContext.shadowColor = theme.glow; gameContext.shadowBlur = 14; }
+    gameContext.globalAlpha = (theme.alpha != null) ? theme.alpha : 0.92;
+    gameContext.fillStyle = theme.fill || hubSurface();
     lhRoundRect(gameContext, x, y, w, h, 9);
     gameContext.fill();
+    gameContext.shadowBlur = 0;
     gameContext.globalAlpha = 1;
     gameContext.lineWidth = 2;
     gameContext.strokeStyle = ink;
     gameContext.stroke();
-    gameContext.fillStyle = ink;
+    gameContext.fillStyle = theme.text || ink;
     gameContext.textAlign = "center";
     gameContext.textBaseline = "middle";
     gameContext.fillText(text, LOGICAL_WIDTH / 2, y + h / 2);
     gameContext.restore();
+}
+
+// A fixed top-centre banner showing the live room-wide playlist. Sits under the AI banner,
+// dropping a row when the seasonal banner takes the top slot. Synced via lobbyPlaylistChanged.
+function drawLobbyPlaylistStatus() {
+    if (!playlistDefList().length) { return; }
+    var count = playlistCount(currentPlaylistId());
+    var text = "🗺️ Playlist: " + currentPlaylistLabel() + (count != null ? " (" + count + ")" : "");
+    drawLobbyBanner(text, lobbyBannerSeasonalClaim ? 164 : 128);
+}
+
+// The seasonal claim the LOCAL player can still act on this frame — the first open claim they
+// don't already own (mirrors the server, which grants ALL open claims, so if more than one
+// season is live the banner advances past ones already claimed). null = nothing to advertise.
+// Hidden once owned so it never nags a claimer.
+function activeSeasonalClaim() {
+    if (typeof currentSeasonalClaims !== "function") { return null; }
+    var open = currentSeasonalClaims(Date.now());
+    if (!open.length) { return null; }
+    var prog = (typeof myProgression !== "undefined") ? myProgression : null;
+    var owns = (prog && prog.unlocked_skins) ? prog.unlocked_skins : null;
+    for (var i = 0; i < open.length; i++) {
+        if (!owns || owns.indexOf(open[i].id) === -1) { return open[i]; }
+    }
+    return null; // every open claim already owned
+}
+
+// The player-facing noun for a cosmetic slot, used in the data-driven seasonal copy so a
+// future non-trail season ('cart'/'border'/'pattern') reads correctly without a code edit.
+function cosmeticSlotNoun(slot) {
+    return (slot === "cart" || slot === "pattern" || slot === "trail" || slot === "border") ? slot : "cosmetic";
+}
+
+// A limited-time, eye-catching GOLD banner advertising the open seasonal claim (Early Adopter
+// etc.), drawn as the TOP banner of the lobby stack (above the AI-bots banner) so the limited
+// CTA gets first billing; the AI + playlist banners drop one row while it's showing. Copy is
+// data-driven (season label + cosmetic name + slot noun) from the registry entry, so a future
+// season needs no edit here. Sign-in nudge for guests; "claim it / Nd left" for signed-in.
+function drawSeasonalClaimBanner() {
+    var claim = lobbyBannerSeasonalClaim;
+    if (!claim) { return; }
+    var signedIn = !!((typeof myProgression !== "undefined") ? myProgression : null);
+    var endMs = Date.parse(claim.unlock.claimEnd);
+    var daysLeft = isNaN(endMs) ? null : Math.max(1, Math.ceil((endMs - Date.now()) / 86400000));
+    var nm = (typeof skinDisplayName === "function") ? skinDisplayName(claim.id) : claim.name;
+    var label = (claim.unlock && claim.unlock.label) ? claim.unlock.label : "Limited";
+    var noun = cosmeticSlotNoun(claim.slot);
+    var tail = (daysLeft != null ? " — " + daysLeft + "d left" : "");
+    var text = signedIn
+        ? ("🌟 Claim your " + label + " " + nm + " " + noun + tail)
+        : ("🌟 Sign in to claim the limited " + label + " " + nm + " " + noun + tail);
+    // Gold theme + soft glow so it reads as premium/limited, not a routine status band.
+    drawLobbyBanner(text, 92, { fill: "#3a2b06", ink: "#ffb31f", text: "#ffe9a8", alpha: 0.96, pad: 34, glow: "rgba(255,179,31,0.7)" });
 }
 
 // Triangular-tier auto fill: a few bots scale up with humans (1H→1, 2-3H→2,
@@ -841,27 +903,8 @@ function drawLobbyAIStatus() {
         var eff = Math.min(lvl, aiMaxBots());
         text = "🤖 AI bots next race: " + eff + (eff === 1 ? " bot" : " bots");
     }
-    var ink = hubInk();
-    gameContext.save();
-    gameContext.font = "bold 16px sans-serif";
-    var tw = gameContext.measureText(text).width;
-    var w = tw + 30;
-    var h = 32;
-    var x = (LOGICAL_WIDTH - w) / 2;
-    var y = 92; // just under the GameID/Players/Round info row
-    gameContext.globalAlpha = 0.92;
-    gameContext.fillStyle = hubSurface();
-    lhRoundRect(gameContext, x, y, w, h, 9);
-    gameContext.fill();
-    gameContext.globalAlpha = 1;
-    gameContext.lineWidth = 2;
-    gameContext.strokeStyle = ink;
-    gameContext.stroke();
-    gameContext.fillStyle = ink;
-    gameContext.textAlign = "center";
-    gameContext.textBaseline = "middle";
-    gameContext.fillText(text, LOGICAL_WIDTH / 2, y + h / 2);
-    gameContext.restore();
+    // Under the GameID/Players/Round info row; +1 row when the seasonal banner takes the top slot.
+    drawLobbyBanner(text, lobbyBannerSeasonalClaim ? 128 : 92);
 }
 
 function lhRoundRect(ctx, x, y, w, h, r) {
@@ -1333,8 +1376,15 @@ function drawSkinCell(lp, item, cx, cy, cw, ch, focused, currentColor, hit) {
     gameContext.lineWidth = sel ? 2 : 1;
     gameContext.strokeStyle = sel ? "#ffd34d" : (lock.locked ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.2)");
     lhRoundRect(gameContext, cx, cy, cw, ch, 6); gameContext.stroke();
+    // Seasonal-claim cosmetics (rarity:'seasonal') get a distinct GOLD frame so they read as
+    // special/limited in the locker. Skipped when the gold "selected" ring already shows.
+    var raritySkin = (typeof getSkin === "function") ? getSkin(opt.id) : null;
+    if (!sel && raritySkin && raritySkin.rarity === "seasonal") {
+        gameContext.lineWidth = 2; gameContext.strokeStyle = "#ffb31f";
+        lhRoundRect(gameContext, cx, cy, cw, ch, 6); gameContext.stroke();
+    }
     if (focused) { gameContext.strokeStyle = "#fff"; gameContext.lineWidth = 2.5; lhRoundRect(gameContext, cx - 1, cy - 1, cw + 2, ch + 2, 7); gameContext.stroke(); }
-    drawCosmeticPreview(opt, cx + cw / 2, cy + ch * 0.34, ch * 0.22, currentColor, lock.locked);
+    drawCosmeticPreview(opt, cx + cw / 2, cy + ch * 0.34, ch * 0.22, currentColor, lock.locked, { x: cx, y: cy, w: cw, h: ch });
     gameContext.fillStyle = lock.locked ? "rgba(255,255,255,0.5)" : "#fff";
     gameContext.font = "8.5px sans-serif"; gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
     gameContext.fillText(opt.label, cx + cw / 2, cy + ch * 0.74);
@@ -1358,10 +1408,20 @@ function activateSkinItem(lp, item) {
 // colour and greyed when locked. Cart/pattern previews run the real registry painter
 // (pattern over a tinted disc so it reads as "on a body"); trail previews draw a short
 // stroke styled by the effect — so every cell previews close to how it drives.
-function drawCosmeticPreview(opt, cx, cy, r, paint, locked) {
+function drawCosmeticPreview(opt, cx, cy, r, paint, locked, cell) {
     var slot = opt.slot;
     var color = paint || "#cccccc";
     gameContext.save();
+    // Keep TRAIL previews inside their cell — particle trails (smoke/hearts/confetti/ripples)
+    // emit well beyond the synthetic ±40 space and would otherwise spill into neighbouring
+    // cells. Clip to the cell's content box, stopping above the label row (~0.62h). Only trails
+    // overflow; cart/pattern/border previews are discs that already fit, so they're left
+    // unclipped to avoid shaving a pattern disc's bottom edge.
+    if (cell && slot === "trail") {
+        var pad = 2;
+        lhRoundRect(gameContext, cell.x + pad, cell.y + pad, cell.w - pad * 2, cell.h * 0.62 - pad, 5);
+        gameContext.clip();
+    }
     if (locked) { gameContext.globalAlpha = 0.4; }
     if (opt.id == null) {
         // Slot default: a plain disc (cart/pattern) or a plain short stroke (trail).
@@ -1545,6 +1605,14 @@ function cartSkinUnlock(id, lp) {
         if (lvl >= skin.unlock.level) { return { locked: false }; }
         return { locked: true, text: "Lv " + skin.unlock.level };
     }
+    if (skin.unlock.kind === "seasonal") {
+        // Claimed seasonal cosmetics live in unlocked_skins (permanent). If not owned, show
+        // whether it's still claimable (sign in during the window) or gone for good.
+        var owns = !!(prog && prog.unlocked_skins && prog.unlocked_skins.indexOf(id) !== -1);
+        if (owns) { return { locked: false }; }
+        var open = (typeof isClaimWindowOpen === "function") && isClaimWindowOpen(skin.unlock, Date.now());
+        return { locked: true, text: open ? "Sign in to claim" : "Expired" };
+    }
     if (skin.unlock.kind !== "achievement") { return { locked: true, text: "?" }; }
     var owned = !!(prog && prog.unlocked_skins && prog.unlocked_skins.indexOf(id) !== -1);
     return owned ? { locked: false } : { locked: true, text: "🏆" };
@@ -1584,6 +1652,12 @@ function flagCosmeticRejected(slot, payload) {
         msg = "Unlock at Lv " + payload.required;
     } else if (payload && payload.reason === "achievement") {
         msg = "Earn the medal to unlock";
+    } else if (payload && payload.reason === "seasonal") {
+        // Seasonal claim the player never claimed in its window. Match the locker's own wording:
+        // still claimable -> "Sign in to claim"; window closed -> "Expired".
+        var sUnlock = (typeof getSkin === "function" && payload.id) ? (getSkin(payload.id) || {}).unlock : null;
+        var stillOpen = !!(sUnlock && typeof isClaimWindowOpen === "function" && isClaimWindowOpen(sUnlock, Date.now()));
+        msg = stillOpen ? "Sign in to claim" : "Expired";
     }
     lp._cartLockMsg = msg;
     lp._cartLockAt = Date.now();

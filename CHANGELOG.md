@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- **Early Adopter trail — claim it before August!** Sign in to your account any time this summer to permanently unlock the exclusive **Solar Flare** trail: a molten-gold flare with drifting embers that everyone sees as you race. The claim closes August 1st and it's gone for good after that — sign in once and it's yours forever.
 
 ## v0.26.4 — 2026-05-31
 

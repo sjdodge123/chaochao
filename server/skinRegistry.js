@@ -106,6 +106,14 @@ var SKINS = [
     { id: 'notes', slot: 'trail', unlock: { kind: 'level', level: 92 } },
     { id: 'neon', slot: 'trail', unlock: { kind: 'achievement' } },
     { id: 'ripple', slot: 'trail', unlock: { kind: 'achievement' } },
+    // --- Seasonal claims (kind:'seasonal') — granted ONCE on sign-in while the claim window
+    // is open; OWNERSHIP IS PERMANENT (the id lands in unlocked_skins, exactly like an
+    // achievement skin, so it stays equippable forever, even after the window closes). After
+    // claimEnd the grant path simply stops firing, so the cosmetic can never be obtained
+    // again — a true "founder" badge. To add a FUTURE season: append another entry with its
+    // own id + window (no schema/migration change needed). Times are ISO-8601 UTC; keep these
+    // IN LOCKSTEP with client/scripts/skinRegistry.js. ---
+    { id: 'founders_flare', slot: 'trail', unlock: { kind: 'seasonal', season: 'early_adopter_2026', label: 'Early Adopter', claimStart: '2026-06-01T00:00:00Z', claimEnd: '2026-08-01T00:00:00Z' } },
     // --- Borders (rim cosmetic; SHARE the 2nd slot with patterns). border_-prefixed ids
     // (flames/scales/electric collide with pattern ids). All kind:'open' for testing. ---
     { id: 'border_ring', slot: 'border', unlock: { kind: 'level', level: 10 } },
@@ -157,10 +165,34 @@ function levelSkinsUnlockedBetween(oldLevel, newLevel) {
     return out;
 }
 
+// True if `unlock` is a seasonal-claim rule whose window is currently open (claimStart <=
+// now < claimEnd). Missing/invalid bounds read as closed so a malformed entry can't grant
+// forever. `now` is epoch ms (pass Date.now()); injected so callers/tests stay deterministic.
+function isClaimWindowOpen(unlock, now) {
+    if (!unlock || unlock.kind !== 'seasonal') { return false; }
+    var start = Date.parse(unlock.claimStart);
+    var end = Date.parse(unlock.claimEnd);
+    if (isNaN(start) || isNaN(end)) { return false; }
+    return now >= start && now < end;
+}
+
+// Every seasonal cosmetic id whose claim window is open right now — the set a signing-in
+// player should be granted (the grant path then skips any already owned). Empty outside any
+// window. Drives auth.grantSeasonalClaims; future seasons are picked up automatically.
+function currentSeasonalClaims(now) {
+    var out = [];
+    for (var i = 0; i < SKINS.length; i++) {
+        if (isClaimWindowOpen(SKINS[i].unlock, now)) { out.push(SKINS[i].id); }
+    }
+    return out;
+}
+
 module.exports = {
     SLOTS: SLOTS,
     SKINS: SKINS,
     getSkin: getSkin,
     getSkinSlot: getSkinSlot,
-    levelSkinsUnlockedBetween: levelSkinsUnlockedBetween
+    levelSkinsUnlockedBetween: levelSkinsUnlockedBetween,
+    isClaimWindowOpen: isClaimWindowOpen,
+    currentSeasonalClaims: currentSeasonalClaims
 };

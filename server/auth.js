@@ -350,42 +350,91 @@ async function saveCosmetic(userId, slot, id) {
     }
 }
 
-// Apply a match's XP / medal / win deltas to a user's progression row and persist.
-// Behind the global writes gate (ALLOW_SUPABASE_WRITES) like every other writer —
-// a no-op locally so dev never seeds the shared DB. Re-reads the row so the stored
-// value is authoritative (not the caller's possibly-stale cache), recomputes level
-// + achievement unlocks via the pure progression helpers, and writes the whole
-// columns back. Returns the new normalized row (so the caller can emit it), or null
-// when writes are gated/disabled.
+// Shared optimistic-concurrency writer for the single-row `progression` table. Reads the row
+// (selectCols), lets `computeFn(existingDataOrNull, rowExists)` derive the new column values,
+// then writes them CONDITIONED on updated_at being unchanged since the read — retrying on a
+// concurrent write (0 rows updated) or an insert race (23505) up to 5 times. Centralises the
+// subtle CAS/insert-race protocol so addProgression and grantSeasonalClaims can't drift apart.
 //
-// Not atomic (read-modify-write) — but a user only finishes one match at a time, so
-// contention is effectively nil; matches the same pragmatic stance as
-// ensureProgressionRow. The fully-atomic fix is a Postgres RPC if this ever races.
-async function addProgression(userId, opts) {
-    opts = opts || {};
+// computeFn must return either:
+//   null                 -> nothing to write; the helper returns null (a no-op).
+//   { payload, result }  -> `payload` (must include user_id + updated_at) is written; `result`
+//                           is returned to the caller on a successful write.
+// computeFn is re-invoked with freshly-read data on every retry, so derived totals are always
+// computed against the latest row. Returns the chosen `result`, or null when gated/aborted/failed.
+async function casUpdateProgression(userId, selectCols, computeFn) {
     if (!writesEnabled || !userId || !supabase) {
         return null;
     }
-    // Compare-and-swap retry: read the row (incl. updated_at), compute the derived totals
-    // in JS, then write CONDITIONED on updated_at being unchanged. If the same account
-    // finished concurrently (two tabs/devices) and wrote in between, the conditional update
-    // touches 0 rows and we retry against fresh values — so XP/medals/wins/unlocks/toasts are
-    // never silently discarded by a last-writer-wins upsert.
     var MAX_ATTEMPTS = 5;
     try {
         for (var attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
             var existing = await supabase
                 .from('progression')
-                .select('xp, level, unlocked_skins, medal_counts, wins, pending_toasts, unlock_dates, updated_at')
+                .select(selectCols)
                 .eq('user_id', userId)
                 .maybeSingle();
             if (existing.error) {
-                console.log('[auth] addProgression select failed:', existing.error.message);
+                console.log('[auth] casUpdateProgression select failed:', existing.error.message);
                 return null;
             }
             var rowExists = !!existing.data;
-            var oldUpdatedAt = rowExists ? existing.data.updated_at : null;
-            var cur = normalizeProgression(existing.data || {});
+            var computed = computeFn(existing.data || null, rowExists);
+            if (!computed) {
+                return null; // computeFn decided there's nothing to write
+            }
+            if (rowExists) {
+                // CAS: only succeeds if no one else wrote since our read.
+                var upd = await supabase
+                    .from('progression')
+                    .update(computed.payload)
+                    .eq('user_id', userId)
+                    .eq('updated_at', existing.data.updated_at)
+                    .select('user_id');
+                if (upd.error) {
+                    console.log('[auth] casUpdateProgression update failed:', upd.error.message);
+                    return null;
+                }
+                if (upd.data && upd.data.length > 0) {
+                    return computed.result;
+                }
+                // 0 rows updated -> a concurrent writer moved updated_at; retry against fresh values.
+            } else {
+                var ins = await supabase
+                    .from('progression')
+                    .insert(computed.payload)
+                    .select('user_id');
+                if (!ins.error) {
+                    return computed.result;
+                }
+                // Unique-violation -> someone inserted the row first; retry as an update.
+                if (ins.error.code === '23505' || /duplicate|unique/i.test(ins.error.message || '')) {
+                    continue;
+                }
+                console.log('[auth] casUpdateProgression insert failed:', ins.error.message);
+                return null;
+            }
+        }
+        console.log('[auth] casUpdateProgression: gave up after', MAX_ATTEMPTS, 'contended attempts for', userId);
+        return null;
+    } catch (e) {
+        console.log('[auth] casUpdateProgression error:', e.message);
+        return null;
+    }
+}
+
+// Apply a match's XP / medal / win deltas to a user's progression row and persist. Behind the
+// global writes gate (ALLOW_SUPABASE_WRITES) like every other writer — a no-op locally so dev
+// never seeds the shared DB. Recomputes level + achievement unlocks via the pure progression
+// helpers against the freshly-read row (CAS-guarded by casUpdateProgression). Returns the new
+// normalized row (so the caller can emit it) + newToasts, or null when writes are gated/disabled.
+async function addProgression(userId, opts) {
+    opts = opts || {};
+    return casUpdateProgression(
+        userId,
+        'xp, level, unlocked_skins, medal_counts, wins, pending_toasts, unlock_dates, updated_at',
+        function (existingData) {
+            var cur = normalizeProgression(existingData || {});
             var oldLevel = cur.level;
             var newXp = cur.xp + (opts.xpDelta || 0);
             var newWins = cur.wins + (opts.win ? 1 : 0);
@@ -408,8 +457,8 @@ async function addProgression(userId, opts) {
                 levelSkinsUnlocked: skinRegistry.levelSkinsUnlockedBetween,
                 freshAchievementSkins: freshAchievementSkins
             });
-            var existingToasts = (existing.data && Array.isArray(existing.data.pending_toasts))
-                ? existing.data.pending_toasts : [];
+            var existingToasts = (existingData && Array.isArray(existingData.pending_toasts))
+                ? existingData.pending_toasts : [];
             var mergedToasts = existingToasts.concat(newToasts);
             // Stamp the first-unlock date for every cosmetic newly earned this match (level
             // skins + achievement skins). Never overwrite an existing date. Analytics only.
@@ -432,48 +481,63 @@ async function addProgression(userId, opts) {
                 unlock_dates: unlockDates,
                 updated_at: new Date().toISOString()
             };
-            if (rowExists) {
-                // CAS: only succeeds if no one else wrote since our read.
-                var upd = await supabase
-                    .from('progression')
-                    .update(payload)
-                    .eq('user_id', userId)
-                    .eq('updated_at', oldUpdatedAt)
-                    .select('user_id');
-                if (upd.error) {
-                    console.log('[auth] addProgression update failed:', upd.error.message);
-                    return null;
-                }
-                if (upd.data && upd.data.length > 0) {
-                    var out = normalizeProgression(payload);
-                    out.newToasts = newToasts; // durable copy is in pending_toasts
-                    return out;
-                }
-                // 0 rows updated -> a concurrent writer moved updated_at; retry.
-            } else {
-                var ins = await supabase
-                    .from('progression')
-                    .insert(payload)
-                    .select('user_id');
-                if (!ins.error) {
-                    var outIns = normalizeProgression(payload);
-                    outIns.newToasts = newToasts;
-                    return outIns;
-                }
-                // Unique-violation -> someone inserted the row first; retry as an update.
-                if (ins.error.code === '23505' || /duplicate|unique/i.test(ins.error.message || '')) {
-                    continue;
-                }
-                console.log('[auth] addProgression insert failed:', ins.error.message);
-                return null;
-            }
+            var out = normalizeProgression(payload);
+            out.newToasts = newToasts; // durable copy is in pending_toasts
+            return { payload: payload, result: out };
         }
-        console.log('[auth] addProgression: gave up after', MAX_ATTEMPTS, 'contended attempts for', userId);
-        return null;
-    } catch (e) {
-        console.log('[auth] addProgression error:', e.message);
+    );
+}
+
+// Grant any OPEN seasonal-claim cosmetics (skinRegistry kind:'seasonal' whose window is
+// live) to a signed-in user, ONCE. The id lands in unlocked_skins — permanent ownership,
+// identical to an achievement skin — and a {type:'seasonal'} celebration toast is queued so
+// the claim is announced on the player's next lobby arrival. Idempotent: an id already owned
+// is skipped, so repeat sign-ins never re-toast. After a window's claimEnd the registry
+// returns it no longer, so the grant simply stops — nothing is ever revoked. Behind the global
+// writes gate, CAS-guarded against a concurrent match-end write (both via casUpdateProgression).
+// Returns the array of newly granted ids (possibly empty), or null when writes are gated/disabled.
+async function grantSeasonalClaims(userId) {
+    if (!writesEnabled || !userId || !supabase) {
         return null;
     }
+    var open = skinRegistry.currentSeasonalClaims(Date.now());
+    if (!open.length) {
+        return [];
+    }
+    var granted = await casUpdateProgression(
+        userId,
+        'unlocked_skins, unlock_dates, pending_toasts, updated_at',
+        function (existingData) {
+            var unlocked = (existingData && Array.isArray(existingData.unlocked_skins))
+                ? existingData.unlocked_skins.slice() : [];
+            var fresh = [];
+            for (var i = 0; i < open.length; i++) {
+                if (unlocked.indexOf(open[i]) === -1) { unlocked.push(open[i]); fresh.push(open[i]); }
+            }
+            if (!fresh.length) {
+                return null; // already claimed everything currently open — nothing to write
+            }
+            var unlockDates = (existingData && existingData.unlock_dates && typeof existingData.unlock_dates === 'object')
+                ? Object.assign({}, existingData.unlock_dates) : {};
+            var nowIso = new Date().toISOString();
+            var claimToasts = [];
+            for (var g = 0; g < fresh.length; g++) {
+                if (!unlockDates[fresh[g]]) { unlockDates[fresh[g]] = nowIso; }
+                claimToasts.push({ type: 'seasonal', id: fresh[g] });
+            }
+            var existingToasts = (existingData && Array.isArray(existingData.pending_toasts))
+                ? existingData.pending_toasts : [];
+            var payload = {
+                user_id: userId,
+                unlocked_skins: unlocked,
+                unlock_dates: unlockDates,
+                pending_toasts: existingToasts.concat(claimToasts),
+                updated_at: new Date().toISOString()
+            };
+            return { payload: payload, result: fresh };
+        }
+    );
+    return granted || []; // casUpdateProgression returns null on abort/failure; callers expect an array
 }
 
 // Read and CLEAR a user's pending celebration toasts (shown on lobby arrival).
@@ -563,6 +627,7 @@ exports.ensureProgressionRow = ensureProgressionRow;
 exports.getProgression = getProgression;
 exports.addProgression = addProgression;
 exports.saveCosmetic = saveCosmetic;
+exports.grantSeasonalClaims = grantSeasonalClaims;
 exports.drainPendingToasts = drainPendingToasts;
 exports.getDisplayName = getDisplayName;
 // Public, browser-safe config to inject into served pages. Returns null unless

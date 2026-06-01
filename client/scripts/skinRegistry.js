@@ -104,6 +104,13 @@ var SKINS = [
     { id: 'notes', name: 'Music Notes', slot: 'trail', rarity: 'uncommon', unlock: { kind: 'level', level: 92 }, effect: 'notes' },
     { id: 'neon', name: 'Neon Wall', slot: 'trail', rarity: 'epic', unlock: { kind: 'achievement' }, effect: 'neon' },
     { id: 'ripple', name: 'Ripples', slot: 'trail', rarity: 'rare', unlock: { kind: 'achievement' }, effect: 'ripple' },
+    // --- Seasonal claims (kind:'seasonal') — claimed once on sign-in during the window, then
+    // owned forever (in unlocked_skins, like an achievement skin). rarity:'seasonal' draws a
+    // distinct gold cell frame in the locker. `unlock.label` is the season's player-facing name,
+    // read by the lobby banner + claim toast (so a future season needs NO code edit — just a new
+    // entry). The 'founder gold' palette lives in the painter (drawFoundersFlareTrail,
+    // trailEffects.js). Keep IN LOCKSTEP with server/skinRegistry.js. ---
+    { id: 'founders_flare', name: 'Solar Flare', slot: 'trail', rarity: 'seasonal', unlock: { kind: 'seasonal', season: 'early_adopter_2026', label: 'Early Adopter', claimStart: '2026-06-01T00:00:00Z', claimEnd: '2026-08-01T00:00:00Z' }, effect: 'foundersFlare' },
     // --- Borders (rim cosmetic; painter tints to player color, drawn AROUND the rim). SHARE the
     // 2nd cosmetic slot with patterns (player.pattern field / selected_pattern column) — distinguished
     // by slot:'border'. ids are border_-prefixed because flames/scales/electric collide with pattern
@@ -177,4 +184,30 @@ function getSkinsForSlot(slot) {
 function skinDisplayName(id) {
     var s = getSkin(id);
     return s ? s.name : id;
+}
+// True if a seasonal-claim window is open at `now` (epoch ms). Mirrors the server's
+// isClaimWindowOpen so the lobby lock UI + claim banner read the SAME rule the server
+// grants on. Missing/invalid bounds read as closed.
+function isClaimWindowOpen(unlock, now) {
+    if (!unlock || unlock.kind !== 'seasonal') { return false; }
+    var start = Date.parse(unlock.claimStart);
+    var end = Date.parse(unlock.claimEnd);
+    if (isNaN(start) || isNaN(end)) { return false; }
+    return now >= start && now < end;
+}
+// Every seasonal cosmetic whose claim window is open right now — mirrors the server's
+// currentSeasonalClaims (which GRANTS all of them), so the lobby can reason about more than
+// one simultaneously-open season instead of seeing only the first.
+function currentSeasonalClaims(now) {
+    var out = [];
+    for (var i = 0; i < SKINS.length; i++) {
+        if (isClaimWindowOpen(SKINS[i].unlock, now)) { out.push(SKINS[i]); }
+    }
+    return out;
+}
+// The first seasonal cosmetic whose window is open right now (or null) — convenience for the
+// common single-season case. The banner uses the plural form so it can skip already-claimed ones.
+function currentSeasonalClaim(now) {
+    var open = currentSeasonalClaims(now);
+    return open.length ? open[0] : null;
 }
