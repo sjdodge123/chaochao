@@ -48,10 +48,12 @@ The progression engine (`server/progression.js` + `auth.addProgression`, gated o
   appended as the LAST item of the lobby-arrival progression-toast stream (after the
   XP/level/skin celebration toasts) so it never competes with the results/recap screen
   and never collides with those toasts. Non-blocking (the lobby stays interactive) and
-  persistent until acted / dismissed / next-race teardown. **Watching is a deliberate
-  pointer tap only** — it is intentionally NOT bound to any gamepad/keyboard button, since
-  those are live gameplay controls and a bare press must never launch a full-screen ad
-  (Codex P2). Offered ONLY to players the **server** confirmed eligible for this match
+  persistent until acted / dismissed / next-race teardown. **Input:** mouse/touch tap the
+  buttons directly; controller/keyboard use a deliberate **two-step focus** so a bare
+  gameplay press can never launch a full-screen ad (Codex P2) — the first Ⓐ/Enter FOCUSES
+  the toast (highlight + Ⓐ/Ⓑ hint), a second Ⓐ/Enter watches, and Ⓑ/Esc declines (Ⓐ is
+  yielded to a station when parked on one). Offered ONLY to players the **server** confirmed
+  eligible for this match
   (targeted `rewardedEligible` — raced + earned XP; matchId is NOT broadcast), and only
   when `ads.isRewardedAvailable()` and the bonus is unclaimed; spectators/guests are never
   offered. **Mutually exclusive with the interstitial** — at most one ad surface per

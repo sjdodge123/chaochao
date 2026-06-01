@@ -289,6 +289,21 @@ nav .auth-control ~ .theme-toggle {
     height: 44px;
     font-size: 20px;
 }
+/* Controller/keyboard focus state: the first Ⓐ/Enter focuses the toast (this highlight + the
+   hint), the second watches — so a bare gameplay press can never launch an ad. */
+.cc-reward-offer.gp-focus {
+    outline: 3px solid #f6c64b;
+    outline-offset: 2px;
+}
+.cc-reward-offer.gp-focus .cc-toast-action {
+    box-shadow: 0 0 0 3px rgba(246, 198, 75, 0.6);
+}
+.cc-reward-hint {
+    font-size: 12px;
+    opacity: 0.85;
+    white-space: nowrap;
+}
+.cc-reward-hint:empty { display: none; }
 .cc-progression-toast .cc-toast-msg {
     font-size: 15px;
     font-weight: 600;

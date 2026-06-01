@@ -148,10 +148,6 @@ function onGamepadKeyDown(e) {
         return;
     }
 
-    // NOTE: the "2× your match XP" offer toast is intentionally NOT bound to the keyboard either.
-    // Space/Enter are gameplay/confirm keys, so binding them to "watch a full-screen ad" would
-    // launch an ad from ordinary input. Watching is an explicit pointer tap on the toast button.
-
     // The centre leave modal (used when solo, or when the primary has no inline
     // block) owns the keyboard while open, in any mode: arrows / A-D move between
     // Leave and Cancel, Enter or Space confirms, Esc closes.
@@ -172,6 +168,27 @@ function onGamepadKeyDown(e) {
             e.preventDefault();
         }
         return;
+    }
+
+    // The "2× your match XP" offer toast (lobby): a deliberate two-step, mirroring the pad, so a
+    // bare gameplay key can't launch a full-screen ad. Enter FIRST focuses the toast, a second
+    // Enter watches; Esc declines. NOT Space (Space is a gameplay key). Only when no modal above
+    // owns the keyboard. Other keys fall through, so the toast stays non-blocking.
+    if (typeof rewardOfferToastOpen === "function" && rewardOfferToastOpen()) {
+        if (e.key === "Escape" || e.keyCode === 27) {
+            if (typeof rewardOfferDismiss === "function") { rewardOfferDismiss(); }
+            e.preventDefault();
+            return;
+        }
+        if (e.keyCode === 13 || e.key === "Enter") {
+            if (typeof rewardOfferIsFocused === "function" && rewardOfferIsFocused()) {
+                if (typeof rewardOfferWatch === "function") { rewardOfferWatch(); }
+            } else if (typeof rewardOfferFocus === "function") {
+                rewardOfferFocus();
+            }
+            e.preventDefault();
+            return;
+        }
     }
 
     var primary = localPlayers[primarySlot];
@@ -513,12 +530,6 @@ function pollPadForSlot(pad, lp) {
         setInputMethod("pad");
     }
 
-    // NOTE: the "2× your match XP" offer toast is intentionally NOT bound to any gamepad button.
-    // It's a non-blocking lobby toast and the primary pad's face buttons are live gameplay
-    // controls (Ⓐ = attack/station-interact, Ⓑ = leave) — reinterpreting a bare press as
-    // "watch a full-screen ad" would launch an ad from ordinary input. Watching must be an
-    // explicit pointer tap on the toast's button; the toast otherwise auto-clears at race start.
-
     if (lp.isPrimary && settingsModalIsOpen()) {
         // P1 navigates the shared settings panel. Other local players are NOT in
         // this branch (it's primary-only), so they keep racing while P1 adjusts
@@ -545,6 +556,13 @@ function pollPadForSlot(pad, lp) {
         // Map-rating star strip (primary pad only — one shared widget). pollMapRatingPad
         // returns true only when it consumed a D-pad/A press this frame, so B/Start/emoji
         // still fall through to their branches at the overview.
+    } else if (lp.isPrimary && typeof rewardOfferToastOpen === "function" && rewardOfferToastOpen() &&
+        pollRewardOffer(pad, lp)) {
+        // "2× your match XP" offer toast (primary pad, lobby). Two-step so a bare press can
+        // never launch an ad: Ⓐ first FOCUSES the toast, a second Ⓐ watches; Ⓑ declines.
+        // pollRewardOffer returns true only when it consumed A/B this frame; reached only in
+        // normal lobby (the station-panel / wheel / leave branches above take priority), and it
+        // yields Ⓐ to a station when parked on one (so station interaction isn't hijacked).
     } else if (!wheelOpen && buttonPressedThisFrame(pad, GP_BTN_B, lp)) {
         if (blocks) {
             openLeaveConfirm(lp);  // inline confirm in this player's block
@@ -872,6 +890,27 @@ function clearEmojiHighlight(items) {
 // stick, A confirms (dismisses — changes apply live as you step), B / emoji
 // closes. Per-slot, so two pads can configure two panels simultaneously. The
 // open/nav/confirm/close logic itself lives in lobbyHub.js (input-agnostic).
+// Drive the "2× your match XP" offer toast with the primary pad. Ⓑ declines at any time (a
+// safe action — never launches an ad). Ⓐ is a deliberate two-step: the first press FOCUSES the
+// toast (highlights it; no ad), the second press WATCHES — so an ordinary gameplay Ⓐ can't
+// launch a full-screen ad. Ⓐ is yielded when parked on a station (station interaction wins).
+// Returns true ONLY when it consumed A/B this frame, so other buttons fall through.
+function pollRewardOffer(pad, lp) {
+    if (buttonPressedThisFrame(pad, GP_BTN_B, lp)) {
+        if (typeof rewardOfferDismiss === "function") { rewardOfferDismiss(); }
+        return true;
+    }
+    if (!lp.nearStation && buttonPressedThisFrame(pad, GP_BTN_A, lp)) {
+        if (typeof rewardOfferIsFocused === "function" && rewardOfferIsFocused()) {
+            if (typeof rewardOfferWatch === "function") { rewardOfferWatch(); }
+        } else if (typeof rewardOfferFocus === "function") {
+            rewardOfferFocus();
+        }
+        return true;
+    }
+    return false;
+}
+
 // Drive the map-rating star strip with the pad: D-pad ◄ ► (or left stick) moves the
 // highlighted star, Ⓐ confirms the vote. Returns true ONLY when it consumed an input
 // this frame, so the caller's else-if chain still falls through to B/Start/emoji when
