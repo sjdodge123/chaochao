@@ -82,7 +82,19 @@ function stampRewardedMatch(sig, payload) {
 			claims[p.verifiedUserId] = { xpDelta: xpDelta, claimed: false };
 		}
 	}
-	room.rewardedMatch = { matchId: matchId, gameOverTs: Date.now(), claims: claims };
+	// Keep per-match claim records keyed by matchId (not just the latest match): a rewarded ad
+	// is allowed to finish during the NEXT race, and a long ad / suspended tab can complete after
+	// that next match has ended — the still-in-TTL prior claim must remain claimable. Prune
+	// records past the TTL on each stamp so the map can't grow. room.rewardedMatch points at the
+	// latest record for convenience; the claim handler looks up by the claimed matchId.
+	var now = Date.now();
+	if (!room.rewardedMatches) { room.rewardedMatches = {}; }
+	for (var oldId in room.rewardedMatches) {
+		if (now - room.rewardedMatches[oldId].gameOverTs > REWARD_CLAIM_TTL_MS) { delete room.rewardedMatches[oldId]; }
+	}
+	var record = { matchId: matchId, gameOverTs: now, claims: claims };
+	room.rewardedMatches[matchId] = record;
+	room.rewardedMatch = record;   // latest (same object reference as the map entry)
 	return payload;
 }
 
@@ -96,14 +108,16 @@ function emitRewardedEligibility(sig) {
 	if (!room || !room.rewardedMatch || !room.game || !room.game.playerList) { return; }
 	var rm = room.rewardedMatch;
 	var pl = room.game.playerList;
+	// Send the REMAINING claim lifetime as a DURATION (not a server timestamp): the client adds
+	// it to its OWN Date.now() to get a deadline, so the whole comparison stays on one clock and
+	// a client/server clock skew can neither hide a valid offer nor launch an expired one.
+	var ttlMs = REWARD_CLAIM_TTL_MS - (Date.now() - rm.gameOverTs);
+	if (ttlMs < 0) { ttlMs = 0; }
 	for (var id in pl) {
 		var p = pl[id];
 		if (p == null || !p.verifiedUserId || !rm.claims[p.verifiedUserId]) { continue; }
 		var sock = mailBoxList[id];
-		// Send the server's gameOver timestamp so the client anchors its offer window to the
-		// SAME clock the claim TTL is validated against — a late-delivered event (suspended tab)
-		// then can't make the client think a long-expired claim is still fresh.
-		if (sock) { sock.emit('rewardedEligible', { matchId: rm.matchId, gameOverTs: rm.gameOverTs }); }
+		if (sock) { sock.emit('rewardedEligible', { matchId: rm.matchId, ttlMs: ttlMs }); }
 	}
 }
 
@@ -845,10 +859,11 @@ function checkForMail(client) {
 		var matchId = payload && payload.matchId;
 		if (!matchId) { return; }
 		var room = hostess.getRoomBySig(roomMailList[client.id]);
-		if (!room || !room.rewardedMatch) { return; }
-		var rm = room.rewardedMatch;
-		// 2. matchId must be THIS room's most-recently-completed match.
-		if (rm.matchId !== matchId) { return; }
+		if (!room || !room.rewardedMatches) { return; }
+		// 2. Look the claim up by its OWN matchId (records are kept per-match, not just the
+		//    latest), so a rewarded ad that finished after the next match started can still pay.
+		var rm = room.rewardedMatches[matchId];
+		if (!rm) { return; }
 		// 3. Within the TTL since gameOver (server-stamped).
 		if (Date.now() - rm.gameOverTs > REWARD_CLAIM_TTL_MS) { return; }
 		var entry = rm.claims[client.userId];

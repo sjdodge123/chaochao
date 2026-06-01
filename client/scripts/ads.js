@@ -570,6 +570,14 @@
             settled = true;
             clearTimeout(timer);
             adInFlight = null;
+            if (status === "timeout") {
+                // The request is still pending in the provider (no ad started in time). Tear it
+                // down so a slow ad can't appear AFTER we've given up — otherwise it would cover
+                // the screen, fire a late ad_shown, and complete with no credit (this settle is
+                // already closed). dismiss() clears GameMonetize's pending PAUSE/START callbacks
+                // and destroys AdinPlay's player. No interstitial can be in flight here.
+                try { if (adapter && typeof adapter.dismiss === "function") { adapter.dismiss(); } } catch (e) {}
+            }
             if (status === "complete") {
                 if (started) {
                     // Confirmed full watch -> grant the reward.
