@@ -199,12 +199,13 @@
         s.onerror = function () { sdkReady = false; }; // fail-open: stays no-op
         (document.head || document.documentElement).appendChild(s);
 
-        // One preroll routine for both interstitial and rewarded. AdinPlay is NOT the chosen
-        // network (GameMonetize is) so this path is wired-but-untested; a dedicated rewarded
-        // zone is configured on the operator's AdinPlay dashboard, but the SDK shape (AIP_START
-        // impression, AIP_COMPLETE/REMOVE done) is identical, so the public layer's PAUSE->START
-        // reward discipline applies unchanged.
-        function aipShowAd(onStart, onComplete, onError) {
+        // AdinPlay is NOT the chosen network (GameMonetize is) so this path is wired-but-untested.
+        // INTERSTITIAL: a close (AIP_REMOVE) and a full play (AIP_COMPLETE) both just mean "the
+        // ad is done" — either resolves it. REWARDED is stricter: the reward must be granted ONLY
+        // on a full watch (AIP_COMPLETE); an early close (AIP_REMOVE before COMPLETE) is a SKIP,
+        // not a reward — otherwise dismissing a preroll would pay out 2× XP. AIP_START is the
+        // impression signal for both (no-fill never fires it).
+        function aipShowInterstitial(onStart, onComplete, onError) {
             try {
                 window.aiptag.cmd.player.push(function () {
                     try {
@@ -213,11 +214,33 @@
                             AD_HEIGHT: 540,
                             AD_DISPLAY: "fullscreen",
                             LOADING_TEXT: "Advertisement",
-                            // AIP_START fires only when an ad actually renders —
-                            // our impression signal. No-fill skips it.
                             AIP_START: function () { onStart(); },
                             AIP_COMPLETE: function () { onComplete(); },
-                            AIP_REMOVE: function () { onComplete(); }
+                            AIP_REMOVE: function () { onComplete(); } // close == done for an interstitial
+                        });
+                        window.aiptag.adplayer.startPreRoll();
+                    } catch (e) { onError(); }
+                });
+            } catch (e) { onError(); }
+        }
+        function aipShowRewarded(onStart, onComplete, onError, onSkip) {
+            try {
+                window.aiptag.cmd.player.push(function () {
+                    try {
+                        var completed = false;
+                        window.aiptag.adplayer = new window.aipPlayer({
+                            AD_WIDTH: 960,
+                            AD_HEIGHT: 540,
+                            AD_DISPLAY: "fullscreen",
+                            LOADING_TEXT: "Advertisement",
+                            AIP_START: function () { onStart(); },
+                            AIP_COMPLETE: function () { completed = true; onComplete(); }, // full watch -> reward
+                            AIP_REMOVE: function () {
+                                // Close: only a no-op AFTER a real completion. A close BEFORE complete
+                                // is an early dismiss -> SKIP (no reward), never onComplete.
+                                if (completed) { return; }
+                                if (typeof onSkip === "function") { onSkip(); } else { onError(); }
+                            }
                         });
                         window.aiptag.adplayer.startPreRoll();
                     } catch (e) { onError(); }
@@ -225,8 +248,8 @@
             } catch (e) { onError(); }
         }
         adapter = {
-            showInterstitial: aipShowAd,
-            showRewarded: aipShowAd,
+            showInterstitial: aipShowInterstitial,
+            showRewarded: aipShowRewarded,
             // Best-effort teardown if we must reclaim the screen for the next race.
             dismiss: function () {
                 try {
@@ -555,7 +578,11 @@
             adapter.showRewarded(
                 onStart,
                 function () { settle("complete"); },
-                function () { settle("error"); }
+                function () { settle("error"); },
+                // Adapter-signalled SKIP (e.g. AdinPlay AIP_REMOVE before AIP_COMPLETE = early
+                // close): NOT a reward. GameMonetize has no early-close event, so its adapter
+                // ignores this 4th arg (a no-fill is detected in settle() as complete-without-start).
+                function () { settle("skipped"); }
             );
         } catch (e) {
             settle("error");

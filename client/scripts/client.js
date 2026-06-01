@@ -41,12 +41,20 @@ var currentMatchId = null,
 var rewardOfferToastEl = null,
 	rewardOfferPending = false,
 	rewardOfferFallbackTimer = null;
+// Stop OFFERING / launching an ad once the match is this old, so a full watch always finishes
+// inside the server's claim TTL (180s) — never let a player burn an ad on a claim the server
+// will reject as expired. currentMatchOfferTs is stamped when the match id is set (startGameover).
+var REWARD_OFFER_WINDOW_MS = 120 * 1000,
+	currentMatchOfferTs = 0,
+	rewardClaimAckTimer = null;   // awaiting the server's xpBonus ack after a watch
 
 // True when the "2× your match XP" offer can be made: signed-in (anonymous players have no
 // server XP to multiply — never offered), a rewarded ad is loaded, we know which match to
 // claim, and it isn't already being watched / claimed.
 function rewardClaimable() {
 	if (!currentMatchId || rewardedClaimState !== "idle") { return false; }
+	// Expire the offer before launch: never start an ad we can't claim in time (server TTL).
+	if (Date.now() - currentMatchOfferTs > REWARD_OFFER_WINDOW_MS) { return false; }
 	// DEV-ONLY — STRIP BEFORE PR: the localhost ?testrewarded=1 override also offers it to
 	// guests (so it's testable without local Supabase auth); the reward is then simulated
 	// client-side in triggerRewardWatch (no server credit — guests have no XP).
@@ -66,20 +74,23 @@ function triggerRewardWatch() {
 	window.ads.showRewarded({
 		placement: "xp_2x",
 		onReward: function () {
-			// Ad watched in full — ask the server to credit the bonus. The server validates
-			// matchId + TTL + single-claim and replies with `xpBonus` (multiplier is server-fixed;
-			// we send it only as a courtesy — the server ignores the client value).
-			rewardedClaimState = "claimed";
+			// Ad watched in full — ask the server to credit the bonus.
 			// DEV-ONLY — STRIP BEFORE PR: under the localhost override a GUEST has no server
 			// progression to credit, so the server would reject the claim. Fake the ack locally
 			// so the toast/flow is visible. Signed-in players always take the real server path.
 			var signedIn = (window.chaochaoAuth && typeof window.chaochaoAuth.isSignedIn === "function" && window.chaochaoAuth.isSignedIn());
 			var devR = (window.ads && typeof window.ads._devRewarded === "function" && window.ads._devRewarded());
 			if (devR && !signedIn) {
+				rewardedClaimState = "claimed";
 				if (typeof enqueueProgressionToasts === "function") { enqueueProgressionToasts([{ type: "xp_bonus", amount: 0 }]); }
 				if (typeof trackEvent === "function") { trackEvent('reward_claimed', { bonus: 'xp_2x', match_id: matchId || '' }); }
 				return;
 			}
+			// Stay PENDING (not 'claimed') until the server's xpBonus ack — the server can still
+			// reject (TTL / transient DB failure), and marking 'claimed' now would consume the
+			// watched ad with no credit and no retry. The ack-timeout below re-offers on failure.
+			rewardedClaimState = "claiming";
+			startRewardClaimAckTimeout();
 			if (typeof server !== "undefined" && server) {
 				server.emit("claimXpMultiplier", { matchId: matchId, multiplier: 2 });
 			}
@@ -96,6 +107,26 @@ function triggerRewardWatch() {
 			}
 		}
 	});
+}
+
+// Guard against the server never acking a claim (TTL rejection / transient DB failure / dropped
+// socket). Without this the player would be stuck in 'claiming' forever after watching an ad.
+// On timeout: unstick to 'idle', tell the player, and — if the match is still within its offer
+// window — re-offer so the watched-but-uncredited ad isn't wasted (the server reset its
+// single-claim flag on failure, so a retry can succeed).
+function startRewardClaimAckTimeout() {
+	if (rewardClaimAckTimer) { clearTimeout(rewardClaimAckTimer); }
+	rewardClaimAckTimer = setTimeout(function () {
+		rewardClaimAckTimer = null;
+		if (rewardedClaimState !== "claiming") { return; } // already acked
+		rewardedClaimState = "idle";
+		if (typeof enqueueProgressionToasts === "function") { enqueueProgressionToasts([{ type: "xp_bonus_failed" }]); }
+		// Re-offer for a genuine retry while still in time.
+		if (rewardClaimable() && typeof flushRewardOffer === "function") {
+			rewardOfferPending = true;
+			flushRewardOffer();
+		}
+	}, 12000);
 }
 
 // Arm the 2× XP offer at the gameOver -> lobby edge, if claimable. Returns true if an offer
@@ -158,6 +189,12 @@ function rewardOfferToastOpen() { return !!rewardOfferToastEl; }
 function rewardOfferWatch() {
 	if (!rewardOfferToastEl) { return; }
 	removeRewardOfferToast();
+	// Guard a late tap on an offer that's aged out of the claim window — don't burn an ad on
+	// a claim the server will reject; tell the player instead of failing silently.
+	if (!rewardClaimable()) {
+		if (typeof enqueueProgressionToasts === "function") { enqueueProgressionToasts([{ type: "xp_bonus_error" }]); }
+		return;
+	}
 	triggerRewardWatch(); // shows the ad; onReward -> claim -> xpBonus toast
 }
 function rewardOfferDismiss() {
@@ -384,7 +421,10 @@ function progressionToastText(ev) {
 		return ev.amount > 0 ? ("⭐ +" + ev.amount + " bonus XP — match XP doubled!") : "⭐ Match XP doubled!";
 	}
 	if (ev.type === "xp_bonus_error") {
-		return "Ad didn't finish — tap to try again for 2× XP.";
+		return "Ad didn't finish — no bonus this time.";
+	}
+	if (ev.type === "xp_bonus_failed") {
+		return "Couldn't credit your bonus XP — try again.";
 	}
 	if (ev.type === "level") {
 		return "⬆️ Level up!  Lv " + ev.level;
@@ -455,6 +495,7 @@ function clearProgressionToasts() {
 	rewardOfferToastEl = null;
 	rewardOfferPending = false;
 	if (rewardOfferFallbackTimer) { clearTimeout(rewardOfferFallbackTimer); rewardOfferFallbackTimer = null; }
+	if (rewardClaimAckTimer) { clearTimeout(rewardClaimAckTimer); rewardClaimAckTimer = null; }
 	if (typeof document !== "undefined" && document.querySelectorAll) {
 		var open = document.querySelectorAll(".cc-progression-toast");
 		for (var i = 0; i < open.length; i++) {
@@ -502,6 +543,8 @@ function registerConnectionHandlers(server) {
 	// ad_complete -> reward_claimed closes.
 	server.on('xpBonus', function (payload) {
 		var bonus = (payload && typeof payload.bonus === "number") ? payload.bonus : 0;
+		// Ack arrived — the claim succeeded. Cancel the retry watchdog and lock it in.
+		if (rewardClaimAckTimer) { clearTimeout(rewardClaimAckTimer); rewardClaimAckTimer = null; }
 		rewardedClaimState = "claimed";
 		if (typeof enqueueProgressionToasts === "function") {
 			enqueueProgressionToasts([{ type: "xp_bonus", amount: bonus }]);
@@ -1108,6 +1151,7 @@ function registerStateHandlers(server) {
 		// never made, since rewardClaimable() requires it). The prompt fires at the next
 		// startLobby (gameOver -> lobby edge), not here on the results screen.
 		currentMatchId = (packet && packet.matchId != null) ? packet.matchId : null;
+		currentMatchOfferTs = Date.now();   // start of this match's offer window
 		rewardedClaimState = "idle";
 		// Bump the medals-card reveal nonce so its entrance animation replays for
 		// this match — even when the same player wins back-to-back (playerWon
