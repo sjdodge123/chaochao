@@ -3921,10 +3921,20 @@ function computeWorldViewTarget(dt) {
         worldGoalEngaged = false;
         return wholeMap;
     }
-    // Advance the focus-phase clock by the (already-clamped) frame dt rather than
-    // wall-clock, so backgrounding the tab pauses the ramp (rAF stops) and the
-    // catch-up frame on refocus can't snap the zoom to the end.
-    worldViewFocusedElapsed += (dt || 16);
+    // Advance the gate-intro clock ONLY while in the gated countdown, and zero it
+    // on every other frame. The lobby/racing/collapsing follow-camera also counts
+    // as "focused", so a single shared clock would keep ticking the whole time you
+    // sit in the lobby — and the first race goes straight lobby -> gated with no
+    // overview to reset it, saturating the ramp below so the camera opens already
+    // fully zoomed instead of easing in from the whole-map overview. Zeroing it
+    // whenever we're not gated makes the intro play on EVERY entry into the gate
+    // (first race out of the lobby, and later rounds out of overview alike).
+    // Frame-dt (already clamped) not wall-clock, so a backgrounded tab pauses it.
+    if (currentState === config.stateMap.gated) {
+        worldViewFocusedElapsed += (dt || 16);
+    } else {
+        worldViewFocusedElapsed = 0;
+    }
     var focusedView = computeFocusedView();
 
     // During the gate countdown, run a slow, eased zoom timed to the countdown:

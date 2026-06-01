@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### Bug fixes
+
+- The start of a race opens on the whole-map overview again and smoothly zooms in on your kart during the countdown, instead of snapping straight to a full close-up.
 
 ## v0.27.0 — 2026-06-01
 
