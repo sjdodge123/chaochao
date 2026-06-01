@@ -193,13 +193,15 @@ function tfxForEachParticle(verts, now, fadeMs, intervalMs, cb) {
 // (0→1 across the drift phase) into their rise/fall + sway offsets, and use
 // `alpha` directly (peaks at 1, falls to 0). Returns a SHARED scratch object
 // (read it immediately; do not retain) to stay allocation-free in the hot loop.
-var TFX_HOLD_FRAC = 0.5;        // fraction of life spent hugging the trail before drifting
+var TFX_HOLD_MS = 1500;         // ms a glyph hugs the walked path before it starts drifting off
 var TFX_FADE_IN_MS = 130;       // quick ramp-in so a freshly-spawned glyph doesn't pop on
 var _tfxPh = { drift: 0, alpha: 0, prog: 0, life: 0 };
 function tfxParticlePhase(age, fadeMs, holdFrac) {
   var life = age / fadeMs;
   _tfxPh.life = life;
-  if (holdFrac == null) holdFrac = TFX_HOLD_FRAC;
+  // Default hold is an absolute time (clamped below the fade window so there's always a
+  // sliver of drift+fade at the end); callers may still pass an explicit fraction.
+  if (holdFrac == null) holdFrac = Math.min(0.98, TFX_HOLD_MS / fadeMs);
   var fadeIn = age < TFX_FADE_IN_MS ? age / TFX_FADE_IN_MS : 1;
   if (life <= holdFrac) {
     _tfxPh.drift = 0; _tfxPh.prog = 0; _tfxPh.alpha = fadeIn;   // anchored on the path
@@ -564,9 +566,8 @@ function drawSurvivorTrail(ctx, verts, color, now, fadeMs, anim) {
   var interval = Math.max(20, fadeMs / DENSITY);
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
-  // embers linger longer on the path before lifting (smouldering feel)
   tfxForEachParticle(verts, now, fadeMs, interval, function (v, ts, age) {
-    var ph = tfxParticlePhase(age, fadeMs, 0.6);
+    var ph = tfxParticlePhase(age, fadeMs);   // shared 1500ms hug like the other floaters
     for (var k = 0; k < 2; k++) {
       var seed = ts + k * 7193;
       var sway = Math.sin(age * 0.003 + tfxHash(seed + 1) * TFX_TAU) * 10 * ph.drift;
