@@ -485,6 +485,19 @@ var COSMETIC_OPTIONS = (function () {
 // welcome-time re-equip then applies one player's saved pick to everyone).
 function cosmeticStorageKey(lp, slot) {
     var who = (lp && lp.slot != null) ? lp.slot : 'p';
+    // Signed-in players persist cosmetics to their ACCOUNT — the server's progression
+    // row is the source of truth (restorePersistedCosmetics applies it on every join,
+    // incl. mid-match and the moment they sign in). Namespace this browser's local
+    // mirror by the account id for the primary couch slot so a previous guest session's
+    // picks — or a different account's — can never be re-equipped and clobber the
+    // signed-in account's saved cosmetics on sign-in. Guests + co-op extras keep the
+    // plain per-couch-slot key (their only persistence is local).
+    var auth = (typeof window !== "undefined") ? window.chaochaoAuth : null;
+    if (lp && typeof primarySlot !== "undefined" && lp.slot === primarySlot &&
+        auth && typeof auth.getUserId === "function") {
+        var uid = auth.getUserId();
+        if (uid) { who = "acct-" + uid; }
+    }
     return "cc_cosmetic_" + who + "_" + slot;
 }
 function saveCosmeticLocal(lp, slot, id) {
