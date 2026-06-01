@@ -186,6 +186,11 @@ function handleClick(event) {
             var rect = gameCanvas.getBoundingClientRect();
             var lx = ((event.clientX - rect.left) / newWidth) * LOGICAL_WIDTH;
             var ly = ((event.clientY - rect.top) / newHeight) * LOGICAL_HEIGHT;
+            // Game-over screen: a click on the "Watch ad to 2× XP" button starts the rewarded flow.
+            if (typeof handleRewardButtonTap === "function" && handleRewardButtonTap(lx, ly)) {
+                event.preventDefault();
+                break;
+            }
             // Overview / game-over screen: a click on the star widget rates the map.
             if (typeof handleMapRatingTap === "function" && handleMapRatingTap(lx, ly)) {
                 event.preventDefault();
@@ -588,6 +593,11 @@ function onTouchStart(evt) {
     // would offset hits once the lobby follow-camera zooms in on touch.
     if (typeof config !== "undefined" && config && currentState === config.stateMap.lobby &&
         typeof lobbyHubHandlePrimaryPointer === "function" && lobbyHubHandlePrimaryPointer(touchX, touchY)) {
+        evt.preventDefault();
+        return;
+    }
+    // Game-over screen: a tap on the "Watch ad to 2× XP" button starts the rewarded flow.
+    if (typeof handleRewardButtonTap === "function" && handleRewardButtonTap(touchX, touchY)) {
         evt.preventDefault();
         return;
     }

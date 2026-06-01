@@ -1,13 +1,17 @@
-// ads.js — network-agnostic ad layer for ChaoChao (interstitial half).
+// ads.js — network-agnostic ad layer for ChaoChao.
 //
-// SCOPE (this chunk): interstitials at the gameOver state transition,
-// frequency-capped. The rewarded-video "Watch to 2× XP" half is DEFERRED until
-// the cosmetics progression engine (server/progression.js + auth.addProgression)
-// lands in main — see docs/ads-monetization-plan.md, "Dependency". The rewarded
-// API surface below is present but stubbed (isRewardedAvailable() === false,
-// showRewarded() fails open) so the forward-compatible interface exists without
-// any progression dependency. Do NOT render the rewarded button until the
-// server-side claim handler ships.
+// SCOPE: interstitials at the gameOver state transition (frequency-capped) AND the
+// rewarded-video "Watch to 2× match XP" reward on the results screen. The rewarded
+// reward is credited server-side (server/messenger.js claimXpMultiplier +
+// auth.addProgression, gated on writesEnabled); the client onReward below is only the
+// signal — see docs/ads-monetization-plan.md, "Rewarded video".
+//
+// GameMonetize note: their HTML5 SDK exposes only showBanner() + the
+// SDK_GAME_PAUSE/START events — NO dedicated rewarded unit, no reward-granted event,
+// and no server-to-server completion postback. So a rewarded ad reuses showBanner() and
+// a CONFIRMED full play (PAUSE -> START) is treated as the reward signal; the server's
+// single-claim + TTL + fixed-multiplier guards are the anti-abuse. A true rewarded unit /
+// S2S postback is a documented follow-up if the network later supports it.
 //
 // DESIGN CONTRACT
 //   - Network-agnostic. Only this file knows which ad network is wired. The rest
@@ -163,27 +167,34 @@
         s.onerror = function () { sdkReady = false; }; // fail-open: stays no-op
         (document.head || document.documentElement).appendChild(s);
 
+        // One preroll routine for both interstitial and rewarded. AdinPlay is NOT the chosen
+        // network (GameMonetize is) so this path is wired-but-untested; a dedicated rewarded
+        // zone is configured on the operator's AdinPlay dashboard, but the SDK shape (AIP_START
+        // impression, AIP_COMPLETE/REMOVE done) is identical, so the public layer's PAUSE->START
+        // reward discipline applies unchanged.
+        function aipShowAd(onStart, onComplete, onError) {
+            try {
+                window.aiptag.cmd.player.push(function () {
+                    try {
+                        window.aiptag.adplayer = new window.aipPlayer({
+                            AD_WIDTH: 960,
+                            AD_HEIGHT: 540,
+                            AD_DISPLAY: "fullscreen",
+                            LOADING_TEXT: "Advertisement",
+                            // AIP_START fires only when an ad actually renders —
+                            // our impression signal. No-fill skips it.
+                            AIP_START: function () { onStart(); },
+                            AIP_COMPLETE: function () { onComplete(); },
+                            AIP_REMOVE: function () { onComplete(); }
+                        });
+                        window.aiptag.adplayer.startPreRoll();
+                    } catch (e) { onError(); }
+                });
+            } catch (e) { onError(); }
+        }
         adapter = {
-            showInterstitial: function (onStart, onComplete, onError) {
-                try {
-                    window.aiptag.cmd.player.push(function () {
-                        try {
-                            window.aiptag.adplayer = new window.aipPlayer({
-                                AD_WIDTH: 960,
-                                AD_HEIGHT: 540,
-                                AD_DISPLAY: "fullscreen",
-                                LOADING_TEXT: "Advertisement",
-                                // AIP_START fires only when an ad actually renders —
-                                // our impression signal. No-fill skips it.
-                                AIP_START: function () { onStart(); },
-                                AIP_COMPLETE: function () { onComplete(); },
-                                AIP_REMOVE: function () { onComplete(); }
-                            });
-                            window.aiptag.adplayer.startPreRoll();
-                        } catch (e) { onError(); }
-                    });
-                } catch (e) { onError(); }
-            },
+            showInterstitial: aipShowAd,
+            showRewarded: aipShowAd,
             // Best-effort teardown if we must reclaim the screen for the next race.
             dismiss: function () {
                 try {
@@ -255,33 +266,41 @@
             }
         } catch (e) { sdkReady = false; }
 
-        adapter = {
-            showInterstitial: function (onStart, onComplete, onError) {
-                try {
-                    // Stash the start/complete cbs for the next PAUSE/START. If a
-                    // previous interstitial is somehow still pending, clear its slots
-                    // first (don't replay its start — that would double-count an
-                    // impression; the public timeout already settled the game side).
-                    gmPendingStart = null;
-                    if (typeof gmPendingComplete === "function") {
-                        var stale = gmPendingComplete; gmPendingComplete = null; stale();
-                    }
-                    gmPendingStart = onStart;
-                    gmPendingComplete = onComplete;
-                    if (window.sdk && typeof window.sdk.showBanner === "function") {
-                        window.sdk.showBanner();
-                    } else {
-                        // SDK object missing despite sdkReady — treat as error.
-                        gmPendingStart = null;
-                        gmPendingComplete = null;
-                        onError();
-                    }
-                } catch (e) {
+        // One ad-show routine for BOTH interstitial and rewarded. GameMonetize's HTML5 SDK
+        // exposes only showBanner() and the SDK_GAME_PAUSE/START events — there is NO dedicated
+        // rewarded unit, no "reward granted" event, and no server-to-server completion postback
+        // (verified against their SDK source). So a rewarded ad is the same showBanner() video;
+        // the public layer treats a CONFIRMED full play (PAUSE -> START) as the reward signal
+        // and a START with no prior PAUSE as a no-fill (skip). Interstitial and rewarded never
+        // overlap in time (lobby gate vs results screen), so sharing the pending slots is safe.
+        function gmShowAd(onStart, onComplete, onError) {
+            try {
+                // Stash the start/complete cbs for the next PAUSE/START. If a previous ad is
+                // somehow still pending, clear its slots first (don't replay its start — that
+                // would double-count an impression; the public timeout already settled it).
+                gmPendingStart = null;
+                if (typeof gmPendingComplete === "function") {
+                    var stale = gmPendingComplete; gmPendingComplete = null; stale();
+                }
+                gmPendingStart = onStart;
+                gmPendingComplete = onComplete;
+                if (window.sdk && typeof window.sdk.showBanner === "function") {
+                    window.sdk.showBanner();
+                } else {
+                    // SDK object missing despite sdkReady — treat as error.
                     gmPendingStart = null;
                     gmPendingComplete = null;
                     onError();
                 }
-            },
+            } catch (e) {
+                gmPendingStart = null;
+                gmPendingComplete = null;
+                onError();
+            }
+        }
+        adapter = {
+            showInterstitial: gmShowAd,
+            showRewarded: gmShowAd,
             // Best-effort teardown for race-start cancellation. NOTE: the GameMonetize
             // preroll SDK exposes no documented programmatic close, so we can only
             // drop our pending callbacks here — visually dismissing an already-playing
@@ -303,7 +322,12 @@
             // impression). (In practice unreachable via showInterstitial(), which
             // early-returns when canShowInterstitial() is false for provider 'none'.)
             sdkReady = false;
-            adapter = { showInterstitial: function (onStart, onComplete) { onComplete(); } };
+            adapter = {
+                showInterstitial: function (onStart, onComplete) { onComplete(); },
+                // Unreachable in practice (isRewardedAvailable() is false for provider 'none',
+                // so showRewarded() short-circuits to onSkip before reaching the adapter).
+                showRewarded: function (onStart, onComplete) { onComplete(); }
+            };
         }
     }
 
@@ -414,16 +438,84 @@
         if (typeof activeSettle === "function") { activeSettle("cancelled"); }
     }
 
-    // ---- Rewarded (DEFERRED — stubbed until progression engine lands) ----------
-    // The forward-compatible surface exists so callers can be written against the
-    // final API, but it reports unavailable and fails open. Do NOT render the
-    // "Watch to 2× XP" button: it requires server/progression.js +
-    // auth.addProgression + the claimXpMultiplier handler, which are not in main.
-    function isRewardedAvailable() { return false; }
+    // ---- Rewarded video — "Watch to 2× match XP" ------------------------------
+    // True once a real network's SDK is ready (and we're allowed to show ads at all:
+    // not embedded, provider != 'none'). The UI gates the results-screen reward button
+    // on this — so locally / when embedded / when no network is wired, the button never
+    // renders and gameplay is untouched. GameMonetize has no separate "rewarded loaded"
+    // signal, so readiness == SDK ready.
+    function isRewardedAvailable() {
+        if (!shouldShow()) { return false; }  // provider 'none' or embedded -> not available
+        return !!sdkReady;
+    }
+
+    // Show a rewarded ad. onReward fires ONLY on a confirmed full watch (an ad actually
+    // started AND completed); onSkip on a no-fill or a close-before-complete; onError on
+    // an SDK throw or the request timing out before any ad starts. Single settle authority
+    // + hard timeout + exactly-once, mirroring showInterstitial's discipline — the reward is
+    // never credited on a mere attempt or a no-fill, so the GA funnel and the XP grant stay
+    // honest. Fail-open: if no real ad path exists, we skip (no reward, no error noise).
     function showRewarded(args) {
         args = args || {};
-        // No reward path wired yet — treat as a skip so any caller fails open.
-        if (typeof args.onSkip === "function") { args.onSkip(); }
+        var placement = args.placement || "xp_2x";
+        var onReward = (typeof args.onReward === "function") ? args.onReward : function () {};
+        var onSkip = (typeof args.onSkip === "function") ? args.onSkip : function () {};
+        var onError = (typeof args.onError === "function") ? args.onError : function () {};
+
+        // No real, ready network (local 'none' / embedded / SDK not loaded) — fail open as a
+        // skip so the caller leaves the button up for a retry and never credits a reward.
+        if (!isRewardedAvailable() || !adapter || typeof adapter.showRewarded !== "function") {
+            onSkip();
+            return;
+        }
+
+        var started = false;
+        function onStart() {
+            if (started) { return; }
+            started = true;
+            // The watchdog guards the REQUEST (waiting for an ad to begin), not playback —
+            // a rewarded video runs well past AD_TIMEOUT_MS. Clear it now that an ad is on
+            // screen; from here we wait for the provider's complete/error.
+            clearTimeout(timer);
+            track("ad_shown", { type: "rewarded", placement: placement });
+        }
+
+        var settled = false;
+        var timer = setTimeout(function () { settle("timeout"); }, AD_TIMEOUT_MS);
+        function settle(status) {
+            if (settled) { return; }
+            settled = true;
+            clearTimeout(timer);
+            if (status === "complete") {
+                if (started) {
+                    // Confirmed full watch -> grant the reward.
+                    track("ad_complete", { type: "rewarded", placement: placement });
+                    try { onReward(); } catch (e) { /* caller must not break the screen */ }
+                } else {
+                    // "complete" with no start = no-fill (GameMonetize signals it as
+                    // SDK_GAME_START without a prior PAUSE). Not watched -> no reward, just skip.
+                    track("ad_skipped", { type: "rewarded", placement: placement });
+                    try { onSkip(); } catch (e) {}
+                }
+            } else if (status === "skipped") {
+                track("ad_skipped", { type: "rewarded", placement: placement });
+                try { onSkip(); } catch (e) {}
+            } else {
+                // "error" (SDK threw) or "timeout" (no ad started in time): no reward.
+                track("ad_error", { type: "rewarded", placement: placement, reason: status });
+                try { onError(); } catch (e) {}
+            }
+        }
+
+        try {
+            adapter.showRewarded(
+                onStart,
+                function () { settle("complete"); },
+                function () { settle("error"); }
+            );
+        } catch (e) {
+            settle("error");
+        }
     }
 
     window.ads = {

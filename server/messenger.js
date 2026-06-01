@@ -25,6 +25,62 @@ var mailBoxList = {},
 	roomMailList = {},
 	io;
 
+// ---- Rewarded "2× match XP" claim state ------------------------------------------------
+// The rewarded-video reward (docs/ads-monetization-plan.md) tops up a signed-in player's
+// match XP when they watch an ad on the results screen. To validate a claim WITHOUT a DB
+// read per attempt — and without touching game.js — we stash each match's per-user earned
+// XP the instant `startGameover` is emitted (at that point the playerList still holds this
+// match's notches; resetForRace hasn't run). The stash lives on the Room object, is
+// overwritten every match, and a matchId + TTL + single-claim flag guard against replay.
+var REWARD_CLAIM_TTL_MS = 90 * 1000;   // a claim is only valid within 90s of gameOver
+var rewardedMatchSeq = 0;              // monotonic — makes each matchId unique per process
+
+// Recompute one signed-in human's match XP the SAME way game.js awardProgression does
+// (participation + per-notch + win + runner-up bonuses, all from config). Kept in lockstep
+// with that breakdown; the headless ads test asserts this equals the engine's own award so
+// the duplication can't silently drift.
+function matchXpForPlayer(p, isWinner, isRunnerUp) {
+	var total = c.xpParticipate;
+	total += c.xpPerNotch * (p.notches || 0);
+	if (isWinner) { total += c.xpWinBonus; }
+	if (isRunnerUp) { total += c.xpRunnerUpBonus; }
+	return total;
+}
+
+// Stamp a server-authoritative matchId onto the outgoing startGameover packet and stash this
+// match's per-user earned XP for later rewarded-bonus claims. Called from messageRoomBySig
+// (the single emit path game.js uses) so no game.js edit is needed. Mutates + returns payload.
+function stampRewardedMatch(sig, payload) {
+	var room = hostess.getRoomBySig(sig);
+	if (!room || !room.game || !room.game.playerList || !payload) {
+		return payload;
+	}
+	var pl = room.game.playerList;
+	var winnerId = (payload.winner != null) ? String(payload.winner) : null;
+	// Runner-up = highest-notch non-winner (mirrors awardProgression; first/secondPlaceSig are
+	// null on the match-ending tick, so derive from the durable notch score instead).
+	var runnerUpId = null, bestNotches = -1;
+	for (var rid in pl) {
+		if (rid === winnerId || pl[rid] == null) { continue; }
+		var rn = pl[rid].notches || 0;
+		if (rn > bestNotches) { bestNotches = rn; runnerUpId = rid; }
+	}
+	var matchId = 'm' + (++rewardedMatchSeq) + '-' + Date.now();
+	var claims = {};
+	for (var id in pl) {
+		var p = pl[id];
+		// Only signed-in humans who actually raced earn XP -> only they can claim a multiplier.
+		if (p == null || p.isAI || !p.verifiedUserId || !p.racedCurrentMap) { continue; }
+		var xpDelta = matchXpForPlayer(p, id === winnerId, id === runnerUpId);
+		if (xpDelta > 0) {
+			claims[p.verifiedUserId] = { xpDelta: xpDelta, claimed: false };
+		}
+	}
+	room.rewardedMatch = { matchId: matchId, gameOverTs: Date.now(), claims: claims };
+	payload.matchId = matchId;   // the client echoes this back in claimXpMultiplier
+	return payload;
+}
+
 // Persist one cosmetic-slot equip for a signed-in player (best-effort, behind the
 // global writes gate inside auth.saveCosmetic). Guests / writes-off are a no-op.
 function persistCosmetic(userId, slot, id) {
@@ -129,6 +185,10 @@ exports.getClient = function (id) {
 	return mailBoxList[id];
 }
 exports.messageRoomBySig = function (sig, header, payload) {
+	// Rewarded-XP: stamp a matchId + stash this match's per-user earned XP as the
+	// results screen goes up, so a later claimXpMultiplier can be validated without a
+	// DB read and without any game.js edit (this is the single startGameover emit path).
+	if (header === 'startGameover') { payload = stampRewardedMatch(sig, payload); }
 	messageRoomBySig(sig, header, payload);
 }
 exports.messageClientBySig = function (sig, header, payload) {
@@ -739,6 +799,61 @@ function checkForMail(client) {
 		if (player != null) {
 			player.wakeUp();
 		}
+	});
+
+	// Rewarded video: a signed-in player watched a "2× match XP" ad on the results screen.
+	// Validate + credit a one-time bonus = original match XP * (multiplier-1), all computed
+	// server-side (the multiplier is a server constant, NEVER trusted from the client). The
+	// client onReward is only a signal — these guards (signed-in + matchId + TTL + single-claim)
+	// are the anti-abuse. GameMonetize's HTML5 SDK exposes no rewarded-completion S2S postback,
+	// so the gold-standard server postback is a documented follow-up (ads-monetization-plan.md).
+	client.on('claimXpMultiplier', function (payload) {
+		// 1. Signed-in only — guests have no progression to multiply. Silently ignore.
+		if (!client.userId) { return; }
+		var matchId = payload && payload.matchId;
+		if (!matchId) { return; }
+		var room = hostess.getRoomBySig(roomMailList[client.id]);
+		if (!room || !room.rewardedMatch) { return; }
+		var rm = room.rewardedMatch;
+		// 2. matchId must be THIS room's most-recently-completed match.
+		if (rm.matchId !== matchId) { return; }
+		// 3. Within the TTL since gameOver (server-stamped).
+		if (Date.now() - rm.gameOverTs > REWARD_CLAIM_TTL_MS) { return; }
+		var entry = rm.claims[client.userId];
+		if (!entry) { return; }          // earned no XP this match (didn't race / wasn't signed in then)
+		// 4. Single-claim guard. Set BEFORE the async persist so a rapid double-emit can't double-credit.
+		if (entry.claimed) { return; }
+		entry.claimed = true;
+		// 5/6. Bonus computed server-side from the stashed delta + the fixed multiplier.
+		var bonus = progression.rewardedBonusXp(entry.xpDelta);
+		if (bonus <= 0) { entry.claimed = false; return; }
+		// 7. Persist (writes-gated inside addProgression; a no-op locally). suppressToasts: the
+		//    client shows its own immediate xpBonus toast, so don't also queue a lobby "+N XP".
+		auth.addProgression(client.userId, { xpDelta: bonus, suppressToasts: true })
+			.then(function (row) {
+				var live = mailBoxList[client.id];
+				if (!live) { return; }
+				// Refresh the lobby Lv/XP badge with the new authoritative totals (writes-on only).
+				if (row) {
+					var pp = buildProgressionPayload(row);
+					if (pp) { live.emit('progressionUpdate', pp); }
+				}
+				// 8. Ack so the client toasts the bonus + fires reward_claimed. Emitted even when
+				//    writes are gated (row null) so the UX stays testable locally — the bonus was
+				//    still computed, just not persisted.
+				live.emit('xpBonus', {
+					matchId: matchId,
+					bonus: bonus,
+					multiplier: progression.XP_MULTIPLIER_REWARDED,
+					xp: row ? row.xp : null,
+					level: row ? row.level : null
+				});
+			})
+			.catch(function (e) {
+				// Persist failed — let the player retry (they watched the ad in good faith).
+				entry.claimed = false;
+				console.log('[rewarded] claim persist failed:', e && e.message);
+			});
 	});
 
 	// Star-rate the map you just played. Allowed on the per-round OVERVIEW (rate it

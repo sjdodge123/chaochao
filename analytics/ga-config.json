@@ -31,6 +31,24 @@
       "displayName": "Bot Trap Source",
       "scope": "EVENT",
       "description": "Which page's invisible honeypot decoy a bot tripped (landing | play). Attached to bot_trap events."
+    },
+    {
+      "parameterName": "type",
+      "displayName": "Ad Type",
+      "scope": "EVENT",
+      "description": "Ad format on ad_shown/ad_complete/ad_skipped/ad_error: interstitial | rewarded."
+    },
+    {
+      "parameterName": "placement",
+      "displayName": "Ad Placement",
+      "scope": "EVENT",
+      "description": "Where the ad fired on ad_* events: between_matches (interstitial) | xp_2x (rewarded results-screen reward)."
+    },
+    {
+      "parameterName": "bonus",
+      "displayName": "Reward Bonus",
+      "scope": "EVENT",
+      "description": "Which rewarded bonus a player claimed on reward_claimed: xp_2x (double match XP). Extensible to future rewarded options."
     }
   ],
   "customMetrics": [

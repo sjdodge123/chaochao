@@ -456,7 +456,10 @@ async function addProgression(userId, opts) {
             }
             // Build the celebration toasts for this match (shown on next lobby arrival, not
             // on the game-over screen). Appended to the durable pending_toasts queue.
-            var newToasts = progression.buildToastEvents({
+            // opts.suppressToasts skips this: the rewarded-XP claim path persists the bonus
+            // but announces it with its own immediate `xpBonus` toast on the results screen,
+            // so queuing a duplicate "+N XP" lobby toast would double-announce the same XP.
+            var newToasts = opts.suppressToasts ? [] : progression.buildToastEvents({
                 xpDelta: opts.xpDelta || 0,
                 oldLevel: oldLevel,
                 newLevel: newLevel,
