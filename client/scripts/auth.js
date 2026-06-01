@@ -280,11 +280,6 @@
         getProfile: getProfile,
         signIn: signIn,
         signOut: signOut,
-        isSignedIn: function () { return !!currentUser; },
-        // The signed-in account id (Supabase user UUID), or null for guests. Lets
-        // client code namespace per-account local state — e.g. the cosmetic mirror
-        // in localStorage — so a prior guest session's (or another account's) picks
-        // can't bleed in and clobber this account's server-saved cosmetics on sign-in.
-        getUserId: function () { return currentUser ? currentUser.id : null; }
+        isSignedIn: function () { return !!currentUser; }
     };
 })();

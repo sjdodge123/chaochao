@@ -99,7 +99,8 @@ revoke insert, update, delete on public.progression from anon, authenticated;
 ## Guardrails (operator's standing rules)
 - **Never write to prod.** Dev only. Prod is dump-only / never a standing MCP connection.
 - **Schema, not data.** Don't copy user rows (PII).
-- **Writes gate:** any local server test that writes uses `ALLOW_SUPABASE_WRITES=true`
-  INLINE at launch (never in `.env`); stop that instance + delete test rows when done.
+- **Writes:** go live automatically against whatever DB is configured. Point local `.env`
+  at the DEV project — a built-in tripwire (`server/auth.js`) blocks writes when a non-Heroku
+  host targets the prod project, so the dev URL is the guard. No manual flag to flip.
 - The progression feature PR must NOT contain any `.mcp.json` or Supabase credential.
 ```

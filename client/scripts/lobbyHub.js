@@ -479,28 +479,25 @@ var COSMETIC_OPTIONS = (function () {
     return out;
 })();
 
-// --- per-slot localStorage persistence (instant re-equip; server re-validates) -------
-// Keyed PER COUCH-PLAYER SLOT (lp.slot), not just the cosmetic slot — otherwise local
-// co-op players on the same browser share one key and clobber each other (and the
-// welcome-time re-equip then applies one player's saved pick to everyone).
+// --- localStorage cosmetic mirror — GUESTS ONLY (instant re-equip; server re-validates) ----
+// Signed-in players are driven entirely by their server progression row: the server persists
+// every equip to the DB and restorePersistedCosmetics re-applies it on every join (incl.
+// mid-match and the moment they sign in). So for a signed-in player we DON'T touch
+// localStorage at all — neither write nor replay. Replaying a stale local pick would re-emit
+// setCosmetic and persist it back to the DB, clobbering a newer choice made on another device
+// (and, on sign-in, the account's saved look). Guests + co-op extras have no DB, so the local
+// mirror is their only persistence; it's keyed per couch-player slot so they don't collide.
+function isAccountSlot(lp) {
+    var auth = (typeof window !== "undefined") ? window.chaochaoAuth : null;
+    return !!(lp && typeof primarySlot !== "undefined" && lp.slot === primarySlot &&
+        auth && typeof auth.isSignedIn === "function" && auth.isSignedIn());
+}
 function cosmeticStorageKey(lp, slot) {
     var who = (lp && lp.slot != null) ? lp.slot : 'p';
-    // Signed-in players persist cosmetics to their ACCOUNT — the server's progression
-    // row is the source of truth (restorePersistedCosmetics applies it on every join,
-    // incl. mid-match and the moment they sign in). Namespace this browser's local
-    // mirror by the account id for the primary couch slot so a previous guest session's
-    // picks — or a different account's — can never be re-equipped and clobber the
-    // signed-in account's saved cosmetics on sign-in. Guests + co-op extras keep the
-    // plain per-couch-slot key (their only persistence is local).
-    var auth = (typeof window !== "undefined") ? window.chaochaoAuth : null;
-    if (lp && typeof primarySlot !== "undefined" && lp.slot === primarySlot &&
-        auth && typeof auth.getUserId === "function") {
-        var uid = auth.getUserId();
-        if (uid) { who = "acct-" + uid; }
-    }
     return "cc_cosmetic_" + who + "_" + slot;
 }
 function saveCosmeticLocal(lp, slot, id) {
+    if (isAccountSlot(lp)) { return; } // signed-in: the DB is the source of truth, not localStorage
     try {
         if (id == null) { localStorage.removeItem(cosmeticStorageKey(lp, slot)); }
         else { localStorage.setItem(cosmeticStorageKey(lp, slot), id); }
@@ -511,9 +508,11 @@ function readCosmeticLocal(lp, slot) {
 }
 // Re-send each saved cosmetic slot for a local player on (re)join so their picks apply
 // instantly without reopening the picker. The server re-validates + rejects silently if
-// the player no longer qualifies (e.g. signed out of the account that unlocked it).
+// the player no longer qualifies. Signed-in players are skipped entirely — their look is
+// restored authoritatively from the DB (restorePersistedCosmetics), so replaying a stale
+// local value here could overwrite a newer pick made elsewhere.
 function reEquipSavedCosmetics(lp) {
-    if (!lp || !lp.socket) { return; }
+    if (!lp || !lp.socket || isAccountSlot(lp)) { return; }
     for (var g = 0; g < COSMETIC_GROUPS.length; g++) {
         var slot = COSMETIC_GROUPS[g].slot;
         var id = readCosmeticLocal(lp, slot);
