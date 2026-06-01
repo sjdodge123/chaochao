@@ -2252,32 +2252,94 @@ function drawGearSkin(ctx, anim, paint) {
   ctx.restore();
 }
 
+// ============================================================================
+// COSMETIC RENDER CACHES (perf) — see docs/spikes/skin-render-perf.md
+// ----------------------------------------------------------------------------
+// Several equipped cosmetics re-ran expensive procedural drawing (hundreds of
+// per-frame gradients, repeated trig, many small paths) EVERY frame, scaling
+// linearly with how many karts wear them. The fix mirrors getPlayerSprite's
+// offscreen-canvas caching: render the STATIC layer of a skin once per
+// (id, colour) and blit it, leaving only the genuinely-animated bits to draw
+// live on top.
+//
+// getCachedSkinLayer(key, build): renders build(c2d) once into a fixed-size
+// offscreen canvas whose context is set up in the SAME normalized [-1,1] space
+// the painters use. Callers blit it with `ctx.drawImage(cv, -1, -1, 2, 2)` into
+// the already-translated+scaled kart ctx, so heading rotation, the punch-pop
+// scale, and any per-frame rotation/sheen still compose on top for free. The
+// cache key is (id|colour) only — never the live transform — so punch/zoom/DPR
+// never thrash it. 256px comfortably exceeds a kart's on-screen device size at
+// any zoom/DPR, so the blit only ever downscales (stays crisp).
+var SKIN_LAYER_CACHE_PX = 256;
+var _skinLayerCache = {};
+function getCachedSkinLayer(key, build) {
+  var cv = _skinLayerCache[key];
+  if (cv != null) return cv;
+  var px = SKIN_LAYER_CACHE_PX;
+  cv = document.createElement("canvas");
+  cv.width = px; cv.height = px;
+  var c = cv.getContext("2d");
+  c.translate(px / 2, px / 2);
+  c.scale(px / 2, px / 2);          // normalized [-1,1] fills the canvas
+  build(c);
+  _skinLayerCache[key] = cv;
+  return cv;
+}
+
+// getCachedGlyphSprite(key, span, build): like the above but for a SMALL repeated
+// glyph (e.g. a polka dot) drawn once in a normalized [-span,span] box and blitted
+// many times per frame. `cv._span` records the box so callers can size the blit.
+var _glyphSpriteCache = {};
+function getCachedGlyphSprite(key, span, build) {
+  var cv = _glyphSpriteCache[key];
+  if (cv != null) return cv;
+  var px = 64;
+  cv = document.createElement("canvas");
+  cv.width = px; cv.height = px;
+  var c = cv.getContext("2d");
+  c.translate(px / 2, px / 2);
+  c.scale(px / (2 * span), px / (2 * span));   // normalized [-span,span] fills the canvas
+  build(c);
+  cv._span = span;
+  _glyphSpriteCache[key] = cv;
+  return cv;
+}
+
 // 10. Spiral Galaxy — glowing arms in the player-colour hue, slowly rotating. (statue+spin)
 function drawGalaxySkin(ctx, anim, paint) {
   paint = paint || "#7a4fff";
-  ctx.beginPath(); ctx.arc(0, 0, 0.95, 0, Math.PI * 2);
-  var space = ctx.createRadialGradient(0, 0, 0.1, 0, 0, 0.95);
-  space.addColorStop(0, cartSkinShade(paint, -0.55)); space.addColorStop(1, "#06060f");
-  ctx.fillStyle = space; ctx.fill();
-  ctx.save();
-  ctx.beginPath(); ctx.arc(0, 0, 0.93, 0, Math.PI * 2); ctx.clip();
-  ctx.rotate(anim * 0.45);
-  for (var arm = 0; arm < 2; arm++) {
-    for (var s = 0; s < 26; s++) {
-      var th = s * 0.34 + arm * Math.PI;
-      var r = 0.08 + s * 0.034;
-      var x = Math.cos(th) * r, y = Math.sin(th) * r;
-      var br = 1 - r;
-      ctx.fillStyle = cartSkinShadeA(paint, 0.2 + 0.4 * br, 0.85);
-      ctx.beginPath(); ctx.arc(x, y, 0.09 * br + 0.02, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "rgba(255,255,255," + (0.5 * br) + ")";
-      ctx.beginPath(); ctx.arc(x, y, 0.03 * br + 0.008, 0, Math.PI * 2); ctx.fill();
+  // The space-disc and core are radially symmetric and the spiral arms only ROTATE,
+  // so the whole galaxy is a static sprite that we rotate-blit — instead of stamping
+  // ~100 arm dots + 3 radial gradients every frame. (Rotating the symmetric disc/core
+  // with the blit is visually identical.)
+  var cv = getCachedSkinLayer("galaxy|" + paint, function (c) {
+    c.beginPath(); c.arc(0, 0, 0.95, 0, Math.PI * 2);
+    var space = c.createRadialGradient(0, 0, 0.1, 0, 0, 0.95);
+    space.addColorStop(0, cartSkinShade(paint, -0.55)); space.addColorStop(1, "#06060f");
+    c.fillStyle = space; c.fill();
+    c.save();
+    c.beginPath(); c.arc(0, 0, 0.93, 0, Math.PI * 2); c.clip();
+    for (var arm = 0; arm < 2; arm++) {
+      for (var s = 0; s < 26; s++) {
+        var th = s * 0.34 + arm * Math.PI;
+        var r = 0.08 + s * 0.034;
+        var x = Math.cos(th) * r, y = Math.sin(th) * r;
+        var br = 1 - r;
+        c.fillStyle = cartSkinShadeA(paint, 0.2 + 0.4 * br, 0.85);
+        c.beginPath(); c.arc(x, y, 0.09 * br + 0.02, 0, Math.PI * 2); c.fill();
+        c.fillStyle = "rgba(255,255,255," + (0.5 * br) + ")";
+        c.beginPath(); c.arc(x, y, 0.03 * br + 0.008, 0, Math.PI * 2); c.fill();
+      }
     }
-  }
+    c.restore();
+    var core = c.createRadialGradient(0, 0, 0.02, 0, 0, 0.28);
+    core.addColorStop(0, "#fffaf0"); core.addColorStop(0.5, cartSkinShade(paint, 0.4)); core.addColorStop(1, cartSkinShadeA(paint, 0.2, 0));
+    c.fillStyle = core; c.beginPath(); c.arc(0, 0, 0.28, 0, Math.PI * 2); c.fill();
+  });
+  ctx.save();
+  ctx.rotate(anim * 0.45);
+  ctx.drawImage(cv, -1, -1, 2, 2);
   ctx.restore();
-  var core = ctx.createRadialGradient(0, 0, 0.02, 0, 0, 0.28);
-  core.addColorStop(0, "#fffaf0"); core.addColorStop(0.5, cartSkinShade(paint, 0.4)); core.addColorStop(1, cartSkinShadeA(paint, 0.2, 0));
-  ctx.fillStyle = core; ctx.beginPath(); ctx.arc(0, 0, 0.28, 0, Math.PI * 2); ctx.fill();
 }
 
 // 11. Snowflake — an icy player-colour crystal, slowly turning. (statue+spin)
@@ -2740,19 +2802,28 @@ function drawPolkaPattern(ctx, anim, paint) {
   var dot = cartComp(paint, 0.05);
   var hi = cartComp(paint, 0.5);
   var rim = cartSkinShadeA(paint, -0.25, 0.5);  // darker rim so dots read on light bases
+  // Every dot (fill + rim + highlight) is identical bar position and a global breathe scale,
+  // so render the UNIT dot once and blit it per cell instead of re-stamping ~50 arc+stroke+arc
+  // paths every frame. span 1.2 leaves room for the rim stroke that extends past radius 1.
+  var span = 1.2;
+  var spr = getCachedGlyphSprite("polka|" + paint, span, function (c) {
+    c.lineWidth = 0.18;
+    c.beginPath(); c.arc(0, 0, 1, 0, Math.PI * 2);
+    c.fillStyle = dot; c.fill();
+    c.strokeStyle = rim; c.stroke();
+    c.beginPath(); c.arc(-0.32, -0.32, 0.38, 0, Math.PI * 2);
+    c.fillStyle = hi; c.fill();
+  });
   var drift = (anim * 0.06) % sp;
   var breathe = 1 + 0.06 * Math.sin(anim * 2.2);
+  var R = r * breathe * span;   // blit half-extent: dot radius (×breathe) scaled out to the sprite box
+  var d = 2 * R;
   var row = 0;
-  ctx.lineWidth = r * 0.18;
   for (var dy = -1.05; dy <= 1.05; dy += sp) {
     var off = (row % 2) ? sp / 2 : 0;
     for (var dx = -1.05; dx <= 1.05; dx += sp) {
       var x = dx + off + drift;
-      ctx.beginPath(); ctx.arc(x, dy, r * breathe, 0, Math.PI * 2);
-      ctx.fillStyle = dot; ctx.fill();
-      ctx.strokeStyle = rim; ctx.stroke();
-      ctx.beginPath(); ctx.arc(x - r * 0.32, dy - r * 0.32, r * 0.38, 0, Math.PI * 2);
-      ctx.fillStyle = hi; ctx.fill();
+      ctx.drawImage(spr, x - R, dy - R, d, d);
     }
     row++;
   }
@@ -3020,17 +3091,24 @@ function drawPunchingBagPattern(ctx, anim, paint) {
 function drawCarbonPattern(ctx, anim, paint) {
   paint = paint || "#888";
   var cs = 0.085 + 0.075 * (1 - Ppat("cf_scale", 0.5));
-  var lite = cartSkinShade(paint, -0.16), dark = cartComp(paint, -0.4);
-  for (var iy = 0; iy * cs < 2.0; iy++) {
-    for (var ix = 0; ix * cs < 2.0; ix++) {
-      var x = -1.0 + ix * cs, y = -1.0 + iy * cs;
-      var dir = (ix + iy) % 2;
-      var g = dir ? ctx.createLinearGradient(x, y, x + cs, y + cs)
-                  : ctx.createLinearGradient(x + cs, y, x, y + cs);
-      g.addColorStop(0, lite); g.addColorStop(1, dark);
-      ctx.fillStyle = g; ctx.fillRect(x, y, cs + 0.006, cs + 0.006);
+  // The tiled carbon weave is identical every frame for a given (colour, scale): it was
+  // creating ~hundreds of tile gradients per frame (this pattern measured ~10x the slot
+  // median). Build the weave once into an offscreen layer and blit it.
+  var cv = getCachedSkinLayer("carbon|" + paint + "|" + cs.toFixed(3), function (c) {
+    var lite = cartSkinShade(paint, -0.16), dark = cartComp(paint, -0.4);
+    for (var iy = 0; iy * cs < 2.0; iy++) {
+      for (var ix = 0; ix * cs < 2.0; ix++) {
+        var x = -1.0 + ix * cs, y = -1.0 + iy * cs;
+        var dir = (ix + iy) % 2;
+        var g = dir ? c.createLinearGradient(x, y, x + cs, y + cs)
+                    : c.createLinearGradient(x + cs, y, x, y + cs);
+        g.addColorStop(0, lite); g.addColorStop(1, dark);
+        c.fillStyle = g; c.fillRect(x, y, cs + 0.006, cs + 0.006);
+      }
     }
-  }
+  });
+  ctx.drawImage(cv, -1, -1, 2, 2);
+  // Animated sheen sweep — one cheap gradient, drawn live over the cached weave.
   var sh = (anim * 0.4) % 2.4 - 1.2;
   var gg = ctx.createLinearGradient(sh - 0.5, -0.6, sh + 0.5, 0.6);
   gg.addColorStop(0, "rgba(255,255,255,0)");
@@ -3043,24 +3121,29 @@ function drawCarbonPattern(ctx, anim, paint) {
 function drawCamoPattern(ctx, anim, paint) {
   paint = paint || "#888";
   var scale = 0.7 + 0.9 * Ppat("cm_scale", 0.5);
-  ctx.fillStyle = cartSkinShade(paint, -0.05); ctx.fillRect(-1, -1, 2, 2);
-  var shades = [cartComp(paint, -0.3), cartSkinShade(paint, 0.2), cartComp(paint, -0.55)];
-  var rnd = srnd(1234);
-  for (var s = 0; s < shades.length; s++) {
-    ctx.fillStyle = shades[s];
-    for (var b = 0; b < 7; b++) {
-      var bx = -0.9 + rnd() * 1.8, by = -0.6 + rnd() * 1.2;
-      var n = 4 + ((rnd() * 4) | 0);
-      ctx.beginPath();
-      for (var k = 0; k < n; k++) {
-        var ox = bx + (rnd() - 0.5) * 0.34 * scale;
-        var oy = by + (rnd() - 0.5) * 0.26 * scale;
-        var rr = (0.07 + rnd() * 0.13) * scale;
-        ctx.moveTo(ox + rr, oy); ctx.arc(ox, oy, rr, 0, Math.PI * 2);
+  // Fully static (seeded RNG, no animation) — render once per (colour, scale) and blit,
+  // instead of re-stamping the same ~21 blotches every frame.
+  var cv = getCachedSkinLayer("camo|" + paint + "|" + scale.toFixed(3), function (c) {
+    c.fillStyle = cartSkinShade(paint, -0.05); c.fillRect(-1, -1, 2, 2);
+    var shades = [cartComp(paint, -0.3), cartSkinShade(paint, 0.2), cartComp(paint, -0.55)];
+    var rnd = srnd(1234);
+    for (var s = 0; s < shades.length; s++) {
+      c.fillStyle = shades[s];
+      for (var b = 0; b < 7; b++) {
+        var bx = -0.9 + rnd() * 1.8, by = -0.6 + rnd() * 1.2;
+        var n = 4 + ((rnd() * 4) | 0);
+        c.beginPath();
+        for (var k = 0; k < n; k++) {
+          var ox = bx + (rnd() - 0.5) * 0.34 * scale;
+          var oy = by + (rnd() - 0.5) * 0.26 * scale;
+          var rr = (0.07 + rnd() * 0.13) * scale;
+          c.moveTo(ox + rr, oy); c.arc(ox, oy, rr, 0, Math.PI * 2);
+        }
+        c.fill();
       }
-      ctx.fill();
     }
-  }
+  });
+  ctx.drawImage(cv, -1, -1, 2, 2);
 }
 
 // --- 10. Hazard Stripes -----------------------------------------------------
@@ -3120,17 +3203,24 @@ function drawScalesPattern(ctx, anim, paint) {
   paint = paint || "#888";
   var sz = 0.12 + 0.10 * Ppat("sc_size", 0.5);
   var rowH = sz * 0.72, row = 0;
+  // Each scale's gradient is purely VERTICAL (x0===x1), so its colour mapping depends only
+  // on y — every scale in a row is coloured identically regardless of x. Build the gradient
+  // ONCE per row (and hoist the constant stroke style) instead of once per scale: ~cols×
+  // fewer gradient objects per frame, pixel-for-pixel identical output.
+  var dark = cartComp(paint, -0.30);
+  ctx.strokeStyle = cartComp(paint, -0.5); ctx.lineWidth = 0.012;
   for (var y = -1.0; y < 1.06; y += rowH) {
     var off = (row % 2) ? sz : 0;
     var shimmer = 0.28 + 0.16 * Math.sin(anim * 2 + row * 0.6);
+    var g = ctx.createLinearGradient(0, y, 0, y + sz);
+    g.addColorStop(0, cartSkinShade(paint, shimmer));
+    g.addColorStop(1, dark);
+    ctx.fillStyle = g;
     for (var x = -1.0; x < 1.02; x += sz * 2) {
       var cx = x + off;
       ctx.beginPath(); ctx.arc(cx, y, sz, 0, Math.PI); ctx.closePath();
-      var g = ctx.createLinearGradient(cx, y, cx, y + sz);
-      g.addColorStop(0, cartSkinShade(paint, shimmer));
-      g.addColorStop(1, cartComp(paint, -0.30));
-      ctx.fillStyle = g; ctx.fill();
-      ctx.strokeStyle = cartComp(paint, -0.5); ctx.lineWidth = 0.012; ctx.stroke();
+      ctx.fill();
+      ctx.stroke();
     }
     row++;
   }
@@ -3218,15 +3308,27 @@ function drawHoneycombPattern(ctx, anim, paint) {
   paint = paint || "#888";
   var R = 0.10 + 0.09 * Ppat("hc_size", 0.5);
   var w = Math.sqrt(3) * R, hh = 1.5 * R, edge = cartComp(paint, 0.15), row = 0;
+  // Hex vertex offsets are constant for a given R — compute them once instead of re-running
+  // 6 cos/sin per cell every frame (~hundreds of trig calls/frame). The per-cell shimmer
+  // (fill colour) still animates and is drawn live. Stroke style hoisted out of the loop.
+  var hx = [], hy = [];
+  for (var k = 0; k < 6; k++) {
+    var a = Math.PI / 180 * (60 * k - 90);
+    hx.push(Math.cos(a) * R); hy.push(Math.sin(a) * R);
+  }
+  ctx.strokeStyle = edge; ctx.lineWidth = 0.02;
   for (var y = -1.05; y < 1.1; y += hh) {
     var off = (row % 2) ? w / 2 : 0;
     for (var x = -1.02; x < 1.06; x += w) {
       var cx = x + off;
-      hexPath(ctx, cx, y, R);
+      ctx.beginPath();
+      ctx.moveTo(cx + hx[0], y + hy[0]);
+      for (var kk = 1; kk < 6; kk++) ctx.lineTo(cx + hx[kk], y + hy[kk]);
+      ctx.closePath();
       var sh = 0.5 + 0.5 * Math.sin(anim * 2 - cx * 2 + y * 2);
       ctx.fillStyle = cartSkinShade(paint, -0.36 + 0.26 * sh);
       ctx.fill();
-      ctx.strokeStyle = edge; ctx.lineWidth = 0.02; ctx.stroke();
+      ctx.stroke();
     }
     row++;
   }
