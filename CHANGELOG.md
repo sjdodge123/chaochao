@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.27.3 — 2026-06-01
+
 ### General
 
 - Fully charged punches now land harder — a maxed charge hits about 50% stronger than before, so committing to the full wind-up pays off, especially from a standstill.
