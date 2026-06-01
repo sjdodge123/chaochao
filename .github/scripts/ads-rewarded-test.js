@@ -52,8 +52,9 @@ function loadAds(adsConfig) {
         // no isEmbedded -> treated as not embedded
         sdk: null
     };
+    const createdScripts = [];
     const fakeDoc = {
-        createElement: function () { return { setAttribute: function () {}, src: '', async: false, id: '', onload: null, onerror: null, style: {} }; },
+        createElement: function () { const el = { setAttribute: function () {}, src: '', async: false, id: '', onload: null, onerror: null, style: {} }; createdScripts.push(el); return el; },
         getElementById: function () { return null; },
         head: { appendChild: function () {} },
         documentElement: { appendChild: function () {} },
@@ -76,6 +77,8 @@ function loadAds(adsConfig) {
         tracked: tracked,
         // GameMonetize routes everything through window.SDK_OPTIONS.onEvent.
         fireSdk: function (name) { fakeWin.SDK_OPTIONS.onEvent({ name: name }); },
+        // AdinPlay marks the SDK ready via the injected script's onload — fire it.
+        fireScriptLoads: function () { createdScripts.forEach(function (s) { if (typeof s.onload === "function") { s.onload(); } }); },
         fireTimers: function () { const due = timers.splice(0, timers.length); due.forEach(function (t) { t.fn(); }); },
         hasEvent: function (name, type) { return tracked.some(function (e) { return e.name === name && (!type || e.params.type === type); }); }
     };
@@ -137,6 +140,40 @@ function testAdsGameMonetizeRewarded() {
     h4.fireTimers(); // fire the 8s watchdog
     check(!r4 && e4, 'no ad starting before the timeout is an ERROR');
     check(h4.tracked.some(function (ev) { return ev.name === 'ad_error' && ev.params.reason === 'timeout'; }), 'ad_error reason=timeout on request timeout');
+}
+
+function testAdsAdinPlayEarlyCloseIsSkip() {
+    console.log('ads.js — AdinPlay rewarded: an early close (AIP_REMOVE before COMPLETE) is a SKIP:');
+    // Mock the AdinPlay SDK: a cmd.player queue that runs callbacks immediately, and an aipPlayer
+    // constructor that captures the AIP_* config so we can drive the ad lifecycle by hand.
+    function setup() {
+        const h = loadAds({ provider: 'adinplay', publisherId: 'pub' });
+        let cfg = null;
+        h.win.aiptag = { cmd: { player: { push: function (fn) { fn(); } } } };
+        h.win.aipPlayer = function (c) { cfg = c; this.startPreRoll = function () {}; this.destroy = function () {}; };
+        h.fireScriptLoads();        // AdinPlay sets sdkReady on the script onload
+        return { h: h, cfg: function () { return cfg; } };
+    }
+
+    // Early close: AIP_START (impression) then AIP_REMOVE WITHOUT AIP_COMPLETE -> skip, no reward.
+    var a = setup();
+    check(a.h.ads.isRewardedAvailable() === true, 'rewarded available once the AdinPlay script loads');
+    var rewardedEarly = false, skippedEarly = false;
+    a.h.ads.showRewarded({ placement: 'xp_2x', onReward: function () { rewardedEarly = true; }, onSkip: function () { skippedEarly = true; } });
+    a.cfg().AIP_START();
+    a.cfg().AIP_REMOVE();   // closed before completing
+    check(!rewardedEarly && skippedEarly, 'AIP_REMOVE before AIP_COMPLETE grants NO reward (it is a skip)');
+    check(a.h.tracked.some(function (e) { return e.name === 'ad_skipped' && e.params.type === 'rewarded'; }), 'ad_skipped emitted on the early close');
+
+    // Full watch: AIP_START then AIP_COMPLETE -> reward. (A trailing AIP_REMOVE after complete is a no-op.)
+    var b = setup();
+    var rewardedFull = false;
+    b.h.ads.showRewarded({ placement: 'xp_2x', onReward: function () { rewardedFull = true; }, onSkip: function () {} });
+    b.cfg().AIP_START();
+    b.cfg().AIP_COMPLETE();
+    b.cfg().AIP_REMOVE();   // close after a real completion — must not double-fire
+    check(rewardedFull, 'AIP_COMPLETE grants the reward (full watch)');
+    check(b.h.tracked.filter(function (e) { return e.name === 'ad_complete' && e.params.type === 'rewarded'; }).length === 1, 'exactly one ad_complete — the post-complete AIP_REMOVE is a no-op');
 }
 
 // ---------------------------------------------------------------------------
@@ -260,7 +297,7 @@ async function testCreditAndSingleClaim() {
         await Promise.resolve(); await Promise.resolve();
         check(calls.length === 1, 'addProgression called exactly once');
         check(calls[0] && calls[0].userId === m.s1.userId && calls[0].opts.xpDelta === expectedBonus, 'credited xpDelta == original match XP (2x total): ' + (calls[0] && calls[0].opts.xpDelta) + ' === ' + expectedBonus);
-        check(calls[0].opts.suppressToasts === true, 'suppressToasts set (client shows its own xpBonus toast, no duplicate lobby toast)');
+        check(calls[0].opts.suppressXpToast === true, 'suppressXpToast set (client shows its own xpBonus toast; level-up/skin toasts are preserved)');
         check(progression.rewardedBonusXp(expectedBonus * 1) >= 0, 'rewardedBonusXp helper present');
         const ack = m.s1.lastEmit('xpBonus');
         check(!!ack && ack.bonus === expectedBonus && ack.matchId === matchId && ack.multiplier === 2, 'xpBonus ack carries bonus + matchId + server multiplier');
@@ -295,11 +332,37 @@ async function testRejections() {
         m.s1.userId = savedUid;
 
         // Expired TTL.
-        m.room.rewardedMatch.gameOverTs = Date.now() - (1000 * 1000); // way past the 90s TTL
+        m.room.rewardedMatch.gameOverTs = Date.now() - (1000 * 1000); // way past the 180s TTL
         m.s1.fire('claimXpMultiplier', { matchId: matchId, multiplier: 2 });
         await Promise.resolve(); await Promise.resolve();
         check(calls.length === 0, 'a claim past the TTL is rejected');
     });
+    teardown(m);
+}
+
+// P1-b: with writes ENABLED, a failed persist (addProgression resolves null) must NOT be acked
+// as success — no xpBonus, and the single-claim flag is reset so the watched ad can be retried.
+async function testWriteFailureNotAcked() {
+    console.log('Server — a failed persist (writes on) is not acked, claim resets for retry:');
+    const m = setupMatch('rw-fail');
+    if (!m) { check(false, 'room set up'); return; }
+    const matchId = m.room.rewardedMatch.matchId;
+    const origWrites = auth.writesEnabled;
+    const origAdd = auth.addProgression;
+    let calls = 0;
+    auth.writesEnabled = true;                 // pretend prod writes are on
+    auth.addProgression = function () { calls++; return Promise.resolve(null); }; // simulate DB failure
+    try {
+        m.s1.emits.length = 0;
+        m.s1.fire('claimXpMultiplier', { matchId: matchId, multiplier: 2 });
+        await Promise.resolve(); await Promise.resolve();
+        check(calls === 1, 'addProgression was attempted');
+        check(!m.s1.lastEmit('xpBonus'), 'NO xpBonus ack emitted on a failed write (ad not falsely credited)');
+        check(m.room.rewardedMatch.claims[m.s1.userId].claimed === false, 'single-claim flag reset -> the watched ad can be retried');
+    } finally {
+        auth.writesEnabled = origWrites;
+        auth.addProgression = origAdd;
+    }
     teardown(m);
 }
 
@@ -314,11 +377,13 @@ function testMultiplierConstant() {
     // Part A
     testAdsNoneProvider();
     testAdsGameMonetizeRewarded();
+    testAdsAdinPlayEarlyCloseIsSkip();
     // Part B
     testMultiplierConstant();
     await testStashMatchesEngineAward();
     await testCreditAndSingleClaim();
     await testRejections();
+    await testWriteFailureNotAcked();
 
     if (failures > 0) {
         console.log('\nRewarded-ads test FAILED with ' + failures + ' error(s).');

@@ -32,10 +32,11 @@ var mailBoxList = {},
 // XP the instant `startGameover` is emitted (at that point the playerList still holds this
 // match's notches; resetForRace hasn't run). The stash lives on the Room object, is
 // overwritten every match, and a matchId + TTL + single-claim flag guard against replay.
-// A claim is only valid within this window of gameOver. The offer is now a prompt at the
-// gameOver->lobby edge (a few seconds after gameOver) with a deliberate watch step, so this
-// covers the results window + the lobby decision + the ad playback comfortably.
-var REWARD_CLAIM_TTL_MS = 120 * 1000;
+// A claim is only valid within this window of gameOver. The offer is a lobby-edge toast (a few
+// seconds after gameOver) with a deliberate watch step. The CLIENT stops OFFERING well before
+// this (REWARD_OFFER_WINDOW_MS in client.js) so an ad is never started without enough headroom
+// to finish + claim inside this window; this server cap is the backstop + anti-replay bound.
+var REWARD_CLAIM_TTL_MS = 180 * 1000;
 var rewardedMatchSeq = 0;              // monotonic — makes each matchId unique per process
 
 // Recompute one signed-in human's match XP the SAME way game.js awardProgression does
@@ -830,30 +831,49 @@ function checkForMail(client) {
 		// 5/6. Bonus computed server-side from the stashed delta + the fixed multiplier.
 		var bonus = progression.rewardedBonusXp(entry.xpDelta);
 		if (bonus <= 0) { entry.claimed = false; return; }
-		// 7. Persist (writes-gated inside addProgression; a no-op locally). suppressToasts: the
-		//    client shows its own immediate xpBonus toast, so don't also queue a lobby "+N XP".
-		auth.addProgression(client.userId, { xpDelta: bonus, suppressToasts: true })
+		// 7. Persist (writes-gated inside addProgression). suppressXpToast: the client shows its
+		//    own xpBonus toast, so drop the duplicate lobby "+N XP" (but keep any level-up/skin).
+		auth.addProgression(client.userId, { xpDelta: bonus, suppressXpToast: true })
 			.then(function (row) {
 				var live = mailBoxList[client.id];
-				if (!live) { return; }
-				// Refresh the lobby Lv/XP badge with the new authoritative totals (writes-on only).
 				if (row) {
-					var pp = buildProgressionPayload(row);
-					if (pp) { live.emit('progressionUpdate', pp); }
+					// SUCCESS. Refresh the SERVER-side cached progression too (not just the
+					// browser) so a bonus that crosses a level threshold immediately gates
+					// setCosmetic equips for the newly-unlocked level skins — otherwise the
+					// server would keep rejecting them until the player rejoined.
+					var liveRoom = hostess.getRoomBySig(roomMailList[client.id]);
+					var rp = liveRoom && liveRoom.playerList ? liveRoom.playerList[client.id] : null;
+					if (rp) {
+						rp.progression = {
+							xp: row.xp, level: row.level,
+							unlocked_skins: row.unlocked_skins || [],
+							medal_counts: row.medal_counts || {},
+							wins: row.wins || 0
+						};
+						rp.progressionLoaded = true;
+					}
+					if (live) {
+						var pp = buildProgressionPayload(row);
+						if (pp) { live.emit('progressionUpdate', pp); }
+						// 8. Ack so the client toasts the bonus + fires reward_claimed.
+						live.emit('xpBonus', { matchId: matchId, bonus: bonus, multiplier: progression.XP_MULTIPLIER_REWARDED, xp: row.xp, level: row.level });
+					}
+				} else if (!auth.writesEnabled) {
+					// Writes DELIBERATELY off (local dev / no Supabase): the bonus was computed but
+					// not persisted. Ack anyway so the UX stays testable; xp/level are unknown.
+					if (live) {
+						live.emit('xpBonus', { matchId: matchId, bonus: bonus, multiplier: progression.XP_MULTIPLIER_REWARDED, xp: null, level: null });
+					}
+				} else {
+					// Writes ENABLED but the persist FAILED (CAS exhausted / DB error -> null row).
+					// Do NOT ack as success — that would consume a watched ad with no credit. Reset
+					// the single-claim flag so the player can retry; the client's ack-timeout re-offers.
+					entry.claimed = false;
+					console.log('[rewarded] claim persist returned null with writes enabled — retry allowed');
 				}
-				// 8. Ack so the client toasts the bonus + fires reward_claimed. Emitted even when
-				//    writes are gated (row null) so the UX stays testable locally — the bonus was
-				//    still computed, just not persisted.
-				live.emit('xpBonus', {
-					matchId: matchId,
-					bonus: bonus,
-					multiplier: progression.XP_MULTIPLIER_REWARDED,
-					xp: row ? row.xp : null,
-					level: row ? row.level : null
-				});
 			})
 			.catch(function (e) {
-				// Persist failed — let the player retry (they watched the ad in good faith).
+				// Persist threw — let the player retry (they watched the ad in good faith).
 				entry.claimed = false;
 				console.log('[rewarded] claim persist failed:', e && e.message);
 			});

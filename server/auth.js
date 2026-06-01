@@ -456,16 +456,20 @@ async function addProgression(userId, opts) {
             }
             // Build the celebration toasts for this match (shown on next lobby arrival, not
             // on the game-over screen). Appended to the durable pending_toasts queue.
-            // opts.suppressToasts skips this: the rewarded-XP claim path persists the bonus
-            // but announces it with its own immediate `xpBonus` toast on the results screen,
-            // so queuing a duplicate "+N XP" lobby toast would double-announce the same XP.
-            var newToasts = opts.suppressToasts ? [] : progression.buildToastEvents({
+            var builtToasts = progression.buildToastEvents({
                 xpDelta: opts.xpDelta || 0,
                 oldLevel: oldLevel,
                 newLevel: newLevel,
                 levelSkinsUnlocked: skinRegistry.levelSkinsUnlockedBetween,
                 freshAchievementSkins: freshAchievementSkins
             });
+            // opts.suppressXpToast: the rewarded-XP claim announces the bonus with its OWN
+            // `xpBonus` toast, so drop the duplicate "+N XP" event here — but KEEP any level-up
+            // and newly-unlocked level-skin toasts the bonus crosses (those aren't duplicated
+            // anywhere else and the player would otherwise gain them silently).
+            var newToasts = opts.suppressXpToast
+                ? builtToasts.filter(function (t) { return t.type !== 'xp'; })
+                : builtToasts;
             var existingToasts = (existingData && Array.isArray(existingData.pending_toasts))
                 ? existingData.pending_toasts : [];
             var mergedToasts = existingToasts.concat(newToasts);
