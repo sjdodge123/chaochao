@@ -155,6 +155,61 @@ function tfxTangent(verts, i) {
   return { x: dx / len, y: dy / len };
 }
 
+// ---- STABLE particle sampling (flicker fix) --------------------------------
+// Index-striding the vertex buffer (`for i+=floor(n/DENSITY)`) re-selects a
+// DIFFERENT subset of vertices every frame as the buffer slides (a vertex is
+// pushed at the head and shifted off the tail), so a glyph tied to a vertex
+// blinks in and out — the flicker on hearts/notes/etc. Instead we quantise each
+// vertex's ABSOLUTE timestamp into fixed `intervalMs` buckets and emit exactly
+// one particle per bucket, anchored to the OLDEST vertex in that bucket and
+// seeded by the bucket's canonical time. A given particle is therefore drawn at
+// the same place with the same jitter on every frame from spawn until it
+// expires — no popping. (The oldest vertex of a bucket only changes once it
+// ages off the front, by which point that particle has already faded out.)
+// cb(v, ts, age, i): v = anchor vertex {x,y,t}, ts = canonical bucket time (use
+// as the deterministic hash seed), age = now - ts in ms, i = anchor vertex index
+// (for tfxTangent etc.).
+function tfxForEachParticle(verts, now, fadeMs, intervalMs, cb) {
+  var n = verts.length;
+  var lastBucket = null;
+  for (var i = 0; i < n; i++) {
+    var v = verts[i];
+    var bucket = Math.floor(v.t / intervalMs);
+    if (bucket === lastBucket) continue;   // one particle per bucket → frame-stable set
+    lastBucket = bucket;
+    var ts = bucket * intervalMs;
+    var age = now - ts; if (age < 0) age = 0;
+    if (age >= fadeMs) continue;
+    cb(v, ts, age, i);
+  }
+}
+
+// ---- two-phase trail-particle motion (hug-the-path, THEN drift + fade) ------
+// All floating glyph trails used to drift the moment they spawned, so they never
+// actually traced the path you walked. tfxParticlePhase splits a particle's life
+// into: (1) a HOLD phase where it sits ON the trail vertex at full opacity (after
+// a quick fade-in so it doesn't pop), then (2) a DRIFT phase where it floats off
+// (up/down, effect's choice) AND fades to nothing. Effects multiply `drift`
+// (0→1 across the drift phase) into their rise/fall + sway offsets, and use
+// `alpha` directly (peaks at 1, falls to 0). Returns a SHARED scratch object
+// (read it immediately; do not retain) to stay allocation-free in the hot loop.
+var TFX_HOLD_FRAC = 0.5;        // fraction of life spent hugging the trail before drifting
+var TFX_FADE_IN_MS = 130;       // quick ramp-in so a freshly-spawned glyph doesn't pop on
+var _tfxPh = { drift: 0, alpha: 0, prog: 0, life: 0 };
+function tfxParticlePhase(age, fadeMs, holdFrac) {
+  var life = age / fadeMs;
+  _tfxPh.life = life;
+  if (holdFrac == null) holdFrac = TFX_HOLD_FRAC;
+  var fadeIn = age < TFX_FADE_IN_MS ? age / TFX_FADE_IN_MS : 1;
+  if (life <= holdFrac) {
+    _tfxPh.drift = 0; _tfxPh.prog = 0; _tfxPh.alpha = fadeIn;   // anchored on the path
+  } else {
+    var p = (life - holdFrac) / (1 - holdFrac);                 // 0→1 through the drift phase
+    _tfxPh.drift = p; _tfxPh.prog = p; _tfxPh.alpha = fadeIn * (1 - p);
+  }
+  return _tfxPh;
+}
+
 // ---- cached unit gradients (origin, radius 1; positioned via translate+scale) ----
 var _tfxBlob = {};   // hot core → transparent (comet head flare, survivor embers)
 function tfxBlobGrad(ctx, color) {
@@ -274,21 +329,20 @@ function drawDashesTrail(ctx, verts, color, now, fadeMs, anim) {
   ctx.restore();
 }
 
-// sparkle (Lv10) — scattered 4-point stars twinkling in place.
+// sparkle (Lv10) — scattered 4-point stars twinkling in place ON the path.
 function drawSparkleTrail(ctx, verts, color, now, fadeMs, anim) {
   if (verts.length < 2) return;
   var DENSITY = TP('sparkle','DENSITY',32), SIZE = TP('sparkle','SIZE',4), TWINKLE = TP('sparkle','TWINKLE',0.75), SPREAD = TP('sparkle','SPREAD',16);
+  var interval = Math.max(20, fadeMs / DENSITY);
   ctx.save();
   ctx.lineCap = "round";
-  var step = Math.max(1, Math.floor(verts.length / Math.max(1, DENSITY)));
-  for (var i = 0; i < verts.length; i += step) {
-    var v = verts[i];
-    var a0 = tfxAgeAlpha(v.t, now, fadeMs);
-    if (a0 <= 0.02) continue;
+  tfxForEachParticle(verts, now, fadeMs, interval, function (v, ts, age, i) {
+    var a0 = tfxClamp01(1 - age / fadeMs);
+    if (a0 <= 0.02) return;
     var tan = tfxTangent(verts, i);
     var nx = -tan.y, ny = tan.x;
     for (var s = 0; s < 2; s++) {
-      var seed = v.t + s * 9301 + i * 49297;
+      var seed = ts + s * 9301;
       var off = (tfxHash(seed) - 0.5) * 2 * SPREAD;
       var along = (tfxHash(seed + 7) - 0.5) * 6;
       var px = v.x + nx * off + tan.x * along;
@@ -309,7 +363,7 @@ function drawSparkleTrail(ctx, verts, color, now, fadeMs, anim) {
       ctx.fillStyle = tfxHot(color, 0.6, 1);
       ctx.beginPath(); ctx.arc(px, py, Math.max(0.6, sz * 0.22), 0, TFX_TAU); ctx.fill();
     }
-  }
+  });
   ctx.restore();
 }
 
@@ -374,41 +428,36 @@ function drawCometTrail(ctx, verts, color, now, fadeMs, anim) {
   ctx.restore();
 }
 
-// bubbles (Lv22) — rising rings that drift up and pop.
+// bubbles (Lv22) — bubbles cling to the path, then drift up + fade and pop.
 function drawBubblesTrail(ctx, verts, color, now, fadeMs, anim) {
   if (verts.length < 2) return;
-  // Tuning knobs. RISE is now the TOTAL px a bubble drifts up over its whole life (bounded),
-  // so bubbles hug the trail and fade instead of streaming hundreds of px up the screen.
-  var DENSITY = TP('bubbles','DENSITY',15);   // samples along the trail (fewer = lighter)
+  var DENSITY = TP('bubbles','DENSITY',15);   // particles along the trail (fewer = lighter)
   var SIZE = TP('bubbles','SIZE',8);      // base bubble radius (px)
-  var RISE = TP('bubbles','RISE',26);     // total rise over a bubble's life (px)
+  var RISE = TP('bubbles','RISE',28);     // total rise during the drift phase (px)
   var PEAK = TP('bubbles','PEAK',0.7);   // max opacity (lower = subtler)
+  var interval = Math.max(20, fadeMs / DENSITY);
   ctx.save();
   ctx.lineWidth = 1.2;
   // Constant colours/styles hoisted out of the per-bubble loop (only globalAlpha varies).
   ctx.strokeStyle = color;
   ctx.fillStyle = tfxHot(color, 0.75, 1);
-  var step = Math.max(1, Math.floor(verts.length / Math.max(1, DENSITY)));
-  for (var i = 0; i < verts.length; i += step) {
-    var v = verts[i];
-    var age = now - v.t;
-    var life = tfxClamp01(age / fadeMs);
-    if (life >= 1) continue;
+  tfxForEachParticle(verts, now, fadeMs, interval, function (v, ts, age) {
+    var ph = tfxParticlePhase(age, fadeMs);
     for (var k = 0; k < 2; k++) {
-      var seed = v.t + k * 6151 + i * 3911;
-      var rise = RISE * life * (0.6 + tfxHash(seed + 2) * 0.7);     // bounded (~ up to 30px)
-      var drift = Math.sin(life * 5 + tfxHash(seed) * TFX_TAU) * 4; // gentle horizontal wobble
+      var seed = ts + k * 6151;
+      var rise = RISE * ph.drift * (0.6 + tfxHash(seed + 2) * 0.7);
+      var drift = Math.sin(ph.life * 5 + tfxHash(seed) * TFX_TAU) * 4 * ph.drift; // gentle wobble as it rises
       var px = v.x + drift + (tfxHash(seed + 1) - 0.5) * 8;
       var py = v.y - rise;
       var r = SIZE * (0.45 + tfxHash(seed + 4) * 0.7);             // ~ up to 5.7px
-      var alpha = tfxClamp01(1 - life) * PEAK * (0.55 + 0.45 * tfxHash(seed + 6));
+      var alpha = ph.alpha * PEAK * (0.55 + 0.45 * tfxHash(seed + 6));
       if (alpha <= 0.03) continue;
       tfxAlpha(ctx, alpha);
       ctx.beginPath(); ctx.arc(px, py, r, 0, TFX_TAU); ctx.stroke();
       tfxAlpha(ctx, alpha * 0.85);
       ctx.beginPath(); ctx.arc(px - r * 0.35, py - r * 0.35, Math.max(0.5, r * 0.22), 0, TFX_TAU); ctx.fill();
     }
-  }
+  });
   ctx.restore();
 }
 
@@ -508,28 +557,23 @@ function drawGuardianTrail(ctx, verts, color, now, fadeMs, anim) {
   ctx.restore();
 }
 
-// survivor (achievement) — embers that rise, flicker, and linger before snuffing.
+// survivor (achievement) — embers smoulder on the path, then rise, flicker + fade.
 function drawSurvivorTrail(ctx, verts, color, now, fadeMs, anim) {
   if (verts.length < 2) return;
-  var DENSITY = TP('survivor','DENSITY',20), SIZE = TP('survivor','SIZE',4), FLICK = TP('survivor','FLICK',0.1), LINGER = TP('survivor','LINGER',0);
+  var DENSITY = TP('survivor','DENSITY',20), SIZE = TP('survivor','SIZE',4), FLICK = TP('survivor','FLICK',0.1), RISE = TP('survivor','RISE',60);
+  var interval = Math.max(20, fadeMs / DENSITY);
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
-  var step = Math.max(1, Math.floor(verts.length / Math.max(1, DENSITY)));
-  for (var i = 0; i < verts.length; i += step) {
-    var v = verts[i];
-    var age = now - v.t;
-    var lifeRaw = tfxClamp01(age / fadeMs);
-    var hold = 0.4 + LINGER * 0.5;
-    var life = lifeRaw < hold ? lifeRaw * 0.25 / hold : 0.25 + (lifeRaw - hold) / (1 - hold) * 0.75;
-    if (life >= 1) continue;
+  // embers linger longer on the path before lifting (smouldering feel)
+  tfxForEachParticle(verts, now, fadeMs, interval, function (v, ts, age) {
+    var ph = tfxParticlePhase(age, fadeMs, 0.6);
     for (var k = 0; k < 2; k++) {
-      var seed = v.t + k * 7193 + i * 2657;
-      var rise = (20 + 70) * (age / 1000) * (0.4 + tfxHash(seed) * 0.8);
-      var sway = Math.sin(age * 0.003 + tfxHash(seed + 1) * TFX_TAU) * 10;
+      var seed = ts + k * 7193;
+      var sway = Math.sin(age * 0.003 + tfxHash(seed + 1) * TFX_TAU) * 10 * ph.drift;
       var px = v.x + sway + (tfxHash(seed + 2) - 0.5) * 8;
-      var py = v.y - rise;
+      var py = v.y - RISE * ph.drift;
       var flick = 0.55 + 0.45 * Math.sin(anim * 0.001 * (6 + FLICK * 10) + tfxHash(seed + 3) * TFX_TAU);
-      var alpha = tfxClamp01(1 - life) * (0.4 + 0.6 * flick);
+      var alpha = ph.alpha * (0.4 + 0.6 * flick);
       if (alpha <= 0.03) continue;
       var r = SIZE * (0.5 + tfxHash(seed + 4) * 0.9) * (0.6 + 0.4 * flick);
       tfxAlpha(ctx, alpha);
@@ -539,7 +583,7 @@ function drawSurvivorTrail(ctx, verts, color, now, fadeMs, anim) {
       ctx.beginPath(); ctx.arc(0, 0, 1, 0, TFX_TAU); ctx.fill();
       ctx.restore();
     }
-  }
+  });
   ctx.restore();
 }
 
@@ -623,47 +667,45 @@ function drawBoltTrail(ctx, verts, color, now, fadeMs, anim) {
   ctx.restore();
 }
 
-// hearts — heart particles floating up off the path.
+// hearts — hearts ride the path you walked, then float up + fade once aged.
 function drawHeartsTrail(ctx, verts, color, now, fadeMs, anim) {
   var n = verts.length; if (n < 2) return;
-  var DENSITY = TP('hearts','DENSITY',15), SIZE = TP('hearts','SIZE',8.5);
-  var step = Math.max(1, Math.floor(n / DENSITY));
+  var DENSITY = TP('hearts','DENSITY',15), SIZE = TP('hearts','SIZE',8.5), RISE = TP('hearts','RISE',46);
+  var interval = Math.max(20, fadeMs / DENSITY);
   ctx.save();
-  for (var i = 0; i < n; i += step) {
-    var v = verts[i]; var age = now - v.t; var life = tfxClamp01(age / fadeMs); if (life >= 1) continue;
-    var seed = v.t;
-    var rise = 70 * (age / 1000) * (0.4 + tfxHash(seed) * 0.7);
-    var sway = Math.sin(age * 0.002 + tfxHash(seed + 1) * TFX_TAU) * 10;
-    var x = v.x + sway + (tfxHash(seed + 2) - 0.5) * 8;
-    var y = v.y - rise;
+  tfxForEachParticle(verts, now, fadeMs, interval, function (v, ts, age) {
+    var ph = tfxParticlePhase(age, fadeMs);
+    var alpha = ph.alpha; if (alpha <= 0.03) return;
+    var seed = ts;
+    var sway = Math.sin(age * 0.002 + tfxHash(seed + 1) * TFX_TAU) * 10 * ph.drift;
+    var x = v.x + sway + (tfxHash(seed + 2) - 0.5) * 6;
+    var y = v.y - RISE * ph.drift;
     var sz = SIZE * (0.6 + tfxHash(seed + 3) * 0.7);
-    var rot = Math.sin(age * 0.002 + tfxHash(seed + 4) * TFX_TAU) * 0.4;
-    var alpha = tfxClamp01((1 - life) * 1.2); if (alpha <= 0.03) continue;
+    var rot = Math.sin(age * 0.002 + tfxHash(seed + 4) * TFX_TAU) * 0.4 * (0.3 + 0.7 * ph.drift);
     ctx.save(); ctx.translate(x, y); ctx.rotate(rot); tfxAlpha(ctx, alpha);
     ctx.fillStyle = color; tfxHeartPath(ctx, sz); ctx.fill();
     tfxAlpha(ctx, alpha * 0.8); ctx.fillStyle = tfxHot(color, 0.6, 1);
     ctx.beginPath(); ctx.arc(-sz * 0.22, -sz * 0.32, sz * 0.14, 0, TFX_TAU); ctx.fill();
     ctx.restore();
-  }
+  });
   ctx.restore();
 }
 
-// smoke — soft puffs billowing outward and drifting up (no hot core).
+// smoke — soft puffs settle on the path, then billow up + fade as they age.
 function drawSmokeTrail(ctx, verts, color, now, fadeMs, anim) {
   var n = verts.length; if (n < 2) return;
-  var DENSITY = TP('smoke','DENSITY',21), SIZE = TP('smoke','SIZE',14);
-  var step = Math.max(1, Math.floor(n / DENSITY));
+  var DENSITY = TP('smoke','DENSITY',21), SIZE = TP('smoke','SIZE',14), RISE = TP('smoke','RISE',50);
+  var interval = Math.max(20, fadeMs / DENSITY);
   ctx.save();
-  for (var i = 0; i < n; i += step) {
-    var v = verts[i]; var age = now - v.t; var life = tfxClamp01(age / fadeMs); if (life >= 1) continue;
+  tfxForEachParticle(verts, now, fadeMs, interval, function (v, ts, age) {
+    var ph = tfxParticlePhase(age, fadeMs);
     for (var k = 0; k < 2; k++) {
-      var seed = v.t + k * 5333;
-      var rise = 55 * (age / 1000) * (0.4 + tfxHash(seed) * 0.8);
-      var drift = Math.sin(age * 0.0015 + tfxHash(seed + 1) * TFX_TAU) * 12;
+      var seed = ts + k * 5333;
+      var drift = Math.sin(age * 0.0015 + tfxHash(seed + 1) * TFX_TAU) * 12 * ph.drift;
       var x = v.x + drift + (tfxHash(seed + 2) - 0.5) * 10;
-      var y = v.y - rise;
-      var r = SIZE * (0.4 + life * 1.7) * (0.6 + tfxHash(seed + 3) * 0.6);
-      var alpha = tfxClamp01(1 - life) * 0.35 * (0.5 + tfxHash(seed + 4) * 0.6);
+      var y = v.y - RISE * ph.drift;
+      var r = SIZE * (0.4 + ph.life * 1.7) * (0.6 + tfxHash(seed + 3) * 0.6);
+      var alpha = ph.alpha * 0.35 * (0.5 + tfxHash(seed + 4) * 0.6);
       if (alpha <= 0.02) continue;
       tfxAlpha(ctx, alpha);
       ctx.save(); ctx.translate(x, y); ctx.scale(r, r);
@@ -671,54 +713,52 @@ function drawSmokeTrail(ctx, verts, color, now, fadeMs, anim) {
       ctx.beginPath(); ctx.arc(0, 0, 1, 0, TFX_TAU); ctx.fill();
       ctx.restore();
     }
-  }
+  });
   ctx.restore();
 }
 
-// confetti — rectangles tumbling and fluttering down.
+// confetti — flecks land on the path, then tumble + flutter down and fade.
 function drawConfettiTrail(ctx, verts, color, now, fadeMs, anim) {
   var n = verts.length; if (n < 2) return;
-  var DENSITY = TP('confetti','DENSITY',17), SIZE = TP('confetti','SIZE',3), SPIN = TP('confetti','SPIN',10);
-  var step = Math.max(1, Math.floor(n / DENSITY));
+  var DENSITY = TP('confetti','DENSITY',17), SIZE = TP('confetti','SIZE',3), SPIN = TP('confetti','SPIN',10), FALL = TP('confetti','FALL',34);
+  var interval = Math.max(20, fadeMs / DENSITY);
   ctx.save();
-  for (var i = 0; i < n; i += step) {
-    var v = verts[i]; var age = now - v.t; var life = tfxClamp01(age / fadeMs); if (life >= 1) continue;
+  tfxForEachParticle(verts, now, fadeMs, interval, function (v, ts, age) {
+    var ph = tfxParticlePhase(age, fadeMs);
+    var alpha = ph.alpha; if (alpha <= 0.03) return;
     for (var k = 0; k < 2; k++) {
-      var seed = v.t + k * 8101;
-      var fall = 50 * (age / 1000) * (0.5 + tfxHash(seed) * 0.9);
-      var sway = Math.sin(age * 0.003 + tfxHash(seed + 1) * TFX_TAU) * 14;
+      var seed = ts + k * 8101;
+      var sway = Math.sin(age * 0.003 + tfxHash(seed + 1) * TFX_TAU) * 14 * ph.drift;
       var x = v.x + sway + (tfxHash(seed + 2) - 0.5) * 12;
-      var y = v.y + fall - 6;
+      var y = v.y + FALL * ph.drift;
       var w = SIZE * (0.6 + tfxHash(seed + 3) * 0.8), h = w * 0.5;
       var spin = anim * 0.001 * (SPIN * 0.06) + tfxHash(seed + 4) * TFX_TAU;
       var squash = Math.abs(Math.cos(spin * 2)) * 0.8 + 0.2;
-      var alpha = tfxClamp01((1 - life) * 1.2); if (alpha <= 0.03) continue;
       ctx.save(); ctx.translate(x, y); ctx.rotate(spin); ctx.scale(1, squash);
       tfxAlpha(ctx, alpha);
       ctx.fillStyle = (k % 2 === 0) ? color : tfxHot(color, 0.5, 1);
       ctx.fillRect(-w / 2, -h / 2, w, h);
       ctx.restore();
     }
-  }
+  });
   ctx.restore();
 }
 
-// snow (Crystals) — 6-point ice crystals rotating and drifting down.
+// snow (Crystals) — crystals rest on the path, then rotate + drift down and fade.
 function drawSnowTrail(ctx, verts, color, now, fadeMs, anim) {
   var n = verts.length; if (n < 2) return;
-  var DENSITY = TP('snow','DENSITY',15), SIZE = TP('snow','SIZE',5), SPIN = TP('snow','SPIN',30);
-  var step = Math.max(1, Math.floor(n / DENSITY));
+  var DENSITY = TP('snow','DENSITY',15), SIZE = TP('snow','SIZE',5), SPIN = TP('snow','SPIN',30), FALL = TP('snow','FALL',24);
+  var interval = Math.max(20, fadeMs / DENSITY);
   ctx.save(); ctx.lineCap = "round";
-  for (var i = 0; i < n; i += step) {
-    var v = verts[i]; var age = now - v.t; var life = tfxClamp01(age / fadeMs); if (life >= 1) continue;
-    var seed = v.t;
-    var fall = 28 * (age / 1000) * (0.5 + tfxHash(seed) * 0.7);
-    var sway = Math.sin(age * 0.0016 + tfxHash(seed + 1) * TFX_TAU) * 12;
+  tfxForEachParticle(verts, now, fadeMs, interval, function (v, ts, age) {
+    var ph = tfxParticlePhase(age, fadeMs);
+    var alpha = ph.alpha; if (alpha <= 0.03) return;
+    var seed = ts;
+    var sway = Math.sin(age * 0.0016 + tfxHash(seed + 1) * TFX_TAU) * 12 * ph.drift;
     var x = v.x + sway + (tfxHash(seed + 2) - 0.5) * 8;
-    var y = v.y + fall - 4;
+    var y = v.y + FALL * ph.drift;
     var sz = SIZE * (0.6 + tfxHash(seed + 3) * 0.6);
     var rot = anim * 0.001 * (SPIN * 0.04) * (tfxHash(seed + 4) < 0.5 ? 1 : -1) + tfxHash(seed + 5) * TFX_TAU;
-    var alpha = tfxClamp01((1 - life) * 1.2); if (alpha <= 0.03) continue;
     ctx.save(); ctx.translate(x, y); ctx.rotate(rot); tfxAlpha(ctx, alpha);
     ctx.strokeStyle = color; ctx.lineWidth = Math.max(0.8, sz * 0.12);
     for (var a = 0; a < 3; a++) {
@@ -734,7 +774,7 @@ function drawSnowTrail(ctx, verts, color, now, fadeMs, anim) {
     ctx.fillStyle = tfxHot(color, 0.5, 1);
     ctx.beginPath(); ctx.arc(0, 0, sz * 0.16, 0, TFX_TAU); ctx.fill();
     ctx.restore();
-  }
+  });
   ctx.restore();
 }
 
@@ -776,33 +816,26 @@ function drawTracksTrail(ctx, verts, color, now, fadeMs, anim) {
   ctx.restore();
 }
 
-// notes (Music Notes) — note glyphs floating up, rocking.
+// notes (Music Notes) — notes ride the path you walked, then lift up + fade.
 function drawNotesTrail(ctx, verts, color, now, fadeMs, anim) {
   var n = verts.length; if (n < 2) return;
   var SIZE = TP('notes','SIZE',3.5);
-  var INTERVAL = TP('notes','INTERVAL',95);  // ms between notes — STABLE spawn cadence keyed on
-  var RISE = TP('notes','RISE',34);          // v.t (not array index), so notes don't flicker as
-  ctx.save();                                 // the vertex buffer slides. RISE = total px drift.
-  var lastBucket = null;
-  for (var i = 0; i < n; i++) {
-    var v = verts[i];
-    var bucket = Math.floor(v.t / INTERVAL);
-    if (bucket === lastBucket) continue;     // one note per INTERVAL — identical set every frame
-    lastBucket = bucket;
-    var age = now - v.t; var life = tfxClamp01(age / fadeMs); if (life >= 1) continue;
-    var seed = v.t;
-    var rise = RISE * Math.pow(life, 1.5) * (0.7 + tfxHash(seed) * 0.5); // ease-in: barely moves on spawn
-    var sway = Math.sin(age * 0.0018 + tfxHash(seed + 1) * TFX_TAU) * 6;
+  var INTERVAL = TP('notes','INTERVAL',95);  // ms between notes — one per bucket (frame-stable)
+  var RISE = TP('notes','RISE',38);          // total px the note lifts during its drift phase
+  ctx.save();
+  tfxForEachParticle(verts, now, fadeMs, INTERVAL, function (v, ts, age) {
+    var ph = tfxParticlePhase(age, fadeMs);
+    var alpha = ph.alpha; if (alpha <= 0.03) return;
+    var seed = ts;
+    var sway = Math.sin(age * 0.0018 + tfxHash(seed + 1) * TFX_TAU) * 6 * ph.drift;
     var x = v.x + sway + (tfxHash(seed + 2) - 0.5) * 6;
-    var y = v.y - rise;
+    var y = v.y - RISE * ph.drift;
     var sz = SIZE * (0.7 + tfxHash(seed + 3) * 0.6);
-    var rot = Math.sin(age * 0.0018 + tfxHash(seed + 4) * TFX_TAU) * 0.3;
-    var fadeIn = tfxClamp01(age / 160);      // ease alpha in so notes don't pop at full strength
-    var alpha = tfxClamp01(fadeIn * (1 - life) * 1.2); if (alpha <= 0.03) continue;
+    var rot = Math.sin(age * 0.0018 + tfxHash(seed + 4) * TFX_TAU) * 0.3 * (0.3 + 0.7 * ph.drift);
     ctx.save(); ctx.translate(x, y); ctx.rotate(rot); tfxAlpha(ctx, alpha);
     ctx.fillStyle = color; tfxNoteGlyph(ctx, sz);
     ctx.restore();
-  }
+  });
   ctx.restore();
 }
 
@@ -837,17 +870,17 @@ function drawNeonTrail(ctx, verts, color, now, fadeMs, anim) {
 function drawRippleTrail(ctx, verts, color, now, fadeMs, anim) {
   var n = verts.length; if (n < 2) return;
   var SPACING = TP('ripple','SPACING',21), GLOW = TP('ripple','GLOW',3);
+  var interval = Math.max(20, fadeMs / SPACING);
   ctx.save();
   if (tfxGlow()) { ctx.shadowColor = color; ctx.shadowBlur = GLOW; }
   ctx.strokeStyle = color;
-  var step = Math.max(1, Math.floor(n / SPACING));
-  for (var i = 0; i < n; i += step) {
-    var v = verts[i]; var life = tfxClamp01((now - v.t) / fadeMs); if (life >= 1) continue;
+  tfxForEachParticle(verts, now, fadeMs, interval, function (v, ts, age) {
+    var life = tfxClamp01(age / fadeMs);
     var R = 4 + life * 46;
-    var alpha = tfxClamp01(1 - life) * 0.8; if (alpha <= 0.03) continue;
+    var alpha = tfxClamp01(1 - life) * 0.8; if (alpha <= 0.03) return;
     tfxAlpha(ctx, alpha); ctx.lineWidth = Math.max(1, 2.5 * (1 - life));
     ctx.beginPath(); ctx.arc(v.x, v.y, R, 0, TFX_TAU); ctx.stroke();
-  }
+  });
   var head = verts[n - 1];
   tfxAlpha(ctx, 0.9); ctx.fillStyle = tfxHot(color, 0.5, 1);
   ctx.beginPath(); ctx.arc(head.x, head.y, 2.4, 0, TFX_TAU); ctx.fill();
