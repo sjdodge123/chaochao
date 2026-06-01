@@ -142,6 +142,14 @@ function testAdsGameMonetizeRewarded() {
     h4.fireTimers(); // fire the 8s watchdog
     check(!r4 && e4, 'no ad starting before the timeout is an ERROR');
     check(h4.tracked.some(function (ev) { return ev.name === 'ad_error' && ev.params.reason === 'timeout'; }), 'ad_error reason=timeout on request timeout');
+    // A SLOW provider that starts an ad AFTER the timeout must not sneak through: the timeout
+    // tore down the provider request (cleared the pending PAUSE/START), so a late PAUSE/START
+    // grants no reward and fires no late ad_shown.
+    var shownBefore = h4.tracked.filter(function (ev) { return ev.name === 'ad_shown'; }).length;
+    h4.fireSdk('SDK_GAME_PAUSE');
+    h4.fireSdk('SDK_GAME_START');
+    check(!r4, 'a late ad after timeout grants NO reward (provider request was torn down)');
+    check(h4.tracked.filter(function (ev) { return ev.name === 'ad_shown'; }).length === shownBefore, 'a late ad after timeout fires no ad_shown');
 }
 
 function testAdsAdinPlayEarlyCloseIsSkip() {
@@ -299,11 +307,11 @@ async function testStashMatchesEngineAward() {
     check(!!rm && !!rm.matchId, 'startGameover stashed a rewardedMatch with a matchId');
     const packet = ioEvents.filter(function (e) { return e.header === 'startGameover'; }).pop();
     check(packet && packet.payload.matchId == null, 'the broadcast startGameover packet does NOT carry matchId (eligibility is targeted, not broadcast)');
-    // Eligibility is delivered targeted, only to the credited racers, and carries the server
-    // gameOverTs so the client anchors its offer window to the server clock (not receipt time).
+    // Eligibility is delivered targeted, only to the credited racers, and carries the REMAINING
+    // claim lifetime as a duration (ttlMs) so the client deadline stays on a single clock.
     var elig1 = m.s1.lastEmit('rewardedEligible');
     check(elig1 && elig1.matchId === rm.matchId, 'winner received a targeted rewardedEligible with this matchId');
-    check(elig1 && elig1.gameOverTs === rm.gameOverTs, 'rewardedEligible carries the server gameOverTs (offer window anchored to server clock, not client receipt)');
+    check(elig1 && typeof elig1.ttlMs === 'number' && elig1.ttlMs > 0 && elig1.ttlMs <= 180000, 'rewardedEligible carries a remaining-lifetime duration (ttlMs), not a server timestamp');
     check(m.s2.lastEmit('rewardedEligible') && m.s2.lastEmit('rewardedEligible').matchId === rm.matchId, 'runner-up received a targeted rewardedEligible with this matchId');
     // Compare per-user stash to the engine's own awarded XP.
     const eng1 = engineXp(m.s1.userId);
@@ -313,6 +321,30 @@ async function testStashMatchesEngineAward() {
     // Sanity: matches the documented breakdown for a 5-notch win / 2-notch runner-up.
     check(eng1 === c.xpParticipate + c.xpPerNotch * 5 + c.xpWinBonus, 'winner award = participation + 5 notches + win bonus');
     check(eng2 === c.xpParticipate + c.xpPerNotch * 2 + c.xpRunnerUpBonus, 'runner-up award = participation + 2 notches + runner-up bonus');
+    teardown(m);
+}
+
+// A rewarded ad can finish during (or after) the NEXT match. The prior match's claim record
+// must survive a later match's stamp (kept per-matchId, pruned only past the TTL) so the
+// watched ad still pays out.
+async function testPriorMatchStillClaimable() {
+    console.log('Server — a prior match stays claimable after the next match ends (per-matchId records):');
+    const m = setupMatch('rw-prior');
+    if (!m) { check(false, 'room set up'); return; }
+    const matchA = m.room.rewardedMatch.matchId;
+    // Simulate a SECOND match ending in the same room (an ad from match A still in flight).
+    m.room.playerList[m.s1.id].notches = 3; m.room.playerList[m.s1.id].racedCurrentMap = true;
+    m.room.playerList[m.s2.id].notches = 1; m.room.playerList[m.s2.id].racedCurrentMap = true;
+    m.room.game.firstPlaceSig = m.s1.id; m.room.game.secondPlaceSig = m.s2.id;
+    m.room.game.gameOver(m.s1.id); // stamps match B; A must remain in the map
+    const matchB = m.room.rewardedMatch.matchId;
+    check(matchA !== matchB, 'the second match got a distinct matchId');
+    check(!!(m.room.rewardedMatches[matchA] && m.room.rewardedMatches[matchB]), 'both the prior (A) and current (B) match records are retained within the TTL');
+    await withFakeAddProgression(async function (calls) {
+        m.s1.fire('claimXpMultiplier', { matchId: matchA, multiplier: 2 });
+        await Promise.resolve(); await Promise.resolve();
+        check(calls.length === 1, "the PRIOR match's claim still succeeds after the next match ended");
+    });
     teardown(m);
 }
 
@@ -443,6 +475,7 @@ function testMultiplierConstant() {
     // Part B
     testMultiplierConstant();
     await testStashMatchesEngineAward();
+    await testPriorMatchStillClaimable();
     await testSpectatorNotOfferedEligibility();
     await testCreditAndSingleClaim();
     await testRejections();

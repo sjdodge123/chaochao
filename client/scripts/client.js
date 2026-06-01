@@ -45,8 +45,10 @@ var rewardOfferToastEl = null,
 // Stop OFFERING / launching an ad once the match is this old, so a full watch always finishes
 // inside the server's claim TTL (180s) — never let a player burn an ad on a claim the server
 // will reject as expired. currentMatchOfferTs is stamped when the match id is set (startGameover).
-var REWARD_OFFER_WINDOW_MS = 120 * 1000,
-	currentMatchOfferTs = 0,       // anchored to the SERVER gameOver time (from rewardedEligible)
+// Don't offer (or launch) an ad unless at least this much of the claim's lifetime remains, so a
+// full watch + claim finishes before the server TTL — never burn an ad on a doomed claim.
+var REWARD_AD_HEADROOM_MS = 60 * 1000,
+	rewardOfferExpiresAt = 0,      // client-clock deadline = receipt Date.now() + server ttlMs
 	rewardClaimAckTimer = null,    // awaiting the server's xpBonus ack after a watch
 	pendingClaimMatchId = null;    // the matchId of the claim we're awaiting an ack for
 
@@ -55,8 +57,10 @@ var REWARD_OFFER_WINDOW_MS = 120 * 1000,
 // claim, and it isn't already being watched / claimed.
 function rewardClaimable() {
 	if (!currentMatchId || rewardedClaimState !== "idle") { return false; }
-	// Expire the offer before launch: never start an ad we can't claim in time (server TTL).
-	if (Date.now() - currentMatchOfferTs > REWARD_OFFER_WINDOW_MS) { return false; }
+	// Expire the offer before launch: never start an ad we can't claim in time. The deadline is
+	// on the CLIENT clock (receipt-now + server-sent remaining lifetime), so a client/server
+	// clock skew can't hide a valid offer or launch an expired one. Keep ad-playback headroom.
+	if (Date.now() > rewardOfferExpiresAt - REWARD_AD_HEADROOM_MS) { return false; }
 	// DEV-ONLY — STRIP BEFORE PR: the localhost ?testrewarded=1 override also offers it to
 	// guests (so it's testable without local Supabase auth); the reward is then simulated
 	// client-side in triggerRewardWatch (no server credit — guests have no XP).
@@ -100,8 +104,16 @@ function triggerRewardWatch() {
 			}
 		},
 		onSkip: function () {
-			// No-fill / closed before completing — no toast, no credit.
+			// No-fill / closed before completing — no ad shown, no credit, the claim is unused.
 			if (rewardedClaimState === "watching") { rewardedClaimState = "idle"; }
+			// Re-offer so the eligible player can try again (the Watch click already removed the
+			// toast). Only in the lobby + still claimable — never pop a Watch prompt over a live
+			// race (the ad request can resolve after the next race has started).
+			var inLobby = (typeof config !== "undefined" && config && currentState === config.stateMap.lobby);
+			if (inLobby && rewardClaimable() && typeof flushRewardOffer === "function") {
+				rewardOfferPending = true;
+				flushRewardOffer();
+			}
 		},
 		onError: function () {
 			// SDK error / timeout — soft toast.
@@ -578,11 +590,12 @@ function registerConnectionHandlers(server) {
 	server.on('rewardedEligible', function (payload) {
 		if (!payload || payload.matchId == null) { return; }
 		currentMatchId = payload.matchId;
-		// Anchor the offer window to the SERVER's gameOver timestamp (not client receipt time):
-		// if this event is delivered late (suspended/backgrounded tab), the window must still
-		// reflect how long the SERVER has had the claim open, so we don't offer an ad for a
-		// claim that has already expired against the server TTL. Fall back to local now if absent.
-		currentMatchOfferTs = (typeof payload.gameOverTs === "number") ? payload.gameOverTs : Date.now();
+		// The server sends the REMAINING claim lifetime as a DURATION (ttlMs); turn it into a
+		// deadline on OUR clock. Single-clock, so no skew issue — and because it's a remaining
+		// lifetime (not a fixed window from "now"), a late-delivered event already reflects the
+		// time the server has burned. Default to a modest window if an older server omits it.
+		var ttlMs = (typeof payload.ttlMs === "number") ? payload.ttlMs : 90000;
+		rewardOfferExpiresAt = Date.now() + ttlMs;
 		rewardedClaimState = "idle";
 	});
 	server.on('xpBonus', function (payload) {
@@ -1202,7 +1215,7 @@ function registerStateHandlers(server) {
 		// an ad the claim handler would reject. currentMatchId is set by that handler; the prompt
 		// fires at the next startLobby (gameOver -> lobby edge), not here on the results screen.
 		currentMatchId = null;
-		currentMatchOfferTs = 0;
+		rewardOfferExpiresAt = 0;
 		rewardedClaimState = "idle";
 		// Bump the medals-card reveal nonce so its entrance animation replays for
 		// this match — even when the same player wins back-to-back (playerWon
