@@ -60,6 +60,7 @@ function loadAds(adsConfig) {
         documentElement: { appendChild: function () {} },
         body: null
     };
+    let clock = 1000;
     const ctx = {
         window: fakeWin,
         document: fakeDoc,
@@ -67,7 +68,7 @@ function loadAds(adsConfig) {
         encodeURIComponent: encodeURIComponent,
         setTimeout: function (fn, ms) { const id = timerSeq++; timers.push({ id: id, fn: fn }); return id; },
         clearTimeout: function (id) { for (let i = 0; i < timers.length; i++) { if (timers[i].id === id) { timers.splice(i, 1); break; } } },
-        Date: { now: function () { return 1000; } }
+        Date: { now: function () { return clock; } }
     };
     vm.createContext(ctx);
     vm.runInContext(fs.readFileSync(path.join(repoRoot, 'client', 'scripts', 'ads.js'), 'utf8'), ctx);
@@ -80,6 +81,7 @@ function loadAds(adsConfig) {
         // AdinPlay marks the SDK ready via the injected script's onload — fire it.
         fireScriptLoads: function () { createdScripts.forEach(function (s) { if (typeof s.onload === "function") { s.onload(); } }); },
         fireTimers: function () { const due = timers.splice(0, timers.length); due.forEach(function (t) { t.fn(); }); },
+        setNow: function (v) { clock = v; },
         hasEvent: function (name, type) { return tracked.some(function (e) { return e.name === name && (!type || e.params.type === type); }); }
     };
 }
@@ -174,6 +176,37 @@ function testAdsAdinPlayEarlyCloseIsSkip() {
     b.cfg().AIP_REMOVE();   // close after a real completion — must not double-fire
     check(rewardedFull, 'AIP_COMPLETE grants the reward (full watch)');
     check(b.h.tracked.filter(function (e) { return e.name === 'ad_complete' && e.params.type === 'rewarded'; }).length === 1, 'exactly one ad_complete — the post-complete AIP_REMOVE is a no-op');
+}
+
+// The interstitial and rewarded paths share GameMonetize's single showBanner()/PAUSE/START
+// slot. dismissInterstitial() runs at race start; it must tear down an in-flight INTERSTITIAL
+// but must NOT drop an in-flight REWARDED ad the player opted into (that would clear its
+// completion and silently deny the credit).
+function testDismissDoesNotKillRewarded() {
+    console.log('ads.js — dismissInterstitial() leaves an in-flight rewarded ad alone, but tears down an interstitial:');
+
+    // Rewarded in flight + race starts (dismissInterstitial) -> reward STILL granted on completion.
+    var h = loadAds({ provider: 'gamemonetize', publisherId: 'g' });
+    h.fireSdk('SDK_READY');
+    h.win.sdk = { showBanner: function () {} };
+    var rewarded = false;
+    h.ads.showRewarded({ placement: 'xp_2x', onReward: function () { rewarded = true; }, onSkip: function () {} });
+    h.fireSdk('SDK_GAME_PAUSE');     // rewarded ad actually started (adInFlight = 'rewarded')
+    h.ads.dismissInterstitial();      // next race starting — must be a no-op for a rewarded ad
+    h.fireSdk('SDK_GAME_START');     // ad finishes
+    check(rewarded, 'rewarded ad survives a race-start dismiss and still grants the reward');
+
+    // Interstitial in flight + race starts -> torn down (onClose fires).
+    var h2 = loadAds({ provider: 'gamemonetize', publisherId: 'g' });
+    h2.fireSdk('SDK_READY');
+    h2.win.sdk = { showBanner: function () {} };
+    h2.setNow(1000000);               // clear the 90s cooldown (last_ts = 0)
+    h2.ads.onMatchEnded();            // seed the cadence so canShowInterstitial() is true
+    var closed = false;
+    h2.ads.showInterstitial({ placement: 'between_matches', onClose: function () { closed = true; } });
+    h2.fireSdk('SDK_GAME_PAUSE');     // interstitial started (adInFlight = 'interstitial')
+    h2.ads.dismissInterstitial();     // race starting — tears it down
+    check(closed, 'an in-flight interstitial IS torn down at race start (onClose fires)');
 }
 
 // ---------------------------------------------------------------------------
@@ -378,6 +411,7 @@ function testMultiplierConstant() {
     testAdsNoneProvider();
     testAdsGameMonetizeRewarded();
     testAdsAdinPlayEarlyCloseIsSkip();
+    testDismissDoesNotKillRewarded();
     // Part B
     testMultiplierConstant();
     await testStashMatchesEngineAward();

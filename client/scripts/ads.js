@@ -57,6 +57,14 @@
     // dismissInterstitial() tear down an ad that's still up when the next race
     // starts, so an interstitial can never sit over live gameplay.
     var activeSettle = null;
+    // Which kind of ad is currently in flight: "interstitial" | "rewarded" | null.
+    // The interstitial and rewarded paths SHARE the provider plumbing (GameMonetize's
+    // single showBanner()/PAUSE/START slots; AdinPlay's single adplayer). They never run
+    // at the same time (mutually exclusive at the gameOver->lobby edge), but
+    // dismissInterstitial() runs at race start and must NOT tear down an in-flight REWARDED
+    // ad the player opted into — that would drop its completion and silently deny the credit.
+    // So dismiss only acts when an interstitial is in flight; a rewarded ad is left to finish.
+    var adInFlight = null;
 
     // ---- Small safe helpers ---------------------------------------------------
     function lsGet(key) {
@@ -444,6 +452,7 @@
             settled = true;
             clearTimeout(timer);
             activeSettle = null;
+            adInFlight = null;
             if (status === "complete") {
                 // Completion is only an impression if the ad actually started.
                 // A "complete" with no start is a NO-FILL (GameMonetize signals it
@@ -469,6 +478,7 @@
         // Expose this in-flight settle so dismissInterstitial() can tear it down if
         // the next race starts before the ad closes on its own.
         activeSettle = settle;
+        adInFlight = "interstitial";
 
         try {
             adapter.showInterstitial(
@@ -481,12 +491,18 @@
         }
     }
 
-    // Tear down any in-flight interstitial so it can't sit over live gameplay.
-    // Called when the next race is about to start (startGated / startRace). Asks the
-    // provider to drop the ad (best-effort — see each adapter's dismiss note), then
-    // settles the in-flight request as "cancelled" (no telemetry, fires onClose).
-    // No-op when nothing is showing.
+    // Tear down any in-flight INTERSTITIAL so it can't sit over live gameplay. Called when
+    // the next race is about to start (startGated / startRace). Asks the provider to drop the
+    // ad (best-effort — see each adapter's dismiss note), then settles the in-flight request as
+    // "cancelled" (no telemetry, fires onClose). No-op when nothing is showing.
+    //
+    // IMPORTANT: this must NOT touch an in-flight REWARDED ad. The two share the provider's
+    // single ad slot, but the rewarded one was opted into for a reward — dropping it at race
+    // start would clear its completion callback and silently deny the credit (and strand the
+    // client awaiting an ack). So we only tear down when an interstitial is what's in flight;
+    // a rewarded ad is left to finish on its own and pay out, even if the race has begun.
     function dismissInterstitial() {
+        if (adInFlight !== "interstitial") { return; }
         try {
             if (adapter && typeof adapter.dismiss === "function") { adapter.dismiss(); }
         } catch (e) { /* best-effort */ }
@@ -553,6 +569,7 @@
             if (settled) { return; }
             settled = true;
             clearTimeout(timer);
+            adInFlight = null;
             if (status === "complete") {
                 if (started) {
                     // Confirmed full watch -> grant the reward.
@@ -574,6 +591,7 @@
             }
         }
 
+        adInFlight = "rewarded";   // so dismissInterstitial() leaves this opted-in ad alone
         try {
             adapter.showRewarded(
                 onStart,
