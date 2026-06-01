@@ -241,7 +241,8 @@ function makeRecordingSocket(id) {
 // path so the room is hostess-registered and roomMailList is wired), set notches, force
 // the winner, and drive gameOver — which fires startGameover and so the rewarded stash.
 let matchSeq = 0;
-function setupMatch(prefix) {
+function setupMatch(prefix, opts) {
+    opts = opts || {};
     matchSeq++;
     const s1 = makeRecordingSocket(prefix + '-s1');
     const s2 = makeRecordingSocket(prefix + '-s2');
@@ -262,7 +263,9 @@ function setupMatch(prefix) {
     const p1 = room.playerList[s1.id];
     const p2 = room.playerList[s2.id];
     p1.isAI = false; p1.verifiedUserId = s1.userId; p1.notches = 5; p1.racedCurrentMap = true;
-    p2.isAI = false; p2.verifiedUserId = s2.userId; p2.notches = 2; p2.racedCurrentMap = true;
+    // opts.p2Spectator: p2 is a signed-in late-joiner who never raced this match — server must
+    // NOT credit them, so they must NOT be told they're eligible for the rewarded claim.
+    p2.isAI = false; p2.verifiedUserId = s2.userId; p2.notches = 2; p2.racedCurrentMap = !opts.p2Spectator;
     p1.progression = progression.defaultProgression(); p1.progressionLoaded = true;
     p2.progression = progression.defaultProgression(); p2.progressionLoaded = true;
     room.game.firstPlaceSig = s1.id;
@@ -295,7 +298,10 @@ async function testStashMatchesEngineAward() {
     const rm = m.room.rewardedMatch;
     check(!!rm && !!rm.matchId, 'startGameover stashed a rewardedMatch with a matchId');
     const packet = ioEvents.filter(function (e) { return e.header === 'startGameover'; }).pop();
-    check(packet && packet.payload.matchId === rm.matchId, 'the startGameover packet carries the same matchId (echoed to the client)');
+    check(packet && packet.payload.matchId == null, 'the broadcast startGameover packet does NOT carry matchId (eligibility is targeted, not broadcast)');
+    // Eligibility is delivered targeted, only to the credited racers.
+    check(m.s1.lastEmit('rewardedEligible') && m.s1.lastEmit('rewardedEligible').matchId === rm.matchId, 'winner received a targeted rewardedEligible with this matchId');
+    check(m.s2.lastEmit('rewardedEligible') && m.s2.lastEmit('rewardedEligible').matchId === rm.matchId, 'runner-up received a targeted rewardedEligible with this matchId');
     // Compare per-user stash to the engine's own awarded XP.
     const eng1 = engineXp(m.s1.userId);
     const eng2 = engineXp(m.s2.userId);
@@ -304,6 +310,25 @@ async function testStashMatchesEngineAward() {
     // Sanity: matches the documented breakdown for a 5-notch win / 2-notch runner-up.
     check(eng1 === c.xpParticipate + c.xpPerNotch * 5 + c.xpWinBonus, 'winner award = participation + 5 notches + win bonus');
     check(eng2 === c.xpParticipate + c.xpPerNotch * 2 + c.xpRunnerUpBonus, 'runner-up award = participation + 2 notches + runner-up bonus');
+    teardown(m);
+}
+
+// A signed-in late-joiner who never raced (spectator) is excluded server-side (no claims entry)
+// and must NOT be told they're eligible — so they're never offered an ad the server would reject.
+async function testSpectatorNotOfferedEligibility() {
+    console.log('Server — a signed-in spectator (never raced) is NOT sent rewardedEligible:');
+    const m = setupMatch('rw-spec', { p2Spectator: true });
+    if (!m) { check(false, 'room set up'); return; }
+    const rm = m.room.rewardedMatch;
+    check(!rm.claims[m.s2.userId], 'spectator has no server claim entry (excluded by racedCurrentMap)');
+    check(!!m.s1.lastEmit('rewardedEligible'), 'the racer IS told they are eligible');
+    check(!m.s2.lastEmit('rewardedEligible'), 'the spectator is NOT told they are eligible (no wasted-ad offer)');
+    // And a forged claim from the spectator is rejected (no entry).
+    await withFakeAddProgression(async function (calls) {
+        m.s2.fire('claimXpMultiplier', { matchId: rm.matchId, multiplier: 2 });
+        await Promise.resolve(); await Promise.resolve();
+        check(calls.length === 0, "a spectator's forged claim is rejected (no entry to credit)");
+    });
     teardown(m);
 }
 
@@ -415,6 +440,7 @@ function testMultiplierConstant() {
     // Part B
     testMultiplierConstant();
     await testStashMatchesEngineAward();
+    await testSpectatorNotOfferedEligibility();
     await testCreditAndSingleClaim();
     await testRejections();
     await testWriteFailureNotAcked();

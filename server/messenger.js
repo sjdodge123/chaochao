@@ -51,9 +51,11 @@ function matchXpForPlayer(p, isWinner, isRunnerUp) {
 	return total;
 }
 
-// Stamp a server-authoritative matchId onto the outgoing startGameover packet and stash this
-// match's per-user earned XP for later rewarded-bonus claims. Called from messageRoomBySig
-// (the single emit path game.js uses) so no game.js edit is needed. Mutates + returns payload.
+// Stash this match's per-user earned XP for later rewarded-bonus claims. Called from
+// messageRoomBySig (the single startGameover emit path) so no game.js edit is needed. The
+// matchId is NOT broadcast — it's delivered targeted, only to players the server actually
+// credited (see emitRewardedEligibility), so a spectator who never raced is never offered an ad
+// the server would then reject. Returns the payload unchanged.
 function stampRewardedMatch(sig, payload) {
 	var room = hostess.getRoomBySig(sig);
 	if (!room || !room.game || !room.game.playerList || !payload) {
@@ -81,8 +83,25 @@ function stampRewardedMatch(sig, payload) {
 		}
 	}
 	room.rewardedMatch = { matchId: matchId, gameOverTs: Date.now(), claims: claims };
-	payload.matchId = matchId;   // the client echoes this back in claimXpMultiplier
 	return payload;
+}
+
+// Tell ONLY the players the server actually credited that a rewarded 2× claim is available for
+// this match (server-authoritative eligibility — racedCurrentMap + earned XP). Sent AFTER the
+// broadcast startGameover (which the client uses to reset its rewarded state), so the targeted
+// `rewardedEligible` lands last and isn't clobbered by that reset. Ineligible players (spectators,
+// guests, bots) get nothing and so are never offered an ad the claim handler would reject.
+function emitRewardedEligibility(sig) {
+	var room = hostess.getRoomBySig(sig);
+	if (!room || !room.rewardedMatch || !room.game || !room.game.playerList) { return; }
+	var rm = room.rewardedMatch;
+	var pl = room.game.playerList;
+	for (var id in pl) {
+		var p = pl[id];
+		if (p == null || !p.verifiedUserId || !rm.claims[p.verifiedUserId]) { continue; }
+		var sock = mailBoxList[id];
+		if (sock) { sock.emit('rewardedEligible', { matchId: rm.matchId }); }
+	}
 }
 
 // Persist one cosmetic-slot equip for a signed-in player (best-effort, behind the
@@ -189,10 +208,16 @@ exports.getClient = function (id) {
 	return mailBoxList[id];
 }
 exports.messageRoomBySig = function (sig, header, payload) {
-	// Rewarded-XP: stamp a matchId + stash this match's per-user earned XP as the
-	// results screen goes up, so a later claimXpMultiplier can be validated without a
-	// DB read and without any game.js edit (this is the single startGameover emit path).
-	if (header === 'startGameover') { payload = stampRewardedMatch(sig, payload); }
+	// Rewarded-XP: stash this match's per-user earned XP as the results screen goes up, so a
+	// later claimXpMultiplier can be validated without a DB read and without any game.js edit
+	// (this is the single startGameover emit path). Then tell ONLY the credited players they're
+	// eligible — AFTER the broadcast, so the client's startGameover reset can't clobber it.
+	if (header === 'startGameover') {
+		payload = stampRewardedMatch(sig, payload);
+		messageRoomBySig(sig, header, payload);
+		emitRewardedEligibility(sig);
+		return;
+	}
 	messageRoomBySig(sig, header, payload);
 }
 exports.messageClientBySig = function (sig, header, payload) {

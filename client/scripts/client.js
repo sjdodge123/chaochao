@@ -111,9 +111,11 @@ function triggerRewardWatch() {
 
 // Guard against the server never acking a claim (TTL rejection / transient DB failure / dropped
 // socket). Without this the player would be stuck in 'claiming' forever after watching an ad.
-// On timeout: unstick to 'idle', tell the player, and — if the match is still within its offer
-// window — re-offer so the watched-but-uncredited ad isn't wasted (the server reset its
-// single-claim flag on failure, so a retry can succeed).
+// On timeout: unstick to 'idle', tell the player, and re-offer for a genuine retry — but ONLY
+// while still in the lobby and within the offer window. A rewarded ad is deliberately allowed to
+// finish after the race has started; if the timeout fires mid-race we must NOT launch another
+// full-screen Watch prompt over live gameplay. We record the retry as pending and let the next
+// lobby arrival surface it (gated by rewardClaimable, so a stale/expired match never re-offers).
 function startRewardClaimAckTimeout() {
 	if (rewardClaimAckTimer) { clearTimeout(rewardClaimAckTimer); }
 	rewardClaimAckTimer = setTimeout(function () {
@@ -121,10 +123,12 @@ function startRewardClaimAckTimeout() {
 		if (rewardedClaimState !== "claiming") { return; } // already acked
 		rewardedClaimState = "idle";
 		if (typeof enqueueProgressionToasts === "function") { enqueueProgressionToasts([{ type: "xp_bonus_failed" }]); }
-		// Re-offer for a genuine retry while still in time.
-		if (rewardClaimable() && typeof flushRewardOffer === "function") {
+		var inLobby = (typeof config !== "undefined" && config && currentState === config.stateMap.lobby);
+		if (inLobby && rewardClaimable() && typeof flushRewardOffer === "function") {
 			rewardOfferPending = true;
-			flushRewardOffer();
+			flushRewardOffer();          // safe: still in the lobby
+		} else {
+			rewardOfferPending = true;   // surface on the next lobby entry, never over a live race
 		}
 	}, 12000);
 }
@@ -495,7 +499,10 @@ function clearProgressionToasts() {
 	rewardOfferToastEl = null;
 	rewardOfferPending = false;
 	if (rewardOfferFallbackTimer) { clearTimeout(rewardOfferFallbackTimer); rewardOfferFallbackTimer = null; }
-	if (rewardClaimAckTimer) { clearTimeout(rewardClaimAckTimer); rewardClaimAckTimer = null; }
+	// NOTE: do NOT clear rewardClaimAckTimer here. A rewarded ad is deliberately allowed to
+	// finish after startGated, so a claim may still be awaiting its xpBonus ack across the race
+	// transition — killing the watchdog would strand the player in 'claiming' if that ack never
+	// arrives. The watchdog self-clears on the ack (xpBonus) or fires its own recovery.
 	if (typeof document !== "undefined" && document.querySelectorAll) {
 		var open = document.querySelectorAll(".cc-progression-toast");
 		for (var i = 0; i < open.length; i++) {
@@ -541,6 +548,14 @@ function registerConnectionHandlers(server) {
 	// event. The server already pushed a fresh progressionUpdate for the lobby badge (writes-on);
 	// we only handle the celebration + analytics here so the funnel match_end -> ad_shown ->
 	// ad_complete -> reward_claimed closes.
+	// Server-authoritative eligibility for the rewarded 2× offer: arrives (targeted) only for
+	// players the server credited this match — raced + earned XP. Binds the offer to this match.
+	server.on('rewardedEligible', function (payload) {
+		if (!payload || payload.matchId == null) { return; }
+		currentMatchId = payload.matchId;
+		currentMatchOfferTs = Date.now();   // start of this match's offer window
+		rewardedClaimState = "idle";
+	});
 	server.on('xpBonus', function (payload) {
 		var bonus = (payload && typeof payload.bonus === "number") ? payload.bonus : 0;
 		// Ack arrived — the claim succeeded. Cancel the retry watchdog and lock it in.
@@ -1146,12 +1161,13 @@ function registerStateHandlers(server) {
 		myMapRating = 0;
 		ratingStarHits = [];
 		ratingPadCursor = 0;
-		// Rewarded "2× match XP": bind to THIS match and reset its claim state so it can be
-		// earned once. matchId is server-stamped (absent from an older server -> the offer is
-		// never made, since rewardClaimable() requires it). The prompt fires at the next
-		// startLobby (gameOver -> lobby edge), not here on the results screen.
-		currentMatchId = (packet && packet.matchId != null) ? packet.matchId : null;
-		currentMatchOfferTs = Date.now();   // start of this match's offer window
+		// Rewarded "2× match XP": clear last match's state. We do NOT take the matchId from this
+		// broadcast — the server sends a TARGETED `rewardedEligible` (right after this) only to
+		// players it actually credited (raced + earned XP), so spectators/guests are never offered
+		// an ad the claim handler would reject. currentMatchId is set by that handler; the prompt
+		// fires at the next startLobby (gameOver -> lobby edge), not here on the results screen.
+		currentMatchId = null;
+		currentMatchOfferTs = 0;
 		rewardedClaimState = "idle";
 		// Bump the medals-card reveal nonce so its entrance animation replays for
 		// this match — even when the same player wins back-to-back (playerWon
