@@ -15,9 +15,10 @@ you ──► write SQL in supabase/migrations/NNNN_name.sql ──► PR ──
                                                               supabase db push ──► PROD
 ```
 
-This is separate from the `ALLOW_SUPABASE_WRITES` kill-switch, which governs *application
-data* writes from the game server. This pipeline governs *schema* migrations. Both keep
-the LLM/agent out of the prod-write business.
+This is separate from *application data* writes by the game server (those go live wherever a
+Supabase DB is configured, with a built-in tripwire that blocks a non-Heroku host from writing
+to the prod project). This pipeline governs *schema* migrations. Both keep the LLM/agent out of
+the prod-write business.
 
 ## One-time operator setup
 

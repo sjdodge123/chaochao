@@ -42,6 +42,20 @@ if (SUPABASE_URL && SERVICE_ROLE_KEY) {
 // progression-toast queue in game.js) working without a DB. Consumers read `auth.writesEnabled`.
 var writesEnabled = enabled;
 
+// Automatic safety tripwire (replaces the manual gate): never let a NON-production host
+// write to the PROD project. The only expected prod writer is the Heroku dyno (Heroku sets
+// DYNO on every dyno). If some other process is pointed at the prod URL — e.g. a local
+// `.env` with stale copied prod creds — block writes rather than risk polluting prod. Set
+// ALLOW_PROD_WRITES=true to override (CI, or a deliberate one-off). No flag is needed for
+// the normal paths: local-at-dev never trips it, and Heroku-at-prod is recognised by DYNO.
+var PROD_PROJECT_REF = 'spkwpkpiuzshrfwplzyg';
+if (writesEnabled && SUPABASE_URL && SUPABASE_URL.indexOf(PROD_PROJECT_REF) !== -1 &&
+    !process.env.DYNO && process.env.ALLOW_PROD_WRITES !== 'true') {
+    writesEnabled = false;
+    console.log('[auth] WRITES BLOCKED: pointed at the PROD project from a non-Heroku host. ' +
+        'Use the DEV project locally, or set ALLOW_PROD_WRITES=true to override.');
+}
+
 if (JWT_SECRET) {
     try {
         jwt = require('jsonwebtoken');
@@ -51,7 +65,7 @@ if (JWT_SECRET) {
 }
 
 if (enabled) {
-    console.log('[auth] Supabase auth ENABLED (' + (jwt && JWT_SECRET ? 'local JWT verify' : 'network verify') + '), writes ENABLED (target: ' + SUPABASE_URL + ').');
+    console.log('[auth] Supabase auth ENABLED (' + (jwt && JWT_SECRET ? 'local JWT verify' : 'network verify') + '), writes ' + (writesEnabled ? 'ENABLED' : 'BLOCKED') + ' (target: ' + SUPABASE_URL + ').');
 } else {
     console.log('[auth] Supabase env vars absent — auth DISABLED, all clients are guests.');
 }
