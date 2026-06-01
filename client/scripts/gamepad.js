@@ -148,20 +148,9 @@ function onGamepadKeyDown(e) {
         return;
     }
 
-    // The "2× your match XP" offer toast (lobby edge): Enter/Space watches, Esc dismisses.
-    // Non-blocking otherwise — it doesn't capture the keyboard, so other keys still work.
-    if (typeof rewardOfferToastOpen === "function" && rewardOfferToastOpen()) {
-        if (e.keyCode === 13 || e.keyCode === 32 || e.key === "Enter" || e.key === " ") {
-            if (typeof rewardOfferWatch === "function") { rewardOfferWatch(); }
-            e.preventDefault();
-            return;
-        }
-        if (e.key === "Escape" || e.keyCode === 27) {
-            if (typeof rewardOfferDismiss === "function") { rewardOfferDismiss(); }
-            e.preventDefault();
-            return;
-        }
-    }
+    // NOTE: the "2× your match XP" offer toast is intentionally NOT bound to the keyboard either.
+    // Space/Enter are gameplay/confirm keys, so binding them to "watch a full-screen ad" would
+    // launch an ad from ordinary input. Watching is an explicit pointer tap on the toast button.
 
     // The centre leave modal (used when solo, or when the primary has no inline
     // block) owns the keyboard while open, in any mode: arrows / A-D move between
@@ -524,14 +513,11 @@ function pollPadForSlot(pad, lp) {
         setInputMethod("pad");
     }
 
-    // "2× your match XP" offer toast (lobby edge): a NON-blocking actionable toast, so the
-    // player can still move in the lobby. We only divert the primary pad's Ⓐ (watch) / Ⓑ
-    // (dismiss) on the frame they're pressed — every other frame falls through to normal
-    // lobby control. (Mouse/touch tap the toast buttons; keyboard uses Enter/Esc.)
-    if (lp.isPrimary && typeof rewardOfferToastOpen === "function" && rewardOfferToastOpen()) {
-        if (buttonPressedThisFrame(pad, GP_BTN_A, lp)) { if (typeof rewardOfferWatch === "function") { rewardOfferWatch(); } return; }
-        if (buttonPressedThisFrame(pad, GP_BTN_B, lp)) { if (typeof rewardOfferDismiss === "function") { rewardOfferDismiss(); } return; }
-    }
+    // NOTE: the "2× your match XP" offer toast is intentionally NOT bound to any gamepad button.
+    // It's a non-blocking lobby toast and the primary pad's face buttons are live gameplay
+    // controls (Ⓐ = attack/station-interact, Ⓑ = leave) — reinterpreting a bare press as
+    // "watch a full-screen ad" would launch an ad from ordinary input. Watching must be an
+    // explicit pointer tap on the toast's button; the toast otherwise auto-clears at race start.
 
     if (lp.isPrimary && settingsModalIsOpen()) {
         // P1 navigates the shared settings panel. Other local players are NOT in

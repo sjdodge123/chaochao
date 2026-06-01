@@ -299,8 +299,11 @@ async function testStashMatchesEngineAward() {
     check(!!rm && !!rm.matchId, 'startGameover stashed a rewardedMatch with a matchId');
     const packet = ioEvents.filter(function (e) { return e.header === 'startGameover'; }).pop();
     check(packet && packet.payload.matchId == null, 'the broadcast startGameover packet does NOT carry matchId (eligibility is targeted, not broadcast)');
-    // Eligibility is delivered targeted, only to the credited racers.
-    check(m.s1.lastEmit('rewardedEligible') && m.s1.lastEmit('rewardedEligible').matchId === rm.matchId, 'winner received a targeted rewardedEligible with this matchId');
+    // Eligibility is delivered targeted, only to the credited racers, and carries the server
+    // gameOverTs so the client anchors its offer window to the server clock (not receipt time).
+    var elig1 = m.s1.lastEmit('rewardedEligible');
+    check(elig1 && elig1.matchId === rm.matchId, 'winner received a targeted rewardedEligible with this matchId');
+    check(elig1 && elig1.gameOverTs === rm.gameOverTs, 'rewardedEligible carries the server gameOverTs (offer window anchored to server clock, not client receipt)');
     check(m.s2.lastEmit('rewardedEligible') && m.s2.lastEmit('rewardedEligible').matchId === rm.matchId, 'runner-up received a targeted rewardedEligible with this matchId');
     // Compare per-user stash to the engine's own awarded XP.
     const eng1 = engineXp(m.s1.userId);

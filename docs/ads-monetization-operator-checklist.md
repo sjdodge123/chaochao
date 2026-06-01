@@ -44,17 +44,21 @@ The progression engine (`server/progression.js` + `auth.addProgression`, gated o
     postback is a documented **follow-up** if GameMonetize later exposes one; until
     then the server's single-claim + TTL + server-fixed multiplier are the
     anti-abuse guardrails.
-- Client UX: a one-tap **"Double your match XP?"** prompt at the `gameOver -> lobby`
-  edge (NOT on the results screen — it would compete with the recap/stats). It's a
-  centre confirm-modal (reusing the leave-modal `confirm-modal` CSS + nav: mouse/touch
-  click, keyboard arrows/Enter/Esc, gamepad D-pad/Ⓐ/Ⓑ) with "📺 Watch" / "No thanks";
-  default focus is "No thanks" so a stray press never auto-launches an ad. Shown ONLY
-  for signed-in players when `ads.isRewardedAvailable()` and the match's bonus is
-  unclaimed; anonymous players are never offered it. **Mutually exclusive with the
-  interstitial** — at most one ad surface per match-end: the opt-in 2× prompt is
-  preferred, and the forced interstitial only fires when the prompt isn't offered (the
-  interstitial cadence still advances either way). The modal is hidden in the DOM until
-  opened, so — like the leave modal — it's invisible to the button-compliance gate.
+- Client UX: a **"⭐ Double the XP you just earned? [📺 Watch] [×]"** actionable toast,
+  appended as the LAST item of the lobby-arrival progression-toast stream (after the
+  XP/level/skin celebration toasts) so it never competes with the results/recap screen
+  and never collides with those toasts. Non-blocking (the lobby stays interactive) and
+  persistent until acted / dismissed / next-race teardown. **Watching is a deliberate
+  pointer tap only** — it is intentionally NOT bound to any gamepad/keyboard button, since
+  those are live gameplay controls and a bare press must never launch a full-screen ad
+  (Codex P2). Offered ONLY to players the **server** confirmed eligible for this match
+  (targeted `rewardedEligible` — raced + earned XP; matchId is NOT broadcast), and only
+  when `ads.isRewardedAvailable()` and the bonus is unclaimed; spectators/guests are never
+  offered. **Mutually exclusive with the interstitial** — at most one ad surface per
+  match-end: the opt-in 2× toast is preferred; the forced interstitial only fires when the
+  toast isn't offered (cadence still advances). The offer window is anchored to the server
+  gameOver timestamp (so a suspended tab can't resurrect an expired claim), and a watched-
+  but-unacked claim keeps a recovery watchdog across the race transition.
 - Server: `claimXpMultiplier` handler in `server/messenger.js` — signed-in only,
   validates `matchId` == the room's most-recently-completed match, single-claim
   flag, 120 s TTL (server-stamped `gameOverTs`), bonus computed server-side

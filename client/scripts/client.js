@@ -45,8 +45,9 @@ var rewardOfferToastEl = null,
 // inside the server's claim TTL (180s) — never let a player burn an ad on a claim the server
 // will reject as expired. currentMatchOfferTs is stamped when the match id is set (startGameover).
 var REWARD_OFFER_WINDOW_MS = 120 * 1000,
-	currentMatchOfferTs = 0,
-	rewardClaimAckTimer = null;   // awaiting the server's xpBonus ack after a watch
+	currentMatchOfferTs = 0,       // anchored to the SERVER gameOver time (from rewardedEligible)
+	rewardClaimAckTimer = null,    // awaiting the server's xpBonus ack after a watch
+	pendingClaimMatchId = null;    // the matchId of the claim we're awaiting an ack for
 
 // True when the "2× your match XP" offer can be made: signed-in (anonymous players have no
 // server XP to multiply — never offered), a rewarded ad is loaded, we know which match to
@@ -74,21 +75,23 @@ function triggerRewardWatch() {
 	window.ads.showRewarded({
 		placement: "xp_2x",
 		onReward: function () {
-			// Ad watched in full — ask the server to credit the bonus.
-			// DEV-ONLY — STRIP BEFORE PR: under the localhost override a GUEST has no server
-			// progression to credit, so the server would reject the claim. Fake the ack locally
-			// so the toast/flow is visible. Signed-in players always take the real server path.
-			var signedIn = (window.chaochaoAuth && typeof window.chaochaoAuth.isSignedIn === "function" && window.chaochaoAuth.isSignedIn());
+			// DEV-ONLY — STRIP BEFORE PR: under the localhost ?testrewarded=1 override the ad is
+			// SIMULATED (no real network), so we must NEVER drive the real server claim — that
+			// would persist bonus XP without an actual ad watch. Keep it purely client-side
+			// (visual toast + GA only), regardless of sign-in, so the override can't credit XP.
 			var devR = (window.ads && typeof window.ads._devRewarded === "function" && window.ads._devRewarded());
-			if (devR && !signedIn) {
+			if (devR) {
 				rewardedClaimState = "claimed";
 				if (typeof enqueueProgressionToasts === "function") { enqueueProgressionToasts([{ type: "xp_bonus", amount: 0 }]); }
 				if (typeof trackEvent === "function") { trackEvent('reward_claimed', { bonus: 'xp_2x', match_id: matchId || '' }); }
 				return;
 			}
-			// Stay PENDING (not 'claimed') until the server's xpBonus ack — the server can still
-			// reject (TTL / transient DB failure), and marking 'claimed' now would consume the
-			// watched ad with no credit and no retry. The ack-timeout below re-offers on failure.
+			// Ad watched in full — ask the server to credit the bonus. Stay PENDING (not 'claimed')
+			// until the server's xpBonus ack — the server can still reject (TTL / transient DB
+			// failure), and marking 'claimed' now would consume the watched ad with no credit and
+			// no retry. The ack-timeout re-offers on failure. Remember WHICH match this claim is
+			// for, so a stale ack from a prior match can't mark a later one claimed.
+			pendingClaimMatchId = matchId;
 			rewardedClaimState = "claiming";
 			startRewardClaimAckTimeout();
 			if (typeof server !== "undefined" && server) {
@@ -121,6 +124,7 @@ function startRewardClaimAckTimeout() {
 	rewardClaimAckTimer = setTimeout(function () {
 		rewardClaimAckTimer = null;
 		if (rewardedClaimState !== "claiming") { return; } // already acked
+		pendingClaimMatchId = null; // give up waiting on this claim's ack
 		rewardedClaimState = "idle";
 		if (typeof enqueueProgressionToasts === "function") { enqueueProgressionToasts([{ type: "xp_bonus_failed" }]); }
 		var inLobby = (typeof config !== "undefined" && config && currentState === config.stateMap.lobby);
@@ -189,7 +193,6 @@ function removeRewardOfferToast() {
 		showNextProgressionToast(); // advance the (now usually empty) stream
 	}, 400);
 }
-function rewardOfferToastOpen() { return !!rewardOfferToastEl; }
 function rewardOfferWatch() {
 	if (!rewardOfferToastEl) { return; }
 	removeRewardOfferToast();
@@ -553,21 +556,31 @@ function registerConnectionHandlers(server) {
 	server.on('rewardedEligible', function (payload) {
 		if (!payload || payload.matchId == null) { return; }
 		currentMatchId = payload.matchId;
-		currentMatchOfferTs = Date.now();   // start of this match's offer window
+		// Anchor the offer window to the SERVER's gameOver timestamp (not client receipt time):
+		// if this event is delivered late (suspended/backgrounded tab), the window must still
+		// reflect how long the SERVER has had the claim open, so we don't offer an ad for a
+		// claim that has already expired against the server TTL. Fall back to local now if absent.
+		currentMatchOfferTs = (typeof payload.gameOverTs === "number") ? payload.gameOverTs : Date.now();
 		rewardedClaimState = "idle";
 	});
 	server.on('xpBonus', function (payload) {
-		var bonus = (payload && typeof payload.bonus === "number") ? payload.bonus : 0;
-		// Ack arrived — the claim succeeded. Cancel the retry watchdog and lock it in.
+		var ackMatchId = payload && payload.matchId;
+		// Validate the ack against the claim we're actually waiting on. A prior match's claim can
+		// resolve LATE (rewarded ads are allowed to finish during the next race), and an unguarded
+		// ack would mark a NEW match claimed + cancel its retry watchdog. Ignore anything that
+		// isn't our pending claim. (The bonus XP was still persisted server-side and the lobby
+		// badge is refreshed via progressionUpdate, so dropping a stale toast loses nothing.)
+		if (!ackMatchId || ackMatchId !== pendingClaimMatchId) { return; }
+		pendingClaimMatchId = null;
 		if (rewardClaimAckTimer) { clearTimeout(rewardClaimAckTimer); rewardClaimAckTimer = null; }
-		rewardedClaimState = "claimed";
+		// Only flip the live offer to 'claimed' if it's still the same match (a new match may
+		// already have armed a fresh offer — don't stomp it).
+		if (ackMatchId === currentMatchId) { rewardedClaimState = "claimed"; }
+		var bonus = (payload && typeof payload.bonus === "number") ? payload.bonus : 0;
 		if (typeof enqueueProgressionToasts === "function") {
 			enqueueProgressionToasts([{ type: "xp_bonus", amount: bonus }]);
 		}
-		trackEvent('reward_claimed', {
-			bonus: 'xp_2x',
-			match_id: (payload && payload.matchId) || currentMatchId || ''
-		});
+		trackEvent('reward_claimed', { bonus: 'xp_2x', match_id: ackMatchId });
 	});
 
 	// botGuard: the server confirmed this client actually drove a kart (not a pageview-only
