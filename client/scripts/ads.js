@@ -75,6 +75,38 @@
         } catch (e) { /* analytics must never break gameplay */ }
     }
 
+    // ===== DEV-ONLY — STRIP BEFORE PR (rewarded playtest override) =============
+    // `?testrewarded=1` on localhost makes the rewarded path testable with NO ad
+    // network: isRewardedAvailable() reports true and showRewarded() simulates a full
+    // watch (a brief overlay, then onReward) so you can exercise the results-screen
+    // button + the REAL server claim/credit/toast flow locally. HARD-gated to localhost
+    // so it's inert anywhere else; must never reach prod (see the playtest-restart-button
+    // convention in CLAUDE.md / memory). NOTE: the button still requires being signed in
+    // (the claim needs a userId) — sign in against the DEV Supabase to see it.
+    function devRewardedOverride() {
+        try {
+            if (location.hostname !== "localhost" && location.hostname !== "127.0.0.1") { return false; }
+            return /[?&]testrewarded=1(?:&|$)/.test(location.search);
+        } catch (e) { return false; }
+    }
+    function showDevAdOverlay(done) {
+        var el = null;
+        try {
+            el = document.createElement("div");
+            el.setAttribute("data-dev-rewarded", "1");
+            el.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.85);" +
+                "display:flex;align-items:center;justify-content:center;color:#FFE08A;" +
+                "font:bold 28px sans-serif;text-align:center;padding:24px;";
+            el.textContent = "Simulated rewarded ad (dev) — granting 2× XP…";
+            (document.body || document.documentElement).appendChild(el);
+        } catch (e) { el = null; }
+        setTimeout(function () {
+            try { if (el && el.parentNode) { el.parentNode.removeChild(el); } } catch (e) {}
+            done();
+        }, 1500);
+    }
+    // ===== END DEV-ONLY =========================================================
+
     function embedded() {
         // isEmbedded() ships in embed.js (loaded before the bundle). Treat its
         // absence as "not embedded" so a load-order hiccup can't suppress ads.
@@ -445,6 +477,7 @@
     // renders and gameplay is untouched. GameMonetize has no separate "rewarded loaded"
     // signal, so readiness == SDK ready.
     function isRewardedAvailable() {
+        if (devRewardedOverride()) { return true; }   // DEV-ONLY — STRIP BEFORE PR
         if (!shouldShow()) { return false; }  // provider 'none' or embedded -> not available
         return !!sdkReady;
     }
@@ -466,6 +499,17 @@
         // skip so the caller leaves the button up for a retry and never credits a reward.
         if (!isRewardedAvailable() || !adapter || typeof adapter.showRewarded !== "function") {
             onSkip();
+            return;
+        }
+
+        // DEV-ONLY — STRIP BEFORE PR: simulate a full watch with no ad network so the
+        // real onReward -> claimXpMultiplier -> xpBonus flow can be exercised locally.
+        if (devRewardedOverride()) {
+            track("ad_shown", { type: "rewarded", placement: placement });
+            showDevAdOverlay(function () {
+                track("ad_complete", { type: "rewarded", placement: placement });
+                try { onReward(); } catch (e) { /* caller must not break the screen */ }
+            });
             return;
         }
 
@@ -527,6 +571,7 @@
         shouldShow: shouldShow,
         isRewardedAvailable: isRewardedAvailable,
         showRewarded: showRewarded,
+        _devRewarded: devRewardedOverride,   // DEV-ONLY — STRIP BEFORE PR
         // Exposed for headless tests / debugging.
         _config: function () { return { provider: provider, sdkReady: sdkReady }; }
     };

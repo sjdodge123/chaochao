@@ -44,7 +44,11 @@ var currentMatchId = null,
 function rewardButtonAvailable() {
 	if (typeof config === "undefined" || config == null || currentState !== config.stateMap.gameOver) { return false; }
 	if (!currentMatchId || rewardedClaimState !== "idle") { return false; }
-	if (!(window.chaochaoAuth && typeof window.chaochaoAuth.isSignedIn === "function" && window.chaochaoAuth.isSignedIn())) { return false; }
+	// DEV-ONLY — STRIP BEFORE PR: the localhost ?testrewarded=1 override also shows the
+	// button for guests (so it's testable without local Supabase auth); the reward is then
+	// simulated client-side in triggerRewardButton (no server credit — guests have no XP).
+	var devR = (window.ads && typeof window.ads._devRewarded === "function" && window.ads._devRewarded());
+	if (!devR && !(window.chaochaoAuth && typeof window.chaochaoAuth.isSignedIn === "function" && window.chaochaoAuth.isSignedIn())) { return false; }
 	if (!(window.ads && typeof window.ads.isRewardedAvailable === "function" && window.ads.isRewardedAvailable())) { return false; }
 	return true;
 }
@@ -62,6 +66,16 @@ function triggerRewardButton() {
 			// matchId + TTL + single-claim and replies with `xpBonus` (multiplier is server-fixed;
 			// we send it only as a courtesy — the server ignores the client value).
 			rewardedClaimState = "claimed";
+			// DEV-ONLY — STRIP BEFORE PR: under the localhost override a GUEST has no server
+			// progression to credit, so the server would reject the claim. Fake the ack locally
+			// so the toast/flow is visible. Signed-in players always take the real server path.
+			var signedIn = (window.chaochaoAuth && typeof window.chaochaoAuth.isSignedIn === "function" && window.chaochaoAuth.isSignedIn());
+			var devR = (window.ads && typeof window.ads._devRewarded === "function" && window.ads._devRewarded());
+			if (devR && !signedIn) {
+				if (typeof enqueueProgressionToasts === "function") { enqueueProgressionToasts([{ type: "xp_bonus", amount: 0 }]); }
+				if (typeof trackEvent === "function") { trackEvent('reward_claimed', { bonus: 'xp_2x', match_id: matchId || '' }); }
+				return;
+			}
 			if (typeof server !== "undefined" && server) {
 				server.emit("claimXpMultiplier", { matchId: matchId, multiplier: 2 });
 			}
