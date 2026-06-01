@@ -40,7 +40,8 @@ var currentMatchId = null,
 // no-celebration-toasts case (e.g. a guest under the dev override).
 var rewardOfferToastEl = null,
 	rewardOfferPending = false,
-	rewardOfferFallbackTimer = null;
+	rewardOfferFallbackTimer = null,
+	rewardOfferFocused = false;   // controller/keyboard focus state (1st press focuses, 2nd watches)
 // Stop OFFERING / launching an ad once the match is this old, so a full watch always finishes
 // inside the server's claim TTL (180s) — never let a player burn an ad on a claim the server
 // will reject as expired. currentMatchOfferTs is stamped when the match id is set (startGameover).
@@ -164,17 +165,26 @@ function flushRewardOffer() {
 
 // The persistent, actionable offer toast (reuses the "Log in" nudge's .cc-toast-action /
 // .cc-toast-close pattern). Unlike celebration toasts it does NOT auto-dismiss — it waits
-// for Watch / dismiss / next-race teardown. Exposed open/watch/dismiss for keyboard + gamepad
-// (gamepad.js): Enter/Ⓐ watches, Esc/Ⓑ dismisses; mouse/touch tap the buttons.
+// for Watch / dismiss / next-race teardown.
+//
+// Input model:
+//   - Mouse / touch: tap "📺 Watch" or "×" directly.
+//   - Controller / keyboard: a deliberate TWO-STEP focus so a bare gameplay press can never
+//     launch a full-screen ad. The toast starts UNFOCUSED; the first Ⓐ/Enter focuses it
+//     (highlights, shows the Ⓐ/Ⓑ hint), and only a SECOND Ⓐ/Enter watches. Ⓑ/Esc declines
+//     at any time (a safe action). gamepad.js drives this via rewardOfferToastOpen() /
+//     rewardOfferIsFocused() / rewardOfferFocus() / rewardOfferWatch() / rewardOfferDismiss().
 function showRewardOfferToast() {
 	if (!document.body) { showNextProgressionToast(); return; }
+	rewardOfferFocused = false;
 	var el = document.createElement("div");
 	el.className = "cc-toast cc-progression-toast cc-reward-offer";
 	el.setAttribute("role", "status");
 	el.innerHTML =
 		'<span class="cc-toast-msg"></span>' +
 		'<button class="cc-toast-action" type="button"></button>' +
-		'<button class="cc-toast-close" type="button" aria-label="Dismiss">×</button>';
+		'<button class="cc-toast-close" type="button" aria-label="Dismiss">×</button>' +
+		'<span class="cc-reward-hint"></span>';
 	el.querySelector(".cc-toast-msg").textContent = "⭐ Double the XP you just earned?";
 	el.querySelector(".cc-toast-action").textContent = "📺 Watch";
 	document.body.appendChild(el);
@@ -186,12 +196,24 @@ function showRewardOfferToast() {
 function removeRewardOfferToast() {
 	var el = rewardOfferToastEl;
 	rewardOfferToastEl = null;
+	rewardOfferFocused = false;
 	if (!el) { return; }
 	el.classList.remove("visible");
 	setTimeout(function () {
 		if (el.parentNode) { el.parentNode.removeChild(el); }
 		showNextProgressionToast(); // advance the (now usually empty) stream
 	}, 400);
+}
+function rewardOfferToastOpen() { return !!rewardOfferToastEl; }
+function rewardOfferIsFocused() { return !!rewardOfferToastEl && rewardOfferFocused; }
+// First controller/keyboard step: focus the toast (no ad launch). Highlights it + shows the
+// Ⓐ Watch / Ⓑ No thanks hint so the second press is clearly a deliberate confirmation.
+function rewardOfferFocus() {
+	if (!rewardOfferToastEl) { return; }
+	rewardOfferFocused = true;
+	rewardOfferToastEl.classList.add("gp-focus");
+	var hint = rewardOfferToastEl.querySelector(".cc-reward-hint");
+	if (hint) { hint.textContent = "Ⓐ Watch · Ⓑ No thanks"; }
 }
 function rewardOfferWatch() {
 	if (!rewardOfferToastEl) { return; }
