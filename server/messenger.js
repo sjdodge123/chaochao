@@ -746,7 +746,7 @@ function checkForMail(client) {
 	// the room's current map (still the just-played map in both states — the next map
 	// only loads at the gate), not a client-supplied id. One vote per voter per map
 	// (UPSERT); bots and identity-less sockets can't vote; a short per-socket cooldown
-	// stops spam. The write is gated on ALLOW_SUPABASE_WRITES inside recordRating.
+	// stops spam. recordRating no-ops when no Supabase DB is configured.
 	client.on('rateMap', function (payload) {
 		var room = hostess.getRoomBySig(roomMailList[client.id]);
 		if (room == undefined ||

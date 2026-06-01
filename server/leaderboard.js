@@ -31,13 +31,11 @@ async function upsertBestTime(userId, mapId, timeMs, displayName) {
     if (!Number.isFinite(timeMs) || timeMs <= 0 || timeMs >= 86400000) {
         return noopUpsertResult(timeMs);
     }
-    // Honor the global write gate (auth.writesEnabled = ALLOW_SUPABASE_WRITES
-    // env var). Local dev runs with this off so leaderboards can be exercised
-    // (rank reads, card rendering) without seeding prod rows; production sets
-    // it on. The async leaderboard pipeline still emits playerPbResult with
-    // isNewRecord=false here — the client treats that as a slower-than-PB
-    // finish (no float, no banner), which is the right UX for "writes off".
-    if (!auth.writesEnabled) {
+    // Skip the write when no Supabase DB is configured (guest-only dev). The async
+    // leaderboard pipeline still emits playerPbResult with isNewRecord=false here —
+    // the client treats that as a slower-than-PB finish (no float, no banner), which
+    // is the right UX when there's nowhere to record a PB.
+    if (!auth.writesEnabled || !auth.supabase) {
         return noopUpsertResult(timeMs);
     }
     var rounded = Math.round(timeMs);
