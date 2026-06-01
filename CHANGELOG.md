@@ -31,6 +31,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## v0.27.2 — 2026-06-01
 
+### General
+
+- [headline] Local co-op with controller support — up to 4 players on one screen (controllers plus one on keyboard/mouse), all in the same game as anyone online.
+
 ### Bug fixes
 
 - Your equipped skin and cosmetics now stick to your account: sign in and they load straight away — even on a different device, or when you hop into a match that's already running. Picks you made while playing as a guest no longer overwrite the look you'd saved to your account when you sign in.

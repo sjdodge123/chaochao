@@ -1448,34 +1448,34 @@ function drawCosmeticPreview(opt, cx, cy, r, paint, locked, cell) {
         return;
     }
     if (slot === "trail") {
-        var effect = (typeof getTrailEffect === "function") ? getTrailEffect(opt.id) : null;
-        var fx = (effect && typeof TRAIL_FX !== "undefined") ? TRAIL_FX[effect] : null;
-        if (fx) {
-            // Trails are MOTION effects — a static stroke made them all look identical. Render
-            // the REAL effect on a synthetic curved path (a kart flying right, trail behind it),
-            // built in a virtual ±40px space and scaled down into the small cell (which clips).
-            var nowMs = Date.now();
-            var fadeMs = (typeof TRAIL_FADE_MS !== "undefined") ? TRAIL_FADE_MS : 1700;
-            var animMs = (typeof cartSkinAnimTime !== "undefined") ? cartSkinAnimTime * 1000 : 0;
+        // Trails are MOTION effects — a static stroke made them all look identical. Render
+        // the REAL effect on a synthetic curved path (a kart flying right, trail behind it),
+        // built in a virtual ±40px space and scaled down into the small cell (which clips).
+        var nowMs = Date.now();
+        var fadeMs = (typeof TRAIL_FADE_MS !== "undefined") ? TRAIL_FADE_MS : 1700;
+        var verts = [], STEPS = 26;
+        for (var ti = 0; ti <= STEPS; ti++) {
+            var u = ti / STEPS;                        // 0 = tail (oldest) .. 1 = kart (newest)
+            verts.push({
+                x: (u * 2 - 1) * 40,                   // tail at left, kart head at right
+                y: Math.sin(u * Math.PI) * -14 + 6,    // gentle arc
+                t: nowMs - fadeMs * (1 - u)            // newest vertex at the kart end
+            });
+        }
+        if (typeof paintTrailFx === "function") {
+            gameContext.save();
             gameContext.translate(cx, cy);
             gameContext.scale(r / 42, r / 42);
-            var verts = [], STEPS = 26;
-            for (var ti = 0; ti <= STEPS; ti++) {
-                var u = ti / STEPS;                        // 0 = tail (oldest) .. 1 = kart (newest)
-                verts.push({
-                    x: (u * 2 - 1) * 40,                   // tail at left, kart head at right
-                    y: Math.sin(u * Math.PI) * -14 + 6,    // gentle arc
-                    t: nowMs - fadeMs * (1 - u)            // newest vertex at the kart end
-                });
+            // anim 0 here keeps the preview deterministic (the cells don't animate per-frame).
+            var drew = paintTrailFx(gameContext, opt.id, verts, color, { fadeMs: fadeMs, anim: 0 });
+            if (drew) {
+                // Small kart head at the newest end so the trail reads as flowing behind a kart.
+                var head = verts[verts.length - 1];
+                gameContext.fillStyle = color;
+                gameContext.beginPath(); gameContext.arc(head.x, head.y, 9, 0, Math.PI * 2); gameContext.fill();
             }
-            if (typeof tfxBaseAlpha !== "undefined") { tfxBaseAlpha = 1; }
-            try { fx(gameContext, verts, color, nowMs, fadeMs, animMs); } catch (e) {}
-            // Small kart head at the newest end so the trail reads as flowing behind a kart.
-            var head = verts[verts.length - 1];
-            gameContext.fillStyle = color;
-            gameContext.beginPath(); gameContext.arc(head.x, head.y, 9, 0, Math.PI * 2); gameContext.fill();
             gameContext.restore();
-            return;
+            if (drew) { gameContext.restore(); return; }
         }
         // Fallback (unknown/missing effect): a plain stroke.
         gameContext.strokeStyle = color; gameContext.lineCap = "round"; gameContext.lineWidth = 2;
