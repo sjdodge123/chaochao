@@ -36,6 +36,15 @@ function persistCosmetic(userId, slot, id) {
 	});
 }
 
+// Unlock kinds whose ownership is recorded PERMANENTLY in progression.unlocked_skins once
+// earned: achievement medals and seasonal claims (and any future grant-based kind — gift/paid/
+// event cosmetics). Both gate the same way: equippable iff the id is in unlocked_skins. Keeping
+// this in one predicate (consulted by cosmeticUnlocked + the setCosmetic handler) means a new
+// such kind only has to be added here, not in two switch arms that could drift apart.
+function unlockIsOwnedKind(kind) {
+	return kind === 'achievement' || kind === 'seasonal';
+}
+
 // Returns true if a player with the given progression row qualifies to equip `id`
 // (exists, belongs to `slot`, and the level/achievement unlock is met). Shared by the
 // restore path; the live setCosmetic handler inlines the same checks (it also emits
@@ -51,7 +60,7 @@ function cosmeticUnlocked(prog, slot, id) {
 	if (skin.unlock.kind === 'level') {
 		return (prog ? (prog.level || 1) : 1) >= skin.unlock.level;
 	}
-	if (skin.unlock.kind === 'achievement') {
+	if (unlockIsOwnedKind(skin.unlock.kind)) {
 		var unlocked = (prog && Array.isArray(prog.unlocked_skins)) ? prog.unlocked_skins : [];
 		return unlocked.indexOf(id) !== -1;
 	}
@@ -651,10 +660,14 @@ function checkForMail(client) {
 				client.emit("cosmeticRejected", { slot: slot, id: id, reason: "level", required: skin.unlock.level });
 				return;
 			}
-		} else if (skin.unlock.kind === "achievement") {
+		} else if (unlockIsOwnedKind(skin.unlock.kind)) {
+			// Seasonal claims live in unlocked_skins once granted (auth.grantSeasonalClaims),
+			// so ownership is permanent — equippable even after the claim window closes. A player
+			// who never claimed during the window simply never has the id and is rejected here.
+			// reason carries the kind ('achievement' | 'seasonal') so the client can word the lock.
 			var unlocked = (prog && Array.isArray(prog.unlocked_skins)) ? prog.unlocked_skins : [];
 			if (unlocked.indexOf(id) === -1) {
-				client.emit("cosmeticRejected", { slot: slot, id: id, reason: "achievement" });
+				client.emit("cosmeticRejected", { slot: slot, id: id, reason: skin.unlock.kind });
 				return;
 			}
 		} else if (skin.unlock.kind === "open") {
@@ -807,7 +820,13 @@ function loadPlayerProgression(client, player) {
 	}
 	player.progression = progression.defaultProgression();
 	player.progressionLoaded = false;
-	auth.getProgression(client.userId).then(function (row) {
+	// Grant any OPEN seasonal claim (Early Adopter etc.) BEFORE the read, so the row we load
+	// already reflects the new unlock and the queued claim toast is in pending_toasts for the
+	// drain at the end of the chain. No-op for guests / writes-off / outside any window; never
+	// blocks the load (a grant failure still falls through to getProgression).
+	Promise.resolve(auth.grantSeasonalClaims(client.userId)).catch(function () { return null; }).then(function () {
+		return auth.getProgression(client.userId);
+	}).then(function (row) {
 		var prog = row || progression.defaultProgression();
 		player.progression = prog;
 		player.progressionLoaded = true;
@@ -826,14 +845,17 @@ function loadPlayerProgression(client, player) {
 		// treating it as still-loading.
 		player.progressionLoaded = true;
 		console.log('[progression] load failed:', e && e.message);
+	}).then(function () {
+		// Drain + deliver pending celebration toasts — chained AFTER the grant resolves so a
+		// just-granted seasonal claim toast is already in pending_toasts (a synchronous drain
+		// here would race the grant's write and miss it). Only when actually arriving in the
+		// lobby: joining a racing/collapsing room mid-match must not overlay rewards during play;
+		// the next startLobby's deliverRoomToasts delivers them at the right moment.
+		var toastRoom = hostess.getRoomBySig(roomMailList[client.id]);
+		if (toastRoom && toastRoom.game && toastRoom.game.currentState === c.stateMap.lobby) {
+			deliverPendingToasts(client);
+		}
 	});
-	// Drain + deliver any celebration toasts earned in a prior match — but ONLY when actually
-	// arriving in the lobby. Joining a racing/collapsing room mid-match must not overlay rewards
-	// during play; the next startLobby's deliverRoomToasts delivers them at the right moment.
-	var toastRoom = hostess.getRoomBySig(roomMailList[client.id]);
-	if (toastRoom && toastRoom.game && toastRoom.game.currentState === c.stateMap.lobby) {
-		deliverPendingToasts(client);
-	}
 }
 // Collect a signed-in client's pending toasts (durable DB queue + dev in-memory
 // queue) and emit them as one ordered `progressionToasts` batch. The client

@@ -233,7 +233,7 @@ var myProgression = null;
 // layers over the canvas without touching the render loop.
 var progressionToastQueue = [];
 var progressionToastShowing = false;
-var PROGRESSION_TOAST_MS = 2600;
+var PROGRESSION_TOAST_MS = 5000; // applies to ALL progression toasts (xp / level-up / skin unlock / seasonal)
 
 function progressionToastText(ev) {
 	if (!ev || !ev.type) { return null; }
@@ -247,6 +247,14 @@ function progressionToastText(ev) {
 	// Name the cosmetic by its slot so the toast reads "New cart/pattern/trail unlocked".
 	var slot = (typeof getSkinSlot === "function") ? getSkinSlot(ev.id) : null;
 	var slotWord = slot === "cart" ? "cart" : slot === "pattern" ? "pattern" : slot === "trail" ? "trail" : "cosmetic";
+	if (ev.type === "seasonal") {
+		// A limited-time seasonal claim — a one-time, never-again cosmetic. The season's
+		// player-facing name comes from the registry entry's unlock.label (data-driven, so a
+		// future season needs no edit here); falls back to "Limited" if absent.
+		var sk = (typeof getSkin === "function") ? getSkin(ev.id) : null;
+		var label = (sk && sk.unlock && sk.unlock.label) ? sk.unlock.label : "Limited";
+		return "🌟 " + label + " " + slotWord + " claimed: " + nm;
+	}
 	if (ev.type === "skin") {
 		return "🎨 New " + slotWord + " unlocked: " + nm;
 	}
@@ -282,6 +290,19 @@ function showNextProgressionToast() {
 			showNextProgressionToast();
 		}, 400); // matches the cc-toast fade-out transition
 	}, PROGRESSION_TOAST_MS);
+}
+// Drop any queued/visible progression toasts. Called when the lobby ends (startGated) so a long
+// reward sequence (now ~5s each) can never keep popping over live gameplay — same rationale as
+// dismissing the between-matches ad at the gate. Pending fade timeouts no-op on the removed nodes.
+function clearProgressionToasts() {
+	progressionToastQueue.length = 0;
+	progressionToastShowing = false;
+	if (typeof document !== "undefined" && document.querySelectorAll) {
+		var open = document.querySelectorAll(".cc-progression-toast");
+		for (var i = 0; i < open.length; i++) {
+			if (open[i].parentNode) { open[i].parentNode.removeChild(open[i]); }
+		}
+	}
 }
 
 // Fire the `cosmetics_equipped` GA event once per MATCH (cosmetics are fixed for a match),
@@ -690,6 +711,9 @@ function registerStateHandlers(server) {
 		if (window.ads && typeof window.ads.dismissInterstitial === "function") {
 			try { window.ads.dismissInterstitial(); } catch (e) { /* never block the gate */ }
 		}
+		// Same idea for celebration toasts: clear the queue so a long reward sequence doesn't
+		// keep popping over the race that's starting (toasts belong to the lobby).
+		if (typeof clearProgressionToasts === "function") { clearProgressionToasts(); }
 		setLobbySfxDampen(false); // restore full SFX before the game-start cue
 		stopSound(lobbyMusic);
 		playSound(gameStart);
