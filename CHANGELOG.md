@@ -10,6 +10,11 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+### General
+
+- The end-of-game recap now opens each clip on the action already in motion — like a camera catching the moment — instead of starting from a frozen pose.
+- New recap highlight: when a punch sends a kart flying a long way (sliding across the ice, say), the recap turns it into its own "Sent Flying!" clip.
+
 ### Bug fixes
 
 - The end-of-game recap now replays the action it was missing: punch lunges and their shockwaves, landed-hit sparks, parry clashes, and kart reflections on ice all show up in the highlight clips, matching what you saw live.
