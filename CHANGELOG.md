@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.27.2 — 2026-06-01
+
 ### Bug fixes
 
 - Your equipped skin and cosmetics now stick to your account: sign in and they load straight away — even on a different device, or when you hop into a match that's already running. Picks you made while playing as a guest no longer overwrite the look you'd saved to your account when you sign in.
