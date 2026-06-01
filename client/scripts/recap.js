@@ -1042,18 +1042,15 @@ function recapDrawTrails(item, frameT) {
 		}
 		var meta = recapMeta[order[oi]] || { color: "grey" };
 		// Cosmetic trail effect: dispatch to the same rich renderer as live racing using
-		// timestamped verts; falls back to the plain colour stroke.
-		var tfxId = (typeof getTrailEffect === "function" && meta.trailFx) ? getTrailEffect(meta.trailFx) : null;
-		var fx = (tfxId && typeof TRAIL_FX !== "undefined") ? TRAIL_FX[tfxId] : null;
-		if (fx) {
-			var verts = vertsBy[order[oi]];
-			if (verts && verts.length >= 2) {
-				var fadeMs = (typeof TRAIL_FADE_MS !== "undefined") ? TRAIL_FADE_MS : 5000;
-				var anim = (typeof cartSkinAnimTime !== "undefined") ? cartSkinAnimTime * 1000 : frameT;
-				if (typeof tfxBaseAlpha !== "undefined") { tfxBaseAlpha = 1; }
-				try { fx(gameContext, verts, meta.color, frameT, fadeMs, anim); } catch (e) {}
+		// timestamped verts; falls back to the plain colour stroke. Shared dispatch
+		// (paintTrailFx) — the montage drives its own clock (frameT), passed as `now`.
+		var rcVerts = vertsBy[order[oi]];
+		if (typeof paintTrailFx === "function" && meta.trailFx && rcVerts && rcVerts.length >= 2) {
+			var rcFade = (typeof TRAIL_FADE_MS !== "undefined") ? TRAIL_FADE_MS : 5000;
+			var rcAnim = (typeof cartSkinAnimTime !== "undefined") ? cartSkinAnimTime * 1000 : frameT;
+			if (paintTrailFx(gameContext, meta.trailFx, rcVerts, meta.color, { fadeMs: rcFade, anim: rcAnim, now: frameT })) {
+				continue;
 			}
-			continue;
 		}
 		gameContext.save();
 		gameContext.lineWidth = 5;

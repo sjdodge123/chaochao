@@ -54,6 +54,40 @@ var tfxBaseAlpha = 1;           // set by drawTrail per kart (1 local, dim non-l
 function tfxGlow() { return (typeof perfGlow === "function") ? perfGlow() : true; }
 // every alpha goes through here so non-local trails dim uniformly
 function tfxAlpha(ctx, a) { ctx.globalAlpha = a * tfxBaseAlpha; }
+
+// Shared dispatch for "static-context" trail renders (overview standings, recap montage,
+// lobby skin-cell preview). Each caller builds its own timestamped vert path (a straight
+// score line, a real recorded track, an arced cell preview) then hands it here. Resolves
+// the effect, sets the module-level tfxBaseAlpha, and invokes the TRAIL_FX renderer in a
+// guarded block so one bad effect can't break the surrounding screen. Returns true if an
+// effect was drawn, false if the caller should fall back to its plain stroke.
+//   effectId  — a skin trail id (run through getTrailEffect) OR an already-resolved key.
+//   verts     — [{x,y,t}] newest-last, in the caller's current transform.
+//   opts      — {fadeMs, anim, baseAlpha} all optional.
+function paintTrailFx(ctx, effectId, verts, color, opts) {
+    if (ctx == null || verts == null || verts.length < 2) { return false; }
+    if (typeof TRAIL_FX === "undefined") { return false; }
+    var key = effectId;
+    if (typeof getTrailEffect === "function" && effectId) {
+        var resolved = getTrailEffect(effectId);
+        if (resolved && TRAIL_FX[resolved]) { key = resolved; }
+    }
+    var fx = key ? TRAIL_FX[key] : null;
+    if (fx == null) { return false; }
+    opts = opts || {};
+    var fadeMs = (opts.fadeMs != null) ? opts.fadeMs
+        : ((typeof TRAIL_FADE_MS !== "undefined") ? TRAIL_FADE_MS : 1700);
+    // `now` is the clock the effect reads vertex ages against. Defaults to wall-clock,
+    // but the recap montage drives its own playback timeline (frameT), so it overrides.
+    var now = (opts.now != null) ? opts.now : Date.now();
+    var anim = (opts.anim != null) ? opts.anim
+        : ((typeof cartSkinAnimTime !== "undefined") ? cartSkinAnimTime * 1000 : now);
+    var prevBase = tfxBaseAlpha;
+    tfxBaseAlpha = (opts.baseAlpha != null) ? opts.baseAlpha : 1;
+    try { fx(ctx, verts, color, now, fadeMs, anim); } catch (e) { /* effect glitch — caller already drew its base */ }
+    tfxBaseAlpha = prevBase; // restore so we don't leak a dim/forced value to later draws
+    return true;
+}
 // Per-effect tuning param: returns the baked default in-game (window.TFX_PARAMS undefined),
 // or a live-tuned value in the trails-review prototype (which sets window.TFX_PARAMS[effect]).
 function TP(effect, key, def) {

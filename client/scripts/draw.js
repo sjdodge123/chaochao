@@ -4658,13 +4658,13 @@ function drawGameOverScreen(dt) {
 // hit rects into ratingStarHits (logical coords) for input.js to test. Click/tap a
 // star to vote (one vote per map; re-voting overwrites). No-op render when the server
 // didn't tell us which map to rate.
-function drawMapRating(cxOverride, bottomY) {
+function drawMapRating(cxOverride, bottomY, fixedW) {
     if (typeof ratingMapId === "undefined" || ratingMapId == null) {
         ratingStarHits = [];
         return;
     }
     // Centre/bottom by default (game-over); callers can override both (the overview
-    // pins it above the next-map preview, clear of the controls glyph at the bottom).
+    // pins it to a full-width bottom strip via fixedW).
     var cx = (typeof cxOverride === "number") ? cxOverride : LOGICAL_WIDTH / 2;
     var n = 5, starSize = 36, gap = 8;
     var rowW = n * starSize + (n - 1) * gap;
@@ -4680,20 +4680,25 @@ function drawMapRating(cxOverride, bottomY) {
     gameContext.font = "bold 15px sans-serif";
     gameContext.textAlign = "center";
     var tw = gameContext.measureText(label).width;
-    var panelW = Math.max(tw + 44, rowW + 44);
+    // fixedW (overview strip) gives an explicit wide panel; otherwise size to content.
+    var panelW = (typeof fixedW === "number") ? fixedW : Math.max(tw + 44, rowW + 44);
     var panelH = 78;
     var px = cx - panelW / 2;
     var py = (typeof bottomY === "number") ? (bottomY - panelH) : (LOGICAL_HEIGHT - panelH - 16);
 
-    // panel
-    gameContext.globalAlpha = 0.88;
-    gameContext.fillStyle = "rgba(18,20,26,0.9)";
-    drawRoundRectPath(px, py, panelW, panelH, 12);
-    gameContext.fill();
-    gameContext.globalAlpha = 1;
-    gameContext.lineWidth = 2;
-    gameContext.strokeStyle = "#FFCB30";
-    gameContext.stroke();
+    // panel chrome — drawn for the game-over screen (no fixedW), but the overview
+    // strip (fixedW set) stays borderless so it breathes with the rest of the page.
+    var chrome = (typeof fixedW !== "number");
+    if (chrome) {
+        gameContext.globalAlpha = 0.88;
+        gameContext.fillStyle = "rgba(18,20,26,0.9)";
+        drawRoundRectPath(px, py, panelW, panelH, 12);
+        gameContext.fill();
+        gameContext.globalAlpha = 1;
+        gameContext.lineWidth = 2;
+        gameContext.strokeStyle = "#FFCB30";
+        gameContext.stroke();
+    }
 
     // label
     gameContext.fillStyle = "#fff";
@@ -7737,38 +7742,33 @@ function drawRecordFloats() {
     gameContext.restore();
 }
 
-// Notch-row rendering — used during the overview-screen pass. The world-space
-// anchor doesn't apply (camera detached, players unrendered), so the float
-// drops onto the player's scoreboard row instead. Last-finisher records that
-// arrive AFTER startOverview still surface here. Geometry mirrors
-// drawOldNotches's iteration so the rows line up regardless of player count.
-function drawRecordFloatsOverview() {
+// Record floats during the overview pass. The world-space anchor doesn't apply
+// (camera detached, players unrendered), so the float drops onto the player's
+// standings row instead. Last-finisher records that arrive AFTER startOverview
+// still surface here. Shares computeStandingsRowGeom so the rows line up exactly
+// with drawStandingsPanel regardless of player count / column split.
+function drawRecordFloatsOverview(page) {
     drainRecordFloats();
     if (recordFloats.length === 0) { return; }
-    if (playerList == null) { return; }
-    // Map playerId -> row index, matching drawOldNotches's iteration order.
+    if (playerList == null || page == null) { return; }
+    var g = page.geom || computeStandingsRowGeom(page); // reuse the frame's shared geometry
+    if (g.count === 0) { return; }
+    // playerId -> row index, matching the standings iteration order.
     var rowIdx = {};
-    var count = 0;
-    for (var pid in playerList) { rowIdx[pid] = count++; }
-    if (count === 0) { return; }
-    var distanceApart = 7;
-    var rowH = config.playerBaseRadius * distanceApart;
-    var offSetX = 80;
-    var offSetY = LOGICAL_HEIGHT / 2 - (count * rowH * 0.5);
-    // Drop the float a bit to the right of the notch column header and just
-    // above the row so it doesn't collide with the notch icon or delta float.
-    var notchColEndX = (gameLength + 1) * notchDistanceApart;
+    for (var i = 0; i < g.count; i++) { rowIdx[g.ids[i]] = i; }
 
     var now = Date.now();
     gameContext.save();
     gameContext.textAlign = "center";
     gameContext.textBaseline = "alphabetic";
-    for (var i = 0; i < recordFloats.length; i++) {
-        var f = recordFloats[i];
+    for (var k = 0; k < recordFloats.length; k++) {
+        var f = recordFloats[k];
         if (!(f.playerId in rowIdx)) { continue; }
+        var b = g.box(rowIdx[f.playerId]);
         var env = recordFloatEnvelope(now, f.startedAt);
-        var x = offSetX + notchColEndX / 2;
-        var y = offSetY + rowIdx[f.playerId] * rowH - 20 - env.rise;
+        // Centre over the row's track, lifted above the row.
+        var x = b.x + b.w * 0.55;
+        var y = b.y - 4 - env.rise;
         paintRecordFloat(f, x, y, env.alpha);
     }
     gameContext.restore();
@@ -8170,30 +8170,110 @@ function drawTitle() {
     }
 }
 
+// ============================================================================
+// OVERVIEW PAGE LAYOUT (between-rounds standings screen)
+// ----------------------------------------------------------------------------
+// A structured, panelled page rather than elements floating on black:
+//   • Standings hero panel  — left ~62%, the racing tracks (karts ride the line)
+//   • Right rail            — Next-map preview (top) + Times-to-beat (bottom)
+//   • Rating strip          — full-width bottom panel
+//   • GameID strip + WR toast at the top
+// House style: borderless sections — content breathes on black under a small gold
+// label; gold accent (OV.gold) for headings/highlights. headerH reserves the label band.
+// ============================================================================
+var OV = {
+    gold: "#FFCB30",
+    margin: 30,
+    gap: 16,
+    railW: 440,
+    ratingH: 84,
+    headerH: 34
+};
+
+// A section heading: a small gold label at the top-left of its region. No box, border,
+// fill, or header band — structure comes from layout position + the label alone. Callers
+// own their region rect; this only needs the label's anchor. headerH reserves the band.
+function ovLabel(x, y, title) {
+    if (!title) { return; }
+    gameContext.save();
+    gameContext.fillStyle = OV.gold;
+    gameContext.font = "bold 13px Arial";
+    gameContext.textAlign = "left";
+    gameContext.textBaseline = "middle";
+    gameContext.fillText(title.toUpperCase(), x + 6, y + OV.headerH / 2 + 1);
+    gameContext.restore();
+}
+
+// Compute the page regions once per frame. Everything keys off these rects so the
+// panels never overlap and the standings know exactly how much room they own.
+function computeOverviewPage() {
+    var wrActive = overviewWorldRecordActive();
+    var topY = wrActive ? 108 : 52;       // drop below the WR toast while it shows
+    var m = OV.margin, gap = OV.gap;
+    var contentBottom = (LOGICAL_HEIGHT - 50) - OV.ratingH - gap; // clear controls + rating
+    var railW = OV.railW;
+    var leftW = LOGICAL_WIDTH - 2 * m - railW - gap;
+    return {
+        topY: topY, gap: gap, margin: m,
+        standings: { x: m, y: topY, w: leftW, h: contentBottom - topY },
+        railX: m + leftW + gap, railW: railW,
+        contentBottom: contentBottom,
+        rating: { x: m, y: contentBottom + gap, w: LOGICAL_WIDTH - 2 * m, h: OV.ratingH }
+    };
+}
+
+// True while the "New world record" toast is on screen, so the standings band can
+// drop below it. Mirrors drawWorldRecordBanner's own start/duration guard.
+function overviewWorldRecordActive() {
+    if (typeof worldRecordBanner === "undefined" || worldRecordBanner == null) { return false; }
+    if (typeof worldRecordBanner.startedAt !== "number") { return false; }
+    return (Date.now() - worldRecordBanner.startedAt) < WORLD_RECORD_BANNER_DURATION_MS;
+}
+
 function drawOverviewBoard() {
     drawBlackBackground();
-    drawOldNotches();
-    drawNextMap();
-    drawMapLeaderboardCard();
-    // Late-arriving PB floats — the last finisher's playerPbResult lands
-    // AFTER startOverview because the server's per-finish upsert + rank lookup
-    // are async. The world-space drawRecordFloats in the race pass never sees
-    // them; this overview-context render catches them anchored to notch rows.
-    drawRecordFloatsOverview();
-    drawHUD();
-    // "Rate this map" star strip for the map just played — pinned ABOVE the next-map
-    // preview card (centred over it), clear of the controls glyph at the bottom. Mirrors
-    // drawNextMap's previewWindow geometry. Drawn last so it sits over the board; guarded
-    // so a render error can't break the overview.
+    var page = computeOverviewPage();
+    // Compute the per-frame geometry ONCE and hang it on `page` so every consumer
+    // reuses it instead of recomputing (the standings sort + the rail split both used
+    // to run twice per frame). All overview renderers read page.geom / page.rail.
+    page.geom = computeStandingsRowGeom(page);
+    page.rail = overviewRailRects(page);
+    drawStandingsPanel(page);
+    drawNextMap(page);
+    drawMapLeaderboardCard(page);
+    // Late-arriving PB floats — the last finisher's playerPbResult lands AFTER
+    // startOverview because the server's per-finish upsert + rank lookup are async.
+    // The world-space drawRecordFloats in the race pass never sees them; this
+    // overview-context render catches them anchored to standings rows.
+    drawRecordFloatsOverview(page);
+    drawHUD(); // GameID strip + WR toast (race-only widgets early-return on overview)
+    // Full-width "Rate this map" strip along the bottom. Guarded so a render error
+    // can't break the overview.
     try {
-        var pvY = (LOGICAL_HEIGHT / 2 - (world.height / 10)) - 100;
-        // Centre on screen; sit clear ABOVE the preview header (the "Next map" 32px
-        // label is at pvY-35, top ~pvY-67) — clamp so it never runs off the top edge.
-        var stripBottom = Math.max(86, pvY - 80);
-        drawMapRating(LOGICAL_WIDTH / 2, stripBottom);
+        drawOverviewRating(page);
     } catch (e) {
         debugLog("rating draw error", e);
     }
+}
+
+// Bottom rating strip — spans the page width above the controls legend.
+function drawOverviewRating(page) {
+    if (typeof ratingMapId === "undefined" || ratingMapId == null) {
+        ratingStarHits = [];
+        return;
+    }
+    drawMapRating(LOGICAL_WIDTH / 2, page.rating.y + page.rating.h, page.rating.w);
+}
+
+// Trim `text` with a trailing "…" until it fits maxW under the CURRENT gameContext font.
+// Shared by the overview name columns (standings + times-to-beat) so the ellipsis-fit
+// loop lives in one place. Returns the original string when it already fits.
+function fitWithEllipsis(text, maxW) {
+    if (text == null) { return ""; }
+    if (gameContext.measureText(text).width <= maxW) { return text; }
+    var t = text;
+    while (t.length > 1 && gameContext.measureText(t + "…").width > maxW) { t = t.slice(0, -1); }
+    return t + "…";
 }
 
 // Format an elapsed-race time (milliseconds) as "m:ss.SS" — minutes are only
@@ -8209,84 +8289,123 @@ function formatRaceTime(ms) {
     return (m > 0 ? (m + ":" + sStr) : sStr) + "." + csStr;
 }
 
-// "Times to beat for <next map>" — overview-screen card under the next-map
-// preview. Renders the global top 10 PB times for the upcoming map. If no one
-// has finished it yet (rows empty), shows "New map!" as a placeholder so the
-// blank space still says something. Plain text on the overview's black
-// backdrop — no card chrome.
-function drawMapLeaderboardCard() {
-    if (mapLeaderboardData == null) { return; }
-    var rows = mapLeaderboardData.rows || [];
-    var mapName = mapLeaderboardData.mapName || "this map";
-    var listX = LOGICAL_WIDTH / 2 + 100;
-    var listY = (LOGICAL_HEIGHT / 2 - (world.height / 10)) - 100 + (world.height / 3) + 28;
-    var listW = world.width / 3;
-    var headerH = 28;
-    var rowH = 26;
+// Vertical split of the right rail into the Next-map panel (top) and the
+// Times-to-beat panel (bottom). Shared so both draw consistently and the rating
+// avoidance / record floats can reason about the rail.
+function overviewRailRects(page) {
+    var x = page.railX, w = page.railW, top = page.standings.y;
+    // Preview tile aspect ~0.56; panel = header + tile + title/author block.
+    var tileW = w - 32;
+    var tileH = Math.round(tileW * 0.56);
+    var previewH = OV.headerH + 12 + tileH + 58;
+    var timesY = top + previewH + page.gap;
+    return {
+        preview: { x: x, y: top, w: w, h: previewH, tileW: tileW, tileH: tileH },
+        times: { x: x, y: timesY, w: w, h: page.contentBottom - timesY }
+    };
+}
 
-    gameContext.save();
-    gameContext.fillStyle = "white";
-    gameContext.font = "bold 18px Arial";
-    gameContext.textBaseline = "alphabetic";
-    gameContext.textAlign = "left";
-    gameContext.fillText("Times to beat for " + mapName, listX, listY + 18);
-
-    if (rows.length === 0) {
-        // Empty-state placeholder where the rows would go.
-        gameContext.font = "italic 18px Arial";
-        gameContext.fillStyle = "#9b5";
-        gameContext.fillText("New map!", listX, listY + headerH + 22);
+function drawNextMap(page) {
+    if (page == null) { return; }
+    var rail = page.rail || overviewRailRects(page);
+    var r = rail.preview;
+    ovLabel(r.x, r.y, "Next Map");
+    if (nextMapPreview == null) {
+        gameContext.save();
+        gameContext.fillStyle = "rgba(255,255,255,0.5)";
+        gameContext.font = "italic 16px Arial"; gameContext.textAlign = "left"; gameContext.textBaseline = "middle";
+        gameContext.fillText("Picking the next map…", r.x + 16, r.y + r.h / 2);
         gameContext.restore();
         return;
     }
-
-    var nameColX = listX + 50;
-    var timeColX = listX + listW - 12;
-    for (var i = 0; i < rows.length; i++) {
-        var row = rows[i];
-        var rowY = listY + headerH + i * rowH;
-        var isYou = (row.playerId === myID);
-        gameContext.fillStyle = "white";
-        gameContext.font = (isYou ? "bold " : "") + "16px Arial";
-        gameContext.textAlign = "left";
-        gameContext.fillText("#" + row.rank, listX, rowY + 18);
-        // Anonymous rows render as "Anon" — short, neutral, and consistent
-        // with how the WR banner and spectator widget label nameless racers.
-        var label = row.displayName || "Anon";
-        if (isYou) { label += " (YOU)"; }
-        // Truncate names that would collide with the time column.
-        var maxNameW = (timeColX - nameColX) - 20;
-        var truncated = label;
-        if (gameContext.measureText(label).width > maxNameW) {
-            while (truncated.length > 1 && gameContext.measureText(truncated + "…").width > maxNameW) {
-                truncated = truncated.slice(0, -1);
-            }
-            truncated += "…";
-        }
-        gameContext.fillText(truncated, nameColX, rowY + 18);
-        gameContext.textAlign = "right";
-        gameContext.fillText(formatRaceTime(row.bestMs), timeColX, rowY + 18);
+    var thX = r.x + 6, thY = r.y + OV.headerH + 10;
+    gameContext.save();
+    // big preview tile — the thumbnail is the visual; rounded-clipped, no frame.
+    if (nextMapThumbnail != null) {
+        try {
+            gameContext.save();
+            drawRoundRectPath(thX, thY, r.tileW, r.tileH, 10);
+            gameContext.clip();
+            gameContext.drawImage(nextMapThumbnail, thX, thY, r.tileW, r.tileH);
+            gameContext.restore();
+        } catch (e) { /* thumbnail not ready — faint placeholder below */ }
+    } else {
+        // No image yet: a faint rounded placeholder so the space reads as the preview.
+        gameContext.fillStyle = "rgba(255,255,255,0.05)";
+        drawRoundRectPath(thX, thY, r.tileW, r.tileH, 10);
+        gameContext.fill();
+    }
+    // title + author below the tile
+    gameContext.fillStyle = "#fff"; gameContext.font = "bold 22px Arial";
+    gameContext.textAlign = "left"; gameContext.textBaseline = "alphabetic";
+    gameContext.fillText(nextMapPreview.name || "—", thX, thY + r.tileH + 28);
+    if (nextMapPreview.author) {
+        gameContext.fillStyle = "rgba(255,255,255,0.6)"; gameContext.font = "14px Arial";
+        gameContext.fillText("by " + nextMapPreview.author, thX, thY + r.tileH + 48);
     }
     gameContext.restore();
 }
 
-function drawNextMap() {
-    if (nextMapPreview != null) {
-        var previewWindow = { x: LOGICAL_WIDTH / 2 + 100, y: (LOGICAL_HEIGHT / 2 - (world.height / 10)) - 100 };
-        gameContext.save();
-        gameContext.beginPath();
-        gameContext.fillStyle = "white";
-        gameContext.lineWidth = 1;
-        gameContext.font = "32px Arial";
-        gameContext.fillText("Next map", previewWindow.x, previewWindow.y - 35);
-        gameContext.font = "20px Arial";
-        gameContext.fillText(nextMapPreview.name, previewWindow.x, previewWindow.y - 5);
-        gameContext.fillText(nextMapPreview.author, previewWindow.x + 300, previewWindow.y - 5);
-        gameContext.drawImage(nextMapThumbnail, previewWindow.x, previewWindow.y, world.width / 3, world.height / 3);
-        gameContext.fill();
+// "Times to beat for <next map>" — right-rail panel below the next-map preview.
+// Global top-10 PB times for the upcoming map; top-3 gold. "New map!" placeholder
+// when empty. Row pitch shrinks to fit the panel height.
+function drawMapLeaderboardCard(page) {
+    if (page == null || mapLeaderboardData == null) { return; }
+    var rail = page.rail || overviewRailRects(page);
+    var r = rail.times;
+    ovLabel(r.x, r.y, "Times to Beat");
+    var allRows = mapLeaderboardData.rows || [];
+    var bodyTop = r.y + OV.headerH + 10;
+
+    gameContext.save();
+    gameContext.textBaseline = "alphabetic";
+    if (allRows.length === 0) {
+        gameContext.font = "italic 15px Arial";
+        gameContext.fillStyle = "#9b5";
+        gameContext.textAlign = "left";
+        gameContext.fillText("New map — be the first!", r.x + 6, bodyTop + 22);
         gameContext.restore();
+        return;
     }
 
+    // Fit rows at a legible pitch. Rather than crushing all 10 into a too-short panel
+    // (which floored the font ABOVE the row pitch, so lines overlapped), cap the count to
+    // what fits at a readable MIN_ROW_H and note the truncation. avail can never go
+    // negative here because overviewRailRects keeps times.h >= 0 on the fixed canvas.
+    var avail = Math.max(0, (r.y + r.h - 12) - bodyTop);
+    var MIN_ROW_H = 18;
+    var maxRows = Math.max(1, Math.floor(avail / MIN_ROW_H));
+    var truncated = allRows.length > maxRows;
+    var rows = truncated ? allRows.slice(0, maxRows - 1) : allRows; // leave a line for "+N more"
+    var shown = rows.length + (truncated ? 1 : 0);
+    var rowH = Math.min(26, avail / shown);
+    var rowFontPx = Math.max(11, Math.min(15, Math.round(rowH - 9)));
+    var rankColX = r.x + 6, nameColX = r.x + 40, timeColX = r.x + r.w - 4;
+    var maxNameW = (timeColX - nameColX) - 70;
+    for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        var ty = bodyTop + i * rowH + rowH * 0.72;
+        var isYou = (row.playerId === myID);
+        gameContext.font = "bold " + rowFontPx + "px Arial";
+        gameContext.textAlign = "left";
+        gameContext.fillStyle = (i < 3) ? OV.gold : "rgba(255,255,255,0.5)";
+        gameContext.fillText("#" + row.rank, rankColX, ty);
+        var label = (row.displayName || "Anon") + (isYou ? " (YOU)" : "");
+        gameContext.fillStyle = "#fff";
+        gameContext.font = (isYou ? "bold " : "") + rowFontPx + "px Arial";
+        gameContext.fillText(fitWithEllipsis(label, maxNameW), nameColX, ty);
+        gameContext.textAlign = "right";
+        gameContext.fillText(formatRaceTime(row.bestMs), timeColX, ty);
+    }
+    // "+N more" footer when the panel couldn't show the whole top-10.
+    if (truncated) {
+        var moreTy = bodyTop + rows.length * rowH + rowH * 0.72;
+        gameContext.font = "italic " + rowFontPx + "px Arial";
+        gameContext.fillStyle = "rgba(255,255,255,0.4)";
+        gameContext.textAlign = "left";
+        gameContext.fillText("+" + (allRows.length - rows.length) + " more", rankColX, moreTy);
+    }
+    gameContext.restore();
 }
 function drawBlackBackground() {
     gameContext.save();
@@ -8296,52 +8415,82 @@ function drawBlackBackground() {
     gameContext.fill();
     gameContext.restore();
 }
-function drawOldNotches() {
-    var count = 0;
-    for (var player in playerList) {
-        count++;
+// ---- STANDINGS HERO PANEL --------------------------------------------------
+// The racing tracks, now inside a panel. Each row: rank badge · kart-on-line
+// track (kart rides at its score position, full cosmetics + tail) · score.
+// Auto 1/2 columns; rows GROW to fill the panel at low player counts.
+// Shared standings geometry: ordered player ids + a per-index row box {x,y,w,h}.
+// Both the panel renderer and the record-float overlay key off this so a float
+// always lands on its player's row at any column/scale.
+function computeStandingsRowGeom(page) {
+    var r = page.standings;
+    // Order by standing (notches desc) so the numeric rank badges and row order match
+    // the actual leaderboard, not playerList insertion (join) order. Decorate-sort with
+    // the original index as a stable tiebreak so equal-score rows keep a deterministic,
+    // flicker-free order frame to frame.
+    var deco = [];
+    var k = 0;
+    for (var pid in playerList) {
+        var pl = playerList[pid];
+        deco.push({ id: pid, notches: (pl && typeof pl.notches === "number") ? pl.notches : 0, ord: k++ });
     }
-    var distanceApart = 7;
-    var offSetX = 80;
-    var offSetY = LOGICAL_HEIGHT / 2 - (count * config.playerBaseRadius * distanceApart * .5);
-
-
-    gameContext.save();
-    gameContext.translate(offSetX, offSetY);
-    for (var player in playerList) {
-        if (playerAnimating == null) {
-            playerAnimating = player;
+    deco.sort(function (a, b) { return (b.notches - a.notches) || (a.ord - b.ord); });
+    var ids = deco.map(function (d) { return d.id; });
+    var count = ids.length;
+    var inX = r.x + 12, inY = r.y + OV.headerH + 6;
+    var inW = r.w - 24, inH = r.h - OV.headerH - 14;
+    var cols = count <= 11 ? 1 : 2;
+    var perCol = Math.max(1, Math.ceil(count / cols));
+    var colW = inW / cols;
+    var rowH = Math.min(64, inH / perCol);
+    var usedH = perCol * rowH;
+    var padTop = Math.max(0, (inH - usedH) / 2);
+    return {
+        ids: ids, count: count, cols: cols, perCol: perCol, colW: colW, rowH: rowH,
+        inX: inX, inY: inY, padTop: padTop,
+        box: function (i) {
+            var col = Math.floor(i / perCol), row = i % perCol;
+            return {
+                x: inX + col * colW,
+                y: inY + padTop + row * rowH,
+                w: colW - (cols > 1 ? 12 : 0),
+                h: rowH
+            };
         }
-        drawNotches(notchDistanceApart);
-        drawPlayerIcon(playerList[player], notchDistanceApart);
-        drawGoalPost(playerList[player], notchDistanceApart);
-        drawEmoji(playerList[player]);
-        drawNotchDeltaFloat(playerList[player]);
-        drawNotchInlineLeaderboard(playerList[player], notchDistanceApart);
-        gameContext.translate(0, config.playerBaseRadius * distanceApart);
-    }
-    gameContext.restore();
+    };
 }
-function drawPlayerIcon(player, notchDistanceApart) {
-    var notchX = 0;
-    var moveAmt = 0;
-    gameContext.beginPath();
-    gameContext.shadowColor = player.color;
-    gameContext.shadowBlur = 10;
-    if (player.distanceToMove > 0) {
-        moveAmt = 2;
-        notchX = player.distanceTraveled + (oldNotches[player.id] * notchDistanceApart);
-    } else if (player.distanceToMove < 0) {
-        moveAmt = -2;
-        notchX = player.distanceTraveled + (oldNotches[player.id] * notchDistanceApart);
-    } else {
-        notchX = player.notches * notchDistanceApart;
-        playerAnimating = null;
-    }
-    drawScoreBoardTrail(notchX, player);
-    drawFireOverview(notchX, player);
-    //drawAbiltiesOverview(notchX, player);
 
+function drawStandingsPanel(page) {
+    var r = page.standings;
+    ovLabel(r.x, r.y, "Round Standings");
+    var g = page.geom || computeStandingsRowGeom(page);
+    if (g.count === 0) { return; }
+
+    for (var i = 0; i < g.count; i++) {
+        var id = g.ids[i];
+        // Preserve the sequential notch-slide cascade: the first not-yet-animated
+        // player becomes the animator; it hands off when its slide completes.
+        if (playerAnimating == null) { playerAnimating = id; }
+        var b = g.box(i);
+        drawStandingsRow(playerList[id], i, b.x, b.y, b.w, b.h);
+    }
+}
+
+// Step a player's notch-slide animation one frame and return the current animated
+// progress as a 0..1 fraction of the full track. Same stepping + hand-off logic as
+// the legacy drawPlayerIcon, just decoupled from a fixed pixel pitch so the kart can
+// ride a track of any width at a constant on-screen size.
+function overviewAnimStep(player) {
+    var unit = notchDistanceApart || 75;
+    var gl = gameLength || (config && config.baseNotchesToWin) || 5;
+    var notchX, moveAmt = 0;
+    if (player.distanceToMove > 0) {
+        moveAmt = 2; notchX = player.distanceTraveled + (oldNotches[player.id] * unit);
+    } else if (player.distanceToMove < 0) {
+        moveAmt = -2; notchX = player.distanceTraveled + (oldNotches[player.id] * unit);
+    } else {
+        notchX = player.notches * unit; playerAnimating = null;
+    }
     if (playerAnimating === player.id) {
         if (player.distanceToMove - moveAmt < 0 && player.distanceToMove + moveAmt > 0) {
             player.distanceToMove = 0;
@@ -8350,54 +8499,337 @@ function drawPlayerIcon(player, notchDistanceApart) {
             player.distanceTraveled += moveAmt;
         }
     }
+    player.x = notchX; player.y = 0;
+    // Track spans gl+1 segments, NOT gl: reaching gameLength notches is "near victory",
+    // not a win — the match only ends when a player wins ANOTHER round while already at the
+    // cap. So a kart at gameLength sits one segment SHORT of the goal flag (the decisive
+    // final step), matching the legacy goal post reserved at (gameLength+1)*distanceApart.
+    return Math.max(0, Math.min(1, notchX / ((gl + 1) * unit)));
+}
 
-    player.x = notchX;
-    player.y = 0;
-    var iconRadius = config.playerBaseRadius * 2;
-    // Match the in-game look: a skinned kart shows its procedural skin (tinted by the
-    // player's colour) instead of the plain colour disc + ring. Heading falls back to
-    // the kart's angle since overview icons are static.
-    // Independent body cosmetics: border (player.border) rings ANY icon; pattern
-    // (player.pattern) textures the plain sphere icon only.
-    // Border FIRST (behind the icon body) so the cart/disc always sits on top.
-    var iconBid = player.border;
-    var iconBskin = (typeof getSkin === "function" && iconBid) ? getSkin(iconBid) : null;
-    if (iconBskin && iconBskin.slot === 'border') {
-        var iconBorder0 = (typeof getSkinPainter === "function") ? getSkinPainter(iconBid) : null;
-        if (iconBorder0 != null) { drawBorderOverlay(player, notchX, 0, iconRadius, iconBorder0); }
+// nearVictory transitions + their sounds, preserved from the legacy drawGoalPost.
+function overviewVictoryState(player) {
+    var gl = gameLength || (config && config.baseNotchesToWin) || 5;
+    if (player.distanceToMove == 0 && playerAnimating !== player.id) {
+        if (player.notches == gl && player.nearVictory == false) {
+            player.nearVictory = true;
+            playSound(nearVictorySound);
+        }
     }
-    var iconPainter = cartSkinPainter(player.cart);
-    if (iconPainter != null) {
-        // Fixed heading (face right, toward the finish) so the scoreboard icon doesn't
-        // freeze at the kart's last racing angle.
-        drawCartSkin(player, notchX, 0, iconRadius, iconPainter, 0);
-    } else {
-        gameContext.beginPath();
-        gameContext.arc(notchX, 0, iconRadius, 0, 2 * Math.PI);
-        gameContext.fillStyle = player.color;
-        gameContext.fill();
-        gameContext.save();
-        gameContext.beginPath();
-        gameContext.lineWidth = 5;
-        gameContext.strokeStyle = "black";
-        gameContext.arc(notchX, 0, iconRadius, 0, 2 * Math.PI);
-        gameContext.stroke();
-        gameContext.restore();
-        // Pattern overlay on the plain sphere standings icon (patterns are sphere-scoped).
-        var iconPid = player.pattern;
-        var iconPskin = (typeof getSkin === "function" && iconPid) ? getSkin(iconPid) : null;
-        if (iconPskin && iconPskin.slot === 'pattern') {
-            var iconPat = (typeof getSkinPainter === "function") ? getSkinPainter(iconPid) : null;
-            if (iconPat != null) { drawPatternOverlay(player, notchX, 0, iconRadius, iconPat); }
+    if (player.distanceToMove != 0 && playerAnimating === player.id) {
+        if (oldNotches[player.id] == gl && player.notches != gl && player.nearVictory == true) {
+            player.nearVictory = false;
+            playSound(fallFromVictorySound);
         }
     }
 }
 
-function drawFireOverview(x, player) {
+// Row label + "is this one of MY karts" for the standings. In single-player the local
+// kart reads "You"; in couch co-op there are up to four local seats sharing the screen,
+// so each gets its seat identity — the primary stays "You" and the others read "P2".."P4"
+// (slot+1, matching the gamepad HUD), so every player can find their own row. A bot /
+// avatar-skin name is used when present; everyone else is nameless (kart colour = id).
+function overviewSeatLabel(player) {
+    // Ownership ("is this one of MY karts") delegates to the canonical isLocalId so the
+    // standings agree with every other render path (kart dimming, halos) — including its
+    // loose == handling of a number-vs-string id across the socket boundary.
+    var local = (typeof isLocalId === "function") ? isLocalId(player.id) : (player.id === myID);
+    if (!local) {
+        return { label: (player.name != null ? player.name : ""), local: false };
+    }
+    // Local: derive the seat tag. Single joined seat → "You"; couch co-op → primary stays
+    // "You", the others read "P2".."P4" (slot+1, matching the gamepad HUD).
+    if (typeof localPlayers !== "undefined" && localPlayers) {
+        var slot = -1, joinedCount = 0;
+        for (var s = 0; s < localPlayers.length; s++) {
+            var lp = localPlayers[s];
+            if (!lp) { continue; }
+            if (lp.joined) { joinedCount++; }
+            if (lp.myID == player.id) { slot = s; } // == to match isLocalId's loose compare
+        }
+        var isPrimary = (typeof primarySlot === "number") ? (slot === primarySlot) : (slot === 0);
+        if (slot >= 0 && joinedCount > 1 && !isPrimary) {
+            return { label: "P" + (slot + 1), local: true };
+        }
+    }
+    return { label: "You", local: true };
+}
+
+// One standings row. px,py = row top-left; pw,rh = row box.
+function drawStandingsRow(player, idx, px, py, pw, rh) {
+    var cy = py + rh / 2;
+    var gl = gameLength || (config && config.baseNotchesToWin) || 5;
+    var seat = overviewSeatLabel(player);
+    var isYou = seat.local;
+
+    // Step the slide FIRST, then run the victory-state check — overviewAnimStep clears
+    // playerAnimating to null on the frame a slide settles, which is exactly what
+    // overviewVictoryState's `playerAnimating !== player.id` guard needs to fire the
+    // near-victory / fall sounds. Running the check first (as before) left the guard
+    // permanently false for a leader that the panel had just assigned as the animator,
+    // so the audio cues never played. Matches the legacy step-then-goalpost order.
+    var frac = overviewAnimStep(player);
+    overviewVictoryState(player);
+
+    // NEAR-VICTORY WARNING — a player one round from winning is the threat everyone
+    // should gang up on, so their whole row lights up gold and pulses. Derive the VISUAL
+    // straight from the score, NOT the stateful player.nearVictory flag (which drives the
+    // sound cue and only flips under specific animation timing). Two cases, mirroring the
+    // legacy goal-post: (a) settled AT the win line, and (b) the legacy "pending" case — a
+    // player who was at the win line last round (oldNotches==gl) whose down-slide hasn't
+    // animated yet (distanceToMove!=0), so the gold holds through the wait instead of
+    // vanishing instantly at overview entry.
+    var atLine = (player.notches >= gl) && player.distanceToMove == 0;
+    var pendingFromLine = (oldNotches[player.id] === gl) && player.distanceToMove != 0;
+    var nearWin = atLine || pendingFromLine;
+    if (nearWin) {
+        var pulse = 0.5 + 0.5 * Math.sin(Date.now() / 260);
+        gameContext.save();
+        gameContext.globalAlpha = 0.12 + 0.10 * pulse;
+        gameContext.fillStyle = OV.gold;
+        drawRoundRectPath(px + 2, py + 2, pw - 4, rh - 4, 8);
+        gameContext.fill();
+        gameContext.globalAlpha = 0.55 + 0.35 * pulse;
+        gameContext.lineWidth = 1.5;
+        gameContext.strokeStyle = OV.gold;
+        gameContext.stroke();
+        gameContext.restore();
+    }
+
+    // rank badge / medal at the front
+    gameContext.save();
+    gameContext.textAlign = "center";
+    gameContext.textBaseline = "middle";
+    if (player.firstPlace) { gameContext.font = "22px Arial"; gameContext.fillText("🥇", px + 22, cy); }
+    else if (player.secondPlace) { gameContext.font = "22px Arial"; gameContext.fillText("🥈", px + 22, cy); }
+    else if (player.downRank) { gameContext.font = "20px Arial"; gameContext.fillText("💀", px + 22, cy); }
+    else { gameContext.font = "bold 15px Arial"; gameContext.fillStyle = "rgba(255,255,255,0.5)"; gameContext.fillText(idx + 1, px + 22, cy); }
+    gameContext.restore();
+
+    // name — humans are nameless on the board (server only sets player.name for bots /
+    // avatar-skin players), so identity is carried by the kart colour/skin. Local seats
+    // get "You"/"P2".."P4" (overviewSeatLabel) so couch co-op players each find their row;
+    // others show a bot/avatar name when present, else blank — the kart speaks for itself.
+    var nm = seat.label;
+    if (nm) {
+        gameContext.save();
+        gameContext.textAlign = "left";
+        gameContext.textBaseline = "middle";
+        gameContext.fillStyle = isYou ? OV.gold : "#fff";
+        gameContext.font = (isYou ? "bold " : "") + "15px Arial";
+        gameContext.fillText(fitWithEllipsis(nm, 110), px + 46, cy);
+        gameContext.restore();
+    }
+
+    // ---- track: kart rides the line ----
+    var trackX0 = px + 184, trackX1 = px + pw - 52, trackW = trackX1 - trackX0;
+    if (trackW < 40) { trackW = 40; trackX1 = trackX0 + trackW; }
+    var fillX = trackX0 + frac * trackW;
+
+    // base rail + notch pips. The track spans gl+1 segments (see overviewAnimStep): a pip
+    // for each score 0..gl, so pip `gl` is one step short of the goal flag (trackX1) — the
+    // kart parks there at near-victory and the flag marks the decisive final win.
+    gameContext.save();
+    gameContext.strokeStyle = "rgba(255,255,255,0.10)";
+    gameContext.lineWidth = 3;
+    gameContext.beginPath(); gameContext.moveTo(trackX0, cy); gameContext.lineTo(trackX1, cy); gameContext.stroke();
+    for (var n = 0; n <= gl; n++) {
+        var nx = trackX0 + (n / (gl + 1)) * trackW;
+        gameContext.beginPath(); gameContext.arc(nx, cy, 2.5, 0, 2 * Math.PI);
+        gameContext.fillStyle = "rgba(255,255,255,0.22)"; gameContext.fill();
+    }
+    gameContext.restore();
+
+    // Will an equipped tail cosmetic draw over this segment? If so, the solid progress
+    // line recedes to a faint thin guide so the COSMETIC trail is the main visual; with no
+    // tail equipped the solid line is the whole show and stays bold.
+    var hasTailFx = !nearWin && player.trailFx && typeof getTrailEffect === "function" &&
+        typeof TRAIL_FX !== "undefined" && getTrailEffect(player.trailFx) &&
+        TRAIL_FX[getTrailEffect(player.trailFx)] != null;
+
+    // filled progress line (the player-colour "trail"). Near-victory players glow GOLD
+    // and dash — the warning trumps their own colour so the threat reads instantly.
+    gameContext.save();
+    if (nearWin) {
+        gameContext.shadowColor = OV.gold; gameContext.shadowBlur = 12;
+        gameContext.strokeStyle = OV.gold; gameContext.lineWidth = 6; gameContext.lineCap = "round";
+        gameContext.setLineDash([18, 6]);
+    } else if (hasTailFx) {
+        // Faint thin guide under the cosmetic trail — keeps the line readable as "progress"
+        // without competing with the equipped effect.
+        gameContext.globalAlpha = 0.22;
+        gameContext.strokeStyle = player.color; gameContext.lineWidth = 2; gameContext.lineCap = "round";
+    } else {
+        gameContext.shadowColor = player.color; gameContext.shadowBlur = 6;
+        gameContext.strokeStyle = player.color; gameContext.lineWidth = 5; gameContext.lineCap = "round";
+    }
+    gameContext.beginPath(); gameContext.moveTo(trackX0, cy); gameContext.lineTo(fillX, cy); gameContext.stroke();
+    gameContext.restore();
+
+    // equipped tail cosmetic overlaid along the filled segment (skipped for near-victory,
+    // where the gold warning trail takes over the whole length).
+    if (hasTailFx) { drawOverviewTailFx(trackX0, fillX, cy, player); }
+
+    // goal flag at the finish — solid pulsing gold once a player reaches the win line.
+    gameContext.save();
+    gameContext.font = (nearWin ? "bold 16px" : "14px") + " Arial";
+    gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
+    if (nearWin) {
+        gameContext.shadowColor = OV.gold; gameContext.shadowBlur = 8;
+        gameContext.fillStyle = OV.gold;
+    } else {
+        gameContext.fillStyle = (frac >= 0.999) ? OV.gold : "rgba(255,255,255,0.3)";
+    }
+    gameContext.fillText("⚑", trackX1 + 10, cy);
+    gameContext.restore();
+
+    // kart rides at the progress head, full cosmetics + fire
+    drawFireOverview(fillX, cy, player);
+    drawOverviewKart(player, fillX, cy, 12);
+
+    // between-round emote — the server still broadcasts chat reactions during overview
+    // and the input UI still sends them, so render them on the row above the kart.
+    // drawEmoji anchors at player.x/player.y; overviewAnimStep left those in track-local
+    // space, so point them at the kart's actual screen position for this draw.
+    if (player.chatMessage != null) {
+        var sx = player.x, sy = player.y;
+        player.x = fillX; player.y = cy - 6;
+        drawEmoji(player);
+        player.x = sx; player.y = sy;
+    }
+
+    // delta float above the kart (this round's score change)
+    drawOverviewDelta(player, fillX, cy - 18);
+
+    // just-played PB tag — signed-in racers' global rank + time on the map they just
+    // finished (sourced from mapLeaderboardJustPlayed). Lets the last finisher, who gets
+    // almost no overview time, still see how they landed. Drawn in its OWN lane below the
+    // track, ending left of the goal flag (trackX1) so it never crowds the flag/score
+    // column at the row's right edge.
+    drawStandingsPbTag(player, trackX1 - 6, cy, isYou);
+
+    // score
+    gameContext.save();
+    gameContext.textAlign = "right"; gameContext.textBaseline = "middle";
+    gameContext.fillStyle = "#fff"; gameContext.font = "bold 16px Arial";
+    gameContext.fillText(player.notches, px + pw - 18, cy);
+    gameContext.restore();
+}
+
+// Just-played global rank + PB time tag for a row, drawn right-aligned ending at xRight.
+// No-op without a mapLeaderboardJustPlayed entry for this player (guests/bots, or a
+// signed-in player with no PB). Mirrors the legacy inline-leaderboard data source.
+function drawStandingsPbTag(player, xRight, cy, isYou) {
+    if (mapLeaderboardJustPlayed == null || !mapLeaderboardJustPlayed.rows) { return; }
+    if (player == null || !player.id) { return; }
+    var rows = mapLeaderboardJustPlayed.rows, row = null;
+    for (var i = 0; i < rows.length; i++) {
+        if (rows[i].playerId === player.id) { row = rows[i]; break; }
+    }
+    if (row == null) { return; }
+    gameContext.save();
+    gameContext.textBaseline = "middle";
+    gameContext.textAlign = "right";
+    gameContext.font = (isYou ? "bold " : "") + "12px Arial";
+    gameContext.fillStyle = "rgba(255,255,255,0.55)";
+    gameContext.fillText("#" + row.rank + "  " + formatRaceTime(row.bestMs), xRight, cy + 13);
+    gameContext.restore();
+}
+
+// Kart with full cosmetics at an explicit centre/radius (decoupled from the old
+// transform-scaled icon). Border behind, then cart skin OR plain disc + pattern —
+// same cosmetic dispatch as the legacy drawPlayerIcon.
+function drawOverviewKart(player, cx, cy, radius) {
+    gameContext.save();
+    gameContext.shadowColor = player.color;
+    gameContext.shadowBlur = 10;
+    // border FIRST (behind the body)
+    var bid = player.border;
+    var bskin = (typeof getSkin === "function" && bid) ? getSkin(bid) : null;
+    if (bskin && bskin.slot === 'border') {
+        var bpaint = (typeof getSkinPainter === "function") ? getSkinPainter(bid) : null;
+        if (bpaint != null) { drawBorderOverlay(player, cx, cy, radius, bpaint); }
+    }
+    var painter = cartSkinPainter(player.cart);
+    if (painter != null) {
+        drawCartSkin(player, cx, cy, radius, painter, 0); // face right (toward finish)
+    } else {
+        gameContext.beginPath();
+        gameContext.arc(cx, cy, radius, 0, 2 * Math.PI);
+        gameContext.fillStyle = player.color;
+        gameContext.fill();
+        gameContext.save();
+        gameContext.beginPath();
+        gameContext.lineWidth = Math.max(2, radius * 0.33);
+        gameContext.strokeStyle = "black";
+        gameContext.arc(cx, cy, radius, 0, 2 * Math.PI);
+        gameContext.stroke();
+        gameContext.restore();
+        // pattern overlays the plain sphere only
+        var pid = player.pattern;
+        var pskin = (typeof getSkin === "function" && pid) ? getSkin(pid) : null;
+        if (pskin && pskin.slot === 'pattern') {
+            var ppaint = (typeof getSkinPainter === "function") ? getSkinPainter(pid) : null;
+            if (ppaint != null) { drawPatternOverlay(player, cx, cy, radius, ppaint); }
+        }
+    }
+    gameContext.restore();
+}
+
+// Equipped tail cosmetic (player.trailFx) painted along the filled progress segment,
+// using the same TRAIL_FX renderer as live racing / the recap. Synthesised verts march
+// x0→x1 so the effect runs the length of the trail. No-op without an effect.
+function drawOverviewTailFx(x0, x1, cy, player) {
+    if (x1 - x0 <= 8 || !player.trailFx) { return; }
+    if (typeof paintTrailFx !== "function") { return; }
+    var fadeMs = (typeof TRAIL_FADE_MS !== "undefined") ? TRAIL_FADE_MS : 1700;
+    var now = Date.now();
+    var n = 14, verts = [];
+    for (var i = 0; i < n; i++) {
+        var f = i / (n - 1);
+        verts.push({ x: x0 + (x1 - x0) * f, y: cy, t: now - fadeMs * 0.92 * (1 - f) });
+    }
+    gameContext.save();
+    // The TRAIL_FX renderers are built for free 2D kart motion, so they add perpendicular
+    // sway/drift/waves around the path. On the overview the trail must hug the FIXED notch
+    // line, so clip the effect to a thin band centred on cy — each trail keeps its colour,
+    // particles, and along-line motion, but its vertical scatter is trimmed to the line.
+    var bandH = 12;
+    gameContext.beginPath();
+    gameContext.rect(x0 - 4, cy - bandH / 2, (x1 - x0) + 8, bandH);
+    gameContext.clip();
+    paintTrailFx(gameContext, player.trailFx, verts, player.color, { fadeMs: fadeMs });
+    gameContext.restore();
+}
+
+// Rising/fading "+2"/"+1"/"−1" above the kart, showing this round's score change.
+function drawOverviewDelta(player, cx, cy) {
+    var delta = player.deltaNotches;
+    if (!delta || notchFloatStart == null) { return; }
+    var elapsed = Date.now() - notchFloatStart;
+    if (elapsed < 0 || elapsed > NOTCH_FLOAT_DURATION) { return; }
+    var t = elapsed / NOTCH_FLOAT_DURATION;
+    var alpha = (t < 0.15) ? (t / 0.15) : (t > 0.6 ? Math.max(0, (1 - t) / 0.4) : 1);
+    var rise = 14 * (1 - Math.pow(1 - t, 2));
+    var label = (delta > 0 ? "+" : "−") + Math.abs(delta);
+    var fill = delta < 0 ? "#ff5a5a" : (delta >= 2 ? "#ffd54a" : "#5be36a");
+    gameContext.save();
+    gameContext.globalAlpha = alpha;
+    gameContext.font = "bold 15px Arial";
+    gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
+    gameContext.lineWidth = 3; gameContext.strokeStyle = "rgba(0,0,0,0.85)";
+    gameContext.shadowColor = fill; gameContext.shadowBlur = 6;
+    gameContext.strokeText(label, cx, cy - rise);
+    gameContext.fillStyle = fill;
+    gameContext.fillText(label, cx, cy - rise);
+    gameContext.restore();
+}
+
+function drawFireOverview(x, y, player) {
     if (player.onFire > 0) {
         gameContext.save();
         gameContext.shadowColor = "rgba(0, 0, 0, 0)";
-        gameContext.translate(x - 5, 0);
+        gameContext.translate(x - 5, y);
         gameContext.rotate(-90 * (Math.PI / 180));
         drawFlameColor(player, 90);
         gameContext.restore();
@@ -8414,182 +8846,6 @@ function drawAbiltiesOverview(notchX, player) {
     gameContext.restore();
 }
 */
-
-function drawNotches(distanceApart) {
-    gameContext.beginPath();
-    for (var i = 0; i < gameLength + 1; i++) {
-        gameContext.arc(i * distanceApart, 0, 2, 0, 2 * Math.PI);
-    }
-    gameContext.fillStyle = "grey";
-    gameContext.fill();
-}
-
-function drawScoreBoardTrail(x, player) {
-    gameContext.save();
-    gameContext.beginPath();
-    gameContext.moveTo(0, 0);
-    gameContext.lineTo(x, 0);
-    gameContext.lineWidth = 10;
-    gameContext.shadowBlur = 3;
-    gameContext.shadowColor = player.color;
-    gameContext.strokeStyle = player.color;
-    if (player.nearVictory == true) {
-        gameContext.setLineDash([20, 3, 3, 3, 3, 3, 3, 3]);
-    } else {
-        gameContext.setLineDash([]);
-    }
-
-    gameContext.stroke();
-    gameContext.arc(0, 0, 8, 0, 2 * Math.PI);
-    gameContext.fillStyle = player.color;
-    gameContext.fill();
-    gameContext.restore();
-}
-function drawGoalPost(player, distanceApart) {
-    gameContext.beginPath();
-
-    gameContext.rect(-15 + (gameLength + 1) * distanceApart, -15, 30, 30);
-    gameContext.shadowColor = "gold";
-    gameContext.fillStyle = "gold";
-    gameContext.lineWidth = 1;
-    gameContext.font = "40px Arial";
-    if (player.firstPlace == true) {
-        gameContext.fillText("🥇", 30 + (gameLength + 1) * distanceApart, 12.5);
-    }
-    gameContext.shadowColor = "silver";
-    gameContext.fillStyle = "silver";
-    if (player.secondPlace == true) {
-        gameContext.fillText("🥈", 30 + (gameLength + 1) * distanceApart, 12.5);
-    }
-    gameContext.shadowColor = "red";
-    gameContext.fillStyle = "red";
-    if (player.downRank == true) {
-        gameContext.fillText("💀", 30 + (gameLength + 1) * distanceApart, 12.5);
-    }
-
-    gameContext.fillStyle = "black";
-
-    if (player.distanceToMove == 0 && playerAnimating !== player.id) {
-        //Animation complete
-
-        if (player.notches == gameLength) {
-            if (player.nearVictory == false) {
-                player.nearVictory = true;
-                playSound(nearVictorySound);
-            }
-        }
-
-        if (player.nearVictory == true) {
-            gameContext.shadowColor = "gold";
-            gameContext.shadowBlur = 10;
-            gameContext.fillStyle = "gold";
-            gameContext.fill();
-        }
-    }
-
-    if (player.distanceToMove != 0 && playerAnimating === player.id) {
-        //Animation occuring
-        if (oldNotches[player.id] == gameLength && player.notches != gameLength) {
-            if (player.nearVictory == true) {
-                player.nearVictory = false;
-                playSound(fallFromVictorySound);
-            }
-        }
-    }
-    if (player.distanceToMove != 0 && playerAnimating !== player.id) {
-        //Animation pending
-        if (oldNotches[player.id] == gameLength) {
-            gameContext.shadowColor = "gold";
-            gameContext.shadowBlur = 10;
-            gameContext.fillStyle = "gold";
-            gameContext.fill();
-        }
-    }
-    gameContext.shadowColor = "grey";
-    gameContext.strokeStyle = "grey";
-    gameContext.fill();
-
-}
-
-// Small rising/fading "+2"/"+1"/"−1" above a player's notch icon on the standings
-// board, showing how their score changed this round. Drawn in the same translated
-// row space as drawPlayerIcon (so player.x is the icon's current track position),
-// after the icon/emoji so it sits on top. Driven off notchFloatStart, set on
-// overview entry; once the window elapses nothing draws, so a resize/redraw of the
-// board won't replay it and it resets cleanly each round.
-// Per-notch-row inline leaderboard tag — "#3  32.17" rendered just past the
-// goal post on each player's notch row, sourced from mapLeaderboardJustPlayed.
-// Lets the last finisher (who gets ~no overview time before the next round
-// starts) still see how they landed on the map they just played. Local-player
-// row is bolded. No tag for guests/bots or for logged-in players with no PB.
-function drawNotchInlineLeaderboard(player, distanceApart) {
-    if (mapLeaderboardJustPlayed == null || !mapLeaderboardJustPlayed.rows) { return; }
-    if (player == null || !player.id) { return; }
-    var row = null;
-    var rows = mapLeaderboardJustPlayed.rows;
-    for (var i = 0; i < rows.length; i++) {
-        if (rows[i].playerId === player.id) { row = rows[i]; break; }
-    }
-    if (row == null) { return; }
-    var x = (gameLength + 1) * distanceApart + 40; // just past the goal post
-    var isYou = (player.id === myID);
-    gameContext.save();
-    gameContext.textBaseline = "middle";
-    gameContext.textAlign = "left";
-    gameContext.fillStyle = "white";
-    gameContext.font = (isYou ? "bold " : "") + "16px Arial";
-    gameContext.fillText("#" + row.rank, x, 0);
-    gameContext.fillText(formatRaceTime(row.bestMs), x + 50, 0);
-    gameContext.restore();
-}
-
-function drawNotchDeltaFloat(player) {
-    var delta = player.deltaNotches;
-    // !delta rejects 0, NaN, null and undefined in one go — NaN can slip in if a
-    // playerList id is missing from the round's notchUpdates (a join/leave race),
-    // and rendering "−NaN" would be worse than just skipping the float.
-    if (!delta || notchFloatStart == null) {
-        return;
-    }
-    var elapsed = Date.now() - notchFloatStart;
-    if (elapsed < 0 || elapsed > NOTCH_FLOAT_DURATION) {
-        return;
-    }
-    var t = elapsed / NOTCH_FLOAT_DURATION; // 0..1 across the float's lifetime
-
-    // Pop in fast, hold, then fade — so it reads as a quick celebratory cue.
-    var alpha;
-    if (t < 0.15) {
-        alpha = t / 0.15;
-    } else if (t > 0.6) {
-        alpha = Math.max(0, (1 - t) / 0.4);
-    } else {
-        alpha = 1;
-    }
-
-    // Ease-out rise above the icon, tracking it as the notch-fill animates.
-    var rise = 34 * (1 - Math.pow(1 - t, 2));
-    var baseY = -(config.playerBaseRadius * 2 + 8) - rise;
-
-    var label = (delta > 0 ? "+" : "−") + Math.abs(delta);
-    // +2 = gold (the round win), +1 = green, a lost notch = red.
-    var fill = delta < 0 ? "#ff5a5a" : (delta >= 2 ? "#ffd54a" : "#5be36a");
-
-    gameContext.save();
-    gameContext.globalAlpha = alpha;
-    gameContext.font = "bold 26px Arial";
-    gameContext.textAlign = "center";
-    gameContext.textBaseline = "middle";
-    // Dark outline + matching glow so it stays legible on the black overview backdrop.
-    gameContext.lineWidth = 4;
-    gameContext.strokeStyle = "rgba(0, 0, 0, 0.85)";
-    gameContext.shadowColor = fill;
-    gameContext.shadowBlur = 8;
-    gameContext.strokeText(label, player.x, baseY);
-    gameContext.fillStyle = fill;
-    gameContext.fillText(label, player.x, baseY);
-    gameContext.restore();
-}
 
 function createFirstRankSymbol(playerid) {
     var player = playerList[playerid];
