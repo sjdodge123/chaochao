@@ -272,6 +272,23 @@ nav .auth-control ~ .theme-toggle {
 .cc-progression-toast.visible {
     transform: translateX(-50%) translateY(0);
 }
+/* "2× your match XP" offer — the last item in the progression-toast stream. Persistent
+   (no auto-dismiss) actionable toast with a gold "Watch" CTA sized for touch (≥44px). */
+.cc-reward-offer .cc-toast-action {
+    height: 44px;
+    padding: 0 16px;
+    font-size: 15px;
+    font-weight: 600;
+    background: #f6c64b;
+    border-color: #f6c64b;
+    color: #1a1a1a;
+}
+.cc-reward-offer .cc-toast-action:hover { background: #ffd45e; }
+.cc-reward-offer .cc-toast-close {
+    width: 44px;
+    height: 44px;
+    font-size: 20px;
+}
 .cc-progression-toast .cc-toast-msg {
     font-size: 15px;
     font-weight: 600;
@@ -1281,18 +1298,6 @@ body.osk-open .gamepad-prompts {
     background: #c87f8a;
     border-color: #c87f8a;
     color: #fff;
-}
-/* Reward prompt ("2× your match XP"): a subtitle line + a gold accent on the opt-in CTA. */
-.confirm-subtitle {
-    font-size: 0.95rem;
-    color: var(--text);
-    opacity: 0.8;
-    margin: -0.5rem 0 1.1rem;
-}
-.confirm-btn.confirm-watch {
-    background: #f6c64b;
-    border-color: #f6c64b;
-    color: #1a1a1a;
 }
 
 /* in-game settings panel (controller-navigable; mirrors the navbar toggles).

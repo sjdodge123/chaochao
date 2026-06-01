@@ -30,10 +30,17 @@ var ratingMapId = null,
 // Rewarded "2× match XP" state. currentMatchId: the server-stamped id of the just-finished
 // match (echoed back in claimXpMultiplier). rewardedClaimState: 'idle' | 'watching' (ad up) |
 // 'claimed'. The offer is NOT shown on the results screen (it would compete with the recap/
-// stats); it's a one-tap prompt at the gameOver -> lobby edge (see the startLobby handler +
-// the reward modal in gamepad.js).
+// stats); it's the LAST item in the lobby-arrival progression-toast stream (an actionable
+// "📺 Watch" toast), so it sequences cleanly AFTER the XP/level/skin celebration toasts.
 var currentMatchId = null,
 	rewardedClaimState = "idle";
+// The live offer-toast element (null when none is showing). rewardOfferPending: an offer
+// should be appended once this match's celebration toasts are queued (they arrive via the
+// progressionToasts event, possibly just after startLobby); the fallback timer covers the
+// no-celebration-toasts case (e.g. a guest under the dev override).
+var rewardOfferToastEl = null,
+	rewardOfferPending = false,
+	rewardOfferFallbackTimer = null;
 
 // True when the "2× your match XP" offer can be made: signed-in (anonymous players have no
 // server XP to multiply — never offered), a rewarded ad is loaded, we know which match to
@@ -91,18 +98,71 @@ function triggerRewardWatch() {
 	});
 }
 
-// Offer the 2× XP prompt at the gameOver -> lobby edge, if claimable. Returns true if the
-// prompt was shown (so the caller can skip the interstitial — never stack two ad surfaces).
-// The modal (gamepad.js) is mouse/touch/keyboard/gamepad navigable; "Watch" -> triggerRewardWatch,
-// "No thanks" -> just closes. Fail-open: if the modal helper is missing, no-op (returns false).
+// Arm the 2× XP offer at the gameOver -> lobby edge, if claimable. Returns true if an offer
+// is now pending (so the caller skips the interstitial — never stack two ad surfaces). The
+// offer itself is appended to the END of the progression-toast stream (after the celebration
+// toasts) by flushRewardOffer — either right after those toasts are queued (progressionToasts
+// handler) or via a short fallback when none arrive (guest / no-XP match).
 function maybeOfferRewardedXp() {
 	if (!rewardClaimable()) { return false; }
-	if (typeof openRewardModal !== "function") { return false; }
-	openRewardModal({
-		onWatch: function () { triggerRewardWatch(); },
-		onDecline: function () { /* dismissed — nothing to do */ }
-	});
+	rewardOfferPending = true;
+	if (rewardOfferFallbackTimer) { clearTimeout(rewardOfferFallbackTimer); }
+	rewardOfferFallbackTimer = setTimeout(flushRewardOffer, 1500);
 	return true;
+}
+
+// Append the pending 2× offer as the LAST item in the progression-toast queue (so it shows
+// after the celebration toasts). Called once per match — right after the celebration toasts
+// are queued, or by the fallback timer when none arrive. Re-checks claimability at flush time.
+function flushRewardOffer() {
+	if (rewardOfferFallbackTimer) { clearTimeout(rewardOfferFallbackTimer); rewardOfferFallbackTimer = null; }
+	if (!rewardOfferPending) { return; }
+	rewardOfferPending = false;
+	if (!rewardClaimable()) { return; }
+	progressionToastQueue.push({ kind: "reward-offer" });
+	if (!progressionToastShowing) { showNextProgressionToast(); }
+}
+
+// The persistent, actionable offer toast (reuses the "Log in" nudge's .cc-toast-action /
+// .cc-toast-close pattern). Unlike celebration toasts it does NOT auto-dismiss — it waits
+// for Watch / dismiss / next-race teardown. Exposed open/watch/dismiss for keyboard + gamepad
+// (gamepad.js): Enter/Ⓐ watches, Esc/Ⓑ dismisses; mouse/touch tap the buttons.
+function showRewardOfferToast() {
+	if (!document.body) { showNextProgressionToast(); return; }
+	var el = document.createElement("div");
+	el.className = "cc-toast cc-progression-toast cc-reward-offer";
+	el.setAttribute("role", "status");
+	el.innerHTML =
+		'<span class="cc-toast-msg"></span>' +
+		'<button class="cc-toast-action" type="button"></button>' +
+		'<button class="cc-toast-close" type="button" aria-label="Dismiss">×</button>';
+	el.querySelector(".cc-toast-msg").textContent = "⭐ Double the XP you just earned?";
+	el.querySelector(".cc-toast-action").textContent = "📺 Watch";
+	document.body.appendChild(el);
+	rewardOfferToastEl = el;
+	el.querySelector(".cc-toast-action").addEventListener("click", rewardOfferWatch);
+	el.querySelector(".cc-toast-close").addEventListener("click", rewardOfferDismiss);
+	requestAnimationFrame(function () { el.classList.add("visible"); });
+}
+function removeRewardOfferToast() {
+	var el = rewardOfferToastEl;
+	rewardOfferToastEl = null;
+	if (!el) { return; }
+	el.classList.remove("visible");
+	setTimeout(function () {
+		if (el.parentNode) { el.parentNode.removeChild(el); }
+		showNextProgressionToast(); // advance the (now usually empty) stream
+	}, 400);
+}
+function rewardOfferToastOpen() { return !!rewardOfferToastEl; }
+function rewardOfferWatch() {
+	if (!rewardOfferToastEl) { return; }
+	removeRewardOfferToast();
+	triggerRewardWatch(); // shows the ad; onReward -> claim -> xpBonus toast
+}
+function rewardOfferDismiss() {
+	if (!rewardOfferToastEl) { return; }
+	removeRewardOfferToast();
 }
 
 // The room's active playlist id for analytics, so rounds/matches can be segmented
@@ -361,6 +421,13 @@ function showNextProgressionToast() {
 	if (!document.body) { progressionToastShowing = false; return; }
 	progressionToastShowing = true;
 	var txt = progressionToastQueue.shift();
+	// The 2× XP offer is a special queue item: a persistent actionable toast that waits for
+	// the player instead of auto-advancing. It's always the last item, so the stream resumes
+	// (and ends) when they Watch/dismiss it.
+	if (txt && typeof txt === "object" && txt.kind === "reward-offer") {
+		showRewardOfferToast();
+		return;
+	}
 	var el = document.createElement("div");
 	el.className = "cc-toast cc-progression-toast";
 	el.setAttribute("role", "status");
@@ -383,6 +450,11 @@ function showNextProgressionToast() {
 function clearProgressionToasts() {
 	progressionToastQueue.length = 0;
 	progressionToastShowing = false;
+	// Tear down the 2× offer too (its DOM node carries .cc-progression-toast, so it's removed
+	// below) and drop any armed/pending offer so it can't pop after the race has started.
+	rewardOfferToastEl = null;
+	rewardOfferPending = false;
+	if (rewardOfferFallbackTimer) { clearTimeout(rewardOfferFallbackTimer); rewardOfferFallbackTimer = null; }
 	if (typeof document !== "undefined" && document.querySelectorAll) {
 		var open = document.querySelectorAll(".cc-progression-toast");
 		for (var i = 0; i < open.length; i++) {
@@ -419,6 +491,9 @@ function registerConnectionHandlers(server) {
 	server.on('progressionToasts', function (payload) {
 		var events = (payload && Array.isArray(payload.events)) ? payload.events : [];
 		if (events.length) { enqueueProgressionToasts(events); }
+		// If a 2× offer is armed for this match, append it now so it lands right AFTER these
+		// celebration toasts (the natural "here's your XP → want to double it?" beat).
+		if (rewardOfferPending) { flushRewardOffer(); }
 	});
 	// Rewarded "2× match XP" claim acked by the server (after it validated + credited the
 	// bonus). Announce it immediately on the results screen and fire the reward_claimed GA
@@ -818,14 +893,11 @@ function registerStateHandlers(server) {
 		if (window.ads && typeof window.ads.dismissInterstitial === "function") {
 			try { window.ads.dismissInterstitial(); } catch (e) { /* never block the gate */ }
 		}
-		// Same idea for celebration toasts: clear the queue so a long reward sequence doesn't
-		// keep popping over the race that's starting (toasts belong to the lobby).
+		// Same idea for celebration toasts AND the 2× offer toast: clear the queue + tear down
+		// any visible toast so a long reward sequence (or the offer) doesn't keep popping over
+		// the race that's starting (they belong to the lobby). clearProgressionToasts removes
+		// the offer toast too (it carries .cc-progression-toast) and drops any armed offer.
 		if (typeof clearProgressionToasts === "function") { clearProgressionToasts(); }
-		// Tear down the "2× your match XP" prompt if it's still up — the next round is starting,
-		// so the offer window is over (it belongs to the lobby). Counts as a decline.
-		if (typeof closeRewardModal === "function" && typeof rewardModalIsOpen === "function" && rewardModalIsOpen()) {
-			try { closeRewardModal(true); } catch (e) { /* never block the gate */ }
-		}
 		setLobbySfxDampen(false); // restore full SFX before the game-start cue
 		stopSound(lobbyMusic);
 		playSound(gameStart);
