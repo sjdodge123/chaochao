@@ -32,6 +32,8 @@ var RECAP_LEADIN_MAX_MS = 800; // most of a clip's slow lead-in we'll skip so it
 var RECAP_LEADIN_FRAC = 0.4;   // open once the framed karts reach this fraction of the clip's peak speed
 var RECAP_SLIDE_DIST = 320;    // travel (world px, default-map scale) a punched kart must cover to count as "sent flying"
 var RECAP_SLIDE_WINDOW_MS = 1500; // window after the hit we watch for that travel before giving up
+var RECAP_SLIDE_SPEED_FACTOR = 1.1; // peak speed (× playerMaxSpeed) the victim must hit — proves it was a knockback
+                                    // launch (which adds velocity past the steer cap), not just fast normal driving
 var RECAP_DISPLAY_MS = RECAP_PLAY_MS; // hold each clip for one full (slowed) playthrough
 var RECAP_MAX_CLIPS = 4;       // keep the montage short within gameOverTime (20s)
 var RECAP_PER_ROUND = 2;       // most clips harvested from any single round (leave room for variety)
@@ -100,9 +102,7 @@ var recapMeta = {};            // id -> { color, radius, name }; survives player
 var recapMaps = [];            // [{ t, image, pad, world, scale }] time-stamped map snapshots (dynamic map state)
 var recapMapDirty = false;     // a map-mutating event fired -> take a fresh snapshot soon
 var recapLastMapSnap = 0;      // throttle clock for map snapshots
-var recapIceCells = [];        // [[{x,y},...], ...] this round's ice-tile polygons (world coords), captured
-                               // at race start (clean map) so the replay can cast the same ice reflections
-var recapSlideWatch = {};      // victimId -> { id, x, y, t }: punched karts being watched for a long knockback slide
+var recapSlideWatch = {};      // victimId -> { id, x, y, t, peak }: punched karts watched for a long knockback slide
 // --- cross-round archive --------------------------------------------------
 var recapArchive = [];         // [{ title, type, priority, ids, frames, map, exits }] harvested clips
 // --- playback state -------------------------------------------------------
@@ -124,10 +124,6 @@ function recapReset() {
 	recapMapDirty = false;
 	recapLastMapSnap = 0;
 	recapSlideWatch = {};
-	// Snapshot the ice footprint now, while the map is still clean — collapse later
-	// overwrites ice cells to lava (cell.id changes), so harvesting it at round end
-	// would miss them. Static for the round, so one capture covers every clip.
-	recapIceCells = recapCaptureIceCells();
 	if (typeof playerList !== "undefined" && playerList != null) {
 		for (var id in playerList) {
 			if (playerList[id] != null) {
@@ -137,9 +133,10 @@ function recapReset() {
 	}
 }
 
-// Collect this round's ice-tile polygons (world-coord vertex rings) from the live
+// Collect the CURRENT ice-tile polygons (world-coord vertex rings) from the live
 // map, reusing the terrainfx vertex helper so the footprint matches the rendered
-// terrain exactly. Returns [] if anything's unavailable (the reflection then no-ops).
+// terrain exactly. Called per map snapshot so the reflection mask tracks tile
+// changes. Returns [] if anything's unavailable (the reflection then no-ops).
 function recapCaptureIceCells() {
 	var out = [];
 	if (typeof currentMap === "undefined" || currentMap == null || currentMap.cells == null) { return out; }
@@ -287,7 +284,11 @@ function recapCaptureMap() {
 	recapMaps.push({
 		t: now, image: snap, scale: scale,
 		pad: (typeof mapCanvasPad !== "undefined") ? mapCanvasPad : 8,
-		world: { x: world.x, y: world.y, width: world.width, height: world.height }
+		world: { x: world.x, y: world.y, width: world.width, height: world.height },
+		// Ice footprint AS OF this snapshot — ice isn't static (snowflakes freeze tiles,
+		// swaps flip them, bombs clear them, collapse buries them in lava), and snapshots
+		// are taken on every such change, so the reflection mask tracks the terrain.
+		iceCells: recapCaptureIceCells()
 	});
 	recapMapDirty = false;
 	recapLastMapSnap = now;
@@ -381,22 +382,34 @@ function recapMarkHighlightAt(type, ids, t) {
 }
 
 // A punch landed on `victimId` at (x,y): start/refresh a watch. If that kart then
-// travels RECAP_SLIDE_DIST within RECAP_SLIDE_WINDOW_MS, recapCheckSlides marks a
-// "Sent Flying!" highlight at the hit time (so the clip catches the launch + slide).
+// travels RECAP_SLIDE_DIST within RECAP_SLIDE_WINDOW_MS *and* its speed spiked past the
+// steer cap (so it was launched, not just driving), recapCheckSlides marks a "Sent
+// Flying!" highlight at the hit time (so the clip catches the launch + slide).
 function recapNotePunchLaunch(victimId, x, y) {
 	if (victimId == null || x == null || y == null) {
 		return;
 	}
-	recapSlideWatch[victimId] = { id: victimId, x: x, y: y, t: Date.now() };
+	recapSlideWatch[victimId] = { id: victimId, x: x, y: y, t: Date.now(), peak: 0 };
 }
 
-// Per-tick: resolve pending knockback watches against the live positions. Fired far
-// enough → a highlight; window elapsed or victim gone/dead → dropped (a slide INTO
-// a hazard is already covered by the 'death' marker).
+// Speed above which a kart must have been LAUNCHED (not driven): knockback adds
+// velocity outside the engine's steer clamp at playerMaxSpeed, while normal driving
+// — even speed-buffed, which only raises acceleration — never exceeds that cap.
+function recapLaunchSpeed() {
+	var cap = (typeof config !== "undefined" && config != null && config.playerMaxSpeed != null)
+		? config.playerMaxSpeed : 500;
+	return cap * RECAP_SLIDE_SPEED_FACTOR;
+}
+
+// Per-tick: resolve pending knockback watches against the live positions. Needs BOTH a
+// long travel AND a launch-level speed spike (else a moving racer taking a light tap
+// would clip as "Sent Flying!"). Window elapsed or victim gone/dead → dropped (a slide
+// INTO a hazard is already covered by the 'death' marker).
 function recapCheckSlides(now) {
 	if (typeof playerList === "undefined" || playerList == null) {
 		return;
 	}
+	var launch = recapLaunchSpeed();
 	for (var id in recapSlideWatch) {
 		var w = recapSlideWatch[id];
 		var p = playerList[id];
@@ -404,8 +417,10 @@ function recapCheckSlides(now) {
 			delete recapSlideWatch[id];
 			continue;
 		}
+		var spd = Math.sqrt((p.velX || 0) * (p.velX || 0) + (p.velY || 0) * (p.velY || 0));
+		if (spd > w.peak) { w.peak = spd; }
 		var dx = p.x - w.x, dy = p.y - w.y;
-		if (dx * dx + dy * dy >= RECAP_SLIDE_DIST * RECAP_SLIDE_DIST) {
+		if (w.peak >= launch && dx * dx + dy * dy >= RECAP_SLIDE_DIST * RECAP_SLIDE_DIST) {
 			recapMarkHighlightAt("slide", [w.id], w.t);
 			delete recapSlideWatch[id];
 		} else if (now - w.t > RECAP_SLIDE_WINDOW_MS) {
@@ -532,7 +547,6 @@ function recapHarvestRound() {
 			brutal: brutal,
 			blind: recapBlindInFrames(frames),
 			effects: recapSliceEffects(startT, startT + RECAP_CLIP_MS),
-			ice: recapIceCells,
 			exits: recapComputeExits(frames)
 		});
 		takenTimes.push(mk.t);
@@ -546,7 +560,7 @@ function recapHarvestRound() {
 			recapArchive.push({
 				title: "Final Moments", type: "tail", priority: 0, ids: [],
 				frames: tailFrames, maps: recapMapsForWindow(endT - RECAP_CLIP_MS, endT), brutal: brutal,
-				blind: recapBlindInFrames(tailFrames), ice: recapIceCells,
+				blind: recapBlindInFrames(tailFrames),
 				effects: recapSliceEffects(endT - RECAP_CLIP_MS, endT), exits: recapComputeExits(tailFrames)
 			});
 		}
@@ -967,8 +981,9 @@ function recapRenderClip(item, winX, winY, winW, winH) {
 		}
 		recapDrawTrails(item, frameT);
 		// Ice reflections sit OVER the terrain and UNDER the karts (matches the live
-		// drawTerrainFX order), so cast them before drawing the karts themselves.
-		recapDrawIceReflections(item, frame);
+		// drawTerrainFX order), so cast them before drawing the karts themselves. The
+		// footprint rides on the map snapshot, so it tracks tile changes over the clip.
+		recapDrawIceReflections(map, frame);
 		for (var i = 0; i < frame.players.length; i++) {
 			recapDrawCar(frame.players[i], item.exits, frameT);
 		}
@@ -1229,8 +1244,8 @@ function recapDrawClash(x, y, t) {
 // Mirrors terrainfx.js tfxDrawIceReflections, but reads buffered frame positions
 // (not the live playerList) and paths the captured ice verts directly (the live
 // frustum-cull path keys off the in-game camera, which is inactive on gameOver).
-function recapDrawIceReflections(item, frame) {
-	var ice = (item != null) ? item.ice : null;
+function recapDrawIceReflections(map, frame) {
+	var ice = (map != null) ? map.iceCells : null;
 	if (ice == null || ice.length === 0 || frame == null || frame.players == null) {
 		return;
 	}
@@ -1270,12 +1285,19 @@ function recapDrawIceReflections(item, frame) {
 // World coords; the helpers' internal camera offset is zero on the gameOver screen.
 function recapAppearance(pr) {
 	var meta = recapMeta[pr[RF_ID]] || { color: "grey", radius: 12 };
-	return {
+	var obj = {
 		id: pr[RF_ID], x: pr[RF_X], y: pr[RF_Y], angle: pr[RF_ANGLE],
 		velX: pr[RF_VX], velY: pr[RF_VY], color: meta.color,
 		radius: (meta.radius != null) ? meta.radius : 12, onFire: pr[RF_FIRE],
 		cart: meta.cart, pattern: meta.pattern, trailFx: meta.trailFx, border: meta.border
 	};
+	// Carry the punch lunge so a reflected kart lunges in step with its body (drawCartSkin
+	// animates off Date.now() - punchAnimAt) — matches the live ice reflection.
+	var pAge = pr[RF_PUNCH];
+	if (pAge != null && pAge >= 0) {
+		obj.punchAnimAt = Date.now() - pAge;
+	}
+	return obj;
 }
 
 // Muzzle flash: a short flash cone + white streaks in the firing direction.
