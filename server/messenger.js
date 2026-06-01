@@ -100,7 +100,10 @@ function emitRewardedEligibility(sig) {
 		var p = pl[id];
 		if (p == null || !p.verifiedUserId || !rm.claims[p.verifiedUserId]) { continue; }
 		var sock = mailBoxList[id];
-		if (sock) { sock.emit('rewardedEligible', { matchId: rm.matchId }); }
+		// Send the server's gameOver timestamp so the client anchors its offer window to the
+		// SAME clock the claim TTL is validated against — a late-delivered event (suspended tab)
+		// then can't make the client think a long-expired claim is still fresh.
+		if (sock) { sock.emit('rewardedEligible', { matchId: rm.matchId, gameOverTs: rm.gameOverTs }); }
 	}
 }
 
