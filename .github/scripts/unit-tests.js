@@ -18,12 +18,15 @@
 // assertion fails the run (exit 1), same convention as smoke-test.js.
 
 const path = require('path');
-const { execFileSync } = require('child_process');
 const repoRoot = path.join(__dirname, '..', '..');
 const utils = require(path.join(repoRoot, 'server', 'utils.js'));
 const mapFormat = require(path.join(repoRoot, 'server', 'mapFormat.js'));
 const compressor = require(path.join(repoRoot, 'server', 'compressor.js'));
 const config = require(path.join(repoRoot, 'server', 'config.json'));
+// auth.js reads Supabase env at require time; with none set it stays disabled and never
+// loads @supabase, so requiring it here is side-effect-free. We test the pure write-enable
+// decision it exports, not the client.
+const auth = require(path.join(repoRoot, 'server', 'auth.js'));
 
 // --- tiny assertion harness -------------------------------------------------
 let failures = 0;
@@ -405,36 +408,22 @@ group('utils math/hash/color', function () {
 });
 
 // ---------------------------------------------------------------------------
-// auth.writesEnabled — the write-enable decision after removing the manual
-// ALLOW_SUPABASE_WRITES gate. Computed at require time from env, so we probe it in
-// child processes with different env. Pins: (1) writes are on automatically when a DB
-// is configured, (2) the old flag is dead, (3) the prod tripwire blocks a non-Heroku
-// host pointed at the prod project, and (4) DYNO / ALLOW_PROD_WRITES lift the tripwire.
+// auth.resolveWritesEnabled — the write-enable decision after removing the manual
+// ALLOW_SUPABASE_WRITES gate. Pure function (dbConfigured, supabaseUrl, env) so we can
+// pin the full matrix directly. Pins: (1) writes are on automatically when a DB is
+// configured, (2) the old flag is dead, (3) the prod tripwire blocks a non-Heroku host
+// pointed at the prod project, and (4) DYNO / ALLOW_PROD_WRITES lift the tripwire.
 // ---------------------------------------------------------------------------
 const DEV_URL = 'https://ukfecygtfghiybasqgtl.supabase.co';   // dev project ref
 const PROD_URL = 'https://spkwpkpiuzshrfwplzyg.supabase.co';  // prod project ref (tripwire target)
-function probeWritesEnabled(overrides) {
-    const env = Object.assign({}, process.env);
-    ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_JWT_SECRET',
-        'DYNO', 'ALLOW_PROD_WRITES', 'ALLOW_SUPABASE_WRITES'].forEach(function (k) { delete env[k]; });
-    Object.assign(env, overrides);
-    const code = "process.stdout.write('WE=' + require(" +
-        JSON.stringify(path.join(repoRoot, 'server', 'auth.js')) + ").writesEnabled);";
-    const out = execFileSync(process.execPath, ['-e', code], { env: env, encoding: 'utf8' });
-    return /WE=true/.test(out);
-}
-group('auth.writesEnabled', function () {
-    eq(probeWritesEnabled({}), false, 'no creds => writes off (guest-only)');
-    eq(probeWritesEnabled({ SUPABASE_URL: DEV_URL, SUPABASE_SERVICE_ROLE_KEY: 'k' }), true,
-        'dev DB configured => writes on (no manual flag needed)');
-    eq(probeWritesEnabled({ SUPABASE_URL: DEV_URL, SUPABASE_SERVICE_ROLE_KEY: 'k', ALLOW_SUPABASE_WRITES: 'false' }), true,
-        'old ALLOW_SUPABASE_WRITES flag is dead (false ignored)');
-    eq(probeWritesEnabled({ SUPABASE_URL: PROD_URL, SUPABASE_SERVICE_ROLE_KEY: 'k' }), false,
-        'prod project from a non-Heroku host => tripwire blocks writes');
-    eq(probeWritesEnabled({ SUPABASE_URL: PROD_URL, SUPABASE_SERVICE_ROLE_KEY: 'k', DYNO: 'web.1' }), true,
-        'prod project on a Heroku dyno => writes on');
-    eq(probeWritesEnabled({ SUPABASE_URL: PROD_URL, SUPABASE_SERVICE_ROLE_KEY: 'k', ALLOW_PROD_WRITES: 'true' }), true,
-        'prod project with ALLOW_PROD_WRITES=true => override lifts the tripwire');
+group('auth.resolveWritesEnabled', function () {
+    const f = auth.resolveWritesEnabled;
+    eq(f(false, null, {}), false, 'no DB configured => writes off (guest-only)');
+    eq(f(true, DEV_URL, {}), true, 'dev DB configured => writes on (no manual flag needed)');
+    eq(f(true, DEV_URL, { ALLOW_SUPABASE_WRITES: 'false' }), true, 'old ALLOW_SUPABASE_WRITES flag is dead (ignored)');
+    eq(f(true, PROD_URL, {}), false, 'prod project from a non-Heroku host => tripwire blocks writes');
+    eq(f(true, PROD_URL, { DYNO: 'web.1' }), true, 'prod project on a Heroku dyno => writes on');
+    eq(f(true, PROD_URL, { ALLOW_PROD_WRITES: 'true' }), true, 'prod project with ALLOW_PROD_WRITES=true => override');
 });
 
 // ---------------------------------------------------------------------------
