@@ -28,6 +28,10 @@ var RECAP_CLIP_MS = 3000;      // length of real footage captured per clip (the 
 var RECAP_SLOWMO = 1.3;        // playback time-stretch: >1 = cinematic slow-mo, 1.0 = real-time
 var RECAP_PLAY_MS = RECAP_CLIP_MS * RECAP_SLOWMO; // on-screen playback duration of one clip (slowed)
 var RECAP_PRE_MS = 1400;       // portion of the captured footage BEFORE the highlight moment
+var RECAP_LEADIN_MAX_MS = 800; // most of a clip's slow lead-in we'll skip so it opens mid-action
+var RECAP_LEADIN_FRAC = 0.4;   // open once the framed karts reach this fraction of the clip's peak speed
+var RECAP_SLIDE_DIST = 320;    // travel (world px, default-map scale) a punched kart must cover to count as "sent flying"
+var RECAP_SLIDE_WINDOW_MS = 1500; // window after the hit we watch for that travel before giving up
 var RECAP_DISPLAY_MS = RECAP_PLAY_MS; // hold each clip for one full (slowed) playthrough
 var RECAP_MAX_CLIPS = 4;       // keep the montage short within gameOverTime (20s)
 var RECAP_PER_ROUND = 2;       // most clips harvested from any single round (leave room for variety)
@@ -81,6 +85,7 @@ var RECAP_TYPE_INFO = {
 	godlike: { title: "Godlike!", priority: 5 },
 	rampage: { title: "Rampage!", priority: 4 },
 	spree: { title: "Killing Spree!", priority: 3 },
+	slide: { title: "Sent Flying!", priority: 4 },
 	goal: { title: "Goal!", priority: 2 },
 	death: { title: "Eliminated", priority: 1 }
 };
@@ -97,6 +102,7 @@ var recapMapDirty = false;     // a map-mutating event fired -> take a fresh sna
 var recapLastMapSnap = 0;      // throttle clock for map snapshots
 var recapIceCells = [];        // [[{x,y},...], ...] this round's ice-tile polygons (world coords), captured
                                // at race start (clean map) so the replay can cast the same ice reflections
+var recapSlideWatch = {};      // victimId -> { id, x, y, t }: punched karts being watched for a long knockback slide
 // --- cross-round archive --------------------------------------------------
 var recapArchive = [];         // [{ title, type, priority, ids, frames, map, exits }] harvested clips
 // --- playback state -------------------------------------------------------
@@ -117,6 +123,7 @@ function recapReset() {
 	recapMaps = [];
 	recapMapDirty = false;
 	recapLastMapSnap = 0;
+	recapSlideWatch = {};
 	// Snapshot the ice footprint now, while the map is still clean — collapse later
 	// overwrites ice cells to lava (cell.id changes), so harvesting it at round end
 	// would miss them. Static for the round, so one capture covers every clip.
@@ -214,6 +221,8 @@ function recapCaptureFrame() {
 			border: (p.border != null) ? p.border : null
 		};
 	}
+	// Resolve any pending knockback-slide watches against this tick's live positions.
+	recapCheckSlides(now);
 	if (players.length === 0) {
 		return;
 	}
@@ -361,7 +370,48 @@ function recapCaptureAimers() {
 // Record a highlight moment (from an existing client event). `ids` are the
 // players the moment involves, used to caption + focus the clip.
 function recapMarkHighlight(type, ids) {
-	recapMarkers.push({ t: Date.now(), type: type, ids: ids || [] });
+	recapMarkHighlightAt(type, ids, Date.now());
+}
+
+// Same, but stamped at an explicit time `t` — used when the moment is RECOGNISED
+// later than it HAPPENED (a knockback slide is only confirmed once the kart has
+// finished travelling), so the clip still centres on the original hit.
+function recapMarkHighlightAt(type, ids, t) {
+	recapMarkers.push({ t: (t != null ? t : Date.now()), type: type, ids: ids || [] });
+}
+
+// A punch landed on `victimId` at (x,y): start/refresh a watch. If that kart then
+// travels RECAP_SLIDE_DIST within RECAP_SLIDE_WINDOW_MS, recapCheckSlides marks a
+// "Sent Flying!" highlight at the hit time (so the clip catches the launch + slide).
+function recapNotePunchLaunch(victimId, x, y) {
+	if (victimId == null || x == null || y == null) {
+		return;
+	}
+	recapSlideWatch[victimId] = { id: victimId, x: x, y: y, t: Date.now() };
+}
+
+// Per-tick: resolve pending knockback watches against the live positions. Fired far
+// enough → a highlight; window elapsed or victim gone/dead → dropped (a slide INTO
+// a hazard is already covered by the 'death' marker).
+function recapCheckSlides(now) {
+	if (typeof playerList === "undefined" || playerList == null) {
+		return;
+	}
+	for (var id in recapSlideWatch) {
+		var w = recapSlideWatch[id];
+		var p = playerList[id];
+		if (p == null || p.x == null || p.alive === false) {
+			delete recapSlideWatch[id];
+			continue;
+		}
+		var dx = p.x - w.x, dy = p.y - w.y;
+		if (dx * dx + dy * dy >= RECAP_SLIDE_DIST * RECAP_SLIDE_DIST) {
+			recapMarkHighlightAt("slide", [w.id], w.t);
+			delete recapSlideWatch[id];
+		} else if (now - w.t > RECAP_SLIDE_WINDOW_MS) {
+			delete recapSlideWatch[id];
+		}
+	}
 }
 
 // Record a one-shot world effect (an explosion) so the clip can replay it in the
@@ -824,7 +874,7 @@ function recapRenderClip(item, winX, winY, winW, winH) {
 	if (item.maps == null || item.maps.length === 0 || item.maps[0].world == null || item.maps[0].world.width == null) {
 		return;
 	}
-	var frame = recapFrameAt(item.frames, recapElapsed);
+	var frame = recapFrameAt(item.frames, recapElapsed, recapEffectiveStartT(item));
 	if (frame == null) {
 		return;
 	}
@@ -1577,21 +1627,84 @@ function recapFocusCenter(item, frame, w) {
 // Pick the frame for the current loop position. The clip loops every
 // RECAP_PLAY_MS (the slow-mo-stretched window); we map progress onto the frames'
 // own timestamps, so the captured footage replays slower than real-time.
-function recapFrameAt(frames, elapsedMs) {
+// Speed signal for lead-in trimming: the fastest FRAMED kart this frame (the
+// subject ids the camera follows, or the whole alive field if none are present).
+// Squared comparison internally; returns the real speed.
+function recapClipSpeedSignal(frame, ids) {
+	if (frame == null || frame.players == null) {
+		return 0;
+	}
+	var subjMax = 0, sceneMax = 0, sawSubj = false;
+	for (var i = 0; i < frame.players.length; i++) {
+		var pr = frame.players[i];
+		if (pr[RF_STATE] !== RECAP_ALIVE) { continue; }
+		var vx = pr[RF_VX] || 0, vy = pr[RF_VY] || 0;
+		var sp = vx * vx + vy * vy;
+		if (sp > sceneMax) { sceneMax = sp; }
+		if (ids != null && ids.length) {
+			for (var k = 0; k < ids.length; k++) {
+				if (pr[RF_ID] === ids[k]) { sawSubj = true; if (sp > subjMax) { subjMax = sp; } break; }
+			}
+		}
+	}
+	return Math.sqrt(sawSubj ? subjMax : sceneMax);
+}
+
+// The timestamp a clip should OPEN on: skip leading frames where the framed karts
+// are barely moving, so the replay feels like a camera catching live action rather
+// than a sim un-pausing from a frozen first frame. Bounded by RECAP_LEADIN_MAX_MS
+// (and a fraction of the clip) so the highlight + its lead-up always survive.
+// Memoized on the item — the speed scan is otherwise repeated every render frame.
+function recapEffectiveStartT(item) {
+	if (item == null || item.frames == null || item.frames.length < 2) {
+		return (item != null && item.frames != null && item.frames.length) ? item.frames[0].t : null;
+	}
+	if (item._startT != null) {
+		return item._startT;
+	}
+	var frames = item.frames;
+	var t0 = frames[0].t;
+	var span = frames[frames.length - 1].t - t0;
+	var ids = (item.focusIds != null) ? item.focusIds : (item.ids != null ? item.ids : null);
+	var speeds = [], peak = 0;
+	for (var i = 0; i < frames.length; i++) {
+		var s = recapClipSpeedSignal(frames[i], ids);
+		speeds.push(s);
+		if (s > peak) { peak = s; }
+	}
+	var startT = t0;
+	if (peak > 0.1 && span > 0) { // there IS motion to find; a frozen scrum stays as-is
+		var thresh = peak * RECAP_LEADIN_FRAC;
+		var maxTrim = Math.min(RECAP_LEADIN_MAX_MS, span * 0.33);
+		for (var j = 0; j < frames.length; j++) {
+			if ((frames[j].t - t0) > maxTrim) { break; }
+			if (speeds[j] >= thresh) { startT = frames[j].t; break; }
+		}
+	}
+	item._startT = startT;
+	return startT;
+}
+
+function recapFrameAt(frames, elapsedMs, startT) {
 	if (frames == null || frames.length === 0) {
 		return null;
 	}
 	if (frames.length === 1) {
 		return frames[0];
 	}
-	var span = frames[frames.length - 1].t - frames[0].t;
+	// Open from the motion-onset time (startT) rather than the buffer's first frame,
+	// so a clip catches the action already in progress (candid) instead of appearing
+	// to start a fresh sim from a near-frozen pose. Defaults to frames[0].t.
+	var t0 = (startT != null && startT >= frames[0].t && startT < frames[frames.length - 1].t)
+		? startT : frames[0].t;
+	var span = frames[frames.length - 1].t - t0;
 	if (span <= 0) {
-		return frames[0];
+		return frames[frames.length - 1];
 	}
 	// Stretch playback: the captured span (~RECAP_CLIP_MS of real footage) is mapped
 	// onto a longer RECAP_PLAY_MS window, so the action replays in slow motion.
 	var progress = (elapsedMs % RECAP_PLAY_MS) / RECAP_PLAY_MS; // 0..1, loops
-	var targetT = frames[0].t + progress * span;
+	var targetT = t0 + progress * span;
 	// frames are time-ordered; linear scan (a clip is only ~90 frames)
 	var best = frames[0];
 	var bestDiff = Math.abs(best.t - targetT);

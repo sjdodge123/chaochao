@@ -1058,6 +1058,11 @@ function registerCombatHandlers(server) {
 		if (hitX != null && hitY != null) {
 			var sparkColor = playerList[owner] != null ? playerList[owner].color : "white";
 			spawnHitEffect(hitX, hitY, sparkColor);
+			// Watch a real player victim for a long knockback slide (e.g. flung across
+			// the ice) — the recap turns a big launch into its own highlight clip.
+			if (victimPlayer != null && typeof recapNotePunchLaunch === "function") {
+				recapNotePunchLaunch(victim, hitX, hitY);
+			}
 			// A fully-charged punch landing gets a meaty "thwack" (Smash-style charged
 			// bat) and an extra kick, on top of the normal swing/hit feedback.
 			if (payload != null && payload.charged) {
