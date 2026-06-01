@@ -66,11 +66,6 @@ var leaveModalEl = null;
 var leaveFocusIdx = 1;   // 0 = Leave, 1 = Cancel (default to the safe choice)
 var gpLeaveStepAt = 0;
 
-// "2× your match XP" prompt (rewarded-video opt-in, shown at the gameOver -> lobby edge).
-var rewardModalEl = null;
-var rewardFocusIdx = 1;  // 0 = Watch, 1 = No thanks (default to the SAFE choice — never auto-launch an ad)
-var gpRewardStepAt = 0;
-var rewardOnWatch = null, rewardOnDecline = null;
 
 // --- in-game settings panel (primary/P1 only; same four toggles as the navbar) ---
 var settingsModalEl = null;
@@ -90,7 +85,6 @@ function initGamepad() {
     window.addEventListener("touchstart", markTouchUsed, false);
     buildHintBar();
     buildLeaveModalUI();
-    buildRewardModalUI();
     buildSettingsModalUI();
     buildTouchSettingsButton();
     buildPadPlayersUI();
@@ -154,23 +148,19 @@ function onGamepadKeyDown(e) {
         return;
     }
 
-    // The "2× your match XP" prompt (lobby edge) owns the keyboard while open: arrows / A-D
-    // move between Watch and No thanks, Enter/Space confirms, Esc declines. Top priority.
-    if (rewardModalIsOpen()) {
-        if (e.key === "Escape" || e.keyCode === 27) {
-            closeRewardModal(true); // decline
-        } else if (e.keyCode === 37 || e.keyCode === 65 || e.key === "ArrowLeft") {
-            setRewardFocus(0); // Watch
+    // The "2× your match XP" offer toast (lobby edge): Enter/Space watches, Esc dismisses.
+    // Non-blocking otherwise — it doesn't capture the keyboard, so other keys still work.
+    if (typeof rewardOfferToastOpen === "function" && rewardOfferToastOpen()) {
+        if (e.keyCode === 13 || e.keyCode === 32 || e.key === "Enter" || e.key === " ") {
+            if (typeof rewardOfferWatch === "function") { rewardOfferWatch(); }
             e.preventDefault();
-        } else if (e.keyCode === 39 || e.keyCode === 68 || e.key === "ArrowRight") {
-            setRewardFocus(1); // No thanks
-            e.preventDefault();
-        } else if (e.keyCode === 13 || e.keyCode === 32 || e.key === "Enter" || e.key === " ") {
-            var rbtns = rewardButtons();
-            if (rbtns[rewardFocusIdx]) { rbtns[rewardFocusIdx].click(); }
-            e.preventDefault();
+            return;
         }
-        return;
+        if (e.key === "Escape" || e.keyCode === 27) {
+            if (typeof rewardOfferDismiss === "function") { rewardOfferDismiss(); }
+            e.preventDefault();
+            return;
+        }
     }
 
     // The centre leave modal (used when solo, or when the primary has no inline
@@ -534,11 +524,16 @@ function pollPadForSlot(pad, lp) {
         setInputMethod("pad");
     }
 
-    if (lp.isPrimary && rewardModalIsOpen()) {
-        // P1 navigates the centre "2× your match XP" prompt (lobby edge). Top priority so
-        // Ⓐ/D-pad drive it before anything else; other local players keep idling in the lobby.
-        pollRewardModal(pad, lp);
-    } else if (lp.isPrimary && settingsModalIsOpen()) {
+    // "2× your match XP" offer toast (lobby edge): a NON-blocking actionable toast, so the
+    // player can still move in the lobby. We only divert the primary pad's Ⓐ (watch) / Ⓑ
+    // (dismiss) on the frame they're pressed — every other frame falls through to normal
+    // lobby control. (Mouse/touch tap the toast buttons; keyboard uses Enter/Esc.)
+    if (lp.isPrimary && typeof rewardOfferToastOpen === "function" && rewardOfferToastOpen()) {
+        if (buttonPressedThisFrame(pad, GP_BTN_A, lp)) { if (typeof rewardOfferWatch === "function") { rewardOfferWatch(); } return; }
+        if (buttonPressedThisFrame(pad, GP_BTN_B, lp)) { if (typeof rewardOfferDismiss === "function") { rewardOfferDismiss(); } return; }
+    }
+
+    if (lp.isPrimary && settingsModalIsOpen()) {
         // P1 navigates the shared settings panel. Other local players are NOT in
         // this branch (it's primary-only), so they keep racing while P1 adjusts
         // settings — the panel just diverts the primary pad.
@@ -1095,100 +1090,6 @@ function pollLeaveModal(pad, lp) {
         if (Math.abs(lx) > 0.5 && now - gpLeaveStepAt > 250) {
             setLeaveFocus(lx < 0 ? 0 : 1);
             gpLeaveStepAt = now;
-        }
-    }
-}
-
-// --- "2× your match XP" prompt (rewarded-video opt-in) ---
-// A centre confirm-modal shown ONCE at the gameOver -> lobby edge (see client.js
-// maybeOfferRewardedXp), reusing the leave modal's CSS + nav pattern. Kept OFF the results
-// screen so it never competes with the recap/stats. Two buttons: "📺 Watch" (the opt-in CTA)
-// and "No thanks". Default focus is the SAFE choice (No thanks) so a stray Ⓐ/Enter at lobby
-// entry can never auto-launch an ad. Hidden in the DOM by default, so — like the leave modal —
-// it's invisible to the button-compliance gate until opened.
-function buildRewardModalUI() {
-    if (rewardModalEl || typeof document === "undefined" || !document.body) {
-        return;
-    }
-    var el = document.createElement("div");
-    el.id = "rewardModal";
-    el.className = "confirm-modal hidden";
-    el.innerHTML =
-        '<div class="confirm-dialog">' +
-        '<div class="confirm-title">Double your match XP?</div>' +
-        '<div class="confirm-subtitle">Watch a short ad to 2× the XP you just earned.</div>' +
-        '<div class="confirm-buttons">' +
-        '<button type="button" class="confirm-btn confirm-watch">📺 Watch</button>' +
-        '<button type="button" class="confirm-btn confirm-decline">No thanks</button>' +
-        '</div></div>';
-    document.body.appendChild(el);
-    rewardModalEl = el;
-    // Mouse/touch users tap either button directly.
-    el.querySelector(".confirm-watch").addEventListener("click", function () { closeRewardModal(false); if (typeof rewardOnWatch === "function") { rewardOnWatch(); } });
-    el.querySelector(".confirm-decline").addEventListener("click", function () { closeRewardModal(true); });
-}
-
-function rewardModalIsOpen() {
-    return !!rewardModalEl && rewardModalEl.classList.contains("visible");
-}
-
-// Open the prompt. opts: { onWatch, onDecline }. No-op (and onDecline fires) if the UI can't
-// be built — fail-open so a missing modal never strands the offer.
-function openRewardModal(opts) {
-    opts = opts || {};
-    rewardOnWatch = (typeof opts.onWatch === "function") ? opts.onWatch : null;
-    rewardOnDecline = (typeof opts.onDecline === "function") ? opts.onDecline : null;
-    if (!rewardModalEl) { buildRewardModalUI(); }
-    if (!rewardModalEl) { if (rewardOnDecline) { rewardOnDecline(); } return; }
-    rewardModalEl.className = "confirm-modal visible";
-    setRewardFocus(1); // default to "No thanks" — never auto-launch an ad
-}
-
-// Close the prompt. If `declined`, fire onDecline. Always clears the stashed callbacks so a
-// later close can't double-fire them.
-function closeRewardModal(declined) {
-    if (rewardModalEl) { rewardModalEl.className = "confirm-modal hidden"; }
-    var d = rewardOnDecline;
-    rewardOnWatch = null;
-    rewardOnDecline = null;
-    if (declined && typeof d === "function") { d(); }
-}
-
-function rewardButtons() {
-    if (!rewardModalEl) { return []; }
-    return [rewardModalEl.querySelector(".confirm-watch"), rewardModalEl.querySelector(".confirm-decline")];
-}
-
-function setRewardFocus(idx) {
-    var btns = rewardButtons();
-    rewardFocusIdx = idx;
-    for (var i = 0; i < btns.length; i++) {
-        if (!btns[i]) { continue; }
-        if (i === idx) { btns[i].classList.add("gp-focus"); try { btns[i].focus(); } catch (e) {} }
-        else { btns[i].classList.remove("gp-focus"); }
-    }
-}
-
-function pollRewardModal(pad, lp) {
-    if (buttonPressedThisFrame(pad, GP_BTN_B, lp)) {
-        closeRewardModal(true); // B = decline
-        return;
-    }
-    if (buttonPressedThisFrame(pad, GP_BTN_A, lp)) {
-        var btns = rewardButtons();
-        if (btns[rewardFocusIdx]) { btns[rewardFocusIdx].click(); }
-        return;
-    }
-    if (buttonPressedThisFrame(pad, GP_DPAD_LEFT, lp)) {
-        setRewardFocus(0);
-    } else if (buttonPressedThisFrame(pad, GP_DPAD_RIGHT, lp)) {
-        setRewardFocus(1);
-    } else {
-        var lx = pad.axes[0] || 0;
-        var now = Date.now();
-        if (Math.abs(lx) > 0.5 && now - gpRewardStepAt > 250) {
-            setRewardFocus(lx < 0 ? 0 : 1);
-            gpRewardStepAt = now;
         }
     }
 }
