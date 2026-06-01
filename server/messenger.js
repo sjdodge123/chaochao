@@ -32,7 +32,10 @@ var mailBoxList = {},
 // XP the instant `startGameover` is emitted (at that point the playerList still holds this
 // match's notches; resetForRace hasn't run). The stash lives on the Room object, is
 // overwritten every match, and a matchId + TTL + single-claim flag guard against replay.
-var REWARD_CLAIM_TTL_MS = 90 * 1000;   // a claim is only valid within 90s of gameOver
+// A claim is only valid within this window of gameOver. The offer is now a prompt at the
+// gameOver->lobby edge (a few seconds after gameOver) with a deliberate watch step, so this
+// covers the results window + the lobby decision + the ad playback comfortably.
+var REWARD_CLAIM_TTL_MS = 120 * 1000;
 var rewardedMatchSeq = 0;              // monotonic — makes each matchId unique per process
 
 // Recompute one signed-in human's match XP the SAME way game.js awardProgression does

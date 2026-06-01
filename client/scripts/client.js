@@ -27,38 +27,35 @@ var ratingMapId = null,
 	ratingStarHits = [],
 	ratingPadCursor = 0;   // gamepad-highlighted star (1..5; 0 = uninitialised)
 
-// Rewarded "2× match XP" results-screen button state. currentMatchId: the server-stamped
-// id of the just-finished match (echoed back in claimXpMultiplier). rewardedClaimState:
-// 'idle' (button shown) | 'watching' (ad up — button hidden) | 'claimed' (done, button gone).
-// rewardButtonHit: the canvas hit-rect drawn by draw.js for input.js to test; rewardPadFocused:
-// the gamepad has the button highlighted (lets Ⓐ trigger it on the results screen).
+// Rewarded "2× match XP" state. currentMatchId: the server-stamped id of the just-finished
+// match (echoed back in claimXpMultiplier). rewardedClaimState: 'idle' | 'watching' (ad up) |
+// 'claimed'. The offer is NOT shown on the results screen (it would compete with the recap/
+// stats); it's a one-tap prompt at the gameOver -> lobby edge (see the startLobby handler +
+// the reward modal in gamepad.js).
 var currentMatchId = null,
-	rewardedClaimState = "idle",
-	rewardButtonHit = null,
-	rewardPadFocused = false;
+	rewardedClaimState = "idle";
 
-// True when the "📺 Watch ad to 2× your XP" button should render on the results screen:
-// signed-in (anonymous players have no server XP to multiply — hidden OUTRIGHT, never shown-
-// then-failed), a rewarded ad is loaded, we know which match to claim, and it isn't already
-// being watched / claimed.
-function rewardButtonAvailable() {
-	if (typeof config === "undefined" || config == null || currentState !== config.stateMap.gameOver) { return false; }
+// True when the "2× your match XP" offer can be made: signed-in (anonymous players have no
+// server XP to multiply — never offered), a rewarded ad is loaded, we know which match to
+// claim, and it isn't already being watched / claimed.
+function rewardClaimable() {
 	if (!currentMatchId || rewardedClaimState !== "idle") { return false; }
-	// DEV-ONLY — STRIP BEFORE PR: the localhost ?testrewarded=1 override also shows the
-	// button for guests (so it's testable without local Supabase auth); the reward is then
-	// simulated client-side in triggerRewardButton (no server credit — guests have no XP).
+	// DEV-ONLY — STRIP BEFORE PR: the localhost ?testrewarded=1 override also offers it to
+	// guests (so it's testable without local Supabase auth); the reward is then simulated
+	// client-side in triggerRewardWatch (no server credit — guests have no XP).
 	var devR = (window.ads && typeof window.ads._devRewarded === "function" && window.ads._devRewarded());
 	if (!devR && !(window.chaochaoAuth && typeof window.chaochaoAuth.isSignedIn === "function" && window.chaochaoAuth.isSignedIn())) { return false; }
 	if (!(window.ads && typeof window.ads.isRewardedAvailable === "function" && window.ads.isRewardedAvailable())) { return false; }
 	return true;
 }
 
-// Start the rewarded flow (click / tap / gamepad Ⓐ). Shows the ad; on a CONFIRMED full watch
-// the server is asked to credit the doubled XP; on skip/error the button returns for a retry.
-function triggerRewardButton() {
-	if (!rewardButtonAvailable()) { return; }
+// Start the rewarded flow (from the lobby-edge prompt's "Watch" choice). Shows the ad; on a
+// CONFIRMED full watch the server is asked to credit the doubled XP and replies with `xpBonus`;
+// on skip/error nothing is credited (a soft toast on error).
+function triggerRewardWatch() {
+	if (!rewardClaimable()) { return; }
 	var matchId = currentMatchId;
-	rewardedClaimState = "watching"; // hide the button while the ad is up
+	rewardedClaimState = "watching";
 	window.ads.showRewarded({
 		placement: "xp_2x",
 		onReward: function () {
@@ -81,11 +78,11 @@ function triggerRewardButton() {
 			}
 		},
 		onSkip: function () {
-			// No-fill / closed before completing — leave the button up for a retry, no toast.
+			// No-fill / closed before completing — no toast, no credit.
 			if (rewardedClaimState === "watching") { rewardedClaimState = "idle"; }
 		},
 		onError: function () {
-			// SDK error / timeout — retry allowed + a soft toast.
+			// SDK error / timeout — soft toast.
 			if (rewardedClaimState === "watching") { rewardedClaimState = "idle"; }
 			if (typeof enqueueProgressionToasts === "function") {
 				enqueueProgressionToasts([{ type: "xp_bonus_error" }]);
@@ -94,16 +91,18 @@ function triggerRewardButton() {
 	});
 }
 
-// Hit-test a pointer (logical coords) against the results-screen reward button. On a hit,
-// kicks off the rewarded flow. Returns true if the tap was consumed. Mirrors handleMapRatingTap.
-function handleRewardButtonTap(lx, ly) {
-	if (!rewardButtonAvailable() || !rewardButtonHit) { return false; }
-	var h = rewardButtonHit;
-	if (lx >= h.x && lx <= h.x + h.w && ly >= h.y && ly <= h.y + h.h) {
-		triggerRewardButton();
-		return true;
-	}
-	return false;
+// Offer the 2× XP prompt at the gameOver -> lobby edge, if claimable. Returns true if the
+// prompt was shown (so the caller can skip the interstitial — never stack two ad surfaces).
+// The modal (gamepad.js) is mouse/touch/keyboard/gamepad navigable; "Watch" -> triggerRewardWatch,
+// "No thanks" -> just closes. Fail-open: if the modal helper is missing, no-op (returns false).
+function maybeOfferRewardedXp() {
+	if (!rewardClaimable()) { return false; }
+	if (typeof openRewardModal !== "function") { return false; }
+	openRewardModal({
+		onWatch: function () { triggerRewardWatch(); },
+		onDecline: function () { /* dismissed — nothing to do */ }
+	});
+	return true;
 }
 
 // The room's active playlist id for analytics, so rounds/matches can be segmented
@@ -789,7 +788,12 @@ function registerStateHandlers(server) {
 		if (cameFromGameOver && window.ads && typeof window.ads.onMatchEnded === "function") {
 			try {
 				window.ads.onMatchEnded();
-				if (window.ads.canShowInterstitial()) {
+				// One ad surface per match-end, max. Prefer the OPT-IN "2× your match XP"
+				// prompt (better for players AND for us — engaged, not forced) when it's
+				// claimable; only fall back to the forced interstitial when it isn't. Either
+				// way onMatchEnded already advanced the interstitial cadence so it isn't frozen.
+				var offered = (typeof maybeOfferRewardedXp === "function") && maybeOfferRewardedXp();
+				if (!offered && window.ads.canShowInterstitial()) {
 					window.ads.showInterstitial({ placement: "between_matches", onClose: function () {} });
 				}
 			} catch (e) { /* ads must never break the lobby transition */ }
@@ -817,6 +821,11 @@ function registerStateHandlers(server) {
 		// Same idea for celebration toasts: clear the queue so a long reward sequence doesn't
 		// keep popping over the race that's starting (toasts belong to the lobby).
 		if (typeof clearProgressionToasts === "function") { clearProgressionToasts(); }
+		// Tear down the "2× your match XP" prompt if it's still up — the next round is starting,
+		// so the offer window is over (it belongs to the lobby). Counts as a decline.
+		if (typeof closeRewardModal === "function" && typeof rewardModalIsOpen === "function" && rewardModalIsOpen()) {
+			try { closeRewardModal(true); } catch (e) { /* never block the gate */ }
+		}
 		setLobbySfxDampen(false); // restore full SFX before the game-start cue
 		stopSound(lobbyMusic);
 		playSound(gameStart);
@@ -1022,13 +1031,12 @@ function registerStateHandlers(server) {
 		myMapRating = 0;
 		ratingStarHits = [];
 		ratingPadCursor = 0;
-		// Rewarded "2× match XP" button: bind it to THIS match and reset its claim state so
-		// it can be earned once. matchId is server-stamped (absent from an older server -> the
-		// button simply never offers, since rewardButtonAvailable() requires it).
+		// Rewarded "2× match XP": bind to THIS match and reset its claim state so it can be
+		// earned once. matchId is server-stamped (absent from an older server -> the offer is
+		// never made, since rewardClaimable() requires it). The prompt fires at the next
+		// startLobby (gameOver -> lobby edge), not here on the results screen.
 		currentMatchId = (packet && packet.matchId != null) ? packet.matchId : null;
 		rewardedClaimState = "idle";
-		rewardButtonHit = null;
-		rewardPadFocused = false;
 		// Bump the medals-card reveal nonce so its entrance animation replays for
 		// this match — even when the same player wins back-to-back (playerWon
 		// unchanged). drawGameOverScreen watches this (see draw.js).

@@ -66,6 +66,12 @@ var leaveModalEl = null;
 var leaveFocusIdx = 1;   // 0 = Leave, 1 = Cancel (default to the safe choice)
 var gpLeaveStepAt = 0;
 
+// "2× your match XP" prompt (rewarded-video opt-in, shown at the gameOver -> lobby edge).
+var rewardModalEl = null;
+var rewardFocusIdx = 1;  // 0 = Watch, 1 = No thanks (default to the SAFE choice — never auto-launch an ad)
+var gpRewardStepAt = 0;
+var rewardOnWatch = null, rewardOnDecline = null;
+
 // --- in-game settings panel (primary/P1 only; same four toggles as the navbar) ---
 var settingsModalEl = null;
 var settingsFocusIdx = 0;   // which row the d-pad focus ring is on
@@ -84,6 +90,7 @@ function initGamepad() {
     window.addEventListener("touchstart", markTouchUsed, false);
     buildHintBar();
     buildLeaveModalUI();
+    buildRewardModalUI();
     buildSettingsModalUI();
     buildTouchSettingsButton();
     buildPadPlayersUI();
@@ -144,6 +151,25 @@ function onGamepadKeyDown(e) {
     // a fresh leave prompt; a leave modal already up still takes over below).
     var primaryHub = (typeof localPlayers !== "undefined") ? localPlayers[primarySlot] : null;
     if (((primaryHub && primaryHub.stationPanel) || e.defaultPrevented) && !leaveModalIsOpen()) {
+        return;
+    }
+
+    // The "2× your match XP" prompt (lobby edge) owns the keyboard while open: arrows / A-D
+    // move between Watch and No thanks, Enter/Space confirms, Esc declines. Top priority.
+    if (rewardModalIsOpen()) {
+        if (e.key === "Escape" || e.keyCode === 27) {
+            closeRewardModal(true); // decline
+        } else if (e.keyCode === 37 || e.keyCode === 65 || e.key === "ArrowLeft") {
+            setRewardFocus(0); // Watch
+            e.preventDefault();
+        } else if (e.keyCode === 39 || e.keyCode === 68 || e.key === "ArrowRight") {
+            setRewardFocus(1); // No thanks
+            e.preventDefault();
+        } else if (e.keyCode === 13 || e.keyCode === 32 || e.key === "Enter" || e.key === " ") {
+            var rbtns = rewardButtons();
+            if (rbtns[rewardFocusIdx]) { rbtns[rewardFocusIdx].click(); }
+            e.preventDefault();
+        }
         return;
     }
 
@@ -508,7 +534,11 @@ function pollPadForSlot(pad, lp) {
         setInputMethod("pad");
     }
 
-    if (lp.isPrimary && settingsModalIsOpen()) {
+    if (lp.isPrimary && rewardModalIsOpen()) {
+        // P1 navigates the centre "2× your match XP" prompt (lobby edge). Top priority so
+        // Ⓐ/D-pad drive it before anything else; other local players keep idling in the lobby.
+        pollRewardModal(pad, lp);
+    } else if (lp.isPrimary && settingsModalIsOpen()) {
         // P1 navigates the shared settings panel. Other local players are NOT in
         // this branch (it's primary-only), so they keep racing while P1 adjusts
         // settings — the panel just diverts the primary pad.
@@ -529,12 +559,8 @@ function pollPadForSlot(pad, lp) {
     } else if (iOwnWheel) {
         pollEmojiWheel(pad, lp);
     } else if (lp.isPrimary && typeof config !== "undefined" && config &&
-        currentState === config.stateMap.gameOver && pollGameOverPad(pad, lp)) {
-        // Results screen (primary pad only): the "Watch ad to 2× XP" reward button + the star
-        // rating share one focus model (D-pad ▲▼ switches, Ⓐ confirms). pollGameOverPad returns
-        // true only when it consumed an input, so B/Start/emoji still fall through.
-    } else if (lp.isPrimary && typeof config !== "undefined" && config &&
-        currentState === config.stateMap.overview && pollMapRatingPad(pad, lp)) {
+        (currentState === config.stateMap.overview || currentState === config.stateMap.gameOver) &&
+        pollMapRatingPad(pad, lp)) {
         // Map-rating star strip (primary pad only — one shared widget). pollMapRatingPad
         // returns true only when it consumed a D-pad/A press this frame, so B/Start/emoji
         // still fall through to their branches at the overview.
@@ -865,39 +891,6 @@ function clearEmojiHighlight(items) {
 // stick, A confirms (dismisses — changes apply live as you step), B / emoji
 // closes. Per-slot, so two pads can configure two panels simultaneously. The
 // open/nav/confirm/close logic itself lives in lobbyHub.js (input-agnostic).
-// Results-screen focus model (primary pad). Two controls share the screen: the optional
-// "Watch ad to 2× XP" reward button (top) and the star-rating strip (bottom). Focus starts
-// on the reward button when it's offered; D-pad ▼ drops to the stars, ▲ returns. Ⓐ confirms
-// the focused control. Returns true ONLY when it consumed an input this frame (so B/Start/
-// emoji still fall through). Self-contained: reads the client globals rewardButtonAvailable /
-// rewardPadFocused / currentMatchId / triggerRewardButton.
-var goPadMatchId = null;
-function pollGameOverPad(pad, lp) {
-    var rewardAvail = (typeof rewardButtonAvailable === "function" && rewardButtonAvailable());
-    // Re-seed focus when a NEW match's results screen appears (currentMatchId changes): land on
-    // the reward button if it's offered, else the stars.
-    if (typeof currentMatchId !== "undefined" && currentMatchId !== goPadMatchId) {
-        goPadMatchId = (typeof currentMatchId !== "undefined") ? currentMatchId : null;
-        rewardPadFocused = rewardAvail;
-    }
-    if (!rewardAvail) {
-        // No reward button (anonymous / not loaded / already claimed) — just the star strip.
-        rewardPadFocused = false;
-        return pollMapRatingPad(pad, lp);
-    }
-    if (rewardPadFocused) {
-        if (buttonPressedThisFrame(pad, GP_DPAD_DOWN, lp)) { rewardPadFocused = false; return true; }
-        if (buttonPressedThisFrame(pad, GP_BTN_A, lp)) {
-            if (typeof triggerRewardButton === "function") { triggerRewardButton(); }
-            return true;
-        }
-        return false; // leave B/emoji/Start to their own branches
-    }
-    // Stars focused: ▲ jumps back to the reward button; otherwise the normal star nav.
-    if (buttonPressedThisFrame(pad, GP_DPAD_UP, lp)) { rewardPadFocused = true; return true; }
-    return pollMapRatingPad(pad, lp);
-}
-
 // Drive the map-rating star strip with the pad: D-pad ◄ ► (or left stick) moves the
 // highlighted star, Ⓐ confirms the vote. Returns true ONLY when it consumed an input
 // this frame, so the caller's else-if chain still falls through to B/Start/emoji when
@@ -1102,6 +1095,100 @@ function pollLeaveModal(pad, lp) {
         if (Math.abs(lx) > 0.5 && now - gpLeaveStepAt > 250) {
             setLeaveFocus(lx < 0 ? 0 : 1);
             gpLeaveStepAt = now;
+        }
+    }
+}
+
+// --- "2× your match XP" prompt (rewarded-video opt-in) ---
+// A centre confirm-modal shown ONCE at the gameOver -> lobby edge (see client.js
+// maybeOfferRewardedXp), reusing the leave modal's CSS + nav pattern. Kept OFF the results
+// screen so it never competes with the recap/stats. Two buttons: "📺 Watch" (the opt-in CTA)
+// and "No thanks". Default focus is the SAFE choice (No thanks) so a stray Ⓐ/Enter at lobby
+// entry can never auto-launch an ad. Hidden in the DOM by default, so — like the leave modal —
+// it's invisible to the button-compliance gate until opened.
+function buildRewardModalUI() {
+    if (rewardModalEl || typeof document === "undefined" || !document.body) {
+        return;
+    }
+    var el = document.createElement("div");
+    el.id = "rewardModal";
+    el.className = "confirm-modal hidden";
+    el.innerHTML =
+        '<div class="confirm-dialog">' +
+        '<div class="confirm-title">Double your match XP?</div>' +
+        '<div class="confirm-subtitle">Watch a short ad to 2× the XP you just earned.</div>' +
+        '<div class="confirm-buttons">' +
+        '<button type="button" class="confirm-btn confirm-watch">📺 Watch</button>' +
+        '<button type="button" class="confirm-btn confirm-decline">No thanks</button>' +
+        '</div></div>';
+    document.body.appendChild(el);
+    rewardModalEl = el;
+    // Mouse/touch users tap either button directly.
+    el.querySelector(".confirm-watch").addEventListener("click", function () { closeRewardModal(false); if (typeof rewardOnWatch === "function") { rewardOnWatch(); } });
+    el.querySelector(".confirm-decline").addEventListener("click", function () { closeRewardModal(true); });
+}
+
+function rewardModalIsOpen() {
+    return !!rewardModalEl && rewardModalEl.classList.contains("visible");
+}
+
+// Open the prompt. opts: { onWatch, onDecline }. No-op (and onDecline fires) if the UI can't
+// be built — fail-open so a missing modal never strands the offer.
+function openRewardModal(opts) {
+    opts = opts || {};
+    rewardOnWatch = (typeof opts.onWatch === "function") ? opts.onWatch : null;
+    rewardOnDecline = (typeof opts.onDecline === "function") ? opts.onDecline : null;
+    if (!rewardModalEl) { buildRewardModalUI(); }
+    if (!rewardModalEl) { if (rewardOnDecline) { rewardOnDecline(); } return; }
+    rewardModalEl.className = "confirm-modal visible";
+    setRewardFocus(1); // default to "No thanks" — never auto-launch an ad
+}
+
+// Close the prompt. If `declined`, fire onDecline. Always clears the stashed callbacks so a
+// later close can't double-fire them.
+function closeRewardModal(declined) {
+    if (rewardModalEl) { rewardModalEl.className = "confirm-modal hidden"; }
+    var d = rewardOnDecline;
+    rewardOnWatch = null;
+    rewardOnDecline = null;
+    if (declined && typeof d === "function") { d(); }
+}
+
+function rewardButtons() {
+    if (!rewardModalEl) { return []; }
+    return [rewardModalEl.querySelector(".confirm-watch"), rewardModalEl.querySelector(".confirm-decline")];
+}
+
+function setRewardFocus(idx) {
+    var btns = rewardButtons();
+    rewardFocusIdx = idx;
+    for (var i = 0; i < btns.length; i++) {
+        if (!btns[i]) { continue; }
+        if (i === idx) { btns[i].classList.add("gp-focus"); try { btns[i].focus(); } catch (e) {} }
+        else { btns[i].classList.remove("gp-focus"); }
+    }
+}
+
+function pollRewardModal(pad, lp) {
+    if (buttonPressedThisFrame(pad, GP_BTN_B, lp)) {
+        closeRewardModal(true); // B = decline
+        return;
+    }
+    if (buttonPressedThisFrame(pad, GP_BTN_A, lp)) {
+        var btns = rewardButtons();
+        if (btns[rewardFocusIdx]) { btns[rewardFocusIdx].click(); }
+        return;
+    }
+    if (buttonPressedThisFrame(pad, GP_DPAD_LEFT, lp)) {
+        setRewardFocus(0);
+    } else if (buttonPressedThisFrame(pad, GP_DPAD_RIGHT, lp)) {
+        setRewardFocus(1);
+    } else {
+        var lx = pad.axes[0] || 0;
+        var now = Date.now();
+        if (Math.abs(lx) > 0.5 && now - gpRewardStepAt > 250) {
+            setRewardFocus(lx < 0 ? 0 : 1);
+            gpRewardStepAt = now;
         }
     }
 }
