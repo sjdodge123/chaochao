@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.28.0 — 2026-06-01
+
 ### General
 
 - After a match you can watch a short ad to **double the XP you earned that match** — handy when you're close to a level-up. It's a quick optional prompt as you head back to the lobby (it never interrupts the results/recap screen). Signed-in players only; the bonus is credited once per match.
