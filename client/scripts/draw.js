@@ -3094,7 +3094,14 @@ function drawCarbonPattern(ctx, anim, paint) {
   // The tiled carbon weave is identical every frame for a given (colour, scale): it was
   // creating ~hundreds of tile gradients per frame (this pattern measured ~10x the slot
   // median). Build the weave once into an offscreen layer and blit it.
-  var cv = getCachedSkinLayer("carbon|" + paint + "|" + cs.toFixed(3), function (c) {
+  // drawPatternOverlay applies the registry opacity via ctx.globalAlpha. Bake that SAME
+  // alpha into the cache's inter-layer compositing (set it on the cache ctx) and blit the
+  // flattened layer at FULL alpha: compositing opaque layers at `op` into a transparent
+  // cache then drawing the result at alpha 1 over the body is identical to drawing each
+  // layer at `op` directly over the body, so translucent patterns look exactly as before.
+  var op = ctx.globalAlpha;
+  var cv = getCachedSkinLayer("carbon|" + paint + "|" + cs.toFixed(3) + "|" + op, function (c) {
+    if (op !== 1) { c.globalAlpha = op; }
     var lite = cartSkinShade(paint, -0.16), dark = cartComp(paint, -0.4);
     for (var iy = 0; iy * cs < 2.0; iy++) {
       for (var ix = 0; ix * cs < 2.0; ix++) {
@@ -3107,8 +3114,12 @@ function drawCarbonPattern(ctx, anim, paint) {
       }
     }
   });
+  ctx.save();
+  ctx.globalAlpha = 1;
   ctx.drawImage(cv, -1, -1, 2, 2);
-  // Animated sheen sweep — one cheap gradient, drawn live over the cached weave.
+  ctx.restore();
+  // Animated sheen sweep — one cheap gradient, drawn live over the cached weave at the
+  // original overlay alpha (ctx.globalAlpha is back to `op` after the restore).
   var sh = (anim * 0.4) % 2.4 - 1.2;
   var gg = ctx.createLinearGradient(sh - 0.5, -0.6, sh + 0.5, 0.6);
   gg.addColorStop(0, "rgba(255,255,255,0)");
@@ -3122,8 +3133,13 @@ function drawCamoPattern(ctx, anim, paint) {
   paint = paint || "#888";
   var scale = 0.7 + 0.9 * Ppat("cm_scale", 0.5);
   // Fully static (seeded RNG, no animation) — render once per (colour, scale) and blit,
-  // instead of re-stamping the same ~21 blotches every frame.
-  var cv = getCachedSkinLayer("camo|" + paint + "|" + scale.toFixed(3), function (c) {
+  // instead of re-stamping the same ~21 blotches every frame. As with carbon, bake the
+  // overlay opacity (ctx.globalAlpha) into the cache's inter-layer compositing and blit at
+  // full alpha, so the semi-transparent base + overlapping blotches blend exactly as the
+  // per-frame version did (over-operator associativity for opaque layers).
+  var op = ctx.globalAlpha;
+  var cv = getCachedSkinLayer("camo|" + paint + "|" + scale.toFixed(3) + "|" + op, function (c) {
+    if (op !== 1) { c.globalAlpha = op; }
     c.fillStyle = cartSkinShade(paint, -0.05); c.fillRect(-1, -1, 2, 2);
     var shades = [cartComp(paint, -0.3), cartSkinShade(paint, 0.2), cartComp(paint, -0.55)];
     var rnd = srnd(1234);
@@ -3143,7 +3159,10 @@ function drawCamoPattern(ctx, anim, paint) {
       }
     }
   });
+  ctx.save();
+  ctx.globalAlpha = 1;
   ctx.drawImage(cv, -1, -1, 2, 2);
+  ctx.restore();
 }
 
 // --- 10. Hazard Stripes -----------------------------------------------------
