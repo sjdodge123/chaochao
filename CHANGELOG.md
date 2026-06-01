@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### Bug fixes
+
+- The end-of-game recap now replays the action it was missing: punch lunges and their shockwaves, landed-hit sparks, parry clashes, and kart reflections on ice all show up in the highlight clips, matching what you saw live.
 
 ## v0.27.3 — 2026-06-01
 

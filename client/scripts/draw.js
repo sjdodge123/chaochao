@@ -4833,6 +4833,11 @@ function spawnPunchEffect(punch) {
             ctx.stroke();
         }
     });
+    // Log it for the end-of-game recap so the punch's shockwave replays in clips
+    // (the recap can't re-run live closures — it redraws from this effect record).
+    if (typeof recapMarkEffect === "function") {
+        recapMarkEffect("punch", px, py, { radius: baseRadius, color: color });
+    }
 }
 
 // Parry "clang" when two punches clash — a bright gold star-burst plus a double
@@ -4876,6 +4881,9 @@ function spawnClashEffect(x, y) {
             ctx.restore();
         }
     });
+    if (typeof recapMarkEffect === "function") {
+        recapMarkEffect("clash", x, y, {});
+    }
 }
 // Burst at the point of contact when a punch connects — a white flash ring
 // plus radiating sparks, so a landed hit has a visible payoff.
@@ -4909,6 +4917,9 @@ function spawnHitEffect(x, y, color) {
             ctx.restore();
         }
     });
+    if (typeof recapMarkEffect === "function") {
+        recapMarkEffect("hit", x, y, { color: color });
+    }
 }
 
 // Teleport flash for the swap ability — an expanding ring plus particles

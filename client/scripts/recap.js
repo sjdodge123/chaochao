@@ -39,6 +39,10 @@ var RECAP_EXIT_FX_MS = 750;    // how long a death/goal poof lingers before the 
 var RECAP_EXPLOSION_MS = 430;  // explosion effect lifetime (matches spawnExplosion's maxAge)
 var RECAP_MUZZLE_MS = 160;     // muzzle-flash lifetime (matches spawnMuzzleFlash's maxAge)
 var RECAP_SHOCKWAVE_MS = 1100; // one collapse-shockwave ring pass (600px/s out to ~650px)
+var RECAP_PUNCH_MS = 220;      // punch shockwave lifetime (matches spawnPunchEffect's maxAge)
+var RECAP_HIT_MS = 220;        // landed-hit ring lifetime (matches spawnHitEffect's maxAge)
+var RECAP_CLASH_MS = 320;      // parry clash lifetime (matches spawnClashEffect's maxAge)
+var RECAP_PUNCH_ANIM_MS = 220; // cart-skin punch lunge window (matches drawCartSkin's /220)
 var RECAP_MAP_SNAP_MS = 450;   // min gap between dynamic-map snapshots (explosion/swap, slow racing changes)
 var RECAP_MAP_SNAP_COLLAPSE_MS = 110; // finer gap while collapsing — lava grows every tick, and a 450ms
                                // gap left the killing lava up to ~half a second behind the death frame
@@ -48,9 +52,10 @@ var RECAP_MAP_MAX = 48;        // cap rolling map snapshots per round (downscale
                                // hold a finely-sampled collapse window without evicting the pre-collapse
                                // baseline that earlier (racing) clips render from
 
-// per-player frame tuple: [id, x, y, angle, velX, velY, state, onFire, ability, infected, emote, speedFx]
-// emote = active emoji string or null; speedFx = 0 none / 1 buff / 2 debuff
-var RF_ID = 0, RF_X = 1, RF_Y = 2, RF_ANGLE = 3, RF_VX = 4, RF_VY = 5, RF_STATE = 6, RF_FIRE = 7, RF_ABILITY = 8, RF_INFECTED = 9, RF_EMOTE = 10, RF_SPEEDFX = 11;
+// per-player frame tuple: [id, x, y, angle, velX, velY, state, onFire, ability, infected, emote, speedFx, punchAge]
+// emote = active emoji string or null; speedFx = 0 none / 1 buff / 2 debuff;
+// punchAge = ms since this kart threw its melee punch (drives the cart-skin lunge), or -1 if not punching
+var RF_ID = 0, RF_X = 1, RF_Y = 2, RF_ANGLE = 3, RF_VX = 4, RF_VY = 5, RF_STATE = 6, RF_FIRE = 7, RF_ABILITY = 8, RF_INFECTED = 9, RF_EMOTE = 10, RF_SPEEDFX = 11, RF_PUNCH = 12;
 // per-frame screen-effect flag bit (blindfold ability — shown as a corner badge, not rendered)
 var RFX_BLIND = 1;
 // projectile tuple: [type, x, y, color, radius]; hazard tuple: [id, x, y, angle, railX, railY]
@@ -90,6 +95,8 @@ var recapMeta = {};            // id -> { color, radius, name }; survives player
 var recapMaps = [];            // [{ t, image, pad, world, scale }] time-stamped map snapshots (dynamic map state)
 var recapMapDirty = false;     // a map-mutating event fired -> take a fresh snapshot soon
 var recapLastMapSnap = 0;      // throttle clock for map snapshots
+var recapIceCells = [];        // [[{x,y},...], ...] this round's ice-tile polygons (world coords), captured
+                               // at race start (clean map) so the replay can cast the same ice reflections
 // --- cross-round archive --------------------------------------------------
 var recapArchive = [];         // [{ title, type, priority, ids, frames, map, exits }] harvested clips
 // --- playback state -------------------------------------------------------
@@ -110,6 +117,10 @@ function recapReset() {
 	recapMaps = [];
 	recapMapDirty = false;
 	recapLastMapSnap = 0;
+	// Snapshot the ice footprint now, while the map is still clean — collapse later
+	// overwrites ice cells to lava (cell.id changes), so harvesting it at round end
+	// would miss them. Static for the round, so one capture covers every clip.
+	recapIceCells = recapCaptureIceCells();
 	if (typeof playerList !== "undefined" && playerList != null) {
 		for (var id in playerList) {
 			if (playerList[id] != null) {
@@ -117,6 +128,24 @@ function recapReset() {
 			}
 		}
 	}
+}
+
+// Collect this round's ice-tile polygons (world-coord vertex rings) from the live
+// map, reusing the terrainfx vertex helper so the footprint matches the rendered
+// terrain exactly. Returns [] if anything's unavailable (the reflection then no-ops).
+function recapCaptureIceCells() {
+	var out = [];
+	if (typeof currentMap === "undefined" || currentMap == null || currentMap.cells == null) { return out; }
+	if (typeof config === "undefined" || config == null || config.tileMap == null || config.tileMap.ice == null) { return out; }
+	if (typeof tfxCellVerts !== "function") { return out; }
+	var iceId = config.tileMap.ice.id;
+	for (var i = 0; i < currentMap.cells.length; i++) {
+		var cell = currentMap.cells[i];
+		if (cell == null || cell.id !== iceId) { continue; }
+		var verts = tfxCellVerts(cell);
+		if (verts && verts.length > 0) { out.push(verts); }
+	}
+	return out;
 }
 
 // Clear EVERYTHING for a brand-new match (called when the lobby/waiting screen
@@ -164,9 +193,13 @@ function recapCaptureFrame() {
 		var emote = (p.chatMessage != null)
 			? [p.chatMessage, now - (p.chatMessageAt || now), p.chatMessageDuration || 4000]
 			: null;
+		// Punch lunge: store how long ago this kart swung (drawCartSkin animates the
+		// forward lunge over RECAP_PUNCH_ANIM_MS). -1 once the window has passed.
+		var punchAge = (p.punchAnimAt != null) ? (now - p.punchAnimAt) : -1;
+		if (punchAge < 0 || punchAge >= RECAP_PUNCH_ANIM_MS) { punchAge = -1; }
 		players.push([p.id, p.x, p.y, p.angle, p.velX, p.velY, state,
 			(p.onFire != null ? p.onFire : 0), (p.ability != null ? p.ability : null), p.infected === true,
-			emote, speedFx]);
+			emote, speedFx, punchAge]);
 		// Keep the static per-player look so a clip can render even after the live
 		// playerList drops bots at the gameOver->waiting transition.
 		recapMeta[p.id] = {
@@ -449,6 +482,7 @@ function recapHarvestRound() {
 			brutal: brutal,
 			blind: recapBlindInFrames(frames),
 			effects: recapSliceEffects(startT, startT + RECAP_CLIP_MS),
+			ice: recapIceCells,
 			exits: recapComputeExits(frames)
 		});
 		takenTimes.push(mk.t);
@@ -462,7 +496,7 @@ function recapHarvestRound() {
 			recapArchive.push({
 				title: "Final Moments", type: "tail", priority: 0, ids: [],
 				frames: tailFrames, maps: recapMapsForWindow(endT - RECAP_CLIP_MS, endT), brutal: brutal,
-				blind: recapBlindInFrames(tailFrames),
+				blind: recapBlindInFrames(tailFrames), ice: recapIceCells,
 				effects: recapSliceEffects(endT - RECAP_CLIP_MS, endT), exits: recapComputeExits(tailFrames)
 			});
 		}
@@ -882,6 +916,9 @@ function recapRenderClip(item, winX, winY, winW, winH) {
 			for (var h = 0; h < frame.hazards.length; h++) { recapDrawHazard(frame.hazards[h]); }
 		}
 		recapDrawTrails(item, frameT);
+		// Ice reflections sit OVER the terrain and UNDER the karts (matches the live
+		// drawTerrainFX order), so cast them before drawing the karts themselves.
+		recapDrawIceReflections(item, frame);
 		for (var i = 0; i < frame.players.length; i++) {
 			recapDrawCar(frame.players[i], item.exits, frameT);
 		}
@@ -1040,7 +1077,155 @@ function recapDrawEffect(ef, frameT) {
 		if (age <= RECAP_SHOCKWAVE_MS) {
 			recapDrawShockwave(ef.x, ef.y, age / RECAP_SHOCKWAVE_MS);
 		}
+	} else if (ef.type === "punch") {
+		if (age <= RECAP_PUNCH_MS) {
+			recapDrawPunch(ef.x, ef.y, ef.params.radius || 24, ef.params.color || "white", age / RECAP_PUNCH_MS);
+		}
+	} else if (ef.type === "hit") {
+		if (age <= RECAP_HIT_MS) {
+			recapDrawHit(ef.x, ef.y, ef.params.color || "white", age / RECAP_HIT_MS);
+		}
+	} else if (ef.type === "clash") {
+		if (age <= RECAP_CLASH_MS) {
+			recapDrawClash(ef.x, ef.y, age / RECAP_CLASH_MS);
+		}
 	}
+}
+
+// Punch shockwave: an impact pop + expanding ring. Mirrors draw.js spawnPunchEffect
+// (the omnidirectional radial burst); t is 0..1 over its lifetime.
+function recapDrawPunch(x, y, baseRadius, color, t) {
+	var grow = 1 - Math.pow(1 - t, 3); // easeOutCubic
+	gameContext.save();
+	gameContext.lineCap = "round";
+	gameContext.globalAlpha = (1 - t) * 0.5;
+	gameContext.fillStyle = color;
+	gameContext.beginPath();
+	gameContext.arc(x, y, baseRadius * (0.55 + 0.75 * grow), 0, 2 * Math.PI);
+	gameContext.fill();
+	gameContext.globalAlpha = (1 - t);
+	gameContext.lineWidth = 2 * (1 - t) + 1;
+	gameContext.strokeStyle = color;
+	gameContext.beginPath();
+	gameContext.arc(x, y, baseRadius * (0.8 + 0.8 * grow), 0, 2 * Math.PI);
+	gameContext.stroke();
+	gameContext.restore();
+	gameContext.globalAlpha = 1;
+}
+
+// Landed-hit burst: a white flash ring + radiating sparks. Mirrors draw.js
+// spawnHitEffect; t is 0..1 over its lifetime.
+function recapDrawHit(x, y, color, t) {
+	var p = 1 - Math.pow(1 - t, 3); // easeOutCubic
+	gameContext.save();
+	gameContext.translate(x, y);
+	gameContext.lineCap = "round";
+	gameContext.globalAlpha = (1 - t);
+	gameContext.strokeStyle = "white";
+	gameContext.lineWidth = 3 * (1 - t) + 1;
+	gameContext.beginPath();
+	gameContext.arc(0, 0, 6 + 22 * p, 0, 2 * Math.PI);
+	gameContext.stroke();
+	gameContext.strokeStyle = color || "white";
+	gameContext.lineWidth = 2 * (1 - t) + 1;
+	for (var i = 0; i < 6; i++) {
+		var a = (i / 6) * Math.PI * 2 + 0.3;
+		var r0 = 2.8 + 8.4 * p;
+		var r1 = 8.4 + 18.2 * p;
+		gameContext.beginPath();
+		gameContext.moveTo(Math.cos(a) * r0, Math.sin(a) * r0);
+		gameContext.lineTo(Math.cos(a) * r1, Math.sin(a) * r1);
+		gameContext.stroke();
+	}
+	gameContext.restore();
+	gameContext.globalAlpha = 1;
+}
+
+// Parry clash: a gold-over-white double ring + four-point spark star. Mirrors
+// draw.js spawnClashEffect; t is 0..1 over its lifetime.
+function recapDrawClash(x, y, t) {
+	var p = 1 - Math.pow(1 - t, 3); // easeOutCubic
+	gameContext.save();
+	gameContext.translate(x, y);
+	gameContext.lineCap = "round";
+	gameContext.globalAlpha = (1 - t) * 0.9;
+	gameContext.strokeStyle = "#ffd34d";
+	gameContext.lineWidth = 3 * (1 - t) + 1.5;
+	gameContext.beginPath();
+	gameContext.arc(0, 0, 4 + 26 * p, 0, 2 * Math.PI);
+	gameContext.stroke();
+	gameContext.globalAlpha = (1 - t) * 0.7;
+	gameContext.strokeStyle = "white";
+	gameContext.lineWidth = 2 * (1 - t) + 1;
+	gameContext.beginPath();
+	gameContext.arc(0, 0, 2 + 16 * p, 0, 2 * Math.PI);
+	gameContext.stroke();
+	gameContext.globalAlpha = (1 - t);
+	gameContext.strokeStyle = "#fff4c2";
+	gameContext.lineWidth = 2 * (1 - t) + 1;
+	var reach = 8 + 20 * p;
+	for (var i = 0; i < 4; i++) {
+		var a = (Math.PI / 4) + i * (Math.PI / 2);
+		gameContext.beginPath();
+		gameContext.moveTo(Math.cos(a) * reach * 0.35, Math.sin(a) * reach * 0.35);
+		gameContext.lineTo(Math.cos(a) * reach, Math.sin(a) * reach);
+		gameContext.stroke();
+	}
+	gameContext.restore();
+	gameContext.globalAlpha = 1;
+}
+
+// Cast each alive kart's ice reflection, clipped to the round's ice footprint.
+// Mirrors terrainfx.js tfxDrawIceReflections, but reads buffered frame positions
+// (not the live playerList) and paths the captured ice verts directly (the live
+// frustum-cull path keys off the in-game camera, which is inactive on gameOver).
+function recapDrawIceReflections(item, frame) {
+	var ice = (item != null) ? item.ice : null;
+	if (ice == null || ice.length === 0 || frame == null || frame.players == null) {
+		return;
+	}
+	var ctx = gameContext;
+	ctx.save();
+	ctx.beginPath();
+	for (var c = 0; c < ice.length; c++) {
+		var verts = ice[c];
+		if (verts == null || verts.length === 0) { continue; }
+		ctx.moveTo(verts[0].x, verts[0].y);
+		for (var v = 1; v < verts.length; v++) { ctx.lineTo(verts[v].x, verts[v].y); }
+		ctx.closePath();
+	}
+	ctx.clip();
+	var useBlur = (typeof perfGlow === "function") ? perfGlow() : true;
+	for (var i = 0; i < frame.players.length; i++) {
+		var pr = frame.players[i];
+		if (pr[RF_STATE] !== RECAP_ALIVE) { continue; }
+		var p = recapAppearance(pr);
+		var rad = p.radius || 16;
+		var pivot = p.y + rad * 1.95;
+		ctx.save();
+		ctx.globalAlpha = 0.38;
+		if (useBlur && "filter" in ctx) { ctx.filter = "blur(2.5px)"; }
+		ctx.translate(p.x, pivot);
+		ctx.scale(1.0, -0.85);
+		ctx.translate(-p.x, -pivot);
+		if (typeof drawKartAppearance === "function") {
+			try { drawKartAppearance(p, p.x, pivot); } catch (e) { /* keep the montage alive */ }
+		}
+		ctx.restore();
+	}
+	ctx.restore();
+}
+
+// The minimal synthetic player the kart-appearance helpers need (skin-aware draw).
+// World coords; the helpers' internal camera offset is zero on the gameOver screen.
+function recapAppearance(pr) {
+	var meta = recapMeta[pr[RF_ID]] || { color: "grey", radius: 12 };
+	return {
+		id: pr[RF_ID], x: pr[RF_X], y: pr[RF_Y], angle: pr[RF_ANGLE],
+		velX: pr[RF_VX], velY: pr[RF_VY], color: meta.color,
+		radius: (meta.radius != null) ? meta.radius : 12, onFire: pr[RF_FIRE],
+		cart: meta.cart, pattern: meta.pattern, trailFx: meta.trailFx, border: meta.border
+	};
 }
 
 // Muzzle flash: a short flash cone + white streaks in the firing direction.
@@ -1184,6 +1369,12 @@ function recapDrawCar(pr, exits, frameT) {
 		speedBuffUntil: pr[RF_SPEEDFX] === 1 ? Date.now() + 99999 : null,
 		speedDebuffUntil: pr[RF_SPEEDFX] === 2 ? Date.now() + 99999 : null
 	};
+	// Punch lunge: drawCartSkin animates off (Date.now() - punchAnimAt), so anchor
+	// punchAnimAt the captured age back from now to replay the lunge at this frame.
+	var recapPunchAge = pr[RF_PUNCH];
+	if (recapPunchAge != null && recapPunchAge >= 0) {
+		p.punchAnimAt = Date.now() - recapPunchAge;
+	}
 	// Emote: captured as [msg, ageMs, durationMs] (or a plain string from the demo).
 	// Reconstruct chatMessageAt so drawEmoji applies its normal fade-out instead of a
 	// static full-strength bubble for the whole looped clip.
