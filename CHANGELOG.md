@@ -12,7 +12,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ### General
 
-- Watch a short ad on the results screen to **double the XP you earned that match** — handy when you're close to a level-up. Signed-in players only; the bonus is credited once per match.
+- After a match you can watch a short ad to **double the XP you earned that match** — handy when you're close to a level-up. It's a quick optional prompt as you head back to the lobby (it never interrupts the results/recap screen). Signed-in players only; the bonus is credited once per match.
 
 ## v0.27.4 — 2026-06-01
 

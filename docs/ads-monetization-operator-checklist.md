@@ -44,17 +44,20 @@ The progression engine (`server/progression.js` + `auth.addProgression`, gated o
     postback is a documented **follow-up** if GameMonetize later exposes one; until
     then the server's single-claim + TTL + server-fixed multiplier are the
     anti-abuse guardrails.
-- Client UI: a canvas "📺 Watch ad to 2× your XP" button on the results screen
-  (`drawRewardButton` in `draw.js`), pinned above the rating widget. Rendered ONLY
-  for signed-in players (`window.chaochaoAuth.isSignedIn()`), only when
-  `ads.isRewardedAvailable()` AND the match's bonus hasn't been claimed. Anonymous
-  players never see it (hidden outright). Click/tap hit-tested in `input.js`;
-  gamepad-reachable on the results screen (D-pad ▲▼ toggles reward ↔ stars, Ⓐ
-  confirms — `pollGameOverPad` in `gamepad.js`). It's a canvas control (no DOM
-  element), so it sits outside the DOM button-compliance gates like the rating widget.
+- Client UX: a one-tap **"Double your match XP?"** prompt at the `gameOver -> lobby`
+  edge (NOT on the results screen — it would compete with the recap/stats). It's a
+  centre confirm-modal (reusing the leave-modal `confirm-modal` CSS + nav: mouse/touch
+  click, keyboard arrows/Enter/Esc, gamepad D-pad/Ⓐ/Ⓑ) with "📺 Watch" / "No thanks";
+  default focus is "No thanks" so a stray press never auto-launches an ad. Shown ONLY
+  for signed-in players when `ads.isRewardedAvailable()` and the match's bonus is
+  unclaimed; anonymous players are never offered it. **Mutually exclusive with the
+  interstitial** — at most one ad surface per match-end: the opt-in 2× prompt is
+  preferred, and the forced interstitial only fires when the prompt isn't offered (the
+  interstitial cadence still advances either way). The modal is hidden in the DOM until
+  opened, so — like the leave modal — it's invisible to the button-compliance gate.
 - Server: `claimXpMultiplier` handler in `server/messenger.js` — signed-in only,
   validates `matchId` == the room's most-recently-completed match, single-claim
-  flag, 90 s TTL (server-stamped `gameOverTs`), bonus computed server-side
+  flag, 120 s TTL (server-stamped `gameOverTs`), bonus computed server-side
   (`originalXpDelta × (multiplier − 1)`, multiplier never from the client),
   persisted via `auth.addProgression({ xpDelta, suppressToasts:true })` behind
   `writesEnabled`, then emits `xpBonus` back. Per-match `{ userId → { xpDelta,

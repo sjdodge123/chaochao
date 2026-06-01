@@ -4643,68 +4643,17 @@ function drawGameOverScreen(dt) {
         debugLog("recap draw error", e);
     }
 
-    // "Watch ad to 2× XP" reward button (signed-in + a rewarded ad loaded only), pinned
-    // just above the rating widget. Guarded like the rest — it must never take down the
-    // (load-bearing) game-over screen.
-    try {
-        drawRewardButton();
-    } catch (e) {
-        debugLog("reward button draw error", e);
-        rewardButtonHit = null;
-    }
-
     // "Rate this map" star widget, pinned bottom-centre. Guarded for the same
     // reason as the recap — it must never take down the game-over screen.
+    // (The rewarded "2× XP" offer is intentionally NOT here — it would compete with the
+    // recap/stats for the player's attention. It's a prompt at the gameOver -> lobby edge
+    // instead; see the startLobby handler in client.js.)
     try {
         drawMapRating();
     } catch (e) {
         debugLog("rating draw error", e);
     }
 
-}
-
-// The rewarded-video CTA on the results screen: "📺 Watch ad to 2× your XP". Rendered ONLY
-// when rewardButtonAvailable() (signed-in + a rewarded ad loaded + this match not yet claimed)
-// — anonymous players never see it. Records its logical hit-rect into rewardButtonHit for
-// input.js; highlights when the gamepad has it focused (rewardPadFocused). No DOM element, so
-// it stays outside the DOM button-compliance gates, exactly like the canvas rating widget.
-function drawRewardButton() {
-    rewardButtonHit = null;
-    if (typeof rewardButtonAvailable !== "function" || !rewardButtonAvailable()) {
-        return;
-    }
-    var label = "📺 Watch ad to 2× your XP";
-    var bw = 380, bh = 54;
-    var bx = LOGICAL_WIDTH / 2 - bw / 2;
-    // Sit just above the rating widget (pinned ~16px off the bottom, panel height 78).
-    var by = LOGICAL_HEIGHT - 78 - 16 - bh - 16;
-    var focused = (typeof activeInputMethod !== "undefined" && activeInputMethod === "pad" &&
-        typeof rewardPadFocused !== "undefined" && rewardPadFocused);
-
-    gameContext.save();
-    gameContext.globalAlpha = 0.96;
-    drawRoundRectPath(bx, by, bw, bh, 14);
-    gameContext.fillStyle = "rgba(20,24,32,0.92)";
-    gameContext.fill();
-    gameContext.globalAlpha = 1;
-    gameContext.lineWidth = focused ? 4 : 2.5;
-    gameContext.strokeStyle = "#FFCB30";
-    gameContext.stroke();
-
-    gameContext.fillStyle = "#FFE08A";
-    gameContext.font = "bold 22px sans-serif";
-    gameContext.textAlign = "center";
-    gameContext.textBaseline = "middle";
-    gameContext.fillText(label, LOGICAL_WIDTH / 2, by + bh / 2);
-
-    if (focused) {
-        gameContext.fillStyle = "rgba(255,255,255,0.7)";
-        gameContext.font = "13px sans-serif";
-        gameContext.fillText("Ⓐ to watch · ▼ to rate the map", LOGICAL_WIDTH / 2, by + bh + 14);
-    }
-    gameContext.restore();
-
-    rewardButtonHit = { x: bx, y: by, w: bw, h: bh };
 }
 
 // A 5-star "rate this map" strip pinned bottom-centre. Shown on the per-round

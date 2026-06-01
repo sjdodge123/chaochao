@@ -1282,6 +1282,18 @@ body.osk-open .gamepad-prompts {
     border-color: #c87f8a;
     color: #fff;
 }
+/* Reward prompt ("2× your match XP"): a subtitle line + a gold accent on the opt-in CTA. */
+.confirm-subtitle {
+    font-size: 0.95rem;
+    color: var(--text);
+    opacity: 0.8;
+    margin: -0.5rem 0 1.1rem;
+}
+.confirm-btn.confirm-watch {
+    background: #f6c64b;
+    border-color: #f6c64b;
+    color: #1a1a1a;
+}
 
 /* in-game settings panel (controller-navigable; mirrors the navbar toggles).
    Unlike the leave modal it does NOT dim the whole screen — in local co-op the
