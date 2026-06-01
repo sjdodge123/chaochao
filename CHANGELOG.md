@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.27.4 — 2026-06-01
+
 ### General
 
 - The end-of-game recap now opens each clip on the action already in motion — like a camera catching the moment — instead of starting from a frozen pose.
