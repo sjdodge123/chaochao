@@ -61,11 +61,7 @@ function rewardClaimable() {
 	// on the CLIENT clock (receipt-now + server-sent remaining lifetime), so a client/server
 	// clock skew can't hide a valid offer or launch an expired one. Keep ad-playback headroom.
 	if (Date.now() > rewardOfferExpiresAt - REWARD_AD_HEADROOM_MS) { return false; }
-	// DEV-ONLY — STRIP BEFORE PR: the localhost ?testrewarded=1 override also offers it to
-	// guests (so it's testable without local Supabase auth); the reward is then simulated
-	// client-side in triggerRewardWatch (no server credit — guests have no XP).
-	var devR = (window.ads && typeof window.ads._devRewarded === "function" && window.ads._devRewarded());
-	if (!devR && !(window.chaochaoAuth && typeof window.chaochaoAuth.isSignedIn === "function" && window.chaochaoAuth.isSignedIn())) { return false; }
+	if (!(window.chaochaoAuth && typeof window.chaochaoAuth.isSignedIn === "function" && window.chaochaoAuth.isSignedIn())) { return false; }
 	if (!(window.ads && typeof window.ads.isRewardedAvailable === "function" && window.ads.isRewardedAvailable())) { return false; }
 	return true;
 }
@@ -80,17 +76,6 @@ function triggerRewardWatch() {
 	window.ads.showRewarded({
 		placement: "xp_2x",
 		onReward: function () {
-			// DEV-ONLY — STRIP BEFORE PR: under the localhost ?testrewarded=1 override the ad is
-			// SIMULATED (no real network), so we must NEVER drive the real server claim — that
-			// would persist bonus XP without an actual ad watch. Keep it purely client-side
-			// (visual toast + GA only), regardless of sign-in, so the override can't credit XP.
-			var devR = (window.ads && typeof window.ads._devRewarded === "function" && window.ads._devRewarded());
-			if (devR) {
-				rewardedClaimState = "claimed";
-				if (typeof enqueueProgressionToasts === "function") { enqueueProgressionToasts([{ type: "xp_bonus", amount: 0 }]); }
-				if (typeof trackEvent === "function") { trackEvent('reward_claimed', { bonus: 'xp_2x', match_id: matchId || '' }); }
-				return;
-			}
 			// Ad watched in full — ask the server to credit the bonus. Stay PENDING (not 'claimed')
 			// until the server's xpBonus ack — the server can still reject (TTL / transient DB
 			// failure), and marking 'claimed' now would consume the watched ad with no credit and
