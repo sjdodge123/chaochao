@@ -18,14 +18,6 @@ var SUPABASE_URL = process.env.SUPABASE_URL || null;
 var SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || null;
 var JWT_SECRET = process.env.SUPABASE_JWT_SECRET || null;
 
-// Global kill-switch for ALL Supabase WRITE paths (leaderboard upserts,
-// progression-row writes, anything added later). Reads stay live so dev can
-// still see prod's data. Default OFF so local dev never accidentally pollutes
-// the prod database — Heroku/production must explicitly set this to "true".
-// Add new writers here too: gate every write at the call site so this stays
-// the one switch the operator flips.
-var writesEnabled = (process.env.ALLOW_SUPABASE_WRITES === 'true');
-
 var supabase = null;
 var jwt = null;
 var enabled = false;
@@ -42,6 +34,14 @@ if (SUPABASE_URL && SERVICE_ROLE_KEY) {
     }
 }
 
+// Supabase writes are live wherever a service-role DB is configured — i.e. whenever auth
+// is `enabled`. The old ALLOW_SUPABASE_WRITES kill-switch existed only to stop LOCAL dev
+// from clobbering the PROD database; now that local points SUPABASE_URL at the dedicated
+// dev project there's no prod to protect, so the manual gate is gone. Guest-only dev (no
+// creds) still has writesEnabled=false, which keeps the in-memory fallbacks (e.g. the
+// progression-toast queue in game.js) working without a DB. Consumers read `auth.writesEnabled`.
+var writesEnabled = enabled;
+
 if (JWT_SECRET) {
     try {
         jwt = require('jsonwebtoken');
@@ -51,7 +51,7 @@ if (JWT_SECRET) {
 }
 
 if (enabled) {
-    console.log('[auth] Supabase auth ENABLED (' + (jwt && JWT_SECRET ? 'local JWT verify' : 'network verify') + '), writes ' + (writesEnabled ? 'ENABLED' : 'BLOCKED (ALLOW_SUPABASE_WRITES != "true")') + '.');
+    console.log('[auth] Supabase auth ENABLED (' + (jwt && JWT_SECRET ? 'local JWT verify' : 'network verify') + '), writes ENABLED (target: ' + SUPABASE_URL + ').');
 } else {
     console.log('[auth] Supabase env vars absent — auth DISABLED, all clients are guests.');
 }
@@ -178,12 +178,6 @@ async function ensureProgressionRow(userId, deviceId) {
     if (!enabled || !userId) {
         return;
     }
-    // Global Supabase-writes gate. Local dev defaults to blocked so test
-    // sessions can sign in (reads still work) without seeding rows into the
-    // shared/prod project.
-    if (!writesEnabled) {
-        return;
-    }
     try {
         var existing = await supabase
             .from('progression')
@@ -275,10 +269,9 @@ async function getDisplayName(userId) {
     }
 }
 
-// Read a user's progression row. A READ, so it works even when writes are gated
-// off (local dev still sees prod data) — only `enabled` (can we talk to Supabase
-// at all) gates it. Returns a normalized row, or null when auth is disabled / the
-// user has no row yet (caller falls back to a default).
+// Read a user's progression row. Only `enabled` (can we talk to Supabase at all)
+// gates it. Returns a normalized row, or null when auth is disabled / the user has
+// no row yet (caller falls back to a default).
 async function getProgression(userId) {
     if (!enabled || !userId || !supabase) {
         return null;
@@ -322,15 +315,14 @@ function normalizeProgression(row) {
     };
 }
 
-// Persist ONE cosmetic-slot equip (cart/pattern/trail) for a signed-in player. Behind the
-// writes gate like every other writer — a no-op locally so dev never seeds the shared DB.
-// `id` null clears the slot. Upserts so a player with no row yet still records the pick.
-// Touches only the one selected_<slot> column; never the XP/medal columns.
-// `border` persists to its own selected_border column (independent 4th slot).
+// Persist ONE cosmetic-slot equip (cart/pattern/trail) for a signed-in player. A no-op when
+// no DB is configured (guest-only dev). `id` null clears the slot. Upserts so a player with
+// no row yet still records the pick. Touches only the one selected_<slot> column; never the
+// XP/medal columns. `border` persists to its own selected_border column (independent 4th slot).
 var COSMETIC_SLOT_COLUMN = { cart: 'selected_cart', pattern: 'selected_pattern', trail: 'selected_trail', border: 'selected_border' };
 async function saveCosmetic(userId, slot, id) {
     var column = COSMETIC_SLOT_COLUMN[slot];
-    if (!writesEnabled || !userId || !supabase || !column) {
+    if (!userId || !supabase || !column) {
         return null;
     }
     try {
@@ -361,9 +353,9 @@ async function saveCosmetic(userId, slot, id) {
 //   { payload, result }  -> `payload` (must include user_id + updated_at) is written; `result`
 //                           is returned to the caller on a successful write.
 // computeFn is re-invoked with freshly-read data on every retry, so derived totals are always
-// computed against the latest row. Returns the chosen `result`, or null when gated/aborted/failed.
+// computed against the latest row. Returns the chosen `result`, or null when aborted/failed/no DB.
 async function casUpdateProgression(userId, selectCols, computeFn) {
-    if (!writesEnabled || !userId || !supabase) {
+    if (!userId || !supabase) {
         return null;
     }
     var MAX_ATTEMPTS = 5;
@@ -423,11 +415,10 @@ async function casUpdateProgression(userId, selectCols, computeFn) {
     }
 }
 
-// Apply a match's XP / medal / win deltas to a user's progression row and persist. Behind the
-// global writes gate (ALLOW_SUPABASE_WRITES) like every other writer — a no-op locally so dev
-// never seeds the shared DB. Recomputes level + achievement unlocks via the pure progression
-// helpers against the freshly-read row (CAS-guarded by casUpdateProgression). Returns the new
-// normalized row (so the caller can emit it) + newToasts, or null when writes are gated/disabled.
+// Apply a match's XP / medal / win deltas to a user's progression row and persist. A no-op when
+// no DB is configured (guest-only dev). Recomputes level + achievement unlocks via the pure
+// progression helpers against the freshly-read row (CAS-guarded by casUpdateProgression).
+// Returns the new normalized row (so the caller can emit it) + newToasts, or null when no DB.
 async function addProgression(userId, opts) {
     opts = opts || {};
     return casUpdateProgression(
@@ -493,11 +484,11 @@ async function addProgression(userId, opts) {
 // identical to an achievement skin — and a {type:'seasonal'} celebration toast is queued so
 // the claim is announced on the player's next lobby arrival. Idempotent: an id already owned
 // is skipped, so repeat sign-ins never re-toast. After a window's claimEnd the registry
-// returns it no longer, so the grant simply stops — nothing is ever revoked. Behind the global
-// writes gate, CAS-guarded against a concurrent match-end write (both via casUpdateProgression).
-// Returns the array of newly granted ids (possibly empty), or null when writes are gated/disabled.
+// returns it no longer, so the grant simply stops — nothing is ever revoked. CAS-guarded against
+// a concurrent match-end write (both via casUpdateProgression).
+// Returns the array of newly granted ids (possibly empty), or null when no DB is configured.
 async function grantSeasonalClaims(userId) {
-    if (!writesEnabled || !userId || !supabase) {
+    if (!userId || !supabase) {
         return null;
     }
     var open = skinRegistry.currentSeasonalClaims(Date.now());
@@ -541,10 +532,8 @@ async function grantSeasonalClaims(userId) {
 }
 
 // Read and CLEAR a user's pending celebration toasts (shown on lobby arrival).
-// A READ-then-clear: the read works whenever auth is enabled, but the clearing
-// write is gated like every other writer. When writes are off (local dev) we still
-// RETURN the toasts (so the UI is testable) but DON'T clear them — acceptable since
-// dev never accumulates real rows. Returns [] when auth is off / no row / empty.
+// A READ-then-clear, CAS-guarded so a concurrent write can't drop a toast.
+// Returns [] when auth is off / no row / empty.
 async function drainPendingToasts(userId) {
     if (!enabled || !userId || !supabase) {
         return [];
@@ -563,11 +552,6 @@ async function drainPendingToasts(userId) {
             var toasts = Array.isArray(res.data.pending_toasts) ? res.data.pending_toasts : [];
             if (toasts.length === 0) {
                 return [];
-            }
-            // Dev (writes off): hand the toasts to the UI but don't clear — acceptable that
-            // they re-show on the next join; the atomic clear below is writes-on only.
-            if (!writesEnabled) {
-                return toasts;
             }
             // Compare-and-swap clear: only wipe if no write landed since our read. If a
             // concurrent match-end addProgression appended NEW toasts (moving updated_at), the
@@ -597,9 +581,9 @@ async function drainPendingToasts(userId) {
 }
 
 // Re-append toasts to the durable queue when delivery failed after a drain cleared them
-// (socket vanished mid-drain). Best-effort, CAS-guarded, writes-gated. Older toasts go first.
+// (socket vanished mid-drain). Best-effort, CAS-guarded. Older toasts go first.
 async function requeuePendingToasts(userId, toasts) {
-    if (!writesEnabled || !userId || !supabase || !toasts || !toasts.length) {
+    if (!userId || !supabase || !toasts || !toasts.length) {
         return;
     }
     try {
