@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.28.2 — 2026-06-02
+
 ### Bug fixes
 
 - Ads no longer appear before you've played — they only show between matches now, never on the first lobby when you open the game.
