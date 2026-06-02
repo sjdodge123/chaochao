@@ -1239,6 +1239,15 @@ function registerStateHandlers(server) {
 		// required because the server emits startWaiting (currentState -> waiting)
 		// between this and the next startLobby, so a state-compare there is always false.
 		adPendingMatchEnd = true;
+		// Start loading the ad SDK NOW, at the results screen — the earliest valid ad surface —
+		// rather than waiting for the lobby edge. A network whose SDK autostarts a preroll on
+		// init (GameMonetize) then shows it over the results screen with the full lobby countdown
+		// of lead time before the next race, instead of risking a slow load whose autostart lands
+		// mid-race. Idempotent + fail-open: no-op once loaded, while embedded, or for provider
+		// 'none'. The lobby-edge availability gates still kick the load if this didn't run.
+		if (window.ads && typeof window.ads.preloadSdk === "function") {
+			try { window.ads.preloadSdk(); } catch (e) { /* ads must never break the results screen */ }
+		}
 	});
 	server.on("startCollapse", function (info) {
 		currentState = config.stateMap.collapsing;

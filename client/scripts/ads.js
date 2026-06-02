@@ -108,6 +108,10 @@
     // Idempotent + fail-open: a missing ensureLoaded or a load failure just keeps us a no-op.
     function ensureSdkLoaded() {
         if (!shouldShow()) { return; }   // provider 'none' / embedded -> never load a network
+        // Never KICK a load during a live round: an SDK that autostarts a preroll on init could
+        // then splash it over gameplay. Loads are kicked from gameOver/lobby edges (preloadSdk /
+        // the availability gates), so this is belt-and-suspenders against a stray gameplay call.
+        if (inActiveGameplay()) { return; }
         try {
             if (adapter && typeof adapter.ensureLoaded === "function") { adapter.ensureLoaded(); }
         } catch (e) { /* fail-open: load failure just leaves the SDK absent (no-op) */ }
@@ -340,7 +344,10 @@
                         // cleanly. The dismiss is still best-effort (GM exposes no hard close — see
                         // adapter.dismiss), but now the autostart is tracked, muted, and torn down
                         // at the gate exactly like a solicited interstitial.
-                        gmPendingComplete = trackProviderInterstitial();
+                        var adoptedSettle = trackProviderInterstitial();
+                        // SDK_GAME_START for this autostart resolves it as a real completion
+                        // (records ad_complete); dismissInterstitial settles it "cancelled".
+                        gmPendingComplete = function () { adoptedSettle("complete"); };
                     }
                 } else if (name === "SDK_GAME_START") {
                     // Ad finished (or no fill) — resolve the in-flight interstitial.
@@ -595,15 +602,25 @@
     // adInFlight === null guard.
     function trackProviderInterstitial() {
         var settled = false;
-        function settle() {
+        // status: "complete" (provider's SDK_GAME_START) or "cancelled" (dismissInterstitial at
+        // the gate). Mirrors showInterstitial's settle so the funnel stays symmetric: an adopted
+        // preroll that finishes records ad_complete; a deliberate teardown records nothing.
+        function settle(status) {
             if (settled) { return; }
             settled = true;
             if (activeSettle === settle) { activeSettle = null; }
             if (adInFlight === "interstitial") { adInFlight = null; }
+            if (status === "complete") {
+                track("ad_complete", { type: "interstitial", placement: "provider_auto" });
+            }
         }
-        activeSettle = settle;     // dismissInterstitial() calls activeSettle("cancelled") -> settle()
+        activeSettle = settle;     // dismissInterstitial() calls activeSettle("cancelled") -> settle("cancelled")
         adInFlight = "interstitial";
         track("ad_shown", { type: "interstitial", placement: "provider_auto" });
+        // An autostarted preroll IS a real impression, so it must burn the frequency cap exactly
+        // like a solicited interstitial — otherwise the seeded cadence stays eligible and the
+        // very next match could request another ad, breaking the 2-match / 90s cap.
+        markInterstitialShown();
         if (inActiveGameplay()) {
             // The autostart raced into a live round. We can't force-close the provider's overlay
             // (no API — same limitation as a solicited ad), but flag it so it's never silent;
@@ -722,9 +739,19 @@
         }
     }
 
+    // Start loading the network SDK as EARLY as possible in the post-match break (called from
+    // the gameOver/results edge), so a GameMonetize-style loader that autostarts a preroll on
+    // init does so over the results screen — a valid ad surface — with the whole lobby countdown
+    // of lead time before the next race, instead of racing into gated/racing. Idempotent + a
+    // no-op while in active gameplay / for provider 'none' / embedded; never blocks anything.
+    function preloadSdk() {
+        try { ensureSdkLoaded(); } catch (e) { /* fail-open */ }
+    }
+
     window.ads = {
         init: init,
         onMatchEnded: onMatchEnded,
+        preloadSdk: preloadSdk,
         canShowInterstitial: canShowInterstitial,
         showInterstitial: showInterstitial,
         dismissInterstitial: dismissInterstitial,
