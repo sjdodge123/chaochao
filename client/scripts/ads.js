@@ -293,6 +293,13 @@
     var gmPendingComplete = null; // fires on SDK_GAME_START (ad done / no-fill)
     function initGameMonetize() {
         sdkReady = false;
+        // One-shot guard: set whenever we deliberately TEAR DOWN a request we initiated (a
+        // rewarded/interstitial timeout or a race-start dismiss). After a teardown the provider
+        // can still fire a late SDK_GAME_PAUSE for that abandoned request; without this we'd
+        // misread that stray PAUSE as a fresh unsolicited autostart and adopt it (double
+        // impression). The flag makes the very next stray PAUSE be ignored once — a genuine
+        // init-autostart (no preceding teardown) is still adopted. See the PAUSE handler.
+        var gmSuppressUnsolicited = false;
         // LAZY LOAD (acquisition-UX fix): we set up SDK_OPTIONS here but DELIBERATELY do
         // NOT inject https://api.gamemonetize.com/sdk.js yet. Their loader can auto-show a
         // preroll the instant it initializes, so pulling it in at page load splashed an ad
@@ -316,7 +323,25 @@
                     // This is the impression signal — commit the cap / emit ad_shown.
                     var sb = gmPendingStart;
                     gmPendingStart = null;
-                    if (typeof sb === "function") { sb(); }
+                    if (typeof sb === "function") {
+                        sb();   // our solicited ad's impression
+                    } else if (gmSuppressUnsolicited) {
+                        // A request we initiated was just torn down (timeout / dismiss); this
+                        // stray PAUSE belongs to it, not a fresh autostart. Ignore it once.
+                        gmSuppressUnsolicited = false;
+                    } else if (adInFlight === null) {
+                        // UNSOLICITED preroll: GameMonetize's SDK can autostart an ad on init,
+                        // OUTSIDE our showBanner() flow. It never passed through showInterstitial(),
+                        // so without this it's invisible — no impression telemetry, and the
+                        // startGated/startRace dismiss safety net (which keys off adInFlight) can't
+                        // reclaim the screen if the ad lingers into the next race. Adopt it as an
+                        // in-flight interstitial (sets adInFlight + activeSettle) and bridge its
+                        // completion (the next SDK_GAME_START) to the adopted settle so it resolves
+                        // cleanly. The dismiss is still best-effort (GM exposes no hard close — see
+                        // adapter.dismiss), but now the autostart is tracked, muted, and torn down
+                        // at the gate exactly like a solicited interstitial.
+                        gmPendingComplete = trackProviderInterstitial();
+                    }
                 } else if (name === "SDK_GAME_START") {
                     // Ad finished (or no fill) — resolve the in-flight interstitial.
                     var cb = gmPendingComplete;
@@ -326,6 +351,30 @@
                 }
             }
         };
+        // VERIFICATION DETECTABILITY (P2): GameMonetize's activation check visits play.html
+        // WITHOUT completing a match and expects to find the SDK integrated. Pure lazy-loading
+        // would make us invisible to that scan. So at init we add an INERT, detectable marker:
+        // a <script type="text/plain"> carrying the canonical sdk.js URL. A text/plain script is
+        // NOT fetched and NOT executed by the browser, so it CANNOT autostart a preroll (the very
+        // thing we're suppressing), yet it leaves a DOM/source-detectable reference to the SDK
+        // (script[src*="gamemonetize"] + window.SDK_OPTIONS, both present pre-match). The
+        // EXECUTABLE loader is still injected lazily by gmEnsureLoaded() under a DIFFERENT id,
+        // only after a match. NOTE: if GM's verifier instead requires the SDK to have actually
+        // executed (window.sdk live), that can't be satisfied without re-introducing the preroll
+        // — the operator must then either verify once with autostart on, or (preferred) ask GM to
+        // disable dashboard autostart so the real SDK can load eagerly with no preroll. Network
+        // specifics stay in this file (ads.js).
+        try {
+            if (!document.getElementById("gamemonetize-sdk-marker")) {
+                var marker = document.createElement("script");
+                marker.id = "gamemonetize-sdk-marker";
+                marker.type = "text/plain";   // inert: never fetched, never executed -> no autostart
+                marker.setAttribute("data-gamemonetize-sdk", "1");
+                marker.src = "https://api.gamemonetize.com/sdk.js";
+                (document.head || document.documentElement).appendChild(marker);
+            }
+        } catch (e) { /* the marker is best-effort; never block init */ }
+
         // Lazy loader: inject the GameMonetize loader exactly as their README specifies, but
         // ONLY when first asked (ensureSdkLoaded -> adapter.ensureLoaded). Idempotent by id —
         // the gamemonetize-sdk guard means the <script> is appended at most once no matter how
@@ -386,6 +435,9 @@
             dismiss: function () {
                 gmPendingStart = null;
                 gmPendingComplete = null;
+                // The provider may emit a late PAUSE for this torn-down request — suppress
+                // adopting that stray event as a fresh unsolicited autostart (one-shot).
+                gmSuppressUnsolicited = true;
             }
         };
     }
@@ -531,6 +583,36 @@
         if (typeof activeSettle === "function") { activeSettle("cancelled"); }
     }
 
+    // Adopt a PROVIDER-INITIATED ad (one the network's SDK started on its own — e.g. a
+    // GameMonetize preroll fired on init, outside our showBanner() flow) into the same
+    // interstitial bookkeeping a solicited ad uses, so it's never invisible: registers
+    // adInFlight = "interstitial" + an activeSettle, so dismissInterstitial() reclaims the slot
+    // at race start (best-effort — the provider may expose no hard close), and emits the
+    // impression. If the autostart somehow began over a live round it's flagged (ad_blocked),
+    // never silent. Returns the one-shot settle the adapter bridges to the provider's completion
+    // event (SDK_GAME_START) so the adopted ad resolves and clears adInFlight cleanly. No-op-safe
+    // to call again: a second adoption while one is in flight is prevented by the caller's
+    // adInFlight === null guard.
+    function trackProviderInterstitial() {
+        var settled = false;
+        function settle() {
+            if (settled) { return; }
+            settled = true;
+            if (activeSettle === settle) { activeSettle = null; }
+            if (adInFlight === "interstitial") { adInFlight = null; }
+        }
+        activeSettle = settle;     // dismissInterstitial() calls activeSettle("cancelled") -> settle()
+        adInFlight = "interstitial";
+        track("ad_shown", { type: "interstitial", placement: "provider_auto" });
+        if (inActiveGameplay()) {
+            // The autostart raced into a live round. We can't force-close the provider's overlay
+            // (no API — same limitation as a solicited ad), but flag it so it's never silent;
+            // dismissInterstitial() at the next gate will still attempt the best-effort teardown.
+            track("ad_blocked", { type: "interstitial", reason: "provider_auto_in_gameplay" });
+        }
+        return settle;
+    }
+
     // ---- Rewarded video — "Watch to 2× match XP" ------------------------------
     // True once a real network's SDK is ready (and we're allowed to show ads at all:
     // not embedded, provider != 'none'). The UI gates the results-screen reward button
@@ -650,7 +732,7 @@
         isRewardedAvailable: isRewardedAvailable,
         showRewarded: showRewarded,
         // Exposed for headless tests / debugging.
-        _config: function () { return { provider: provider, sdkReady: sdkReady }; }
+        _config: function () { return { provider: provider, sdkReady: sdkReady, adInFlight: adInFlight }; }
     };
 
     // Auto-init from server-injected config. window.__ADS__ is set by the
