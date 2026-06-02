@@ -99,6 +99,35 @@
         return true;
     }
 
+    // Lazy-load kick. The network SDK is NOT injected at page init (some loaders, e.g.
+    // GameMonetize, auto-show a preroll the moment they initialize — that splashed an ad on
+    // the first lobby, before the player had played). Instead each adapter exposes an optional
+    // ensureLoaded() that injects its <script> once, and we call this from the demand paths
+    // (canShowInterstitial / isRewardedAvailable / the show* entry points). Those are only
+    // reached AFTER a match ends, so the SDK is pulled in lazily — never on the first lobby.
+    // Idempotent + fail-open: a missing ensureLoaded or a load failure just keeps us a no-op.
+    function ensureSdkLoaded() {
+        if (!shouldShow()) { return; }   // provider 'none' / embedded -> never load a network
+        try {
+            if (adapter && typeof adapter.ensureLoaded === "function") { adapter.ensureLoaded(); }
+        } catch (e) { /* fail-open: load failure just leaves the SDK absent (no-op) */ }
+    }
+
+    // Hard guard: an ad must NEVER cover live gameplay. Returns true when the client is in an
+    // active-gameplay state (gated / racing / collapsing) — the waiting / lobby / overview /
+    // gameOver edges are the only valid ad surfaces. Reads the shared `currentState` /
+    // `config.stateMap` globals from the play bundle. If they're absent (load-order, or this
+    // file on a non-play page) we return false so a missing global can't suppress a legitimate
+    // ad — the cadence/availability gates upstream already constrain WHEN we get here.
+    function inActiveGameplay() {
+        try {
+            var cs = window.currentState;
+            var sm = window.config && window.config.stateMap;
+            if (typeof cs !== "number" || !sm) { return false; }
+            return cs === sm.gated || cs === sm.racing || cs === sm.collapsing;
+        } catch (e) { return false; }
+    }
+
     // ---- Frequency cap --------------------------------------------------------
     // Called once per FINISHED match (from the gameOver hook), regardless of
     // whether an ad ends up showing — it advances the per-match counter.
@@ -119,6 +148,10 @@
 
     function canShowInterstitial() {
         if (!shouldShow()) { return false; }
+        // First demand for an ad after a match end — kick the lazy SDK load (no-op once
+        // loaded). The first request races the SDK becoming ready, so this returns false
+        // now (treated as no-fill, gameplay proceeds) and the SDK is ready for next time.
+        ensureSdkLoaded();
         if (!sdkReady) { return false; } // nothing loaded => nothing to show
         var count = parseInt(lsGet(LS_MATCH_COUNT) || "0", 10);
         if (isNaN(count)) { count = 0; }
@@ -260,6 +293,13 @@
     var gmPendingComplete = null; // fires on SDK_GAME_START (ad done / no-fill)
     function initGameMonetize() {
         sdkReady = false;
+        // LAZY LOAD (acquisition-UX fix): we set up SDK_OPTIONS here but DELIBERATELY do
+        // NOT inject https://api.gamemonetize.com/sdk.js yet. Their loader can auto-show a
+        // preroll the instant it initializes, so pulling it in at page load splashed an ad
+        // on the very FIRST lobby — before the player had played a single match. The loader
+        // is now injected on demand by gmEnsureLoaded() (wired to adapter.ensureLoaded and
+        // kicked from the show / availability paths), and the first such demand can only
+        // happen AFTER a match ends. See ensureSdkLoaded() below.
         window.SDK_OPTIONS = {
             gameId: publisherId || "",
             onEvent: function (a) {
@@ -286,16 +326,20 @@
                 }
             }
         };
-        // Inject the loader exactly as their README specifies (idempotent by id).
-        try {
-            if (!document.getElementById("gamemonetize-sdk")) {
+        // Lazy loader: inject the GameMonetize loader exactly as their README specifies, but
+        // ONLY when first asked (ensureSdkLoaded -> adapter.ensureLoaded). Idempotent by id —
+        // the gamemonetize-sdk guard means the <script> is appended at most once no matter how
+        // many demands arrive. Fail-open: a 404/blocked load just leaves sdkReady false (no-op).
+        function gmEnsureLoaded() {
+            try {
+                if (document.getElementById("gamemonetize-sdk")) { return; }
                 var s = document.createElement("script");
                 s.id = "gamemonetize-sdk";
                 s.src = "https://api.gamemonetize.com/sdk.js";
                 s.onerror = function () { sdkReady = false; }; // 404/blocked -> no-op
                 (document.head || document.documentElement).appendChild(s);
-            }
-        } catch (e) { sdkReady = false; }
+            } catch (e) { sdkReady = false; }
+        }
 
         // One ad-show routine for BOTH interstitial and rewarded. GameMonetize's HTML5 SDK
         // exposes only showBanner() and the SDK_GAME_PAUSE/START events — there is NO dedicated
@@ -332,6 +376,7 @@
         adapter = {
             showInterstitial: gmShowAd,
             showRewarded: gmShowAd,
+            ensureLoaded: gmEnsureLoaded,   // lazy-injects sdk.js on first real ad demand
             // Best-effort teardown for race-start cancellation. NOTE: the GameMonetize
             // preroll SDK exposes no documented programmatic close, so we can only
             // drop our pending callbacks here — visually dismissing an already-playing
@@ -388,6 +433,15 @@
         args = args || {};
         var placement = args.placement || "gameover";
         var onClose = (typeof args.onClose === "function") ? args.onClose : function () {};
+        // Belt-and-suspenders: an ad must never cover live gameplay. The normal trigger is the
+        // gameOver->lobby edge, but refuse outright if somehow called while a round is live
+        // (gated/racing/collapsing). Fail-open: just fire onClose so nothing is gated on it.
+        if (inActiveGameplay()) {
+            try { console.warn("[ads] refused interstitial during active gameplay"); } catch (e) {}
+            track("ad_blocked", { type: "interstitial", reason: "active_gameplay" });
+            onClose();
+            return;
+        }
         if (!canShowInterstitial()) { onClose(); return; }
 
         // Impression/cadence are committed ONLY when the ad actually starts (onStart),
@@ -485,6 +539,11 @@
     // signal, so readiness == SDK ready.
     function isRewardedAvailable() {
         if (!shouldShow()) { return false; }  // provider 'none' or embedded -> not available
+        // Kick the lazy SDK load (no-op once loaded). This is reached at the gameOver->lobby
+        // edge when deciding whether to offer the 2× prompt — i.e. only AFTER a match — so the
+        // SDK never loads on the first lobby. First call returns false (not yet ready); the
+        // offer simply isn't made that match and the SDK is ready for the next one.
+        ensureSdkLoaded();
         return !!sdkReady;
     }
 
@@ -500,6 +559,16 @@
         var onReward = (typeof args.onReward === "function") ? args.onReward : function () {};
         var onSkip = (typeof args.onSkip === "function") ? args.onSkip : function () {};
         var onError = (typeof args.onError === "function") ? args.onError : function () {};
+
+        // Belt-and-suspenders: never play a rewarded ad over live gameplay. The offer toast is a
+        // lobby surface, but refuse outright if somehow triggered mid-round (gated/racing/
+        // collapsing) and fail open as a SKIP so the player can retry from the lobby.
+        if (inActiveGameplay()) {
+            try { console.warn("[ads] refused rewarded ad during active gameplay"); } catch (e) {}
+            track("ad_blocked", { type: "rewarded", reason: "active_gameplay" });
+            onSkip();
+            return;
+        }
 
         // No real, ready network (local 'none' / embedded / SDK not loaded) — fail open as a
         // skip so the caller leaves the button up for a retry and never credits a reward.
