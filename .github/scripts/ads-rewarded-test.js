@@ -87,6 +87,10 @@ function loadAds(adsConfig) {
         hasEvent: function (name, type) { return tracked.some(function (e) { return e.name === name && (!type || e.params.type === type); }); },
         // Lazy-load introspection: how many <script id="..."> with a given id have been injected.
         scriptCount: function (id) { return createdScripts.filter(function (s) { return s.id === id; }).length; },
+        // The most-recently-created element with a given id (to assert its type/src).
+        getScript: function (id) { for (let i = createdScripts.length - 1; i >= 0; i--) { if (createdScripts[i].id === id) { return createdScripts[i]; } } return null; },
+        // True if an event with the given name + a matching params field was tracked.
+        hasEventWith: function (name, key, val) { return tracked.some(function (e) { return e.name === name && e.params[key] === val; }); },
         // Read the frequency-cap localStorage directly (to assert cadence isn't burned).
         ls: function (k) { return (k in lsStore) ? lsStore[k] : null; }
     };
@@ -294,6 +298,89 @@ function testLazyLoadAndGameplayGuard() {
     h4.ads.onMatchEnded();
     h4.ads.showInterstitial({ placement: 'between_matches', onClose: function () {} });
     check(banner4 === 1, '(d) an interstitial at the lobby edge is NOT blocked (showBanner called)');
+}
+
+// Codex P1: a GameMonetize preroll the SDK autostarts on init bypasses our showBanner() flow,
+// so it must still be ADOPTED into the interstitial bookkeeping — tracked, telemetered, and
+// torn down by the startGated/startRace dismiss safety net — instead of being invisible. And a
+// request we deliberately tore down must NOT have its late stray PAUSE misread as a fresh
+// autostart (one-shot suppression).
+function testProviderAutostartAdoption() {
+    console.log('ads.js — an SDK-autostarted (unsolicited) preroll is adopted + dismissable:');
+
+    // Unsolicited PAUSE with no prior showInterstitial() -> adopted as an in-flight interstitial.
+    const h = loadAds({ provider: 'gamemonetize', publisherId: 'g' });
+    h.fireSdk('SDK_READY');
+    h.win.sdk = { showBanner: function () {} };
+    check(h.ads._config().adInFlight == null, 'no ad in flight before the autostart');
+    h.fireSdk('SDK_GAME_PAUSE');   // the SDK started a preroll we never requested
+    check(h.ads._config().adInFlight === 'interstitial', 'an unsolicited autostart is adopted as an in-flight interstitial (so the dismiss net covers it)');
+    check(h.hasEventWith('ad_shown', 'placement', 'provider_auto'), 'ad_shown {placement:provider_auto} emitted for the autostart (not invisible)');
+    // The race-start dismiss safety net can now reclaim it.
+    h.ads.dismissInterstitial();
+    check(h.ads._config().adInFlight == null, 'dismissInterstitial() tears down the adopted autostart at the gate');
+    // A trailing SDK_GAME_START for the dismissed ad is a harmless no-op (already settled).
+    h.fireSdk('SDK_GAME_START');
+    check(h.ads._config().adInFlight == null, 'a late SDK_GAME_START after dismiss is a no-op');
+
+    // An autostart that completes on its own (PAUSE -> START, never dismissed) resolves cleanly.
+    const h2 = loadAds({ provider: 'gamemonetize', publisherId: 'g' });
+    h2.fireSdk('SDK_READY');
+    h2.win.sdk = { showBanner: function () {} };
+    h2.fireSdk('SDK_GAME_PAUSE');
+    check(h2.ads._config().adInFlight === 'interstitial', 'autostart adopted');
+    h2.fireSdk('SDK_GAME_START');
+    check(h2.ads._config().adInFlight == null, 'the adopted autostart resolves on its own SDK_GAME_START');
+
+    // Autostart that races into a LIVE round is flagged (ad_blocked) but still tracked so the
+    // gate dismiss can attempt teardown — never silent.
+    const h3 = loadAds({ provider: 'gamemonetize', publisherId: 'g' });
+    h3.fireSdk('SDK_READY');
+    h3.win.sdk = { showBanner: function () {} };
+    const stateMap = JSON.parse(fs.readFileSync(path.join(repoRoot, 'server', 'config.json'), 'utf8')).stateMap;
+    h3.win.config = { stateMap: stateMap };
+    h3.win.currentState = stateMap.racing;
+    h3.fireSdk('SDK_GAME_PAUSE');
+    check(h3.hasEventWith('ad_blocked', 'reason', 'provider_auto_in_gameplay'), 'an autostart over a live round is flagged ad_blocked {reason:provider_auto_in_gameplay}');
+    check(h3.ads._config().adInFlight === 'interstitial', 'still tracked (so the gate dismiss can attempt teardown)');
+
+    // Regression: a SOLICITED interstitial PAUSE is NOT re-adopted as provider_auto.
+    const h4 = loadAds({ provider: 'gamemonetize', publisherId: 'g' });
+    h4.fireSdk('SDK_READY');
+    h4.win.sdk = { showBanner: function () {} };
+    h4.setNow(1000000);
+    h4.ads.onMatchEnded();
+    h4.ads.showInterstitial({ placement: 'between_matches', onClose: function () {} });
+    h4.fireSdk('SDK_GAME_PAUSE');   // solicited -> fires our onStart, not the adopt path
+    check(!h4.hasEventWith('ad_shown', 'placement', 'provider_auto'), 'a solicited interstitial PAUSE is NOT mislabeled provider_auto');
+    check(h4.hasEventWith('ad_shown', 'placement', 'between_matches'), 'the solicited interstitial impression is recorded normally');
+
+    // One-shot suppression: after a torn-down request, a late stray PAUSE is NOT adopted (no
+    // duplicate impression). Mirrors the rewarded-timeout teardown.
+    const h5 = loadAds({ provider: 'gamemonetize', publisherId: 'g' });
+    h5.fireSdk('SDK_READY');
+    h5.win.sdk = { showBanner: function () {} };
+    h5.ads.showRewarded({ placement: 'xp_2x', onReward: function () {}, onSkip: function () {} });
+    h5.fireTimers();                 // request times out -> dismiss() sets the suppress flag
+    const shownBefore = h5.tracked.filter(function (e) { return e.name === 'ad_shown'; }).length;
+    h5.fireSdk('SDK_GAME_PAUSE');    // late stray PAUSE for the torn-down request
+    check(h5.ads._config().adInFlight == null, 'a stray PAUSE after a teardown is NOT adopted (one-shot suppression)');
+    check(h5.tracked.filter(function (e) { return e.name === 'ad_shown'; }).length === shownBefore, 'no duplicate ad_shown for the abandoned request');
+}
+
+// Codex P2: with pure lazy-loading the SDK would be invisible to GameMonetize's activation
+// verifier (which visits play.html without playing a match). An INERT, source/DOM-detectable
+// marker is injected at init: a <script type="text/plain"> carrying the sdk.js URL — never
+// fetched/executed (so no autostart), while the executable loader stays lazy under a different id.
+function testVerificationMarker() {
+    console.log('ads.js — an inert SDK marker is detectable at init (no preroll), executable loader stays lazy:');
+    const h = loadAds({ provider: 'gamemonetize', publisherId: 'g' });
+    check(h.scriptCount('gamemonetize-sdk-marker') === 1, 'an inert gamemonetize-sdk-marker is injected at init (detectable for verification)');
+    const marker = h.getScript('gamemonetize-sdk-marker');
+    check(marker && marker.type === 'text/plain', 'the marker is type="text/plain" — inert: never fetched or executed (no autostart possible)');
+    check(marker && marker.src === 'https://api.gamemonetize.com/sdk.js', 'the marker carries the canonical sdk.js URL (source-detectable)');
+    check(h.scriptCount('gamemonetize-sdk') === 0, 'the EXECUTABLE loader is still NOT injected at init (stays lazy until a match ends)');
+    check(!!h.win.SDK_OPTIONS && h.win.SDK_OPTIONS.gameId === 'g', 'window.SDK_OPTIONS is set at init (gameId present) — detectable by an executing verifier too');
 }
 
 // ---------------------------------------------------------------------------
@@ -552,6 +639,8 @@ function testMultiplierConstant() {
     testAdsAdinPlayEarlyCloseIsSkip();
     testDismissDoesNotKillRewarded();
     testLazyLoadAndGameplayGuard();
+    testProviderAutostartAdoption();
+    testVerificationMarker();
     // Part B
     testMultiplierConstant();
     await testStashMatchesEngineAward();
