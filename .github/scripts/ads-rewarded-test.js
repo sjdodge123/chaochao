@@ -389,6 +389,31 @@ function testProviderAutostartAdoption() {
     check(h5.tracked.filter(function (e) { return e.name === 'ad_shown'; }).length === shownBefore, 'no duplicate ad_shown for the abandoned request');
 }
 
+// Review finding: a SOLICITED interstitial whose request times out must be TORN DOWN (mirroring
+// the rewarded path), so a slow fill that arrives after the 8s watchdog can't re-fire a phantom
+// impression / burn the cap after onClose already ran, nor cover the next round untracked.
+function testInterstitialTimeoutTeardown() {
+    console.log('ads.js — a timed-out solicited interstitial is torn down (no phantom late impression):');
+    const h = loadAds({ provider: 'gamemonetize', publisherId: 'g' });
+    h.fireSdk('SDK_READY');
+    h.win.sdk = { showBanner: function () {} };   // never fires PAUSE/START -> the request times out
+    h.setNow(1000000);                             // clear the 90s cooldown
+    h.ads.onMatchEnded();                          // cadence eligible
+    let closed = false;
+    h.ads.showInterstitial({ placement: 'between_matches', onClose: function () { closed = true; } });
+    h.fireTimers();                                // 8s watchdog -> settle('timeout') -> adapter.dismiss()
+    check(closed, 'onClose fires on the interstitial timeout (fail-open, gameplay proceeds)');
+    check(h.ads._config().adInFlight == null, 'nothing in flight after the timeout');
+    check(h.ls('ads_last_interstitial_ts') == null, 'a timed-out request does NOT burn the cooldown (no impression occurred)');
+    const shownBefore = h.tracked.filter(function (e) { return e.name === 'ad_shown'; }).length;
+    // A slow provider that serves the ad AFTER the timeout must not sneak through.
+    h.fireSdk('SDK_GAME_PAUSE');
+    h.fireSdk('SDK_GAME_START');
+    check(h.tracked.filter(function (e) { return e.name === 'ad_shown'; }).length === shownBefore, 'a late fill after the interstitial timeout fires NO ad_shown (no phantom impression after onClose)');
+    check(!h.hasEventWith('ad_shown', 'placement', 'provider_auto'), 'the late PAUSE is NOT mis-adopted as a provider_auto autostart (one-shot suppression)');
+    check(h.ads._config().adInFlight == null, 'the late PAUSE leaves nothing in flight (cannot cover the next round)');
+}
+
 // Codex P2: with pure lazy-loading the SDK would be invisible to GameMonetize's activation
 // verifier (which visits play.html without playing a match). An INERT, source/DOM-detectable
 // marker is injected at init: a <script type="text/plain"> carrying the sdk.js URL — never
@@ -661,6 +686,7 @@ function testMultiplierConstant() {
     testDismissDoesNotKillRewarded();
     testLazyLoadAndGameplayGuard();
     testProviderAutostartAdoption();
+    testInterstitialTimeoutTeardown();
     testVerificationMarker();
     // Part B
     testMultiplierConstant();
