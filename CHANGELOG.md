@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.28.1 — 2026-06-02
+
 ### General
 
 - Trail effects now trace the path you actually walked: hearts, music notes, smoke, confetti, crystals and bubbles ride along your trail for a beat before floating off and fading, instead of drifting away the instant they appear. They also no longer flicker.
