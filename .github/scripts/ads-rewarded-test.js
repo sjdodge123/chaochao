@@ -53,11 +53,13 @@ function loadAds(adsConfig) {
         sdk: null
     };
     const createdScripts = [];
+    const byId = {};   // appended elements indexed by id, so getElementById (the idempotency guard) works
+    function register(el) { if (el && el.id) { byId[el.id] = el; } }
     const fakeDoc = {
         createElement: function () { const el = { setAttribute: function () {}, src: '', async: false, id: '', onload: null, onerror: null, style: {} }; createdScripts.push(el); return el; },
-        getElementById: function () { return null; },
-        head: { appendChild: function () {} },
-        documentElement: { appendChild: function () {} },
+        getElementById: function (id) { return byId[id] || null; },
+        head: { appendChild: function (el) { register(el); } },
+        documentElement: { appendChild: function (el) { register(el); } },
         body: null
     };
     let clock = 1000;
@@ -82,7 +84,11 @@ function loadAds(adsConfig) {
         fireScriptLoads: function () { createdScripts.forEach(function (s) { if (typeof s.onload === "function") { s.onload(); } }); },
         fireTimers: function () { const due = timers.splice(0, timers.length); due.forEach(function (t) { t.fn(); }); },
         setNow: function (v) { clock = v; },
-        hasEvent: function (name, type) { return tracked.some(function (e) { return e.name === name && (!type || e.params.type === type); }); }
+        hasEvent: function (name, type) { return tracked.some(function (e) { return e.name === name && (!type || e.params.type === type); }); },
+        // Lazy-load introspection: how many <script id="..."> with a given id have been injected.
+        scriptCount: function (id) { return createdScripts.filter(function (s) { return s.id === id; }).length; },
+        // Read the frequency-cap localStorage directly (to assert cadence isn't burned).
+        ls: function (k) { return (k in lsStore) ? lsStore[k] : null; }
     };
 }
 
@@ -215,6 +221,79 @@ function testDismissDoesNotKillRewarded() {
     h2.fireSdk('SDK_GAME_PAUSE');     // interstitial started (adInFlight = 'interstitial')
     h2.ads.dismissInterstitial();     // race starting — tears it down
     check(closed, 'an in-flight interstitial IS torn down at race start (onClose fires)');
+}
+
+// Acquisition-UX fix: the GameMonetize loader must NOT be injected at page init (its SDK can
+// auto-show a preroll the instant it initializes — that splashed an ad on the very first lobby,
+// before the player had played). It's lazy-loaded on the first real ad demand instead, the first
+// such demand fails open, and an active-gameplay guard refuses to cover a live round.
+function testLazyLoadAndGameplayGuard() {
+    console.log('ads.js — GameMonetize loader is lazy-loaded (no ad on first lobby) + active-gameplay guard:');
+
+    // (a) On init, the loader <script id="gamemonetize-sdk"> is NOT injected.
+    const h = loadAds({ provider: 'gamemonetize', publisherId: 'g' });
+    check(h.scriptCount('gamemonetize-sdk') === 0, '(a) on init the gamemonetize-sdk script is NOT injected (lazy — no first-lobby preroll possible)');
+    check(h.ads._config().sdkReady === false, '(a) sdkReady is false on init (SDK not loaded yet)');
+
+    // (b) The loader IS injected on the first real ad demand (a match-end interstitial check).
+    const firstCheck = h.ads.canShowInterstitial();
+    check(firstCheck === false, '(b) first canShowInterstitial() is false (SDK not ready yet) — fails open, no ad');
+    check(h.scriptCount('gamemonetize-sdk') === 1, '(b) the gamemonetize-sdk script IS injected on the first ad demand');
+    // Idempotent: repeated demands never inject a second copy.
+    h.ads.canShowInterstitial();
+    h.ads.isRewardedAvailable();
+    check(h.scriptCount('gamemonetize-sdk') === 1, '(b) repeated demands never inject a second loader (idempotent by id)');
+
+    // (c) An ad requested before the SDK is ready fails open (onClose), and the frequency cadence
+    //     is NOT burned — the next match can still try once the SDK has loaded.
+    const h2 = loadAds({ provider: 'gamemonetize', publisherId: 'g' });
+    h2.setNow(1000000);          // clear the 90s cooldown
+    h2.ads.onMatchEnded();       // a match ended -> cadence is now eligible
+    const countBefore = h2.ls('ads_match_count_since_interstitial');
+    let closed = false;
+    h2.ads.showInterstitial({ placement: 'between_matches', onClose: function () { closed = true; } });
+    check(closed, '(c) an interstitial requested before SDK-ready fails open (onClose fires, gameplay never blocks)');
+    check(!h2.hasEvent('ad_shown'), '(c) no ad_shown for a pre-ready request (no impression)');
+    check(h2.ls('ads_match_count_since_interstitial') === countBefore, '(c) the match-cadence counter is NOT burned by a pre-ready no-fill');
+    // Rewarded mirrors this: not available before ready -> a clean skip.
+    let rSkipped = false, rRewarded = false;
+    h2.ads.showRewarded({ placement: 'xp_2x', onReward: function () { rRewarded = true; }, onSkip: function () { rSkipped = true; } });
+    check(rSkipped && !rRewarded, '(c) a rewarded ad requested before SDK-ready is a clean SKIP (no reward, no crash)');
+
+    // (d) The active-gameplay guard blocks a show during gated/racing/collapsing even when the
+    //     SDK is ready and the cadence is eligible — an ad can NEVER cover a live round.
+    const stateMap = JSON.parse(fs.readFileSync(path.join(repoRoot, 'server', 'config.json'), 'utf8')).stateMap;
+    [['gated', stateMap.gated], ['racing', stateMap.racing], ['collapsing', stateMap.collapsing]].forEach(function (pair) {
+        const h3 = loadAds({ provider: 'gamemonetize', publisherId: 'g' });
+        h3.fireSdk('SDK_READY');
+        let bannerCalls = 0;
+        h3.win.sdk = { showBanner: function () { bannerCalls++; } };
+        h3.win.config = { stateMap: stateMap };
+        h3.win.currentState = pair[1];        // the client is mid-round
+        h3.setNow(1000000);
+        h3.ads.onMatchEnded();                 // cadence eligible
+        check(h3.ads.canShowInterstitial() === true, '(d/' + pair[0] + ') sanity: cadence + SDK would otherwise allow an interstitial');
+        let iClosed = false;
+        h3.ads.showInterstitial({ placement: 'between_matches', onClose: function () { iClosed = true; } });
+        check(iClosed && bannerCalls === 0, '(d/' + pair[0] + ') interstitial is REFUSED during ' + pair[0] + ' (no showBanner), onClose still fires');
+        check(h3.hasEvent('ad_blocked', 'interstitial'), '(d/' + pair[0] + ') ad_blocked {type:interstitial} logged for the gameplay-state refusal');
+        // Rewarded is refused too -> a clean skip, no banner.
+        let rSkip = false;
+        h3.ads.showRewarded({ placement: 'xp_2x', onReward: function () {}, onSkip: function () { rSkip = true; } });
+        check(rSkip && bannerCalls === 0, '(d/' + pair[0] + ') rewarded ad is REFUSED during ' + pair[0] + ' (skip, no showBanner)');
+    });
+
+    // And the valid surfaces (lobby / gameOver) are NOT blocked by the guard.
+    const h4 = loadAds({ provider: 'gamemonetize', publisherId: 'g' });
+    h4.fireSdk('SDK_READY');
+    let banner4 = 0;
+    h4.win.sdk = { showBanner: function () { banner4++; } };
+    h4.win.config = { stateMap: stateMap };
+    h4.win.currentState = stateMap.lobby;     // the normal interstitial surface
+    h4.setNow(1000000);
+    h4.ads.onMatchEnded();
+    h4.ads.showInterstitial({ placement: 'between_matches', onClose: function () {} });
+    check(banner4 === 1, '(d) an interstitial at the lobby edge is NOT blocked (showBanner called)');
 }
 
 // ---------------------------------------------------------------------------
@@ -472,6 +551,7 @@ function testMultiplierConstant() {
     testAdsGameMonetizeRewarded();
     testAdsAdinPlayEarlyCloseIsSkip();
     testDismissDoesNotKillRewarded();
+    testLazyLoadAndGameplayGuard();
     // Part B
     testMultiplierConstant();
     await testStashMatchesEngineAward();
