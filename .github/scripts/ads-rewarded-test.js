@@ -298,6 +298,19 @@ function testLazyLoadAndGameplayGuard() {
     h4.ads.onMatchEnded();
     h4.ads.showInterstitial({ placement: 'between_matches', onClose: function () {} });
     check(banner4 === 1, '(d) an interstitial at the lobby edge is NOT blocked (showBanner called)');
+
+    // (e) preloadSdk() loads the SDK EARLY (gameOver/results edge) to widen the lead time before
+    //     the race, but is a no-op during active gameplay so a slow autostart can't be kicked
+    //     into a live round (Codex P1: delayed init covering gameplay).
+    const hp = loadAds({ provider: 'gamemonetize', publisherId: 'g' });
+    hp.win.config = { stateMap: stateMap };
+    check(hp.scriptCount('gamemonetize-sdk') === 0, '(e) no executable loader before preloadSdk()');
+    hp.win.currentState = stateMap.racing;
+    hp.ads.preloadSdk();                       // mid-round -> refused
+    check(hp.scriptCount('gamemonetize-sdk') === 0, '(e) preloadSdk() is a no-op during active gameplay (no load kicked into a live round)');
+    hp.win.currentState = stateMap.gameOver;   // results screen -> valid surface
+    hp.ads.preloadSdk();
+    check(hp.scriptCount('gamemonetize-sdk') === 1, '(e) preloadSdk() at the gameOver edge injects the executable loader early (more lead time before the race)');
 }
 
 // Codex P1: a GameMonetize preroll the SDK autostarts on init bypasses our showBanner() flow,
@@ -313,12 +326,18 @@ function testProviderAutostartAdoption() {
     h.fireSdk('SDK_READY');
     h.win.sdk = { showBanner: function () {} };
     check(h.ads._config().adInFlight == null, 'no ad in flight before the autostart');
+    h.setNow(50000);               // a real clock so markInterstitialShown stamps a cooldown ts
     h.fireSdk('SDK_GAME_PAUSE');   // the SDK started a preroll we never requested
     check(h.ads._config().adInFlight === 'interstitial', 'an unsolicited autostart is adopted as an in-flight interstitial (so the dismiss net covers it)');
     check(h.hasEventWith('ad_shown', 'placement', 'provider_auto'), 'ad_shown {placement:provider_auto} emitted for the autostart (not invisible)');
+    // P1b: an adopted preroll IS an impression, so it burns the frequency cap like a solicited one.
+    check(h.ls('ads_last_interstitial_ts') === '50000', 'adopted autostart stamps the cooldown ts (frequency cap applied)');
+    check(h.ls('ads_match_count_since_interstitial') === '0', 'adopted autostart resets the match cadence counter (no back-to-back ad next match)');
     // The race-start dismiss safety net can now reclaim it.
     h.ads.dismissInterstitial();
     check(h.ads._config().adInFlight == null, 'dismissInterstitial() tears down the adopted autostart at the gate');
+    // P2: a deliberate teardown (cancelled) records NO completion.
+    check(!h.hasEventWith('ad_complete', 'placement', 'provider_auto'), 'a dismissed autostart records no ad_complete (cancelled, not completed)');
     // A trailing SDK_GAME_START for the dismissed ad is a harmless no-op (already settled).
     h.fireSdk('SDK_GAME_START');
     check(h.ads._config().adInFlight == null, 'a late SDK_GAME_START after dismiss is a no-op');
@@ -331,6 +350,8 @@ function testProviderAutostartAdoption() {
     check(h2.ads._config().adInFlight === 'interstitial', 'autostart adopted');
     h2.fireSdk('SDK_GAME_START');
     check(h2.ads._config().adInFlight == null, 'the adopted autostart resolves on its own SDK_GAME_START');
+    // P2: a normally-completed autostart records ad_complete (symmetric funnel, not "abandoned").
+    check(h2.hasEventWith('ad_complete', 'placement', 'provider_auto'), 'a completed autostart records ad_complete {placement:provider_auto}');
 
     // Autostart that races into a LIVE round is flagged (ad_blocked) but still tracked so the
     // gate dismiss can attempt teardown — never silent.
