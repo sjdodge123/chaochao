@@ -534,6 +534,17 @@
             clearTimeout(timer);
             activeSettle = null;
             adInFlight = null;
+            if (status === "timeout") {
+                // The request is still pending in the provider (no ad started in time). Tear it
+                // down — mirroring the rewarded path — so a SLOW fill can't appear AFTER we've
+                // given up: otherwise the still-set gmPendingStart would re-fire onStart on a
+                // late SDK_GAME_PAUSE (a phantom impression + cap burn AFTER onClose already ran),
+                // and because adInFlight is now null neither the gameplay guard nor
+                // dismissInterstitial could reclaim it if it landed over the next round. dismiss()
+                // clears GameMonetize's pending callbacks and arms its one-shot stray-PAUSE
+                // suppression (and destroys AdinPlay's player).
+                try { if (adapter && typeof adapter.dismiss === "function") { adapter.dismiss(); } } catch (e) {}
+            }
             if (status === "complete") {
                 // Completion is only an impression if the ad actually started.
                 // A "complete" with no start is a NO-FILL (GameMonetize signals it
