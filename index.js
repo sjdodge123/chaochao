@@ -259,39 +259,43 @@ var maintenance = require('./server/maintenance.js');
 var crypto = require('crypto');
 var c = utils.loadConfig();
 
+// Tiny per-IP sliding-window rate limiter, shared by the public endpoints
+// below. Keyed by client IP. A Map (not a plain object) so a hostile IP string
+// can never be a special property name (__proto__, constructor, …) — there's
+// no prototype to pollute and key lookups stay O(1) on arbitrary strings.
+// Each limiter sweeps its expired keys once per window so an endpoint hit by
+// many distinct IPs can't grow the map without bound (entries are otherwise
+// only pruned when that same IP calls again). Cheap (runs once per window)
+// and harmless while the server sleeps.
+function makeRateLimiter(windowMs, maxPerWindow) {
+    var hitsByIp = new Map(); // ip -> [timestamps] within the window
+    setInterval(function () {
+        var now = Date.now();
+        hitsByIp.forEach(function (timestamps, ip) {
+            var hits = timestamps.filter(function (t) { return now - t < windowMs; });
+            if (hits.length === 0) { hitsByIp.delete(ip); }
+            else { hitsByIp.set(ip, hits); }
+        });
+    }, windowMs).unref();
+    return function rateLimited(ip) {
+        var now = Date.now();
+        var hits = (hitsByIp.get(ip) || []).filter(function (t) { return now - t < windowMs; });
+        if (hits.length >= maxPerWindow) {
+            hitsByIp.set(ip, hits);
+            return true;
+        }
+        hits.push(now);
+        hitsByIp.set(ip, hits);
+        return false;
+    };
+}
+
 // In-browser feedback / bug-report endpoint. The widget (client/scripts/feedback.js)
 // POSTs here and utils.submitIssue files it as a GitHub issue using the server's
 // GITHUB_AUTH token (same credential map-submit uses). Because it's unauthenticated
 // and writes to GitHub, it's guarded by: a tight JSON body cap, a hidden honeypot
 // field (any value = a bot, silently accepted-and-dropped), and a per-IP rate limit.
-// Keyed by client IP. A Map (not a plain object) so a hostile IP string can never
-// be a special property name (__proto__, constructor, …) — there's no prototype to
-// pollute and key lookups stay O(1) on arbitrary strings.
-var feedbackHits = new Map(); // ip -> [timestamps] within the window
-var FEEDBACK_WINDOW_MS = 10 * 60 * 1000;
-var FEEDBACK_MAX_PER_WINDOW = 5;
-function feedbackRateLimited(ip) {
-    var now = Date.now();
-    var hits = (feedbackHits.get(ip) || []).filter(function (t) { return now - t < FEEDBACK_WINDOW_MS; });
-    if (hits.length >= FEEDBACK_MAX_PER_WINDOW) {
-        feedbackHits.set(ip, hits);
-        return true;
-    }
-    hits.push(now);
-    feedbackHits.set(ip, hits);
-    return false;
-}
-// Sweep expired keys so a public endpoint hit by many distinct IPs can't grow
-// feedbackHits without bound (entries are otherwise only pruned when that same IP
-// submits again). Cheap (runs once per window) and harmless while the server sleeps.
-setInterval(function () {
-    var now = Date.now();
-    feedbackHits.forEach(function (timestamps, ip) {
-        var hits = timestamps.filter(function (t) { return now - t < FEEDBACK_WINDOW_MS; });
-        if (hits.length === 0) { feedbackHits.delete(ip); }
-        else { feedbackHits.set(ip, hits); }
-    });
-}, FEEDBACK_WINDOW_MS).unref();
+var feedbackRateLimited = makeRateLimiter(10 * 60 * 1000, 5);
 app.post('/feedback', express.json({ limit: '16kb' }), function (req, res) {
     var body = req.body || {};
     // Honeypot: a real form leaves `website` empty (it's hidden off-screen). Any
@@ -335,8 +339,20 @@ function opsAuthorized(req) {
     var a = Buffer.from(given), b = Buffer.from(OPS_SECRET);
     return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
+// Per-IP limiter shared by both ops endpoints, checked BEFORE the secret so
+// brute-forcing OPS_SECRET is throttled too. The nightly workflow makes at
+// most ~35 calls per run from one runner IP, so 120/10min is generous for
+// legitimate use. A limited caller gets the same 404 the cloak uses — it
+// can't even tell the endpoints exist. Same trusted-proxy IP resolution as
+// /feedback (left-most x-forwarded-for entries are caller-forgeable).
+var opsRateLimited = makeRateLimiter(10 * 60 * 1000, 120);
+function opsGate(req) {
+    var ip = botGuard.resolveClientIp(req.headers['x-forwarded-for'], req.ip) || 'unknown';
+    if (opsRateLimited(ip)) { return false; }
+    return opsAuthorized(req);
+}
 app.post('/ops/drain', function (req, res) {
-    if (!opsAuthorized(req)) { return res.status(404).end(); }
+    if (!opsGate(req)) { return res.status(404).end(); }
     // Bound the heads-up window: 0 (announce only) to 15 min, default 3 min.
     var seconds = parseInt(req.query.seconds, 10);
     if (isNaN(seconds)) { seconds = 180; }
@@ -345,7 +361,7 @@ app.post('/ops/drain', function (req, res) {
     res.json({ status: true, seconds: seconds });
 });
 app.get('/ops/status', function (req, res) {
-    if (!opsAuthorized(req)) { return res.status(404).end(); }
+    if (!opsGate(req)) { return res.status(404).end(); }
     res.json({
         clients: clientCount,
         activeRaces: hostess.countActiveRaces(),
