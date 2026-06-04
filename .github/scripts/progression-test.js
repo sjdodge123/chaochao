@@ -189,10 +189,13 @@ function testLevelUp() {
     // The runner-up sits JUST past the L2 floor: under the capped-hook curve (50+22n,
     // tuned so a fresh player levels off their very first decent match) a 0-XP start
     // would cross L2 too — park them where one runner-up match can't reach L3.
+    // notches: 0 keeps a comfortable margin below the L3 floor (earns 90 vs the 115
+    // needed) so a small future bump to any XP award doesn't trip this assertion for
+    // reasons unrelated to what it guards.
     const r = runMatch({
         sig: 'prog-lvl',
         p1: { id: 'prog-lvl-1', notches: 5, totalKills: 0, progression: { xp: startXp, level: 1, unlocked_skins: [], medal_counts: {}, wins: 0 } },
-        p2: { id: 'prog-lvl-2', notches: 1, totalKills: 0, progression: { xp: progression.cumulativeXpForLevel(2), level: 2, unlocked_skins: [], medal_counts: {}, wins: 0 } }
+        p2: { id: 'prog-lvl-2', notches: 0, totalKills: 0, progression: { xp: progression.cumulativeXpForLevel(2), level: 2, unlocked_skins: [], medal_counts: {}, wins: 0 } }
     });
     check(r.p1.progression.level >= 2, 'winner cache level advanced past 1 (-> ' + r.p1.progression.level + ')');
     check(r.p2.progression.level === 2, 'low-XP runner-up stayed level 2');
@@ -413,8 +416,29 @@ function testSpectatorEarnsNothing() {
     check((r.p1.progression.wins || 0) === 0, '1 racer + 1 spectator is not "2 humans" — solo win does not count');
 }
 
+// MIGRATION-SAFETY GUARD: the live curve must stay at-or-below the ORIGINAL launch
+// curve (50·n^1.6) at every cumulative floor, forever. Level is derived from xp on
+// read, so any curve whose floors exceed a previous curve's would DEMOTE existing
+// players and revoke equipped level skins. If a retune trips this, make it cheaper —
+// never steeper than this pinned reference.
+function testCurveNeverDemotes() {
+    console.log('Curve migration safety (no demotion vs original 50·n^1.6 curve):');
+    function origReq(n) { return n <= 1 ? 0 : Math.round(50 * Math.pow(n, 1.6)); }
+    var origCum = 0, ok = true;
+    for (var n = 2; n <= 120; n++) {
+        origCum += origReq(n);
+        if (progression.cumulativeXpForLevel(n) > origCum) {
+            ok = false;
+            check(false, 'cumulative floor of Lv' + n + ' exceeds the original curve (' +
+                progression.cumulativeXpForLevel(n) + ' > ' + origCum + ') — this curve would demote players');
+        }
+    }
+    if (ok) { check(true, 'every cumulative floor Lv2-120 is <= the original launch curve'); }
+}
+
 (async function run() {
     testPureHelpers();
+    testCurveNeverDemotes();
     testXpBreakdown();
     testWinnerFromGameOverArg();
     testLevelUp();

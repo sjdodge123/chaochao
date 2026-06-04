@@ -101,6 +101,15 @@ These events exist to make that retune a measurement, not a guess.
   cheapen the curve to `min(400, 20+9n)`.
 - Both levers only ever make the curve cheaper, so no player can lose a level.
 
+### Sampling caveat (read before trusting the numbers)
+
+Pacing events fire on lobby arrival; for a player who quits at the results screen they
+fire on the **next session's** first lobby (durable `pending_toasts` queue) — delayed,
+not lost. The one cohort the GA data structurally excludes is **players who never
+return at all** — i.e. exactly the players the hook failed for. Survivorship-check any
+retune read against Supabase (`progression.xp` totals / `unlock_dates`) before
+concluding pacing is healthy.
+
 ### Dashboard
 
 GA4 has no dashboards-as-code; the standing setup is one saved Exploration per
