@@ -42,13 +42,14 @@ var server = null,
     // palette. Persisted in localStorage (see the #colorblindControl wiring).
     colorblindEnabled = false,
     worldViewFocusedElapsed = 0,  // ms accumulated in the focus phase (frame-dt based, not wall-clock)
-    // Latched goal-engage state, so the framing can't flap when a player skims the
-    // edge of WORLD_ZOOM_ENGAGE (e.g. drifting around the spawn gate next to the
-    // goal). Engage at ENGAGE, only release past RELEASE — hysteresis kills the jerk.
-    worldGoalEngaged = false,
+    // Per-player smoothed look-ahead vectors keyed by player id (see
+    // computeFocusedView). Smoothing the lead itself keeps steering wiggle,
+    // punches and bounces from snapping the camera; cleared whenever the
+    // camera leaves the focused states so no stale lead carries over.
+    worldLeadSmooth = {},
     WORLD_ZOOM_MAX = 2.05,     // tightest cruise focus while racing (close enough to read the skin, far enough to navigate)
-    WORLD_ZOOM_ENGAGE = 460,   // world-units: nearest goal pulls into frame within this
-    WORLD_ZOOM_RELEASE = 620,  // world-units: once engaged, only let go of the goal past this (hysteresis band)
+    WORLD_ZOOM_ENGAGE = 460,   // world-units: nearest goal is FULLY framed within this
+    WORLD_ZOOM_RELEASE = 620,  // world-units: goal framing fades smoothly to nothing by here (continuous blend, no pop)
     WORLD_ZOOM_PAD = 120,      // world-units padding around framed points
     WORLD_ZOOM_TAU = 620,      // smoothing time-constant (ms); higher = slower, gentler glide
     WORLD_ZOOM_HOLD_MS = 1100, // hold the whole-map view this long when a round starts, before easing in
@@ -64,9 +65,15 @@ var server = null,
     // velocity, up to LEAD_MAX world-units at/above LEAD_REF speed (≈ top speed
     // on normal tiles, measured ~83 u/s), so the tighter cruise zoom never costs
     // forward visibility — at speed the camera leads the kart; parked, you get
-    // the tight skin-admiring view centred on it.
+    // the tight skin-admiring view centred on it. The lead vector itself is
+    // smoothed per player with LEAD_TAU (ms) so direction flips sway gently.
     WORLD_ZOOM_LEAD_REF = 80,
     WORLD_ZOOM_LEAD_MAX = 110,
+    WORLD_ZOOM_LEAD_TAU = 700,
+    // Max zoom-scale change per second while GATED (the countdown follows its
+    // eased ramp directly, with no exponential smoothing) — the designed ramp
+    // moves ~0.15/s, so this only catches abrupt target shifts mid-countdown.
+    WORLD_ZOOM_GATE_RATE = 0.5,
     // Sustained camera back-off while holding/throwing an aimed ability (bomb/ice)
     // until it detonates, so it's easier to aim. Multiplies the focused scale
     // (0.62 => ~38% wider); the smoothing eases it out and back.

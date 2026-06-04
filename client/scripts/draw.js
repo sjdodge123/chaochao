@@ -3954,11 +3954,11 @@ function focusWorldPoints() {
     var pts = [];
     var living = livingLocalPlayers();
     for (var i = 0; i < living.length; i++) {
-        // vx/vy feed the camera's velocity look-ahead in computeFocusedView.
-        pts.push({ x: living[i].x, y: living[i].y, vx: living[i].velX || 0, vy: living[i].velY || 0 });
+        // id keys the per-player smoothed look-ahead state; vx/vy feed it.
+        pts.push({ id: living[i].id, x: living[i].x, y: living[i].y, vx: living[i].velX || 0, vy: living[i].velY || 0 });
     }
     if (pts.length === 0 && myPlayer && myPlayer.alive) {
-        pts.push({ x: myPlayer.x, y: myPlayer.y, vx: myPlayer.velX || 0, vy: myPlayer.velY || 0 });
+        pts.push({ id: myPlayer.id, x: myPlayer.x, y: myPlayer.y, vx: myPlayer.velX || 0, vy: myPlayer.velY || 0 });
     }
     return pts;
 }
@@ -3971,13 +3971,13 @@ function focusWorldPoints() {
 // goal itself stays framed — the close-up only lands once everyone framed has
 // converged on it. Centre is kept separate from the zoom so a transition can
 // ramp only the zoom (players can't slide out of frame).
-function computeFocusedView() {
+function computeFocusedView(dt) {
     var wholeMap = { cx: LOGICAL_WIDTH / 2, cy: LOGICAL_HEIGHT / 2, scale: 1 };
     var pts = focusWorldPoints();
     if (pts.length === 0) {
         // Nobody local alive to follow -> whole map (watch the action). Drop the
-        // goal latch so it can't carry stale engagement into the next round/map.
-        worldGoalEngaged = false;
+        // smoothed look-ahead so it can't carry stale lead into the next round.
+        worldLeadSmooth = {};
         return wholeMap;
     }
     // Nearest goal (to any framed player) first: its distance drives the dynamic
@@ -3991,61 +3991,72 @@ function computeFocusedView() {
             if (d < nd) { nd = d; ng = goals[g]; }
         }
     }
-    // Hysteresis: engage the goal framing once within ENGAGE, but don't let go
-    // until clearly past RELEASE. Otherwise a player drifting at the ENGAGE edge
-    // (e.g. circling the spawn gate beside the goal) flips the framing every few
-    // frames, which the gate-countdown ramp follows directly (a=1) and jerks.
-    if (!ng) {
-        worldGoalEngaged = false;
-    } else if (worldGoalEngaged) {
-        if (nd > WORLD_ZOOM_RELEASE) { worldGoalEngaged = false; }
-    } else if (nd <= WORLD_ZOOM_ENGAGE) {
-        worldGoalEngaged = true;
+    // Goal-framing weight: blends the goal into the framing box continuously —
+    // 1 within ENGAGE, fading to 0 by RELEASE. Continuity matters because the
+    // gate-countdown ramp follows the target directly (a=1): a binary engage
+    // latch made the target scale STEP the instant the goal popped in/out of
+    // the box, which read as a sudden zoom jerk in the gated view.
+    var w = 0;
+    if (ng) {
+        w = 1 - (nd - WORLD_ZOOM_ENGAGE) / (WORLD_ZOOM_RELEASE - WORLD_ZOOM_ENGAGE);
+        w = Math.max(0, Math.min(1, w));
+        w = w * w * (3 - 2 * w);
     }
-    // Finish-line punch-in: while the goal is engaged, raise the zoom cap from
-    // WORLD_ZOOM_MAX toward (MAX + BOOST) as the group closes from ENGAGE down to
-    // GOAL_FULL. Smoothstepped, and the goal + every player stay inside the
-    // framing box below, so the fit only reaches the boosted cap once everyone
-    // has actually converged on the goal — the last stretch reads as a lunge.
+    // Finish-line punch-in: raise the zoom cap from WORLD_ZOOM_MAX toward
+    // (MAX + BOOST) as the group closes from ENGAGE down to GOAL_FULL.
+    // Smoothstepped (and 0 at/beyond ENGAGE, so it's continuous with w), and
+    // the goal + every player stay inside the framing box below, so the fit
+    // only reaches the boosted cap once everyone has actually converged on the
+    // goal — the last stretch reads as a lunge.
     var effMax = WORLD_ZOOM_MAX;
-    if (ng && worldGoalEngaged) {
+    if (ng) {
         var gt = (WORLD_ZOOM_ENGAGE - nd) / (WORLD_ZOOM_ENGAGE - WORLD_ZOOM_GOAL_FULL);
         gt = Math.max(0, Math.min(1, gt));
         effMax += WORLD_ZOOM_GOAL_BOOST * gt * gt * (3 - 2 * gt);
     }
     var halfX = LOGICAL_WIDTH / (2 * effMax);
     var halfY = LOGICAL_HEIGHT / (2 * effMax);
+    // Velocity look-ahead: each player's half-box is centred ahead of them along
+    // a SMOOTHED lead vector (its own exponential lag, per player), so steering
+    // wiggle, punches and bounces swing the lead gently instead of snapping the
+    // camera. The target lead is zero while gated (players just rev in the pen,
+    // and the gate ramp follows its target unsmoothed), so any leftover lead
+    // drains out during the countdown and builds naturally off the line.
+    var la = 1 - Math.exp(-(dt || 16) / WORLD_ZOOM_LEAD_TAU);
+    var gatedNow = (currentState === config.stateMap.gated);
     var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     for (var i = 0; i < pts.length; i++) {
-        // Velocity look-ahead: centre this player's half-box ahead of them along
-        // their travel (capped well under the half-box, so the player always
-        // stays comfortably inside their own box -> on screen). Lead targets are
-        // clamped to the world so ramming a wall can't inflate the box. The
-        // camera's exponential smoothing absorbs sudden velocity flips
-        // (punches/bounces) into a gentle drift rather than a snap.
-        var lx = pts[i].x, ly = pts[i].y;
+        var tx = 0, ty = 0;
         var spd = Math.sqrt(pts[i].vx * pts[i].vx + pts[i].vy * pts[i].vy);
-        if (spd > 1) {
+        if (!gatedNow && spd > 1) {
             // Lead scales with speed up to full cruise (LEAD_REF), and is also
             // capped at a fraction of the (zoom-dependent) half-box so the goal
             // punch-in's tighter box can't shove a fast kart to the screen edge
             // — at least ~45% of the half-box always stays behind them.
             var lead = Math.min(WORLD_ZOOM_LEAD_MAX, halfY * 0.55) * Math.min(1, spd / WORLD_ZOOM_LEAD_REF);
-            lx += pts[i].vx / spd * lead;
-            ly += pts[i].vy / spd * lead;
-            lx = Math.max(world.x, Math.min(world.x + world.width, lx));
-            ly = Math.max(world.y, Math.min(world.y + world.height, ly));
+            tx = pts[i].vx / spd * lead;
+            ty = pts[i].vy / spd * lead;
         }
+        var sm = worldLeadSmooth[pts[i].id];
+        if (!sm) { sm = worldLeadSmooth[pts[i].id] = { x: 0, y: 0 }; }
+        sm.x += (tx - sm.x) * la;
+        sm.y += (ty - sm.y) * la;
+        // Clamp the led point to the world so ramming a wall can't inflate the box.
+        var lx = Math.max(world.x, Math.min(world.x + world.width, pts[i].x + sm.x));
+        var ly = Math.max(world.y, Math.min(world.y + world.height, pts[i].y + sm.y));
         minX = Math.min(minX, lx - halfX);
         maxX = Math.max(maxX, lx + halfX);
         minY = Math.min(minY, ly - halfY);
         maxY = Math.max(maxY, ly + halfY);
     }
-    if (ng && worldGoalEngaged) {
-        minX = Math.min(minX, ng.x - WORLD_ZOOM_PAD);
-        maxX = Math.max(maxX, ng.x + WORLD_ZOOM_PAD);
-        minY = Math.min(minY, ng.y - WORLD_ZOOM_PAD);
-        maxY = Math.max(maxY, ng.y + WORLD_ZOOM_PAD);
+    if (w > 0) {
+        // Stretch each box edge toward the goal pad by the blend weight — at
+        // w=1 the goal is fully framed (same as the old hard include), and the
+        // approach/retreat over the ENGAGE..RELEASE band is perfectly smooth.
+        minX -= Math.max(0, minX - (ng.x - WORLD_ZOOM_PAD)) * w;
+        maxX += Math.max(0, (ng.x + WORLD_ZOOM_PAD) - maxX) * w;
+        minY -= Math.max(0, minY - (ng.y - WORLD_ZOOM_PAD)) * w;
+        maxY += Math.max(0, (ng.y + WORLD_ZOOM_PAD) - maxY) * w;
     }
     var boxW = Math.max(1, maxX - minX), boxH = Math.max(1, maxY - minY);
     var scale = Math.min(LOGICAL_WIDTH / boxW, LOGICAL_HEIGHT / boxH);
@@ -4063,7 +4074,7 @@ function computeWorldViewTarget(dt) {
     var wholeMap = { cx: LOGICAL_WIDTH / 2, cy: LOGICAL_HEIGHT / 2, scale: 1 };
     if (!cameraZoomEnabled || myPlayer == null || typeof world === "undefined" || world == null) {
         worldViewFocusedElapsed = 0;
-        worldGoalEngaged = false;
+        worldLeadSmooth = {};
         return wholeMap;
     }
     // Focus once the round is live (gate countdown + race); plus the LOBBY whenever
@@ -4080,7 +4091,7 @@ function computeWorldViewTarget(dt) {
         inLobby);
     if (!focused) {
         worldViewFocusedElapsed = 0;
-        worldGoalEngaged = false;
+        worldLeadSmooth = {};
         return wholeMap;
     }
     // Advance the gate-intro clock ONLY while in the gated countdown, and zero it
@@ -4097,7 +4108,7 @@ function computeWorldViewTarget(dt) {
     } else {
         worldViewFocusedElapsed = 0;
     }
-    var focusedView = computeFocusedView();
+    var focusedView = computeFocusedView(dt);
 
     // During the gate countdown, run a slow, eased zoom timed to the countdown:
     // whole-map at the start (take in the arena + goal), arriving at the focused
@@ -4138,7 +4149,18 @@ function updateWorldCamera(dt) {
     var a = gatedNow ? 1 : (1 - Math.exp(-cdt / WORLD_ZOOM_TAU));
     worldView.cx += (target.cx - worldView.cx) * a;
     worldView.cy += (target.cy - worldView.cy) * a;
-    worldView.scale += (target.scale - worldView.scale) * a;
+    if (gatedNow) {
+        // Direct follow, but rate-limited: the ramp itself moves the scale far
+        // slower than this cap, so the cap is invisible in the normal arc — it
+        // only bites when the FOCUSED target moves abruptly mid-countdown (a
+        // player sliding fast across the goal blend band, a death changing the
+        // framed group), turning what was a visible zoom jerk into a quick glide.
+        var ds = target.scale - worldView.scale;
+        var maxStep = WORLD_ZOOM_GATE_RATE * cdt / 1000;
+        worldView.scale += Math.max(-maxStep, Math.min(maxStep, ds));
+    } else {
+        worldView.scale += (target.scale - worldView.scale) * a;
+    }
 }
 
 // True while a local player is dealing with an aimed ability — holding a bomb /
