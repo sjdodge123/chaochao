@@ -794,6 +794,20 @@ function drawLobbyHubHud() {
     drawSeasonalClaimBanner(); // top slot when active; AI + playlist drop a row below it
     drawLobbyAIStatus();
     drawLobbyPlaylistStatus();
+    // Couch co-op: when SEVERAL seats have a panel open at once, kart-anchored panels
+    // overlap and hide each other. Dock them to fixed non-overlapping screen cells
+    // instead (side-by-side for two, a 2×2 grid for three/four) so every open menu
+    // stays fully visible; a single open panel keeps the stick-to-your-kart anchor.
+    var openPanels = [];
+    for (var os = 0; os < localPlayers.length; os++) {
+        var olp = localPlayers[os];
+        if (olp) { olp._panelDock = null; }
+        if (olp && olp.stationPanel && olp.myID != null &&
+            typeof playerList !== "undefined" && playerList && playerList[olp.myID]) {
+            openPanels.push(olp);
+        }
+    }
+    if (openPanels.length >= 2) { assignPanelDocks(openPanels); }
     for (var slot = 0; slot < localPlayers.length; slot++) {
         var lp = localPlayers[slot];
         if (!lp) {
@@ -809,6 +823,37 @@ function drawLobbyHubHud() {
         } else if (lp.nearStation) {
             drawStationPrompt(lp, sp);
         }
+    }
+}
+
+// The drawn size of a slot's open panel (mirrors drawStationPanel's per-kind sizing) and
+// its full FOOTPRINT width — the skin picker carries the Equipped preview docked beside
+// it, so overlap layout must reserve that width too.
+function stationPanelSize(lp) {
+    var kind = lp.stationPanel.kind;
+    var w = 250, h = 132;
+    if (kind === "playlist") { w = 280; h = 150; }
+    if (kind === "skin") { w = 300; h = skinPanelHeight(); }
+    var fw = (kind === "skin") ? (w + 8 + EQUIP_PREVIEW_W) : w;
+    return { w: w, h: h, fw: fw };
+}
+// Dock 2+ open panels into fixed screen cells, in seat order: one row of two, or a 2×2
+// grid for three/four. Each panel's FOOTPRINT (panel + side preview) is centred in its
+// cell, so the skin picker's preview never crosses into a neighbour's cell.
+function assignPanelDocks(open) {
+    var cols = 2;
+    var rows = (open.length <= 2) ? 1 : 2;
+    var cw = LOGICAL_WIDTH / cols;
+    var chH = LOGICAL_HEIGHT / rows;
+    for (var i = 0; i < open.length; i++) {
+        var sz = stationPanelSize(open[i]);
+        var col = i % cols, row = Math.floor(i / cols);
+        var fx = col * cw + (cw - sz.fw) / 2;
+        var fy = row * chH + (chH - sz.h) / 2;
+        open[i]._panelDock = {
+            x: lhClamp(fx, 8, LOGICAL_WIDTH - sz.fw - 8),
+            y: lhClamp(fy, 8, LOGICAL_HEIGHT - sz.h - 8)
+        };
     }
 }
 
@@ -1028,20 +1073,19 @@ function drawStationPrompt(lp, sp) {
 
 function drawStationPanel(lp, sp) {
     var kind = lp.stationPanel.kind;
-    var w = 250;
-    var h = 132;
-    if (kind === "playlist") {
-        w = 280;
-        h = 150; // room for the playlist name + map count + one-line description
+    // Sizing lives in stationPanelSize (shared with the co-op dock layout).
+    var sz = stationPanelSize(lp);
+    var w = sz.w, h = sz.h;
+    // Anchored over the kart normally; when 2+ panels are open in couch co-op the dock
+    // layout (assignPanelDocks) pins each to its own screen cell so none overlap.
+    var x, y;
+    if (lp._panelDock) {
+        x = lp._panelDock.x;
+        y = lp._panelDock.y;
+    } else {
+        x = lhClamp(sp.x - w / 2, 8, LOGICAL_WIDTH - w - 8);
+        y = lhClamp(sp.y - h - 46, 8, LOGICAL_HEIGHT - h - 8);
     }
-    if (kind === "skin") {
-        w = 300;
-        // FIXED size (tabbed/paged picker) — independent of how many cosmetics exist, so
-        // several of these fit on screen at once in couch co-op. See skinPanelHeight().
-        h = skinPanelHeight();
-    }
-    var x = lhClamp(sp.x - w / 2, 8, LOGICAL_WIDTH - w - 8);
-    var y = lhClamp(sp.y - h - 46, 8, LOGICAL_HEIGHT - h - 8);
     var tint = (lp.myID != null && playerList && playerList[lp.myID]) ? playerList[lp.myID].color : "#fff";
     var hit = { prompt: null, options: [], close: null };
 
@@ -1068,7 +1112,21 @@ function drawStationPanel(lp, sp) {
     gameContext.textAlign = "left";
     gameContext.textBaseline = "middle";
     gameContext.font = "bold 18px sans-serif";
-    gameContext.fillText(stationGlyph(kind) + "  " + stationTitle(kind), x + 14, y + 22);
+    var titleStr = stationGlyph(kind) + "  " + stationTitle(kind);
+    gameContext.fillText(titleStr, x + 14, y + 22);
+    // Docked panels sit away from their kart, so tag whose panel it is: a "P<seat>" chip
+    // in the kart's colour right after the title (the border tint alone is easy to miss).
+    if (lp._panelDock) {
+        var chipX = x + 14 + gameContext.measureText(titleStr).width + 10;
+        gameContext.fillStyle = tint;
+        lhRoundRect(gameContext, chipX, y + 11, 30, 20, 6);
+        gameContext.fill();
+        gameContext.fillStyle = "#000";
+        gameContext.font = "bold 12px sans-serif";
+        gameContext.textAlign = "center";
+        gameContext.fillText("P" + (lp.slot + 1), chipX + 15, y + 21.5);
+        gameContext.textAlign = "left";
+    }
 
     // Close (✕) — top-right.
     var cl = { x: x + w - 30, y: y + 8, w: 24, h: 24 };
@@ -1102,11 +1160,159 @@ function drawStationPanel(lp, sp) {
         drawPlaylistPanelBody(x, y, w, h, hit);
     } else if (kind === "skin") {
         drawSkinPanelBody(lp, x, y, w, h, hit);
+        drawEquippedPreview(lp, x, y, w, h, tint);
     } else {
         drawStubPanelBody(x, y, w, h, "Coming soon");
     }
     gameContext.restore();
     stationHudHit[lp.slot] = hit;
+}
+
+// === Equipped-loadout side preview ===========================================
+// A display-only companion panel docked beside the open skin picker: a LIVE in-game
+// render of this seat's kart (the real drawKartAppearance chokepoint — border ring,
+// cart shape or plain disc + pattern, avatar composite — plus the real paintTrailFx
+// trail flowing behind it), and one row per cosmetic slot naming what's equipped.
+// Reads the same playerList fields the game renders from, so it updates the instant
+// a pick (or a 🎲 Random roll) lands. No hit rects / focus region — purely visual.
+var EQUIP_PREVIEW_W = 158;
+var EQUIP_SLOT_ROWS = [
+    { key: 'color', label: 'Color' },
+    { key: 'cart', label: 'Cart' },
+    { key: 'pattern', label: 'Pattern' },
+    { key: 'border', label: 'Border' },
+    { key: 'trail', label: 'Trail' }
+];
+function drawEquippedPreview(lp, px0, py0, pw0, ph0, tint) {
+    var p = (lp && lp.myID != null && typeof playerList !== "undefined" && playerList) ? playerList[lp.myID] : null;
+    if (!p) { return; }
+    var pad = 12, vpH = 84, rowH = 16;
+    var w = EQUIP_PREVIEW_W;
+    var h = 30 + vpH + 10 + EQUIP_SLOT_ROWS.length * rowH + pad;
+    // Dock to the right of the picker; flip to the left edge when it'd run off screen.
+    var x = px0 + pw0 + 8;
+    if (x + w > LOGICAL_WIDTH - 8) { x = px0 - w - 8; }
+    x = lhClamp(x, 8, LOGICAL_WIDTH - w - 8);
+    var y = lhClamp(py0, 8, LOGICAL_HEIGHT - h - 8);
+    // Same chrome as the station panels (shadowed near-opaque card, kart-tint border).
+    gameContext.save();
+    gameContext.shadowColor = "rgba(0,0,0,0.55)";
+    gameContext.shadowBlur = 18;
+    gameContext.shadowOffsetY = 5;
+    gameContext.fillStyle = "rgba(14,16,22,0.985)";
+    lhRoundRect(gameContext, x, y, w, h, 12);
+    gameContext.fill();
+    gameContext.shadowColor = "transparent";
+    gameContext.shadowBlur = 0;
+    gameContext.shadowOffsetY = 0;
+    gameContext.lineWidth = 2;
+    gameContext.strokeStyle = tint;
+    gameContext.stroke();
+    gameContext.fillStyle = "#fff";
+    gameContext.font = "bold 13px sans-serif";
+    gameContext.textAlign = "left";
+    gameContext.textBaseline = "middle";
+    gameContext.fillText("Equipped", x + pad, y + 17);
+    // --- live kart viewport ---------------------------------------------------
+    var vx = x + 9, vy = y + 30, vw = w - 18;
+    gameContext.fillStyle = "rgba(255,255,255,0.05)";
+    lhRoundRect(gameContext, vx, vy, vw, vpH, 8);
+    gameContext.fill();
+    gameContext.save();
+    lhRoundRect(gameContext, vx, vy, vw, vpH, 8);
+    gameContext.clip();
+    // Synthetic player wearing THIS kart's live cosmetic fields, at preview scale. Render
+    // goes through the game's own chokepoints, so it matches the racing look exactly.
+    var prev = {
+        color: p.color, cart: p.cart, pattern: p.pattern, border: p.border,
+        avatarUrl: p.avatarUrl, radius: 20, onFire: 0, punchAnimAt: null
+    };
+    var kx = vx + vw * 0.7, ky = vy + vpH * 0.52;
+    // Trail FIRST (it flows behind the kart): the real effect on a gentle arc sweeping in
+    // from the left, with live vertex timestamps so animated trails shimmer per-frame.
+    var trailId = p.trailFx || null;
+    var nowMs = Date.now();
+    var fadeMs = (typeof TRAIL_FADE_MS !== "undefined") ? TRAIL_FADE_MS : 1700;
+    var verts = [], STEPS = 24, span = vw * 0.62;
+    for (var ti = 0; ti <= STEPS; ti++) {
+        var u = ti / STEPS; // 0 = oldest (left), 1 = at the kart
+        verts.push({
+            x: kx - (1 - u) * span,
+            y: ky + Math.sin(u * Math.PI * 1.25 + nowMs / 600) * 7,
+            t: nowMs - fadeMs * (1 - u) * 0.85
+        });
+    }
+    var drewTrail = (trailId && typeof paintTrailFx === "function") &&
+        paintTrailFx(gameContext, trailId, verts, p.color, { fadeMs: fadeMs });
+    if (!drewTrail) {
+        // Default "Basic" trail (or unknown id): the plain stroke, like the picker default.
+        gameContext.strokeStyle = p.color; gameContext.lineWidth = 3; gameContext.lineCap = "round";
+        gameContext.globalAlpha = 0.6;
+        gameContext.beginPath();
+        gameContext.moveTo(verts[0].x, verts[0].y);
+        for (var vi = 1; vi < verts.length; vi++) { gameContext.lineTo(verts[vi].x, verts[vi].y); }
+        gameContext.stroke();
+        gameContext.globalAlpha = 1;
+    }
+    // The kart itself — the game's shared body chokepoint (border → cart/disc → pattern),
+    // pinned to heading 0 (facing right, like the overview scoreboard's static display).
+    if (typeof drawKartAppearance === "function") {
+        drawKartAppearance(prev, kx, ky, 0);
+    }
+    // Avatar skin composes over the plain disc in-game (skipped when a cart shape replaces
+    // the body) — mirror that treatment here: photo clipped to the kart circle + thin edge.
+    var hasCartShape = (typeof cartSkinPainter === "function") && cartSkinPainter(prev.cart) != null;
+    if (!hasCartShape && prev.avatarUrl && typeof preloadAvatarImage === "function") {
+        var av = preloadAvatarImage(prev.avatarUrl);
+        if (av && av.ready && !av.failed) {
+            gameContext.save();
+            gameContext.beginPath();
+            gameContext.arc(kx, ky, prev.radius, 0, 2 * Math.PI);
+            gameContext.clip();
+            try { gameContext.drawImage(av.img, kx - prev.radius, ky - prev.radius, prev.radius * 2, prev.radius * 2); } catch (e) { }
+            gameContext.restore();
+            gameContext.beginPath();
+            gameContext.arc(kx, ky, prev.radius, 0, 2 * Math.PI);
+            gameContext.lineWidth = 1.5;
+            gameContext.strokeStyle = "rgba(255,255,255,0.7)";
+            gameContext.stroke();
+        }
+    }
+    gameContext.restore(); // viewport clip
+    // --- slot rows --------------------------------------------------------------
+    var ry = vy + vpH + 10;
+    gameContext.textBaseline = "middle";
+    for (var r = 0; r < EQUIP_SLOT_ROWS.length; r++) {
+        var row = EQUIP_SLOT_ROWS[r];
+        var cy = ry + r * rowH + rowH / 2;
+        gameContext.fillStyle = "#9aa";
+        gameContext.font = "10px sans-serif";
+        gameContext.textAlign = "left";
+        gameContext.fillText(row.label, x + pad, cy);
+        if (row.key === 'color') {
+            // Swatch (the colour tints every cosmetic); flag the avatar photo when worn.
+            gameContext.fillStyle = p.color || "#ccc";
+            lhRoundRect(gameContext, x + pad + 48, cy - 5.5, 24, 11, 3);
+            gameContext.fill();
+            if (prev.avatarUrl) {
+                gameContext.fillStyle = "#f4c542";
+                gameContext.font = "10px sans-serif";
+                gameContext.fillText("+ Avatar", x + pad + 78, cy);
+            }
+            continue;
+        }
+        var id = currentCosmetic(lp, row.key);
+        var name = id
+            ? ((typeof skinDisplayName === "function") ? skinDisplayName(id) : id)
+            : ((typeof COSMETIC_SLOT_DEFAULT_NAME !== "undefined" && COSMETIC_SLOT_DEFAULT_NAME[row.key]) || "Default");
+        // A pattern stays equipped under a shaped cart but doesn't render — say so.
+        var hidden = (row.key === 'pattern' && id && hasCartShape);
+        gameContext.fillStyle = hidden ? "rgba(255,255,255,0.4)" : (id ? "#ffd34d" : "rgba(255,255,255,0.75)");
+        gameContext.font = (id ? "bold " : "") + "10px sans-serif";
+        gameContext.textAlign = "right";
+        gameContext.fillText(name + (hidden ? " (hidden)" : ""), x + w - pad, cy);
+    }
+    gameContext.restore();
 }
 
 // AI panel body: a ◄ value ► stepper plus the "applies next race" caption.
