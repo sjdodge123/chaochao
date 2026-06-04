@@ -373,13 +373,50 @@ app.get('/ops/status', function (req, res) {
 // when PERF_HARNESS is set (c.perfHarness) so prod never exposes the route. The page
 // POSTs one JSON row per completed/skipped sample plus a final summary; rows append as
 // JSONL to PERF_HARNESS_LOG (default perf-harness-report.jsonl in the repo root) for
-// the operator/agent to tail. Same express.json body-cap pattern as /feedback above;
-// no rate limit — the route only exists on a local dev server.
+// the operator/agent to tail. Defense-in-depth even though the route only exists on a
+// local dev server: same express.json body cap as /feedback, a per-IP rate limit, and
+// the body is projected through a typed allowlist (numbers coerced, strings stripped
+// to printable ASCII and length-capped) so request data never flows raw to disk.
 if (c.perfHarness) {
     var perfHarnessLog = process.env.PERF_HARNESS_LOG || path.join(__dirname, 'perf-harness-report.jsonl');
     console.log('[perfHarness] report sink ON -> ' + perfHarnessLog);
+    var perfReportLimited = makeRateLimiter(60 * 1000, 600); // ~1 row/2s per device + bursts
+    var phNum = function (v) { var n = Number(v); return isFinite(n) ? n : null; };
+    var phStr = function (v) {
+        return (typeof v === 'string') ? v.replace(/[^\x20-\x7E]/g, '').slice(0, 300) : null;
+    };
+    // Allowlist projection of one report row. Nested summary `results` are dropped —
+    // every row was already streamed (and logged) individually as it completed.
+    function cleanPerfRow(b) {
+        var row = {};
+        ['kind', 'label', 'tier', 'tierLabel', 'reason', 'note', 'v'].forEach(function (k) {
+            if (b[k] != null) { row[k] = phStr(b[k]); }
+        });
+        ['fps', 'worstMs', 'frames', 'durMs', 'state0', 'state1', 'alive', 'ice', 'gl',
+            'attempt', 'idx', 'total', 't', 'queued', 'n'].forEach(function (k) {
+                if (b[k] != null) { row[k] = phNum(b[k]); }
+            });
+        if (Array.isArray(b.filter)) { row.filter = b.filter.slice(0, 16).map(phStr); }
+        if (b.device && typeof b.device === 'object') {
+            var d = {};
+            ['ua', 'platform', 'autoTier', 'storedPref'].forEach(function (k) {
+                if (b.device[k] != null) { d[k] = phStr(b.device[k]); }
+            });
+            ['dpr', 'iw', 'ih', 'sw', 'sh', 'cores', 'mem'].forEach(function (k) {
+                if (b.device[k] != null) { d[k] = phNum(b.device[k]); }
+            });
+            d.touch = !!b.device.touch;
+            d.resumed = !!b.device.resumed;
+            row.device = d;
+        }
+        return row;
+    }
     app.post('/__perf/report', express.json({ limit: '256kb' }), function (req, res) {
-        var row = req.body || {};
+        var ip = botGuard.resolveClientIp(req.headers['x-forwarded-for'], req.ip) || 'unknown';
+        if (perfReportLimited(ip)) {
+            return res.status(429).json({ status: false });
+        }
+        var row = cleanPerfRow(req.body || {});
         row.serverTime = Date.now();
         try {
             fs.appendFileSync(perfHarnessLog, JSON.stringify(row) + '\n');
