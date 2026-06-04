@@ -24,7 +24,7 @@
       "parameterName": "playlist",
       "displayName": "Playlist",
       "scope": "EVENT",
-      "description": "Active map playlist on round_start/round_complete/match_end (featured | hardcore | pure | all | …). Lets gameplay be segmented by playlist and surfaces per-playlist skew."
+      "description": "Active map playlist on round_start/round_complete/match_end (featured | hardcore | pure | all | \u2026). Lets gameplay be segmented by playlist and surfaces per-playlist skew."
     },
     {
       "parameterName": "trap_source",
@@ -49,6 +49,24 @@
       "displayName": "Reward Bonus",
       "scope": "EVENT",
       "description": "Which rewarded bonus a player claimed on reward_claimed: xp_2x (double match XP). Extensible to future rewarded options."
+    },
+    {
+      "parameterName": "cosmetic_id",
+      "displayName": "Cosmetic Id",
+      "scope": "EVENT",
+      "description": "Which cosmetic was unlocked on cosmetic_unlocked (registry id, e.g. pizza, comet, border_ring)."
+    },
+    {
+      "parameterName": "cosmetic_slot",
+      "displayName": "Cosmetic Slot",
+      "scope": "EVENT",
+      "description": "Slot of the unlocked cosmetic on cosmetic_unlocked: cart | pattern | trail | border."
+    },
+    {
+      "parameterName": "unlock_kind",
+      "displayName": "Unlock Kind",
+      "scope": "EVENT",
+      "description": "How the cosmetic was earned on cosmetic_unlocked: skin (level ladder) | achievement | seasonal."
     }
   ],
   "customMetrics": [
@@ -65,6 +83,20 @@
       "scope": "EVENT",
       "measurementUnit": "STANDARD",
       "description": "Bots present in a match (used to separate humans-only metrics)."
+    },
+    {
+      "parameterName": "xp",
+      "displayName": "XP Earned",
+      "scope": "EVENT",
+      "measurementUnit": "STANDARD",
+      "description": "XP credited on xp_earned (per-match award; also fired for the rewarded 2x bonus). averageXp drives the pacing retune."
+    },
+    {
+      "parameterName": "level",
+      "displayName": "Player Level",
+      "scope": "EVENT",
+      "measurementUnit": "STANDARD",
+      "description": "Player level on level_up (level reached) and xp_earned (level after the award). Distribution over time shows curve pacing."
     }
   ],
   "keyEvents": [
@@ -74,6 +106,10 @@
     },
     {
       "eventName": "verified_human",
+      "countingMethod": "ONCE_PER_EVENT"
+    },
+    {
+      "eventName": "cosmetic_unlocked",
       "countingMethod": "ONCE_PER_EVENT"
     }
   ]
