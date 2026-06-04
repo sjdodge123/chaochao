@@ -52,11 +52,23 @@ sample-poisoning pitfalls all carry over).
   http). Ask the operator to disable auto-lock only as a belt-and-braces
   fallback. Still detect visibility loss / rAF stalls in the harness and
   auto-requeue poisoned samples as before.
-- **Scenario matrix** (keep it smaller than the desktop 87-id sweep — the goal
-  is device headroom, not per-id regression): `__none__` baseline, worst-cart
-  combo (warlord+nebula+border_runes+comet), all-9-comet, all-9-guardian,
-  random-mix; × each pinned tier; on an ice map. 9 karts via
-  `setLobbyAI {enabled:true, count:8}`.
+- **Scenario matrix — validate the KNOWN hot spots on the device's OPTIMAL
+  (Auto-resolved) tier first**, then pinned tiers, then random unknowns:
+  1. `__none__` baseline (calibrates the device's display cap + headroom).
+  2. The identified hot spots from the desktop rounds — the ids that were
+     pre-fix collapse drivers or shadow/filter-heavy: carts pizza,
+     golden_champion, wheel_of_fortune, firetruck, compass, coin, dartboard,
+     clock; trails comet, founders_flare, bolt, aurora, neon, ripple, guardian;
+     border_runes; pattern nebula; plus the worst-combo
+     (warlord+nebula+border_runes+comet) and the ice-reflection stressor
+     (any cart, ice-heavy map — the scratch+blit path PR #259 added).
+     These all passed at desktop-High; the point is confirming the fix holds
+     on mobile GPUs at the tier Auto actually picks for the device.
+  3. Random unknowns: 3-5 random same-id picks per slot (seeded from the
+     full registry, ids not in the hot-spot list) + the random-mix dev-patch
+     dressing — catches anything device-specific the desktop round couldn't.
+  All on an ice map, 9 karts via `setLobbyAI {enabled:true, count:8}`,
+  interleaved `__none__` controls as always.
 - **Watch for**: GPU texture re-upload stutter that dt-FPS misses (memory
   `device-perf-profiles-feature`) — also report worst-frame ms (max rAF delta
   per window), not just the mean, since stutter hides in averages.
