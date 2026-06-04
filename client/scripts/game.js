@@ -88,6 +88,10 @@ var server = null,
     // startedAt }. Single slot — a fresh WR replaces the active banner so the
     // most recent wins (rare enough that queueing isn't worth the code).
     worldRecordBanner = null,
+    // Server-pushed maintenance notice: { reason: 'drain'|'restart', deadline,
+    // expiresAt } (ms timestamps). 'restart' renders a live countdown banner,
+    // 'drain' a static "new races paused" notice; null = no banner.
+    serverMaintenance = null,
     round = 0,
     timeOutChecker = null,
     currentState = null,

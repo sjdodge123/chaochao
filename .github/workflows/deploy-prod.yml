@@ -8,13 +8,26 @@ name: Deploy to prod (Heroku)
 #   nightly    — 09:00 UTC (~5am ET, lowest-traffic window for the mostly-US
 #                audience) fast-forwards prod to main. Pushing an unchanged
 #                SHA is a git no-op, so a quiet night produces no Heroku
-#                build and no dyno restart.
+#                build and no dyno restart. Before pushing, the drain step
+#                tells the live server maintenance is coming: players see a
+#                "new races are paused" banner, rooms stop starting races,
+#                and the workflow waits (bounded) for in-flight races to end.
 #   emergency  — merge a PR carrying the `deploy:prod` label and prod is
-#                fast-forwarded to main immediately. (The release workflow's
-#                "Release vX.Y.Z" version-bump commit may land on main just
-#                after; prod picks it up at the next nightly — harmless.)
+#                fast-forwarded to main immediately, skipping the drain wait.
+#                (The release workflow's "Release vX.Y.Z" version-bump commit
+#                may land on main just after; prod picks it up at the next
+#                nightly — harmless.)
 #   manual     — Run workflow from the Actions tab, optionally with a
-#                specific ref, to ship main (or any commit on it) right now.
+#                specific ref and/or the nightly-style drain, to ship right now.
+#
+# Players ALWAYS get a final warning regardless of path: Heroku sends SIGTERM
+# 30s before SIGKILL on every restart, and index.js turns that into an
+# in-game "server restarting in 28s" countdown + race-start block.
+#
+# The drain endpoints are authenticated with the OPS_SECRET repo secret,
+# which must match the OPS_SECRET config var on the Heroku app. If either is
+# missing the drain is skipped (with a warning) and the deploy proceeds —
+# the SIGTERM countdown still covers the players.
 #
 # prod only ever moves forward: a non-fast-forward push fails loudly rather
 # than silently rewriting deploy history. To roll back prod, use
@@ -33,6 +46,10 @@ on:
       ref:
         description: Branch/SHA to deploy (must be an ancestor-compatible advance of prod)
         default: main
+      drain:
+        description: Announce + wait for in-flight races to finish before pushing (nightly-style)
+        type: boolean
+        default: false
   pull_request:
     types: [closed]
     branches: [main]
@@ -44,6 +61,9 @@ concurrency:
 
 permissions:
   contents: write
+
+env:
+  PROD_URL: https://www.chaochaogame.com
 
 jobs:
   deploy:
@@ -60,7 +80,8 @@ jobs:
         with:
           fetch-depth: 0          # need full history to fast-forward prod
 
-      - name: Fast-forward prod
+      - name: Resolve target
+        id: resolve
         env:
           REF: ${{ github.event.inputs.ref || 'main' }}
         run: |
@@ -70,8 +91,54 @@ jobs:
           echo "prod: $current -> $target"
           if [ "$target" = "$current" ]; then
             echo "prod is already at $target — nothing to deploy."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+
+      # Nightly (and drain-opted manual) runs give the live server a heads-up
+      # before the push: announce maintenance, stop new races, then wait for
+      # active races to finish — bounded, so a marathon room can never block a
+      # deploy forever. Emergencies (deploy:prod label, plain dispatch) skip
+      # straight to the push and rely on the 30s SIGTERM countdown.
+      - name: Drain prod (announce + wait for races)
+        if: >
+          steps.resolve.outputs.changed == 'true' &&
+          (github.event_name == 'schedule' ||
+           (github.event_name == 'workflow_dispatch' && inputs.drain))
+        env:
+          OPS_SECRET: ${{ secrets.OPS_SECRET }}
+        run: |
+          if [ -z "$OPS_SECRET" ]; then
+            echo "::warning::OPS_SECRET secret not set — skipping drain. Players still get the 30s SIGTERM countdown."
             exit 0
           fi
-          # Plain (non-force) push: fails if $target would rewind prod.
-          git push origin "$target:refs/heads/prod"
+          if ! curl -fsS -X POST -H "x-ops-secret: $OPS_SECRET" \
+               "$PROD_URL/ops/drain?seconds=180" > /dev/null; then
+            echo "::warning::drain call failed — deploying without the advance notice."
+            exit 0
+          fi
+          echo "Drain announced (3 min heads-up; new races now paused)."
+          sleep 180
+          # Wait up to a further 10 min for in-flight races to finish.
+          for i in $(seq 1 30); do
+            races=$(curl -fsS -H "x-ops-secret: $OPS_SECRET" "$PROD_URL/ops/status" \
+                    | jq -r '.activeRaces' 2>/dev/null || echo unknown)
+            if [ "$races" = "0" ]; then
+              echo "No active races — proceeding."
+              exit 0
+            fi
+            echo "Still $races active race(s) (poll $i/30) — waiting 20s."
+            sleep 20
+          done
+          echo "::warning::races still active after the 10 min bound — deploying anyway (SIGTERM countdown covers them)."
+
+      - name: Fast-forward prod
+        if: steps.resolve.outputs.changed == 'true'
+        env:
+          TARGET: ${{ steps.resolve.outputs.target }}
+        run: |
+          # Plain (non-force) push: fails if $TARGET would rewind prod.
+          git push origin "$TARGET:refs/heads/prod"
           echo "Pushed — Heroku auto-deploy of prod will pick this up."

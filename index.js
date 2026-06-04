@@ -255,6 +255,8 @@ var utils = require('./server/utils.js');
 var messenger = require('./server/messenger.js');
 var hostess = require('./server/hostess.js');
 var botGuard = require('./server/botGuard.js');
+var maintenance = require('./server/maintenance.js');
+var crypto = require('crypto');
 var c = utils.loadConfig();
 
 // In-browser feedback / bug-report endpoint. The widget (client/scripts/feedback.js)
@@ -316,6 +318,38 @@ app.post('/feedback', express.json({ limit: '16kb' }), function (req, res) {
     }).catch(function (e) {
         console.log(e);
         res.json({ status: false, message: "Couldn't send your feedback right now. Please try again in a moment." });
+    });
+});
+
+// Deploy-time ops endpoints, live only when OPS_SECRET is set (a Heroku config
+// var). The deploy workflow POSTs /ops/drain minutes before pushing the prod
+// branch — players get a "races paused" banner and rooms stop starting new
+// races — then polls /ops/status until active races finish. Without the secret
+// (local dev) or without the right header both endpoints 404, so probes can't
+// even tell they exist.
+var OPS_SECRET = process.env.OPS_SECRET || null;
+function opsAuthorized(req) {
+    if (!OPS_SECRET) { return false; }
+    var given = req.headers['x-ops-secret'];
+    if (typeof given !== 'string') { return false; }
+    var a = Buffer.from(given), b = Buffer.from(OPS_SECRET);
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+app.post('/ops/drain', function (req, res) {
+    if (!opsAuthorized(req)) { return res.status(404).end(); }
+    // Bound the heads-up window: 0 (announce only) to 15 min, default 3 min.
+    var seconds = parseInt(req.query.seconds, 10);
+    if (isNaN(seconds)) { seconds = 180; }
+    seconds = Math.max(0, Math.min(15 * 60, seconds));
+    maintenance.begin(seconds, 'drain');
+    res.json({ status: true, seconds: seconds });
+});
+app.get('/ops/status', function (req, res) {
+    if (!opsAuthorized(req)) { return res.status(404).end(); }
+    res.json({
+        clients: clientCount,
+        activeRaces: hostess.countActiveRaces(),
+        maintenance: maintenance.getState()
     });
 });
 
@@ -420,6 +454,11 @@ io.on('connection', (client) => {
     }
     messenger.addMailBox(client.id, client, { userId: client.userId, deviceId: client.deviceId });
 
+    // A client connecting mid-maintenance missed the broadcast — replay the
+    // banner state so they see the countdown/drain notice too.
+    var maint = maintenance.getState();
+    if (maint != null) { client.emit('serverMaintenance', maint); }
+
     client.on('disconnect', () => {
       botGuard.unregister(client.id);
       hostess.kickFromRoom(client.id);
@@ -433,6 +472,23 @@ process.on( 'SIGINT', function() {
     console.log( "\nServer shutting down from (Ctrl-C)" );
     //io.sockets.emit("serverShutdown","Server terminated");
     process.exit();
+});
+
+// Heroku sends SIGTERM at every restart/deploy and SIGKILLs the dyno 30s
+// later. Use that fixed grace window: announce a restart countdown to every
+// connected player (and block new races via the maintenance gate), keep
+// ticking so in-flight races play on, then exit just inside the window. The
+// new dyno boots in parallel, so clients reconnect to it right after the
+// drop (client.js auto-reloads when a maintenance restart cuts the socket).
+// With nobody connected there's no one to warn — exit immediately.
+process.on('SIGTERM', function () {
+    if (clientCount === 0) {
+        console.log('Server shutting down (SIGTERM, idle)');
+        process.exit(0);
+    }
+    console.log('Server shutting down (SIGTERM) — announcing 28s restart countdown to ' + clientCount + ' client(s)');
+    maintenance.begin(28, 'restart');
+    setTimeout(function () { process.exit(0); }, 28 * 1000);
 });
 
 
