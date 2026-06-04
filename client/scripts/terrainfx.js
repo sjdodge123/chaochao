@@ -324,18 +324,49 @@ function tfxDrawLavaConvection(t, camX, camY) {
     ctx.restore();
 }
 
+// Shared scratch for the glow-profile blurred reflection. The kart's appearance is
+// painted UNFILTERED at device resolution into this small offscreen canvas, and only
+// the single drawImage onto the main canvas goes through ctx.filter. Re-painting the
+// full procedural skin (dozens of path/gradient ops for some carts) per kart per
+// frame WITH the blur filter active pushed every op through a slow intermediate-
+// surface path — a populated room in cosmetics collapsed to 2-5 FPS from this alone.
+var _tfxReflScratch = null;
 function tfxDrawIceReflections(camX, camY) {
     var ice = terrainFX.ice;
     if (!ice.length || typeof playerList === "undefined" || playerList == null) { return; }
     var ctx = gameContext;
-    ctx.save();
-    tfxPathCells(ctx, ice, camX, camY);
-    ctx.clip();
+    var vr = tfxVisibleWorldRect(camX, camY);
+    var clipped = false;
     var useBlur = (typeof perfGlow === "function") ? perfGlow() : true;
     for (var id in playerList) {
         var p = playerList[id];
         if (p == null || p.alive === false) { continue; }
         var rad = p.radius || 16;
+        // Half-extent of the painted appearance: borders ring out to ~1.4r and the
+        // punch pop scales up to ~1.3x, so 2.2r covers every current cosmetic.
+        var ext = rad * 2.2;
+        // World bbox the reflection can touch (it casts BELOW the kart, see pivot
+        // math under the blit): x +- ext, y .. y + ~4r, plus the 2.5px blur bleed.
+        var rminX = p.x - ext - 4, rmaxX = p.x + ext + 4;
+        var rminY = p.y, rmaxY = p.y + rad * 4 + 4;
+        // Skip karts whose reflection is off-screen or can't overlap any ice cell —
+        // the clip would discard every pixel, but the painter ops would still run
+        // (previously EVERY alive kart paid the full filtered repaint each frame
+        // whenever the map had any ice at all, even nowhere near it).
+        if (vr != null && (rmaxX < vr.loX || rminX > vr.hiX || rmaxY < vr.loY || rminY > vr.hiY)) { continue; }
+        var near = false;
+        for (var ci = 0; ci < ice.length; ci++) {
+            var cb = ice[ci];
+            if (rmaxX >= cb.minX && rminX <= cb.maxX && rmaxY >= cb.minY && rminY <= cb.maxY) { near = true; break; }
+        }
+        if (!near) { continue; }
+        if (!clipped) {
+            // Defer the save+clip until a kart actually reflects (most frames none do).
+            ctx.save();
+            tfxPathCells(ctx, ice, camX, camY);
+            ctx.clip();
+            clipped = true;
+        }
         var x = p.x + camX, y = p.y + camY;
         // Cast the reflection fully BELOW the kart so its top sits at the kart's
         // base (not hidden behind the body). Flip + squash about that pivot, and
@@ -345,15 +376,44 @@ function tfxDrawIceReflections(camX, camY) {
         var pivot = y + rad * 1.95;
         ctx.save();
         ctx.globalAlpha = 0.38;
-        if (useBlur && "filter" in ctx) { ctx.filter = "blur(2.5px)"; }
-        ctx.translate(x, pivot);
-        ctx.scale(1.0, -0.85);
-        ctx.translate(-x, -pivot);
-        if (typeof drawKartAppearance === "function") {
-            drawKartAppearance(p, x, pivot);
+        if (useBlur && "filter" in ctx && typeof drawKartAppearance === "function") {
+            // Glow profiles: paint the appearance into the scratch (no filter), then
+            // blur only the one blit. Same transform state as the old direct path,
+            // so the blur and squash read identically.
+            var sx = (typeof canvasScaleX !== "undefined" && canvasScaleX) ? canvasScaleX : 1;
+            var sy = (typeof canvasScaleY !== "undefined" && canvasScaleY) ? canvasScaleY : 1;
+            var w = Math.ceil(ext * 2 * sx), h = Math.ceil(ext * 2 * sy);
+            if (_tfxReflScratch == null) { _tfxReflScratch = document.createElement("canvas"); }
+            var s = _tfxReflScratch;
+            if (s.width < w) { s.width = w; }
+            if (s.height < h) { s.height = h; }
+            var sctx = s.getContext("2d");
+            sctx.setTransform(1, 0, 0, 1, 0, 0);
+            sctx.clearRect(0, 0, w, h);
+            sctx.setTransform(sx, 0, 0, sy, 0, 0);
+            // The skin painters draw through the gameContext global, so point it at
+            // the scratch for the repaint and ALWAYS restore (try/finally) so a
+            // throwing painter can't hijack the rest of the frame.
+            var prevCtx = gameContext;
+            gameContext = sctx;
+            try { drawKartAppearance(p, ext, ext); } finally { gameContext = prevCtx; }
+            ctx.filter = "blur(2.5px)";
+            ctx.translate(x, pivot);
+            ctx.scale(1.0, -0.85);
+            ctx.drawImage(s, 0, 0, w, h, -ext, -ext, ext * 2, ext * 2);
+        } else {
+            // No-glow profiles never paid the filter, so keep the direct repaint.
+            ctx.translate(x, pivot);
+            ctx.scale(1.0, -0.85);
+            ctx.translate(-x, -pivot);
+            if (typeof drawKartAppearance === "function") {
+                drawKartAppearance(p, x, pivot);
+            }
         }
         ctx.restore();
     }
-    ctx.restore();
+    if (clipped) {
+        ctx.restore();
+    }
 }
 

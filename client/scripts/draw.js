@@ -8864,9 +8864,39 @@ function drawStandingsPbTag(player, xRight, cy, isYou) {
 // transform-scaled icon). Border behind, then cart skin OR plain disc + pattern —
 // same cosmetic dispatch as the legacy drawPlayerIcon.
 function drawOverviewKart(player, cx, cy, radius) {
+    // Paint the cosmetic stack UNSHADOWED into a small scratch canvas, then blit it
+    // ONCE with the colored glow. Keeping shadowBlur=10 live across a procedural
+    // skin's dozens of path/gradient ops rendered an intermediate blurred surface
+    // per op — with a full board of skinned karts the overview paid that every frame.
+    var ext = radius * 2.2; // covers border rim (~1.4r) with glow headroom
+    var sx = (typeof canvasScaleX !== "undefined" && canvasScaleX) ? canvasScaleX : 1;
+    var sy = (typeof canvasScaleY !== "undefined" && canvasScaleY) ? canvasScaleY : 1;
+    var w = Math.ceil(ext * 2 * sx), h = Math.ceil(ext * 2 * sy);
+    if (_overviewKartScratch == null) { _overviewKartScratch = document.createElement("canvas"); }
+    var s = _overviewKartScratch;
+    if (s.width < w) { s.width = w; }
+    if (s.height < h) { s.height = h; }
+    var sctx = s.getContext("2d");
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+    sctx.clearRect(0, 0, w, h);
+    sctx.setTransform(sx, 0, 0, sy, 0, 0);
+    // The skin painters draw through the gameContext global, so point it at the
+    // scratch for the repaint and ALWAYS restore (try/finally) so a throwing
+    // painter can't hijack the rest of the frame.
+    var prevCtx = gameContext;
+    gameContext = sctx;
+    try { drawOverviewKartBody(player, ext, ext, radius); } finally { gameContext = prevCtx; }
     gameContext.save();
     gameContext.shadowColor = player.color;
     gameContext.shadowBlur = 10;
+    gameContext.drawImage(s, 0, 0, w, h, cx - ext, cy - ext, ext * 2, ext * 2);
+    gameContext.restore();
+}
+var _overviewKartScratch = null;
+// The actual cosmetic stack (border behind, then cart skin OR plain disc + pattern),
+// shadow-free — drawOverviewKart composites it with the glow in one blit.
+function drawOverviewKartBody(player, cx, cy, radius) {
+    gameContext.save();
     // border FIRST (behind the body)
     var bid = player.border;
     var bskin = (typeof getSkin === "function" && bid) ? getSkin(bid) : null;
