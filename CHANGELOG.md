@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.29.0 — 2026-06-04
+
 ### General
 
 - Leveling up is way faster now — and unlocking something new feels like it! XP needed per level has been massively reduced (no level ever costs more than ~10 matches' worth, and nobody loses progress — most players will jump several levels and find new cosmetics waiting). Unlocks now land every few matches instead of dozens.
