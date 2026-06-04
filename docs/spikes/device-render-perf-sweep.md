@@ -148,6 +148,25 @@ not chased.
 - Worst-frame stutter (>50ms) only ever accompanied the low-FPS rows or one-off
   ambient hitches — no silent texture-upload stutter at healthy FPS readings.
 
+## CORRECTION (post-fix verification round): the gated-state confound
+
+The original gate accepted `gated` rounds — but gated karts are PARKED and lay no
+trail, so **every trail-scenario row that ran in state 3 is a phantom** (same id,
+same device: gated 60 fps vs racing 27). Re-reading the tables above with states:
+
+- Phone Balanced collapses (founders_flare 26.6 / aurora 27.2 / combo 45.5) were
+  RACING rows — real. Phone-High "trails individually fine" was gated — unmeasured.
+- iPad-High trail collapses were racing — real. iPad-Balanced per-id trail rows were
+  mostly gated, BUT its racing rows (combo:worst 59, guardian 60, random_mix 60)
+  show iPad-Balanced genuinely holds up.
+- Phone Low all-clear: mostly racing rows — real.
+
+The harness gate now requires racing/collapsing (gated excluded) for every scenario.
+Verification runs also surfaced **thermal throttling** as a third confound: the 3rd
+consecutive ~run on the phone read cap_probe 49 fps (vs 58 rested) with whole-frame
+degradation and 250-550ms ambient stalls — rest the device between runs and judge
+only against same-round baselines.
+
 ## Fix shipped on this branch: downsampled trail-glow composite on Balanced
 
 Investigated post-sweep (operator-requested). Root cause of the Balanced

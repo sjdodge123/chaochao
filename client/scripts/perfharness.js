@@ -267,7 +267,11 @@
         if (!g.vis) { return "hidden"; }
         if (it.gate === "visible") { return null; }
         var SM = config.stateMap;
-        if (g.state !== SM.gated && g.state !== SM.racing && g.state !== SM.collapsing) { return "state:" + g.state; }
+        // Racing/collapsing ONLY — karts parked at the gate lay NO trail, so a
+        // gated-state window measures a phantom for every trail scenario (the
+        // 2026-06-04 phone runs proved it: same id, gated 60 fps vs racing 27).
+        // Uniform across scenario kinds so every row stays comparable.
+        if (g.state !== SM.racing && g.state !== SM.collapsing) { return "state:" + g.state; }
         if (g.alive !== 9) { return "alive:" + g.alive; }
         if (g.ice < 1) { return "no-ice"; }
         if (expectedLabel && g.label !== expectedLabel) { return "label:" + g.label; }
