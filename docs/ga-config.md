@@ -81,3 +81,53 @@ npm install --no-save @google-analytics/admin@^9.1.0
 export GOOGLE_APPLICATION_CREDENTIALS=/path/to/ga-key.json
 node analytics/reconcile-ga.js --dry-run
 ```
+
+## Event catalog (what the client fires)
+
+Quick index of every `trackEvent()` call and where it lives. Params marked † are
+registered custom dimensions/metrics in `ga-config.json`.
+
+| Event | Fired when | Params | Where |
+|---|---|---|---|
+| `cta_click` | Landing CTA clicked | `target`† | index.html |
+| `tip_click` | Landing tip carousel clicked | `idx` | index.html |
+| `bot_trap` | Invisible honeypot decoy clicked | `trap_source`† | index/play.html |
+| `verified_human` | Server confirmed real kart input (once/session) | — | client.js |
+| `lobby_entered` | Player reaches a lobby | — | client.js |
+| `first_match` | Player's first-ever race (lifetime, localStorage) | `time_to_first_match`† | metrics.js → client.js |
+| `round_start` | Each round's gate release | `players`† `bots`† `map`† `playlist`† | client.js |
+| `round_complete` | Round's overview screen | `map`† `playlist`† `round_number`† `duration_seconds`† | client.js |
+| `match_end` | Match over (key event) | `won`† `map`† `playlist`† `players`† `bots`† `duration_seconds`† | client.js |
+| `match_abandon` | Page closed mid-match (pagehide) | `state`† `round_number`† `map`† `playlist`† | metrics.js |
+| `cosmetics_equipped` | Once per match, local player's loadout | `cart` `pattern` `trail` `border` | client.js |
+| `level_up` | Progression level reached | `level`† | client.js |
+| `cosmetic_unlocked` | Cosmetic earned (key event) | `cosmetic_id`† `cosmetic_slot`† `unlock_kind`† | client.js |
+| `xp_earned` | Per-match XP credited (incl. 2× bonus) | `xp`† `level`† | client.js — see docs/cosmetics-analytics.md |
+| `login` | Fresh OAuth sign-in completed (key event) | `method`† | auth.js |
+| `login_nudge_shown` / `login_nudge_clicked` | Post-match sign-in nudge funnel | — | auth.js |
+| `reward_offered` | 2× XP toast became visible (funnel denominator) | `bonus`† | client.js |
+| `reward_claimed` | Server credited the 2× XP bonus | `bonus`† `match_id` | client.js |
+| `ad_shown` / `ad_complete` / `ad_skipped` / `ad_error` / `ad_blocked` | Ad lifecycle | `type`† `placement`† | ads.js |
+| `disconnect` | Socket dropped (once/session) | `reason`† | client.js |
+| `connect_error` | Could not reach the server (once/session) | `reason`† | client.js |
+| `server_kick` | Kicked by the server (AFK etc.) | — | client.js |
+| `map_submitted` | Editor map submitted as a PR | — | create.js |
+
+User-scoped properties (set via `gtag('set','user_properties',…)` in
+`client/scripts/metrics.js`, refreshed on auth change / progression update /
+gamepad connect): `auth_state`, `player_level`, `input_method`, `perf_profile`,
+`embed_host`.
+
+## Operator checklist — console-only settings (NOT manageable by this pipeline)
+
+These two are one-time clicks in the GA web console; neither is retroactive, so the
+clock on their data starts only when they're enabled:
+
+1. **Event data retention → 14 months.** GA4's default is **2 months**, after which
+   event-level data ages out of Explorations. Admin → Data settings → Data retention →
+   Event data retention: `14 months` (also toggle "Reset user data on new activity" on).
+2. **BigQuery export (free tier).** Admin → Product links → BigQuery links → Link.
+   Daily export is free and is the only way to keep raw events past GA4's 14-month cap
+   (cohort/LTV analysis across launches, e.g. comparing portal launch cohorts). Pick the
+   same region as the GCP project hosting the service account; daily export only (streaming
+   costs money and isn't needed).

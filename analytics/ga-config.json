@@ -24,7 +24,7 @@
       "parameterName": "playlist",
       "displayName": "Playlist",
       "scope": "EVENT",
-      "description": "Active map playlist on round_start/round_complete/match_end (featured | hardcore | pure | all | \u2026) \u2014 segments gameplay per playlist."
+      "description": "Active map playlist on round_start/round_complete/match_end (featured | hardcore | pure | all | …) — segments gameplay per playlist."
     },
     {
       "parameterName": "trap_source",
@@ -67,6 +67,54 @@
       "displayName": "Unlock Kind",
       "scope": "EVENT",
       "description": "How the cosmetic was earned on cosmetic_unlocked: skin (level ladder) | achievement | seasonal."
+    },
+    {
+      "parameterName": "method",
+      "displayName": "Login Method",
+      "scope": "EVENT",
+      "description": "OAuth provider on the login event: google | discord."
+    },
+    {
+      "parameterName": "state",
+      "displayName": "Game State",
+      "scope": "EVENT",
+      "description": "Game state the player was in when match_abandon fired: gated | racing | collapsing | overview."
+    },
+    {
+      "parameterName": "reason",
+      "displayName": "Disconnect Reason",
+      "scope": "EVENT",
+      "description": "socket.io close reason on the disconnect/connect_error events (transport close, ping timeout, ...)."
+    },
+    {
+      "parameterName": "auth_state",
+      "displayName": "Auth State",
+      "scope": "USER",
+      "description": "How the player is signed in: guest | google | discord. User-scoped so retention/engagement can be cohorted by sign-in status."
+    },
+    {
+      "parameterName": "player_level",
+      "displayName": "Player Level Bucket",
+      "scope": "USER",
+      "description": "Progression level bucket: none | 1 | 2-5 | 6-10 | 11-20 | 21+. Refreshed on progressionUpdate and level-up."
+    },
+    {
+      "parameterName": "input_method",
+      "displayName": "Input Method",
+      "scope": "USER",
+      "description": "Primary input device this session: gamepad | touch | keyboard."
+    },
+    {
+      "parameterName": "perf_profile",
+      "displayName": "Perf Profile",
+      "scope": "USER",
+      "description": "Active graphics profile: high | balanced | low (manual pin) or auto_high/auto_balanced/auto_low (Auto's pick) - the device-capability mix."
+    },
+    {
+      "parameterName": "embed_host",
+      "displayName": "Embed Host",
+      "scope": "USER",
+      "description": "Portal hostname when running inside an iframe (itch.io / CrazyGames / Poki / ...), else none. Attributes traffic + quality per portal."
     }
   ],
   "customMetrics": [
@@ -97,6 +145,27 @@
       "scope": "EVENT",
       "measurementUnit": "STANDARD",
       "description": "Player level on level_up (level reached) and xp_earned (level after the award). Distribution over time shows curve pacing."
+    },
+    {
+      "parameterName": "duration_seconds",
+      "displayName": "Duration (s)",
+      "scope": "EVENT",
+      "measurementUnit": "SECONDS",
+      "description": "Elapsed seconds: round length on round_complete (gate release - overview), match length on match_end (first race - game over)."
+    },
+    {
+      "parameterName": "time_to_first_match",
+      "displayName": "Time to first match (s)",
+      "scope": "EVENT",
+      "measurementUnit": "SECONDS",
+      "description": "Seconds from page navigation start to the player's first-ever race (first_match event). Onboarding-friction metric."
+    },
+    {
+      "parameterName": "round_number",
+      "displayName": "Round number",
+      "scope": "EVENT",
+      "measurementUnit": "STANDARD",
+      "description": "Match round counter on round_complete / match_abandon - locates where in a match players quit."
     }
   ],
   "keyEvents": [
@@ -110,6 +179,14 @@
     },
     {
       "eventName": "cosmetic_unlocked",
+      "countingMethod": "ONCE_PER_EVENT"
+    },
+    {
+      "eventName": "first_match",
+      "countingMethod": "ONCE_PER_EVENT"
+    },
+    {
+      "eventName": "login",
       "countingMethod": "ONCE_PER_EVENT"
     }
   ]
