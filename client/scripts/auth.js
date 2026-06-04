@@ -69,13 +69,46 @@
         return user.id + '|' + (m.full_name || m.name || m.user_name || user.email || '') + '|' + (m.avatar_url || '');
     }
 
+    // GA login conversion. A fresh OAuth sign-in is a full-page redirect away and
+    // back, so "was a sign-in just completed?" can't be told apart from a routine
+    // session restore by auth events alone. Instead signIn() stamps the chosen
+    // provider in localStorage before redirecting; seeing a signed-in session with
+    // that stamp present = the player actually converted. The stamp is consumed on
+    // first sight, and a stale one (player bailed at the OAuth screen and came
+    // back later) is swept by a short timer below so it can't mis-fire days later.
+    var SIGNIN_PENDING_KEY = 'chaochao.signInPending';
+    function consumeSignInPending(user) {
+        if (!user) { return; }
+        var pending = null;
+        try {
+            pending = window.localStorage.getItem(SIGNIN_PENDING_KEY);
+            if (pending) { window.localStorage.removeItem(SIGNIN_PENDING_KEY); }
+        } catch (e) { /* storage unavailable */ }
+        if (pending && typeof trackEvent === 'function') {
+            // GA4's recommended sign-in event name; `method` = google | discord.
+            trackEvent('login', { method: pending });
+        }
+    }
+    // Sweep a stale pending stamp: if no session showed up shortly after load,
+    // the OAuth round-trip didn't complete (cancelled / abandoned).
+    setTimeout(function () {
+        if (currentUser) { return; }
+        try { window.localStorage.removeItem(SIGNIN_PENDING_KEY); } catch (e) { /* ignore */ }
+    }, 15000);
+
     function applySession(session) {
         accessToken = (session && session.access_token) || null;
         var newUser = (session && session.user) || null;
         var changed = navKey(currentUser) !== navKey(newUser);
         currentUser = newUser;
+        consumeSignInPending(newUser);
         if (changed) {
             renderAuthUI();
+            // Refresh the auth_state GA user property (defined by metrics.js in the
+            // play bundle; absent on pages without it).
+            if (typeof window.updateGAUserProperties === 'function') {
+                window.updateGAUserProperties();
+            }
         }
     }
 
@@ -102,6 +135,9 @@
             console.log('[auth] sign-in unavailable (auth disabled).');
             return;
         }
+        // Stamp the provider so the post-redirect load can fire the GA `login`
+        // conversion (see consumeSignInPending above).
+        try { window.localStorage.setItem(SIGNIN_PENDING_KEY, provider); } catch (e) { /* ignore */ }
         // Redirect back to the current page; supabase-js completes the session
         // from the URL on return, then a fresh socket handshake carries the token.
         sb.auth.signInWithOAuth({
@@ -252,6 +288,9 @@
             '<button class="cc-toast-close" type="button" aria-label="Dismiss">×</button>';
         document.body.appendChild(toastEl);
         toastEl.querySelector('.cc-toast-action').addEventListener('click', function () {
+            // Nudge funnel numerator (denominator = login_nudge_shown); the
+            // conversion itself lands as `login` after the OAuth round-trip.
+            if (typeof trackEvent === 'function') { trackEvent('login_nudge_clicked'); }
             hideToast();
             var login = document.getElementById('authLogin');
             if (login) { login.click(); } // open the navbar sign-in popover
@@ -267,6 +306,9 @@
         buildToast();
         if (!toastEl) { return; }
         toastEl.classList.add('visible');
+        // Nudge funnel denominator (clicked/shown = nudge CTR; login/shown = the
+        // guest -> registered conversion rate the nudge actually drives).
+        if (typeof trackEvent === 'function') { trackEvent('login_nudge_shown'); }
         if (toastTimer) { clearTimeout(toastTimer); }
         toastTimer = setTimeout(hideToast, 9000);
     }
@@ -280,6 +322,13 @@
         getProfile: getProfile,
         signIn: signIn,
         signOut: signOut,
-        isSignedIn: function () { return !!currentUser; }
+        isSignedIn: function () { return !!currentUser; },
+        // For the auth_state GA user property: 'guest' or the OAuth provider the
+        // session was created with ('google' | 'discord').
+        getAuthState: function () {
+            if (!currentUser) { return 'guest'; }
+            var appMeta = currentUser.app_metadata || {};
+            return appMeta.provider || 'unknown';
+        }
     };
 })();

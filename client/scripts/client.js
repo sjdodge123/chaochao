@@ -188,6 +188,10 @@ function showRewardOfferToast() {
 	rewardOfferToastEl = el;
 	el.querySelector(".cc-toast-action").addEventListener("click", rewardOfferWatch);
 	el.querySelector(".cc-toast-close").addEventListener("click", rewardOfferDismiss);
+	// The offer is now actually visible — fire the funnel DENOMINATOR so
+	// reward_claimed/reward_offered yields the claim-through rate. Same `bonus`
+	// value as reward_claimed so the funnel joins cleanly.
+	trackEvent('reward_offered', { bonus: 'xp_2x' });
 	requestAnimationFrame(function () { el.classList.add("visible"); });
 }
 function removeRewardOfferToast() {
@@ -552,6 +556,10 @@ function clearProgressionToasts() {
 // Fire the `cosmetics_equipped` GA event once per MATCH (cosmetics are fixed for a match),
 // not once per round. Reset when a new match's lobby forms (startLobby).
 var cosmeticsTrackedThisMatch = false;
+// First race of the current match (client clock), for match_end's duration_seconds.
+// Cleared when a new match's lobby forms; stamped by the first startRace after that
+// (which also covers a mid-match join — their match starts at their first race).
+var matchStartedAt = null;
 function registerConnectionHandlers(server) {
 	server.on('welcome', function (id) {
 		debugLog("welcome, myID=", id);
@@ -569,6 +577,9 @@ function registerConnectionHandlers(server) {
 	server.on('progressionUpdate', function (prog) {
 		myProgression = prog || null;
 		debugLog("progressionUpdate level=", prog && prog.level, "xp=", prog && prog.xp);
+		// Refresh the player_level GA user property so a level change moves this
+		// player's cohort mid-session (and the first update fills it post-join).
+		if (typeof updateGAUserProperties === "function") { updateGAUserProperties(); }
 	});
 	// Celebration toasts earned in a prior match, delivered on lobby arrival (NOT on
 	// the game-over screen). Server sends an ordered batch; we sequence them as
@@ -670,6 +681,9 @@ function registerConnectionHandlers(server) {
 
 	server.on("serverKick", function () {
 		debugLog("serverKick received -- being booted");
+		// Engagement signal: how often players idle out (AFK kick) vs leave on
+		// their own. Fired before teardown so it can't be skipped by navigation.
+		trackEvent('server_kick');
 		// Per-slot teardown (§6.17): drop the primary slot. With no other local
 		// players this disconnects and navigates exactly as before (N=1); with pad
 		// players still in the game it fails over to one of them instead of ending
@@ -693,7 +707,15 @@ function registerConnectionHandlers(server) {
 	// bare auto-reconnect would strand them roomless (nothing re-sends
 	// enterGame on the primary socket). Rather than guessing how long the new
 	// dyno takes to boot, poll until the server actually answers, then reload.
-	server.on("disconnect", function () {
+	server.on("disconnect", function (reason) {
+		// Connection-quality telemetry: ONE disconnect event per page session
+		// (socket.io auto-reconnect can cycle; the first drop is the signal). The
+		// reason dim separates server restarts ('transport close') from network
+		// trouble ('ping timeout') and intentional teardown ('io client disconnect').
+		if (!window.__disconnectSent) {
+			window.__disconnectSent = true;
+			trackEvent('disconnect', { reason: reason || 'unknown' });
+		}
 		if (serverMaintenance == null) { return; }
 		// Stale state guard: a hidden tab's draw loop never runs, so the
 		// banner's own expiry can't clear serverMaintenance — don't treat a
@@ -722,6 +744,15 @@ function registerConnectionHandlers(server) {
 		}, 2000);
 	});
 
+	// Couldn't reach the server at all (engine.io-level failure). Once per page
+	// session — socket.io retries in a loop and would otherwise spam GA. Catches
+	// "players who tried to play but never connected", invisible in every other
+	// gameplay event.
+	server.on("connect_error", function (err) {
+		if (window.__connectErrorSent) { return; }
+		window.__connectErrorSent = true;
+		trackEvent('connect_error', { reason: (err && err.message) ? String(err.message).slice(0, 90) : 'unknown' });
+	});
 
 	server.on("gameState", function (gameState) {
 		debugLog("gameState received, gameID=", gameState.gameID, "myID=", gameState.myID, "players=", Object.keys(gameState.clientList || {}).length);
@@ -1030,6 +1061,7 @@ function registerStateHandlers(server) {
 		currentState = config.stateMap.lobby;
 		trackEvent('lobby_entered');
 		cosmeticsTrackedThisMatch = false; // new match forming — re-arm the cosmetics event
+		matchStartedAt = null; // re-arm the match clock; the first startRace stamps it
 		spawnLobbyStartButton(packet);
 		setLobbySfxDampen(true);
 		playSoundAfterFinish(lobbyMusic);
@@ -1140,12 +1172,16 @@ function registerStateHandlers(server) {
 		// client roster, excludes bots); `bots` counts AI fill via the spawn-packet
 		// `name` marker (server compressor sets player.name only on bot append; humans
 		// stay null — see compressor.js gameState).
+		if (matchStartedAt == null) { matchStartedAt = Date.now(); } // first race of this match
 		trackEvent('round_start', {
 			players: clientList ? Object.keys(clientList).length : 0,
 			bots: countBotsInPlayerList(),
 			map: (currentMap && currentMap.name) || 'unknown',
 			playlist: currentPlaylistIdForMetrics()
 		});
+		// Lifetime-once onboarding conversion: the player's very first race, with
+		// time_to_first_match (seconds since navigation start). See metrics.js.
+		if (typeof trackFirstMatchIfNew === "function") { trackFirstMatchIfNew(); }
 		// Once per match: which cosmetics the LOCAL player chose to race with. One event with
 		// all four slots so GA can chart per-slot popularity AND popular combinations.
 		// 'none' = the slot's default (no cart shape / pattern / trail / border).
@@ -1204,10 +1240,17 @@ function registerStateHandlers(server) {
 		myMapRating = 0;
 		ratingStarHits = [];
 		ratingPadCursor = 0;
-		trackEvent('round_complete', {
+		// duration_seconds = gate release -> overview (raceStartedAt is stamped per
+		// round in startRace); round_number locates pacing skew within a match.
+		var roundCompleteParams = {
 			map: (currentMap && currentMap.name) || 'unknown',
-			playlist: currentPlaylistIdForMetrics()
-		});
+			playlist: currentPlaylistIdForMetrics(),
+			round_number: (typeof round === "number") ? round : 0
+		};
+		if (raceStartedAt != null) {
+			roundCompleteParams.duration_seconds = Math.round((Date.now() - raceStartedAt) / 1000);
+		}
+		trackEvent('round_complete', roundCompleteParams);
 	});
 	// Map leaderboard for the JUST-PLAYED map (rank/time per logged-in racer in
 	// this room). Drives the inline rank/time shown alongside each notch row on
@@ -1308,13 +1351,19 @@ function registerStateHandlers(server) {
 			? Colors.decode((winner._serverColor != null) ? winner._serverColor : winner.color)
 			: "";
 		currentState = config.stateMap.gameOver;
-		trackEvent('match_end', {
+		// duration_seconds = the player's first race of this match -> game over
+		// (matchStartedAt; a mid-match joiner's clock starts at their first race).
+		var matchEndParams = {
 			won: (packet.winner === myID),
 			map: (currentMap && currentMap.name) || 'unknown',
 			playlist: currentPlaylistIdForMetrics(),
 			players: clientList ? Object.keys(clientList).length : 0,
 			bots: countBotsInPlayerList()
-		});
+		};
+		if (matchStartedAt != null) {
+			matchEndParams.duration_seconds = Math.round((Date.now() - matchStartedAt) / 1000);
+		}
+		trackEvent('match_end', matchEndParams);
 		// Nudge signed-out players to log in (save progress / earn skins). No-op
 		// when auth is off or already signed in. Primary screen only.
 		if (window.chaochaoAuth && typeof window.chaochaoAuth.showLoginNudge === "function") {
