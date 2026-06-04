@@ -119,6 +119,11 @@ function openStationPanel(lp) {
     if (!st) {
         return;
     }
+    openStationPanelAt(lp, st);
+}
+// Shared open path: build the panel state for a station, regardless of how the player
+// reached it (parked in the zone, or "joining" another seat's open panel from anywhere).
+function openStationPanelAt(lp, st) {
     noteHubActivity(lp);
     var cursor = 0;
     var tab = 'color';
@@ -145,6 +150,34 @@ function closeStationPanel(lp) {
         noteHubActivity(lp);
         lp.stationPanel = null;
     }
+}
+
+// --- "join" another seat's open station ---------------------------------------
+// Couch karts are easy to lose track of, so a pad seat shouldn't have to drive into a
+// zone to shop alongside Player 1: while another LOCAL seat has a panel open, every
+// pad-driven seat without one gets a "Ⓐ Join" chip pinned to that open panel (see
+// drawHubJoinPrompts) and its confirm button opens this seat's OWN copy of the same
+// station from anywhere in the lobby. Panels are pure client UX — picks still go out on
+// this seat's own socket and the server validates them exactly like a zone-opened panel.
+// Returns the first other open seat (seat order), or null when there's nothing to join.
+function hubJoinTarget(lp) {
+    if (!lp || lp.stationPanel || typeof localPlayers === "undefined") { return null; }
+    for (var s = 0; s < localPlayers.length; s++) {
+        var other = localPlayers[s];
+        if (other && other !== lp && other.stationPanel) { return other; }
+    }
+    return null;
+}
+// Open the same station another seat is using (no proximity required). Goes through the
+// shared open path so cursor defaults, movement-cancel and the AFK ping all match a
+// zone open. Returns true when a panel was opened (lets the pad poller consume the press).
+function joinStationPanel(lp) {
+    var target = hubJoinTarget(lp);
+    if (!target) { return false; }
+    var st = stationById(target.stationPanel.id) ||
+        { id: target.stationPanel.id, kind: target.stationPanel.kind };
+    openStationPanelAt(lp, st);
+    return true;
 }
 
 // dx: -1/+1 horizontal step, dy: -1/+1 vertical (rows). The AI panel is a single
@@ -825,6 +858,85 @@ function drawLobbyHubHud() {
         } else if (lp.nearStation) {
             drawStationPrompt(lp, sp);
         }
+    }
+    // Runs AFTER every panel above so each chip can pin itself to its target's
+    // freshly-stashed _panelRect.
+    drawHubJoinPrompts();
+}
+
+// "P2 Ⓐ Join" chips for pad seats that could join an open panel (see hubJoinTarget):
+// one chip per eligible seat, pinned in a row under the panel they'd join — both
+// players are already looking there, unlike a prompt anchored to a hard-to-spot kart.
+// Pad-driven seats only: touch/mouse and keyboard belong to the primary, whose own
+// kart prompt + pointer already cover opening a station. Seats parked in a station
+// zone keep their normal zone prompt instead (their A is bound to that zone).
+function drawHubJoinPrompts() {
+    if (typeof localPlayers === "undefined" || typeof gameContext === "undefined" || !gameContext) {
+        return;
+    }
+    var nextX = {}; // target slot -> x where that panel's next chip starts
+    for (var s = 0; s < localPlayers.length; s++) {
+        var lp = localPlayers[s];
+        if (!lp) { continue; }
+        lp._joinChipRect = null;
+        if (lp.stationPanel || lp.nearStation) { continue; }
+        if (lp.myID == null || typeof playerList === "undefined" || !playerList || !playerList[lp.myID]) { continue; }
+        var padType = slotPadType(lp);
+        if (!padType) { continue; }
+        var target = hubJoinTarget(lp);
+        if (!target || !target._panelRect) { continue; }
+        var S = (target._panelScale > 0) ? target._panelScale : 1;
+        var pr = target._panelRect;
+        var glyph = padConfirmGlyph(padType);
+        var seat = "P" + (lp.slot + 1);
+        var text = "Join " + stationTitle(target.stationPanel.kind);
+        var color = playerList[lp.myID].color || "#fff";
+        gameContext.save();
+        gameContext.textBaseline = "middle";
+        var seatFont = hubFont(S, 12, true);
+        var textFont = hubFont(S, 12, true);
+        gameContext.font = seatFont;
+        var seatW = gameContext.measureText(seat).width;
+        var textW = gameContext.measureText(text).width;
+        var chipH = 26 * S, glyphR = 9 * S, padX = 10 * S, gap = 7 * S;
+        var w = padX + seatW + gap + glyphR * 2 + gap + textW + padX;
+        var x = (nextX[target.slot] != null) ? nextX[target.slot] : pr.x;
+        // Below the panel normally; flip above when the panel hugs the bottom edge.
+        var y = pr.y + pr.h + 8 * S;
+        if (y + chipH > LOGICAL_HEIGHT - 6) { y = pr.y - chipH - 8 * S; }
+        nextX[target.slot] = x + w + 8 * S;
+        // Pill: panel-chrome fill, seat-coloured border so it reads as THIS seat's button.
+        gameContext.globalAlpha = 0.95;
+        gameContext.fillStyle = "rgba(14,16,22,0.95)";
+        lhRoundRect(gameContext, x, y, w, chipH, 8 * S);
+        gameContext.fill();
+        gameContext.globalAlpha = 1;
+        gameContext.lineWidth = 2;
+        gameContext.strokeStyle = color;
+        gameContext.stroke();
+        // Seat tag in the seat's colour, then the confirm-glyph badge, then the action.
+        gameContext.fillStyle = color;
+        gameContext.font = seatFont;
+        gameContext.textAlign = "left";
+        gameContext.fillText(seat, x + padX, y + chipH / 2 + 1);
+        var gx = x + padX + seatW + gap + glyphR, gy = y + chipH / 2;
+        gameContext.beginPath();
+        gameContext.arc(gx, gy, glyphR, 0, 2 * Math.PI);
+        gameContext.fillStyle = "rgba(255,255,255,0.14)";
+        gameContext.fill();
+        gameContext.lineWidth = 1.5;
+        gameContext.strokeStyle = "rgba(255,255,255,0.7)";
+        gameContext.stroke();
+        gameContext.fillStyle = "#fff";
+        gameContext.font = hubFont(S, 11, true);
+        gameContext.textAlign = "center";
+        gameContext.fillText(glyph, gx, gy + 0.5);
+        gameContext.fillStyle = "#fff";
+        gameContext.font = textFont;
+        gameContext.textAlign = "left";
+        gameContext.fillText(text, gx + glyphR + gap, y + chipH / 2 + 1);
+        gameContext.restore();
+        lp._joinChipRect = { x: x, y: y, w: w, h: chipH }; // headless geometry checks
     }
 }
 

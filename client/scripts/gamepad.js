@@ -581,6 +581,12 @@ function pollPadForSlot(pad, lp) {
         // Parked on a station: A opens its panel (the press is consumed here, so it
         // doesn't also register as an attack this frame).
         openStationPanel(lp);
+    } else if (!wheelOpen && !lp.nearStation && buttonPressedThisFrame(pad, GP_BTN_A, lp) &&
+        typeof joinStationPanel === "function" && joinStationPanel(lp)) {
+        // Another local seat is shopping: Ⓐ "joins" — opens this seat's OWN copy of the
+        // same station from anywhere (advertised by the "P2 Ⓐ Join" chip on that panel).
+        // joinStationPanel returns false when there's nothing to join, so the press
+        // falls through to the normal attack branch below.
     } else {
         // Normal play (also when another player owns the wheel).
         pollAim(pad, lp);

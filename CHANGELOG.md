@@ -13,6 +13,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 ### General
 
 - Lobby station menus (Skins, AI Bots, Playlist) are much easier to read: when you're the only one with a menu open it now draws nearly twice as large — bigger skin cells, labels and the Equipped preview. With two menus open they share the screen at a medium size, and the 3-4 player couch grid keeps the familiar compact layout, so everything always fits on screen without overlapping.
+- Couch co-op: while another player has a station menu open, every controller seat sees a "P2 Ⓐ Join" button (✕ on PlayStation) pinned right under that menu — one press opens your own copy of the same shop from anywhere in the lobby, no need to hunt for your kart and drive it into the zone.
 
 ## v0.28.4 — 2026-06-04
 

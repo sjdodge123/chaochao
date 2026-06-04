@@ -84,6 +84,8 @@ vm.runInContext(hubSrc, sandbox, { filename: "lobbyHub.js" });
 
 // --- scenario driver -----------------------------------------------------------
 
+// kinds[i] is a station kind for an open panel, or null for an idle pad seat (no panel)
+// — idle seats exercise the "P<N> Ⓐ Join" chip pinned to another seat's open panel.
 const SEAT_COLORS = ["#e74c3c", "#3498db", "#2ecc71", "#f1c40f"];
 function runScenario(kinds) {
     sandbox.playerList = {};
@@ -95,7 +97,7 @@ function runScenario(kinds) {
             myID: i,
             socket: { emit: function () { } },
             nearStation: null,
-            stationPanel: { id: i + 1, kind: kind, tab: "color", region: "grid", cursor: 0 },
+            stationPanel: kind ? { id: i + 1, kind: kind, tab: "color", region: "grid", cursor: 0 } : null,
         };
     });
     fontSizes.length = 0;
@@ -136,14 +138,28 @@ const SCENARIOS = [
     { kinds: ["skin", "skin"], scale: 1.4 },
     { kinds: ["skin", "ai", "playlist"], scale: 1 },
     { kinds: ["skin", "ai", "playlist", "skin"], scale: 1 },
+    // Idle pad seats (null) get a "join" chip pinned to the open panel instead.
+    { kinds: ["skin", null], scale: 1.8 },
+    { kinds: ["skin", null, null, null], scale: 1.8 },
+    { kinds: ["skin", "playlist", null, null], scale: 1.4 },
 ];
 
 for (const sc of SCENARIOS) {
-    const label = sc.kinds.length + " open (" + sc.kinds.join(",") + ")";
+    const openCount = sc.kinds.filter(Boolean).length;
+    const label = openCount + " open (" + sc.kinds.map(k => k || "idle").join(",") + ")";
     console.log("scenario: " + label);
     const lps = runScenario(sc.kinds);
     const rects = [];
     lps.forEach(function (lp, i) {
+        if (!sc.kinds[i]) {
+            // Idle pad seat: it must get an on-screen join chip and no panel.
+            assert(!lp._panelRect, `${label} seat ${i}: idle seat drew a panel`);
+            assert(lp._joinChipRect, `${label} seat ${i}: idle pad seat got no join chip`);
+            if (lp._joinChipRect) {
+                assert(onScreen(lp._joinChipRect), `${label} seat ${i}: join chip off screen ${fmt(lp._joinChipRect)}`);
+            }
+            return;
+        }
         assert(Math.abs((lp._panelScale || 0) - sc.scale) < 1e-6,
             `${label} seat ${i}: scale ${lp._panelScale} != expected ${sc.scale}`);
         assert(lp._panelRect, `${label} seat ${i}: no panel rect drawn`);
