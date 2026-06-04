@@ -10,10 +10,11 @@
 //      against prod even though the script ships in the bundle.
 //
 // What it does once active:
-//   - Driver (150ms): in lobby, requests 8 bots (setLobbyAI) + pins the ice
-//     playlist (setLobbyPlaylist 'ice' — the ice-reflection path is the known
-//     render hot spot), and steers onto the start button with a wander-escape
-//     when wedged; in rounds it jiggles (defeats the AFK kick; bots do the racing).
+//   - Driver (150ms): in lobby, requests 8 bots (setLobbyAI) and steers onto the
+//     start button with a wander-escape when wedged; in rounds it jiggles (defeats
+//     the AFK kick; bots do the racing) and, if a round drags past 90s (wedged
+//     bots — no global round failsafe exists), drives itself to the goal to force
+//     the next round.
 //   - Sampler (own rAF chain): walks a queue of scenarios (baseline / hot-spot
 //     cosmetic ids / worst-combo / random unknowns, per perf tier), forcing the
 //     scenario's cosmetics onto every kart EVERY frame, and records mean FPS +
@@ -68,7 +69,7 @@
 
     var hudEl = null, queue = [], results = [], doneSet = {}, glCalls = 0;
     var device = null, optTier = null, originalPref = null, finished = false;
-    var drv = { lastPos: null, stuckMs: 0, wanderUntil: 0, wanderMv: null, lastLobbyCfg: 0 };
+    var drv = { lastPos: null, stuckMs: 0, wanderUntil: 0, wanderMv: null, lastLobbyCfg: 0, lastState: null, stateSince: 0 };
     var S = { phase: "next", item: null, expectedLabel: null, t0: 0, frames: 0, sum: 0, worst: 0, gl0: 0, gate0: null, lastTs: 0, idx: 0 };
 
     // ---------- utilities ----------
@@ -398,53 +399,67 @@
         var SM = config.stateMap;
         var me = playerList[myID];
         var now = Date.now();
+        if (currentState !== drv.lastState) { drv.lastState = currentState; drv.stateSince = now; }
         var mv = { turnLeft: false, moveForward: false, turnRight: false, moveBackward: false, attack: false };
+        var target = null;
         if (currentState === SM.lobby) {
             if (now - drv.lastLobbyCfg > 2000) {
                 drv.lastLobbyCfg = now;
-                try {
-                    server.emit("setLobbyAI", { enabled: true, count: 8 });   // 8 bots + me = 9 karts
-                    server.emit("setLobbyPlaylist", { id: "ice" });           // every round on an icy map
-                } catch (e) { /* socket mid-reconnect */ }
+                // 8 bots + me = 9 karts. Default map rotation (no playlist pin):
+                // most rotation maps carry some ice for the ice gate, and the AI can
+                // actually FINISH them — pinning the all-ice playlist stalled rounds
+                // forever (bots wedge on ice; no global round failsafe exists).
+                try { server.emit("setLobbyAI", { enabled: true, count: 8 }); } catch (e) { /* socket mid-reconnect */ }
             }
-            var target = (typeof lobbyStartButton === "object" && lobbyStartButton) ? lobbyStartButton : null;
-            if (target) {
-                if (now < drv.wanderUntil && drv.wanderMv) {
+            target = (typeof lobbyStartButton === "object" && lobbyStartButton) ? lobbyStartButton : null;
+        } else if ((currentState === SM.racing || currentState === SM.collapsing) &&
+            now - drv.stateSince > 90000) {
+            // Round watchdog: bots can wedge on hostile maps and never reach the
+            // goal, and nothing else ends a racing round. After 90s of the same
+            // round, finish it ourselves — drive to the nearest goal.
+            var pts = (typeof worldGoalPoints === "function") ? worldGoalPoints() : [];
+            var bd = Infinity;
+            for (var i = 0; i < pts.length; i++) {
+                var d2 = (pts[i].x - me.x) * (pts[i].x - me.x) + (pts[i].y - me.y) * (pts[i].y - me.y);
+                if (d2 < bd) { bd = d2; target = pts[i]; }
+            }
+        }
+        if (target) {
+            if (now < drv.wanderUntil && drv.wanderMv) {
+                mv = drv.wanderMv;
+            } else {
+                // Movement is screen-relative omnidirectional: turnLeft = left,
+                // moveForward = up. Steer by dx/dy sign with a deadzone.
+                var dx = target.x - me.x, dy = target.y - me.y;
+                if (dx > 12) { mv.turnRight = true; } else if (dx < -12) { mv.turnLeft = true; }
+                if (dy > 12) { mv.moveBackward = true; } else if (dy < -12) { mv.moveForward = true; }
+            }
+            // Wedge escape: commanded movement but the kart hasn't budged for
+            // >1.2s (water pockets / walls wedge a straight-line driver) —
+            // wander in a random direction briefly, then resume seeking.
+            var wantsMove = mv.turnLeft || mv.turnRight || mv.moveForward || mv.moveBackward;
+            if (wantsMove && drv.lastPos) {
+                var moved = Math.abs(me.x - drv.lastPos.x) + Math.abs(me.y - drv.lastPos.y);
+                drv.stuckMs = (moved < 2) ? drv.stuckMs + 150 : 0;
+                if (drv.stuckMs > 1200) {
+                    drv.stuckMs = 0;
+                    drv.wanderUntil = now + 700;
+                    var dirs = [
+                        { turnLeft: true }, { turnRight: true }, { moveForward: true }, { moveBackward: true },
+                        { turnLeft: true, moveForward: true }, { turnRight: true, moveBackward: true },
+                        { turnRight: true, moveForward: true }, { turnLeft: true, moveBackward: true }
+                    ];
+                    var d = dirs[Math.floor(Math.random() * dirs.length)];
+                    drv.wanderMv = {
+                        turnLeft: !!d.turnLeft, moveForward: !!d.moveForward,
+                        turnRight: !!d.turnRight, moveBackward: !!d.moveBackward, attack: false
+                    };
                     mv = drv.wanderMv;
-                } else {
-                    // Movement is screen-relative omnidirectional: turnLeft = left,
-                    // moveForward = up. Steer by dx/dy sign with a deadzone.
-                    var dx = target.x - me.x, dy = target.y - me.y;
-                    if (dx > 12) { mv.turnRight = true; } else if (dx < -12) { mv.turnLeft = true; }
-                    if (dy > 12) { mv.moveBackward = true; } else if (dy < -12) { mv.moveForward = true; }
-                }
-                // Wedge escape: commanded movement but the kart hasn't budged for
-                // >1.2s (water pockets / walls wedge a straight-line driver) —
-                // wander in a random direction briefly, then resume seeking.
-                var wantsMove = mv.turnLeft || mv.turnRight || mv.moveForward || mv.moveBackward;
-                if (wantsMove && drv.lastPos) {
-                    var moved = Math.abs(me.x - drv.lastPos.x) + Math.abs(me.y - drv.lastPos.y);
-                    drv.stuckMs = (moved < 2) ? drv.stuckMs + 150 : 0;
-                    if (drv.stuckMs > 1200) {
-                        drv.stuckMs = 0;
-                        drv.wanderUntil = now + 700;
-                        var dirs = [
-                            { turnLeft: true }, { turnRight: true }, { moveForward: true }, { moveBackward: true },
-                            { turnLeft: true, moveForward: true }, { turnRight: true, moveBackward: true },
-                            { turnRight: true, moveForward: true }, { turnLeft: true, moveBackward: true }
-                        ];
-                        var d = dirs[Math.floor(Math.random() * dirs.length)];
-                        drv.wanderMv = {
-                            turnLeft: !!d.turnLeft, moveForward: !!d.moveForward,
-                            turnRight: !!d.turnRight, moveBackward: !!d.moveBackward, attack: false
-                        };
-                        mv = drv.wanderMv;
-                    }
                 }
             }
         } else {
-            // Jiggle through every non-lobby state: defeats the AFK kick and keeps
-            // rounds cycling forever (the bots race; we idle near the gate).
+            // Jiggle through every other state: defeats the AFK kick and keeps
+            // rounds cycling (the bots race; we idle near the gate).
             mv.moveForward = (Math.floor(now / 450) % 2) === 0;
             mv.moveBackward = !mv.moveForward;
         }
