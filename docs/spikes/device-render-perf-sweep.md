@@ -100,8 +100,10 @@ real mobile hardware at every tier the device can Auto-resolve to.
 Display cap: **60 fps** (probe 58.8). Auto tier resolved: **low** (as `namedDeviceTier`
 predicts for Android phones). 66/66 scenarios, 0 skips, gl 1.0 throughout. Early-run
 page reloads (Android pull-to-refresh) were absorbed by localStorage resume — 4 hellos,
-zero lost rows. Android Chrome's keep-awake video DID hold the screen (no sleep, unlike
-iPadOS).
+zero lost rows. Operator-confirmed: the keep-awake video did NOT hold the screen on
+Android Chrome either — the phone slept at its own 10-minute timeout mid-run and the
+gates + resume absorbed it. **Treat screen-timeout/Auto-Lock override as the required
+keep-awake mechanism on BOTH platforms**; the video is best-effort only.
 
 ### Low — the tier phones actually ship with (Auto): ALL CLEAR
 
