@@ -1218,7 +1218,11 @@ function drawEquippedPreview(lp, px0, py0, pw0, ph0, tint) {
     gameContext.fillStyle = "rgba(255,255,255,0.05)";
     lhRoundRect(gameContext, vx, vy, vw, vpH, 8);
     gameContext.fill();
+    // try/catch/finally so a thrown draw (a future skin painter / sprite path) can't leak
+    // the viewport clip onto the rest of the frame or kill the rAF loop — swallowed like
+    // the recap's montage draws: a broken preview must not take the lobby HUD down.
     gameContext.save();
+    try {
     lhRoundRect(gameContext, vx, vy, vw, vpH, 8);
     gameContext.clip();
     // Synthetic player wearing THIS kart's live cosmetic fields, at preview scale. Render
@@ -1278,7 +1282,8 @@ function drawEquippedPreview(lp, px0, py0, pw0, ph0, tint) {
             gameContext.stroke();
         }
     }
-    gameContext.restore(); // viewport clip
+    } catch (e) { /* keep the lobby HUD alive — see comment above */ }
+    finally { gameContext.restore(); } // viewport clip
     // --- slot rows --------------------------------------------------------------
     var ry = vy + vpH + 10;
     gameContext.textBaseline = "middle";
