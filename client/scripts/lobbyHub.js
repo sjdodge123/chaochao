@@ -1963,6 +1963,23 @@ function activateSkinItem(lp, item) {
     // 'achv' cells are read-only — focusing one already shows its requirement line.
 }
 
+// The "how to earn it" line for an achievement cosmetic id, with the player's live
+// progress when available: "Win 25 matches · 12/25". null for non-achievement ids
+// (level/seasonal locks keep their own wording). Same config.achievementDefs data the
+// 🏆 tab renders, so the picker and the profile always agree.
+function achievementRequirementLine(lp, id) {
+    if (id == null) { return null; }
+    var defs = (typeof config !== "undefined" && config && config.achievementDefs) ? config.achievementDefs : null;
+    if (!defs) { return null; }
+    var def = null;
+    for (var i = 0; i < defs.length; i++) { if (defs[i].id === id) { def = defs[i]; break; } }
+    if (!def) { return null; }
+    var prog = (lp && !lp.isPrimary) ? null : ((typeof myProgression !== "undefined") ? myProgression : null);
+    if (!prog) { return def.desc; }
+    var val = (def.stat === 'wins') ? (prog.wins || 0) : ((prog.medal_counts || {})[def.stat] || 0);
+    return def.desc + " · " + Math.min(val, def.threshold) + "/" + def.threshold;
+}
+
 // Cached dark-silhouette thumbnails for not-yet-earned achievement cosmetics: the real
 // painter's SHAPE with all detail flattened to one dark fill (mystery teaser — the unlock
 // celebration is the reveal). Painters are procedural (no image decode race), so a
@@ -2115,10 +2132,13 @@ function stationPickCosmetic(lp, opt) {
         return;
     }
     // Don't burn a round-trip on a locked cosmetic — show the requirement (the server
-    // re-validates on equip regardless; this is just UX).
+    // re-validates on equip regardless; this is just UX). Achievement items show their
+    // actual "how to earn it" line + live progress (same data the 🏆 tab renders), not
+    // the slot's lock glyph.
     var lock = cartSkinUnlock(opt.id || null, lp);
     if (lock.locked) {
-        lp._cartLockMsg = lock.text ? ("Unlock at " + lock.text) : "Locked";
+        var achMsg = achievementRequirementLine(lp, opt.id);
+        lp._cartLockMsg = achMsg || (lock.text ? ("Unlock at " + lock.text) : "Locked");
         lp._cartLockAt = Date.now();
         return;
     }
@@ -2298,7 +2318,7 @@ function flagCosmeticRejected(slot, payload) {
     if (payload && payload.reason === "level" && payload.required) {
         msg = "Unlock at Lv " + payload.required;
     } else if (payload && payload.reason === "achievement") {
-        msg = "Earn the medal to unlock";
+        msg = achievementRequirementLine(lp, payload.id) || "Earn the medal to unlock";
     } else if (payload && payload.reason === "seasonal") {
         // Seasonal claim the player never claimed in its window. Match the locker's own wording:
         // still claimable -> "Sign in to claim"; window closed -> "Expired".
