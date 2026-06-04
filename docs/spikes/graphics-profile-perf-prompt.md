@@ -7,8 +7,12 @@
 ---
 
 Run a per-graphics-profile render-performance sweep of the chaochao client,
-using the live in-page harness methodology from memory `live-render-perf-harness.md`
-(read it first — it has the full architecture and the sample-poisoning pitfalls).
+using the live in-page harness methodology from the agent-session memory note
+`live-render-perf-harness.md` (NOT a repo file — it lives in the Claude memory
+directory and is auto-recalled; it has the full architecture and the
+sample-poisoning pitfalls). Measurement is rAF-delta sampling in the page —
+DevTools flamechart tracing is NOT part of this method (use it ad hoc only if
+a specific regression needs root-causing).
 
 ## Goal
 
