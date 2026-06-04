@@ -397,7 +397,11 @@ function init() {
     if (loading == false) {
         timeOutChecker = setInterval(checkForTimeout, 1000);
     }
-    animloop();
+    // Schedule (never call animloop() synchronously): a direct call while a rAF
+    // callback is already queued would clear animFramePending without consuming
+    // that queued callback, forking a second permanent chain — the exact bug the
+    // pending flag exists to prevent. init() runs twice (setupPage + gameState).
+    scheduleAnimFrame();
     initEventHandlers();
     initGamepad();
 }

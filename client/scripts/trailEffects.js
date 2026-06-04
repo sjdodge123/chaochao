@@ -253,6 +253,9 @@ function tfxPuffGrad(ctx, color) {
 // no-glow path keeps painting straight to the main canvas.
 var _tfxGlowScratch = null;
 function tfxGlowBlit(ctx, verts, color, glowR, margin, composite, body) {
+  // Geometry bbox in the CALLER's coordinate space (+margin for overhang like
+  // ribbon half-widths / ember rise). The shadow is applied at blit time on the
+  // main canvas and bleeds outside the image freely, so it needs no scratch pad.
   var n = verts.length;
   var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (var i = 0; i < n; i++) {
@@ -262,32 +265,76 @@ function tfxGlowBlit(ctx, verts, color, glowR, margin, composite, body) {
     if (v.y < minY) minY = v.y;
     if (v.y > maxY) maxY = v.y;
   }
-  var pad = glowR + margin;
-  minX -= pad; minY -= pad; maxX += pad; maxY += pad;
-  var W = (typeof LOGICAL_WIDTH !== "undefined" && LOGICAL_WIDTH) ? LOGICAL_WIDTH : 1366;
-  var H = (typeof LOGICAL_HEIGHT !== "undefined" && LOGICAL_HEIGHT) ? LOGICAL_HEIGHT : 768;
-  if (minX < -pad) minX = -pad;
-  if (minY < -pad) minY = -pad;
-  if (maxX > W + pad) maxX = W + pad;
-  if (maxY > H + pad) maxY = H + pad;
-  if (maxX - minX < 1 || maxY - minY < 1) return;
-  var sx = (typeof canvasScaleX !== "undefined" && canvasScaleX) ? canvasScaleX : 1;
-  var sy = (typeof canvasScaleY !== "undefined" && canvasScaleY) ? canvasScaleY : 1;
-  var w = Math.ceil((maxX - minX) * sx), h = Math.ceil((maxY - minY) * sy);
+  minX -= margin; minY -= margin; maxX += margin; maxY += margin;
+  // Map the bbox through the caller's CURRENT transform (board scale, world zoom,
+  // screen shake, or a preview's translate/scale all compose here) into device
+  // space, where the scratch renders 1:1 — so this works under ANY transform.
+  var t = ctx.getTransform();
+  var xs = [], ys = [];
+  var corners = [[minX, minY], [maxX, minY], [minX, maxY], [maxX, maxY]];
+  for (var ci = 0; ci < 4; ci++) {
+    xs.push(t.a * corners[ci][0] + t.c * corners[ci][1] + t.e);
+    ys.push(t.b * corners[ci][0] + t.d * corners[ci][1] + t.f);
+  }
+  var dMinX = Math.floor(Math.min.apply(null, xs)), dMaxX = Math.ceil(Math.max.apply(null, xs));
+  var dMinY = Math.floor(Math.min.apply(null, ys)), dMaxY = Math.ceil(Math.max.apply(null, ys));
+  // Clamp to the real canvas (+glow bleed) — off-screen geometry can't show, and
+  // the clamp bounds the scratch (and its per-frame texture upload) to canvas size.
+  var bleed = glowR + 4;
+  if (dMinX < -bleed) dMinX = -bleed;
+  if (dMinY < -bleed) dMinY = -bleed;
+  if (dMaxX > ctx.canvas.width + bleed) dMaxX = ctx.canvas.width + bleed;
+  if (dMaxY > ctx.canvas.height + bleed) dMaxY = ctx.canvas.height + bleed;
+  var w = dMaxX - dMinX, h = dMaxY - dMinY;
+  if (w < 1 || h < 1) return;
   if (_tfxGlowScratch == null) { _tfxGlowScratch = document.createElement("canvas"); }
   var s = _tfxGlowScratch;
   if (s.width < w) { s.width = w; }
   if (s.height < h) { s.height = h; }
   var sc = s.getContext("2d");
+  // The scratch CONTEXT is shared across effects and frames, so isolate each use:
+  // a body that flips composite mode (aurora's 'lighter') must not leak it into the
+  // next effect's scratch render. save/restore plus explicit defaults — the canvas
+  // is grow-only, so a resize reset can't be relied on.
+  sc.save();
   sc.setTransform(1, 0, 0, 1, 0, 0);
   sc.clearRect(0, 0, w, h);
-  sc.setTransform(sx, 0, 0, sy, -minX * sx, -minY * sy);
+  sc.globalCompositeOperation = "source-over";
+  sc.globalAlpha = 1;
+  sc.shadowBlur = 0;
+  if ("filter" in sc) { sc.filter = "none"; }
+  sc.setLineDash([]);
+  // Caller's full transform, shifted so the device bbox lands at the scratch origin.
+  sc.setTransform(t.a, t.b, t.c, t.d, t.e - dMinX, t.f - dMinY);
   body(sc);
+  sc.restore();
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);   // blit 1:1 in device space
+  ctx.globalAlpha = 1;                  // body alphas are baked into the scratch
+  ctx.shadowColor = color;
+  ctx.shadowBlur = glowR;               // shadowBlur ignores the CTM, same as per-op
+  if (composite) { ctx.globalCompositeOperation = composite; }
+  ctx.drawImage(s, 0, 0, w, h, dMinX, dMinY, w, h);
+  ctx.restore();
+}
+// Glow dispatch shared by the heavy painters: no glow -> draw straight to ctx;
+// glow -> scratch + single shadowed blit (transform-aware). The per-op shadow
+// fallback only remains for ancient contexts without getTransform().
+function tfxGlowPaint(ctx, verts, color, glowR, margin, composite, body) {
+  if (!tfxGlow()) {
+    if (composite) { ctx.save(); ctx.globalCompositeOperation = composite; body(ctx); ctx.restore(); }
+    else { body(ctx); }
+    return;
+  }
+  if (typeof ctx.getTransform === "function") {
+    tfxGlowBlit(ctx, verts, color, glowR, margin, composite, body);
+    return;
+  }
   ctx.save();
   ctx.shadowColor = color;
   ctx.shadowBlur = glowR;
   if (composite) { ctx.globalCompositeOperation = composite; }
-  ctx.drawImage(s, 0, 0, w, h, minX, minY, maxX - minX, maxY - minY);
+  body(ctx);
   ctx.restore();
 }
 // unit glyph paths, filled by the caller
@@ -458,8 +505,7 @@ function drawCometTrail(ctx, verts, color, now, fadeMs, anim) {
       c.fill();
     }
   };
-  if (tfxGlow()) { tfxGlowBlit(ctx, verts, color, GLOW, WIDTH, null, cometRibbon); }
-  else { cometRibbon(ctx); }
+  tfxGlowPaint(ctx, verts, color, GLOW, WIDTH, null, cometRibbon);
   // Core stroke: a single op, so a direct shadow stays cheap.
   if (tfxGlow()) { ctx.shadowColor = color; ctx.shadowBlur = GLOW * 0.5; }
   var coreStart = -1;
@@ -562,8 +608,7 @@ function drawAuroraTrail(ctx, verts, color, now, fadeMs, anim) {
       }
     }
   };
-  if (tfxGlow()) { tfxGlowBlit(ctx, verts, color, GLOW, AMP + 12, "lighter", auroraBody); }
-  else { ctx.globalCompositeOperation = "lighter"; auroraBody(ctx); }
+  tfxGlowPaint(ctx, verts, color, GLOW, AMP + 12, "lighter", auroraBody);
   ctx.restore();
 }
 
@@ -734,8 +779,7 @@ function drawBoltTrail(ctx, verts, color, now, fadeMs, anim) {
       }
     }
   };
-  if (tfxGlow()) { tfxGlowBlit(ctx, verts, color, GLOW * 0.5, AMP + 24, null, boltCore); }
-  else { boltCore(ctx); }
+  tfxGlowPaint(ctx, verts, color, GLOW * 0.5, AMP + 24, null, boltCore);
   ctx.restore();
 }
 
@@ -935,13 +979,8 @@ function drawNeonTrail(ctx, verts, color, now, fadeMs, anim) {
       if (run) c.stroke();
     }
   }
-  if (tfxGlow()) {
-    tfxGlowBlit(ctx, verts, color, GLOW, WIDTH, null, function (c) { strokeBuckets(c, WIDTH, tfxRGBA(color, 0.32)); });
-    tfxGlowBlit(ctx, verts, color, GLOW * 0.4, WIDTH, null, function (c) { strokeBuckets(c, Math.max(1.5, WIDTH * 0.28), tfxHot(color, 0.7, 1)); });
-  } else {
-    strokeBuckets(ctx, WIDTH, tfxRGBA(color, 0.32));
-    strokeBuckets(ctx, Math.max(1.5, WIDTH * 0.28), tfxHot(color, 0.7, 1));
-  }
+  tfxGlowPaint(ctx, verts, color, GLOW, WIDTH, null, function (c) { strokeBuckets(c, WIDTH, tfxRGBA(color, 0.32)); });
+  tfxGlowPaint(ctx, verts, color, GLOW * 0.4, WIDTH, null, function (c) { strokeBuckets(c, Math.max(1.5, WIDTH * 0.28), tfxHot(color, 0.7, 1)); });
   ctx.restore();
 }
 
@@ -963,8 +1002,7 @@ function drawRippleTrail(ctx, verts, color, now, fadeMs, anim) {
       c.beginPath(); c.arc(v.x, v.y, R, 0, TFX_TAU); c.stroke();
     });
   };
-  if (tfxGlow()) { tfxGlowBlit(ctx, verts, color, GLOW, 54, null, rippleRings); }
-  else { rippleRings(ctx); }
+  tfxGlowPaint(ctx, verts, color, GLOW, 54, null, rippleRings);
   var head = verts[n - 1];
   // Head ping: single op, direct shadow stays cheap.
   if (tfxGlow()) { ctx.shadowColor = color; ctx.shadowBlur = GLOW; }
@@ -1048,8 +1086,7 @@ function drawFoundersFlareTrail(ctx, verts, color, now, fadeMs, anim) {
       c.fill();
     }
   };
-  if (tfxGlow()) { tfxGlowBlit(ctx, verts, gold, GLOW, WIDTH, null, flareRibbon); }
-  else { flareRibbon(ctx); }
+  tfxGlowPaint(ctx, verts, gold, GLOW, WIDTH, null, flareRibbon);
   // White-hot inner core + ember flecks, both glowing at the softer radius — the
   // core is one stroke but the embers are ~20 small fills, so share a scratch blit.
   var flareCoreEmbers = function (c2) {
@@ -1084,8 +1121,7 @@ function drawFoundersFlareTrail(ctx, verts, color, now, fadeMs, anim) {
       c2.beginPath(); c2.arc(ex, ey, er, 0, TFX_TAU); c2.fill();
     }
   };
-  if (tfxGlow()) { tfxGlowBlit(ctx, verts, gold, GLOW * 0.45, WIDTH * 2, null, flareCoreEmbers); }
-  else { flareCoreEmbers(ctx); }
+  tfxGlowPaint(ctx, verts, gold, GLOW * 0.45, WIDTH * 2, null, flareCoreEmbers);
   // Radiant head — bright sun-like blob.
   var head = verts[n - 1];
   var R = WIDTH * 1.0;
