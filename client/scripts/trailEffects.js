@@ -96,14 +96,55 @@ function TP(effect, key, def) {
 }
 
 // ---- color helpers (parse any CSS color → rgb once, cached) ----------------
+// Parse hex/rgb()/hsl() in pure JS. The old "paint one pixel and read it back"
+// trick forced a synchronous GPU pipeline flush per getImageData — every NEW
+// colour (each 🎲 randomize picks one) stalled the frame several ms per painter,
+// which stacked into a visible hitch with multiple couch-co-op panels open.
+function tfxParseColorFast(color) {
+  if (typeof color !== "string") return null;
+  var s = color.trim(), m;
+  if (s.charAt(0) === "#") {
+    if (s.length === 4 || s.length === 5) { // #rgb / #rgba
+      var r3 = parseInt(s.charAt(1) + s.charAt(1), 16), g3 = parseInt(s.charAt(2) + s.charAt(2), 16), b3 = parseInt(s.charAt(3) + s.charAt(3), 16);
+      return (r3 >= 0 && g3 >= 0 && b3 >= 0) ? { r: r3, g: g3, b: b3 } : null;
+    }
+    if (s.length === 7 || s.length === 9) { // #rrggbb / #rrggbbaa
+      var n = parseInt(s.slice(1, 7), 16);
+      return isNaN(n) ? null : { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+    }
+    return null;
+  }
+  m = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/.exec(s);
+  if (m) { return { r: Math.round(+m[1]), g: Math.round(+m[2]), b: Math.round(+m[3]) }; }
+  m = /^hsla?\(\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%/.exec(s);
+  if (m) {
+    var h = (((+m[1]) % 360) + 360) % 360 / 360, sl = (+m[2]) / 100, l = (+m[3]) / 100;
+    var q = l < 0.5 ? l * (1 + sl) : l + sl - l * sl, p = 2 * l - q;
+    var hue = function (t) {
+      t = ((t % 1) + 1) % 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    };
+    return { r: Math.round(hue(h + 1 / 3) * 255), g: Math.round(hue(h) * 255), b: Math.round(hue(h - 1 / 3) * 255) };
+  }
+  return null;
+}
 var _tfxRGB = {};
+var _tfxParseCv = null; // shared fallback canvas for exotic colours (named etc.) — created once
 function tfxRGB(color) {
   if (_tfxRGB[color] != null) return _tfxRGB[color];
-  var cv = document.createElement("canvas"); cv.width = cv.height = 1;
-  var cx = cv.getContext("2d");
-  cx.fillStyle = "#000"; cx.fillStyle = color; cx.fillRect(0, 0, 1, 1);
-  var d = cx.getImageData(0, 0, 1, 1).data;
-  var rgb = { r: d[0], g: d[1], b: d[2] };
+  var rgb = tfxParseColorFast(color);
+  if (rgb == null) { // exotic colour string: one readback on a persistent canvas
+    if (_tfxParseCv == null) {
+      _tfxParseCv = document.createElement("canvas"); _tfxParseCv.width = _tfxParseCv.height = 1;
+    }
+    var cx = _tfxParseCv.getContext("2d", { willReadFrequently: true });
+    cx.fillStyle = "#000"; cx.fillStyle = color; cx.fillRect(0, 0, 1, 1);
+    var d = cx.getImageData(0, 0, 1, 1).data;
+    rgb = { r: d[0], g: d[1], b: d[2] };
+  }
   _tfxRGB[color] = rgb; return rgb;
 }
 // tfxRGBA/tfxHot/tfxDark build an rgba STRING from (color, t, a). They're called per-particle
