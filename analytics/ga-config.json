@@ -148,14 +148,14 @@
     },
     {
       "parameterName": "duration_seconds",
-      "displayName": "Duration (s)",
+      "displayName": "Duration seconds",
       "scope": "EVENT",
       "measurementUnit": "SECONDS",
       "description": "Elapsed seconds: round length on round_complete (gate release - overview), match length on match_end (first race - game over)."
     },
     {
       "parameterName": "time_to_first_match",
-      "displayName": "Time to first match (s)",
+      "displayName": "Time to first match seconds",
       "scope": "EVENT",
       "measurementUnit": "SECONDS",
       "description": "Seconds from page navigation start to the player's first-ever race (first_match event). Onboarding-friction metric."
