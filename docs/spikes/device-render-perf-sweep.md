@@ -37,9 +37,9 @@ inert in prod.
 4. Random unknowns (seeded, 4 per slot + 2 combos) on the optimal tier.
 
 All race-gated samples require: tab visible, state ∈ {gated, racing, collapsing} and
-unchanged across the window, 9 karts alive, ice on the map (`setLobbyPlaylist 'ice'`
-pins the Slip & Slide playlist), pinned tier label in effect; failures auto-requeue
-(max 8 attempts). Each row records mean FPS **and worst single-frame ms** (stutter
+unchanged across the window, 9 karts alive, ice on the map (default rotation maps
+mostly carry some ice; ice-only playlist deliberately NOT pinned — see lessons),
+pinned tier label in effect; failures auto-requeue (max 8 attempts). Each row records mean FPS **and worst single-frame ms** (stutter
 hides in averages — GPU texture re-upload lesson).
 
 ## Device results
@@ -83,6 +83,17 @@ Lessons baked back into the harness during validation:
 4. The lobby floor's ice cells make the drive to the start button SLOW
    (`ice.acel` = 15 vs 300) — patience, not a bug; the wedge-escape handles the
    shoreline pockets.
+
+The full 66-scenario desktop run completed (66 samples, 0 skips, ~25 min,
+Chrome/Mac M-series, 120Hz cap): clean stretches read 120 fps across hot spots
+(pizza/golden_champion/comet/etc.) on High; Balanced ~89-104; Low ~96-104. A
+late-run stretch dipped to 49-77 fps — **including the interleaved `__none__`
+baselines (52-67)** — i.e. an environmental dip (the harness window was
+backgrounded/partially occluded; macOS Chrome throttles occluded windows), not a
+cosmetic regression. Judge ids relative to the nearest baseline, exactly as the
+desktop methodology prescribes. Per-id desktop verdicts were already settled in
+`docs/spikes/cosmetic-perf-verification.md`; this run validates the harness, the
+device run is the new data.
 
 ## Follow-ups
 
