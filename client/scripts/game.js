@@ -401,13 +401,29 @@ function init() {
     initEventHandlers();
     initGamepad();
 }
+// animloop is started from TWO places — setupPage()'s init() (loading screen)
+// and the gameState handler's init() (gameplay). Both used to schedule their own
+// requestAnimFrame chain, and a frame where BOTH gameRunning and loading were true
+// scheduled twice — so any client whose gameState arrived before the asset preload
+// finished ran 2+ permanent gameLoop chains forever, drawing every frame 2+ times
+// (half the FPS for the whole session). Funnel all scheduling through ONE pending
+// flag so exactly one rAF chain survives no matter how init() is re-entered.
+var animFramePending = false;
+function scheduleAnimFrame() {
+    if (animFramePending) {
+        return;
+    }
+    animFramePending = true;
+    requestAnimFrame(animloop);
+}
 function animloop() {
+    animFramePending = false;
     if (gameRunning) {
         var now = Date.now();
         dt = now - then;
         gameLoop(dt);
         then = now;
-        requestAnimFrame(animloop);
+        scheduleAnimFrame();
     }
     if (loading == true) {
         var loadedCount = 0;
@@ -428,7 +444,7 @@ function animloop() {
             loadingTimeoutShown = true;
             progressContainer.html('Loading is taking longer than usual. <a href="#" onclick="location.reload();return false;">Refresh the page</a> to retry.');
         }
-        requestAnimFrame(animloop);
+        scheduleAnimFrame();
     }
 }
 function gameLoop(dt) {

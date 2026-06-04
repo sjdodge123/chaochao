@@ -241,6 +241,55 @@ function tfxPuffGrad(ctx, color) {
   g.addColorStop(1, tfxRGBA(color, 0));
   _tfxPuff[color] = g; return g;
 }
+// Scratch-glow compositor for the shadowBlur-heavy trail painters. Painting dozens
+// of fills/strokes per trail per frame WITH ctx.shadowBlur set renders an
+// intermediate blurred surface per op — with several wearers on screen that alone
+// collapsed High-profile frame rate. Instead: paint the geometry UNSHADOWED into a
+// shared scratch sized to the verts' on-screen bbox (device resolution, clamped to
+// the viewport), then draw the scratch ONCE onto ctx with the colored shadow. One
+// shadowed composite replaces the per-op surfaces; the halo follows the union
+// silhouette, which reads the same. The viewport clamp also stops fully off-screen
+// trails from painting at all. Only called on glow profiles (tfxGlow()); the
+// no-glow path keeps painting straight to the main canvas.
+var _tfxGlowScratch = null;
+function tfxGlowBlit(ctx, verts, color, glowR, margin, composite, body) {
+  var n = verts.length;
+  var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (var i = 0; i < n; i++) {
+    var v = verts[i];
+    if (v.x < minX) minX = v.x;
+    if (v.x > maxX) maxX = v.x;
+    if (v.y < minY) minY = v.y;
+    if (v.y > maxY) maxY = v.y;
+  }
+  var pad = glowR + margin;
+  minX -= pad; minY -= pad; maxX += pad; maxY += pad;
+  var W = (typeof LOGICAL_WIDTH !== "undefined" && LOGICAL_WIDTH) ? LOGICAL_WIDTH : 1366;
+  var H = (typeof LOGICAL_HEIGHT !== "undefined" && LOGICAL_HEIGHT) ? LOGICAL_HEIGHT : 768;
+  if (minX < -pad) minX = -pad;
+  if (minY < -pad) minY = -pad;
+  if (maxX > W + pad) maxX = W + pad;
+  if (maxY > H + pad) maxY = H + pad;
+  if (maxX - minX < 1 || maxY - minY < 1) return;
+  var sx = (typeof canvasScaleX !== "undefined" && canvasScaleX) ? canvasScaleX : 1;
+  var sy = (typeof canvasScaleY !== "undefined" && canvasScaleY) ? canvasScaleY : 1;
+  var w = Math.ceil((maxX - minX) * sx), h = Math.ceil((maxY - minY) * sy);
+  if (_tfxGlowScratch == null) { _tfxGlowScratch = document.createElement("canvas"); }
+  var s = _tfxGlowScratch;
+  if (s.width < w) { s.width = w; }
+  if (s.height < h) { s.height = h; }
+  var sc = s.getContext("2d");
+  sc.setTransform(1, 0, 0, 1, 0, 0);
+  sc.clearRect(0, 0, w, h);
+  sc.setTransform(sx, 0, 0, sy, -minX * sx, -minY * sy);
+  body(sc);
+  ctx.save();
+  ctx.shadowColor = color;
+  ctx.shadowBlur = glowR;
+  if (composite) { ctx.globalCompositeOperation = composite; }
+  ctx.drawImage(s, 0, 0, w, h, minX, minY, maxX - minX, maxY - minY);
+  ctx.restore();
+}
 // unit glyph paths, filled by the caller
 function tfxHeartPath(ctx, sz) {
   ctx.beginPath();
@@ -389,23 +438,30 @@ function drawCometTrail(ctx, verts, color, now, fadeMs, anim) {
     nx[j] = -tan.y; ny[j] = tan.x;
   }
   ctx.save();
-  if (tfxGlow()) { ctx.shadowColor = color; ctx.shadowBlur = GLOW; }
   ctx.lineJoin = "round";
-  ctx.fillStyle = color;
-  for (var s = 1; s < m; s++) {
-    var alpha = af[s] * 0.5;
-    if (alpha <= 0.02) continue;
-    var p0 = verts[idx[s - 1]], p1 = verts[idx[s]];
-    tfxAlpha(ctx, alpha);
-    ctx.beginPath();
-    ctx.moveTo(p0.x + nx[s - 1] * hw[s - 1], p0.y + ny[s - 1] * hw[s - 1]);
-    ctx.lineTo(p1.x + nx[s] * hw[s],         p1.y + ny[s] * hw[s]);
-    ctx.lineTo(p1.x - nx[s] * hw[s],         p1.y - ny[s] * hw[s]);
-    ctx.lineTo(p0.x - nx[s - 1] * hw[s - 1], p0.y - ny[s - 1] * hw[s - 1]);
-    ctx.closePath();
-    ctx.fill();
-  }
-  if (tfxGlow()) ctx.shadowBlur = GLOW * 0.5;
+  // Ribbon body: ~50 alpha-faded quad fills. Per-op shadowBlur here was the comet's
+  // frame killer — route the glow through ONE shadowed scratch blit instead.
+  var cometRibbon = function (c) {
+    c.lineJoin = "round";
+    c.fillStyle = color;
+    for (var s = 1; s < m; s++) {
+      var alpha = af[s] * 0.5;
+      if (alpha <= 0.02) continue;
+      var p0 = verts[idx[s - 1]], p1 = verts[idx[s]];
+      tfxAlpha(c, alpha);
+      c.beginPath();
+      c.moveTo(p0.x + nx[s - 1] * hw[s - 1], p0.y + ny[s - 1] * hw[s - 1]);
+      c.lineTo(p1.x + nx[s] * hw[s],         p1.y + ny[s] * hw[s]);
+      c.lineTo(p1.x - nx[s] * hw[s],         p1.y - ny[s] * hw[s]);
+      c.lineTo(p0.x - nx[s - 1] * hw[s - 1], p0.y - ny[s - 1] * hw[s - 1]);
+      c.closePath();
+      c.fill();
+    }
+  };
+  if (tfxGlow()) { tfxGlowBlit(ctx, verts, color, GLOW, WIDTH, null, cometRibbon); }
+  else { cometRibbon(ctx); }
+  // Core stroke: a single op, so a direct shadow stays cheap.
+  if (tfxGlow()) { ctx.shadowColor = color; ctx.shadowBlur = GLOW * 0.5; }
   var coreStart = -1;
   for (var c = 0; c < m; c++) { if (af[c] > 0.35) { coreStart = c; break; } }
   if (coreStart >= 0 && coreStart < m - 1) {
@@ -482,25 +538,32 @@ function drawAuroraTrail(ctx, verts, color, now, fadeMs, anim) {
     bk[i] = (age >= fadeMs) ? TFX_BUCKETS : Math.floor(age / bucketMs);
   }
   ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-  if (tfxGlow()) { ctx.shadowColor = color; ctx.shadowBlur = GLOW; }
-  ctx.lineCap = "round"; ctx.lineJoin = "round";
-  for (var L = 0; L < layers; L++) {
-    var inner = layers > 1 ? L / (layers - 1) : 1;
-    ctx.lineWidth = (5 + AMP * 0.55) * (1 - inner * 0.72);
-    ctx.strokeStyle = (L === layers - 1) ? tfxHot(color, 0.35, 1) : color;
-    var layerA = 0.12 + 0.20 * inner;
-    for (var b = 0; b < TFX_BUCKETS; b++) {
-      tfxAlpha(ctx, layerA * (1 - (b + 0.5) / TFX_BUCKETS));
-      var run = false;
-      for (var vv = 1; vv < n; vv++) {
-        if (bk[vv] !== b) { if (run) { ctx.stroke(); run = false; } continue; }
-        if (!run) { ctx.beginPath(); ctx.moveTo(wx[vv - 1], wy[vv - 1]); run = true; }
-        ctx.lineTo(wx[vv], wy[vv]);
+  // All the wavy layer strokes, additive between themselves. Per-stroke shadowBlur
+  // (GLOW 27, ~a dozen long strokes) was the cost — paint them unshadowed and let
+  // tfxGlowBlit add the glow on the single 'lighter' composite, which keeps the
+  // additive-vs-background look.
+  var auroraBody = function (c) {
+    c.globalCompositeOperation = "lighter";
+    c.lineCap = "round"; c.lineJoin = "round";
+    for (var L = 0; L < layers; L++) {
+      var inner = layers > 1 ? L / (layers - 1) : 1;
+      c.lineWidth = (5 + AMP * 0.55) * (1 - inner * 0.72);
+      c.strokeStyle = (L === layers - 1) ? tfxHot(color, 0.35, 1) : color;
+      var layerA = 0.12 + 0.20 * inner;
+      for (var b = 0; b < TFX_BUCKETS; b++) {
+        tfxAlpha(c, layerA * (1 - (b + 0.5) / TFX_BUCKETS));
+        var run = false;
+        for (var vv = 1; vv < n; vv++) {
+          if (bk[vv] !== b) { if (run) { c.stroke(); run = false; } continue; }
+          if (!run) { c.beginPath(); c.moveTo(wx[vv - 1], wy[vv - 1]); run = true; }
+          c.lineTo(wx[vv], wy[vv]);
+        }
+        if (run) c.stroke();
       }
-      if (run) ctx.stroke();
     }
-  }
+  };
+  if (tfxGlow()) { tfxGlowBlit(ctx, verts, color, GLOW, AMP + 12, "lighter", auroraBody); }
+  else { ctx.globalCompositeOperation = "lighter"; auroraBody(ctx); }
   ctx.restore();
 }
 
@@ -638,33 +701,41 @@ function drawBoltTrail(ctx, verts, color, now, fadeMs, anim) {
     px[j] = verts[ii].x - t.y * jit; py[j] = verts[ii].y + t.x * jit;
   }
   ctx.save(); ctx.lineCap = "round"; ctx.lineJoin = "round";
+  // Soft outer bolt: one polyline stroke, so a direct shadow stays cheap.
   if (tfxGlow()) { ctx.shadowColor = color; ctx.shadowBlur = GLOW; }
   ctx.strokeStyle = tfxRGBA(color, 0.5); ctx.lineWidth = 4; tfxAlpha(ctx, 0.55);
   ctx.beginPath(); ctx.moveTo(px[0], py[0]);
   for (var s = 1; s < m; s++) ctx.lineTo(px[s], py[s]);
   ctx.stroke();
-  if (tfxGlow()) ctx.shadowBlur = GLOW * 0.5;
-  ctx.strokeStyle = tfxHot(color, 0.65, 1); ctx.lineWidth = 1.6;
-  for (var c = 1; c < m; c++) {
-    if (af[c] <= 0.04) continue;
-    tfxAlpha(ctx, af[c]);
-    ctx.beginPath(); ctx.moveTo(px[c - 1], py[c - 1]); ctx.lineTo(px[c], py[c]); ctx.stroke();
-  }
-  var forks = Math.round(FORKS);
-  if (forks > 0) {
-    ctx.lineWidth = 1.1; ctx.strokeStyle = tfxRGBA(color, 0.8);
-    var gap = Math.max(2, Math.floor(m / (forks * 2 + 1)));
-    for (var s2 = 2; s2 < m - 1; s2 += gap) {
-      if (af[s2] < 0.3) continue;
-      var t2 = tfxTangent(verts, idx[s2]);
-      var dir = (tfxHash(verts[idx[s2]].t + fstep * 51) < 0.5) ? 1 : -1;
-      var fl = 8 + tfxHash(verts[idx[s2]].t + fstep) * 12;
-      tfxAlpha(ctx, af[s2] * 0.7);
-      ctx.beginPath(); ctx.moveTo(px[s2], py[s2]);
-      ctx.lineTo(px[s2] - t2.y * fl * dir + t2.x * fl * 0.4, py[s2] + t2.x * fl * dir + t2.y * fl * 0.4);
-      ctx.stroke();
+  ctx.shadowBlur = 0;
+  // Hot core + forks: ~40 tiny per-segment strokes; per-op shadow here was the
+  // bolt's frame cost — glow them via one scratch blit instead.
+  var boltCore = function (c2) {
+    c2.lineCap = "round"; c2.lineJoin = "round";
+    c2.strokeStyle = tfxHot(color, 0.65, 1); c2.lineWidth = 1.6;
+    for (var c = 1; c < m; c++) {
+      if (af[c] <= 0.04) continue;
+      tfxAlpha(c2, af[c]);
+      c2.beginPath(); c2.moveTo(px[c - 1], py[c - 1]); c2.lineTo(px[c], py[c]); c2.stroke();
     }
-  }
+    var forks = Math.round(FORKS);
+    if (forks > 0) {
+      c2.lineWidth = 1.1; c2.strokeStyle = tfxRGBA(color, 0.8);
+      var gap = Math.max(2, Math.floor(m / (forks * 2 + 1)));
+      for (var s2 = 2; s2 < m - 1; s2 += gap) {
+        if (af[s2] < 0.3) continue;
+        var t2 = tfxTangent(verts, idx[s2]);
+        var dir = (tfxHash(verts[idx[s2]].t + fstep * 51) < 0.5) ? 1 : -1;
+        var fl = 8 + tfxHash(verts[idx[s2]].t + fstep) * 12;
+        tfxAlpha(c2, af[s2] * 0.7);
+        c2.beginPath(); c2.moveTo(px[s2], py[s2]);
+        c2.lineTo(px[s2] - t2.y * fl * dir + t2.x * fl * 0.4, py[s2] + t2.x * fl * dir + t2.y * fl * 0.4);
+        c2.stroke();
+      }
+    }
+  };
+  if (tfxGlow()) { tfxGlowBlit(ctx, verts, color, GLOW * 0.5, AMP + 24, null, boltCore); }
+  else { boltCore(ctx); }
   ctx.restore();
 }
 
@@ -846,24 +917,31 @@ function drawNeonTrail(ctx, verts, color, now, fadeMs, anim) {
   var WIDTH = TP('neon','WIDTH',8), GLOW = TP('neon','GLOW',11);
   var bucketMs = fadeMs / TFX_BUCKETS;
   ctx.save(); ctx.lineCap = "round"; ctx.lineJoin = "round";
-  if (tfxGlow()) { ctx.shadowColor = color; ctx.shadowBlur = GLOW; }
-  function strokeBuckets(width, style) {
-    ctx.lineWidth = width; ctx.strokeStyle = style;
+  // Each pass is ~TFX_BUCKETS alpha-faded strokes; with per-op shadowBlur the two
+  // passes tanked with several wearers. Paint each pass unshadowed and glow it via
+  // one scratch blit per pass.
+  function strokeBuckets(c, width, style) {
+    c.lineCap = "round"; c.lineJoin = "round";
+    c.lineWidth = width; c.strokeStyle = style;
     for (var b = 0; b < TFX_BUCKETS; b++) {
-      tfxAlpha(ctx, (1 - (b + 0.5) / TFX_BUCKETS));
+      tfxAlpha(c, (1 - (b + 0.5) / TFX_BUCKETS));
       var run = false;
       for (var i = 1; i < n; i++) {
         var age = now - verts[i].t; var seg = (age >= fadeMs) ? TFX_BUCKETS : Math.floor(age / bucketMs);
-        if (seg !== b) { if (run) { ctx.stroke(); run = false; } continue; }
-        if (!run) { ctx.beginPath(); ctx.moveTo(verts[i - 1].x, verts[i - 1].y); run = true; }
-        ctx.lineTo(verts[i].x, verts[i].y);
+        if (seg !== b) { if (run) { c.stroke(); run = false; } continue; }
+        if (!run) { c.beginPath(); c.moveTo(verts[i - 1].x, verts[i - 1].y); run = true; }
+        c.lineTo(verts[i].x, verts[i].y);
       }
-      if (run) ctx.stroke();
+      if (run) c.stroke();
     }
   }
-  strokeBuckets(WIDTH, tfxRGBA(color, 0.32));
-  if (tfxGlow()) ctx.shadowBlur = GLOW * 0.4;
-  strokeBuckets(Math.max(1.5, WIDTH * 0.28), tfxHot(color, 0.7, 1));
+  if (tfxGlow()) {
+    tfxGlowBlit(ctx, verts, color, GLOW, WIDTH, null, function (c) { strokeBuckets(c, WIDTH, tfxRGBA(color, 0.32)); });
+    tfxGlowBlit(ctx, verts, color, GLOW * 0.4, WIDTH, null, function (c) { strokeBuckets(c, Math.max(1.5, WIDTH * 0.28), tfxHot(color, 0.7, 1)); });
+  } else {
+    strokeBuckets(ctx, WIDTH, tfxRGBA(color, 0.32));
+    strokeBuckets(ctx, Math.max(1.5, WIDTH * 0.28), tfxHot(color, 0.7, 1));
+  }
   ctx.restore();
 }
 
@@ -873,16 +951,23 @@ function drawRippleTrail(ctx, verts, color, now, fadeMs, anim) {
   var SPACING = TP('ripple','SPACING',21), GLOW = TP('ripple','GLOW',3);
   var interval = Math.max(20, fadeMs / SPACING);
   ctx.save();
-  if (tfxGlow()) { ctx.shadowColor = color; ctx.shadowBlur = GLOW; }
-  ctx.strokeStyle = color;
-  tfxForEachParticle(verts, now, fadeMs, interval, function (v, ts, age) {
-    var life = tfxClamp01(age / fadeMs);
-    var R = 4 + life * 46;
-    var alpha = tfxClamp01(1 - life) * 0.8; if (alpha <= 0.03) return;
-    tfxAlpha(ctx, alpha); ctx.lineWidth = Math.max(1, 2.5 * (1 - life));
-    ctx.beginPath(); ctx.arc(v.x, v.y, R, 0, TFX_TAU); ctx.stroke();
-  });
+  // ~20 expanding ring strokes per frame; even GLOW 3 per-op shadows added an
+  // intermediate surface per ring. One scratch blit carries the glow instead.
+  var rippleRings = function (c) {
+    c.strokeStyle = color;
+    tfxForEachParticle(verts, now, fadeMs, interval, function (v, ts, age) {
+      var life = tfxClamp01(age / fadeMs);
+      var R = 4 + life * 46;
+      var alpha = tfxClamp01(1 - life) * 0.8; if (alpha <= 0.03) return;
+      tfxAlpha(c, alpha); c.lineWidth = Math.max(1, 2.5 * (1 - life));
+      c.beginPath(); c.arc(v.x, v.y, R, 0, TFX_TAU); c.stroke();
+    });
+  };
+  if (tfxGlow()) { tfxGlowBlit(ctx, verts, color, GLOW, 54, null, rippleRings); }
+  else { rippleRings(ctx); }
   var head = verts[n - 1];
+  // Head ping: single op, direct shadow stays cheap.
+  if (tfxGlow()) { ctx.shadowColor = color; ctx.shadowBlur = GLOW; }
   tfxAlpha(ctx, 0.9); ctx.fillStyle = tfxHot(color, 0.5, 1);
   ctx.beginPath(); ctx.arc(head.x, head.y, 2.4, 0, TFX_TAU); ctx.fill();
   ctx.restore();
@@ -943,55 +1028,64 @@ function drawFoundersFlareTrail(ctx, verts, color, now, fadeMs, anim) {
     nx[j] = -tan.y; ny[j] = tan.x;
   }
   ctx.save();
-  if (tfxGlow()) { ctx.shadowColor = gold; ctx.shadowBlur = GLOW; }
   ctx.lineJoin = "round";
-  ctx.fillStyle = gold;
-  // Molten body ribbon.
-  for (var s = 1; s < m; s++) {
-    var alpha = af[s] * 0.55;
-    if (alpha <= 0.02) continue;
-    var p0 = verts[idx[s - 1]], p1 = verts[idx[s]];
-    tfxAlpha(ctx, alpha);
-    ctx.beginPath();
-    ctx.moveTo(p0.x + nx[s - 1] * hw[s - 1], p0.y + ny[s - 1] * hw[s - 1]);
-    ctx.lineTo(p1.x + nx[s] * hw[s], p1.y + ny[s] * hw[s]);
-    ctx.lineTo(p1.x - nx[s] * hw[s], p1.y - ny[s] * hw[s]);
-    ctx.lineTo(p0.x - nx[s - 1] * hw[s - 1], p0.y - ny[s - 1] * hw[s - 1]);
-    ctx.closePath();
-    ctx.fill();
-  }
-  // White-hot inner core.
-  if (tfxGlow()) ctx.shadowBlur = GLOW * 0.45;
-  var coreStart = -1;
-  for (var c = 0; c < m; c++) { if (af[c] > 0.3) { coreStart = c; break; } }
-  if (coreStart >= 0 && coreStart < m - 1) {
-    tfxAlpha(ctx, 0.9);
-    ctx.strokeStyle = FLARE_HOT;
-    ctx.lineCap = "round";
-    ctx.lineWidth = Math.max(0.9, WIDTH * 0.16);
-    ctx.beginPath();
-    ctx.moveTo(verts[idx[coreStart]].x, verts[idx[coreStart]].y);
-    for (var cc = coreStart + 1; cc < m; cc++) ctx.lineTo(verts[idx[cc]].x, verts[idx[cc]].y);
-    ctx.stroke();
-  }
-  // Drifting ember flecks — deterministic per vertex (tfxHash), rising as they age.
-  ctx.fillStyle = gold;
-  for (var e = 1; e < m; e += 1) {
-    var fe = af[e];
-    if (fe <= 0.05) continue;
-    var h1 = tfxHash(verts[idx[e]].t);
-    if (h1 < 0.45) continue; // sparse — only some segments spit an ember
-    var age = 1 - fe;
-    var ev = verts[idx[e]];
-    var perp = (h1 - 0.5) * WIDTH * 1.6;
-    var rise = age * WIDTH * 1.1;
-    var ex = ev.x + nx[e] * perp;
-    var ey = ev.y + ny[e] * perp - rise;
-    var twinkle = 0.5 + 0.5 * Math.sin(anim * 0.02 + h1 * 31.0);
-    tfxAlpha(ctx, fe * twinkle * 0.9);
-    var er = Math.max(0.6, (1.8 * fe) * (0.6 + 0.4 * h1));
-    ctx.beginPath(); ctx.arc(ex, ey, er, 0, TFX_TAU); ctx.fill();
-  }
+  // Molten body ribbon: ~50 alpha-faded quad fills — the per-op shadowBlur here made
+  // this the single most expensive trail. Glow it via ONE shadowed scratch blit.
+  var flareRibbon = function (c) {
+    c.lineJoin = "round";
+    c.fillStyle = gold;
+    for (var s = 1; s < m; s++) {
+      var alpha = af[s] * 0.55;
+      if (alpha <= 0.02) continue;
+      var p0 = verts[idx[s - 1]], p1 = verts[idx[s]];
+      tfxAlpha(c, alpha);
+      c.beginPath();
+      c.moveTo(p0.x + nx[s - 1] * hw[s - 1], p0.y + ny[s - 1] * hw[s - 1]);
+      c.lineTo(p1.x + nx[s] * hw[s], p1.y + ny[s] * hw[s]);
+      c.lineTo(p1.x - nx[s] * hw[s], p1.y - ny[s] * hw[s]);
+      c.lineTo(p0.x - nx[s - 1] * hw[s - 1], p0.y - ny[s - 1] * hw[s - 1]);
+      c.closePath();
+      c.fill();
+    }
+  };
+  if (tfxGlow()) { tfxGlowBlit(ctx, verts, gold, GLOW, WIDTH, null, flareRibbon); }
+  else { flareRibbon(ctx); }
+  // White-hot inner core + ember flecks, both glowing at the softer radius — the
+  // core is one stroke but the embers are ~20 small fills, so share a scratch blit.
+  var flareCoreEmbers = function (c2) {
+    var coreStart = -1;
+    for (var c = 0; c < m; c++) { if (af[c] > 0.3) { coreStart = c; break; } }
+    if (coreStart >= 0 && coreStart < m - 1) {
+      tfxAlpha(c2, 0.9);
+      c2.strokeStyle = FLARE_HOT;
+      c2.lineCap = "round";
+      c2.lineWidth = Math.max(0.9, WIDTH * 0.16);
+      c2.beginPath();
+      c2.moveTo(verts[idx[coreStart]].x, verts[idx[coreStart]].y);
+      for (var cc = coreStart + 1; cc < m; cc++) c2.lineTo(verts[idx[cc]].x, verts[idx[cc]].y);
+      c2.stroke();
+    }
+    // Drifting ember flecks — deterministic per vertex (tfxHash), rising as they age.
+    c2.fillStyle = gold;
+    for (var e = 1; e < m; e += 1) {
+      var fe = af[e];
+      if (fe <= 0.05) continue;
+      var h1 = tfxHash(verts[idx[e]].t);
+      if (h1 < 0.45) continue; // sparse — only some segments spit an ember
+      var age = 1 - fe;
+      var ev = verts[idx[e]];
+      var perp = (h1 - 0.5) * WIDTH * 1.6;
+      var rise = age * WIDTH * 1.1;
+      var ex = ev.x + nx[e] * perp;
+      var ey = ev.y + ny[e] * perp - rise;
+      var twinkle = 0.5 + 0.5 * Math.sin(anim * 0.02 + h1 * 31.0);
+      tfxAlpha(c2, fe * twinkle * 0.9);
+      var er = Math.max(0.6, (1.8 * fe) * (0.6 + 0.4 * h1));
+      c2.beginPath(); c2.arc(ex, ey, er, 0, TFX_TAU); c2.fill();
+    }
+  };
+  if (tfxGlow()) { tfxGlowBlit(ctx, verts, gold, GLOW * 0.45, WIDTH * 2, null, flareCoreEmbers); }
+  else { flareCoreEmbers(ctx); }
   // Radiant head — bright sun-like blob.
   var head = verts[n - 1];
   var R = WIDTH * 1.0;
