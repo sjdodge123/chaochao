@@ -121,3 +121,4 @@ changed_maps.txt
 
 # Local-only portal embed test (see docs/portal-submission-checklist.md)
 embed-test.html
+perf-harness-report.jsonl

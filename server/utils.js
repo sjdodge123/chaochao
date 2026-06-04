@@ -16,6 +16,12 @@ c.port = process.env.PORT || c.port;
 // gated — set UNLOCK_ALL_COSMETICS=true only on a local test server. Delivered to the
 // client in the config payload as `config.unlockAllCosmetics`.
 c.unlockAllCosmetics = (process.env.UNLOCK_ALL_COSMETICS === 'true');
+// Dev/testing seam: on-device render-perf harness (client/scripts/perfharness.js).
+// When PERF_HARNESS=1 (or true) the served config carries `perfHarness: true` — one of
+// the two activation conditions for the in-page sampler (the other is ?perfharness=1 in
+// the page URL) — and index.js registers the dev-only POST /__perf/report sink. Default
+// OFF so the harness can never activate in prod.
+c.perfHarness = (process.env.PERF_HARNESS === '1' || process.env.PERF_HARNESS === 'true');
 
 // Test-only config override seam (CI perf harness). When CHAO_PERF_OVERRIDE is a
 // JSON object, deep-merge it over the loaded config so a separate-process server
