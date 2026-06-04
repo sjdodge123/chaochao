@@ -303,18 +303,23 @@ class Game {
 			this.resetLobbyTimer();
 			return;
 		}
+		//Preview play-test: the solo creator has no one to rally on the lobby
+		//start button, so skip the lobby and head straight to the race gate.
+		//Checked BEFORE the maintenance drain: previews never hold up a deploy
+		//(countActiveRaces skips them), so a drain shouldn't freeze a creator's
+		//solo test either.
+		if (this.gameBoard.isPreview) {
+			this.startGated();
+			return;
+		}
 		//Maintenance drain: a restart is pending, so hold the room in the lobby —
 		//no new race may start (one already underway elsewhere is left to finish).
 		//Reset the start-button timer so the race doesn't fire the instant the
-		//block lifts; players re-rally on the button instead.
+		//block lifts; players re-rally on the button instead. (startGated() has
+		//its own backstop gate; this earlier check just keeps the button timer
+		//from spinning pointlessly.)
 		if (maintenance.isRaceBlocked()) {
 			this.resetLobbyTimer();
-			return;
-		}
-		//Preview play-test: the solo creator has no one to rally on the lobby
-		//start button, so skip the lobby and head straight to the race gate.
-		if (this.gameBoard.isPreview) {
-			this.startGated();
 			return;
 		}
 		//If majority of players stand on the gamestart button start the timer
@@ -338,9 +343,13 @@ class Game {
 		this.gatedTimer = Date.now();
 	}
 	checkNewRaceTimer() {
-		//Maintenance drain: freeze the between-rounds countdown — the next race
-		//of the series doesn't start while a server restart is pending.
+		//Maintenance drain: the next race of the series doesn't start while a
+		//server restart is pending. Null the timer (don't just early-return) so
+		//wall-clock elapsed during the block is discarded and the room gets a
+		//fresh full countdown when the block lifts — mirrors resetLobbyTimer()
+		//in checkGatedStart.
 		if (maintenance.isRaceBlocked()) {
+			this.newRaceTimer = null;
 			return;
 		}
 		if (this.newRaceTimer != null) {
@@ -737,6 +746,14 @@ class Game {
 		messenger.deliverRoomToasts(this.playerList);
 	}
 	startGated() {
+		//Structural maintenance gate at the single choke point every race start
+		//flows through, so a future caller can't bypass the drain. Callers are
+		//tick-driven check* functions that re-arm and retry, so a silent no-op
+		//just holds the room until the block lifts. Previews are exempt: they
+		//never delay a deploy and the restart cuts them regardless.
+		if (!this.gameBoard.isPreview && maintenance.isRaceBlocked()) {
+			return;
+		}
 		console.log("Start Gated");
 		this.locked = true;
 		// Leaving the lobby tutorial (this is the lobby->race transition; later rounds
