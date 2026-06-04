@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- Lobby station menus (Skins, AI Bots, Playlist) are much easier to read: when you're the only one with a menu open it now draws nearly twice as large — bigger skin cells, labels and the Equipped preview. With two menus open they share the screen at a medium size, and the 3-4 player couch grid keeps the familiar compact layout, so everything always fits on screen without overlapping.
 
 ## v0.28.4 — 2026-06-04
 

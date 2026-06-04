@@ -801,12 +801,14 @@ function drawLobbyHubHud() {
     var openPanels = [];
     for (var os = 0; os < localPlayers.length; os++) {
         var olp = localPlayers[os];
-        if (olp) { olp._panelDock = null; }
+        if (olp) { olp._panelDock = null; olp._panelScale = null; }
         if (olp && olp.stationPanel && olp.myID != null &&
             typeof playerList !== "undefined" && playerList && playerList[olp.myID]) {
             openPanels.push(olp);
         }
     }
+    // Scales FIRST (the dock layout reads the scaled sizes), then the dock cells.
+    if (openPanels.length >= 1) { assignPanelScales(openPanels); }
     if (openPanels.length >= 2) { assignPanelDocks(openPanels); }
     for (var slot = 0; slot < localPlayers.length; slot++) {
         var lp = localPlayers[slot];
@@ -826,28 +828,74 @@ function drawLobbyHubHud() {
     }
 }
 
-// The drawn size of a slot's open panel (mirrors drawStationPanel's per-kind sizing) and
-// its full FOOTPRINT width — the skin picker carries the Equipped preview docked beside
-// it, so overlap layout must reserve that width too.
-function stationPanelSize(lp) {
-    var kind = lp.stationPanel.kind;
+// The BASE (compact, scale-1) size of a panel kind (mirrors drawStationPanel's per-kind
+// sizing) and its full FOOTPRINT width — the skin picker carries the Equipped preview
+// docked beside it, so overlap layout must reserve that width too.
+function stationPanelBaseSize(kind) {
     var w = 250, h = 132;
     if (kind === "playlist") { w = 280; h = 150; }
     if (kind === "skin") { w = 300; h = skinPanelHeight(); }
     var fw = (kind === "skin") ? (w + 8 + EQUIP_PREVIEW_W) : w;
     return { w: w, h: h, fw: fw };
 }
+// The drawn size of a slot's open panel THIS frame: the base size times the slot's
+// adaptive scale (set per-frame by assignPanelScales). Single sizing source — the dock
+// layout and the panel renderer both read this, so they can never disagree.
+function stationPanelSize(lp) {
+    var base = stationPanelBaseSize(lp.stationPanel.kind);
+    var s = (lp._panelScale > 0) ? lp._panelScale : 1;
+    return { w: base.w * s, h: base.h * s, fw: base.fw * s, scale: s };
+}
+// --- adaptive panel scale ------------------------------------------------------
+// Panels grow when fewer are open at once: a lone panel gets a generous readable
+// size (~1.8x, ≈3x the footprint), two side-by-side panels go medium, and the
+// 3-4-player couch grid keeps the compact original size. Every scale is then
+// fit-clamped against the panel's dock cell so a scaled panel (plus the skin
+// picker's side preview) always fits its cell with margin — fonts, cells, and hit
+// rects all derive from the same scale (see hubFont / the S param threading).
+var PANEL_SCALE_LARGE = 1.8;
+var PANEL_SCALE_MEDIUM = 1.4;
+var PANEL_DOCK_MARGIN = 24; // logical px kept free around a panel inside its dock cell
+function panelTierScale(openCount) {
+    if (openCount <= 1) { return PANEL_SCALE_LARGE; }
+    if (openCount === 2) { return PANEL_SCALE_MEDIUM; }
+    return 1;
+}
+// The dock grid for N open panels: a lone panel owns the whole screen (it stays
+// kart-anchored, the cell only bounds its scale); two sit side by side; three/four
+// take a 2×2 grid.
+function panelDockGrid(openCount) {
+    if (openCount <= 1) { return { cols: 1, rows: 1 }; }
+    return { cols: 2, rows: (openCount <= 2) ? 1 : 2 };
+}
+// Set each open panel's per-frame scale: the count tier, clamped so the panel's full
+// footprint fits its dock cell with PANEL_DOCK_MARGIN to spare.
+function assignPanelScales(open) {
+    var grid = panelDockGrid(open.length);
+    var cw = LOGICAL_WIDTH / grid.cols;
+    var ch = LOGICAL_HEIGHT / grid.rows;
+    var tier = panelTierScale(open.length);
+    for (var i = 0; i < open.length; i++) {
+        var base = stationPanelBaseSize(open[i].stationPanel.kind);
+        var fit = Math.min((cw - PANEL_DOCK_MARGIN) / base.fw, (ch - PANEL_DOCK_MARGIN) / base.h);
+        open[i]._panelScale = Math.min(tier, fit);
+    }
+}
+// A panel font scaled by the slot's panel scale, snapped to half-pixels so text stays
+// on a crisp size instead of a long fractional one.
+function hubFont(S, px, bold) {
+    return (bold ? "bold " : "") + (Math.round(px * S * 2) / 2) + "px sans-serif";
+}
 // Dock 2+ open panels into fixed screen cells, in seat order: one row of two, or a 2×2
 // grid for three/four. Each panel's FOOTPRINT (panel + side preview) is centred in its
 // cell, so the skin picker's preview never crosses into a neighbour's cell.
 function assignPanelDocks(open) {
-    var cols = 2;
-    var rows = (open.length <= 2) ? 1 : 2;
-    var cw = LOGICAL_WIDTH / cols;
-    var chH = LOGICAL_HEIGHT / rows;
+    var grid = panelDockGrid(open.length);
+    var cw = LOGICAL_WIDTH / grid.cols;
+    var chH = LOGICAL_HEIGHT / grid.rows;
     for (var i = 0; i < open.length; i++) {
         var sz = stationPanelSize(open[i]);
-        var col = i % cols, row = Math.floor(i / cols);
+        var col = i % grid.cols, row = Math.floor(i / grid.cols);
         var fx = col * cw + (cw - sz.fw) / 2;
         var fy = row * chH + (chH - sz.h) / 2;
         open[i]._panelDock = {
@@ -1046,10 +1094,10 @@ function drawStationPrompt(lp, sp) {
     var hint = slotOpenHint(lp);
     var label = hint + "  •  " + stationTitle(st.kind);
     gameContext.save();
-    gameContext.font = "bold 15px sans-serif";
+    gameContext.font = "bold 16px sans-serif";
     var tw = gameContext.measureText(label).width;
-    var w = tw + 24;
-    var h = 30;
+    var w = tw + 26;
+    var h = 32;
     var x = lhClamp(sp.x - w / 2, 6, LOGICAL_WIDTH - w - 6);
     var y = lhClamp(sp.y - 78, 6, LOGICAL_HEIGHT - h - 6);
     gameContext.globalAlpha = 0.92;
@@ -1073,9 +1121,11 @@ function drawStationPrompt(lp, sp) {
 
 function drawStationPanel(lp, sp) {
     var kind = lp.stationPanel.kind;
-    // Sizing lives in stationPanelSize (shared with the co-op dock layout).
+    // Sizing lives in stationPanelSize (shared with the co-op dock layout); S is the
+    // adaptive scale every internal coordinate/font multiplies by, so the drawn panel —
+    // and the hit rects pushed from the SAME coords — stay in final logical space.
     var sz = stationPanelSize(lp);
-    var w = sz.w, h = sz.h;
+    var w = sz.w, h = sz.h, S = sz.scale;
     // Anchored over the kart normally; when 2+ panels are open in couch co-op the dock
     // layout (assignPanelDocks) pins each to its own screen cell so none overlap.
     var x, y;
@@ -1086,6 +1136,7 @@ function drawStationPanel(lp, sp) {
         x = lhClamp(sp.x - w / 2, 8, LOGICAL_WIDTH - w - 8);
         y = lhClamp(sp.y - h - 46, 8, LOGICAL_HEIGHT - h - 8);
     }
+    lp._panelRect = { x: x, y: y, w: w, h: h }; // drawn rect (headless geometry checks)
     var tint = (lp.myID != null && playerList && playerList[lp.myID]) ? playerList[lp.myID].color : "#fff";
     var hit = { prompt: null, options: [], close: null };
 
@@ -1111,26 +1162,26 @@ function drawStationPanel(lp, sp) {
     gameContext.fillStyle = "#fff";
     gameContext.textAlign = "left";
     gameContext.textBaseline = "middle";
-    gameContext.font = "bold 18px sans-serif";
+    gameContext.font = hubFont(S, 18, true);
     var titleStr = stationGlyph(kind) + "  " + stationTitle(kind);
-    gameContext.fillText(titleStr, x + 14, y + 22);
+    gameContext.fillText(titleStr, x + 14 * S, y + 22 * S);
     // Docked panels sit away from their kart, so tag whose panel it is: a "P<seat>" chip
     // in the kart's colour right after the title (the border tint alone is easy to miss).
     if (lp._panelDock) {
-        var chipX = x + 14 + gameContext.measureText(titleStr).width + 10;
+        var chipX = x + 14 * S + gameContext.measureText(titleStr).width + 10 * S;
         gameContext.fillStyle = tint;
-        lhRoundRect(gameContext, chipX, y + 11, 30, 20, 6);
+        lhRoundRect(gameContext, chipX, y + 11 * S, 30 * S, 20 * S, 6 * S);
         gameContext.fill();
         gameContext.fillStyle = "#000";
-        gameContext.font = "bold 12px sans-serif";
+        gameContext.font = hubFont(S, 12, true);
         gameContext.textAlign = "center";
-        gameContext.fillText("P" + (lp.slot + 1), chipX + 15, y + 21.5);
+        gameContext.fillText("P" + (lp.slot + 1), chipX + 15 * S, y + 21.5 * S);
         gameContext.textAlign = "left";
     }
 
     // Close (✕) — top-right.
-    var cl = { x: x + w - 30, y: y + 8, w: 24, h: 24 };
-    gameContext.font = "bold 18px sans-serif";
+    var cl = { x: x + w - 30 * S, y: y + 8 * S, w: 24 * S, h: 24 * S };
+    gameContext.font = hubFont(S, 18, true);
     gameContext.textAlign = "center";
     gameContext.fillStyle = "#bbb";
     gameContext.fillText("✕", cl.x + cl.w / 2, cl.y + cl.h / 2 + 1);
@@ -1139,30 +1190,30 @@ function drawStationPanel(lp, sp) {
     // just left of the ✕, so pad players know how to back out. Touch/keyboard see only the ✕.
     var closeGlyph = slotCloseGlyph(lp);
     if (closeGlyph) {
-        var bcx = cl.x - 16, bcy = cl.y + cl.h / 2;
+        var bcx = cl.x - 16 * S, bcy = cl.y + cl.h / 2;
         gameContext.beginPath();
-        gameContext.arc(bcx, bcy, 9, 0, 2 * Math.PI);
+        gameContext.arc(bcx, bcy, 9 * S, 0, 2 * Math.PI);
         gameContext.fillStyle = "rgba(0,0,0,0.45)";
         gameContext.fill();
         gameContext.lineWidth = 1.5;
         gameContext.strokeStyle = "rgba(255,255,255,0.55)";
         gameContext.stroke();
         gameContext.fillStyle = "#fff";
-        gameContext.font = "bold 11px sans-serif";
+        gameContext.font = hubFont(S, 11, true);
         gameContext.textAlign = "center";
         gameContext.textBaseline = "middle";
         gameContext.fillText(closeGlyph, bcx, bcy + 0.5);
     }
 
     if (kind === "ai") {
-        drawAIPanelBody(x, y, w, h, hit);
+        drawAIPanelBody(x, y, w, h, hit, S);
     } else if (kind === "playlist") {
-        drawPlaylistPanelBody(x, y, w, h, hit);
+        drawPlaylistPanelBody(x, y, w, h, hit, S);
     } else if (kind === "skin") {
-        drawSkinPanelBody(lp, x, y, w, h, hit);
-        drawEquippedPreview(lp, x, y, w, h, tint);
+        drawSkinPanelBody(lp, x, y, w, h, hit, S);
+        drawEquippedPreview(lp, x, y, w, h, tint, S);
     } else {
-        drawStubPanelBody(x, y, w, h, "Coming soon");
+        drawStubPanelBody(x, y, w, h, "Coming soon", S);
     }
     gameContext.restore();
     stationHudHit[lp.slot] = hit;
@@ -1183,17 +1234,19 @@ var EQUIP_SLOT_ROWS = [
     { key: 'border', label: 'Border' },
     { key: 'trail', label: 'Trail' }
 ];
-function drawEquippedPreview(lp, px0, py0, pw0, ph0, tint) {
+function drawEquippedPreview(lp, px0, py0, pw0, ph0, tint, S) {
     var p = (lp && lp.myID != null && typeof playerList !== "undefined" && playerList) ? playerList[lp.myID] : null;
     if (!p) { return; }
-    var pad = 12, vpH = 84, rowH = 16;
-    var w = EQUIP_PREVIEW_W;
-    var h = 30 + vpH + 10 + EQUIP_SLOT_ROWS.length * rowH + pad;
+    if (!(S > 0)) { S = 1; }
+    var pad = 12 * S, vpH = 84 * S, rowH = 16 * S;
+    var w = EQUIP_PREVIEW_W * S;
+    var h = (30 + 10) * S + vpH + EQUIP_SLOT_ROWS.length * rowH + pad;
     // Dock to the right of the picker; flip to the left edge when it'd run off screen.
-    var x = px0 + pw0 + 8;
-    if (x + w > LOGICAL_WIDTH - 8) { x = px0 - w - 8; }
+    var x = px0 + pw0 + 8 * S;
+    if (x + w > LOGICAL_WIDTH - 8) { x = px0 - w - 8 * S; }
     x = lhClamp(x, 8, LOGICAL_WIDTH - w - 8);
     var y = lhClamp(py0, 8, LOGICAL_HEIGHT - h - 8);
+    lp._equipRect = { x: x, y: y, w: w, h: h }; // drawn rect (headless geometry checks)
     // Same chrome as the station panels (shadowed near-opaque card, kart-tint border).
     gameContext.save();
     gameContext.shadowColor = "rgba(0,0,0,0.55)";
@@ -1209,27 +1262,27 @@ function drawEquippedPreview(lp, px0, py0, pw0, ph0, tint) {
     gameContext.strokeStyle = tint;
     gameContext.stroke();
     gameContext.fillStyle = "#fff";
-    gameContext.font = "bold 13px sans-serif";
+    gameContext.font = hubFont(S, 13, true);
     gameContext.textAlign = "left";
     gameContext.textBaseline = "middle";
-    gameContext.fillText("Equipped", x + pad, y + 17);
+    gameContext.fillText("Equipped", x + pad, y + 17 * S);
     // --- live kart viewport ---------------------------------------------------
-    var vx = x + 9, vy = y + 30, vw = w - 18;
+    var vx = x + 9 * S, vy = y + 30 * S, vw = w - 18 * S;
     gameContext.fillStyle = "rgba(255,255,255,0.05)";
-    lhRoundRect(gameContext, vx, vy, vw, vpH, 8);
+    lhRoundRect(gameContext, vx, vy, vw, vpH, 8 * S);
     gameContext.fill();
     // try/catch/finally so a thrown draw (a future skin painter / sprite path) can't leak
     // the viewport clip onto the rest of the frame or kill the rAF loop — swallowed like
     // the recap's montage draws: a broken preview must not take the lobby HUD down.
     gameContext.save();
     try {
-    lhRoundRect(gameContext, vx, vy, vw, vpH, 8);
+    lhRoundRect(gameContext, vx, vy, vw, vpH, 8 * S);
     gameContext.clip();
     // Synthetic player wearing THIS kart's live cosmetic fields, at preview scale. Render
     // goes through the game's own chokepoints, so it matches the racing look exactly.
     var prev = {
         color: p.color, cart: p.cart, pattern: p.pattern, border: p.border,
-        avatarUrl: p.avatarUrl, radius: 20, onFire: 0, punchAnimAt: null
+        avatarUrl: p.avatarUrl, radius: 20 * S, onFire: 0, punchAnimAt: null
     };
     var kx = vx + vw * 0.7, ky = vy + vpH * 0.52;
     // Trail FIRST (it flows behind the kart): the real effect on a gentle arc sweeping in
@@ -1242,7 +1295,7 @@ function drawEquippedPreview(lp, px0, py0, pw0, ph0, tint) {
         var u = ti / STEPS; // 0 = oldest (left), 1 = at the kart
         verts.push({
             x: kx - (1 - u) * span,
-            y: ky + Math.sin(u * Math.PI * 1.25 + nowMs / 600) * 7,
+            y: ky + Math.sin(u * Math.PI * 1.25 + nowMs / 600) * 7 * S,
             t: nowMs - fadeMs * (1 - u) * 0.85
         });
     }
@@ -1250,7 +1303,7 @@ function drawEquippedPreview(lp, px0, py0, pw0, ph0, tint) {
         paintTrailFx(gameContext, trailId, verts, p.color, { fadeMs: fadeMs });
     if (!drewTrail) {
         // Default "Basic" trail (or unknown id): the plain stroke, like the picker default.
-        gameContext.strokeStyle = p.color; gameContext.lineWidth = 3; gameContext.lineCap = "round";
+        gameContext.strokeStyle = p.color; gameContext.lineWidth = 3 * S; gameContext.lineCap = "round";
         gameContext.globalAlpha = 0.6;
         gameContext.beginPath();
         gameContext.moveTo(verts[0].x, verts[0].y);
@@ -1285,24 +1338,24 @@ function drawEquippedPreview(lp, px0, py0, pw0, ph0, tint) {
     } catch (e) { /* keep the lobby HUD alive — see comment above */ }
     finally { gameContext.restore(); } // viewport clip
     // --- slot rows --------------------------------------------------------------
-    var ry = vy + vpH + 10;
+    var ry = vy + vpH + 10 * S;
     gameContext.textBaseline = "middle";
     for (var r = 0; r < EQUIP_SLOT_ROWS.length; r++) {
         var row = EQUIP_SLOT_ROWS[r];
         var cy = ry + r * rowH + rowH / 2;
         gameContext.fillStyle = "#9aa";
-        gameContext.font = "10px sans-serif";
+        gameContext.font = hubFont(S, 10);
         gameContext.textAlign = "left";
         gameContext.fillText(row.label, x + pad, cy);
         if (row.key === 'color') {
             // Swatch (the colour tints every cosmetic); flag the avatar photo when worn.
             gameContext.fillStyle = p.color || "#ccc";
-            lhRoundRect(gameContext, x + pad + 48, cy - 5.5, 24, 11, 3);
+            lhRoundRect(gameContext, x + pad + 48 * S, cy - 5.5 * S, 24 * S, 11 * S, 3 * S);
             gameContext.fill();
             if (prev.avatarUrl) {
                 gameContext.fillStyle = "#f4c542";
-                gameContext.font = "10px sans-serif";
-                gameContext.fillText("+ Avatar", x + pad + 78, cy);
+                gameContext.font = hubFont(S, 10);
+                gameContext.fillText("+ Avatar", x + pad + 78 * S, cy);
             }
             continue;
         }
@@ -1313,7 +1366,7 @@ function drawEquippedPreview(lp, px0, py0, pw0, ph0, tint) {
         // A pattern stays equipped under a shaped cart but doesn't render — say so.
         var hidden = (row.key === 'pattern' && id && hasCartShape);
         gameContext.fillStyle = hidden ? "rgba(255,255,255,0.4)" : (id ? "#ffd34d" : "rgba(255,255,255,0.75)");
-        gameContext.font = (id ? "bold " : "") + "10px sans-serif";
+        gameContext.font = hubFont(S, 10, !!id);
         gameContext.textAlign = "right";
         gameContext.fillText(name + (hidden ? " (hidden)" : ""), x + w - pad, cy);
     }
@@ -1321,18 +1374,19 @@ function drawEquippedPreview(lp, px0, py0, pw0, ph0, tint) {
 }
 
 // AI panel body: a ◄ value ► stepper plus the "applies next race" caption.
-function drawAIPanelBody(x, y, w, h, hit) {
-    var midY = y + 70;
+function drawAIPanelBody(x, y, w, h, hit, S) {
+    if (!(S > 0)) { S = 1; }
+    var midY = y + 70 * S;
     // value text, centred
     gameContext.textAlign = "center";
     gameContext.textBaseline = "middle";
     gameContext.fillStyle = "#fff";
-    gameContext.font = "bold 24px sans-serif";
+    gameContext.font = hubFont(S, 24, true);
     gameContext.fillText(aiLevelLabel(), x + w / 2, midY);
     // ◄ / ► buttons
-    var dec = { x: x + 16, y: midY - 20, w: 40, h: 40 };
-    var inc = { x: x + w - 56, y: midY - 20, w: 40, h: 40 };
-    gameContext.font = "bold 28px sans-serif";
+    var dec = { x: x + 16 * S, y: midY - 20 * S, w: 40 * S, h: 40 * S };
+    var inc = { x: x + w - 56 * S, y: midY - 20 * S, w: 40 * S, h: 40 * S };
+    gameContext.font = hubFont(S, 28, true);
     gameContext.fillStyle = "#9cdcff";
     gameContext.fillText("◄", dec.x + dec.w / 2, dec.y + dec.h / 2);
     gameContext.fillText("►", inc.x + inc.w / 2, inc.y + inc.h / 2);
@@ -1340,29 +1394,30 @@ function drawAIPanelBody(x, y, w, h, hit) {
     hit.options.push({ rect: inc, action: "inc" });
     // caption
     gameContext.fillStyle = "#9aa";
-    gameContext.font = "12px sans-serif";
-    gameContext.fillText("applies next race", x + w / 2, y + h - 16);
+    gameContext.font = hubFont(S, 12);
+    gameContext.fillText("applies next race", x + w / 2, y + h - 16 * S);
 }
 
 // Playlist board body: a ◄ name ► stepper through config.playlists, with the
 // map count and a one-line description. Selection is room-wide (last-writer-wins)
 // and applies to the next round's map pick.
-function drawPlaylistPanelBody(x, y, w, h, hit) {
+function drawPlaylistPanelBody(x, y, w, h, hit, S) {
+    if (!(S > 0)) { S = 1; }
     var id = currentPlaylistId();
     var def = playlistDef(id);
     var name = def ? def.name : id;
     var count = playlistCount(id);
-    var midY = y + 62;
+    var midY = y + 62 * S;
     // playlist name, centred
     gameContext.textAlign = "center";
     gameContext.textBaseline = "middle";
     gameContext.fillStyle = "#fff";
-    gameContext.font = "bold 22px sans-serif";
+    gameContext.font = hubFont(S, 22, true);
     gameContext.fillText(name, x + w / 2, midY);
     // ◄ / ► buttons
-    var dec = { x: x + 12, y: midY - 20, w: 40, h: 40 };
-    var inc = { x: x + w - 52, y: midY - 20, w: 40, h: 40 };
-    gameContext.font = "bold 28px sans-serif";
+    var dec = { x: x + 12 * S, y: midY - 20 * S, w: 40 * S, h: 40 * S };
+    var inc = { x: x + w - 52 * S, y: midY - 20 * S, w: 40 * S, h: 40 * S };
+    gameContext.font = hubFont(S, 28, true);
     gameContext.fillStyle = HUB_ACCENT;
     gameContext.fillText("◄", dec.x + dec.w / 2, dec.y + dec.h / 2);
     gameContext.fillText("►", inc.x + inc.w / 2, inc.y + inc.h / 2);
@@ -1371,19 +1426,19 @@ function drawPlaylistPanelBody(x, y, w, h, hit) {
     // map count
     if (count != null) {
         gameContext.fillStyle = "#cfd6dd";
-        gameContext.font = "12px sans-serif";
-        gameContext.fillText(count + (count === 1 ? " map" : " maps"), x + w / 2, midY + 24);
+        gameContext.font = hubFont(S, 12);
+        gameContext.fillText(count + (count === 1 ? " map" : " maps"), x + w / 2, midY + 24 * S);
     }
     // one-line description
     if (def && def.desc) {
         gameContext.fillStyle = "#9aa";
-        gameContext.font = "12px sans-serif";
-        gameContext.fillText(def.desc, x + w / 2, y + h - 30);
+        gameContext.font = hubFont(S, 12);
+        gameContext.fillText(def.desc, x + w / 2, y + h - 30 * S);
     }
     // footer caption
     gameContext.fillStyle = "#9aa";
-    gameContext.font = "12px sans-serif";
-    gameContext.fillText("applies next race", x + w / 2, y + h - 14);
+    gameContext.font = hubFont(S, 12);
+    gameContext.fillText("applies next race", x + w / 2, y + h - 14 * S);
 }
 
 // === Tabbed/paged skin picker ================================================
@@ -1464,28 +1519,30 @@ function cosmeticPickerCompare(lp, a, b) {
     if (la !== lb) { return la - lb; }                                     // unlocked before locked
     return cosmeticUnlockRank(a) - cosmeticUnlockRank(b);                  // then level asc, achievements last
 }
-// Full fixed panel height: title gap + tab row + grid + 🎲 Random row + badge + page row.
+// Full BASE (scale-1) panel height: title gap + tab row + grid + 🎲 Random row + badge +
+// page row. The adaptive scale multiplies this whole stack (see stationPanelSize).
 var SKIN_RANDOM_BTN_H = 24; // 🎲 Random button row height (full panel width — easy touch target)
 function skinPanelHeight() {
     return 38 + 26 + 10 + SKIN_PICKER_ROWS * (SKIN_PICKER_CELLH + 6) + SKIN_RANDOM_BTN_H + 8 + 20 + 24;
 }
 
-function drawSkinPanelBody(lp, x, y, w, h, hit) {
+function drawSkinPanelBody(lp, x, y, w, h, hit, S) {
     var sp = lp.stationPanel;
     if (sp.tab == null) { sp.tab = 'color'; }
     if (sp.region == null) { sp.region = 'grid'; }
+    if (!(S > 0)) { S = 1; }
     skinValidateTab(lp);
-    var pad = 14, gap = 6, cols = SKIN_PICKER_COLS;
+    var pad = 14 * S, gap = 6 * S, cols = SKIN_PICKER_COLS;
     var tabs = skinTabs(lp);
     // tab row. On a controller, reserve a gutter on each side for the LB/RB bumper hints
     // (bumpers switch tabs); touch/keyboard get the full width with no gutters.
-    var tabTop = y + 38, tabH = 26;
+    var tabTop = y + 38 * S, tabH = 26 * S;
     var padType = slotPadType(lp);
-    var gut = padType ? 22 : 0;
+    var gut = padType ? 22 * S : 0;
     if (padType) {
         var bg = padBumperGlyphs(padType);
         gameContext.fillStyle = "rgba(255,255,255,0.7)";
-        gameContext.font = "bold 10px sans-serif";
+        gameContext.font = hubFont(S, 10, true);
         gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
         gameContext.fillText(bg.l, x + pad + gut / 2, tabTop + tabH / 2 + 1);
         gameContext.fillText(bg.r, x + w - pad - gut / 2, tabTop + tabH / 2 + 1);
@@ -1495,13 +1552,13 @@ function drawSkinPanelBody(lp, x, y, w, h, hit) {
         var tx = x + pad + gut + t * tabW;
         var active = tabs[t].key === sp.tab;
         gameContext.fillStyle = active ? "rgba(255,211,77,0.22)" : "rgba(255,255,255,0.10)";
-        lhRoundRect(gameContext, tx + 1, tabTop, tabW - 2, tabH, 6); gameContext.fill();
+        lhRoundRect(gameContext, tx + 1, tabTop, tabW - 2, tabH, 6 * S); gameContext.fill();
         if (sp.region === 'tabs' && active) {
             gameContext.strokeStyle = "#fff"; gameContext.lineWidth = 2;
-            lhRoundRect(gameContext, tx + 1, tabTop, tabW - 2, tabH, 6); gameContext.stroke();
+            lhRoundRect(gameContext, tx + 1, tabTop, tabW - 2, tabH, 6 * S); gameContext.stroke();
         }
         gameContext.fillStyle = active ? "#ffd34d" : "rgba(255,255,255,0.82)";
-        gameContext.font = (active ? "bold " : "") + "11px sans-serif";
+        gameContext.font = hubFont(S, 11, active);
         gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
         gameContext.fillText(tabs[t].label, tx + tabW / 2, tabTop + tabH / 2 + 1);
         hit.options.push({ rect: { x: tx, y: tabTop, w: tabW, h: tabH }, action: "tab:" + tabs[t].key });
@@ -1514,51 +1571,51 @@ function drawSkinPanelBody(lp, x, y, w, h, hit) {
     var page = Math.floor(sp.cursor / perPage);
     var pageCount = Math.max(1, Math.ceil(items.length / perPage));
     var cellW = (w - pad * 2 - gap * (cols - 1)) / cols;
-    var cellH = SKIN_PICKER_CELLH;
-    var gridTop = tabTop + tabH + 10;
+    var cellH = SKIN_PICKER_CELLH * S;
+    var gridTop = tabTop + tabH + 10 * S;
     var currentColor = skinCurrentColor(lp);
     for (var k = 0; k < perPage; k++) {
         var idx = page * perPage + k;
         if (idx >= items.length) { break; }
         var cx = x + pad + (k % cols) * (cellW + gap);
         var cy = gridTop + Math.floor(k / cols) * (cellH + gap);
-        drawSkinCell(lp, items[idx], cx, cy, cellW, cellH, (sp.region === 'grid' && idx === sp.cursor), currentColor, hit);
+        drawSkinCell(lp, items[idx], cx, cy, cellW, cellH, (sp.region === 'grid' && idx === sp.cursor), currentColor, hit, S);
     }
     // 🎲 Random — a full-width row between the grid and the badge. Tap it (touch/mouse),
     // or ▼ off the grid's last row and confirm (pad/keyboard); each press re-rolls the
     // whole look from this seat's unlocked cosmetics.
-    var rndY = gridTop + SKIN_PICKER_ROWS * (cellH + gap) + 2;
-    var rnd = { x: x + pad, y: rndY, w: w - pad * 2, h: SKIN_RANDOM_BTN_H };
+    var rndY = gridTop + SKIN_PICKER_ROWS * (cellH + gap) + 2 * S;
+    var rnd = { x: x + pad, y: rndY, w: w - pad * 2, h: SKIN_RANDOM_BTN_H * S };
     var rndFocus = (sp.region === 'random');
     gameContext.fillStyle = rndFocus ? "rgba(255,211,77,0.30)" : "rgba(255,211,77,0.12)";
-    lhRoundRect(gameContext, rnd.x, rnd.y, rnd.w, rnd.h, 7); gameContext.fill();
+    lhRoundRect(gameContext, rnd.x, rnd.y, rnd.w, rnd.h, 7 * S); gameContext.fill();
     gameContext.lineWidth = rndFocus ? 2.5 : 1.5;
     gameContext.strokeStyle = rndFocus ? "#fff" : HUB_ACCENT;
-    lhRoundRect(gameContext, rnd.x, rnd.y, rnd.w, rnd.h, 7); gameContext.stroke();
+    lhRoundRect(gameContext, rnd.x, rnd.y, rnd.w, rnd.h, 7 * S); gameContext.stroke();
     gameContext.fillStyle = "#ffd34d";
-    gameContext.font = "bold 12px sans-serif";
+    gameContext.font = hubFont(S, 12, true);
     gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
     gameContext.fillText("🎲 Random", rnd.x + rnd.w / 2, rnd.y + rnd.h / 2 + 1);
     hit.options.push({ rect: rnd, action: "randomize" });
     // Lv/XP badge (or sign-in nudge)
-    var badgeY = rndY + SKIN_RANDOM_BTN_H + 6;
-    drawProgressionBadge(lp, x + pad, badgeY, w - pad * 2);
+    var badgeY = rndY + (SKIN_RANDOM_BTN_H + 6) * S;
+    drawProgressionBadge(lp, x + pad, badgeY, w - pad * 2, S);
     // page controls
-    var pgY = y + h - 22;
+    var pgY = y + h - 22 * S;
     if (pageCount > 1) {
         var arrowOn = (sp.region === 'page');
-        var lrect = { x: x + pad, y: pgY - 11, w: 30, h: 22 };
-        var rrect = { x: x + w - pad - 30, y: pgY - 11, w: 30, h: 22 };
+        var lrect = { x: x + pad, y: pgY - 11 * S, w: 30 * S, h: 22 * S };
+        var rrect = { x: x + w - pad - 30 * S, y: pgY - 11 * S, w: 30 * S, h: 22 * S };
         gameContext.fillStyle = arrowOn ? "#fff" : "#9cdcff";
-        gameContext.font = "bold 18px sans-serif"; gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
+        gameContext.font = hubFont(S, 18, true); gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
         gameContext.fillText("◄", lrect.x + lrect.w / 2, pgY);
         gameContext.fillText("►", rrect.x + rrect.w / 2, pgY);
         hit.options.push({ rect: lrect, action: "page:-1" });
         hit.options.push({ rect: rrect, action: "page:1" });
-        var dotGap = 12, dx0 = x + w / 2 - (pageCount - 1) * dotGap / 2;
+        var dotGap = 12 * S, dx0 = x + w / 2 - (pageCount - 1) * dotGap / 2;
         for (var d = 0; d < pageCount; d++) {
             gameContext.beginPath();
-            gameContext.arc(dx0 + d * dotGap, pgY, d === page ? 3.5 : 2.5, 0, Math.PI * 2);
+            gameContext.arc(dx0 + d * dotGap, pgY, (d === page ? 3.5 : 2.5) * S, 0, Math.PI * 2);
             gameContext.fillStyle = d === page ? "#ffd34d" : "rgba(255,255,255,0.4)";
             gameContext.fill();
         }
@@ -1568,30 +1625,32 @@ function drawSkinPanelBody(lp, x, y, w, h, hit) {
     if (lp._cartLockAt && (Date.now() - lp._cartLockAt) < 1600 && lp._cartLockMsg) { msg = lp._cartLockMsg; }
     else if (lp._skinRejectAt && (Date.now() - lp._skinRejectAt) < 1500) { msg = "Colour taken"; }
     if (msg) {
-        gameContext.fillStyle = "#ff6b6b"; gameContext.textAlign = "center"; gameContext.font = "bold 11px sans-serif";
-        gameContext.fillText(msg, x + w / 2, badgeY + 14);
+        gameContext.fillStyle = "#ff6b6b"; gameContext.textAlign = "center"; gameContext.font = hubFont(S, 11, true);
+        gameContext.fillText(msg, x + w / 2, badgeY + 14 * S);
     }
 }
 
 // Draw one picker cell (colour swatch / avatar / cosmetic) + push its hit target.
-function drawSkinCell(lp, item, cx, cy, cw, ch, focused, currentColor, hit) {
+// cw/ch arrive pre-scaled; S scales the cell's INTERNAL details (fonts, insets, rings).
+function drawSkinCell(lp, item, cx, cy, cw, ch, focused, currentColor, hit, S) {
+    if (!(S > 0)) { S = 1; }
     if (item.kind === 'color') {
         var taken = skinTakenColors(lp);
         var isTaken = !!taken[item.color];
         var hasAvatar = playerHasAvatarSkin(lp);
         gameContext.globalAlpha = isTaken ? 0.32 : 1;
         gameContext.fillStyle = item.color;
-        lhRoundRect(gameContext, cx, cy, cw, ch, 6); gameContext.fill();
+        lhRoundRect(gameContext, cx, cy, cw, ch, 6 * S); gameContext.fill();
         gameContext.globalAlpha = 1;
         if (item.color === skinCurrentColor(lp) && !hasAvatar) {
             gameContext.fillStyle = "#000"; gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
-            gameContext.font = "bold 18px sans-serif"; gameContext.fillText("✓", cx + cw / 2, cy + ch / 2 + 1);
+            gameContext.font = hubFont(S, 18, true); gameContext.fillText("✓", cx + cw / 2, cy + ch / 2 + 1);
         }
         if (isTaken) {
             gameContext.strokeStyle = "rgba(0,0,0,0.6)"; gameContext.lineWidth = 2;
-            gameContext.beginPath(); gameContext.moveTo(cx + 5, cy + 5); gameContext.lineTo(cx + cw - 5, cy + ch - 5); gameContext.stroke();
+            gameContext.beginPath(); gameContext.moveTo(cx + 5 * S, cy + 5 * S); gameContext.lineTo(cx + cw - 5 * S, cy + ch - 5 * S); gameContext.stroke();
         }
-        if (focused) { gameContext.strokeStyle = "#fff"; gameContext.lineWidth = 3; lhRoundRect(gameContext, cx - 1, cy - 1, cw + 2, ch + 2, 7); gameContext.stroke(); }
+        if (focused) { gameContext.strokeStyle = "#fff"; gameContext.lineWidth = 3; lhRoundRect(gameContext, cx - 1, cy - 1, cw + 2, ch + 2, 7 * S); gameContext.stroke(); }
         hit.options.push({ rect: { x: cx, y: cy, w: cw, h: ch }, action: isTaken ? "noop" : ("pick:" + item.color) });
         return;
     }
@@ -1599,25 +1658,25 @@ function drawSkinCell(lp, item, cx, cy, cw, ch, focused, currentColor, hit) {
         var hasAv = playerHasAvatarSkin(lp);
         var avProfile = avatarSkinProfile(lp);
         gameContext.fillStyle = "#f4c542";
-        lhRoundRect(gameContext, cx, cy, cw, ch, 6); gameContext.fill();
-        var inset = 3;
+        lhRoundRect(gameContext, cx, cy, cw, ch, 6 * S); gameContext.fill();
+        var inset = 3 * S;
         var av = (avProfile && typeof preloadAvatarImage === "function") ? preloadAvatarImage(avProfile.avatarUrl) : null;
         if (av && av.ready && !av.failed) {
             gameContext.save();
-            lhRoundRect(gameContext, cx + inset, cy + inset, cw - inset * 2, ch - inset * 2, 4); gameContext.clip();
+            lhRoundRect(gameContext, cx + inset, cy + inset, cw - inset * 2, ch - inset * 2, 4 * S); gameContext.clip();
             gameContext.drawImage(av.img, cx + inset, cy + inset, cw - inset * 2, ch - inset * 2);
             gameContext.restore();
         } else {
             gameContext.fillStyle = "#222"; gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
-            gameContext.font = "16px sans-serif"; gameContext.fillText("👤", cx + cw / 2, cy + ch / 2 + 1);
+            gameContext.font = hubFont(S, 16); gameContext.fillText("👤", cx + cw / 2, cy + ch / 2 + 1);
         }
         if (hasAv) {
-            gameContext.beginPath(); gameContext.arc(cx + cw - 8, cy + 8, 7, 0, 2 * Math.PI);
+            gameContext.beginPath(); gameContext.arc(cx + cw - 8 * S, cy + 8 * S, 7 * S, 0, 2 * Math.PI);
             gameContext.fillStyle = "rgba(0,0,0,0.7)"; gameContext.fill();
             gameContext.fillStyle = "#fff"; gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
-            gameContext.font = "bold 10px sans-serif"; gameContext.fillText("✓", cx + cw - 8, cy + 8.5);
+            gameContext.font = hubFont(S, 10, true); gameContext.fillText("✓", cx + cw - 8 * S, cy + 8.5 * S);
         }
-        if (focused) { gameContext.strokeStyle = "#fff"; gameContext.lineWidth = 3; lhRoundRect(gameContext, cx - 1, cy - 1, cw + 2, ch + 2, 7); gameContext.stroke(); }
+        if (focused) { gameContext.strokeStyle = "#fff"; gameContext.lineWidth = 3; lhRoundRect(gameContext, cx - 1, cy - 1, cw + 2, ch + 2, 7 * S); gameContext.stroke(); }
         hit.options.push({ rect: { x: cx, y: cy, w: cw, h: ch }, action: "pickAvatar" });
         return;
     }
@@ -1625,24 +1684,24 @@ function drawSkinCell(lp, item, cx, cy, cw, ch, focused, currentColor, hit) {
     var sel = currentCosmetic(lp, opt.slot) === opt.id;
     var lock = cartSkinUnlock(opt.id, lp);
     gameContext.fillStyle = sel ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.06)";
-    lhRoundRect(gameContext, cx, cy, cw, ch, 6); gameContext.fill();
+    lhRoundRect(gameContext, cx, cy, cw, ch, 6 * S); gameContext.fill();
     gameContext.lineWidth = sel ? 2 : 1;
     gameContext.strokeStyle = sel ? "#ffd34d" : (lock.locked ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.2)");
-    lhRoundRect(gameContext, cx, cy, cw, ch, 6); gameContext.stroke();
+    lhRoundRect(gameContext, cx, cy, cw, ch, 6 * S); gameContext.stroke();
     // Seasonal-claim cosmetics (rarity:'seasonal') get a distinct GOLD frame so they read as
     // special/limited in the locker. Skipped when the gold "selected" ring already shows.
     var raritySkin = (typeof getSkin === "function") ? getSkin(opt.id) : null;
     if (!sel && raritySkin && raritySkin.rarity === "seasonal") {
         gameContext.lineWidth = 2; gameContext.strokeStyle = "#ffb31f";
-        lhRoundRect(gameContext, cx, cy, cw, ch, 6); gameContext.stroke();
+        lhRoundRect(gameContext, cx, cy, cw, ch, 6 * S); gameContext.stroke();
     }
-    if (focused) { gameContext.strokeStyle = "#fff"; gameContext.lineWidth = 2.5; lhRoundRect(gameContext, cx - 1, cy - 1, cw + 2, ch + 2, 7); gameContext.stroke(); }
+    if (focused) { gameContext.strokeStyle = "#fff"; gameContext.lineWidth = 2.5; lhRoundRect(gameContext, cx - 1, cy - 1, cw + 2, ch + 2, 7 * S); gameContext.stroke(); }
     drawCosmeticPreview(opt, cx + cw / 2, cy + ch * 0.34, ch * 0.22, currentColor, lock.locked, { x: cx, y: cy, w: cw, h: ch });
     gameContext.fillStyle = lock.locked ? "rgba(255,255,255,0.5)" : "#fff";
-    gameContext.font = "8.5px sans-serif"; gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
+    gameContext.font = hubFont(S, 8.5); gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
     gameContext.fillText(opt.label, cx + cw / 2, cy + ch * 0.74);
     if (lock.locked && lock.text) {
-        gameContext.fillStyle = "#ffd34d"; gameContext.font = "bold 8.5px sans-serif";
+        gameContext.fillStyle = "#ffd34d"; gameContext.font = hubFont(S, 8.5, true);
         gameContext.fillText("🔒 " + lock.text, cx + cw / 2, cy + ch * 0.93);
     }
     hit.options.push({ rect: { x: cx, y: cy, w: cw, h: ch }, action: "cosmetic:" + opt.slot + ":" + (opt.id == null ? "" : opt.id) });
@@ -1929,28 +1988,29 @@ function cartSkinUnlock(id, lp) {
     return owned ? { locked: false } : { locked: true, text: "🏆" };
 }
 // Lv badge + an XP-to-next-level bar for signed-in players; a sign-in nudge for guests.
-function drawProgressionBadge(lp, x, y, w) {
+function drawProgressionBadge(lp, x, y, w, S) {
+    if (!(S > 0)) { S = 1; }
     var prog = (typeof myProgression !== "undefined") ? myProgression : null;
     gameContext.textAlign = "left";
     gameContext.textBaseline = "middle";
     if (!prog) {
         gameContext.fillStyle = "rgba(255,255,255,0.85)";
-        gameContext.font = "11px sans-serif";
-        gameContext.fillText("Sign in to earn XP & unlock skins", x, y + 10);
+        gameContext.font = hubFont(S, 11);
+        gameContext.fillText("Sign in to earn XP & unlock skins", x, y + 10 * S);
         return;
     }
     gameContext.fillStyle = "#ffd34d";
-    gameContext.font = "bold 12px sans-serif";
-    gameContext.fillText("Lv " + (prog.level || 1), x, y + 10);
-    var barX = x + 46, barW = Math.max(20, w - 46), barH = 7, barY = y + 5;
+    gameContext.font = hubFont(S, 12, true);
+    gameContext.fillText("Lv " + (prog.level || 1), x, y + 10 * S);
+    var barX = x + 46 * S, barW = Math.max(20, w - 46 * S), barH = 7 * S, barY = y + 5 * S;
     var frac = 0;
     if (prog.xpForNextLevel) {
         frac = Math.max(0, Math.min(1, (prog.xpThisLevel || 0) / prog.xpForNextLevel));
     }
     gameContext.fillStyle = "rgba(255,255,255,0.15)";
-    lhRoundRect(gameContext, barX, barY, barW, barH, 4); gameContext.fill();
+    lhRoundRect(gameContext, barX, barY, barW, barH, 4 * S); gameContext.fill();
     gameContext.fillStyle = "#ffd34d";
-    lhRoundRect(gameContext, barX, barY, Math.max(2, barW * frac), barH, 4); gameContext.fill();
+    lhRoundRect(gameContext, barX, barY, Math.max(2, barW * frac), barH, 4 * S); gameContext.fill();
 }
 // Surface a server-side cosmetic rejection on the (lobby-)slot's open panel. `slot` here
 // is the LOCAL-PLAYER slot (primary/couch), not the cosmetic slot; payload.slot/reason
@@ -1985,12 +2045,13 @@ function flagCosmeticRejected(slot, payload) {
     }
 }
 
-function drawStubPanelBody(x, y, w, h, msg) {
+function drawStubPanelBody(x, y, w, h, msg, S) {
+    if (!(S > 0)) { S = 1; }
     gameContext.textAlign = "center";
     gameContext.textBaseline = "middle";
     gameContext.fillStyle = "#ccc";
-    gameContext.font = "16px sans-serif";
-    gameContext.fillText(msg, x + w / 2, y + h / 2 + 6);
+    gameContext.font = hubFont(S, 16);
+    gameContext.fillText(msg, x + w / 2, y + h / 2 + 6 * S);
 }
 
 // --- pointer (mouse/touch, primary slot only) --------------------------------
