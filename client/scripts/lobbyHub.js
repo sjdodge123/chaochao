@@ -874,7 +874,9 @@ function drawHubJoinPrompts() {
     if (typeof localPlayers === "undefined" || typeof gameContext === "undefined" || !gameContext) {
         return;
     }
-    var nextX = {}; // target slot -> x where that panel's next chip starts
+    // Pass 1: collect each eligible seat's chip (with measured width), grouped by the
+    // panel it would join, so pass 2 can lay a whole group out together.
+    var groups = {}; // target slot -> { target, S, chips: [...] }
     for (var s = 0; s < localPlayers.length; s++) {
         var lp = localPlayers[s];
         if (!lp) { continue; }
@@ -886,58 +888,87 @@ function drawHubJoinPrompts() {
         var target = hubJoinTarget(lp);
         if (!target || !target._panelRect) { continue; }
         var S = (target._panelScale > 0) ? target._panelScale : 1;
-        var pr = target._panelRect;
-        var glyph = padConfirmGlyph(padType);
         var seat = "P" + (lp.slot + 1);
         var text = "Join " + stationTitle(target.stationPanel.kind);
-        var color = playerList[lp.myID].color || "#fff";
-        gameContext.save();
-        gameContext.textBaseline = "middle";
-        var seatFont = hubFont(S, 12, true);
-        var textFont = hubFont(S, 12, true);
-        gameContext.font = seatFont;
+        gameContext.font = hubFont(S, 12, true);
         var seatW = gameContext.measureText(seat).width;
         var textW = gameContext.measureText(text).width;
-        var chipH = 26 * S, glyphR = 9 * S, padX = 10 * S, gap = 7 * S;
-        var w = padX + seatW + gap + glyphR * 2 + gap + textW + padX;
-        var x = (nextX[target.slot] != null) ? nextX[target.slot] : pr.x;
-        // Below the panel normally; flip above when the panel hugs the bottom edge.
-        var y = pr.y + pr.h + 8 * S;
-        if (y + chipH > LOGICAL_HEIGHT - 6) { y = pr.y - chipH - 8 * S; }
-        nextX[target.slot] = x + w + 8 * S;
-        // Pill: panel-chrome fill, seat-coloured border so it reads as THIS seat's button.
-        gameContext.globalAlpha = 0.95;
-        gameContext.fillStyle = "rgba(14,16,22,0.95)";
-        lhRoundRect(gameContext, x, y, w, chipH, 8 * S);
-        gameContext.fill();
-        gameContext.globalAlpha = 1;
-        gameContext.lineWidth = 2;
-        gameContext.strokeStyle = color;
-        gameContext.stroke();
-        // Seat tag in the seat's colour, then the confirm-glyph badge, then the action.
-        gameContext.fillStyle = color;
-        gameContext.font = seatFont;
-        gameContext.textAlign = "left";
-        gameContext.fillText(seat, x + padX, y + chipH / 2 + 1);
-        var gx = x + padX + seatW + gap + glyphR, gy = y + chipH / 2;
-        gameContext.beginPath();
-        gameContext.arc(gx, gy, glyphR, 0, 2 * Math.PI);
-        gameContext.fillStyle = "rgba(255,255,255,0.14)";
-        gameContext.fill();
-        gameContext.lineWidth = 1.5;
-        gameContext.strokeStyle = "rgba(255,255,255,0.7)";
-        gameContext.stroke();
-        gameContext.fillStyle = "#fff";
-        gameContext.font = hubFont(S, 11, true);
-        gameContext.textAlign = "center";
-        gameContext.fillText(glyph, gx, gy + 0.5);
-        gameContext.fillStyle = "#fff";
-        gameContext.font = textFont;
-        gameContext.textAlign = "left";
-        gameContext.fillText(text, gx + glyphR + gap, y + chipH / 2 + 1);
-        gameContext.restore();
-        lp._joinChipRect = { x: x, y: y, w: w, h: chipH }; // headless geometry checks
+        var glyphR = 9 * S, padX = 10 * S, gap = 7 * S;
+        var g = groups[target.slot] || (groups[target.slot] = { target: target, S: S, chips: [] });
+        g.chips.push({
+            lp: lp, seat: seat, text: text, glyph: padConfirmGlyph(padType),
+            color: playerList[lp.myID].color || "#fff",
+            w: padX + seatW + gap + glyphR * 2 + gap + textW + padX,
+            seatW: seatW, glyphR: glyphR, padX: padX, gap: gap
+        });
     }
+    // Pass 2: per panel, wrap the chips into rows that stay inside the screen (a chip
+    // that would cross the right edge starts a new row), stack the rows below the
+    // panel, and flip the WHOLE stack above it when it would run off the bottom.
+    for (var key in groups) {
+        var g = groups[key];
+        var S2 = g.S, pr = g.target._panelRect;
+        var chipH = 26 * S2, rowGap = 6 * S2, hGap = 8 * S2;
+        var rows = [[]], rowW = 0;
+        for (var i = 0; i < g.chips.length; i++) {
+            var c = g.chips[i];
+            if (rowW > 0 && pr.x + rowW + c.w > LOGICAL_WIDTH - 8) { rows.push([]); rowW = 0; }
+            rows[rows.length - 1].push(c);
+            rowW += c.w + hGap;
+        }
+        var stackH = rows.length * chipH + (rows.length - 1) * rowGap;
+        var y = pr.y + pr.h + 8 * S2;
+        if (y + stackH > LOGICAL_HEIGHT - 6) { y = pr.y - 8 * S2 - stackH; }
+        y = lhClamp(y, 6, LOGICAL_HEIGHT - stackH - 6);
+        for (var r = 0; r < rows.length; r++) {
+            // Left-align rows on the panel, clamped so even a lone wide chip stays on screen.
+            var rw = 0;
+            for (var j = 0; j < rows[r].length; j++) { rw += rows[r][j].w; }
+            rw += hGap * (rows[r].length - 1);
+            var x = lhClamp(pr.x, 8, LOGICAL_WIDTH - rw - 8);
+            for (var k = 0; k < rows[r].length; k++) {
+                drawHubJoinChip(rows[r][k], x, y, chipH, S2);
+                x += rows[r][k].w + hGap;
+            }
+            y += chipH + rowGap;
+        }
+    }
+}
+// One "P<N> Ⓐ Join <Station>" pill at (x, y): panel-chrome fill with a seat-coloured
+// border, the seat tag in its kart colour, the pad confirm-glyph badge, then the action.
+function drawHubJoinChip(c, x, y, chipH, S) {
+    gameContext.save();
+    gameContext.textBaseline = "middle";
+    gameContext.globalAlpha = 0.95;
+    gameContext.fillStyle = "rgba(14,16,22,0.95)";
+    lhRoundRect(gameContext, x, y, c.w, chipH, 8 * S);
+    gameContext.fill();
+    gameContext.globalAlpha = 1;
+    gameContext.lineWidth = 2;
+    gameContext.strokeStyle = c.color;
+    gameContext.stroke();
+    gameContext.fillStyle = c.color;
+    gameContext.font = hubFont(S, 12, true);
+    gameContext.textAlign = "left";
+    gameContext.fillText(c.seat, x + c.padX, y + chipH / 2 + 1);
+    var gx = x + c.padX + c.seatW + c.gap + c.glyphR, gy = y + chipH / 2;
+    gameContext.beginPath();
+    gameContext.arc(gx, gy, c.glyphR, 0, 2 * Math.PI);
+    gameContext.fillStyle = "rgba(255,255,255,0.14)";
+    gameContext.fill();
+    gameContext.lineWidth = 1.5;
+    gameContext.strokeStyle = "rgba(255,255,255,0.7)";
+    gameContext.stroke();
+    gameContext.fillStyle = "#fff";
+    gameContext.font = hubFont(S, 11, true);
+    gameContext.textAlign = "center";
+    gameContext.fillText(c.glyph, gx, gy + 0.5);
+    gameContext.fillStyle = "#fff";
+    gameContext.font = hubFont(S, 12, true);
+    gameContext.textAlign = "left";
+    gameContext.fillText(c.text, gx + c.glyphR + c.gap, y + chipH / 2 + 1);
+    gameContext.restore();
+    c.lp._joinChipRect = { x: x, y: y, w: c.w, h: chipH }; // headless geometry checks
 }
 
 // The BASE (compact, scale-1) size of a panel kind (mirrors drawStationPanel's per-kind

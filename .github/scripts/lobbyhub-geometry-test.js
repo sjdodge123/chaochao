@@ -87,10 +87,10 @@ vm.runInContext(hubSrc, sandbox, { filename: "lobbyHub.js" });
 // kinds[i] is a station kind for an open panel, or null for an idle pad seat (no panel)
 // — idle seats exercise the "P<N> Ⓐ Join" chip pinned to another seat's open panel.
 const SEAT_COLORS = ["#e74c3c", "#3498db", "#2ecc71", "#f1c40f"];
-function runScenario(kinds) {
+function runScenario(kinds, xs) {
     sandbox.playerList = {};
     sandbox.localPlayers = kinds.map(function (kind, i) {
-        sandbox.playerList[i] = { color: SEAT_COLORS[i], x: 200 + i * 250, y: 300, radius: 12 };
+        sandbox.playerList[i] = { color: SEAT_COLORS[i], x: (xs && xs[i] != null) ? xs[i] : 200 + i * 250, y: 300, radius: 12 };
         return {
             slot: i,
             isPrimary: i === 0,
@@ -142,13 +142,17 @@ const SCENARIOS = [
     { kinds: ["skin", null], scale: 1.8 },
     { kinds: ["skin", null, null, null], scale: 1.8 },
     { kinds: ["skin", "playlist", null, null], scale: 1.4 },
+    // Right-edge anchored panel + 3 chips: the chip row must wrap/clamp on screen
+    // instead of running past LOGICAL_WIDTH (Codex review finding).
+    { kinds: ["playlist", null, null, null], scale: 1.8, xs: [1340, 100, 100, 100], tag: "right-edge" },
 ];
 
 for (const sc of SCENARIOS) {
     const openCount = sc.kinds.filter(Boolean).length;
-    const label = openCount + " open (" + sc.kinds.map(k => k || "idle").join(",") + ")";
+    const label = openCount + " open (" + sc.kinds.map(k => k || "idle").join(",") + ")"
+        + (sc.tag ? " [" + sc.tag + "]" : "");
     console.log("scenario: " + label);
-    const lps = runScenario(sc.kinds);
+    const lps = runScenario(sc.kinds, sc.xs);
     const rects = [];
     lps.forEach(function (lp, i) {
         if (!sc.kinds[i]) {
