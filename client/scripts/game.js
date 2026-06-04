@@ -46,12 +46,27 @@ var server = null,
     // edge of WORLD_ZOOM_ENGAGE (e.g. drifting around the spawn gate next to the
     // goal). Engage at ENGAGE, only release past RELEASE — hysteresis kills the jerk.
     worldGoalEngaged = false,
-    WORLD_ZOOM_MAX = 1.8,      // tightest focus on the player while racing (shows some surroundings)
+    WORLD_ZOOM_MAX = 2.05,     // tightest cruise focus while racing (close enough to read the skin, far enough to navigate)
     WORLD_ZOOM_ENGAGE = 460,   // world-units: nearest goal pulls into frame within this
     WORLD_ZOOM_RELEASE = 620,  // world-units: once engaged, only let go of the goal past this (hysteresis band)
     WORLD_ZOOM_PAD = 120,      // world-units padding around framed points
     WORLD_ZOOM_TAU = 620,      // smoothing time-constant (ms); higher = slower, gentler glide
     WORLD_ZOOM_HOLD_MS = 1100, // hold the whole-map view this long when a round starts, before easing in
+    // Goal-approach intensity zoom: once the goal is engaged, the zoom cap ramps
+    // from WORLD_ZOOM_MAX up to (MAX + BOOST) as the group closes from ENGAGE
+    // down to GOAL_FULL world-units — a finish-line punch-in. The framing box
+    // still includes every living local player AND the goal, so the close-up
+    // only lands when everyone has converged on it; the boost can never push a
+    // local player off-screen.
+    WORLD_ZOOM_GOAL_BOOST = 0.55,
+    WORLD_ZOOM_GOAL_FULL = 140,
+    // Velocity look-ahead: each player's framing box shifts ahead along their
+    // velocity, up to LEAD_MAX world-units at/above LEAD_REF speed (≈ top speed
+    // on normal tiles, measured ~83 u/s), so the tighter cruise zoom never costs
+    // forward visibility — at speed the camera leads the kart; parked, you get
+    // the tight skin-admiring view centred on it.
+    WORLD_ZOOM_LEAD_REF = 80,
+    WORLD_ZOOM_LEAD_MAX = 110,
     // Sustained camera back-off while holding/throwing an aimed ability (bomb/ice)
     // until it detonates, so it's easier to aim. Multiplies the focused scale
     // (0.62 => ~38% wider); the smoothing eases it out and back.
