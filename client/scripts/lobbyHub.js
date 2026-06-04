@@ -171,11 +171,12 @@ function stationPanelNav(lp, dx, dy) {
     }
 }
 
-// Keyboard/gamepad nav over the tabbed/paged skin picker. Three focus regions:
-//   'tabs' — the category row (◄► switch category, ▼ drops into the grid)
-//   'grid' — the current page's cells (▲ from the top row → tabs, ▼ from the last row →
-//            page arrows; ◄►/▲▼ move the cursor, crossing pages automatically)
-//   'page' — the ◄ ► page arrows (◄► flip pages, ▲ back to the grid)
+// Keyboard/gamepad nav over the tabbed/paged skin picker. Four focus regions:
+//   'tabs'   — the category row (◄► switch category, ▼ drops into the grid)
+//   'grid'   — the current page's cells (▲ from the top row → tabs, ▼ from the last row →
+//              the 🎲 Random button; ◄►/▲▼ move the cursor, crossing pages automatically)
+//   'random' — the full-width 🎲 Random button under the grid (▲ grid, ▼ page arrows)
+//   'page'   — the ◄ ► page arrows (◄► flip pages, ▲ back to the Random button)
 function skinPanelNav(lp, dx, dy) {
     var sp = lp.stationPanel;
     if (!sp) { return; }
@@ -203,7 +204,12 @@ function skinPanelNav(lp, dx, dy) {
             if (pg > pageCount - 1) { pg = pageCount - 1; }
             sp.cursor = Math.min(items.length - 1, pg * perPage);
         }
+        if (dy < 0) { sp.region = 'random'; }
+        return;
+    }
+    if (sp.region === 'random') {
         if (dy < 0) { sp.region = 'grid'; }
+        else if (dy > 0 && pageCount > 1) { sp.region = 'page'; }
         return;
     }
     // grid
@@ -214,7 +220,7 @@ function skinPanelNav(lp, dx, dy) {
     var lastRowInPage = Math.floor((Math.min(perPage, items.length - pageStart) - 1) / cols);
     if (dy < 0 && rowInPage === 0) { sp.region = 'tabs'; return; }
     if (dy > 0 && rowInPage === lastRowInPage) {
-        if (pageCount > 1) { sp.region = 'page'; }
+        sp.region = 'random';
         return;
     }
     var nc = cur;
@@ -225,12 +231,14 @@ function skinPanelNav(lp, dx, dy) {
     sp.cursor = nc;
 }
 
-// Commit the focused element: a tab switch, a page step, or the cell under the cursor.
+// Commit the focused element: a tab switch, the 🎲 Random re-roll, a page step, or the
+// cell under the cursor.
 function skinPanelConfirm(lp) {
     var sp = lp.stationPanel;
     if (!sp) { return; }
     skinValidateTab(lp);
     if (sp.region === 'tabs') { sp.region = 'grid'; sp.cursor = 0; return; }
+    if (sp.region === 'random') { stationRandomizeCosmetics(lp); return; }
     if (sp.region === 'page') { return; }
     var items = skinTabItems(lp, sp.tab);
     activateSkinItem(lp, items[sp.cursor || 0]);
@@ -276,6 +284,11 @@ function stationPanelAction(lp, action) {
         closeStationPanel(lp);
     } else if (action === "pickAvatar") {
         stationPickAvatar(lp);
+    } else if (action === "randomize") {
+        // Pointer tap on the 🎲 Random button — also move pad/keyboard focus onto it so a
+        // follow-up confirm re-rolls again without re-navigating.
+        if (lp.stationPanel) { lp.stationPanel.region = 'random'; }
+        stationRandomizeCosmetics(lp);
     } else if (action != null && action.indexOf("tab:") === 0) {
         // Switch the picker's active category (pointer tap on a tab).
         if (lp.stationPanel) { lp.stationPanel.tab = action.slice(4); lp.stationPanel.cursor = 0; lp.stationPanel.region = 'grid'; }
@@ -1240,9 +1253,10 @@ function cosmeticPickerCompare(lp, a, b) {
     if (la !== lb) { return la - lb; }                                     // unlocked before locked
     return cosmeticUnlockRank(a) - cosmeticUnlockRank(b);                  // then level asc, achievements last
 }
-// Full fixed panel height: title gap + tab row + grid + badge + page row.
+// Full fixed panel height: title gap + tab row + grid + 🎲 Random row + badge + page row.
+var SKIN_RANDOM_BTN_H = 24; // 🎲 Random button row height (full panel width — easy touch target)
 function skinPanelHeight() {
-    return 38 + 26 + 10 + SKIN_PICKER_ROWS * (SKIN_PICKER_CELLH + 6) + 20 + 24;
+    return 38 + 26 + 10 + SKIN_PICKER_ROWS * (SKIN_PICKER_CELLH + 6) + SKIN_RANDOM_BTN_H + 8 + 20 + 24;
 }
 
 function drawSkinPanelBody(lp, x, y, w, h, hit) {
@@ -1299,8 +1313,24 @@ function drawSkinPanelBody(lp, x, y, w, h, hit) {
         var cy = gridTop + Math.floor(k / cols) * (cellH + gap);
         drawSkinCell(lp, items[idx], cx, cy, cellW, cellH, (sp.region === 'grid' && idx === sp.cursor), currentColor, hit);
     }
+    // 🎲 Random — a full-width row between the grid and the badge. Tap it (touch/mouse),
+    // or ▼ off the grid's last row and confirm (pad/keyboard); each press re-rolls the
+    // whole look from this seat's unlocked cosmetics.
+    var rndY = gridTop + SKIN_PICKER_ROWS * (cellH + gap) + 2;
+    var rnd = { x: x + pad, y: rndY, w: w - pad * 2, h: SKIN_RANDOM_BTN_H };
+    var rndFocus = (sp.region === 'random');
+    gameContext.fillStyle = rndFocus ? "rgba(255,211,77,0.30)" : "rgba(255,211,77,0.12)";
+    lhRoundRect(gameContext, rnd.x, rnd.y, rnd.w, rnd.h, 7); gameContext.fill();
+    gameContext.lineWidth = rndFocus ? 2.5 : 1.5;
+    gameContext.strokeStyle = rndFocus ? "#fff" : HUB_ACCENT;
+    lhRoundRect(gameContext, rnd.x, rnd.y, rnd.w, rnd.h, 7); gameContext.stroke();
+    gameContext.fillStyle = "#ffd34d";
+    gameContext.font = "bold 12px sans-serif";
+    gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
+    gameContext.fillText("🎲 Random", rnd.x + rnd.w / 2, rnd.y + rnd.h / 2 + 1);
+    hit.options.push({ rect: rnd, action: "randomize" });
     // Lv/XP badge (or sign-in nudge)
-    var badgeY = gridTop + SKIN_PICKER_ROWS * (cellH + gap) + 2;
+    var badgeY = rndY + SKIN_RANDOM_BTN_H + 6;
     drawProgressionBadge(lp, x + pad, badgeY, w - pad * 2);
     // page controls
     var pgY = y + h - 22;
@@ -1556,6 +1586,43 @@ function stationPickCosmetic(lp, opt) {
     if (p && field) {
         p[field] = id; // optimistic local update
     }
+}
+// 🎲 Random: equip a random loadout from what THIS seat has unlocked — a fresh colour
+// (never one another kart wears, never the current one, so a press always visibly changes
+// something) plus a random pick per cosmetic slot (the slot default counts as one candidate,
+// so plain looks stay in the pool). Patterns only render on the plain cart, so a shaped-cart
+// roll forces the pattern slot to None instead of burning the roll on an invisible pattern.
+// Every pick rides the existing commit paths (stationPickSkin / stationPickCosmetic), so
+// persistence, optimistic updates and server-side validation are identical to picking by hand.
+function stationRandomizeCosmetics(lp) {
+    if (!lp || !lp.socket) { return; }
+    noteHubActivity(lp);
+    var pal = skinPalette();
+    var taken = skinTakenColors(lp);
+    var cur = skinCurrentColor(lp);
+    var colors = [];
+    for (var i = 0; i < pal.length; i++) {
+        if (!taken[pal[i]] && pal[i] !== cur) { colors.push(pal[i]); }
+    }
+    if (colors.length) {
+        stationPickSkin(lp, colors[Math.floor(Math.random() * colors.length)]);
+    }
+    var cartId = randomUnlockedCosmetic(lp, 'cart');
+    stationPickCosmetic(lp, { slot: 'cart', id: cartId });
+    stationPickCosmetic(lp, { slot: 'pattern', id: (cartId != null) ? null : randomUnlockedCosmetic(lp, 'pattern') });
+    stationPickCosmetic(lp, { slot: 'border', id: randomUnlockedCosmetic(lp, 'border') });
+    stationPickCosmetic(lp, { slot: 'trail', id: randomUnlockedCosmetic(lp, 'trail') });
+}
+// One random candidate for a cosmetic slot: the slot default (null) + every id this seat
+// has UNLOCKED (couch seats gate at guest level — cartSkinUnlock handles that per-seat).
+function randomUnlockedCosmetic(lp, slot) {
+    var ids = [null];
+    for (var i = 0; i < COSMETIC_OPTIONS.length; i++) {
+        var opt = COSMETIC_OPTIONS[i];
+        if (opt.slot !== slot || opt.id == null) { continue; }
+        if (!cartSkinUnlock(opt.id, lp).locked) { ids.push(opt.id); }
+    }
+    return ids[Math.floor(Math.random() * ids.length)];
 }
 // Cosmetic-picker layout: positions each option in one of three labeled groups —
 // "Carts" / "Patterns" / "Trails" — each starting on a fresh row under a small header.

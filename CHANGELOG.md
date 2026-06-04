@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- The Skins station has a new 🎲 Random button — one press dresses your kart in a random colour plus a random set of the carts, patterns, borders and trails you've unlocked. Works with touch, mouse, keyboard and controller.
 
 ## v0.28.2 — 2026-06-02
 
