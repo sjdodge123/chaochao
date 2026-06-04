@@ -56,3 +56,55 @@ group by key order by players desc;
 
 Note: `unlock_dates` records *unlocking*; `cosmetics_equipped` (GA) records *choosing to
 race with* — together they show the funnel from unlock → actual use.
+
+## 3. Progression pacing (curve-retune monitoring)
+
+The capped-hook XP curve (`min(1000, 50+22n)`) was tuned assuming ~5-minute matches;
+real matches run 10–25 min, so wall-clock pacing ships ~3× slower than the design
+target (operator decision 2026-06-04: ship as-is, retune with data after ~1 week).
+These events exist to make that retune a measurement, not a guess.
+
+### Events (fired at `progressionToasts` arrival in client.js — signed-in humans only,
+### drained-once durable queue so they can't double-fire)
+
+| Event | Params | Fires |
+|-------|--------|-------|
+| `xp_earned` | `xp` (metric), `level` (metric) | once per match per signed-in player; also for the rewarded 2× bonus |
+| `level_up` | `level` (metric) | each level gained (GA4 recommended games event) |
+| `cosmetic_unlocked` | `cosmetic_id`, `cosmetic_slot`, `unlock_kind` (skin = level ladder / achievement / seasonal) | each newly earned cosmetic — **key event** |
+
+### The three retune questions → where to look
+
+1. **"How much XP does a real match pay?"** — `xp_earned`: `averageXp` (auto-derived
+   from the `xp` custom metric). If the average sits near ~100, the curve's
+   matches-per-level table holds; if real play (long matches, win rates) pushes it
+   higher, pacing is faster than feared. Data API: dimension `date`, metric
+   `averageXp` + `eventCount` on `eventName = xp_earned`.
+2. **"Where does the player base sit on the ladder after a week?"** — `level_up`
+   with the `level` metric: a histogram of `level` (dimension: `customEvent:level`
+   isn't needed — bucket the metric in an Exploration) shows how deep players get.
+   Healthy: a steady spread into the teens after week one; a wall at L4–6 means the
+   early curve is still too steep for real session lengths.
+3. **"How long between unlocks?"** (the actual hook) — two sources:
+   - GA approximation: `cosmetic_unlocked` count per active user per week
+     (Exploration: user-scoped segment, weekly cohort). Falling toward ≤1/week for
+     mid-level players = the cap era is too slow.
+   - **Precise source: Supabase `progression.unlock_dates`** (`{cosmetic_id: ISO
+     timestamp}` per row). Median gap between consecutive unlocks per player:
+     sort each row's values, diff adjacent timestamps, take the median by the
+     player's level band. This is the number the retune decision should use.
+
+### Decision levers (pre-agreed, demotion-safe — level is derived from xp on read)
+
+- Median unlock gap (mid-level band) > ~3 play sessions → **(a)** add per-round-raced
+  XP (~+12/round) so long matches pay like long matches — preferred; or **(b)**
+  cheapen the curve to `min(400, 20+9n)`.
+- Both levers only ever make the curve cheaper, so no player can lose a level.
+
+### Dashboard
+
+GA4 has no dashboards-as-code; the standing setup is one saved Exploration per
+question above (build once in GA4 UI → Explorations, names: "XP per match",
+"Level distribution", "Unlock cadence"). For on-demand checks the same three
+queries run through the Analytics Data API (the agent can run them via the
+google-analytics MCP `run_report`).

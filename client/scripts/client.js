@@ -576,6 +576,29 @@ function registerConnectionHandlers(server) {
 	// {type:'skin',id} | {type:'achievement',id}.
 	server.on('progressionToasts', function (payload) {
 		var events = (payload && Array.isArray(payload.events)) ? payload.events : [];
+		// Progression pacing analytics — fired HERE (toast arrival) so it's independent
+		// of how the celebration is presented (full card vs text fallback vs cleared by
+		// a race start). The durable pending_toasts queue is drained exactly once, so
+		// these can't double-fire on reconnect. Only signed-in humans ever receive
+		// progression toasts, so no bots param is needed (always human traffic).
+		for (var ti = 0; ti < events.length; ti++) {
+			var tev = events[ti];
+			if (!tev || !tev.type) { continue; }
+			if (tev.type === "xp" && tev.amount > 0) {
+				trackEvent('xp_earned', {
+					xp: tev.amount,
+					level: (tev.to && tev.to.level) || (myProgression && myProgression.level) || 0
+				});
+			} else if (tev.type === "level") {
+				trackEvent('level_up', { level: tev.level }); // GA4 recommended games event
+			} else if (tev.type === "skin" || tev.type === "achievement" || tev.type === "seasonal") {
+				trackEvent('cosmetic_unlocked', {
+					cosmetic_id: tev.id,
+					cosmetic_slot: (typeof getSkinSlot === "function" && getSkinSlot(tev.id)) || 'unknown',
+					unlock_kind: tev.type
+				});
+			}
+		}
 		if (events.length) { enqueueProgressionToasts(events); }
 		// If a 2× offer is armed for this match, append it now so it lands right AFTER these
 		// celebration toasts (the natural "here's your XP → want to double it?" beat).
@@ -617,6 +640,11 @@ function registerConnectionHandlers(server) {
 			enqueueProgressionToasts([{ type: "xp_bonus", amount: bonus }]);
 		}
 		trackEvent('reward_claimed', { bonus: 'xp_2x', match_id: ackMatchId });
+		// Count the bonus toward XP-pacing totals too (its normal xp toast is suppressed
+		// server-side to avoid a duplicate "+N XP" celebration).
+		if (bonus > 0) {
+			trackEvent('xp_earned', { xp: bonus, level: (payload && payload.level) || (myProgression && myProgression.level) || 0 });
+		}
 	});
 
 	// botGuard: the server confirmed this client actually drove a kart (not a pageview-only
