@@ -51,7 +51,38 @@ _(pending on-device run)_
 
 ## Desktop validation (sanity check of the harness itself)
 
-_(filled in below during the build session)_
+Validated end-to-end on desktop Chrome (Mac, 120Hz rAF cap) against the dev server
+before the device run:
+
+- Install gate, hello row, 66-scenario queue build, JSONL streaming: ✔
+- Driver autonomously reaches the lobby start button, requests 8 bots, race starts,
+  bots spawn in random cosmetics (dev world.js patch): ✔
+- Race-gated samples complete with correct gates (state 3→3, alive 9, ice>0,
+  pinned-tier label, gl ratio 1.0) at the 120fps display cap, worst ~9ms: ✔
+- localStorage resume after reload skips completed labels: ✔
+- Requeue/wait on gate failure (lobby/overview between rounds): ✔ after a fix —
+  see "lessons" below.
+
+Lessons baked back into the harness during validation:
+
+1. **Don't pin the all-ice playlist.** The AI can't finish ice-heavy maps (the
+   ice-nav fix lives in unmerged PR #181) and NOTHING else ends a racing round —
+   the sweep stalled forever in round 1. The default (featured) rotation carries
+   enough ice for the `ice>0` gate, and bots actually finish those maps. A 90s
+   round watchdog was also added: the driver goal-seeks with its own kart to force
+   the round over if bots wedge anyway.
+2. **Pre-window gate failures must WAIT, not burn retry attempts** — sitting out
+   the lobby/overview between rounds is normal. Attempts are only consumed by
+   windows that started and then got poisoned (state flip / stall / hidden), plus
+   a 180s wait budget per visit.
+3. Desktop-only trap (irrelevant on-device, fatal in validation): another agent
+   session sharing Chrome steals tab focus; a hidden tab freezes rAF and
+   eventually trips the AFK kick via intensive timer throttling. Running the
+   harness in its own Chrome window (visibility is per-window occlusion, not app
+   focus) fixed it.
+4. The lobby floor's ice cells make the drive to the start button SLOW
+   (`ice.acel` = 15 vs 300) — patience, not a bug; the wedge-escape handles the
+   shoreline pockets.
 
 ## Follow-ups
 
