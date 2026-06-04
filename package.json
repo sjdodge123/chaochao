@@ -4,7 +4,7 @@
     "description": "Multiplayer web based slow paced racing game",
     "dependencies": {
         "@octokit/core": "^7.0.6",
-        "@supabase/supabase-js": "^2.106.1",
+        "@supabase/supabase-js": "^2.107.0",
         "compression": "^1.7.4",
         "dotenv": "^17.4.2",
         "express": "^5.2.1",
@@ -14,7 +14,7 @@
     },
     "devDependencies": {
         "@axe-core/playwright": "^4.11.3",
-        "axe-core": "^4.11.4",
+        "axe-core": "^4.12.0",
         "esbuild": "^0.28.0",
         "playwright": "^1.60.0"
     },
