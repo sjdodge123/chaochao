@@ -24,7 +24,7 @@
       "parameterName": "playlist",
       "displayName": "Playlist",
       "scope": "EVENT",
-      "description": "Active map playlist on round_start/round_complete/match_end (featured | hardcore | pure | all | \u2026). Lets gameplay be segmented by playlist and surfaces per-playlist skew."
+      "description": "Active map playlist on round_start/round_complete/match_end (featured | hardcore | pure | all | \u2026) \u2014 segments gameplay per playlist."
     },
     {
       "parameterName": "trap_source",
