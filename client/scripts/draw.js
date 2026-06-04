@@ -403,22 +403,30 @@ function getBlackoutHoleSprite() {
 // the player's heading and scaled so the cart radius == 1.0; "forward" (travel
 // direction) is +X. Each painter draws in that normalized space. Callers pass the
 // already-camera-adjusted screen center, so the camera offset is never double-applied.
-// Resolve any CSS colour (palette name/hex/colour-blind remap) to {r,g,b} by
-// painting one pixel and reading it back — works for ANY colour without parsing.
-// Cached; the palette is ~22 colours so this stays tiny.
+// Resolve any CSS colour (palette name/hex/colour-blind remap) to {r,g,b}.
+// Pure-JS parse first (tfxParseColorFast, trailEffects.js) — the old paint-one-
+// pixel-and-read-it-back trick forced a synchronous GPU flush per NEW colour,
+// which made every 🎲 randomize hitch. Readback only remains as the fallback for
+// exotic colour strings, on one persistent canvas. Cached per colour as before.
 var _cartSkinRGB = {};
+var _cartSkinParseCv = null;
 function cartSkinRGB(color) {
     if (_cartSkinRGB[color] != null) {
         return _cartSkinRGB[color];
     }
-    var c = document.createElement("canvas");
-    c.width = c.height = 1;
-    var cx = c.getContext("2d");
-    cx.fillStyle = "#000";   // fallback if `color` is invalid
-    cx.fillStyle = color;
-    cx.fillRect(0, 0, 1, 1);
-    var d = cx.getImageData(0, 0, 1, 1).data;
-    var rgb = { r: d[0], g: d[1], b: d[2] };
+    var rgb = (typeof tfxParseColorFast === "function") ? tfxParseColorFast(color) : null;
+    if (rgb == null) {
+        if (_cartSkinParseCv == null) {
+            _cartSkinParseCv = document.createElement("canvas");
+            _cartSkinParseCv.width = _cartSkinParseCv.height = 1;
+        }
+        var cx = _cartSkinParseCv.getContext("2d", { willReadFrequently: true });
+        cx.fillStyle = "#000";   // fallback if `color` is invalid
+        cx.fillStyle = color;
+        cx.fillRect(0, 0, 1, 1);
+        var d = cx.getImageData(0, 0, 1, 1).data;
+        rgb = { r: d[0], g: d[1], b: d[2] };
+    }
     _cartSkinRGB[color] = rgb;
     return rgb;
 }
