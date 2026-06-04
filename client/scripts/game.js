@@ -52,7 +52,13 @@ var server = null,
     WORLD_ZOOM_RELEASE = 620,  // world-units: goal framing fades smoothly to nothing by here (continuous blend, no pop)
     WORLD_ZOOM_PAD = 120,      // world-units padding around framed points
     WORLD_ZOOM_TAU = 620,      // smoothing time-constant (ms); higher = slower, gentler glide
-    WORLD_ZOOM_HOLD_MS = 1100, // hold the whole-map view this long when a round starts, before easing in
+    WORLD_ZOOM_HOLD_MS = 1100, // gate intro: hold the opening spawn close-up this long before panning out
+    // Gate-intro arc shape, as fractions of the countdown after HOLD: pan OUT
+    // from the spawn over OUT_FRAC, sit on the whole map for the remainder,
+    // then ease back IN over the final IN_FRAC, landing as the gate opens.
+    WORLD_ZOOM_GATE_OUT_FRAC = 0.34,
+    WORLD_ZOOM_GATE_IN_FRAC = 0.40,
+    worldViewGatedPrev = false, // was last frame gated? (drives the intro snap-to-spawn cut)
     // Goal-approach intensity zoom: once the goal is engaged, the zoom cap ramps
     // from WORLD_ZOOM_MAX up to (MAX + BOOST) as the group closes from ENGAGE
     // down to GOAL_FULL world-units — a finish-line punch-in. The framing box
@@ -71,9 +77,11 @@ var server = null,
     WORLD_ZOOM_LEAD_MAX = 110,
     WORLD_ZOOM_LEAD_TAU = 700,
     // Max zoom-scale change per second while GATED (the countdown follows its
-    // eased ramp directly, with no exponential smoothing) — the designed ramp
-    // moves ~0.15/s, so this only catches abrupt target shifts mid-countdown.
-    WORLD_ZOOM_GATE_RATE = 0.5,
+    // eased arc directly, with no exponential smoothing) — the designed arc
+    // peaks ~0.6/s mid-smoothstep, so this only catches abrupt target shifts
+    // mid-countdown (fast slide across the goal blend band, a death reshaping
+    // the framed group), never the arc itself.
+    WORLD_ZOOM_GATE_RATE = 0.8,
     // Sustained camera back-off while holding/throwing an aimed ability (bomb/ice)
     // until it detonates, so it's easier to aim. Multiplies the focused scale
     // (0.62 => ~38% wider); the smoothing eases it out and back.

@@ -4110,17 +4110,34 @@ function computeWorldViewTarget(dt) {
     }
     var focusedView = computeFocusedView(dt);
 
-    // During the gate countdown, run a slow, eased zoom timed to the countdown:
-    // whole-map at the start (take in the arena + goal), arriving at the focused
-    // zoom right as the gate opens. Crucially we ONLY ramp the zoom and keep the
-    // centre anchored on the player (clamped to the world) the whole time — at
-    // scale 1 the clamp shows the whole map, and it homes in on the player as it
-    // zooms, so the player can never slide out of frame mid-transition.
+    // During the gate countdown, run a slow, eased camera arc timed to the
+    // countdown — anchored on YOUR SPAWN, not the map centre: open tight on the
+    // kart (admire the skin / find yourself), pan OUT from the spawn to reveal
+    // the whole arena (take in the layout + goal), then ease back into the
+    // focused zoom, landing exactly as the gate opens. e is the "how focused"
+    // weight (1 = tight, 0 = whole map); the centre stays anchored on the
+    // player (clamped to the world) throughout — at scale 1 the clamp shows the
+    // whole map, and it homes back in on the player as it re-zooms, so the
+    // player can never slide out of frame mid-transition. (The very first gated
+    // frame snaps the camera to this close-up in updateWorldCamera — the world
+    // isn't visible during the overview scoreboard, so the cut is invisible.)
     if (currentState === config.stateMap.gated) {
-        var dur = ((config.gatedWaitTime || 9) * 1000) - WORLD_ZOOM_HOLD_MS;
-        var elapsed = worldViewFocusedElapsed - WORLD_ZOOM_HOLD_MS;
-        var p = (dur > 0) ? Math.max(0, Math.min(1, elapsed / dur)) : 1;
-        var e = p * p * (3 - 2 * p); // smoothstep: gentle in (see the map) and out (settle)
+        var rest = ((config.gatedWaitTime || 9) * 1000) - WORLD_ZOOM_HOLD_MS;
+        var tt = worldViewFocusedElapsed - WORLD_ZOOM_HOLD_MS;
+        var e = 1; // hold phase (and degenerate configs): stay tight on the spawn
+        if (rest > 0 && tt > 0) {
+            var outMs = rest * WORLD_ZOOM_GATE_OUT_FRAC;
+            var inMs = rest * WORLD_ZOOM_GATE_IN_FRAC;
+            if (tt < outMs) {
+                var u = tt / outMs;                       // pan out from the spawn
+                e = 1 - u * u * (3 - 2 * u);
+            } else if (tt >= rest - inMs) {
+                var v = Math.min(1, (tt - (rest - inMs)) / inMs); // ease back in
+                e = v * v * (3 - 2 * v);
+            } else {
+                e = 0;                                    // whole-map beat
+            }
+        }
         var scale = 1 + (focusedView.scale - 1) * e;
         return clampViewToWorld(focusedView.cx, focusedView.cy, scale);
     }
@@ -4140,12 +4157,24 @@ function updateWorldCamera(dt) {
     var target = computeWorldViewTarget(cdt);
     if (worldView == null) {
         worldView = { cx: target.cx, cy: target.cy, scale: target.scale };
+        // The init IS the snap if we're born into gated — record it so the
+        // snap-to-spawn cut below doesn't re-fire on the next frame.
+        worldViewGatedPrev = (cameraZoomEnabled && typeof config !== "undefined" && config && currentState === config.stateMap.gated);
         return;
     }
     // During the gate countdown the target is already a precise, eased time-ramp,
     // so follow it directly (a=1) for the arc to finish exactly as the gate opens.
     // Everywhere else, smooth exponentially for natural player/goal tracking.
     var gatedNow = (cameraZoomEnabled && typeof config !== "undefined" && config && currentState === config.stateMap.gated);
+    if (gatedNow && !worldViewGatedPrev) {
+        // First gated frame: CUT straight to the spawn close-up the arc opens
+        // on. Invisible — the world isn't drawn during the overview scoreboard,
+        // and the first race swaps the whole map (lobby -> arena) on this frame
+        // anyway. Without the snap the camera would visibly glide in from
+        // wherever the previous state left it before the pan-out could begin.
+        worldView.cx = target.cx; worldView.cy = target.cy; worldView.scale = target.scale;
+    }
+    worldViewGatedPrev = gatedNow;
     var a = gatedNow ? 1 : (1 - Math.exp(-cdt / WORLD_ZOOM_TAU));
     worldView.cx += (target.cx - worldView.cx) * a;
     worldView.cy += (target.cy - worldView.cy) * a;
