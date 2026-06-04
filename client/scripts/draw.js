@@ -3954,20 +3954,23 @@ function focusWorldPoints() {
     var pts = [];
     var living = livingLocalPlayers();
     for (var i = 0; i < living.length; i++) {
-        pts.push({ x: living[i].x, y: living[i].y });
+        // vx/vy feed the camera's velocity look-ahead in computeFocusedView.
+        pts.push({ x: living[i].x, y: living[i].y, vx: living[i].velX || 0, vy: living[i].velY || 0 });
     }
     if (pts.length === 0 && myPlayer && myPlayer.alive) {
-        pts.push({ x: myPlayer.x, y: myPlayer.y });
+        pts.push({ x: myPlayer.x, y: myPlayer.y, vx: myPlayer.velX || 0, vy: myPlayer.velY || 0 });
     }
     return pts;
 }
 
 // The fully-focused view: the DESIRED (unclamped) centre + zoom that frames every
 // live local player (local co-op widens the zoom as players spread, tightens as
-// they cluster), growing toward the nearest goal as the group approaches it. A
-// single player gets a tight WORLD_ZOOM_MAX framing exactly as before, since each
-// player contributes a max-zoom half-box. Centre is kept separate from the zoom
-// so a transition can ramp only the zoom (players can't slide out of frame).
+// they cluster). Each player contributes a max-zoom half-box, shifted ahead along
+// their velocity (look-ahead) so the tight cruise zoom keeps forward visibility.
+// Near the nearest goal the zoom cap ramps up (finish-line punch-in) while the
+// goal itself stays framed — the close-up only lands once everyone framed has
+// converged on it. Centre is kept separate from the zoom so a transition can
+// ramp only the zoom (players can't slide out of frame).
 function computeFocusedView() {
     var wholeMap = { cx: LOGICAL_WIDTH / 2, cy: LOGICAL_HEIGHT / 2, scale: 1 };
     var pts = focusWorldPoints();
@@ -3977,17 +3980,8 @@ function computeFocusedView() {
         worldGoalEngaged = false;
         return wholeMap;
     }
-    var halfX = LOGICAL_WIDTH / (2 * WORLD_ZOOM_MAX);
-    var halfY = LOGICAL_HEIGHT / (2 * WORLD_ZOOM_MAX);
-    var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (var i = 0; i < pts.length; i++) {
-        minX = Math.min(minX, pts[i].x - halfX);
-        maxX = Math.max(maxX, pts[i].x + halfX);
-        minY = Math.min(minY, pts[i].y - halfY);
-        maxY = Math.max(maxY, pts[i].y + halfY);
-    }
-    // Pull the nearest goal (to any framed player) into frame as the group gets
-    // close to it -> the view zooms out to keep players and the goal visible.
+    // Nearest goal (to any framed player) first: its distance drives the dynamic
+    // zoom cap below, so it must be known before the framing boxes are sized.
     var goals = worldGoalPoints();
     var ng = null, nd = Infinity;
     for (var g = 0; g < goals.length; g++) {
@@ -4008,6 +4002,45 @@ function computeFocusedView() {
     } else if (nd <= WORLD_ZOOM_ENGAGE) {
         worldGoalEngaged = true;
     }
+    // Finish-line punch-in: while the goal is engaged, raise the zoom cap from
+    // WORLD_ZOOM_MAX toward (MAX + BOOST) as the group closes from ENGAGE down to
+    // GOAL_FULL. Smoothstepped, and the goal + every player stay inside the
+    // framing box below, so the fit only reaches the boosted cap once everyone
+    // has actually converged on the goal — the last stretch reads as a lunge.
+    var effMax = WORLD_ZOOM_MAX;
+    if (ng && worldGoalEngaged) {
+        var gt = (WORLD_ZOOM_ENGAGE - nd) / (WORLD_ZOOM_ENGAGE - WORLD_ZOOM_GOAL_FULL);
+        gt = Math.max(0, Math.min(1, gt));
+        effMax += WORLD_ZOOM_GOAL_BOOST * gt * gt * (3 - 2 * gt);
+    }
+    var halfX = LOGICAL_WIDTH / (2 * effMax);
+    var halfY = LOGICAL_HEIGHT / (2 * effMax);
+    var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (var i = 0; i < pts.length; i++) {
+        // Velocity look-ahead: centre this player's half-box ahead of them along
+        // their travel (capped well under the half-box, so the player always
+        // stays comfortably inside their own box -> on screen). Lead targets are
+        // clamped to the world so ramming a wall can't inflate the box. The
+        // camera's exponential smoothing absorbs sudden velocity flips
+        // (punches/bounces) into a gentle drift rather than a snap.
+        var lx = pts[i].x, ly = pts[i].y;
+        var spd = Math.sqrt(pts[i].vx * pts[i].vx + pts[i].vy * pts[i].vy);
+        if (spd > 1) {
+            // Lead scales with speed up to full cruise (LEAD_REF), and is also
+            // capped at a fraction of the (zoom-dependent) half-box so the goal
+            // punch-in's tighter box can't shove a fast kart to the screen edge
+            // — at least ~45% of the half-box always stays behind them.
+            var lead = Math.min(WORLD_ZOOM_LEAD_MAX, halfY * 0.55) * Math.min(1, spd / WORLD_ZOOM_LEAD_REF);
+            lx += pts[i].vx / spd * lead;
+            ly += pts[i].vy / spd * lead;
+            lx = Math.max(world.x, Math.min(world.x + world.width, lx));
+            ly = Math.max(world.y, Math.min(world.y + world.height, ly));
+        }
+        minX = Math.min(minX, lx - halfX);
+        maxX = Math.max(maxX, lx + halfX);
+        minY = Math.min(minY, ly - halfY);
+        maxY = Math.max(maxY, ly + halfY);
+    }
     if (ng && worldGoalEngaged) {
         minX = Math.min(minX, ng.x - WORLD_ZOOM_PAD);
         maxX = Math.max(maxX, ng.x + WORLD_ZOOM_PAD);
@@ -4016,7 +4049,7 @@ function computeFocusedView() {
     }
     var boxW = Math.max(1, maxX - minX), boxH = Math.max(1, maxY - minY);
     var scale = Math.min(LOGICAL_WIDTH / boxW, LOGICAL_HEIGHT / boxH);
-    scale = Math.max(1, Math.min(WORLD_ZOOM_MAX, scale)); // never zoom out past the whole map
+    scale = Math.max(1, Math.min(effMax, scale)); // never zoom out past the whole map
     var cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
     // Defensive: a NaN coordinate would poison setTransform and blank the canvas.
     if (!isFinite(cx) || !isFinite(cy) || !isFinite(scale)) {

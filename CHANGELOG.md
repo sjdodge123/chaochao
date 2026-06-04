@@ -10,7 +10,8 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+- The dynamic camera now rides a little closer to your kart (your skin is easier to admire), looks further ahead in the direction you're driving, and punches in for an intense close-up as you and the goal converge at the finish line — without ever letting a local player slip off screen.
 
 ## v0.29.0 — 2026-06-04
 
