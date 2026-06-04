@@ -476,6 +476,12 @@ function progressionToastText(ev) {
 	return null;
 }
 function enqueueProgressionToasts(events) {
+	// The celebration system (celebrations.js) takes every event it can present —
+	// XP bar fills, level bursts, full-screen unlock reveals — and returns whatever
+	// it can't (error toasts, unknown skin ids) for this legacy text path.
+	if (typeof celebrationsEnqueue === "function") {
+		events = celebrationsEnqueue(events) || [];
+	}
 	for (var i = 0; i < events.length; i++) {
 		var txt = progressionToastText(events[i]);
 		if (txt) { progressionToastQueue.push(txt); }
@@ -485,6 +491,13 @@ function enqueueProgressionToasts(events) {
 function showNextProgressionToast() {
 	if (progressionToastQueue.length === 0) { progressionToastShowing = false; return; }
 	if (!document.body) { progressionToastShowing = false; return; }
+	// Defer while a celebration sequence is on screen — celebrations.js calls back
+	// into showNextProgressionToast() when it drains, so the queued items (notably
+	// the 2× XP reward offer) land right AFTER the celebration beat, never over it.
+	if (typeof celebrationsActive === "function" && celebrationsActive()) {
+		progressionToastShowing = false;
+		return;
+	}
 	progressionToastShowing = true;
 	var txt = progressionToastQueue.shift();
 	// The 2× XP offer is a special queue item: a persistent actionable toast that waits for
@@ -516,6 +529,9 @@ function showNextProgressionToast() {
 function clearProgressionToasts() {
 	progressionToastQueue.length = 0;
 	progressionToastShowing = false;
+	// Tear down any live/queued celebration overlays too (same race-start rationale —
+	// a full-screen unlock reveal must never sit over, or eat input from, live gameplay).
+	if (typeof celebrationsClear === "function") { celebrationsClear(); }
 	// Tear down the 2× offer too (its DOM node carries .cc-progression-toast, so it's removed
 	// below) and drop any armed/pending offer so it can't pop after the race has started.
 	rewardOfferToastEl = null;

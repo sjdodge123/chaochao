@@ -1283,6 +1283,7 @@ class Game {
 				}
 				events = progression.buildToastEvents({
 					xpDelta: breakdown.total,
+					oldXp: prog.xp || 0,
 					oldLevel: oldLevel,
 					newLevel: newLevel,
 					levelSkinsUnlocked: skinRegistry.levelSkinsUnlockedBetween,

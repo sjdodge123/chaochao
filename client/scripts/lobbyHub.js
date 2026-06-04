@@ -338,6 +338,13 @@ function stationPanelAction(lp, action) {
             lp.stationPanel.cursor = Math.min(items.length - 1, pg * perPage);
             lp.stationPanel.region = 'grid';
         }
+    } else if (action != null && action.indexOf("achv:") === 0) {
+        // Profile tab: tapping an achievement cell focuses it (read-only — focusing
+        // shows its "how to earn it" line under the grid).
+        if (lp.stationPanel) {
+            lp.stationPanel.cursor = parseInt(action.slice(5), 10) || 0;
+            lp.stationPanel.region = 'grid';
+        }
     } else if (action != null && action.indexOf("cosmetic:") === 0) {
         // "cosmetic:<slot>:<id>" (id may be empty for the slot default).
         var rest = action.slice("cosmetic:".length);
@@ -1609,6 +1616,10 @@ function skinTabs(lp) {
         tabs.push({ key: 'border', label: 'Borders' });
     }
     tabs.push({ key: 'trail', label: 'Trails' });
+    // Profile/achievements: every achievement cosmetic as a silhouette + "?" with a
+    // progress bar and (focused) its "how to earn it" line. Glyph label — six text
+    // labels don't fit the 300px tab row.
+    tabs.push({ key: 'profile', label: '🏆' });
     return tabs;
 }
 // Reset the active tab to a valid one if the current tab was just hidden (e.g. Patterns
@@ -1632,6 +1643,34 @@ function skinTabItems(lp, tabKey) {
         var pal = skinPalette();
         for (var i = 0; i < pal.length; i++) { out.push({ kind: 'color', color: pal[i] }); }
         if (avatarSkinProfile(lp)) { out.push({ kind: 'avatar' }); }
+        return out;
+    }
+    if (tabKey === 'profile') {
+        // One cell per achievement cosmetic (defs ship in the config payload, built from
+        // server/progression.js). In-progress first, closest-to-unlock leading — the
+        // "almost there" ones are the hook; earned ones trail as the trophy shelf.
+        var defs = (typeof config !== "undefined" && config && config.achievementDefs) ? config.achievementDefs : [];
+        var prog = (lp && !lp.isPrimary) ? null : ((typeof myProgression !== "undefined") ? myProgression : null);
+        var owned = (prog && prog.unlocked_skins) || [];
+        var mc = (prog && prog.medal_counts) || {};
+        var wins = (prog && prog.wins) || 0;
+        for (var a = 0; a < defs.length; a++) {
+            var def = defs[a];
+            var val = (def.stat === 'wins') ? wins : (mc[def.stat] || 0);
+            out.push({
+                kind: 'achv',
+                def: def,
+                value: Math.min(val, def.threshold),
+                done: owned.indexOf(def.id) !== -1
+            });
+        }
+        out.sort(function (p, q) {
+            if (p.done !== q.done) { return p.done ? 1 : -1; }
+            var fp = p.value / p.def.threshold, fq = q.value / q.def.threshold;
+            if (fp !== fq) { return fq - fp; }
+            return p.def.threshold - q.def.threshold;
+        });
+        for (var ix = 0; ix < out.length; ix++) { out[ix].idx = ix; } // for tap-to-focus hits
         return out;
     }
     var cosmetics = [];
@@ -1740,9 +1779,20 @@ function drawSkinPanelBody(lp, x, y, w, h, hit, S) {
     gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
     gameContext.fillText("🎲 Random", rnd.x + rnd.w / 2, rnd.y + rnd.h / 2 + 1);
     hit.options.push({ rect: rnd, action: "randomize" });
-    // Lv/XP badge (or sign-in nudge)
+    // Lv/XP badge (or sign-in nudge). On the Profile tab the focused achievement's
+    // "how to earn it" line takes this slot instead — that's the tab's whole point —
+    // unless there's no progression (guest/couch seat), where the sign-in nudge matters more.
     var badgeY = rndY + (SKIN_RANDOM_BTN_H + 6) * S;
-    drawProgressionBadge(lp, x + pad, badgeY, w - pad * 2, S);
+    var profProg = (lp && !lp.isPrimary) ? null : ((typeof myProgression !== "undefined") ? myProgression : null);
+    var focusedAchv = (sp.tab === 'profile' && profProg) ? items[sp.cursor || 0] : null;
+    if (focusedAchv && focusedAchv.kind === 'achv') {
+        gameContext.fillStyle = "#fff"; gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
+        gameContext.font = hubFont(S, 11);
+        var achLine = focusedAchv.def.desc + " · " + (focusedAchv.done ? "Done!" : (focusedAchv.value + "/" + focusedAchv.def.threshold));
+        gameContext.fillText(achLine, x + w / 2, badgeY + 9 * S, w - pad * 2);
+    } else {
+        drawProgressionBadge(lp, x + pad, badgeY, w - pad * 2, S);
+    }
     // page controls
     var pgY = y + h - 22 * S;
     if (pageCount > 1) {
@@ -1823,6 +1873,46 @@ function drawSkinCell(lp, item, cx, cy, cw, ch, focused, currentColor, hit, S) {
         hit.options.push({ rect: { x: cx, y: cy, w: cw, h: ch }, action: "pickAvatar" });
         return;
     }
+    if (item.kind === 'achv') {
+        // Profile tab: a not-yet-earned achievement cosmetic is a MYSTERY — dark
+        // silhouette + "?" + progress bar; earned ones show the real item + a ✓.
+        var d = item.def;
+        gameContext.fillStyle = "rgba(255,255,255,0.06)";
+        lhRoundRect(gameContext, cx, cy, cw, ch, 6 * S); gameContext.fill();
+        gameContext.lineWidth = 1;
+        gameContext.strokeStyle = item.done ? "rgba(95,217,122,0.55)" : "rgba(255,255,255,0.12)";
+        lhRoundRect(gameContext, cx, cy, cw, ch, 6 * S); gameContext.stroke();
+        if (focused) { gameContext.strokeStyle = "#fff"; gameContext.lineWidth = 2.5; lhRoundRect(gameContext, cx - 1, cy - 1, cw + 2, ch + 2, 7 * S); gameContext.stroke(); }
+        var pcx = cx + cw / 2, pcy = cy + ch * 0.34, pr = ch * 0.22;
+        if (item.done) {
+            drawCosmeticPreview({ slot: d.slot, id: d.id }, pcx, pcy, pr, currentColor, false, { x: cx, y: cy, w: cw, h: ch });
+            gameContext.beginPath(); gameContext.arc(cx + cw - 8 * S, cy + 8 * S, 7 * S, 0, 2 * Math.PI);
+            gameContext.fillStyle = "rgba(0,0,0,0.7)"; gameContext.fill();
+            gameContext.fillStyle = "#5fd97a"; gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
+            gameContext.font = hubFont(S, 10, true); gameContext.fillText("✓", cx + cw - 8 * S, cy + 8.5 * S);
+        } else {
+            if (!drawAchievementSilhouette(d.id, pcx, pcy, pr)) {
+                gameContext.fillStyle = "#2a3140";
+                gameContext.beginPath(); gameContext.arc(pcx, pcy, pr, 0, Math.PI * 2); gameContext.fill();
+            }
+            gameContext.fillStyle = "#ffd34d"; gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
+            gameContext.font = hubFont(S, 14, true); gameContext.fillText("?", pcx, pcy + 1);
+        }
+        // progress bar + count (earned = full green "Done")
+        var bx = cx + 5 * S, bw = cw - 10 * S, by = cy + ch * 0.66, bh = 5 * S;
+        var frac = item.done ? 1 : Math.min(1, item.value / d.threshold);
+        gameContext.fillStyle = "rgba(255,255,255,0.12)";
+        lhRoundRect(gameContext, bx, by, bw, bh, 2.5 * S); gameContext.fill();
+        if (frac > 0) {
+            gameContext.fillStyle = item.done ? "#5fd97a" : "#ffd34d";
+            lhRoundRect(gameContext, bx, by, Math.max(3 * S, bw * frac), bh, 2.5 * S); gameContext.fill();
+        }
+        gameContext.fillStyle = item.done ? "#5fd97a" : "rgba(255,255,255,0.6)";
+        gameContext.font = hubFont(S, 8); gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
+        gameContext.fillText(item.done ? "Done" : (item.value + "/" + d.threshold), cx + cw / 2, cy + ch * 0.87);
+        hit.options.push({ rect: { x: cx, y: cy, w: cw, h: ch }, action: "achv:" + item.idx });
+        return;
+    }
     var opt = item.opt;
     var sel = currentCosmetic(lp, opt.slot) === opt.id;
     var lock = cartSkinUnlock(opt.id, lp);
@@ -1839,10 +1929,24 @@ function drawSkinCell(lp, item, cx, cy, cw, ch, focused, currentColor, hit, S) {
         lhRoundRect(gameContext, cx, cy, cw, ch, 6 * S); gameContext.stroke();
     }
     if (focused) { gameContext.strokeStyle = "#fff"; gameContext.lineWidth = 2.5; lhRoundRect(gameContext, cx - 1, cy - 1, cw + 2, ch + 2, 7 * S); gameContext.stroke(); }
-    drawCosmeticPreview(opt, cx + cw / 2, cy + ch * 0.34, ch * 0.22, currentColor, lock.locked, { x: cx, y: cy, w: cw, h: ch });
+    // Locked ACHIEVEMENT cosmetics stay a mystery in the picker too: silhouette + "?",
+    // name hidden — the 🏆 lock badge points at the Profile tab for the requirement, and
+    // the unlock celebration does the reveal. Level/seasonal locks keep the real preview
+    // (seeing the item you're leveling toward IS the carrot).
+    var mystery = lock.locked && raritySkin && raritySkin.unlock && raritySkin.unlock.kind === "achievement";
+    if (mystery) {
+        if (!drawAchievementSilhouette(opt.id, cx + cw / 2, cy + ch * 0.34, ch * 0.22)) {
+            gameContext.fillStyle = "#2a3140";
+            gameContext.beginPath(); gameContext.arc(cx + cw / 2, cy + ch * 0.34, ch * 0.22, 0, Math.PI * 2); gameContext.fill();
+        }
+        gameContext.fillStyle = "#ffd34d"; gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
+        gameContext.font = hubFont(S, 14, true); gameContext.fillText("?", cx + cw / 2, cy + ch * 0.34 + 1);
+    } else {
+        drawCosmeticPreview(opt, cx + cw / 2, cy + ch * 0.34, ch * 0.22, currentColor, lock.locked, { x: cx, y: cy, w: cw, h: ch });
+    }
     gameContext.fillStyle = lock.locked ? "rgba(255,255,255,0.5)" : "#fff";
     gameContext.font = hubFont(S, 8.5); gameContext.textAlign = "center"; gameContext.textBaseline = "middle";
-    gameContext.fillText(opt.label, cx + cw / 2, cy + ch * 0.74);
+    gameContext.fillText(mystery ? "???" : opt.label, cx + cw / 2, cy + ch * 0.74);
     if (lock.locked && lock.text) {
         gameContext.fillStyle = "#ffd34d"; gameContext.font = hubFont(S, 8.5, true);
         gameContext.fillText("🔒 " + lock.text, cx + cw / 2, cy + ch * 0.93);
@@ -1856,6 +1960,35 @@ function activateSkinItem(lp, item) {
     if (item.kind === 'color') { stationPickSkin(lp, item.color); }
     else if (item.kind === 'avatar') { stationPickAvatar(lp); }
     else if (item.kind === 'cosmetic') { stationPickCosmetic(lp, item.opt); }
+    // 'achv' cells are read-only — focusing one already shows its requirement line.
+}
+
+// Cached dark-silhouette thumbnails for not-yet-earned achievement cosmetics: the real
+// painter's SHAPE with all detail flattened to one dark fill (mystery teaser — the unlock
+// celebration is the reveal). Painters are procedural (no image decode race), so a
+// render-once cache per id+size is safe; ~47 ids × one small canvas.
+var achvSilhouetteCache = {};
+function drawAchievementSilhouette(id, cx, cy, r) {
+    var size = Math.max(12, Math.ceil(r * 3.2));
+    var key = id + ":" + size;
+    var cv = achvSilhouetteCache[key];
+    if (cv === undefined) {
+        cv = null;
+        if (typeof celebrationPaintCosmetic === "function" && typeof document !== "undefined") {
+            try {
+                cv = document.createElement("canvas");
+                cv.width = size; cv.height = size;
+                var c2 = cv.getContext("2d");
+                celebrationPaintCosmetic(c2, size, size, id, "#ffffff", 0);
+                c2.globalCompositeOperation = "source-in"; // keep the shape, drop the detail
+                c2.fillStyle = "#2a3140";
+                c2.fillRect(0, 0, size, size);
+            } catch (e) { cv = null; }
+        }
+        achvSilhouetteCache[key] = cv;
+    }
+    if (cv) { gameContext.drawImage(cv, cx - size / 2, cy - size / 2); return true; }
+    return false;
 }
 
 

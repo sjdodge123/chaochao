@@ -458,6 +458,7 @@ async function addProgression(userId, opts) {
             // on the game-over screen). Appended to the durable pending_toasts queue.
             var builtToasts = progression.buildToastEvents({
                 xpDelta: opts.xpDelta || 0,
+                oldXp: cur.xp,
                 oldLevel: oldLevel,
                 newLevel: newLevel,
                 levelSkinsUnlocked: skinRegistry.levelSkinsUnlockedBetween,

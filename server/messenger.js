@@ -6,6 +6,10 @@ var c = utils.loadConfig();
 // config payload that already ships to every client) so the skin picker's swatches
 // and its "is this color taken?" preview match the server's validation set.
 c.colorPalette = utils.getColorPalette();
+// Achievement-cosmetic definitions (id/name/slot/stat/threshold + player-facing "how to
+// earn it" text), shipped in the same config payload — the unlock celebrations and the
+// profile panel render from this, so the ladder lives only in server/progression.js.
+c.achievementDefs = require('./progression.js').clientAchievementDefs();
 var compressor = require('./compressor.js');
 var debug = require('./debug.js');
 var mapFormat = require('./mapFormat.js');
@@ -983,6 +987,18 @@ function buildProgressionPayload(row) {
 		return null;
 	}
 	var prog = progression.levelProgress(row.xp || 0);
+	// The next level-ladder cosmetic this player is working toward, with the exact XP
+	// gap — drives the client's "next unlock: X, ~N matches away" teaser. null when the
+	// ladder is exhausted (Lv100).
+	var next = skinRegistry.nextLevelSkin(prog.level);
+	var nextUnlock = null;
+	if (next) {
+		nextUnlock = {
+			id: next.id,
+			level: next.level,
+			xpToGo: Math.max(0, progression.cumulativeXpForLevel(next.level) - (row.xp || 0))
+		};
+	}
 	return {
 		xp: row.xp || 0,
 		level: row.level || prog.level,
@@ -990,7 +1006,8 @@ function buildProgressionPayload(row) {
 		medal_counts: row.medal_counts || {},
 		wins: row.wins || 0,
 		xpThisLevel: prog.xpThisLevel,
-		xpForNextLevel: prog.xpForNextLevel
+		xpForNextLevel: prog.xpForNextLevel,
+		nextUnlock: nextUnlock
 	};
 }
 // Attach a signed-in player's progression to the player object (for server-side

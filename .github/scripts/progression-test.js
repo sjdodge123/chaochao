@@ -186,13 +186,16 @@ function testLevelUp() {
     // crosses it. The Racing Stripes pattern (id 'stripes') unlocks at Lv2, so crossing
     // into Lv2 should also queue a "skin" toast.
     const startXp = progression.cumulativeXpForLevel(2) - 12;
+    // The runner-up sits JUST past the L2 floor: under the capped-hook curve (50+22n,
+    // tuned so a fresh player levels off their very first decent match) a 0-XP start
+    // would cross L2 too — park them where one runner-up match can't reach L3.
     const r = runMatch({
         sig: 'prog-lvl',
         p1: { id: 'prog-lvl-1', notches: 5, totalKills: 0, progression: { xp: startXp, level: 1, unlocked_skins: [], medal_counts: {}, wins: 0 } },
-        p2: { id: 'prog-lvl-2', notches: 1, totalKills: 0, progression: progression.defaultProgression() }
+        p2: { id: 'prog-lvl-2', notches: 1, totalKills: 0, progression: { xp: progression.cumulativeXpForLevel(2), level: 2, unlocked_skins: [], medal_counts: {}, wins: 0 } }
     });
     check(r.p1.progression.level >= 2, 'winner cache level advanced past 1 (-> ' + r.p1.progression.level + ')');
-    check(r.p2.progression.level === 1, 'low-XP runner-up stayed level 1');
+    check(r.p2.progression.level === 2, 'low-XP runner-up stayed level 2');
     const t1 = drainMem('prog-lvl-1');
     check(t1.some(e => e.type === 'level' && e.level >= 2), 'winner queued a level-up toast');
     check(t1.some(e => e.type === 'skin' && e.id === 'stripes'), 'winner queued a Racing Stripes (stripes, Lv2) new-cosmetic toast');

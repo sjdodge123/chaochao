@@ -21,13 +21,18 @@ function rewardedBonusXp(originalXpDelta) {
     return base * (XP_MULTIPLIER_REWARDED - 1);
 }
 
-// XP needed to advance FROM level n-1 TO level n. Fast-early, slow-late:
-//   xpRequiredForLevel(2) ≈ 152, (5) ≈ 657, (13) ≈ 3084.
-// Tuned (with the config XP awards, ~150-250 XP/match) for ~4-5 unlocks in a
-// player's first session.
+// XP needed to advance FROM level n-1 TO level n. Linear with a hard ceiling
+// ("capped hook", operator-approved 2026-06-04): 50 + 22n, capped at 1000/level
+// (the cap kicks in at Lv44). With ~100 XP/match (winners ~195) that paces the
+// every-2-levels cosmetic ladder at ~2-3 matches per unlock early, growing to a
+// permanent ceiling of ~20 matches — the next skin always feels reachable.
+// L100 ≈ 80k XP ≈ ~800 matches lifetime.
+//   xpRequiredForLevel(2) = 95, (10) = 270, (44+) = 1000.
+// MIGRATION SAFETY: this is strictly cheaper than the old 50·n^1.6 curve at every
+// level, so levelForXp(existing xp) can only go UP — no player ever demotes.
 function xpRequiredForLevel(n) {
     if (n <= 1) { return 0; }
-    return Math.round(50 * Math.pow(n, 1.6));
+    return Math.min(1000, Math.round((50 + 22 * n) / 5) * 5);
 }
 
 // Total cumulative XP required to BE level `level` (i.e. the floor of that level).
@@ -120,6 +125,43 @@ var ACHIEVEMENT_UNLOCKS = [
     { id: 'checkered', name: "Checkered", slot: 'pattern', stat: 'mapsSubmitted', threshold: 5 },
 ];
 
+// Player-facing "how to earn it" text for an achievement unlock. Medal stats phrase as
+// "Earn the <medal> medal N times" (titles match gatherAchievements in achievements.js);
+// self-counter stats get bespoke phrasing. Shipped to the client (clientAchievementDefs)
+// so unlock celebrations and the profile panel can show the requirement.
+var MEDAL_TITLES = {
+    mostKills: 'Serial Killer', savior: 'Savior', survivalist: 'Survivalist',
+    brutalist: 'Brutalist', mostMurdered: 'Picked On', zombieSlayer: 'Zombie Slayer',
+    heavyHitter: 'Heavy Hitter', pinball: 'Pinball', iceSkater: 'Ice Skater'
+};
+function describeAchievement(u) {
+    var n = u.threshold;
+    switch (u.stat) {
+        case 'wins': return 'Win ' + n + ' matches';
+        case 'winStreak': return 'Win ' + n + ' matches in a row';
+        case 'gamesPlayed': return 'Play ' + n + ' matches';
+        case 'goalsReached': return 'Reach the goal ' + n + ' times';
+        case 'abilitiesUsed': return 'Use ' + n + ' abilities';
+        case 'cosmeticGames': return 'Play ' + n + ' matches with a cosmetic equipped';
+        case 'recapAppearances': return 'Star in ' + n + ' match recaps';
+        case 'joinInProgress': return 'Join ' + n + ' matches already in progress';
+        case 'mapsSubmitted': return n === 1 ? 'Publish a map from the editor' : ('Publish ' + n + ' maps from the editor');
+        default: {
+            var title = MEDAL_TITLES[u.stat] || u.stat;
+            return 'Earn the ' + title + ' medal ' + n + (n === 1 ? ' time' : ' times');
+        }
+    }
+}
+
+// The achievement ladder shaped for the client (config payload): everything the UI
+// needs to render locked silhouettes, requirement text and progress bars — no
+// client-side mirror of ACHIEVEMENT_UNLOCKS to keep in lockstep.
+function clientAchievementDefs() {
+    return ACHIEVEMENT_UNLOCKS.map(function (u) {
+        return { id: u.id, name: u.name, slot: u.slot, stat: u.stat, threshold: u.threshold, desc: describeAchievement(u) };
+    });
+}
+
 // winStreak is a MAX/streak, not a count: maintained explicitly after the additive medal
 // merge. `_streak` (underscore = internal, not a cosmetic stat) is the current run; `winStreak`
 // is the best-ever, which the achievement ladder gates on. Call once per match after merging.
@@ -169,7 +211,16 @@ function buildToastEvents(opts) {
     opts = opts || {};
     var events = [];
     if (opts.xpDelta > 0) {
-        events.push({ type: 'xp', amount: opts.xpDelta });
+        var xpEv = { type: 'xp', amount: opts.xpDelta };
+        // When the caller knows the player's pre-match XP total, attach before/after
+        // level-bar snapshots so the client can ANIMATE the bar filling (and rolling
+        // over on level-up) instead of just printing "+N XP". Optional: events without
+        // them (old queued toasts, not-yet-loaded rows) fall back to plain text.
+        if (typeof opts.oldXp === 'number') {
+            xpEv.from = levelProgress(opts.oldXp);
+            xpEv.to = levelProgress(opts.oldXp + opts.xpDelta);
+        }
+        events.push(xpEv);
     }
     var oldLevel = opts.oldLevel || 1;
     var newLevel = opts.newLevel || oldLevel;
@@ -197,6 +248,8 @@ module.exports = {
     levelForXp: levelForXp,
     levelProgress: levelProgress,
     ACHIEVEMENT_UNLOCKS: ACHIEVEMENT_UNLOCKS,
+    describeAchievement: describeAchievement,
+    clientAchievementDefs: clientAchievementDefs,
     achievementsUnlocked: achievementsUnlocked,
     applyWinStreak: applyWinStreak,
     mergeMedalCounts: mergeMedalCounts,
