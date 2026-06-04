@@ -1,6 +1,6 @@
 # On-device render-performance sweep (real iPad / Android hardware)
 
-**Status:** iPad run COMPLETE (66/66 scenarios, 0 skips). Android still pending a device.
+**Status:** COMPLETE — iPad run 66/66 and Android-phone run 66/66, both 0 skips.
 **Date:** 2026-06-04
 **Branch:** `worktree-perf-device-sweep`
 
@@ -95,17 +95,71 @@ real mobile hardware at every tier the device can Auto-resolve to.
 - Mid-run resume worked in production conditions: 16 banked rows survived the
   sleep, the remaining 50 completed after wake with no duplicates or skips.
 
+## Device results — Android phone (Android 10+, Chrome 148 Mobile, 8 cores, dpr 2.625, 412×915)
+
+Display cap: **60 fps** (probe 58.8). Auto tier resolved: **low** (as `namedDeviceTier`
+predicts for Android phones). 66/66 scenarios, 0 skips, gl 1.0 throughout. Early-run
+page reloads (Android pull-to-refresh) were absorbed by localStorage resume — 4 hellos,
+zero lost rows. Android Chrome's keep-awake video DID hold the screen (no sleep, unlike
+iPadOS).
+
+### Low — the tier phones actually ship with (Auto): ALL CLEAR
+
+All hot spots, worst-combo, random_mix, and random unknowns ≥54 fps, almost all at the
+60 cap with 17ms worsts. The two sub-58 rows carry ambient-hitch signatures (a
+`__none__` baseline itself read 55.8 with a 233ms one-off spike during the early reload
+churn; wheel_of_fortune 54.3/100ms in the same stretch).
+
+### Balanced — what ANDROID TABLETS Auto-resolve to: two glow-heavy trails collapse
+
+| Scenario (balanced) | FPS | Worst ms |
+| --- | --- | --- |
+| __none__ baseline / carts / border_runes | 60.1 | 17 |
+| pattern:nebula | 57.7 | 33 |
+| trailFx:comet | 60.1 | 17 |
+| **trailFx:founders_flare** | **26.6** | 50 |
+| **trailFx:aurora** | **27.2** | 50 |
+| combo:worst | 45.5 | 33 |
+
+Baseline-anchored (60.1 same phase). Balanced keeps `glow: true` at 0.6× particle
+volume — founders_flare/aurora's glow passes still overwhelm a phone-class GPU. This is
+the strongest finding of the device round: **an Android tablet (Auto→balanced) with
+multiple founders_flare/aurora wearers could see ~27 fps.** Mitigation context: 9
+same-trail wearers is the synthetic stress case; typical rooms have 1-2.
+
+### High (manual override only): combo collapse, trails individually OK
+
+Unlike the iPad (individual trails 24-42 on High), this phone runs each heavy trail at
+57-60 on High but **combo:worst collapses to 22.8 fps** — cumulative 4-layer cost, not
+any single effect. One more suggestive row: golden_champion 38.1 on the heaviest-ice
+round (89 sites) while a Low-tier row in the SAME round read 60.1 — plausibly the
+statue-skin × ice-reflection repaint interaction at High's full budget; single reading,
+not chased.
+
+## Cross-device picture
+
+- **Every tier Auto can actually pick is clean**: iPad→Balanced ✔, Android
+  phone→Low ✔ (and iPad Balanced runs even the heavy trails at cap — tablet iPad GPU
+  ≫ phone GPU at the same tier).
+- The trail-glow budget is the consistent offender once you step one tier above a
+  device's Auto resolution: founders_flare + aurora are the worst, comet next.
+- Worst-frame stutter (>50ms) only ever accompanied the low-FPS rows or one-off
+  ambient hitches — no silent texture-upload stutter at healthy FPS readings.
+
 ## Follow-up prompt (operator-injectable)
 
-> High graphics tier on tablets degrades on heavy trails (iPad: comet 38 fps,
-> founders_flare 24 fps, aurora 37 fps w/ 96 ms hitches at 9 wearers; Balanced and
-> Low hold 60). Auto never picks High on tablets, so this only affects manual
-> overrides. If we want it fixed anyway: scale the trail/glow particle budget by
-> device class even when pref=High (e.g. touch devices get particleCount 0.6 +
-> maxEffects 280 for trail FX only), or simply cap maxEffects on touch-High.
-> Verify with `PERF_HARNESS=1 UNLOCK_ALL_COSMETICS=true PORT=<free> node index.js`
-> + `http://<LAN-IP>:<port>/play.html?perfharness=1` on the device — the
-> harness's phase-2 High subset covers exactly these ids.
+> Glow-heavy trails (founders_flare, aurora — comet next) overwhelm mobile GPUs one
+> tier above the device's Auto resolution. Measured at 9 same-trail wearers:
+> Android phone on Balanced 26.6/27.2 fps (Balanced is what ANDROID TABLETS
+> Auto-resolve to — the real exposure); iPad on High 24-42 fps; phone on High
+> combo 22.8 fps. Every Auto-picked tier is clean on both devices. Recommended
+> shape of a fix: gate the trail glow pass (`perfGlow()`-style) or scale the trail
+> particle budget by device class (touch → Low's trail knobs) even when the
+> player pins a higher tier — or demote just founders_flare/aurora's glow on
+> touch devices. Verify on-device with
+> `PERF_HARNESS=1 UNLOCK_ALL_COSMETICS=true PORT=<free> node index.js` +
+> `http://<LAN-IP>:<port>/play.html?perfharness=1` — the phase-2 tier subsets
+> cover exactly these ids; compare against the committed tables in this doc.
 
 ## Raw data
 
