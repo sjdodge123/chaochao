@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.28.4 — 2026-06-04
+
 ### General
 
 - The game now warns you before the server goes down for an update: a banner counts down the final 30 seconds, new races stop starting while a restart is pending (races already underway get to finish), and you're brought back in automatically once the server is back.
