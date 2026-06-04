@@ -369,6 +369,27 @@ app.get('/ops/status', function (req, res) {
     });
 });
 
+// Dev-only render-perf harness sink (client/scripts/perfharness.js). Registered ONLY
+// when PERF_HARNESS is set (c.perfHarness) so prod never exposes the route. The page
+// POSTs one JSON row per completed/skipped sample plus a final summary; rows append as
+// JSONL to PERF_HARNESS_LOG (default perf-harness-report.jsonl in the repo root) for
+// the operator/agent to tail. Same express.json body-cap pattern as /feedback above;
+// no rate limit — the route only exists on a local dev server.
+if (c.perfHarness) {
+    var perfHarnessLog = process.env.PERF_HARNESS_LOG || path.join(__dirname, 'perf-harness-report.jsonl');
+    console.log('[perfHarness] report sink ON -> ' + perfHarnessLog);
+    app.post('/__perf/report', express.json({ limit: '256kb' }), function (req, res) {
+        var row = req.body || {};
+        row.serverTime = Date.now();
+        try {
+            fs.appendFileSync(perfHarnessLog, JSON.stringify(row) + '\n');
+        } catch (e) {
+            console.log('[perfHarness] write failed: ' + e.message);
+        }
+        res.json({ status: true });
+    });
+}
+
 //Base Server vars
 var serverSleeping = true,
     pendingReboot = false,

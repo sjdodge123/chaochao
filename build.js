@@ -22,7 +22,8 @@ const bundles = {
         'client/scripts/audience.js',
         'client/scripts/recap.js',
         'client/scripts/joystick.js',
-        'client/scripts/utils.js'
+        'client/scripts/utils.js',
+        'client/scripts/perfharness.js'
     ],
     'create.bundle.min.js': [
         'client/scripts/rhill-voronoi-core.js',
