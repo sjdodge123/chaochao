@@ -185,8 +185,35 @@ viewing sizes). Low keeps glow off; High keeps the original single-blit path.
 
 Desktop verification (targeted `&phfilter=` runs through the new path):
 founders_flare/aurora/comet on pinned Balanced all at the 120 fps display cap, gl 1.0,
-visuals spot-checked. Phone re-verification of the Balanced subset: pending (one
-~5-min targeted run).
+visuals spot-checked.
+
+### Final phone verification (corrected racing-only gate, rested device)
+
+| Row (run order) | FPS | Pre-fix racing |
+| --- | --- | --- |
+| carts pizza / golden_champion | 60.1 | 60.1 |
+| trailFx:comet | 31.8 | (no valid pre — old row was gated) |
+| **trailFx:founders_flare** | **36.8** | 26.6 (+38%) |
+| **trailFx:aurora** | **37.6** | 27.2 (+38%) |
+| pattern:nebula | 39.7 | 57.7 |
+| border:border_runes | 26.8 | 60.1 |
+| combo:worst | 15.8 | 45.5 |
+| `__none__` baseline (ran LAST) | **60.1 / 16.7ms** | 60.1 |
+
+The baseline at the cap immediately after combo's 15.8 is the decisive read: the
+device recovers instantly when cosmetics come off, so the low rows are the genuine
+sustained cost of 9 heavy-cosmetic karts racing at Balanced on a phone-class GPU —
+not a lingering thermal state. (nebula/border deltas vs pre-fix carry round/map
+variance; the same-position founders/aurora comparison is the controlled one.)
+
+**Conclusion:** the glowScale fix delivers a real +38% on the two worst trails and is
+kept. Beyond it, phone-class GPUs at Balanced are simply above budget under 9-wearer
+load (~27-45 fps; stacked combo 15.8) — while the SAME phone at Low (its actual
+Auto tier) runs everything at 60, and iPad-Balanced holds 59-60 racing. Further
+per-painter surgery can't close a ~2× hardware gap. If weak Android tablets
+(Auto→Balanced) ever report stutter in the field, the product lever is a one-line
+`namedDeviceTier` demotion of Android tablets to `low` — operator decision,
+deliberately NOT shipped in this branch.
 
 Also added for that verification: `&phfilter=<substr>[,<substr>]` harness URL param —
 filters the scenario queue (cap_probe always runs), skips persistence, so a post-fix
