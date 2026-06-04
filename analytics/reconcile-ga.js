@@ -54,6 +54,10 @@ const group = async (title, fn) => {
 // is how an over-length description once slipped through review and broke the main
 // apply (playlist, 170 > 150).
 const GA_FIELD_LIMITS = { parameterName: 40, displayName: 82, description: 150 };
+// displayName charset, same reasoning: the API rejects anything beyond alphanumeric,
+// underscore, or space — which is how "Duration (s)" (parentheses) slipped past the
+// dry-run and broke the main apply mid-run (dimensions created, metrics/keyEvents not).
+const GA_DISPLAY_NAME_RE = /^[A-Za-z0-9_ ]+$/;
 function validateFieldLimits(kind, entries) {
   for (const e of entries || []) {
     for (const [field, max] of Object.entries(GA_FIELD_LIMITS)) {
@@ -63,6 +67,12 @@ function validateFieldLimits(kind, entries) {
           `${kind} "${e.parameterName}": ${field} is ${v.length} chars (GA4 max ${max}). Shorten it in ga-config.json.`
         );
       }
+    }
+    if (typeof e.displayName === 'string' && !GA_DISPLAY_NAME_RE.test(e.displayName)) {
+      throw new Error(
+        `${kind} "${e.parameterName}": displayName "${e.displayName}" has characters GA4 rejects ` +
+        `(only letters, digits, underscores, and spaces are allowed). Fix it in ga-config.json.`
+      );
     }
   }
 }
