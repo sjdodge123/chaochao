@@ -122,17 +122,29 @@ jobs:
           echo "Drain announced (3 min heads-up; new races now paused)."
           sleep 180
           # Wait up to a further 10 min for in-flight races to finish.
+          races=unknown
           for i in $(seq 1 30); do
             races=$(curl -fsS -H "x-ops-secret: $OPS_SECRET" "$PROD_URL/ops/status" \
                     | jq -r '.activeRaces' 2>/dev/null || echo unknown)
             if [ "$races" = "0" ]; then
               echo "No active races — proceeding."
-              exit 0
+              break
             fi
             echo "Still $races active race(s) (poll $i/30) — waiting 20s."
             sleep 20
           done
-          echo "::warning::races still active after the 10 min bound — deploying anyway (SIGTERM countdown covers them)."
+          if [ "$races" != "0" ]; then
+            echo "::warning::races still active after the 10 min bound — deploying anyway (SIGTERM countdown covers them)."
+          fi
+          # Re-anchor the drain to push time: the server's 15-min auto-expiry
+          # started at the announcement above, and this step may have waited up
+          # to 13 min — a slow Heroku build after the push could otherwise
+          # outlive the grace and let races resume on the old dyno right
+          # before SIGTERM cuts them.
+          if ! curl -fsS -X POST -H "x-ops-secret: $OPS_SECRET" \
+               "$PROD_URL/ops/drain?seconds=0" > /dev/null; then
+            echo "::warning::re-drain failed — grace stays anchored to the original announcement."
+          fi
 
       - name: Fast-forward prod
         if: steps.resolve.outputs.changed == 'true'

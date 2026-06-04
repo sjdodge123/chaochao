@@ -642,14 +642,40 @@ function registerConnectionHandlers(server) {
 		serverMaintenance = data;
 	});
 
-	// When an announced restart actually cuts the socket, bring the player back
-	// automatically: the new dyno boots in parallel with the old one's 28s
-	// countdown, so a short pause + reload lands them on the fresh server. Any
-	// other disconnect keeps today's behavior (socket.io auto-reconnect).
+	// When a maintenance restart cuts the socket, bring the player back
+	// automatically. Any active maintenance state counts — not just 'restart':
+	// during a nightly the final SIGTERM broadcast can be lost in the dyno
+	// cutover, leaving the client holding 'drain' when the socket drops, and a
+	// bare auto-reconnect would strand them roomless (nothing re-sends
+	// enterGame on the primary socket). Rather than guessing how long the new
+	// dyno takes to boot, poll until the server actually answers, then reload.
 	server.on("disconnect", function () {
-		if (serverMaintenance == null || serverMaintenance.reason !== "restart") { return; }
-		debugLog("socket dropped during maintenance restart -- reloading shortly");
-		setTimeout(function () { window.location.reload(); }, 6000);
+		if (serverMaintenance == null) { return; }
+		// Stale state guard: a hidden tab's draw loop never runs, so the
+		// banner's own expiry can't clear serverMaintenance — don't treat a
+		// long-expired drain as a live restart hours later.
+		if (serverMaintenance.expiresAt != null && Date.now() > serverMaintenance.expiresAt) {
+			serverMaintenance = null;
+			return;
+		}
+		debugLog("socket dropped during maintenance -- waiting for server, then reloading");
+		var attempts = 0;
+		var waitForServer = setInterval(function () {
+			attempts++;
+			if (attempts > 30) { // ~60s: stop probing and just try the reload
+				clearInterval(waitForServer);
+				window.location.reload();
+				return;
+			}
+			fetch(window.location.pathname, { method: "HEAD", cache: "no-store" })
+				.then(function (res) {
+					if (res.ok) {
+						clearInterval(waitForServer);
+						window.location.reload();
+					}
+				})
+				.catch(function () { /* server not up yet — keep polling */ });
+		}, 2000);
 	});
 
 
