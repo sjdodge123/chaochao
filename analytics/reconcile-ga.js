@@ -49,12 +49,32 @@ const group = async (title, fn) => {
   }
 };
 
+// GA4 Admin API field limits for custom dimensions/metrics. Enforced at LOAD time so
+// the PR dry-run fails on a violation — the API only rejects on the real apply, which
+// is how an over-length description once slipped through review and broke the main
+// apply (playlist, 170 > 150).
+const GA_FIELD_LIMITS = { parameterName: 40, displayName: 82, description: 150 };
+function validateFieldLimits(kind, entries) {
+  for (const e of entries || []) {
+    for (const [field, max] of Object.entries(GA_FIELD_LIMITS)) {
+      const v = e[field];
+      if (typeof v === 'string' && v.length > max) {
+        throw new Error(
+          `${kind} "${e.parameterName}": ${field} is ${v.length} chars (GA4 max ${max}). Shorten it in ga-config.json.`
+        );
+      }
+    }
+  }
+}
+
 function loadConfig() {
   const raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   const propertyId = String(raw.propertyId || '').replace(/^properties\//, '');
   if (!/^\d+$/.test(propertyId)) {
     throw new Error(`config.propertyId must be a numeric GA4 property id, got: ${raw.propertyId}`);
   }
+  validateFieldLimits('customDimension', raw.customDimensions);
+  validateFieldLimits('customMetric', raw.customMetrics);
   return {
     parent: `properties/${propertyId}`,
     propertyId,
