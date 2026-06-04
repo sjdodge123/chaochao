@@ -43,9 +43,19 @@ function metricsLevelBucket(level) {
 
 // Primary input this session. Gamepad wins over touch (a pad on an iPad is a pad
 // player); touch wins over keyboard. Coarse by design — it's a cohorting axis.
+// Touch is probed via input.js's isTouchDevice() (pure matchMedia detector), NOT
+// the isTouchScreen flag — that flag is only assigned inside initEventHandlers()
+// on the gameState/init() path, which runs AFTER the DOMContentLoaded refresh
+// below, and guests get no later auth/progression refresh to correct a miss.
 function metricsInputMethod() {
 	if (typeof gamepadConnected !== "undefined" && gamepadConnected === true) { return "gamepad"; }
-	if (typeof isTouchScreen !== "undefined" && isTouchScreen === true) { return "touch"; }
+	try {
+		if (typeof isTouchDevice === "function") {
+			if (isTouchDevice()) { return "touch"; }
+		} else if (typeof isTouchScreen !== "undefined" && isTouchScreen === true) {
+			return "touch";
+		}
+	} catch (e) { /* matchMedia unavailable */ }
 	return "keyboard";
 }
 
