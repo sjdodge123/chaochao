@@ -4019,9 +4019,11 @@ function computeFocusedView(dt) {
     // Velocity look-ahead: each player's half-box is centred ahead of them along
     // a SMOOTHED lead vector (its own exponential lag, per player), so steering
     // wiggle, punches and bounces swing the lead gently instead of snapping the
-    // camera. The target lead is zero while gated (players just rev in the pen,
-    // and the gate ramp follows its target unsmoothed), so any leftover lead
-    // drains out during the countdown and builds naturally off the line.
+    // camera. While GATED the lead state is hard-zeroed (not just decayed):
+    // the intro snaps the camera to this frame's target on gated entry, so a
+    // stale lobby lead would anchor the spawn close-up off-centre on the
+    // lobby -> first-race path. Players just rev in the pen anyway, and the
+    // lead still builds naturally from zero off the line.
     var la = 1 - Math.exp(-(dt || 16) / WORLD_ZOOM_LEAD_TAU);
     var gatedNow = (currentState === config.stateMap.gated);
     var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -4039,8 +4041,12 @@ function computeFocusedView(dt) {
         }
         var sm = worldLeadSmooth[pts[i].id];
         if (!sm) { sm = worldLeadSmooth[pts[i].id] = { x: 0, y: 0 }; }
-        sm.x += (tx - sm.x) * la;
-        sm.y += (ty - sm.y) * la;
+        if (gatedNow) {
+            sm.x = 0; sm.y = 0;
+        } else {
+            sm.x += (tx - sm.x) * la;
+            sm.y += (ty - sm.y) * la;
+        }
         // Clamp the led point to the world so ramming a wall can't inflate the box.
         var lx = Math.max(world.x, Math.min(world.x + world.width, pts[i].x + sm.x));
         var ly = Math.max(world.y, Math.min(world.y + world.height, pts[i].y + sm.y));
