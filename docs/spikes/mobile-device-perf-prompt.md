@@ -8,9 +8,10 @@
 ---
 
 Build and run an on-device render-performance sweep of the chaochao client for
-real iPad/Android hardware, porting the live harness methodology from memory
-`live-render-perf-harness.md` (read it first — sampler design, gating rules,
-sample-poisoning pitfalls all carry over).
+real iPad/Android hardware, porting the live harness methodology from the
+agent-session memory note `live-render-perf-harness.md` (NOT a repo file — it
+lives in the Claude memory directory and is auto-recalled; read it first —
+sampler design, gating rules, sample-poisoning pitfalls all carry over).
 
 ## Architecture (verified feasible — follow existing repo precedents)
 
@@ -62,8 +63,11 @@ sample-poisoning pitfalls all carry over).
      border_runes; pattern nebula; plus the worst-combo
      (warlord+nebula+border_runes+comet) and the ice-reflection stressor
      (any cart, ice-heavy map — the scratch+blit path PR #259 added).
-     These all passed at desktop-High; the point is confirming the fix holds
-     on mobile GPUs at the tier Auto actually picks for the device.
+     These all passed on desktop (carts/guardian in the verification round —
+     see docs/spikes/cosmetic-perf-verification.md; the shadow-heavy trail
+     outliers, border_runes and nebula during PR #259 development itself);
+     the point is confirming the fixes hold on mobile GPUs at the tier Auto
+     actually picks for the device.
   3. Random unknowns: 3-5 random same-id picks per slot (seeded from the
      full registry, ids not in the hot-spot list) + the random-mix dev-patch
      dressing — catches anything device-specific the desktop round couldn't.
