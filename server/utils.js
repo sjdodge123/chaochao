@@ -22,6 +22,11 @@ c.unlockAllCosmetics = (process.env.UNLOCK_ALL_COSMETICS === 'true');
 // the page URL) — and index.js registers the dev-only POST /__perf/report sink. Default
 // OFF so the harness can never activate in prod.
 c.perfHarness = (process.env.PERF_HARNESS === '1' || process.env.PERF_HARNESS === 'true');
+// Dev/testing seam: when set, AI bots spawn wearing random cosmetics (cart/trail
+// always, pattern/border by coin-flip) so camera/cosmetic work can be eyeballed
+// against a fully-dressed grid without 9 signed-in humans. Default OFF so prod
+// bots stay plain — set RANDOM_BOT_COSMETICS=true on a local test server only.
+c.randomBotCosmetics = (process.env.RANDOM_BOT_COSMETICS === 'true');
 
 // Test-only config override seam (CI perf harness). When CHAO_PERF_OVERRIDE is a
 // JSON object, deep-merge it over the loaded config so a separate-process server
