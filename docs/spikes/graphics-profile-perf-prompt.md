@@ -48,6 +48,14 @@ judge RELATIVE to the nearest control; requeue suspect clusters for a clean roun
   silently disappear entirely (e.g. a trail id that draws NOTHING on Low is a bug).
 - Auto: confirm the resolved tier at 1440px and at <900px window widths.
 
+## Run discipline (operator working agreement)
+
+- **Hard time cap: 3 hours wall-clock** for the whole run. When the cap nears,
+  stop all monitors/waits, finalize with collected data, report coverage
+  honestly (measured vs skipped).
+- **Operator messages preempt monitoring**: answer immediately, pause watch
+  loops while a question is pending, stop entirely if asked.
+
 ## Deliverable
 
 Per-profile × per-scenario FPS table + visual contract screenshots + any fixes
