@@ -5529,19 +5529,36 @@ function drawAimer(aimer) {
     }
 }
 
+// Bottom-left map plaque: the map's name (bold) over a dimmed "by <author>"
+// credit, on the shared HUD-panel chrome — replaces two bare strokeText lines
+// that were nearly invisible over busy terrain.
 function drawMapTitle() {
-    if (currentMap != null) {
-        gameContext.save();
-        gameContext.strokeStyle = themeColor('inkOutline', 'white');
-        gameContext.lineWidth = 4;
-        gameContext.fillStyle = themeColor('ink', 'black');
-        gameContext.font = "14px Arial";
-        gameContext.strokeText('"' + currentMap.name + '"', 5, LOGICAL_HEIGHT - 25);
-        gameContext.strokeText('~' + currentMap.author, 5, LOGICAL_HEIGHT - 10);
-        gameContext.fillText('"' + currentMap.name + '"', 5, LOGICAL_HEIGHT - 25);
-        gameContext.fillText('~' + currentMap.author, 5, LOGICAL_HEIGHT - 10);
-        gameContext.restore();
+    if (currentMap == null) {
+        return;
     }
+    var name = "" + currentMap.name;
+    var credit = "by " + currentMap.author;
+    var nameFont = "bold 15px sans-serif";
+    var creditFont = "11px sans-serif";
+    var padX = 12, h = 44;
+    var ink = themeColor('ink', 'black');
+    gameContext.save();
+    gameContext.font = nameFont;
+    var nw = gameContext.measureText(name).width;
+    gameContext.font = creditFont;
+    var cw = gameContext.measureText(credit).width;
+    var w = Math.max(nw, cw) + padX * 2;
+    var x = 10, y = LOGICAL_HEIGHT - 10 - h;
+    drawHudPanel(x, y, w, h, { alpha: 0.82 });
+    gameContext.textAlign = "left";
+    gameContext.textBaseline = "alphabetic";
+    gameContext.fillStyle = ink;
+    gameContext.font = nameFont;
+    gameContext.fillText(name, x + padX, y + 19);
+    gameContext.globalAlpha = 0.65;
+    gameContext.font = creditFont;
+    gameContext.fillText(credit, x + padX, y + 34);
+    gameContext.restore();
 }
 
 // Accumulated time (seconds) driving cart-skin animation (fire-truck wheel spin,
@@ -7780,7 +7797,7 @@ function drawMaintenanceBanner() {
         line2 = "New races are paused — a quick restart follows shortly";
     }
     var cx = LOGICAL_WIDTH / 2;
-    var by = 28;
+    var by = 66; // headline baseline — panel sits below the session info bar
     // Urgency pulse on the headline once a restart countdown is live, same
     // accelerating-sine trick as the gate line.
     var alpha = 1;
@@ -7790,16 +7807,23 @@ function drawMaintenanceBanner() {
     gameContext.save();
     gameContext.textAlign = "center";
     gameContext.textBaseline = "alphabetic";
+    // Dark alert panel behind both lines so the warning reads over any terrain
+    // (and over the HUD chrome) without per-glyph stroking.
     gameContext.font = "bold 20px Arial";
-    gameContext.lineWidth = 3;
-    gameContext.strokeStyle = "rgba(0,0,0,0.85)";
+    var mw1 = gameContext.measureText(line1).width;
+    gameContext.font = "14px Arial";
+    var mw2 = gameContext.measureText(line2).width;
+    var mW = Math.max(mw1, mw2) + 36;
+    drawHudPanel(cx - mW / 2, by - 22, mW, 50, {
+        fill: "rgba(12, 14, 18, 0.78)", alpha: 1,
+        border: "rgba(255, 179, 71, 0.65)", borderWidth: 1.5
+    });
+    gameContext.font = "bold 20px Arial";
     gameContext.globalAlpha = alpha;
-    gameContext.strokeText(line1, cx, by);
     gameContext.fillStyle = "#ffb347";
     gameContext.fillText(line1, cx, by);
     gameContext.globalAlpha = 1;
     gameContext.font = "14px Arial";
-    gameContext.strokeText(line2, cx, by + 19);
     gameContext.fillStyle = "white";
     gameContext.fillText(line2, cx, by + 19);
     gameContext.restore();
@@ -7825,11 +7849,14 @@ function drawBrutalBadges() {
     gameContext.save();
     for (var k = 0; k < icons.length; k++) {
         var bx = startX + k * (bw + gap);
-        gameContext.fillStyle = "rgba(255,255,255,0.82)";
-        gameContext.fillRect(bx, topY, bw, bh);
-        gameContext.strokeStyle = "rgba(0,0,0,0.55)";
+        // Rounded tile, matching the shared HUD-panel chrome (light bg kept so
+        // the dark icon silhouettes stay readable in both themes).
+        gameContext.fillStyle = "rgba(255,255,255,0.88)";
+        roundRectPath(gameContext, bx, topY, bw, bh, 6);
+        gameContext.fill();
+        gameContext.strokeStyle = "rgba(0,0,0,0.45)";
         gameContext.lineWidth = 1.5;
-        gameContext.strokeRect(bx, topY, bw, bh);
+        gameContext.stroke();
         var ic = icons[k];
         if (ic.complete !== false && (ic.naturalWidth == null || ic.naturalWidth > 0)) {
             try {
@@ -8114,11 +8141,19 @@ function drawRaceTimer() {
         color = localTimerStopByDeath ? "#ff5a5a" : "#ffd54a";
     }
     gameContext.save();
-    gameContext.fillStyle = color;
     gameContext.font = "bold 28px Arial";
+    var label = formatRaceTime(elapsed);
+    // Fixed dark pill (not the theme surface) so the white/gold/red time keeps
+    // contrast in BOTH themes and over any terrain.
+    var tw = gameContext.measureText(label).width;
+    drawHudPanel(LOGICAL_WIDTH - 20 - tw - 12, 10, tw + 24, 38, {
+        fill: "rgba(12, 14, 18, 0.62)", alpha: 1,
+        border: "rgba(255, 255, 255, 0.25)", borderWidth: 1.5
+    });
+    gameContext.fillStyle = color;
     gameContext.textAlign = "right";
     gameContext.textBaseline = "alphabetic";
-    gameContext.fillText(formatRaceTime(elapsed), LOGICAL_WIDTH - 20, 40);
+    gameContext.fillText(label, LOGICAL_WIDTH - 20, 40);
     gameContext.restore();
 }
 
@@ -8187,11 +8222,11 @@ function drawSpectatorBanner() {
     var padX = 14;
     var w = textW + gap + swatchW + padX * 2;
     var cx = LOGICAL_WIDTH / 2;
-    var y = 52;
+    var y = 66; // below the session info bar (which spans y 8..38)
     var boxX = cx - w / 2;
 
     gameContext.fillStyle = "rgba(0, 0, 0, 0.55)";
-    roundRectPath(gameContext, boxX, y - 19, w, 28, 8); // in the play bundle (audience.js)
+    roundRectPath(gameContext, boxX, y - 19, w, 28, 9); // in the play bundle (audience.js)
     gameContext.fill();
 
     var textX = boxX + padX;
@@ -8207,22 +8242,87 @@ function drawSpectatorBanner() {
     gameContext.restore();
 }
 
-function drawGameInfo() {
-    // Drawn in the HUD pass (logical screen space), so centre on the logical
-    // width, not the world width (they're equal today, but the HUD shouldn't
-    // depend on world dims).
-    var startX = LOGICAL_WIDTH / 2 - 125;
+// ---- Shared HUD chrome -----------------------------------------------------
+// One rounded-panel language for every persistent HUD element (session info
+// bar, map plaque, waiting banner), borrowed from the lobby-hub banners
+// (lobbyHub.js drawLobbyBanner): theme surface fill, 2px ink border, 9px
+// corners. Keeps the in-race HUD reading as the same family as the lobby UI.
+function drawHudPanel(x, y, w, h, opts) {
+    opts = opts || {};
     gameContext.save();
-    gameContext.font = "14px Arial";
-    gameContext.strokeStyle = themeColor('inkOutline', 'white');
-    gameContext.lineWidth = 4;
-    gameContext.fillStyle = themeColor('ink', 'black');
-    gameContext.strokeText("GameID: " + gameID, startX + 10, 20);
-    gameContext.fillText("GameID: " + gameID, startX + 10, 20);
-    gameContext.strokeText("Players: " + totalPlayers, startX + 100, 20);
-    gameContext.fillText("Players: " + totalPlayers, startX + 100, 20);
-    gameContext.strokeText("Round: " + round, startX + 190, 20);
-    gameContext.fillText("Round: " + round, startX + 190, 20);
+    gameContext.globalAlpha = (opts.alpha != null) ? opts.alpha : 0.88;
+    gameContext.fillStyle = opts.fill || themeColor('surface', '#101216');
+    roundRectPath(gameContext, x, y, w, h, (opts.radius != null) ? opts.radius : 9); // audience.js helper
+    gameContext.fill();
+    gameContext.globalAlpha = (opts.borderAlpha != null) ? opts.borderAlpha : 1;
+    gameContext.lineWidth = (opts.borderWidth != null) ? opts.borderWidth : 2;
+    gameContext.strokeStyle = opts.border || themeColor('ink', 'black');
+    gameContext.stroke();
+    gameContext.restore();
+}
+
+// Top-centre session bar: GAME <id> | PLAYERS <n> | ROUND <r> as one panel of
+// label/value segments with hairline dividers, replacing the three floating
+// strokeText labels. ROUND only appears once a race exists (gated/racing/
+// collapsing) so the lobby isn't showing a meaningless "Round 0".
+function drawGameInfo() {
+    var segs = [
+        { label: "GAME", value: (gameID != null && gameID !== "") ? ("" + gameID) : "—" },
+        { label: "PLAYERS", value: "" + totalPlayers }
+    ];
+    var inRace = currentState == config.stateMap.gated ||
+        currentState == config.stateMap.racing ||
+        currentState == config.stateMap.collapsing;
+    if (inRace && round > 0) {
+        segs.push({ label: "ROUND", value: "" + round });
+    }
+
+    var labelFont = "bold 10px sans-serif";
+    var valueFont = "bold 15px sans-serif";
+    var padX = 16, labelGap = 6, dividerGap = 13, h = 30, y = 8;
+    var ink = themeColor('ink', 'black');
+
+    gameContext.save();
+    var total = 0;
+    for (var i = 0; i < segs.length; i++) {
+        gameContext.font = labelFont;
+        segs[i].lw = gameContext.measureText(segs[i].label).width;
+        gameContext.font = valueFont;
+        segs[i].vw = gameContext.measureText(segs[i].value).width;
+        segs[i].w = segs[i].lw + labelGap + segs[i].vw;
+        total += segs[i].w;
+    }
+    var w = padX * 2 + total + (segs.length - 1) * dividerGap * 2;
+    var x = (LOGICAL_WIDTH - w) / 2;
+    drawHudPanel(x, y, w, h, null);
+
+    gameContext.textBaseline = "middle";
+    gameContext.textAlign = "left";
+    var cy = y + h / 2 + 1;
+    var cx = x + padX;
+    for (var k = 0; k < segs.length; k++) {
+        if (k > 0) {
+            // Hairline divider between segments.
+            cx += dividerGap;
+            gameContext.globalAlpha = 0.25;
+            gameContext.strokeStyle = ink;
+            gameContext.lineWidth = 1;
+            gameContext.beginPath();
+            gameContext.moveTo(cx, y + 7);
+            gameContext.lineTo(cx, y + h - 7);
+            gameContext.stroke();
+            gameContext.globalAlpha = 1;
+            cx += dividerGap;
+        }
+        gameContext.fillStyle = ink;
+        gameContext.globalAlpha = 0.55;
+        gameContext.font = labelFont;
+        gameContext.fillText(segs[k].label, cx, cy);
+        gameContext.globalAlpha = 1;
+        gameContext.font = valueFont;
+        gameContext.fillText(segs[k].value, cx + segs[k].lw + labelGap, cy);
+        cx += segs[k].w;
+    }
     gameContext.restore();
 }
 
@@ -8461,11 +8561,24 @@ function drawTitle() {
         }
     }
     if (currentState == config.stateMap.waiting && lobbyStartButton == null) {
+        // Properly-centred pill in the shared HUD chrome, with a slow animated
+        // ellipsis so the screen reads "alive" while waiting. The panel is sized
+        // for the full three dots so it never resizes as they cycle.
+        var wMsg = "Waiting for more players";
+        var dots = new Array((Math.floor(Date.now() / 450) % 3) + 2).join(".");
+        var wFont = "bold 20px sans-serif";
+        var wPadX = 24, wH = 44;
         gameContext.save();
+        gameContext.font = wFont;
+        var wTextW = gameContext.measureText(wMsg + "...").width;
+        var wW = wTextW + wPadX * 2;
+        var wX = (LOGICAL_WIDTH - wW) / 2;
+        var wY = LOGICAL_HEIGHT / 2 - 60;
+        drawHudPanel(wX, wY, wW, wH, null);
         gameContext.fillStyle = themeColor('ink', 'black');
-        gameContext.lineWidth = 3;
-        gameContext.font = "30px Arial";
-        gameContext.fillText('Waiting for more players..', (LOGICAL_WIDTH / 2) - 200, (LOGICAL_HEIGHT / 2) - 25);
+        gameContext.textAlign = "left";
+        gameContext.textBaseline = "middle";
+        gameContext.fillText(wMsg + dots, wX + wPadX, wY + wH / 2 + 1);
         gameContext.restore();
     }
 }
