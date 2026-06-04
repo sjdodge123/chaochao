@@ -148,6 +148,31 @@ not chased.
 - Worst-frame stutter (>50ms) only ever accompanied the low-FPS rows or one-off
   ambient hitches — no silent texture-upload stutter at healthy FPS readings.
 
+## Fix shipped on this branch: downsampled trail-glow composite on Balanced
+
+Investigated post-sweep (operator-requested). Root cause of the Balanced
+founders_flare/aurora collapse: the trail-glow `shadowBlur` composite runs over the
+**destination-sized** rect — a trail's bbox spans much of the screen at dpr 2, and
+founders_flare issues TWO such blits per kart (ribbon + core/embers), aurora one with
+`'lighter'` — ×9 wearers ≈ 9-18 near-screen-sized gaussian passes per frame. Pure GPU
+fill-rate, invisible to JS profiling (the established pattern).
+
+Fix: new `glowScale` PERF knob (high 1 = bit-for-bit unchanged; balanced 0.5).
+`tfxGlowBlit` at scale <1 renders the body scratch at half device res, runs the
+shadowBlur over a small second scratch (¼ of the pixels), then does ONE plain smoothed
+upscale to the main canvas. The halo is soft by nature so the upscale doesn't read;
+geometry inside the glow image is half-res (Balanced-only, invisible at phone/tablet
+viewing sizes). Low keeps glow off; High keeps the original single-blit path.
+
+Desktop verification (targeted `&phfilter=` runs through the new path):
+founders_flare/aurora/comet on pinned Balanced all at the 120 fps display cap, gl 1.0,
+visuals spot-checked. Phone re-verification of the Balanced subset: pending (one
+~5-min targeted run).
+
+Also added for that verification: `&phfilter=<substr>[,<substr>]` harness URL param —
+filters the scenario queue (cap_probe always runs), skips persistence, so a post-fix
+re-measure takes minutes.
+
 ## Follow-up prompt (operator-injectable)
 
 > Glow-heavy trails (founders_flare, aurora — comet next) overwhelm mobile GPUs one

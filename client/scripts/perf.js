@@ -26,6 +26,7 @@ var PERF_PROFILES = {
         cooldownMul: 1.0,        // multiplier on particle spawn cooldowns (>1 = rarer)
         maxEffects: 100000,      // cap on simultaneous transient effects (huge => unbounded)
         glow: true,              // per-frame shadowBlur glow passes (goal arrow, ability beam, trail, cut)
+        glowScale: 1,            // resolution of the trail-glow composite (1 = full-res blur, the pre-knob behavior; <1 routes the blur through a downsampled intermediate — gaussian cost drops to ~scale² of the pixels)
         embers: true,            // rising embers off burning karts
         explosionSparks: 10,     // debris sparks per explosion
         audience: true,          // letterbox crowd
@@ -41,6 +42,14 @@ var PERF_PROFILES = {
         cooldownMul: 1.4,
         maxEffects: 280,
         glow: true,
+        // Half-res trail-glow composite: the 2026-06-04 device sweep measured the
+        // glow-heaviest trails (founders_flare/aurora) at ~27 FPS on a phone-class
+        // GPU at this tier — the gaussian shadowBlur over trail-sized rects at
+        // dpr 2 × 9 karts is pure fill-rate cost. Quartering the blurred pixels
+        // keeps the halo (soft by nature, upscale is invisible on it) and restores
+        // the budget; HIGH stays at 1 so desktop rendering is byte-for-byte
+        // unchanged (the CHANGELOG promise).
+        glowScale: 0.5,
         embers: true,
         explosionSparks: 7,
         audience: true,
@@ -57,6 +66,7 @@ var PERF_PROFILES = {
         cooldownMul: 2.2,
         maxEffects: 120,
         glow: false,
+        glowScale: 0.5,          // unused while glow is off; set for consistency if a future knob re-enables glow here
         embers: false,
         explosionSparks: 4,
         audience: false,
@@ -232,6 +242,12 @@ function perfCooldown(ms) {
 // One-shot, cached (halo/sprite), lobby and HUD glows are intentionally left
 // alone — they're not in the per-frame racing budget the LOW tier targets.
 function perfGlow() { return !!PERF.glow; }
+// Resolution scale for the trail-glow composite (see tfxGlowBlit). 1 = the exact
+// pre-knob single-blit path; <1 runs the gaussian over a downsampled intermediate.
+function perfGlowScale() {
+    var s = PERF.glowScale;
+    return (typeof s === "number" && s > 0 && s < 1) ? s : 1;
+}
 function perfEmbers() { return !!PERF.embers; }
 // Gates ambient "extra" FX whose absence isn't visible at a glance: walking-speed
 // terrain flecks (sand/ice/dirt) and the multi-particle lava-death sinking corpse.

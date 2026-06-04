@@ -293,6 +293,7 @@ function tfxPuffGrad(ctx, color) {
 // trails from painting at all. Only called on glow profiles (tfxGlow()); the
 // no-glow path keeps painting straight to the main canvas.
 var _tfxGlowScratch = null;
+var _tfxGlowScratch2 = null; // small intermediate for the downsampled-glow path (glowScale < 1)
 function tfxGlowBlit(ctx, verts, color, glowR, margin, composite, body) {
   // Geometry bbox in the CALLER's coordinate space (+margin for overhang like
   // ribbon half-widths / ember rise). The shadow is applied at blit time on the
@@ -328,10 +329,21 @@ function tfxGlowBlit(ctx, verts, color, glowR, margin, composite, body) {
   if (dMaxY > ctx.canvas.height + bleed) dMaxY = ctx.canvas.height + bleed;
   var w = dMaxX - dMinX, h = dMaxY - dMinY;
   if (w < 1 || h < 1) return;
+  // Glow resolution (perf knob). The gaussian shadowBlur at blit time runs over the
+  // DESTINATION-sized rect, so at full res a long trail costs a near-screen-sized
+  // blur per blit — ×9 wearers ×(1-2 blits each) that is the fill-rate collapse the
+  // 2026-06-04 device sweep measured on phone-class GPUs (founders_flare/aurora
+  // ~27 FPS on Balanced). gs < 1 renders the body at gs scale, runs the blur over a
+  // small intermediate (gs² of the pixels), then does ONE plain smoothed upscale —
+  // the halo is soft by nature so the upscale doesn't read. gs === 1 keeps the
+  // original single-blit path bit-for-bit (HIGH's no-op promise).
+  var gs = (typeof perfGlowScale === "function") ? perfGlowScale() : 1;
+  var w1 = (gs < 1) ? Math.max(1, Math.ceil(w * gs)) : w;
+  var h1 = (gs < 1) ? Math.max(1, Math.ceil(h * gs)) : h;
   if (_tfxGlowScratch == null) { _tfxGlowScratch = document.createElement("canvas"); }
   var s = _tfxGlowScratch;
-  if (s.width < w) { s.width = w; }
-  if (s.height < h) { s.height = h; }
+  if (s.width < w1) { s.width = w1; }
+  if (s.height < h1) { s.height = h1; }
   var sc = s.getContext("2d");
   // The scratch CONTEXT is shared across effects and frames, so isolate each use:
   // a body that flips composite mode (aurora's 'lighter') must not leak it into the
@@ -339,23 +351,53 @@ function tfxGlowBlit(ctx, verts, color, glowR, margin, composite, body) {
   // is grow-only, so a resize reset can't be relied on.
   sc.save();
   sc.setTransform(1, 0, 0, 1, 0, 0);
-  sc.clearRect(0, 0, w, h);
+  sc.clearRect(0, 0, w1, h1);
   sc.globalCompositeOperation = "source-over";
   sc.globalAlpha = 1;
   sc.shadowBlur = 0;
   if ("filter" in sc) { sc.filter = "none"; }
   sc.setLineDash([]);
-  // Caller's full transform, shifted so the device bbox lands at the scratch origin.
-  sc.setTransform(t.a, t.b, t.c, t.d, t.e - dMinX, t.f - dMinY);
+  // Caller's full transform (scaled by the glow resolution), shifted so the device
+  // bbox lands at the scratch origin.
+  sc.setTransform(t.a * gs, t.b * gs, t.c * gs, t.d * gs, (t.e - dMinX) * gs, (t.f - dMinY) * gs);
   body(sc);
   sc.restore();
+  if (gs >= 1) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);   // blit 1:1 in device space
+    ctx.globalAlpha = 1;                  // body alphas are baked into the scratch
+    ctx.shadowColor = color;
+    ctx.shadowBlur = glowR;               // shadowBlur ignores the CTM, same as per-op
+    if (composite) { ctx.globalCompositeOperation = composite; }
+    ctx.drawImage(s, 0, 0, w, h, dMinX, dMinY, w, h);
+    ctx.restore();
+    return;
+  }
+  // Downsampled path: shadow-composite body+halo into a small second scratch (the
+  // blur runs HERE, over gs² of the pixels), then ONE plain upscale to the canvas.
+  var pad = Math.ceil(glowR * gs) + 4;    // room for the halo bleed at scratch scale
+  var w2 = w1 + pad * 2, h2 = h1 + pad * 2;
+  if (_tfxGlowScratch2 == null) { _tfxGlowScratch2 = document.createElement("canvas"); }
+  var s2 = _tfxGlowScratch2;
+  if (s2.width < w2) { s2.width = w2; }
+  if (s2.height < h2) { s2.height = h2; }
+  var sc2 = s2.getContext("2d");
+  sc2.save();                             // same shared-context isolation as above
+  sc2.setTransform(1, 0, 0, 1, 0, 0);
+  sc2.clearRect(0, 0, w2, h2);
+  sc2.globalCompositeOperation = "source-over";
+  sc2.globalAlpha = 1;
+  if ("filter" in sc2) { sc2.filter = "none"; }
+  sc2.shadowColor = color;
+  sc2.shadowBlur = glowR * gs;            // halo radius in scratch units = glowR on screen
+  sc2.drawImage(s, 0, 0, w1, h1, pad, pad, w1, h1);
+  sc2.restore();
   ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);   // blit 1:1 in device space
-  ctx.globalAlpha = 1;                  // body alphas are baked into the scratch
-  ctx.shadowColor = color;
-  ctx.shadowBlur = glowR;               // shadowBlur ignores the CTM, same as per-op
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
   if (composite) { ctx.globalCompositeOperation = composite; }
-  ctx.drawImage(s, 0, 0, w, h, dMinX, dMinY, w, h);
+  // Map the padded scratch back to device space (pad/gs of halo bleed each side).
+  ctx.drawImage(s2, 0, 0, w2, h2, dMinX - pad / gs, dMinY - pad / gs, w2 / gs, h2 / gs);
   ctx.restore();
 }
 // Glow dispatch shared by the heavy painters: no glow -> draw straight to ctx;

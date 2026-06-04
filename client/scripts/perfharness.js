@@ -68,7 +68,7 @@
     ];
 
     var hudEl = null, queue = [], results = [], doneSet = {}, glCalls = 0;
-    var device = null, optTier = null, originalPref = null, finished = false;
+    var device = null, optTier = null, originalPref = null, finished = false, filtered = false;
     var drv = { lastPos: null, stuckMs: 0, wanderUntil: 0, wanderMv: null, lastLobbyCfg: 0, lastState: null, stateSince: 0 };
     var S = { phase: "next", item: null, expectedLabel: null, t0: 0, frames: 0, sum: 0, worst: 0, gl0: 0, gate0: null, lastTs: 0, idx: 0 };
 
@@ -110,6 +110,7 @@
     }
 
     function saveState() {
+        if (filtered) { return; } // targeted verify runs are throwaway — never persist
         try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify({
                 v: PH_VERSION, optTier: optTier, originalPref: originalPref, done: doneSet
@@ -530,8 +531,28 @@
             autoTier: optTier, storedPref: originalPref, resumed: !!saved
         };
         queue = buildQueue(optTier);
+        // Targeted verify mode: &phfilter=<substr>[,<substr>...] keeps only matching
+        // scenario labels (cap_probe always runs) and ignores/skips persistence, so a
+        // post-fix re-measure of a handful of ids takes minutes, not a full sweep.
+        // e.g. ?perfharness=1&phfilter=balanced  — every balanced-tier scenario.
+        var filt = null;
+        try {
+            var fm = (window.location.search || "").match(/[?&]phfilter=([^&]+)/);
+            if (fm) { filt = decodeURIComponent(fm[1]).split(","); }
+        } catch (e) { /* no location */ }
+        if (filt) {
+            filtered = true;
+            doneSet = {};
+            queue = queue.filter(function (it) {
+                if (it.label === "cap_probe") { return true; }
+                for (var fi = 0; fi < filt.length; fi++) {
+                    if (it.label.indexOf(filt[fi]) !== -1) { return true; }
+                }
+                return false;
+            });
+        }
         saveState();
-        report({ kind: "hello", device: device, queued: queue.length });
+        report({ kind: "hello", device: device, queued: queue.length, filter: filt });
         console.log("[perfHarness] installed — " + queue.length + " scenarios, optimal tier '" + optTier + "'" + (saved ? " (resumed)" : ""));
 
         // Wrap gameLoop to count calls per rAF frame — the duplicate-render-chain
