@@ -44,9 +44,14 @@ sample-poisoning pitfalls all carry over).
   Some iPads are 120Hz ProMotion; calibrate with `__none__` baselines first and
   report the cap. Flag <45 (≈ the 90-of-120 line scaled), investigate <30.
 - **Foreground/awake**: backgrounding or screen-sleep freezes rAF + socket
-  heartbeats (this killed two desktop sessions — on mobile it's harsher). Have
-  the operator disable auto-lock (or use Guided Access) for the run; detect
-  visibility loss in the harness and auto-requeue poisoned samples as before.
+  heartbeats (this killed two desktop sessions — on mobile it's harsher).
+  KEEP-AWAKE IS THE HARNESS'S JOB, not the operator's: the Screen Wake Lock API
+  is NOT available over plain http:// LAN (secure-context only), so use the
+  NoSleep.js technique — a tiny muted inline looping <video> element started on
+  the first touch (gesture-gated; works on iOS Safari + Android Chrome over
+  http). Ask the operator to disable auto-lock only as a belt-and-braces
+  fallback. Still detect visibility loss / rAF stalls in the harness and
+  auto-requeue poisoned samples as before.
 - **Scenario matrix** (keep it smaller than the desktop 87-id sweep — the goal
   is device headroom, not per-id regression): `__none__` baseline, worst-cart
   combo (warlord+nebula+border_runes+comet), all-9-comet, all-9-guardian,
@@ -55,6 +60,16 @@ sample-poisoning pitfalls all carry over).
 - **Watch for**: GPU texture re-upload stutter that dt-FPS misses (memory
   `device-perf-profiles-feature`) — also report worst-frame ms (max rAF delta
   per window), not just the mean, since stutter hides in averages.
+
+## Run discipline (operator working agreement)
+
+- **Hard time cap: 3 hours wall-clock** for the whole run (setup + sweep +
+  fixes). Track start time; when the cap nears, stop all monitors/waits,
+  finalize with whatever data is collected, and report coverage honestly
+  (measured vs skipped) rather than running on.
+- **Operator messages preempt monitoring**: answer immediately and pause any
+  watch loops while a question is pending; resume only after replying (and
+  stop entirely if asked). Never let a babysitting loop delay a status answer.
 
 ## Deliverable
 
