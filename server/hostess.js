@@ -65,6 +65,22 @@ exports.getRooms = function () {
 	}
 	return rooms;
 }
+// Rooms currently mid-race (gate raised through collapse). The deploy
+// workflow polls this via /ops/status after a drain to wait for in-flight
+// races to finish before pushing a new build. Preview play-tests and tarpit
+// rooms never hold up a deploy.
+exports.countActiveRaces = function () {
+	var count = 0;
+	for (var sig in roomList) {
+		var room = roomList[sig];
+		if (room.isPreview || room.isTarpit) { continue; }
+		var state = room.game.currentState;
+		if (state == c.stateMap.gated || state == c.stateMap.racing || state == c.stateMap.collapsing) {
+			count++;
+		}
+	}
+	return count;
+}
 exports.findARoom = function (clientID) {
 	if (getRoomCount() == 0) {
 		var sig = generateNewRoom();

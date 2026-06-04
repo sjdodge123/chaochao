@@ -3,6 +3,7 @@ var utils = require('./utils.js');
 var c = utils.loadConfig();
 var messenger = require('./messenger.js');
 var hostess = require('./hostess.js');
+var maintenance = require('./maintenance.js');
 var _engine = require('./engine.js');
 var compressor = require('./compressor.js');
 var debug = require('./debug.js');
@@ -302,6 +303,14 @@ class Game {
 			this.resetLobbyTimer();
 			return;
 		}
+		//Maintenance drain: a restart is pending, so hold the room in the lobby —
+		//no new race may start (one already underway elsewhere is left to finish).
+		//Reset the start-button timer so the race doesn't fire the instant the
+		//block lifts; players re-rally on the button instead.
+		if (maintenance.isRaceBlocked()) {
+			this.resetLobbyTimer();
+			return;
+		}
 		//Preview play-test: the solo creator has no one to rally on the lobby
 		//start button, so skip the lobby and head straight to the race gate.
 		if (this.gameBoard.isPreview) {
@@ -329,6 +338,11 @@ class Game {
 		this.gatedTimer = Date.now();
 	}
 	checkNewRaceTimer() {
+		//Maintenance drain: freeze the between-rounds countdown — the next race
+		//of the series doesn't start while a server restart is pending.
+		if (maintenance.isRaceBlocked()) {
+			return;
+		}
 		if (this.newRaceTimer != null) {
 			this.newRaceTimeLeft = ((this.newRaceWaitTime * 1000 - (Date.now() - this.newRaceTimer)) / (1000)).toFixed(1);
 			if (this.newRaceTimeLeft > 0) {

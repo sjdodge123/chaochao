@@ -633,6 +633,25 @@ function registerConnectionHandlers(server) {
 		dropLocalPlayer(primarySlot);
 	});
 
+	// Deploy heads-up: the server is restarting soon ('restart' carries a
+	// wall-clock deadline ~28s out) or draining ahead of a nightly deploy
+	// ('drain': new races are paused, restart follows in a few minutes).
+	// draw.js renders the banner from this global; it self-expires there.
+	server.on("serverMaintenance", function (data) {
+		debugLog("serverMaintenance received", data);
+		serverMaintenance = data;
+	});
+
+	// When an announced restart actually cuts the socket, bring the player back
+	// automatically: the new dyno boots in parallel with the old one's 28s
+	// countdown, so a short pause + reload lands them on the fresh server. Any
+	// other disconnect keeps today's behavior (socket.io auto-reconnect).
+	server.on("disconnect", function () {
+		if (serverMaintenance == null || serverMaintenance.reason !== "restart") { return; }
+		debugLog("socket dropped during maintenance restart -- reloading shortly");
+		setTimeout(function () { window.location.reload(); }, 6000);
+	});
+
 
 	server.on("gameState", function (gameState) {
 		debugLog("gameState received, gameID=", gameState.gameID, "myID=", gameState.myID, "players=", Object.keys(gameState.clientList || {}).length);

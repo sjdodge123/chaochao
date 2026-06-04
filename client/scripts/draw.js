@@ -7624,9 +7624,58 @@ function drawHUD() {
     drawBrutalBadges();
     drawSpectatorLeaderboard();
     drawWorldRecordBanner();
+    drawMaintenanceBanner();
     drawVirtualButtons();
     drawTouchControls();
     drawTitle();
+}
+
+// Deploy heads-up banner (top-center, every state — drawHUD runs in both the
+// main loop and the overview pass). A 'restart' shows a live countdown to the
+// server-sent deadline ("back in a moment" — client.js auto-reloads after the
+// drop); a 'drain' shows a static "new races paused" notice until the restart
+// that always follows it takes over. Self-expires past expiresAt so a
+// canceled deploy clears the banner without a server round-trip.
+function drawMaintenanceBanner() {
+    if (serverMaintenance == null) { return; }
+    var now = Date.now();
+    if (serverMaintenance.expiresAt != null && now > serverMaintenance.expiresAt) {
+        serverMaintenance = null;
+        return;
+    }
+    var line1, line2;
+    if (serverMaintenance.reason === "restart") {
+        var secsLeft = Math.max(0, Math.ceil((serverMaintenance.deadline - now) / 1000));
+        line1 = secsLeft > 0 ? ("Server restarting in " + secsLeft + "s") : "Server restarting…";
+        line2 = "Game update — you'll be back in the action in a moment";
+    } else {
+        line1 = "Server update coming up";
+        line2 = "New races are paused — a quick restart follows shortly";
+    }
+    var cx = LOGICAL_WIDTH / 2;
+    var by = 28;
+    // Urgency pulse on the headline once a restart countdown is live, same
+    // accelerating-sine trick as the gate line.
+    var alpha = 1;
+    if (serverMaintenance.reason === "restart") {
+        alpha = 0.75 + 0.25 * Math.sin(now / 180);
+    }
+    gameContext.save();
+    gameContext.textAlign = "center";
+    gameContext.textBaseline = "alphabetic";
+    gameContext.font = "bold 20px Arial";
+    gameContext.lineWidth = 3;
+    gameContext.strokeStyle = "rgba(0,0,0,0.85)";
+    gameContext.globalAlpha = alpha;
+    gameContext.strokeText(line1, cx, by);
+    gameContext.fillStyle = "#ffb347";
+    gameContext.fillText(line1, cx, by);
+    gameContext.globalAlpha = 1;
+    gameContext.font = "14px Arial";
+    gameContext.strokeText(line2, cx, by + 19);
+    gameContext.fillStyle = "white";
+    gameContext.fillText(line2, cx, by + 19);
+    gameContext.restore();
 }
 
 // Persistent top-right badge (just under the race timer) showing one icon per active
