@@ -12,6 +12,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run start:prod` — start with `NODE_ENV=production`, which makes `index.js` rewrite the `<!-- BUILD: bundle-start -->…<!-- BUILD: bundle-end -->` block in each served HTML page to point at the corresponding bundle in `client/scripts/dist/`. The bundles must already exist; run `npm run build` first.
 - `npm run heroku-postbuild` — invoked automatically by Heroku to build bundles during deploy.
 
+Prod (Heroku app `chaochaogame`) auto-deploys the **`prod` branch, not `main`** — merging a PR does not restart the live server. `.github/workflows/deploy-prod.yml` fast-forwards prod→main nightly at 09:00 UTC, immediately when a merged PR carries the `deploy:prod` label (emergencies), or via manual workflow dispatch.
+
 There is no unit-test framework, linter, or formatter configured. `client/scripts/dist/` is ignored by `.gitignore` (the `dist` rule), so bundles are produced at deploy time, not committed.
 
 ### Testing gameplay (headless)
