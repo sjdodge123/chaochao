@@ -1001,7 +1001,11 @@ function buildProgressionPayload(row) {
 	}
 	return {
 		xp: row.xp || 0,
-		level: row.level || prog.level,
+		// ALWAYS the level derived from xp (levelProgress above) — never row.level. The
+		// stored column is a write-time cache that goes stale across curve retunes, and
+		// a `row.level ||` fallback here would silently re-introduce the badge-vs-bar
+		// payload inconsistency normalizeProgression exists to prevent.
+		level: prog.level,
 		unlocked_skins: row.unlocked_skins || [],
 		medal_counts: row.medal_counts || {},
 		wins: row.wins || 0,

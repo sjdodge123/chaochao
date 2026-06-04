@@ -60,12 +60,16 @@ function cumulativeXpForLevel(level) {
     return CURVE_CUM[CURVE_CAP_LEVEL] + (level - CURVE_CAP_LEVEL) * CURVE_CAP;
 }
 
-// Highest level whose cumulative floor a given total XP has reached.
+// Highest level whose cumulative floor a given total XP has reached. Clamped at a
+// far-beyond-the-ladder ceiling so a corrupt/absurd xp row renders a bounded badge
+// ("Lv 9999") instead of a ten-digit one — the skin ladder tops out at 100, so no
+// legitimate value gets near the clamp.
+var LEVEL_HARD_CAP = 9999;
 function levelForXp(totalXp) {
     var xp = totalXp || 0;
     var capFloor = CURVE_CUM[CURVE_CAP_LEVEL];
     if (xp >= capFloor) {
-        return CURVE_CAP_LEVEL + Math.floor((xp - capFloor) / CURVE_CAP);
+        return Math.min(LEVEL_HARD_CAP, CURVE_CAP_LEVEL + Math.floor((xp - capFloor) / CURVE_CAP));
     }
     var lvl = 1;
     while (lvl + 1 <= CURVE_CAP_LEVEL && CURVE_CUM[lvl + 1] <= xp) {
