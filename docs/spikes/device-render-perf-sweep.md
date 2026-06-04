@@ -1,6 +1,6 @@
 # On-device render-performance sweep (real iPad / Android hardware)
 
-**Status:** in progress — harness built + desktop-validated; awaiting on-device run.
+**Status:** iPad run COMPLETE (66/66 scenarios, 0 skips). Android still pending a device.
 **Date:** 2026-06-04
 **Branch:** `worktree-perf-device-sweep`
 
@@ -42,12 +42,76 @@ mostly carry some ice; ice-only playlist deliberately NOT pinned — see lessons
 pinned tier label in effect; failures auto-requeue (max 8 attempts). Each row records mean FPS **and worst single-frame ms** (stutter
 hides in averages — GPU texture re-upload lesson).
 
-## Device results
+## Device results — iPad (iPadOS 26.5, Chrome/WebKit, 8 cores, dpr 2, 1180×688)
 
-_(pending on-device run)_
+Display cap (rAF ceiling): **60 fps** (cap_probe). Healthy = 60; flag <45.
+Auto tier resolved: **balanced** (matches `namedDeviceTier`). 66/66 scenarios, 0 skips,
+gl ratio 1.0 throughout (no duplicate render chain on the device).
 
-| Tier | Scenario | FPS | Worst ms | Notes |
-| ---- | -------- | --- | -------- | ----- |
+### Balanced — the tier iPads actually ship with (Auto): ALL CLEAR
+
+All 8 hot-spot carts, all 7 hot-spot trails (comet, founders_flare, bolt, aurora,
+neon, ripple, guardian), nebula, border_runes, the worst-combo
+(warlord+nebula+border_runes+comet), random_mix, and all 18 random unknowns +
+2 random combos read **60 fps at the display cap, worst frame 17-22ms** (17ms =
+no dropped frames at 60Hz). Three soft rows, all explained by ambient hitches —
+an interleaved `__none__` baseline itself read 56 fps / 86ms worst, so these are
+round-transition/GC/texture hitches, not cosmetics:
+
+| Scenario (balanced) | FPS | Worst ms | Verdict |
+| --- | --- | --- | --- |
+| border:border_runes | 54.9 | 130 | ambient hitch (same border reads 60/17 on High; combo carrying it reads 59/21) |
+| rnd|cart:eight_ball | 58.2 | 77 | ambient hitch (baseline #8 hitched 86ms with cosmetics OFF) |
+| __none__#8 (baseline) | 56.0 | 86 | the ambient hitch itself |
+
+### Low: ALL CLEAR — every subset row at 60 fps / 17ms worst.
+
+### High (manual override only on an iPad): heavy trails degrade
+
+| Scenario (high) | FPS | Worst ms |
+| --- | --- | --- |
+| __none__ baseline | 60 | 17 |
+| cart:pizza / cart:golden_champion | 60 | 17 |
+| pattern:nebula / border:border_runes | 60 | 17 |
+| **trailFx:comet** | **37.9** | 30 |
+| **trailFx:founders_flare** | **24.4** | 44 |
+| **trailFx:aurora** | **37.4** | **96** |
+| **combo:worst** (carries comet) | **42.1** | 26 |
+
+Reproducible and baseline-anchored (60-fps baseline in the same round). The delta
+vs Balanced is the High knob set: full particle volume (particleCount 1.0 vs 0.6),
+no effect cap (100000 vs 280), shorter spawn cooldowns — per-particle glow blits at
+full volume overwhelm the mobile GPU. **Not a ship blocker**: Auto never puts a
+tablet on High; a player must force it manually. Verdict: the PR #259 fixes hold on
+real mobile hardware at every tier the device can Auto-resolve to.
+
+### Run notes
+
+- The NoSleep-style muted looping video does NOT prevent screen sleep on
+  iPadOS 26 (Chrome or Safari — both WebKit). The device slept mid-run; gates
+  caught it, rows resumed cleanly after wake. **Operator must set
+  Settings → Display & Brightness → Auto-Lock → Never for the run.** The video
+  + visibility gates remain useful (re-arm on tap, poisoned-window requeue).
+- Mid-run resume worked in production conditions: 16 banked rows survived the
+  sleep, the remaining 50 completed after wake with no duplicates or skips.
+
+## Follow-up prompt (operator-injectable)
+
+> High graphics tier on tablets degrades on heavy trails (iPad: comet 38 fps,
+> founders_flare 24 fps, aurora 37 fps w/ 96 ms hitches at 9 wearers; Balanced and
+> Low hold 60). Auto never picks High on tablets, so this only affects manual
+> overrides. If we want it fixed anyway: scale the trail/glow particle budget by
+> device class even when pref=High (e.g. touch devices get particleCount 0.6 +
+> maxEffects 280 for trail FX only), or simply cap maxEffects on touch-High.
+> Verify with `PERF_HARNESS=1 UNLOCK_ALL_COSMETICS=true PORT=<free> node index.js`
+> + `http://<LAN-IP>:<port>/play.html?perfharness=1` on the device — the
+> harness's phase-2 High subset covers exactly these ids.
+
+## Raw data
+
+Full JSONL row sets archived in the session job dir during the run
+(`desktop-sweep.jsonl`, `ipad-sweep.jsonl`); regenerate any time by re-running the
+harness — rows stream to `perf-harness-report.jsonl`.
 
 ## Desktop validation (sanity check of the harness itself)
 
@@ -95,6 +159,3 @@ desktop methodology prescribes. Per-id desktop verdicts were already settled in
 `docs/spikes/cosmetic-perf-verification.md`; this run validates the harness, the
 device run is the new data.
 
-## Follow-ups
-
-_(pending)_
