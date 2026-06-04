@@ -35,22 +35,40 @@ function xpRequiredForLevel(n) {
     return Math.min(1000, Math.round((50 + 22 * n) / 5) * 5);
 }
 
+// Precomputed cumulative floors make cumulativeXpForLevel/levelForXp O(1). This is a
+// hardening requirement, not just speed: past the cap every level costs a flat 1000,
+// so a naive walk is ~xp/1000 iterations — a corrupt/oversized xp row (nothing bounds
+// the column) would stall the single-threaded event loop for seconds (measured 2.4s at
+// xp=1e12). CURVE_CAP_LEVEL = first level whose cost hits the cap; CURVE_CUM[l] = the
+// cumulative floor of level l up to there; beyond it the floor is closed-form.
+var CURVE_CAP = 1000;
+var CURVE_CAP_LEVEL = (function () {
+    var n = 2;
+    while (xpRequiredForLevel(n) < CURVE_CAP) { n++; }
+    return n;
+})();
+var CURVE_CUM = (function () {
+    var cum = [0, 0]; // levels 0 and 1 have a 0 floor
+    for (var n = 2; n <= CURVE_CAP_LEVEL; n++) { cum[n] = cum[n - 1] + xpRequiredForLevel(n); }
+    return cum;
+})();
+
 // Total cumulative XP required to BE level `level` (i.e. the floor of that level).
 function cumulativeXpForLevel(level) {
-    var total = 0;
-    for (var n = 2; n <= level; n++) {
-        total += xpRequiredForLevel(n);
-    }
-    return total;
+    if (level <= 1) { return 0; }
+    if (level <= CURVE_CAP_LEVEL) { return CURVE_CUM[level]; }
+    return CURVE_CUM[CURVE_CAP_LEVEL] + (level - CURVE_CAP_LEVEL) * CURVE_CAP;
 }
 
 // Highest level whose cumulative floor a given total XP has reached.
 function levelForXp(totalXp) {
     var xp = totalXp || 0;
+    var capFloor = CURVE_CUM[CURVE_CAP_LEVEL];
+    if (xp >= capFloor) {
+        return CURVE_CAP_LEVEL + Math.floor((xp - capFloor) / CURVE_CAP);
+    }
     var lvl = 1;
-    var cumulative = 0;
-    while (cumulative + xpRequiredForLevel(lvl + 1) <= xp) {
-        cumulative += xpRequiredForLevel(lvl + 1);
+    while (lvl + 1 <= CURVE_CAP_LEVEL && CURVE_CUM[lvl + 1] <= xp) {
         lvl++;
     }
     return lvl;
@@ -125,14 +143,16 @@ var ACHIEVEMENT_UNLOCKS = [
     { id: 'checkered', name: "Checkered", slot: 'pattern', stat: 'mapsSubmitted', threshold: 5 },
 ];
 
-// Player-facing "how to earn it" text for an achievement unlock. Medal stats phrase as
-// "Earn the <medal> medal N times" (titles match gatherAchievements in achievements.js);
-// self-counter stats get bespoke phrasing. Shipped to the client (clientAchievementDefs)
-// so unlock celebrations and the profile panel can show the requirement.
+// THE single source of medal display names: achievements.js builds its end-of-match
+// medal cards from this map, and describeAchievement phrases requirement lines from it
+// ("Earn the <medal> medal N times") — so the game-over banner, the profile tab, and
+// the unlock celebration can never disagree on what a medal is called.
 var MEDAL_TITLES = {
-    mostKills: 'Serial Killer', savior: 'Savior', survivalist: 'Survivalist',
-    brutalist: 'Brutalist', mostMurdered: 'Picked On', zombieSlayer: 'Zombie Slayer',
-    heavyHitter: 'Heavy Hitter', pinball: 'Pinball', iceSkater: 'Ice Skater'
+    mostKills: 'Serial killer', savior: 'Savior', survivalist: 'Survivalist',
+    brutalist: 'Brutalist', mostMurdered: 'Picked on', resourceful: 'Resouceful',
+    bully: 'Bully', doubleKill: 'Double Kill', tripleKill: 'Triple Kill',
+    megaKill: 'Mega Kill', zombieSlayer: 'Zombie Slayer', heavyHitter: 'Heavy Hitter',
+    pinball: 'Pinball', iceSkater: 'Ice Skater'
 };
 function describeAchievement(u) {
     var n = u.threshold;
@@ -248,6 +268,7 @@ module.exports = {
     levelForXp: levelForXp,
     levelProgress: levelProgress,
     ACHIEVEMENT_UNLOCKS: ACHIEVEMENT_UNLOCKS,
+    MEDAL_TITLES: MEDAL_TITLES,
     describeAchievement: describeAchievement,
     clientAchievementDefs: clientAchievementDefs,
     achievementsUnlocked: achievementsUnlocked,

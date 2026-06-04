@@ -1602,6 +1602,10 @@ var SKIN_PICKER_ROWS = 3;
 var SKIN_PICKER_CELLH = 54;
 var SKIN_PICKER_PER_PAGE = SKIN_PICKER_COLS * SKIN_PICKER_ROWS;
 
+// Cache for the 🏆 profile tab's built item list (see skinTabItems) — rebuilt only when
+// the progression object or the achievement defs are replaced.
+var profileItemsCache = { prog: undefined, defs: undefined, items: null };
+
 function skinTabs(lp) {
     var tabs = [
         { key: 'color', label: 'Color' },
@@ -1651,6 +1655,14 @@ function skinTabItems(lp, tabKey) {
         // "almost there" ones are the hook; earned ones trail as the trophy shelf.
         var defs = (typeof config !== "undefined" && config && config.achievementDefs) ? config.achievementDefs : [];
         var prog = (lp && !lp.isPrimary) ? null : ((typeof myProgression !== "undefined") ? myProgression : null);
+        // Memoized: this runs EVERY frame the panel is open (draw + nav + hit paths) and
+        // rebuilding+sorting ~47 cells per frame is pure GC churn. myProgression is
+        // replaced wholesale on progressionUpdate, so reference identity is a sufficient
+        // key. (Single-entry cache: two seats with different progression both open on
+        // the 🏆 tab at once would thrash it — rare, and merely loses the memo.)
+        if (profileItemsCache.prog === prog && profileItemsCache.defs === defs && profileItemsCache.items) {
+            return profileItemsCache.items;
+        }
         var owned = (prog && prog.unlocked_skins) || [];
         var mc = (prog && prog.medal_counts) || {};
         var wins = (prog && prog.wins) || 0;
@@ -1671,6 +1683,9 @@ function skinTabItems(lp, tabKey) {
             return p.def.threshold - q.def.threshold;
         });
         for (var ix = 0; ix < out.length; ix++) { out[ix].idx = ix; } // for tap-to-focus hits
+        profileItemsCache.prog = prog;
+        profileItemsCache.defs = defs;
+        profileItemsCache.items = out;
         return out;
     }
     var cosmetics = [];

@@ -2009,6 +2009,25 @@ html.cc-embedded .cc-toast {
     letter-spacing: 2px;
 }
 .cc-unlock-hint { font-size: 11px; opacity: 0.45; margin-top: 14px; }
+/* bulk-unlock summary card: grid of mini previews instead of N sequential reveals */
+.cc-unlock-grid {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    margin: 14px 0 6px;
+    max-width: 340px;
+}
+.cc-unlock-grid-item { width: 72px; text-align: center; }
+.cc-unlock-grid-canvas { position: static; width: 64px; height: 64px; } /* beat the global canvas{position:absolute} */
+.cc-unlock-grid-name { font-size: 10px; opacity: 0.85; margin-top: 2px; }
+.cc-unlock-grid-more {
+    align-self: center;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--cc-accent, #ffd34d);
+    padding: 0 6px;
+}
 
 /* --- Confetti --------------------------------------------------------------- */
 .cc-confetti {
