@@ -54,10 +54,14 @@ const group = async (title, fn) => {
 // is how an over-length description once slipped through review and broke the main
 // apply (playlist, 170 > 150).
 const GA_FIELD_LIMITS = { parameterName: 40, displayName: 82, description: 150 };
-// displayName charset, same reasoning: the API rejects anything beyond alphanumeric,
-// underscore, or space — which is how "Duration (s)" (parentheses) slipped past the
-// dry-run and broke the main apply mid-run (dimensions created, metrics/keyEvents not).
+// Charset rules, same reasoning: the API rejects these only at apply time — which is
+// how "Duration (s)" (parentheses in a displayName) slipped past the dry-run and broke
+// the main apply mid-run (dimensions created, metrics/keyEvents not).
+//   displayName:   letters, digits, underscores, spaces
+//   parameterName: letters, digits, underscores; must start with a letter
+//   keyEvent name: same rules as parameterName (GA event-name constraints)
 const GA_DISPLAY_NAME_RE = /^[A-Za-z0-9_ ]+$/;
+const GA_PARAMETER_NAME_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
 function validateFieldLimits(kind, entries) {
   for (const e of entries || []) {
     for (const [field, max] of Object.entries(GA_FIELD_LIMITS)) {
@@ -74,6 +78,23 @@ function validateFieldLimits(kind, entries) {
         `(only letters, digits, underscores, and spaces are allowed). Fix it in ga-config.json.`
       );
     }
+    if (typeof e.parameterName === 'string' && !GA_PARAMETER_NAME_RE.test(e.parameterName)) {
+      throw new Error(
+        `${kind} "${e.parameterName}": parameterName must start with a letter and contain only ` +
+        `letters, digits, and underscores. Fix it in ga-config.json.`
+      );
+    }
+  }
+}
+function validateKeyEvents(entries) {
+  for (const e of entries || []) {
+    const name = e.eventName;
+    if (typeof name !== 'string' || name.length > 40 || !GA_PARAMETER_NAME_RE.test(name)) {
+      throw new Error(
+        `keyEvent "${name}": eventName must be 1-40 chars, start with a letter, and contain only ` +
+        `letters, digits, and underscores. Fix it in ga-config.json.`
+      );
+    }
   }
 }
 
@@ -85,6 +106,7 @@ function loadConfig() {
   }
   validateFieldLimits('customDimension', raw.customDimensions);
   validateFieldLimits('customMetric', raw.customMetrics);
+  validateKeyEvents(raw.keyEvents);
   return {
     parent: `properties/${propertyId}`,
     propertyId,
