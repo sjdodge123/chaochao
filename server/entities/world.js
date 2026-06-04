@@ -5,6 +5,7 @@ var messenger = require('../messenger.js');
 var compressor = require('../compressor.js');
 var { Rect } = require('./shapes.js');
 var { Player } = require('./player.js');
+var skinRegistry = require('../skinRegistry.js');
 
 class World extends Rect {
 	constructor(x, y, width, height, engine, playerList, hazardList, roomSig) {
@@ -37,7 +38,33 @@ class World extends Rect {
 		// Full personality profile (trait weights) for the AI brain; the
 		// suffix-numbered duplicates share their base personality's traits.
 		bot.profile = identity;
+		if (c.randomBotCosmetics) {
+			this.dressBotRandomly(bot);
+		}
 		return bot;
+	}
+	// Dev/testing seam (RANDOM_BOT_COSMETICS, see utils.js): dress a bot in random
+	// cosmetics so a local playtest shows the full skin spread without 9 signed-in
+	// humans. Cart + trail always land (every bot reads as "skinned"); pattern and
+	// border roll independently so the mix varies. Cosmetic ids ride the normal
+	// spawn packet (compressor slots 13-16), so the client needs nothing special.
+	dressBotRandomly(bot) {
+		var bySlot = { cart: [], pattern: [], trail: [], border: [] };
+		for (var i = 0; i < skinRegistry.SKINS.length; i++) {
+			var s = skinRegistry.SKINS[i];
+			if (bySlot[s.slot]) {
+				bySlot[s.slot].push(s.id);
+			}
+		}
+		var pick = function (arr) { return arr[Math.floor(Math.random() * arr.length)]; };
+		bot.cart = pick(bySlot.cart);
+		bot.trailFx = pick(bySlot.trail);
+		if (Math.random() < 0.7) {
+			bot.pattern = pick(bySlot.pattern);
+		}
+		if (Math.random() < 0.5) {
+			bot.border = pick(bySlot.border);
+		}
 	}
 	spawnPlayerRandomLoc(player) {
 		var loc = this.findFreeLoc(player);
