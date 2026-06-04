@@ -13,6 +13,8 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 ### General
 
 - The Skins station has a new 🎲 Random button — one press dresses your kart in a random colour plus a random set of the carts, patterns, borders and trails you've unlocked. Works with touch, mouse, keyboard and controller.
+- The Skins station now shows an "Equipped" preview beside the picker: a live in-game render of your kart with its trail flowing behind it, plus a row for each slot (colour, cart, pattern, border, trail) naming exactly what you're wearing.
+- Couch co-op: when two or more players open lobby station menus at the same time, the panels now spread out into their own corners of the screen (tagged P1/P2/…) instead of piling up on top of each other.
 
 ## v0.28.2 — 2026-06-02
 
