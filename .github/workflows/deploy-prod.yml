@@ -1,0 +1,77 @@
+name: Deploy to prod (Heroku)
+
+# Prod deploy control. Heroku auto-deploys the `prod` branch (dashboard:
+# Deploy tab → GitHub → automatic deploys from `prod`, NOT main), so merging
+# a PR into main no longer restarts the live server. This workflow is the
+# only thing that advances `prod`:
+#
+#   nightly    — 09:00 UTC (~5am ET, lowest-traffic window for the mostly-US
+#                audience) fast-forwards prod to main. Pushing an unchanged
+#                SHA is a git no-op, so a quiet night produces no Heroku
+#                build and no dyno restart.
+#   emergency  — merge a PR carrying the `deploy:prod` label and prod is
+#                fast-forwarded to main immediately. (The release workflow's
+#                "Release vX.Y.Z" version-bump commit may land on main just
+#                after; prod picks it up at the next nightly — harmless.)
+#   manual     — Run workflow from the Actions tab, optionally with a
+#                specific ref, to ship main (or any commit on it) right now.
+#
+# prod only ever moves forward: a non-fast-forward push fails loudly rather
+# than silently rewriting deploy history. To roll back prod, use
+# `heroku rollback -a chaochaogame` (instant, no rebuild) or force-push prod
+# by hand if you really want Heroku to rebuild an older commit.
+#
+# NOTE: keep Heroku's "Wait for CI to pass before deploy" OFF — no CI runs on
+# pushes to prod (main is already validated by PR checks), so a CI wait would
+# hang every deploy.
+
+on:
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch/SHA to deploy (must be an ancestor-compatible advance of prod)
+        default: main
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+# Serialize deploys so a label-merge and the nightly can't race on prod.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    # Nightly and manual runs always proceed; PR-close runs only when the PR
+    # actually merged AND was labeled deploy:prod.
+    if: >
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.merged == true &&
+       contains(github.event.pull_request.labels.*.name, 'deploy:prod'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0          # need full history to fast-forward prod
+
+      - name: Fast-forward prod
+        env:
+          REF: ${{ github.event.inputs.ref || 'main' }}
+        run: |
+          target=$(git rev-parse --verify "origin/$REF" 2>/dev/null \
+                || git rev-parse --verify "$REF")
+          current=$(git rev-parse --verify origin/prod 2>/dev/null || echo none)
+          echo "prod: $current -> $target"
+          if [ "$target" = "$current" ]; then
+            echo "prod is already at $target — nothing to deploy."
+            exit 0
+          fi
+          # Plain (non-force) push: fails if $target would rewind prod.
+          git push origin "$target:refs/heads/prod"
+          echo "Pushed — Heroku auto-deploy of prod will pick this up."
