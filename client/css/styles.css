@@ -1801,3 +1801,237 @@ html.cc-embedded #authLogin,
 html.cc-embedded .cc-toast {
     display: none !important;
 }
+
+/* === Progression celebrations (celebrations.js) ============================
+   Three tiers: XP card (non-blocking, top-center), level burst, and the
+   full-screen cosmetic-unlock reveal. --cc-accent is set per-card from the
+   cosmetic's rarity. z-index sits above the cc-toast family (2000) — the two
+   never show simultaneously (toasts defer while celebrations play). */
+.cc-celebrate {
+    position: fixed;
+    inset: 0;
+    z-index: 2050;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s;
+    overflow: hidden;
+}
+.cc-celebrate.visible { opacity: 1; }
+.cc-celebrate-level { background: rgba(0, 0, 0, 0.35); }
+.cc-celebrate-unlock {
+    pointer-events: auto;
+    cursor: pointer;
+    background: radial-gradient(ellipse at center, rgba(8, 10, 18, 0.55) 0%, rgba(8, 10, 18, 0.82) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* --- Tier 1: XP card ------------------------------------------------------ */
+.cc-xp-card {
+    position: absolute;
+    left: 50%;
+    top: 76px;
+    transform: translate(-50%, -16px);
+    transition: transform 0.35s;
+    min-width: 300px;
+    max-width: 92vw;
+    padding: 14px 18px;
+    border-radius: 12px;
+    background: var(--navbar-bg);
+    color: var(--navbar-text);
+    border: 1px solid rgba(255, 211, 77, 0.85);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 211, 77, 0.25);
+    text-align: center;
+}
+.cc-celebrate.visible .cc-xp-card { transform: translate(-50%, 0); }
+.cc-xp-amount {
+    font-size: 24px;
+    font-weight: 800;
+    color: #ffd34d;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.cc-xp-sub { font-size: 13px; opacity: 0.85; margin-top: 2px; }
+.cc-xp-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+}
+.cc-xp-level {
+    font-size: 13px;
+    font-weight: 700;
+    color: #ffd34d;
+    min-width: 42px;
+    text-align: left;
+}
+.cc-xp-level-pop { animation: ccXpLevelPop 0.5s ease-out; }
+@keyframes ccXpLevelPop {
+    0% { transform: scale(1); }
+    40% { transform: scale(1.6); }
+    100% { transform: scale(1); }
+}
+.cc-xp-bar {
+    flex: 1;
+    height: 10px;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.15);
+    overflow: hidden;
+}
+.cc-xp-fill {
+    height: 100%;
+    border-radius: 5px;
+    background: linear-gradient(90deg, #ffb02e, #ffd34d);
+    box-shadow: 0 0 8px rgba(255, 211, 77, 0.7);
+}
+.cc-xp-frac { font-size: 11px; opacity: 0.7; min-width: 64px; text-align: right; }
+.cc-xp-teaser {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    opacity: 0;
+    transition: opacity 0.4s;
+}
+.cc-xp-teaser.visible { opacity: 1; }
+.cc-xp-teaser-canvas { position: static; width: 30px; height: 30px; } /* beat the global canvas{position:absolute} */
+.cc-xp-teaser-text { font-size: 12.5px; opacity: 0.9; }
+
+/* --- Tier 2: level burst --------------------------------------------------- */
+.cc-level-burst {
+    position: absolute;
+    left: 50%;
+    top: 46%; /* below the lobby's stacked status banners */
+    transform: translate(-50%, -50%) scale(0.6);
+    transition: transform 0.45s cubic-bezier(0.2, 1.6, 0.4, 1);
+    text-align: center;
+}
+.cc-celebrate.visible .cc-level-burst { transform: translate(-50%, -50%) scale(1); }
+.cc-level-ring {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 30px;
+    height: 30px;
+    margin: -15px 0 0 -15px;
+    border: 3px solid rgba(255, 211, 77, 0.9);
+    border-radius: 50%;
+    animation: ccLevelRing 0.9s ease-out forwards;
+}
+@keyframes ccLevelRing {
+    0% { transform: scale(1); opacity: 1; }
+    100% { transform: scale(9); opacity: 0; }
+}
+/* shared by the standalone burst AND the pop inside the XP card */
+.cc-level-pop { margin-top: 10px; animation: ccCardPop 0.45s cubic-bezier(0.2, 1.6, 0.4, 1); }
+@keyframes ccCardPop {
+    0% { transform: scale(0.4); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
+}
+.cc-level-pop-kicker {
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 4px;
+    color: #ffd34d;
+}
+.cc-level-pop-num {
+    font-size: 64px;
+    font-weight: 900;
+    line-height: 1.05;
+    color: #fff;
+    text-shadow: 0 0 24px rgba(255, 211, 77, 0.8), 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+.cc-xp-card .cc-level-pop-num { font-size: 40px; }
+
+/* --- Tier 3: unlock reveal -------------------------------------------------- */
+.cc-unlock-rays {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 160vmax;
+    height: 160vmax;
+    margin: -80vmax 0 0 -80vmax;
+    background: repeating-conic-gradient(
+        from 0deg,
+        var(--cc-accent, #ffd34d) 0deg 9deg,
+        transparent 9deg 24deg
+    );
+    opacity: 0.12;
+    -webkit-mask-image: radial-gradient(circle, black 0%, transparent 62%);
+    mask-image: radial-gradient(circle, black 0%, transparent 62%);
+    animation: ccRays 18s linear infinite;
+}
+@keyframes ccRays {
+    to { transform: rotate(360deg); }
+}
+.cc-unlock-card {
+    position: relative;
+    max-width: min(420px, 92vw);
+    padding: 24px 34px 20px;
+    border-radius: 16px;
+    background: rgba(16, 19, 30, 0.96);
+    border: 2px solid var(--cc-accent, #ffd34d);
+    box-shadow: 0 0 48px rgba(0, 0, 0, 0.7), 0 0 28px var(--cc-accent, #ffd34d);
+    text-align: center;
+    color: #fff;
+    transform: scale(0.55);
+    transition: transform 0.5s cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+.cc-celebrate.visible .cc-unlock-card { transform: scale(1); }
+.cc-unlock-kicker {
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 3px;
+    color: var(--cc-accent, #ffd34d);
+}
+.cc-unlock-canvas {
+    position: static; /* beat the global canvas{position:absolute} */
+    display: block;
+    width: 200px;
+    height: 200px;
+    margin: 12px auto 6px;
+}
+.cc-unlock-name { font-size: 27px; font-weight: 800; }
+.cc-unlock-sub { font-size: 14px; opacity: 0.78; margin-top: 4px; }
+.cc-unlock-rarity {
+    display: inline-block;
+    margin-top: 10px;
+    padding: 2px 12px;
+    border: 1px solid var(--cc-accent, #ffd34d);
+    border-radius: 999px;
+    color: var(--cc-accent, #ffd34d);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
+.cc-unlock-hint { font-size: 11px; opacity: 0.45; margin-top: 14px; }
+
+/* --- Confetti --------------------------------------------------------------- */
+.cc-confetti {
+    position: absolute;
+    top: -14px;
+    width: 8px;
+    height: 13px;
+    animation: ccConfettiFall linear forwards;
+}
+@keyframes ccConfettiFall {
+    0% { transform: translate3d(0, 0, 0) rotate(0deg); opacity: 1; }
+    85% { opacity: 1; }
+    100% { transform: translate3d(var(--dx, 0px), 104vh, 0) rotate(var(--rot, 360deg)); opacity: 0; }
+}
+
+@media (max-width: 600px) {
+    .cc-unlock-canvas { width: 150px; height: 150px; }
+    .cc-unlock-name { font-size: 22px; }
+    .cc-xp-card { min-width: 260px; top: 64px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .cc-unlock-rays { animation: none; }
+    .cc-confetti { display: none; }
+    .cc-level-ring { animation: none; opacity: 0; }
+}
+html.cc-embedded .cc-celebrate { display: none !important; }

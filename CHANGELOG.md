@@ -10,7 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- Leveling up is way faster now — and unlocking something new feels like it! XP needed per level has been massively reduced (no level ever costs more than ~10 matches' worth, and nobody loses progress — most players will jump several levels and find new cosmetics waiting). Unlocks now land every few matches instead of dozens.
+- New celebration screens: earning XP fills an animated level bar, leveling up gets a proper fanfare, and unlocking a cosmetic shows the actual item spinning in your color with confetti and a crowd cheer — plus a peek at the next skin you're closing in on.
 
 ## v0.28.5 — 2026-06-04
 

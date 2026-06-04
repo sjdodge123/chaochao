@@ -17,6 +17,7 @@ const bundles = {
         'client/scripts/borderEffects.js',
         'client/scripts/terrainfx.js',
         'client/scripts/skinRegistry.js',
+        'client/scripts/celebrations.js',
         'client/scripts/gameboard.js',
         'client/scripts/lobbyHub.js',
         'client/scripts/audience.js',

@@ -165,6 +165,19 @@ function levelSkinsUnlockedBetween(oldLevel, newLevel) {
     return out;
 }
 
+// The NEXT level-gated cosmetic above `level` (lowest unlock.level > level), or null at
+// the top of the ladder. Drives the "next unlock" teaser in the progression payload —
+// the single biggest "one more match" pull, so the client always knows what's coming.
+function nextLevelSkin(level) {
+    var best = null;
+    for (var i = 0; i < SKINS.length; i++) {
+        var s = SKINS[i];
+        if (s.unlock.kind !== 'level' || s.unlock.level <= level) { continue; }
+        if (!best || s.unlock.level < best.unlock.level) { best = s; }
+    }
+    return best ? { id: best.id, level: best.unlock.level } : null;
+}
+
 // True if `unlock` is a seasonal-claim rule whose window is currently open (claimStart <=
 // now < claimEnd). Missing/invalid bounds read as closed so a malformed entry can't grant
 // forever. `now` is epoch ms (pass Date.now()); injected so callers/tests stay deterministic.
@@ -193,6 +206,7 @@ module.exports = {
     getSkin: getSkin,
     getSkinSlot: getSkinSlot,
     levelSkinsUnlockedBetween: levelSkinsUnlockedBetween,
+    nextLevelSkin: nextLevelSkin,
     isClaimWindowOpen: isClaimWindowOpen,
     currentSeasonalClaims: currentSeasonalClaims
 };

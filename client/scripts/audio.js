@@ -306,6 +306,12 @@ var musicTrackEndedHandler = null;
 
 // --- Sound descriptors (replaces the old `new Audio(...)` globals) ----------
 var playerJoinSound = makeSound("./assets/sounds/pleasing-bell.mp3");
+// Progression-celebration cues (celebrations.js): XP bar tick-up, level-up chime, and the
+// cosmetic-unlock crowd cheer. Distinct descriptors (not the in-game SFX) so their volume
+// can skip the lobby dampen — celebrations only ever play in the lobby.
+var celebrationXpTick = makeSound("./assets/sounds/collectitem.mp3");
+var celebrationLevelUp = makeSound("./assets/sounds/pleasing-bell.mp3", { duck: true });
+var celebrationCheer = makeSound("./assets/sounds/crowd-cheer-big.mp3", { duck: true });
 var playerDiedSound = makeSound("./assets/sounds/TailWhip.mp3");
 var countDownA = makeSound("./assets/sounds/countdown-a.mp3");
 var countDownB = makeSound("./assets/sounds/countdown-b.mp3");
@@ -428,6 +434,11 @@ function volumeChange() {
     // levels — they were tuned against a per-file loudness measurement.
     var sfx = masterVolume * sfxVolumeScalar;
     playerJoinSound.volume = .6 * sfx;   // join chime — must scale with the slider (historically it didn't)
+    // Celebration cues fold in the master toggle but NOT the lobby dampen scalar —
+    // they only fire in the lobby, where sfxVolumeScalar is 0.1 and would gut them.
+    celebrationXpTick.volume = .5 * masterVolume;
+    celebrationLevelUp.volume = .55 * masterVolume;
+    celebrationCheer.volume = .22 * masterVolume;  // crowd-cheer-big is mastered hot (in-game sits at .125)
     blackoutSound.volume = .35 * sfx;
     bumperSound.volume = .25 * sfx;
     cutSound.volume = .15 * sfx;
