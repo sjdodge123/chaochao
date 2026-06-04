@@ -1793,41 +1793,62 @@ function stationPickCosmetic(lp, opt) {
         p[field] = id; // optimistic local update
     }
 }
-// 🎲 Random: equip a random loadout from what THIS seat has unlocked — a fresh colour
-// (never one another kart wears, never the current one, so a press always visibly changes
-// something) plus a random pick per cosmetic slot (the slot default counts as one candidate,
-// so plain looks stay in the pool). Patterns only render on the plain cart, so a shaped-cart
-// roll forces the pattern slot to None instead of burning the roll on an invisible pattern.
-// Every pick rides the existing commit paths (stationPickSkin / stationPickCosmetic), so
-// persistence, optimistic updates and server-side validation are identical to picking by hand.
+// 🎲 Random: equip a random loadout from what THIS seat has unlocked. Every slot that has
+// an alternative re-rolls to something DIFFERENT (the current value is excluded from its
+// pool, with the slot default as one candidate); slots with nothing new to offer are left
+// untouched — no redundant emits. Two deliberate skips: the colour roll is skipped while
+// the avatar skin is worn (the server clears the avatar on ANY setSkin, and a random roll
+// must not silently destroy that explicit identity choice), and the pattern slot is skipped
+// while a shaped cart is equipped/rolled (patterns only render on the plain cart; manual
+// cart equips preserve the stored pattern hidden underneath, so a roll must too). If NOTHING
+// could change (a fresh guest with no unlocks in a colour-saturated lobby), flash the panel
+// toast instead of silently doing nothing. Picks ride the existing commit paths
+// (stationPickSkin / stationPickCosmetic): persistence + server validation match manual picks.
 function stationRandomizeCosmetics(lp) {
     if (!lp || !lp.socket) { return; }
     noteHubActivity(lp);
-    var pal = skinPalette();
-    var taken = skinTakenColors(lp);
-    var cur = skinCurrentColor(lp);
-    var colors = [];
-    for (var i = 0; i < pal.length; i++) {
-        if (!taken[pal[i]] && pal[i] !== cur) { colors.push(pal[i]); }
+    var changed = false;
+    if (!playerHasAvatarSkin(lp)) {
+        var pal = skinPalette();
+        var taken = skinTakenColors(lp);
+        var cur = skinCurrentColor(lp);
+        var colors = [];
+        for (var i = 0; i < pal.length; i++) {
+            if (!taken[pal[i]] && pal[i] !== cur) { colors.push(pal[i]); }
+        }
+        if (colors.length) {
+            stationPickSkin(lp, colors[Math.floor(Math.random() * colors.length)]);
+            changed = true;
+        }
     }
-    if (colors.length) {
-        stationPickSkin(lp, colors[Math.floor(Math.random() * colors.length)]);
+    // Cart first: the pattern skip below reads the (optimistically updated) cart slot.
+    var slots = ['cart', 'pattern', 'border', 'trail'];
+    for (var s = 0; s < slots.length; s++) {
+        var slot = slots[s];
+        if (slot === 'pattern' && currentCosmetic(lp, 'cart')) { continue; } // hidden under a shaped cart — preserve it
+        var id = randomUnlockedCosmetic(lp, slot);
+        if (id === undefined) { continue; } // nothing new this seat could equip here
+        stationPickCosmetic(lp, { slot: slot, id: id });
+        changed = true;
     }
-    var cartId = randomUnlockedCosmetic(lp, 'cart');
-    stationPickCosmetic(lp, { slot: 'cart', id: cartId });
-    stationPickCosmetic(lp, { slot: 'pattern', id: (cartId != null) ? null : randomUnlockedCosmetic(lp, 'pattern') });
-    stationPickCosmetic(lp, { slot: 'border', id: randomUnlockedCosmetic(lp, 'border') });
-    stationPickCosmetic(lp, { slot: 'trail', id: randomUnlockedCosmetic(lp, 'trail') });
+    if (!changed) {
+        lp._cartLockMsg = "Nothing new to roll — unlock more skins!";
+        lp._cartLockAt = Date.now();
+    }
 }
-// One random candidate for a cosmetic slot: the slot default (null) + every id this seat
-// has UNLOCKED (couch seats gate at guest level — cartSkinUnlock handles that per-seat).
+// One random NEW candidate for a cosmetic slot: the slot default (null) + every id this
+// seat has UNLOCKED (couch seats gate at guest level via cartSkinUnlock), minus whatever
+// is currently equipped — so a roll never re-deals the same hand. Returns undefined when
+// the slot has no alternative (e.g. a guest with no unlocks), so the caller skips the emit.
 function randomUnlockedCosmetic(lp, slot) {
-    var ids = [null];
+    var cur = currentCosmetic(lp, slot);
+    var ids = (cur !== null) ? [null] : [];
     for (var i = 0; i < COSMETIC_OPTIONS.length; i++) {
         var opt = COSMETIC_OPTIONS[i];
-        if (opt.slot !== slot || opt.id == null) { continue; }
+        if (opt.slot !== slot || opt.id == null || opt.id === cur) { continue; }
         if (!cartSkinUnlock(opt.id, lp).locked) { ids.push(opt.id); }
     }
+    if (!ids.length) { return undefined; }
     return ids[Math.floor(Math.random() * ids.length)];
 }
 // Cosmetic-picker layout: positions each option in one of three labeled groups —
