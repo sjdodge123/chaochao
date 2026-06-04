@@ -1,24 +1,17 @@
 'use strict';
 
+// Medal display names live in progression.js (MEDAL_TITLES) so the end-of-match medal
+// cards here and the achievement requirement lines ("Earn the <medal> medal N times")
+// can never drift apart.
+var MEDAL_TITLES = require('./progression.js').MEDAL_TITLES;
+
 // End-of-match medal tallying. Mixed into Game.prototype, so methods use `this`.
 module.exports = {
 	gatherAchievements() {
-		var achievements = {
-			mostKills: { ids: [], value: 0, title: "Serial killer" },
-			savior: { ids: [], value: 0, title: "Savior" },
-			survivalist: { ids: [], value: 0, title: "Survivalist" },
-			brutalist: { ids: [], value: 0, title: "Brutalist" },
-			mostMurdered: { ids: [], value: 0, title: "Picked on" },
-			resourceful: { ids: [], value: 0, title: "Resouceful" },
-			bully: { ids: [], value: 0, title: "Bully" },
-			doubleKill: { ids: [], value: 0, title: "Double Kill" },
-			tripleKill: { ids: [], value: 0, title: "Triple Kill" },
-			megaKill: { ids: [], value: 0, title: "Mega Kill" },
-			zombieSlayer: { ids: [], value: 0, title: "Zombie Slayer" },
-			heavyHitter: { ids: [], value: 0, title: "Heavy Hitter" },
-			pinball: { ids: [], value: 0, title: "Pinball" },
-			iceSkater: { ids: [], value: 0, title: "Ice Skater" },
-		};
+		var achievements = {};
+		for (var stat in MEDAL_TITLES) {
+			achievements[stat] = { ids: [], value: 0, title: MEDAL_TITLES[stat] };
+		}
 		// Competitive medals need a real opponent — 2+ humans present (guests count; bots don't).
 		var humanCount = 0;
 		for (var hid in this.playerList) { if (this.playerList[hid] && !this.playerList[hid].isAI) { humanCount++; } }

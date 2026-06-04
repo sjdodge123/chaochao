@@ -313,9 +313,15 @@ async function getProgression(userId) {
 
 function normalizeProgression(row) {
     var def = progression.defaultProgression();
+    var xp = (row && typeof row.xp === 'number') ? row.xp : def.xp;
     return {
-        xp: (row && typeof row.xp === 'number') ? row.xp : def.xp,
-        level: (row && typeof row.level === 'number') ? row.level : def.level,
+        xp: xp,
+        // Level is DERIVED from xp on every read, never trusted from the stored column.
+        // The column is only a write-time cache (addProgression keeps it current for
+        // analytics): after a curve retune the stored value goes stale until the
+        // player's next match, which would leave the badge, equip gating, and the
+        // recomputed xpThisLevel/nextUnlock fields in the same payload disagreeing.
+        level: progression.levelForXp(xp),
         unlocked_skins: (row && Array.isArray(row.unlocked_skins)) ? row.unlocked_skins : def.unlocked_skins,
         medal_counts: (row && row.medal_counts && typeof row.medal_counts === 'object') ? row.medal_counts : def.medal_counts,
         wins: (row && typeof row.wins === 'number') ? row.wins : def.wins,

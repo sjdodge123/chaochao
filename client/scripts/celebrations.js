@@ -51,6 +51,12 @@ function celebrationsActive() {
 // rewarded-bonus path, which suppresses its xp event) still get their own burst.
 function celebrationsEnqueue(events) {
 	if (!events || !events.length || !document.body) { return events || []; }
+	// Celebrations are a lobby-only flourish. A rewarded-ad xpBonus ack is explicitly
+	// allowed to resolve DURING the next race (see the xpBonus handler in client.js) —
+	// don't pop a celebration card + sound over live gameplay; returning the events
+	// unhandled drops them to the legacy quiet text toast instead.
+	if (typeof currentState !== "undefined" && typeof config !== "undefined" && config && config.stateMap
+		&& currentState !== config.stateMap.lobby) { return events; }
 	var leftover = [];
 	var mapped = [];
 	for (var i = 0; i < events.length; i++) {
@@ -78,6 +84,16 @@ function celebrationsEnqueue(events) {
 		} else {
 			leftover.push(ev); // xp_bonus_error / xp_bonus_failed / future types
 		}
+	}
+	// A pile of unlocks (multi-level vault from a 2× bonus, merged offline queues, a
+	// future curve retune) must not become minutes of sequential full-screen reveals —
+	// and a race start would silently destroy the unseen tail (the server's
+	// pending_toasts queue is already drained). Past 3, collapse every unlock into ONE
+	// summary reveal; up to 3 keep their individual full cards.
+	var unlocks = mapped.filter(function (m) { return m.kind === "unlock"; });
+	if (unlocks.length > 3) {
+		mapped = mapped.filter(function (m) { return m.kind !== "unlock"; });
+		mapped.push({ kind: "unlockBatch", items: unlocks });
 	}
 	if (mapped.length) {
 		celebrationQueue = celebrationQueue.concat(mapped);
@@ -124,6 +140,7 @@ function celebrationShowNext() {
 	var item = celebrationQueue.shift();
 	if (item.kind === "xp") { celebrationShowXp(item); }
 	else if (item.kind === "level") { celebrationShowLevel(item); }
+	else if (item.kind === "unlockBatch") { celebrationShowUnlockBatch(item); }
 	else { celebrationShowUnlock(item); }
 }
 
@@ -306,6 +323,17 @@ function celebrationShowXp(item) {
 	var dingedLevels = 0;
 
 	function step(ts) {
+		// Same never-strand contract as the unlock paintLoop: a throw here would kill
+		// the rAF chain with celebrationShowing stuck true, jamming the queue (and the
+		// deferred 2× XP offer behind it) for the rest of the lobby.
+		try {
+			stepBody(ts);
+		} catch (e) {
+			celebrationRafId = null;
+			celebrationShowNext();
+		}
+	}
+	function stepBody(ts) {
 		if (start == null) { start = ts; }
 		var u = Math.min(1, (ts - start) / fillDur);
 		var e = ease(u);
@@ -322,7 +350,12 @@ function celebrationShowXp(item) {
 				levelEl.classList.remove("cc-xp-level-pop");
 				void levelEl.offsetWidth; // restart the pop animation
 				levelEl.classList.add("cc-xp-level-pop");
-				celebrationPlay(typeof celebrationLevelUp !== "undefined" ? celebrationLevelUp : null);
+				// Big jumps cross several levels within a few frames; one chime per level
+				// just blats against the audio engine's 6-voice cap. Past 3 levels, save
+				// the chime for the final one (the visual pop still fires per level).
+				if (levelsCrossed <= 3 || dingedLevels === levelsCrossed) {
+					celebrationPlay(typeof celebrationLevelUp !== "undefined" ? celebrationLevelUp : null);
+				}
 			}
 			fillEl.style.width = (100 * Math.min(1, frac)).toFixed(1) + "%";
 			if (dingedLevels === levelsCrossed) {
@@ -452,6 +485,52 @@ function celebrationShowUnlock(item) {
 	}
 	overlay.addEventListener("pointerdown", finish);
 	celebrationTimer(finish, CELEBRATION_UNLOCK_MS);
+}
+
+// Summary reveal for a BULK unlock (4+ items in one batch): one full-screen card with
+// a grid of mini previews instead of minutes of sequential reveals. Static paint (no
+// per-thumb rAF loop — up to a dozen live painters at once isn't worth the GPU).
+function celebrationShowUnlockBatch(item) {
+	var items = item.items || [];
+	var overlay = celebrationEl("div", "cc-celebrate cc-celebrate-unlock", document.body);
+	celebrationRoot = overlay;
+	overlay.style.setProperty("--cc-accent", "#ffd34d");
+	celebrationEl("div", "cc-unlock-rays", overlay);
+	celebrationConfetti(overlay, 44, "#ffd34d");
+
+	var card = celebrationEl("div", "cc-unlock-card", overlay);
+	celebrationEl("div", "cc-unlock-kicker", card, items.length + " NEW ITEMS UNLOCKED");
+	var grid = celebrationEl("div", "cc-unlock-grid", card);
+	var color = celebrationPlayerColor();
+	var SHOWN = 8;
+	for (var i = 0; i < Math.min(items.length, SHOWN); i++) {
+		var cell = celebrationEl("div", "cc-unlock-grid-item", grid);
+		var cv = celebrationEl("canvas", "cc-unlock-grid-canvas", cell);
+		cv.width = 96; cv.height = 96;
+		try {
+			celebrationPaintCosmetic(cv.getContext("2d"), 96, 96, items[i].id, color, 0);
+		} catch (e) { /* a painter throw must never strand the overlay */ }
+		var nm = (typeof skinDisplayName === "function") ? skinDisplayName(items[i].id) : items[i].id;
+		celebrationEl("div", "cc-unlock-grid-name", cell, nm);
+	}
+	if (items.length > SHOWN) {
+		celebrationEl("div", "cc-unlock-grid-more", grid, "+" + (items.length - SHOWN) + " more");
+	}
+	celebrationEl("div", "cc-unlock-sub", card, "Find them all in the Skins station");
+	celebrationEl("div", "cc-unlock-hint", card, "tap to continue");
+
+	requestAnimationFrame(function () { overlay.classList.add("visible"); });
+	celebrationPlay(typeof celebrationCheer !== "undefined" ? celebrationCheer : null);
+
+	var done = false;
+	function finish() {
+		if (done) { return; }
+		done = true;
+		overlay.classList.remove("visible");
+		celebrationTimer(celebrationAdvance, 380);
+	}
+	overlay.addEventListener("pointerdown", finish);
+	celebrationTimer(finish, CELEBRATION_UNLOCK_MS + 1500); // a grid takes longer to read than one item
 }
 
 // ---------------------------------------------------------------------------
