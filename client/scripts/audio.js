@@ -332,9 +332,10 @@ var teleportWarnSound = makeSound("./assets/sounds/teleport_warn.mp3");
 var brutalRoundSound = makeSound("./assets/sounds/brutalround.mp3", { duck: true });
 var volcanoErupt = makeSound("./assets/sounds/volcano-erupt.mp3");
 var speedBuff = makeSound("./assets/sounds/speedBuff.mp3");
-// Star Power reuses the rise.mp3 riser (also nearVictory's cue) — a separate
-// instance so its volume/duck can be tuned independently.
-var starPowerSound = makeSound("./assets/sounds/rise.mp3");
+// Star Power activation: a bright ascending arpeggio + shimmer tail synthesized
+// for this cue (rise.mp3 was tried first but its mean is -33 dB with the peak at
+// the END — a slow build, inaudible as an activation hit under gameplay).
+var starPowerSound = makeSound("./assets/sounds/starPower.mp3");
 var speedDebuff = makeSound("./assets/sounds/speed_downgrade.mp3");
 var tileSwap = makeSound("./assets/sounds/tileswap.mp3");
 var iceCannon = makeSound("./assets/sounds/iceCannon.mp3");

@@ -11,3 +11,10 @@ trimmed and loudness-normalized from **"Free Crowd Cheering Sounds"** by
 - Changes: extracted ~2.5–4s segments, applied fades, and normalized loudness.
 
 Attribution as required by the license: crowd sounds by Gregor Quendel (CC-BY 4.0).
+
+## Star Power
+
+`starPower.mp3` is an original cue synthesized in-repo with ffmpeg (stacked
+sine partials: an ascending E-major arpeggio E5→G#5→B5→E6 with vibrato +
+echo shimmer tail, limited to -2.3 dBFS peak). No external source; public
+domain / project-owned.
