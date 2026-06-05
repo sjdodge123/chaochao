@@ -514,13 +514,16 @@ function drawKartAppearance(player, sx, sy, headingOverride) {
     // and the PATTERN (player.pattern) textures the plain sphere only. Both can be equipped at
     // once. Border FIRST — it rings from BEHIND so the cart body always sits on top (only the
     // rim past the body shows).
+    var painter = cartSkinPainter(player.cart);
     var bid = player.border;
     var bskin = (typeof getSkin === "function" && bid) ? getSkin(bid) : null;
     if (bskin && bskin.slot === 'border') {
         var bp = (typeof getSkinPainter === "function") ? getSkinPainter(bid) : null;
-        if (bp != null) { drawBorderOverlay(player, sx, sy, player.radius, bp); }
+        // Shaped carts render CART_SKIN_VISUAL_SCALE larger than the physics radius,
+        // so the border ring scales with them or its inner edge would be swallowed.
+        var br = player.radius * (painter != null ? CART_SKIN_VISUAL_SCALE : 1);
+        if (bp != null) { drawBorderOverlay(player, sx, sy, br, bp); }
     }
-    var painter = cartSkinPainter(player.cart);
     if (painter != null) {
         drawCartSkin(player, sx, sy, player.radius, painter, headingOverride);
     } else {
@@ -540,6 +543,13 @@ function drawKartAppearance(player, sx, sy, headingOverride) {
         }
     }
 }
+
+// Shaped cart bodies render 20% larger than the physics radius so they read
+// slightly bigger than the base sphere cart. Pure presentation: the server's
+// collision radius is untouched (the client never feeds this back). Applied at
+// the drawCartSkin chokepoint so every path (live racing, overview scoreboard,
+// lava-burn, recap, ice reflection) agrees on the size.
+var CART_SKIN_VISUAL_SCALE = 1.2;
 
 function drawCartSkin(player, centerX, centerY, radius, painter, headingOverride) {
     var ctx = gameContext;
@@ -570,7 +580,7 @@ function drawCartSkin(player, centerX, centerY, radius, painter, headingOverride
     ctx.save();
     ctx.translate(centerX, centerY);
     if (!statue) { ctx.rotate(heading); }
-    ctx.scale(radius, radius);
+    ctx.scale(radius * CART_SKIN_VISUAL_SCALE, radius * CART_SKIN_VISUAL_SCALE);
     if (punchK > 0) {
         ctx.translate(punchK * 0.12, 0);                    // lunge forward (heading is local +X)
         ctx.scale(1 + punchK * 0.14, 1 + punchK * 0.14);    // impact pop
