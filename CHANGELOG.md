@@ -13,6 +13,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 ### General
 
 - Three new soundtracks join the music rotation: two high-energy chiptune tracks during races, and one chill chiptune track for calmer moments (Bogart VGM's "8Bit Action" series).
+- Music mood changes are much smoother: the hype track now carries the leader all the way over the finish line and the new mood washes in on the round-results screen (instead of the music abruptly switching mid-race the moment someone gained or lost match point), with the old track fading gently underneath.
 
 ## v0.30.0 — 2026-06-05
 
