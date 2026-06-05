@@ -12,7 +12,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ### Ability changes
 
-- New ability: Star Power! Grab the star tile and pop it to go full invincible for a few seconds — you glow in cycling rainbow colours and leave a trail of rainbow stars. While it lasts, punches and pucks bounce off you, bombs and cuts can't fling you, slowdowns and swaps pass you by, and even a blindfold can't blind you — but you can still punch everyone else, so plow straight through the pack. Watch the blink: when the glow starts flashing it's about to wear off. And no, it won't save you from lava.
+- New ability: Star Power! Grab the star tile and pop it to go full invincible for a few seconds — you glow in cycling rainbow colours, leave a trail of rainbow stars, and your own theme music plays while it lasts. Punches and pucks bounce off you, bombs and cuts can't fling you, slowdowns and swaps pass you by, a blindfold can't blind you — and even lava can't burn you, so you can shortcut straight across it. You can still punch everyone else, so plow through the pack. Watch the blink: when the glow starts flashing the star is about to wear off, and lava stops being a road the instant it does.
 
 ## v0.29.3 — 2026-06-05
 

@@ -505,8 +505,9 @@ class Player extends Circle {
 		return this.isInvuln() || this.onSanctuary;
 	}
 	// Star Power (any state, not lobby-only): immune to punches/pucks, explosion
-	// and cut knockback, swaps, and rival speed buffs/debuffs — but NOT terrain
-	// (lava still kills). The starred player can still punch others.
+	// and cut knockback, swaps, rival speed buffs/debuffs — and lava (crossed
+	// like terrain, see handleMapCellHit). The starred player can still punch
+	// others.
 	hasStarPower() {
 		return this.starPowerUntil != 0 && Date.now() < this.starPowerUntil;
 	}
@@ -878,11 +879,20 @@ class Player extends Circle {
 			if (this.currentState == c.stateMap.lobby) {
 				// Lobby lava is a teaching prop: cosmetic death + safe respawn, never
 				// the real kill path (no killPlayer/removeNotch). Invuln players in
-				// their post-respawn grace window are immune.
-				if (this.isInvuln()) {
+				// their post-respawn grace window are immune, as is a Star Power holder.
+				if (this.isInvuln() || this.hasStarPower()) {
 					return;
 				}
 				this.lobbyRespawnPending = "death";
+				return;
+			}
+			// Star Power: lava can't kill — cross it (collapse ground included) like a
+			// zombie does, taking the cell's physics but never the burn/death path. If
+			// the star runs out mid-crossing, the next tick's lava hit kills as normal.
+			if (this.hasStarPower()) {
+				this.acel = object.acel;
+				this.dragCoeff = object.dragCoeff;
+				this.brakeCoeff = object.brakeCoeff;
 				return;
 			}
 			if (this.isZombie == true) {

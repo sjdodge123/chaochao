@@ -2,10 +2,9 @@
 
 // Headless test for the STAR POWER ability (config.tileMap.abilities.starPower).
 //
-// Star Power makes its holder temporarily invulnerable to everything rivals can
-// throw at them — punches/pucks, explosion + cut knockback, speed buffs/debuffs,
-// swaps, the blindfold (bot-side) — while the holder can still punch others.
-// Terrain is deliberately NOT exempt (lava still kills).
+// Star Power makes its holder temporarily invulnerable to everything — punches/
+// pucks, explosion + cut knockback, speed buffs/debuffs, swaps, the blindfold
+// (bot-side), and lava itself — while the holder can still punch others.
 //
 // This boots the REAL server modules (no network/browser, same technique as
 // smoke-test.js) and asserts each gate directly:
@@ -20,7 +19,8 @@
 //      unwinds drag ONLY for the players that actually got it (no drift)
 //   7. the starred player's own punches still land on others
 //   8. swap re-rolls/fizzles rather than yanking a starred player
-//   9. expiry: once starPowerUntil passes, punches land again
+//   9. lava can't kill a starred player (control player still dies)
+//  10. expiry: once starPowerUntil passes, punches land again
 //
 // Run: node .github/scripts/star-power-test.js
 
@@ -143,7 +143,19 @@ gb.swapOwnerWithRandomPlayer({ context: gb, aimer: aimer, owner: B.id });
 assert(emitted.some(e => e.event === 'fizzle' && e.payload === B.id), 'swap with only a starred candidate fizzles');
 assert(A.x === posA.x && A.y === posA.y && B.x === posB.x && B.y === posB.y, 'nobody was teleported by the fizzled swap');
 
-// --- 9. expiry ------------------------------------------------------------------
+// --- 9. lava immunity ----------------------------------------------------------
+// killPlayer only fires in racing/collapsing, and player.currentState is stamped
+// by ticks this test doesn't run — stamp it so the control death is REAL (and the
+// starred survival therefore meaningful, not a state no-op).
+const lavaCell = { id: config.tileMap.lava.id, isMapCell: true, acel: 100, dragCoeff: 5, brakeCoeff: 5 };
+A.currentState = config.stateMap.racing; C.currentState = config.stateMap.racing;
+A.alive = true; C.alive = true; C.onFire = 0;
+A.handleMapCellHit(lavaCell);
+assert(A.alive === true, 'starred player survives driving on lava');
+C.handleMapCellHit(lavaCell);
+assert(C.alive === false, 'control player dies on the same lava');
+
+// --- 10. expiry -----------------------------------------------------------------
 A.starPowerUntil = Date.now() - 1;
 assert(A.hasStarPower() === false, 'hasStarPower() turns off once the timestamp passes');
 park(A, cx, cy);
