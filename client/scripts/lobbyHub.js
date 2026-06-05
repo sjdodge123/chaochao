@@ -1059,9 +1059,24 @@ function assignPanelDocks(open) {
 // registry isn't re-scanned by each banner. Read by all three lobby banners.
 var lobbyBannerSeasonalClaim = null;
 
+// Y for lobby-banner row `row` (0 = top). The stack tucks directly under the
+// top-centre session info bar (draw.js drawGameInfo, y 8..38) so the whole
+// top-centre HUD reads as ONE column; it drops below the maintenance alert
+// panel (ends ~y94) when a deploy notice is up so the two never overlap.
+var LOBBY_BANNER_ROW_H = 38; // 32px pill + 6px gap
+function lobbyBannerRowY(row) {
+    var base = 46;
+    if (typeof serverMaintenance !== "undefined" && serverMaintenance != null) {
+        base = 102;
+    }
+    return base + row * LOBBY_BANNER_ROW_H;
+}
+
 // Draws ONE fixed top-centre lobby banner (rounded pill, centered bold text) at row `y`. Backs
-// all three lobby banners so their geometry stays identical. theme overrides the neutral hub
-// panel look: { fill, ink (border), text (defaults to ink), alpha, pad, glow }.
+// all three lobby banners so their geometry stays identical. The pill chrome itself is the
+// shared HUD panel (draw.js drawHudPanel) so these match the session bar / map plaque exactly.
+// theme overrides the neutral hub panel look: { fill, ink (border), text (defaults to ink),
+// alpha, pad, glow }.
 function drawLobbyBanner(text, y, theme) {
     theme = theme || {};
     var ink = theme.ink || hubInk();
@@ -1072,16 +1087,12 @@ function drawLobbyBanner(text, y, theme) {
     var w = tw + pad;
     var h = 32;
     var x = (LOGICAL_WIDTH - w) / 2;
-    if (theme.glow) { gameContext.shadowColor = theme.glow; gameContext.shadowBlur = 14; }
-    gameContext.globalAlpha = (theme.alpha != null) ? theme.alpha : 0.92;
-    gameContext.fillStyle = theme.fill || hubSurface();
-    lhRoundRect(gameContext, x, y, w, h, 9);
-    gameContext.fill();
-    gameContext.shadowBlur = 0;
-    gameContext.globalAlpha = 1;
-    gameContext.lineWidth = 2;
-    gameContext.strokeStyle = ink;
-    gameContext.stroke();
+    drawHudPanel(x, y, w, h, {
+        fill: theme.fill || hubSurface(),
+        alpha: (theme.alpha != null) ? theme.alpha : 0.92,
+        border: ink,
+        glow: theme.glow
+    });
     gameContext.fillStyle = theme.text || ink;
     gameContext.textAlign = "center";
     gameContext.textBaseline = "middle";
@@ -1095,7 +1106,7 @@ function drawLobbyPlaylistStatus() {
     if (!playlistDefList().length) { return; }
     var count = playlistCount(currentPlaylistId());
     var text = "🗺️ Playlist: " + currentPlaylistLabel() + (count != null ? " (" + count + ")" : "");
-    drawLobbyBanner(text, lobbyBannerSeasonalClaim ? 164 : 128);
+    drawLobbyBanner(text, lobbyBannerRowY(lobbyBannerSeasonalClaim ? 2 : 1));
 }
 
 // The seasonal claim the LOCAL player can still act on this frame — the first open claim they
@@ -1139,7 +1150,7 @@ function drawSeasonalClaimBanner() {
         ? ("🌟 Claim your " + label + " " + nm + " " + noun + tail)
         : ("🌟 Sign in to claim the limited " + label + " " + nm + " " + noun + tail);
     // Gold theme + soft glow so it reads as premium/limited, not a routine status band.
-    drawLobbyBanner(text, 92, { fill: "#3a2b06", ink: "#ffb31f", text: "#ffe9a8", alpha: 0.96, pad: 34, glow: "rgba(255,179,31,0.7)" });
+    drawLobbyBanner(text, lobbyBannerRowY(0), { fill: "#3a2b06", ink: "#ffb31f", text: "#ffe9a8", alpha: 0.96, pad: 34, glow: "rgba(255,179,31,0.7)" });
 }
 
 // Triangular-tier auto fill: a few bots scale up with humans (1H→1, 2-3H→2,
@@ -1171,8 +1182,8 @@ function drawLobbyAIStatus() {
         var eff = Math.min(lvl, aiMaxBots());
         text = "🤖 AI bots next race: " + eff + (eff === 1 ? " bot" : " bots");
     }
-    // Under the GameID/Players/Round info row; +1 row when the seasonal banner takes the top slot.
-    drawLobbyBanner(text, lobbyBannerSeasonalClaim ? 128 : 92);
+    // Under the session info bar; +1 row when the seasonal banner takes the top slot.
+    drawLobbyBanner(text, lobbyBannerRowY(lobbyBannerSeasonalClaim ? 1 : 0));
 }
 
 function lhRoundRect(ctx, x, y, w, h, r) {

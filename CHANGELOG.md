@@ -12,7 +12,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ### General
 
-- The in-game HUD got a face-lift: the game ID / player count / round readout is now a clean panel at the top of the screen, the race timer sits in its own dark pill so it's readable over any terrain, the map name & author show on a proper plaque in the corner, brutal-round badges have rounded tiles, and the "Waiting for more players" notice is a centered banner with an animated ellipsis — everything matching the lobby's panel style.
+- The in-game HUD got a face-lift: every round now opens with a proper map announcement card (map name + author — taking its turn politely after any Brutal Round reveal), the race timer sits in its own dark pill so it's readable over any terrain, the round number shows in a clean panel at the top, the map name & author also live on a small plaque in the corner, brutal-round badges have rounded tiles, and the "Waiting for more players" notice is a centered banner with an animated ellipsis. The lobby's info banners (seasonal claim, AI bots, playlist) stack neatly at the top of the screen, and the old game-ID / player-count text is tucked away (visible again with `?debughud=1` if you need it).
 
 ## v0.29.2 — 2026-06-05
 
