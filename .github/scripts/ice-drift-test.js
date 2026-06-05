@@ -211,12 +211,15 @@ try {
         config.iceDrift.keepMomentumOnRelease = prev;
         return A.velX;
     }
-    check(Math.abs(releaseSpeed(true, false) - 200 * config.punchThrowBrake) < 1e-6,
-        'toggle OFF: releasing on ice still brakes (default ship behaviour)');
+    const easedBrake = Math.min(1, config.punchThrowBrake * config.iceDrift.releaseBrakeEase);
+    check(Math.abs(releaseSpeed(true, false) - 200 * easedBrake) < 1e-6,
+        'toggle OFF: releasing on ice brakes at the EASED rate (keeps ' + (easedBrake * 100).toFixed(1) + '%)');
+    check(easedBrake > config.punchThrowBrake,
+        'the ice release brake is softer than the solid-ground brake (' + easedBrake.toFixed(4) + ' > ' + config.punchThrowBrake + ')');
     check(releaseSpeed(true, true) === 200,
         'toggle ON: releasing on ice keeps the glide');
     check(Math.abs(releaseSpeed(false, true) - 200 * config.punchThrowBrake) < 1e-6,
-        'toggle ON but on solid ground: normal punch brake still applies');
+        'toggle ON but on solid ground: full punch brake still applies');
 
     // -----------------------------------------------------------------------
     // 7) Medal + achievement wiring.
@@ -241,10 +244,49 @@ try {
     check(notYet.indexOf('powder') === -1, 'one short does not');
 
     // -----------------------------------------------------------------------
-    // 8) Registry lockstep: powder exists server-side, client-side, and has a
+    // 8) AI drift policy: bots dig in (hold a charge) when skating off their line
+    //    on ice, leave the lava emergency to the instant tap-brake, and release
+    //    once momentum is back on line.
+    // -----------------------------------------------------------------------
+    console.log('\n[8] AI drift policy');
+    const ai = require(path.join(repoRoot, 'server', 'aiController.js'));
+    function driftBot(onIce, vx, vy, tdx, tdy, speedScale) {
+        return {
+            onIce: onIce, isZombie: false, maxVelocity: 500,
+            velX: vx, velY: vy, targetDirX: tdx, targetDirY: tdy
+        };
+    }
+    // Sliding +x at speed but steering wants +y (carving a turn) -> drift hold.
+    check(ai._test.driftHoldNeeded(driftBot(true, 300, 0, 0, 1), {}) === true,
+        'misaligned ice slide -> drift hold');
+    // Momentum already on our line -> no hold (save the stamina).
+    check(ai._test.driftHoldNeeded(driftBot(true, 300, 0, 1, 0), {}) === false,
+        'aligned slide -> no drift');
+    // Lava ahead -> the emergency tap-brake path owns it, never the drift.
+    check(ai._test.driftHoldNeeded(driftBot(true, 300, 0, 0, 1), { lavaAhead: true }) === false,
+        'lava ahead -> defer to the emergency tap-brake');
+    // Solid ground -> no drift (the grip blend only exists on ice).
+    check(ai._test.driftHoldNeeded(driftBot(false, 300, 0, 0, 1), {}) === false,
+        'not on ice -> no drift');
+    // Crawling -> steering alone is enough.
+    check(ai._test.driftHoldNeeded(driftBot(true, 40, 0, 0, 1), {}) === false,
+        'too slow -> no drift');
+    // Zombies can't charge, so they can't drift.
+    const zom = driftBot(true, 300, 0, 0, 1); zom.isZombie = true;
+    check(ai._test.driftHoldNeeded(zom, {}) === false, 'zombies cannot drift');
+    // Recovery: realigned momentum (or a near-stop) ends the hold early.
+    check(ai._test.driftRecovered(driftBot(true, 300, 0, 1, 0)) === true,
+        'momentum back on line -> recovered (release early)');
+    check(ai._test.driftRecovered(driftBot(true, 300, 0, 0, 1)) === false,
+        'still skating sideways -> keep holding');
+    check(ai._test.driftRecovered(driftBot(true, 30, 0, 0, 1)) === true,
+        'scrubbed to a crawl -> recovered');
+
+    // -----------------------------------------------------------------------
+    // 9) Registry lockstep: powder exists server-side, client-side, and has a
     //    renderer (string checks — client scripts are browser globals).
     // -----------------------------------------------------------------------
-    console.log('\n[8] skin registry lockstep');
+    console.log('\n[9] skin registry lockstep');
     const srvReg = require(path.join(repoRoot, 'server', 'skinRegistry.js'));
     check(srvReg.getSkinSlot('powder') === 'trail', 'server skinRegistry knows the powder trail');
     const clientReg = fs.readFileSync(path.join(repoRoot, 'client', 'scripts', 'skinRegistry.js'), 'utf8');

@@ -480,11 +480,15 @@ class Player extends Circle {
 		}
 		// Throwing a punch costs momentum: brake your velocity so even a tap isn't free
 		// — you lurch as you swing and have to rebuild speed. (The hit's force already
-		// captured your pre-brake speed via calcPunchBonus above.) Playtest toggle:
-		// releasing a drift-charge while ON ICE can keep its glide instead.
+		// captured your pre-brake speed via calcPunchBonus above.) On ICE the brake is
+		// eased by releaseBrakeEase (the full stop felt too harsh coming out of a
+		// drift), and the keepMomentumOnRelease playtest toggle skips it entirely.
 		if (!(c.iceDrift.keepMomentumOnRelease && this.onIce)) {
-			this.velX *= c.punchThrowBrake;
-			this.velY *= c.punchThrowBrake;
+			var releaseBrake = this.onIce
+				? Math.min(1, c.punchThrowBrake * (c.iceDrift.releaseBrakeEase || 1))
+				: c.punchThrowBrake;
+			this.velX *= releaseBrake;
+			this.velY *= releaseBrake;
 		}
 		// No scoring in the lobby (the bully stat isn't gated by checkForWinners).
 		if (currentState != c.stateMap.lobby) {
