@@ -255,8 +255,12 @@ function classify(map, config) {
         if (amount > 0) { score -= amount; deductions.push(label + ' -' + amount); }
     }
 
+    // Path-derived deductions (fairness, length) ride on the bot-line routing
+    // estimate, which models neither ability pickups nor skilled ice/grass play —
+    // so they're weighted softer than the purely geometric checks (see
+    // config.balance.fairnessMax / lengthMax).
     if (edges.length > 1) {
-        deduct(Math.round((1 - fairness) * 25), 'fairness');
+        deduct(Math.round((1 - fairness) * bal(config, 'fairnessMax', 25)), 'fairness');
     }
     // hazard sanity: heavy lava and bumper-walls punish; near-zero hazard is bland
     var hd = 0;
@@ -266,8 +270,9 @@ function classify(map, config) {
     deduct(Math.min(20, hd), 'hazard');
     // length comfort: distance from the ideal par band
     var idealLow = bal(config, 'idealParLow', 18), idealHigh = bal(config, 'idealParHigh', 40);
-    if (par < idealLow) { deduct(Math.min(15, Math.round((idealLow - par) * 1.5)), 'length'); }
-    else if (par > idealHigh) { deduct(Math.min(15, Math.round((par - idealHigh) * 0.6)), 'length'); }
+    var lengthMax = bal(config, 'lengthMax', 15);
+    if (par < idealLow) { deduct(Math.min(lengthMax, Math.round((idealLow - par) * 1.5)), 'length'); }
+    else if (par > idealHigh) { deduct(Math.min(lengthMax, Math.round((par - idealHigh) * 0.6)), 'length'); }
     // whole-map ice (frictionless everywhere) is a coin-flip, not a race
     if (r.ice > 0.45) { deduct(Math.min(10, Math.round((r.ice - 0.45) * 30)), 'ice'); }
     // tiny boards collapse into a scrum

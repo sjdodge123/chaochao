@@ -54,6 +54,10 @@ var gradedTex = {};
 // (which would discard the in-progress work). Reset by load/rebuild.
 var mapModified = false;
 
+// True between clicking "Test Fairness" and the mapScore reply — routes that
+// reply to the overlay + a score toast instead of the submit flow.
+var fairnessCheckPending = false;
+
 // Preview start-gate pick: "auto" (balanced placement, the old behaviour) or an
 // edge name from the map's startEdges. On multi-gate maps the author chooses
 // which gate THEY spawn at in preview; bots still fill both sides. Persisted
@@ -274,10 +278,28 @@ function clientConnect() {
         }
     });
 
-    // Reply to the pre-submit balance check (see submitToGithub). A featured-tier (or
-    // errored) score submits straight through; a lower score shows a NON-BLOCKING
-    // "submit anyway?" nudge listing the main deductions.
+    // Reply to a balance check. Two callers share the scoreMap round-trip:
+    //  - the on-demand "Test Fairness" button (fairnessCheckPending): draw the
+    //    overlay + a score toast, no submit flow involved;
+    //  - the pre-submit check (submitPending, see submitToGithub): a featured-tier
+    //    (or errored) score submits straight through; a lower score shows a
+    //    NON-BLOCKING "submit anyway?" nudge listing the main deductions.
     server.on("mapScore", function (payload) {
+        if (fairnessCheckPending) {
+            fairnessCheckPending = false;
+            if (payload == null || payload.error) {
+                // Invalid map (e.g. no goal yet) or the per-socket throttle.
+                showSubmitStatus("Couldn't check balance — add a goal, or try again in a moment", "#8a6d00", "white", 6000);
+                return;
+            }
+            applyBalanceOverlay(payload);
+            if (payload.tier === "featured") {
+                showSubmitStatus("★ " + payload.balanceScore + "/100 — would make Featured!", "green", "white", 6000);
+            } else {
+                showSubmitStatus(payload.balanceScore + "/100 — see the overlay for fixes (Esc hides it)", "#8a6d00", "white", 6000);
+            }
+            return;
+        }
         if (!submitPending) { return; }
         if (payload == null || payload.error || payload.tier === "featured") {
             performSubmit();
@@ -290,19 +312,7 @@ function clientConnect() {
         // Stash the overlay geometry (per-edge routes + goal) so drawEditor can
         // SHOW the problem on the map itself; it persists after Cancel so the
         // author can paint fixes against it.
-        if (payload.debug != null) {
-            balanceOverlay = {
-                debug: payload.debug,
-                score: payload.balanceScore,
-                featuredScore: payload.featuredScore,
-                deductions: Array.isArray(payload.deductions) ? payload.deductions : [],
-                hardFail: Array.isArray(payload.hardFail) ? payload.hardFail : [],
-                par: payload.parTime,
-                idealLow: payload.idealParLow,
-                idealHigh: payload.idealParHigh
-            };
-            dirty = true;
-        }
+        applyBalanceOverlay(payload);
         var msg = "This map scored " + payload.balanceScore + "/100" + why +
             ", so it won't make the Featured playlist. It'll still be playable in the themed/Wild lists." +
             (payload.debug != null ? " The routes behind this check are now drawn on the map (Esc hides them)." : "") +
@@ -595,6 +605,10 @@ function setupPage() {
     });
     $("#bumperButton").on("click", function () { editorSelectHazard("bumper"); return false; });
     $("#movingBumperButton").on("click", function () { editorSelectHazard("movingBumper"); return false; });
+    $("#fairnessButton").on("click", function () {
+        runFairnessCheck();
+        return false;
+    });
     $("#previewButton").on("click", function () {
         previewMap();
         return false;
@@ -983,6 +997,35 @@ function clearBalanceOverlay() {
     dirty = true;
 }
 
+// Stash a mapScore payload's overlay geometry for drawEditor. Shared by the
+// pre-submit nudge and the on-demand "Test Fairness" button.
+function applyBalanceOverlay(payload) {
+    if (payload == null || payload.debug == null) { return; }
+    balanceOverlay = {
+        debug: payload.debug,
+        score: payload.balanceScore,
+        featuredScore: payload.featuredScore,
+        deductions: Array.isArray(payload.deductions) ? payload.deductions : [],
+        hardFail: Array.isArray(payload.hardFail) ? payload.hardFail : [],
+        par: payload.parTime,
+        idealLow: payload.idealParLow,
+        idealHigh: payload.idealParHigh
+    };
+    dirty = true;
+}
+
+// On-demand balance check ("Test Fairness" button): same scoreMap round-trip the
+// submit flow uses, but the reply only draws the overlay + a score toast. Works
+// on unnamed WIP maps (no author/name/email required — nothing is published).
+function runFairnessCheck() {
+    if (config == null || vMap == null || server == null) { return; }
+    if (submitPending || wipeConfirmOpen()) { return; } // don't race the submit flow
+    clearBalanceOverlay();
+    showSubmitStatus("Checking balance..", "#ADD8E6", "black", 8000);
+    fairnessCheckPending = true;
+    server.emit('scoreMap', JSON.stringify(vMap));
+}
+
 // One-line, on-canvas explanation per deduction label ("fairness -10" -> "fairness").
 function balanceHint(label) {
     var ov = balanceOverlay || {};
@@ -1127,6 +1170,10 @@ function drawBalanceOverlay() {
         var hint = balanceHint(ded.split(" ")[0]);
         lines.push(["– " + ded + (hint ? ": " + hint : ""), "#ffd54a"]);
     }
+    if (balanceOverlay.hardFail.length === 0 && balanceOverlay.deductions.length === 0) {
+        lines.push(["No deductions — nice and fair!", "#7ee08a"]);
+    }
+    lines.push(["Routes are estimated racing lines — abilities & skilled play aren't modeled", "#9fd3ff"]);
     ctx.font = "bold 15px Arial";
     var maxW = 0;
     for (var lw = 0; lw < lines.length; lw++) {

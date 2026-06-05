@@ -365,15 +365,14 @@ function checkForMail(client) {
 				deductions: meta.deductions,
 				hardFail: meta.hardFail
 			};
-			if (meta.tier !== "featured") {
-				// Unbalanced verdict: attach the overlay geometry (per-edge median
-				// routes + goal centroid) plus the numbers the editor's legend cites,
-				// so the author can see WHERE the deductions come from.
-				reply.debug = mapClassifier.balanceDebug(map, c);
-				reply.parTime = Math.round(meta.parTime * 10) / 10;
-				reply.idealParLow = (c.balance && c.balance.idealParLow != null) ? c.balance.idealParLow : 18;
-				reply.idealParHigh = (c.balance && c.balance.idealParHigh != null) ? c.balance.idealParHigh : 40;
-			}
+			// Attach the overlay geometry (per-edge median routes + goal centroid)
+			// plus the numbers the editor's legend cites, so the author can see
+			// WHERE the deductions come from. Featured maps carry it too — the
+			// editor's on-demand "Test Fairness" check draws the routes either way.
+			reply.debug = mapClassifier.balanceDebug(map, c);
+			reply.parTime = Math.round(meta.parTime * 10) / 10;
+			reply.idealParLow = (c.balance && c.balance.idealParLow != null) ? c.balance.idealParLow : 18;
+			reply.idealParHigh = (c.balance && c.balance.idealParHigh != null) ? c.balance.idealParHigh : 40;
 			client.emit("mapScore", reply);
 		} catch (e) {
 			client.emit("mapScore", { error: true });
