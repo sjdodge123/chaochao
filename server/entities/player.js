@@ -991,11 +991,6 @@ class Player extends Circle {
 		if (this.ability != null || this.isZombie) {
 			return true;
 		}
-		// TESTING ONLY — REVERT BEFORE PR: every lobby ability tile grants Star
-		// Power so it can be grabbed repeatedly from any station for playtesting.
-		if (this.currentState == c.stateMap.lobby) {
-			Ctor = StarPower;
-		}
 		this.ability = new Ctor(this.id, this.roomSig);
 		this.acquiredAbility = { mapID: object.voronoiId };
 		// Broadcast the GRANTED ability's id (not the tile id) so the client-side
