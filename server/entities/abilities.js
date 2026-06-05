@@ -144,6 +144,22 @@ class Cut extends Ability {
 }
 
 
+class StarPower extends Ability {
+	constructor(owner, roomSig) {
+		super(owner, roomSig);
+		this.applyStar = false;
+		this.id = c.tileMap.abilities.starPower.id;
+	}
+	use() {
+		if (this.alive == false) {
+			return;
+		}
+		this.alive = false;
+		this.applyStar = true;
+		messenger.messageRoomBySig(this.roomSig, "starPower", this.ownerId);
+	}
+}
+
 class BombTrigger extends Ability {
 	constructor(owner, roomSig) {
 		super(owner, roomSig);
@@ -160,4 +176,4 @@ class BombTrigger extends Ability {
 	}
 }
 
-module.exports = { Ability, Blindfold, Swap, IceCannon, Bomb, SpeedBuff, SpeedDebuff, TileSwap, Cut, BombTrigger };
+module.exports = { Ability, Blindfold, Swap, IceCannon, Bomb, SpeedBuff, SpeedDebuff, TileSwap, Cut, StarPower, BombTrigger };

@@ -332,6 +332,9 @@ var teleportWarnSound = makeSound("./assets/sounds/teleport_warn.mp3");
 var brutalRoundSound = makeSound("./assets/sounds/brutalround.mp3", { duck: true });
 var volcanoErupt = makeSound("./assets/sounds/volcano-erupt.mp3");
 var speedBuff = makeSound("./assets/sounds/speedBuff.mp3");
+// Star Power reuses the rise.mp3 riser (also nearVictory's cue) — a separate
+// instance so its volume/duck can be tuned independently.
+var starPowerSound = makeSound("./assets/sounds/rise.mp3");
 var speedDebuff = makeSound("./assets/sounds/speed_downgrade.mp3");
 var tileSwap = makeSound("./assets/sounds/tileswap.mp3");
 var iceCannon = makeSound("./assets/sounds/iceCannon.mp3");
@@ -457,6 +460,7 @@ function volumeChange() {
     iceCannon.volume = .25 * sfx;
     tileSwap.volume = .32 * sfx;       // file has the hottest transient peak in the game (~-6 dBFS); tame the spike
     speedBuff.volume = 0.25 * sfx;
+    starPowerSound.volume = 0.3 * sfx;
     speedDebuff.volume = 0.05 * sfx;
     volcanoErupt.volume = 0.05 * sfx;
     brutalRoundSound.volume = 0.35 * sfx;

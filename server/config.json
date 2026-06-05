@@ -226,6 +226,11 @@
                 "spawnable": true,
                 "distance": 5,
                 "id": 108
+            },
+            "starPower": {
+                "spawnable": true,
+                "duration": 5000,
+                "id": 109
             }
         }
     },

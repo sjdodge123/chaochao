@@ -36,6 +36,7 @@ function tfxBuildAbilityIcons() {
     set("tileSwap", typeof copyIcon !== "undefined" ? copyIcon : null);
     set("iceCannon", typeof snowFlakeIcon !== "undefined" ? snowFlakeIcon : null);
     set("cut", typeof scissorsIcon !== "undefined" ? scissorsIcon : null);
+    set("starPower", typeof starIcon !== "undefined" ? starIcon : null);
     return m;
 }
 

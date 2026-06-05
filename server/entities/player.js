@@ -8,7 +8,7 @@ var _engine = require('../engine.js');
 var { emitBotEmote } = require('../botEmotes.js');
 var { Circle } = require('./shapes.js');
 var { Punch } = require('./punch.js');
-var { Blindfold, Swap, Bomb, SpeedBuff, SpeedDebuff, TileSwap, IceCannon, Cut } = require('./abilities.js');
+var { Blindfold, Swap, Bomb, SpeedBuff, SpeedDebuff, TileSwap, IceCannon, Cut, StarPower } = require('./abilities.js');
 
 // Ability pickup tiles -> their ability class, so handleHit can acquire any of
 // them through one path (tryAcquireAbility) instead of eight identical branches.
@@ -21,6 +21,7 @@ ABILITY_TILE_CTORS[c.tileMap.abilities.speedDebuff.id] = SpeedDebuff;
 ABILITY_TILE_CTORS[c.tileMap.abilities.tileSwap.id] = TileSwap;
 ABILITY_TILE_CTORS[c.tileMap.abilities.iceCannon.id] = IceCannon;
 ABILITY_TILE_CTORS[c.tileMap.abilities.cut.id] = Cut;
+ABILITY_TILE_CTORS[c.tileMap.abilities.starPower.id] = StarPower;
 
 class LobbyStartButton extends Circle {
 	constructor(x, y, angle, color) {
@@ -174,6 +175,10 @@ class Player extends Circle {
 		this.invulnHeldInCircle = false;
 		this.onSanctuary = false;
 		this.lobbyRespawnPending = null;
+
+		//Star Power: timestamp until which the player is invulnerable to rival
+		//abilities and punches (set by GameBoard.checkAbilities on use).
+		this.starPowerUntil = 0;
 
 		//Achievements
 		this.savior = 0;
@@ -499,6 +504,12 @@ class Player extends Circle {
 	isProtected() {
 		return this.isInvuln() || this.onSanctuary;
 	}
+	// Star Power (any state, not lobby-only): immune to punches/pucks, explosion
+	// and cut knockback, swaps, and rival speed buffs/debuffs — but NOT terrain
+	// (lava still kills). The starred player can still punch others.
+	hasStarPower() {
+		return this.starPowerUntil != 0 && Date.now() < this.starPowerUntil;
+	}
 	checkChatCoolDownTimer() {
 		if (this.chatCoolDownTimer != null) {
 			this.chatCoolDownTimeLeft = ((this.chatCoolDownWaitTime * 1000 - (Date.now() - this.chatCoolDownTimer)) / (1000)).toFixed(1);
@@ -754,6 +765,11 @@ class Player extends Circle {
 		if (this.isInvuln()) {
 			return;
 		}
+		// Star Power deflects every incoming punch — players, bumpers, zombies
+		// (no infection) — while the starred player keeps punching others.
+		if (this.hasStarPower()) {
+			return;
+		}
 		if (object.ownerInfected) {
 			this.infect();
 		}
@@ -783,7 +799,7 @@ class Player extends Circle {
 		return;
 	}
 	handlePuckHit(object) {
-		if (this.isInvuln()) {
+		if (this.isInvuln() || this.hasStarPower()) {
 			return;
 		}
 		_engine.puckPlayer(object, this);
@@ -1115,6 +1131,7 @@ class Player extends Circle {
 		this.invulnHeldInCircle = false;
 		this.onSanctuary = false;
 		this.lobbyRespawnPending = null;
+		this.starPowerUntil = 0;
 		if (currentState == c.stateMap.gameOver) {
 			this.survivalist = 0;
 			this.brutalist = 0;

@@ -646,7 +646,9 @@ function pointRepulsion(bot, x, y, radius) {
 // immune; the self-handicap makes vision effects bite the AI as they bite a human.
 function isBlinded(bot, ctx, now) {
     if (ctx.blackoutActive) { return true; }
-    if (ctx.visionBlockedUntil > now) { return true; }
+    // A starred bot mirrors the starred human: the blindfold overlay is skipped
+    // for a Star Power holder client-side, so don't self-handicap here either.
+    if (ctx.visionBlockedUntil > now && !(bot.starPowerUntil > now)) { return true; }
     if (ctx.cloudy) {
         for (var i = 0; i < ctx.clouds.length; i++) {
             var cl = ctx.clouds[i];
@@ -836,6 +838,14 @@ function decideAbility(bot, ctx, ability, nav) {
     if (id === AB.tileSwap.id) {
         // Map-wide chaos: best when behind, but use it before the round's out.
         if ((rank >= 2 && armed) || forced) { bot.attack = true; }
+        return;
+    }
+    if (id === AB.starPower.id) {
+        // Invulnerability pays off when CONTESTED: a rival close enough to punch or
+        // shove us (plow through them untouchable), or as armor for the endgame
+        // collapse scramble. A bot cruising alone banks it.
+        var nrs = nearestRival(bot, ctx.players);
+        if ((armed && nrs != null && nrs.dist < CUT_RANGE * 1.5) || forced) { bot.attack = true; }
         return;
     }
 }

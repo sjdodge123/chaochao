@@ -147,7 +147,10 @@
                   detail: "Fires a frozen shot that turns the patch where it lands into slick ice. Lay a trap on a tight corner and watch chasers skate helplessly off the track." },
                 { id: "ability-cut", name: "Cut", icon: svg("scissors-solid.svg"), anim: "cut",
                   blurb: "A short-range swipe that shoves rivals aside.",
-                  detail: "A quick, close-range swipe with no wind-up or aiming: it carves a line through the pack and flings nearby racers away from it, throwing those on each side opposite ways. An instant shove to clear bodies off you or fling a clinging rival off course." }
+                  detail: "A quick, close-range swipe with no wind-up or aiming: it carves a line through the pack and flings nearby racers away from it, throwing those on each side opposite ways. An instant shove to clear bodies off you or fling a clinging rival off course." },
+                { id: "ability-starpower", name: "Star Power", icon: svg("star-solid.svg"), anim: "starPower",
+                  blurb: "A few seconds of glowing invulnerability.",
+                  detail: "Light up in rainbow colours and become untouchable for a few seconds: punches and pucks bounce off, bombs and cuts can't fling you, slowdowns and swaps pass you by — and a blindfold can't blind you. You can still punch everyone else, so plow straight through the pack. The one thing it won't save you from is the ground itself: drive into lava and you're just a very shiny casualty." }
             ]
         },
         {
