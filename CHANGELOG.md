@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.29.3 — 2026-06-05
+
 ### General
 
 - Shaped cart skins (Drone, Dino, Hoverbike, Starfighter, and friends) now ride 20% larger, so they read clearly bigger than the base sphere cart — looks only, hitboxes are exactly the same.
