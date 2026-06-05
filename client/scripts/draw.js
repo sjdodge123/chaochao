@@ -5539,6 +5539,21 @@ function drawAimer(aimer) {
     }
 }
 
+// Truncate text with an ellipsis so it fits maxW in the CURRENT gameContext
+// font (binary search on the cut point). Guards the measureText-sized HUD
+// panels (map announcement/plaque, lobby banners) against user-authored
+// strings — a long map name must shrink the text, never the layout.
+function hudEllipsize(text, maxW) {
+    text = "" + text;
+    if (gameContext.measureText(text).width <= maxW) { return text; }
+    var lo = 0, hi = text.length;
+    while (lo < hi) {
+        var mid = (lo + hi + 1) >> 1;
+        if (gameContext.measureText(text.slice(0, mid) + "…").width <= maxW) { lo = mid; } else { hi = mid - 1; }
+    }
+    return text.slice(0, lo) + "…";
+}
+
 // ---- Round-start map announcement -------------------------------------------
 // A prominent lower-third title card ("Map Name" / "by author") at the start of
 // every round, so the map credit is actually seen (the corner plaque stays as a
@@ -5578,14 +5593,15 @@ function drawMapAnnouncement() {
         alpha = clamp01(1 - fp);
         rise = -10 * fp; // gentle drift up as it fades
     }
-    var name = "" + currentMap.name;
-    var credit = "by " + currentMap.author;
     var nameFont = "bold 34px sans-serif";
     var creditFont = "16px sans-serif";
+    var maxTextW = LOGICAL_WIDTH * 0.66; // cap so user-authored names can't push the card off-screen
     gameContext.save();
     gameContext.font = nameFont;
+    var name = hudEllipsize(currentMap.name, maxTextW);
     var nw = gameContext.measureText(name).width;
     gameContext.font = creditFont;
+    var credit = hudEllipsize("by " + currentMap.author, maxTextW);
     var cw = gameContext.measureText(credit).width;
     var w = Math.max(nw, cw) + 64;
     var h = 78;
@@ -5612,16 +5628,17 @@ function drawMapTitle() {
     if (currentMap == null) {
         return;
     }
-    var name = "" + currentMap.name;
-    var credit = "by " + currentMap.author;
     var nameFont = "bold 15px sans-serif";
     var creditFont = "11px sans-serif";
     var padX = 12, h = 44;
+    var maxTextW = 300; // corner plaque stays a corner plaque, whatever the map is called
     var ink = themeColor('ink', 'black');
     gameContext.save();
     gameContext.font = nameFont;
+    var name = hudEllipsize(currentMap.name, maxTextW);
     var nw = gameContext.measureText(name).width;
     gameContext.font = creditFont;
+    var credit = hudEllipsize("by " + currentMap.author, maxTextW);
     var cw = gameContext.measureText(credit).width;
     var w = Math.max(nw, cw) + padX * 2;
     var x = 10, y = LOGICAL_HEIGHT - 10 - h;
