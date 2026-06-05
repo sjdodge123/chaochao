@@ -3799,10 +3799,6 @@ function drawObjects(dt) {
     // ---- HUD PASS: screen space, never zoomed (score, map title, touch
     // controls, mode indicators, game-over). ----
     applyCanvasTransform();
-    // High-speed trip: full-screen rainbow speed streaks when a local kart
-    // exceeds normal cruise speed (ice runs, buffs). Drawn FIRST in the HUD
-    // pass so the score/title/touch controls stay readable on top.
-    drawSpeedLinesOverlay();
     if (currentState == config.stateMap.gated ||
         currentState == config.stateMap.racing ||
         currentState == config.stateMap.collapsing) {
@@ -6169,84 +6165,6 @@ function localStarPowerInfo() {
 function localStarPowerUntil() {
     var info = localStarPowerInfo();
     return info ? info.until : 0;
-}
-
-// Local-only "going FAST" trip: rainbow motion-trail streaks swept across the
-// whole screen (HUD pass — never zoomed, under the HUD text), flying opposite
-// the local kart's travel. Engages SUBTLY whenever a local kart exceeds the
-// normal-ground cruise ceiling (~83 u/s drag-limited) — hitting ice off a
-// grass run, speed buffs, a big punch — and ramps with how far past it you
-// are. Not a Star Power effect (the star has its own aura/trail/theme); a
-// starred kart only shows these lines when it's actually moving that fast.
-// Cost is ~18 plain strokes + one radial gradient, and only while engaged.
-var speedTrip = { ang: 0, intensity: 0 };
-var SPEED_TRIP_V0 = 90;   // u/s: engage just past the normal cruise ceiling
-var SPEED_TRIP_V1 = 135;  // u/s: full (still subtle) intensity
-var SPEED_TRIP_MAX = 0.55; // global scale: "subtle" — never the star-trip blast
-function drawSpeedLinesOverlay() {
-    // Fastest living LOCAL kart drives the effect (couch co-op: any racer
-    // hitting the threshold lights the shared screen, like the shared shake).
-    var locals = livingLocalPlayers();
-    var p = null, spd = 0;
-    for (var li = 0; li < locals.length; li++) {
-        var s = Math.sqrt(locals[li].velX * locals[li].velX + locals[li].velY * locals[li].velY);
-        if (s > spd) { spd = s; p = locals[li]; }
-    }
-    var target = Math.max(0, Math.min(1, (spd - SPEED_TRIP_V0) / (SPEED_TRIP_V1 - SPEED_TRIP_V0)));
-    // Smooth engage/release so skimming the threshold breathes instead of
-    // flickering; release a touch faster than attack.
-    speedTrip.intensity += (target - speedTrip.intensity) * (target > speedTrip.intensity ? 0.06 : 0.10);
-    if (speedTrip.intensity <= 0.02 || p == null) {
-        return;
-    }
-    var now = Date.now();
-    var env = speedTrip.intensity * SPEED_TRIP_MAX * (0.9 + 0.1 * Math.sin(now / 300));
-    // Streak direction: opposite the kart's travel; smoothed so a punch or
-    // wall bounce swings the whole field around rather than snapping it.
-    if (Math.abs(p.velX) + Math.abs(p.velY) > 0.5) {
-        var ta = Math.atan2(p.velY, p.velX);
-        var d = ta - speedTrip.ang;
-        while (d > Math.PI) { d -= 2 * Math.PI; }
-        while (d < -Math.PI) { d += 2 * Math.PI; }
-        speedTrip.ang += d * 0.08;
-    }
-    var w = LOGICAL_WIDTH, h = LOGICAL_HEIGHT;
-    var diag = Math.sqrt(w * w + h * h);
-    gameContext.save();
-    gameContext.globalCompositeOperation = "lighter";
-    gameContext.translate(w / 2, h / 2);
-    gameContext.rotate(speedTrip.ang);
-    gameContext.lineCap = "round";
-    var LANES = 18;
-    for (var i = 0; i < LANES; i++) {
-        var h1 = (typeof tfxHash === "function") ? tfxHash(i * 131 + 7) : ((i * 0.618) % 1);
-        var h2 = (typeof tfxHash === "function") ? tfxHash(i * 977 + 3) : ((i * 0.414) % 1);
-        var y = (h1 - 0.5) * diag;
-        var len = 130 + h2 * 240;
-        var speed = 500 + h1 * 700; // px/s, lanes at different speeds = parallax
-        var cycle = diag + len;
-        var x = (now * speed / 1000 + h2 * cycle * 7) % cycle;
-        var sx = diag / 2 - x; // marches backward relative to travel
-        var hue = (now / 6 + i * 24) % 360;
-        gameContext.globalAlpha = env * (0.10 + 0.16 * h2);
-        gameContext.strokeStyle = "hsl(" + hue.toFixed(0) + ",100%,70%)";
-        gameContext.lineWidth = 1.5 + h1 * 2.5;
-        gameContext.beginPath();
-        gameContext.moveTo(sx, y);
-        gameContext.lineTo(sx + len, y);
-        gameContext.stroke();
-    }
-    gameContext.restore();
-    // Soft hue-cycling vignette at the screen edges rounds out the trip without
-    // obscuring the action in the middle.
-    var hueV = (now / 8) % 360;
-    var grad = gameContext.createRadialGradient(w / 2, h / 2, h * 0.42, w / 2, h / 2, diag / 2);
-    grad.addColorStop(0, "hsla(" + hueV.toFixed(0) + ",90%,60%,0)");
-    grad.addColorStop(1, "hsla(" + hueV.toFixed(0) + ",90%,60%," + (0.16 * env).toFixed(3) + ")");
-    gameContext.save();
-    gameContext.fillStyle = grad;
-    gameContext.fillRect(0, 0, w, h);
-    gameContext.restore();
 }
 
 // Star Power: rainbow glow + cycling ring + orbiting stars around an invulnerable

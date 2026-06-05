@@ -10,10 +10,6 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-### General
-
-- Going REALLY fast now looks the part: break past normal top speed — a long ice slide, a speed burst, a big launch — and subtle rainbow streaks sweep across your screen with your motion until you slow back down.
-
 ### Ability changes
 
 - New ability: Star Power! Grab the star tile and pop it to go full invincible for a few seconds — you glow in cycling rainbow colours, leave a trail of rainbow stars, your own theme music plays while it lasts, and the camera eases out wide until the star fades. Punches and pucks bounce off you, bombs and cuts can't fling you, slowdowns and swaps pass you by, a blindfold can't blind you — and even lava can't burn you, so you can shortcut straight across it. You can still punch everyone else, so plow through the pack. Watch the blink: when the glow starts flashing the star is about to wear off, and lava stops being a road the instant it does.
