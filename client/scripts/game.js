@@ -432,6 +432,17 @@ function enterLobby() {
     if (playParams.has("gameid")) {
         var paramGameID = playParams.get("gameid");
         clientSendStart(paramGameID);
+    } else if (playParams.get("new") === "1") {
+        // "Start a new game" (join page): -2 tells the server to always spin up
+        // a fresh room instead of matchmaking into an existing one. Strip the
+        // param afterwards so a mid-game refresh matchmakes normally instead of
+        // stranding the player in yet another empty room.
+        clientSendStart(-2);
+        try {
+            playParams.delete("new");
+            var qs = playParams.toString();
+            history.replaceState(null, "", window.location.pathname + (qs ? "?" + qs : ""));
+        } catch (e) { /* ignore — cosmetic only */ }
     } else {
         clientSendStart(-1);
     }

@@ -98,6 +98,13 @@ exports.findARoom = function (clientID) {
 	}
 	return generateNewRoom();
 }
+// Explicit "Start a new game": always spin up a fresh room, never matchmake into an
+// existing one (that's findARoom's job). Used by enterGame's id == -2 sentinel.
+exports.startNewRoom = function () {
+	var sig = generateNewRoom();
+	console.log("Starting a fresh room on request:" + sig);
+	return sig;
+}
 exports.kickFromRoom = function (clientID) {
 	var room = searchForRoom(clientID);
 	if (room != undefined) {
