@@ -17,7 +17,9 @@ Attribution as required by the license: crowd sounds by Gregor Quendel (CC-BY 4.
 `starPower.mp3` is an original 5.5s theme synthesized in-repo (Node script:
 additive square-ish partials). Fast bouncy chiptune in A major @190 BPM —
 octave-bounce bass, eighth-note arpeggio lead, kick/snare beat, offbeat noise
-hats, feedback echo — in the spirit of kart-racer invincibility themes but an
-original composition (no Nintendo material). Runs the star's full duration and
-resolves on the tonic as it wears off; played with ±5% per-use pitch jitter.
+hats — deliberately "muddled": soft attacks, a thick 150ms echo wash, and a
+2-pass ~2.4 kHz lowpass so it sits as a warm bed under gameplay. In the spirit
+of kart-racer invincibility themes but an original composition (no Nintendo
+material). Runs the star's full duration and resolves on the tonic as it wears
+off; played with ±5% per-use pitch jitter.
 No external source; project-owned.
