@@ -13,7 +13,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 ### General
 
 - Shaped cart skins (Drone, Dino, Hoverbike, Starfighter, and friends) now ride 20% larger, so they read clearly bigger than the base sphere cart — looks only, hitboxes are exactly the same.
-- The in-game HUD got a face-lift: every round now opens with a proper map announcement card (map name + author — taking its turn politely after any Brutal Round reveal), the race timer sits in its own dark pill so it's readable over any terrain, the round number shows in a clean panel at the top, the map name & author also live on a small plaque in the corner, brutal-round badges have rounded tiles, and the "Waiting for more players" notice is a centered banner with an animated ellipsis. The lobby's info banners (seasonal claim, AI bots, playlist) stack neatly at the top of the screen, and the game ID / player count / round readout is a clean, frameless strip up top that fades out of your way once the race is on.
+- The in-game HUD got a face-lift: every round now opens with a proper map announcement card (map name + author — taking its turn politely after any Brutal Round reveal), the race timer sits in its own dark pill so it's readable over any terrain, the map name & author keep a subtle credit in the corner, brutal-round badges have rounded tiles, and the "Waiting for more players" notice is a centered banner with an animated ellipsis. The lobby's info banners (seasonal claim, AI bots, playlist) stack neatly at the top of the screen, and the game ID / player count / round readout is a clean, frameless strip up top that fades out of your way once the race is on.
 
 ## v0.29.2 — 2026-06-05
 
