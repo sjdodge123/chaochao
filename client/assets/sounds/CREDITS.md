@@ -26,8 +26,14 @@ No external source; project-owned.
 
 ## Background music
 
-`8bit-action-1.mp3`, `8bit-action-3.mp3`, and `8bit-action-6.mp3` are from the
-**"8Bit Action"** series by **Bogart VGM**.
+`8bit-action-1.mp3`, `8bit-action-3.mp3`, and `8bit-action-6.mp3` are the
+Stage 1, Stage 3, and Stage 6 tracks from the **"8Bit Action Soundtrack"** by
+**Bogart VGM**.
 
+- Source: https://opengameart.org/content/8bit-action-soundtrack
+- License: Creative Commons Attribution-ShareAlike 4.0 (CC-BY-SA 4.0) — https://creativecommons.org/licenses/by-sa/4.0/
 - Changes: re-encoded to 128 kbps MP3, metadata stripped.
-- License/source URL: TODO — confirm the license terms before shipping.
+
+Attribution as required by the license: music by Bogart VGM (CC-BY-SA 4.0).
+The tracks themselves remain under CC-BY-SA 4.0; this notice plus the source
+link satisfies the attribution and license-indication requirements.
