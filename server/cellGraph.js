@@ -48,6 +48,18 @@ function tileWeight(id) {
     }
 }
 
+// Doorway model. A kart is playerBaseRadius*2 wide (15px):
+//  - a shared border narrower than the kart is a WALL — physically impossible,
+//    so routes, par times, the editor overlay, and goal reachability all refuse
+//    it (a goal whose only entrance is a pin-point reads as unreachable);
+//  - a border the kart fits through but without comfortable clearance
+//    (< MIN_DOORWAY) is heavily penalized, so routes only thread a tight gap
+//    when no wider lane exists (committed maps like TheIsland/Shortcut have
+//    mandatory tight doors that players really do squeeze — those stay valid).
+var KART_WIDTH = (c.playerBaseRadius || 7.5) * 2;       // 15px: hard physical limit
+var MIN_DOORWAY = KART_WIDTH + 11;                       // 26px: comfortable clearance
+var TIGHT_DOORWAY_PENALTY = 8;                           // cost x for kart-fits-but-tight
+
 function buildAdjacency(map) {
     var cells = map.cells;
     var idToIndex = {};
@@ -57,10 +69,12 @@ function buildAdjacency(map) {
         }
     }
     var neighbors = new Array(cells.length);
+    var doorways = new Array(cells.length); // parallel: shared-border length per neighbor
     for (var ci = 0; ci < cells.length; ci++) {
         var cell = cells[ci];
         var set = {};
         var list = [];
+        var widths = [];
         if (cell && cell.site && Array.isArray(cell.halfedges)) {
             var own = cell.site.voronoiId;
             for (var h = 0; h < cell.halfedges.length; h++) {
@@ -85,23 +99,32 @@ function buildAdjacency(map) {
                 if (ni != null && ni !== ci && !set[ni]) {
                     set[ni] = true;
                     list.push(ni);
+                    // The crossing width is the shared border's length. Missing
+                    // vertices (degenerate data) count as wide so nothing breaks.
+                    if (edge.va && edge.vb) {
+                        var wx = edge.va.x - edge.vb.x, wy = edge.va.y - edge.vb.y;
+                        widths.push(Math.sqrt(wx * wx + wy * wy));
+                    } else {
+                        widths.push(Infinity);
+                    }
                 }
             }
         }
         neighbors[ci] = list;
+        doorways[ci] = widths;
     }
-    return neighbors;
+    return { neighbors: neighbors, doorways: doorways };
 }
 
 function getAdjacency(map) {
     var key = (map.id != null ? map.id : "anon") + ":" + map.cells.length;
     var entry = adjacencyCache.get(key);
     if (entry && entry.count === map.cells.length) {
-        return entry.neighbors;
+        return entry.adj;
     }
-    var neighbors = buildAdjacency(map);
-    adjacencyCache.set(key, { neighbors: neighbors, count: map.cells.length });
-    return neighbors;
+    var adj = buildAdjacency(map);
+    adjacencyCache.set(key, { adj: adj, count: map.cells.length });
+    return adj;
 }
 
 // Minimal binary min-heap of { node, cost }. A* / Dijkstra over ~250 cells is
@@ -181,7 +204,9 @@ function findPathToNearestGoal(map, point, options) {
         return null;
     }
     var cells = map.cells;
-    var neighbors = getAdjacency(map);
+    var adj = getAdjacency(map);
+    var neighbors = adj.neighbors;
+    var doorways = adj.doorways;
     var LAVA = c.tileMap.lava.id;
     var GOAL = c.tileMap.goal.id;
     var EMPTY = c.tileMap.empty.id;
@@ -267,9 +292,16 @@ function findPathToNearestGoal(map, point, options) {
             break;
         }
         var nbrs = neighbors[u];
+        var doors = doorways[u];
         for (var k = 0; k < nbrs.length; k++) {
             var v = nbrs[k];
             if (done[v]) {
+                continue;
+            }
+            // A pin-point doorway (shared border narrower than the kart itself)
+            // is a wall: nobody can physically thread it, so routes — and goal
+            // reachability — must not depend on it.
+            if (doors[k] < KART_WIDTH) {
                 continue;
             }
             // Lava and empty holes are impassable; so are caller-blocked cells. The
@@ -283,7 +315,9 @@ function findPathToNearestGoal(map, point, options) {
             }
             var step = dist(cells[u].site, cells[v].site);
             var pen = (penalty && penalty[cells[v].site.voronoiId]) ? penaltyMult : 1;
-            var nc = cost[u] + step * tileWeight(cells[v].id) * cellJitter(cells[v].site.voronoiId) * pen;
+            // Kart fits but it's a squeeze: take it only when no wider lane exists.
+            var tight = (doors[k] < MIN_DOORWAY) ? TIGHT_DOORWAY_PENALTY : 1;
+            var nc = cost[u] + step * tileWeight(cells[v].id) * cellJitter(cells[v].site.voronoiId) * pen * tight;
             if (nc < cost[v]) {
                 cost[v] = nc;
                 geo[v] = geo[u] + step;
@@ -449,6 +483,8 @@ module.exports = {
     getAdjacency: getAdjacency,
     buildAdjacency: buildAdjacency,
     edgeSampleOrigins: edgeSampleOrigins,
+    KART_WIDTH: KART_WIDTH,
+    MIN_DOORWAY: MIN_DOORWAY,
     findPathToNearestGoal: findPathToNearestGoal,
     reachableGoalExists: reachableGoalExists,
     reachableFromEdge: reachableFromEdge,
