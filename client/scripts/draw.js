@@ -5529,6 +5529,72 @@ function drawAimer(aimer) {
     }
 }
 
+// ---- Round-start map announcement -------------------------------------------
+// A prominent lower-third title card ("Map Name" / "by author") at the start of
+// every round, so the map credit is actually seen (the corner plaque stays as a
+// subtle persistent reference). Spatially clear of the centre-screen brutal
+// round card, AND when a brutal round is announcing, the map card additionally
+// waits until the brutal card's hold ends (~2.6s) so the two reveals sequence
+// instead of competing for attention.
+var mapAnnounceKey = null;
+var mapAnnounceStart = null;
+function drawMapAnnouncement() {
+    if (currentMap == null) { return; }
+    var inRace = currentState == config.stateMap.gated ||
+        currentState == config.stateMap.racing ||
+        currentState == config.stateMap.collapsing;
+    if (!inRace) {
+        mapAnnounceKey = null; // re-arm for the next round
+        return;
+    }
+    var key = round + ":" + currentMap.name;
+    if (key !== mapAnnounceKey) {
+        mapAnnounceKey = key;
+        mapAnnounceStart = Date.now() + (brutalRound ? 2600 : 0);
+    }
+    var e = Date.now() - mapAnnounceStart;
+    var inMs = 320, holdMs = 2400, outMs = 700;
+    if (e < 0 || e > inMs + holdMs + outMs) { return; }
+    var alpha, rise;
+    if (e < inMs) {
+        var p = e / inMs;
+        alpha = clamp01(p);
+        rise = (1 - easeOutBack(p)) * 26; // slide up into place with overshoot
+    } else if (e < inMs + holdMs) {
+        alpha = 1;
+        rise = 0;
+    } else {
+        var fp = (e - inMs - holdMs) / outMs;
+        alpha = clamp01(1 - fp);
+        rise = -10 * fp; // gentle drift up as it fades
+    }
+    var name = "" + currentMap.name;
+    var credit = "by " + currentMap.author;
+    var nameFont = "bold 34px sans-serif";
+    var creditFont = "16px sans-serif";
+    gameContext.save();
+    gameContext.font = nameFont;
+    var nw = gameContext.measureText(name).width;
+    gameContext.font = creditFont;
+    var cw = gameContext.measureText(credit).width;
+    var w = Math.max(nw, cw) + 64;
+    var h = 78;
+    var cx = LOGICAL_WIDTH / 2;
+    var top = LOGICAL_HEIGHT * 0.74 + rise;
+    drawHudPanel(cx - w / 2, top, w, h, { alpha: 0.88 * alpha, borderAlpha: alpha });
+    var ink = themeColor('ink', 'black');
+    gameContext.globalAlpha = alpha;
+    gameContext.textAlign = "center";
+    gameContext.textBaseline = "alphabetic";
+    gameContext.fillStyle = ink;
+    gameContext.font = nameFont;
+    gameContext.fillText(name, cx, top + 38);
+    gameContext.globalAlpha = 0.7 * alpha;
+    gameContext.font = creditFont;
+    gameContext.fillText(credit, cx, top + 62);
+    gameContext.restore();
+}
+
 // Bottom-left map plaque: the map's name (bold) over a dimmed "by <author>"
 // credit, on the shared HUD-panel chrome — replaces two bare strokeText lines
 // that were nearly invisible over busy terrain.
@@ -7772,6 +7838,7 @@ function drawHUD() {
     drawVirtualButtons();
     drawTouchControls();
     drawTitle();
+    drawMapAnnouncement();
 }
 
 // Deploy heads-up banner (top-center, every state — drawHUD runs in both the
@@ -8250,10 +8317,12 @@ function drawSpectatorBanner() {
 function drawHudPanel(x, y, w, h, opts) {
     opts = opts || {};
     gameContext.save();
+    if (opts.glow) { gameContext.shadowColor = opts.glow; gameContext.shadowBlur = 14; }
     gameContext.globalAlpha = (opts.alpha != null) ? opts.alpha : 0.88;
     gameContext.fillStyle = opts.fill || themeColor('surface', '#101216');
     roundRectPath(gameContext, x, y, w, h, (opts.radius != null) ? opts.radius : 9); // audience.js helper
     gameContext.fill();
+    gameContext.shadowBlur = 0;
     gameContext.globalAlpha = (opts.borderAlpha != null) ? opts.borderAlpha : 1;
     gameContext.lineWidth = (opts.borderWidth != null) ? opts.borderWidth : 2;
     gameContext.strokeStyle = opts.border || themeColor('ink', 'black');
@@ -8261,20 +8330,34 @@ function drawHudPanel(x, y, w, h, opts) {
     gameContext.restore();
 }
 
-// Top-centre session bar: GAME <id> | PLAYERS <n> | ROUND <r> as one panel of
-// label/value segments with hairline dividers, replacing the three floating
-// strokeText labels. ROUND only appears once a race exists (gated/racing/
-// collapsing) so the lobby isn't showing a meaningless "Round 0".
+// Opt-in HUD diagnostics (mirrors the ?debugtouch convention): the GAME id and
+// PLAYERS count are operator/debug info — players browse + join rooms via
+// join.html, not by reading the id off the HUD — so they only render with
+// ?debughud=1 in the URL, or after calling toggleHudDebug() in the console.
+var hudDebugInfo = false;
+try { hudDebugInfo = /[?&]debughud/.test(window.location.search); } catch (e) { hudDebugInfo = false; }
+if (typeof window !== "undefined") {
+    window.toggleHudDebug = function () { hudDebugInfo = !hudDebugInfo; return hudDebugInfo; };
+}
+
+// Top-centre session bar as one panel of label/value segments with hairline
+// dividers. Default shows just ROUND once a race exists (gated/racing/
+// collapsing); the GAME/PLAYERS debug segments join it behind ?debughud=1.
+// Draws nothing when there's nothing to show (e.g. lobby without debug).
 function drawGameInfo() {
-    var segs = [
-        { label: "GAME", value: (gameID != null && gameID !== "") ? ("" + gameID) : "—" },
-        { label: "PLAYERS", value: "" + totalPlayers }
-    ];
+    var segs = [];
+    if (hudDebugInfo) {
+        segs.push({ label: "GAME", value: (gameID != null && gameID !== "") ? ("" + gameID) : "—" });
+        segs.push({ label: "PLAYERS", value: "" + totalPlayers });
+    }
     var inRace = currentState == config.stateMap.gated ||
         currentState == config.stateMap.racing ||
         currentState == config.stateMap.collapsing;
     if (inRace && round > 0) {
         segs.push({ label: "ROUND", value: "" + round });
+    }
+    if (segs.length === 0) {
+        return;
     }
 
     var labelFont = "bold 10px sans-serif";
