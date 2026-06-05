@@ -243,16 +243,26 @@ function smoothRoute(map, config, pts, penaltyLookup, hazardPoints) {
     function segmentSafe(a, b) {
         if (!segClearsHazards(a, b)) { return false; }
         var dx = b.x - a.x, dy = b.y - a.y;
+        var len = Math.sqrt(dx * dx + dy * dy) || 1;
+        // Perpendicular half-tube: the leg must keep a kart's half-width (plus a
+        // little) of clearance on BOTH sides, so the drawn line never threads a
+        // lava pinch narrower than the kart physically fits. Legs through tight-
+        // but-legal doors fall back to the door-midpoint waypoints instead.
+        var halfTube = cellGraph.KART_WIDTH / 2 + 2;
+        var nx = (-dy / len) * halfTube, ny = (dx / len) * halfTube;
         // 5px sampling: a straightened leg can graze a narrow lava wedge between
         // coarser samples (Voronoi corners come to a point). Brute-force nearest-
         // site lookups at this density are still fine for an on-demand, throttled
         // check (~a few ms on a 250-cell map).
-        var steps = Math.max(2, Math.ceil(Math.sqrt(dx * dx + dy * dy) / 5));
+        var steps = Math.max(2, Math.ceil(len / 5));
         for (var s = 1; s < steps; s++) {
             var t = s / steps;
-            var cell = cellAt(a.x + dx * t, a.y + dy * t);
-            if (cell == null || cell.id === lavaId || cell.id === emptyId) { return false; }
-            if (penaltyLookup && cell.site && penaltyLookup[cell.site.voronoiId]) { return false; }
+            var px = a.x + dx * t, py = a.y + dy * t;
+            for (var o = -1; o <= 1; o++) {
+                var cell = cellAt(px + nx * o, py + ny * o);
+                if (cell == null || cell.id === lavaId || cell.id === emptyId) { return false; }
+                if (penaltyLookup && cell.site && penaltyLookup[cell.site.voronoiId]) { return false; }
+            }
         }
         return true;
     }

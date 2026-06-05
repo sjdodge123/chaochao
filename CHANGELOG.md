@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+### General
+
+- AI racers (and the editor's balance-check routes) no longer try to thread pin-point gaps between cells that a kart physically can't fit through — those count as walls now, and tight-but-passable squeezes are only taken when no wider lane exists. Maps whose only entrance really is a pin-point now correctly read as having an unreachable goal.
+
 ### Map editor
 
 - When the balance check says your map won't make Featured, the editor now draws the evidence right on the map: the race route from each start gate with its time (green = the faster side, red = the slower one — that gap is the fairness penalty), a marker showing how far off-centre your goal sits, and a legend translating every deduction into a concrete fix. Routes are drawn as real racing lines — straight across open ground, bending only for lava, holes, and bumpers (which they dodge the same way the AI racers do). The overlay stays up while you paint corrections; press Esc to hide it.
