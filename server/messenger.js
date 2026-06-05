@@ -492,6 +492,10 @@ function checkForMail(client) {
 			roomSig = hostess.getTarpitRoom();
 		} else if (id == -1) {
 			roomSig = hostess.findARoom(client.id);
+		} else if (id == -2) {
+			// "Start a new game" (play.html?new=1): always a fresh room, never
+			// matchmade into an existing one.
+			roomSig = hostess.startNewRoom();
 		} else {
 			roomSig = id;
 		}
