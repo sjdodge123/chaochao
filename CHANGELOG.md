@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.29.2 — 2026-06-05
+
 ### Bug fixes
 - "Start a new game" on the join screen now always opens a fresh game, instead of quietly dropping you into someone else's room that had space.
 
