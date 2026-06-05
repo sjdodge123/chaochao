@@ -203,8 +203,10 @@ var PREVIEW_COOP_CAP = 4;
 // it and findARoom never matchmakes into it, so no stranger is placed here even
 // though capacity is now > 1. The map is injected onto this room's gameBoard only
 // — never the shared map library. enableAI defaults off, so the play-test runs
-// bot-free unless the editor opted in.
-exports.createPreviewRoom = function (previewMap, enableAI) {
+// bot-free unless the editor opted in. startEdge (optional) pins which gate the
+// AUTHOR spawns at on multi-gate maps, so each side is testable on demand instead
+// of whichever the round-robin hands out.
+exports.createPreviewRoom = function (previewMap, enableAI, startEdge) {
 	var sig = generateRoomSig();
 	var room = game.getRoom(sig, PREVIEW_COOP_CAP);
 	room.isPreview = true;
@@ -213,6 +215,13 @@ exports.createPreviewRoom = function (previewMap, enableAI) {
 	room.game.gameBoard.previewMap = previewMap;
 	// Default off: a preview is a solo, bot-free run unless the editor opted in.
 	room.game.gameBoard.previewAI = enableAI === true;
+	room.game.gameBoard.previewStartEdge = (typeof startEdge === "string") ? startEdge : null;
+	if (enableAI === true) {
+		// A play-test wants a real grid to race against, but the auto fill scales
+		// off humans (1 human -> 1 bot). Force a fixed-size field via the same
+		// override the lobby AI hub uses; fillGridWithBots clamps it to capacity.
+		room.game.botOverride = { enabled: true, count: (c.aiRacers && c.aiRacers.previewBotCount) || 6 };
+	}
 	roomList[sig] = room;
 	// Safety net: if the creator's play page never connects (abandoned launch),
 	// reclaim the empty room so it can't linger. A joined room is left alone.

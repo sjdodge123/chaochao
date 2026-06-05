@@ -81,6 +81,11 @@ class GameBoard {
 		// Preview-only: whether the editor asked to fill the grid with AI racers.
 		// Default off, so a preview is a solo, bot-free run unless opted in.
 		this.previewAI = false;
+		// Preview-only: pin the HUMAN players' start gate to this edge ("left"/
+		// "right"/"top"/"bottom") so the author can test a chosen side of a
+		// multi-gate map. null = normal balanced placement. Bots are never pinned,
+		// so the opposite gate still fields a grid to race against.
+		this.previewStartEdge = null;
 
 		this.allAbilityIDs = this.indexAbilities();
 		this.collapseLoc = {};
@@ -1402,6 +1407,14 @@ class GameBoard {
 		return best;
 	}
 	gatePlayer(player, gateIndex) {
+		// Editor preview with a pinned start gate: humans always spawn at the chosen
+		// edge (every round, and on couch co-op joins), overriding the round-robin /
+		// least-populated placement. Bots keep normal placement so both sides race.
+		if (this.isPreview && this.previewStartEdge != null && player != null && !player.isAI) {
+			for (var pg = 0; pg < this.startingGates.length; pg++) {
+				if (this.startingGates[pg].edge === this.previewStartEdge) { gateIndex = pg; break; }
+			}
+		}
 		if (gateIndex == null) { gateIndex = this.leastPopulatedGateIndex(player); }
 		if (gateIndex < 0 || gateIndex >= this.startingGates.length) { gateIndex = 0; }
 		player.gateIndex = gateIndex;

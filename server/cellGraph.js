@@ -448,6 +448,7 @@ function computeMapParTime(map) {
 module.exports = {
     getAdjacency: getAdjacency,
     buildAdjacency: buildAdjacency,
+    edgeSampleOrigins: edgeSampleOrigins,
     findPathToNearestGoal: findPathToNearestGoal,
     reachableGoalExists: reachableGoalExists,
     reachableFromEdge: reachableFromEdge,

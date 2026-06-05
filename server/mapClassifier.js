@@ -85,23 +85,90 @@ function lengthClass(par, config) {
     return 'standard';
 }
 
-// How centered the goal is between a pair of opposite start edges, 0..1 (1 =
-// dead centre, 0 = right against one edge). For top/bottom starts it measures the
-// goal centroid's Y; for left/right, its X. Used to flag unfair off-centre goals
-// on 2-edge maps. Returns 1 (no penalty) if there's no goal to locate.
-function goalCentrality(map, edges, config) {
+// Centroid of all goal tiles' sites, or null when the map has no goal.
+function goalCentroid(map, config) {
     var goalId = tileId(config, 'goal');
     var cells = Array.isArray(map.cells) ? map.cells : [];
     var gx = 0, gy = 0, gn = 0;
     for (var i = 0; i < cells.length; i++) {
         if (cells[i].id === goalId && cells[i].site) { gx += cells[i].site.x; gy += cells[i].site.y; gn++; }
     }
-    if (gn === 0) { return 1; }
-    gx /= gn; gy /= gn;
+    if (gn === 0) { return null; }
+    return { x: gx / gn, y: gy / gn };
+}
+
+// How centered the goal is between a pair of opposite start edges, 0..1 (1 =
+// dead centre, 0 = right against one edge). For top/bottom starts it measures the
+// goal centroid's Y; for left/right, its X. Used to flag unfair off-centre goals
+// on 2-edge maps. Returns 1 (no penalty) if there's no goal to locate.
+function goalCentrality(map, edges, config) {
+    var g = goalCentroid(map, config);
+    if (g == null) { return 1; }
     var W = config.worldWidth || 1366, H = config.worldHeight || 768;
     var vertical = (edges.indexOf('top') !== -1 || edges.indexOf('bottom') !== -1);
-    var c = vertical ? (1 - Math.abs(2 * gy / H - 1)) : (1 - Math.abs(2 * gx / W - 1));
+    var c = vertical ? (1 - Math.abs(2 * g.y / H - 1)) : (1 - Math.abs(2 * g.x / W - 1));
     return (c < 0) ? 0 : (c > 1 ? 1 : c);
+}
+
+// Resolve a route's voronoiIds back to drawable site points (rounded — these go
+// over the wire to the editor overlay, so keep the payload compact).
+function pathPoints(map, path) {
+    var cells = map.cells, idToIndex = {};
+    for (var i = 0; i < cells.length; i++) {
+        if (cells[i] && cells[i].site) { idToIndex[cells[i].site.voronoiId] = i; }
+    }
+    var pts = [];
+    for (var p = 0; p < path.length; p++) {
+        var ci = idToIndex[path[p]];
+        if (ci != null) {
+            pts.push({ x: Math.round(cells[ci].site.x), y: Math.round(cells[ci].site.y) });
+        }
+    }
+    return pts;
+}
+
+// Overlay geometry for the editor's "looks unbalanced" nudge: the representative
+// (median-time) route from each start edge — the same sampling parForEdge feeds
+// into the fairness deduction — plus the goal centroid + centrality, so the author
+// can SEE which side is faster and where the goal actually sits. Read-only; only
+// computed for the scoreMap reply, never at boot.
+function balanceDebug(map, config) {
+    var edges = startEdgesOf(map);
+    var out = { edges: [], goal: null };
+    for (var e = 0; e < edges.length; e++) {
+        var samples = cellGraph.edgeSampleOrigins(edges[e]);
+        var routes = [];
+        for (var s = 0; s < samples.length; s++) {
+            var r = cellGraph.findPathToNearestGoal(map, samples[s]);
+            if (r != null) {
+                var t = cellGraph.estimatePathTime(map, r.path);
+                if (t > 0) { routes.push({ time: t, path: r.path }); }
+            }
+        }
+        if (routes.length === 0) {
+            // No reachable route from this edge (matches a hard-fail) — still report
+            // the edge so the overlay can flag it instead of silently omitting it.
+            out.edges.push({ edge: edges[e], par: 0, points: [] });
+            continue;
+        }
+        routes.sort(function (a, b) { return a.time - b.time; });
+        var median = routes[Math.floor(routes.length / 2)];
+        out.edges.push({
+            edge: edges[e],
+            par: Math.round(median.time * 10) / 10,
+            points: pathPoints(map, median.path)
+        });
+    }
+    var g = goalCentroid(map, config);
+    if (g != null) {
+        out.goal = {
+            x: Math.round(g.x),
+            y: Math.round(g.y),
+            centrality: Math.round(goalCentrality(map, edges, config) * 100) / 100,
+            vertical: (edges.indexOf('top') !== -1 || edges.indexOf('bottom') !== -1)
+        };
+    }
+    return out;
 }
 
 // Main entry: map (reconstructed, full geometry) + config -> meta object.
@@ -251,6 +318,7 @@ function resolvePlaylists(meta, playlistDefs) {
 
 module.exports = {
     classify: classify,
+    balanceDebug: balanceDebug,
     matches: matches,
     resolvePlaylists: resolvePlaylists
 };
