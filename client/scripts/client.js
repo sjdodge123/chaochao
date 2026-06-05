@@ -1887,7 +1887,9 @@ function registerEffectHandlers(server) {
 		playerAbilityUsed(owner);
 	});
 	server.on("starPower", function (owner) {
-		playSound(starPowerSound);
+		// ±5% per-play pitch jitter so back-to-back stars don't sound like the
+		// identical clip duplicated (rate shift also nudges the theme's tempo).
+		playSoundVaried(starPowerSound, 0.05);
 		if (playerList[owner] != null) {
 			playerList[owner].starPowerUntil = Date.now() + config.tileMap.abilities.starPower.duration;
 		}
