@@ -328,10 +328,35 @@ function checkForMail(client) {
 	// Read-only: classify an in-editor map and return its balance so the editor can
 	// show a soft "this looks unbalanced" nudge before submit. Does NOT touch the
 	// submit/PR path; purely informational.
+	//
+	// Trust boundary: this is an unauthenticated socket and classification (plus
+	// the overlay's balanceDebug) runs synchronous pathfinding on the shared event
+	// loop, so cap + validate BEFORE any classifier work — the same hydrate +
+	// validateMap pipeline submit/preview use (cell cap, finite coords, 1-2
+	// opposite startEdges) — and throttle per socket. Every rejection replies
+	// { error: true }, which the editor treats as "check unavailable, submit
+	// normally", so the real submit path still surfaces the actual reason.
+	var lastScoreMapAt = 0;
 	client.on("scoreMap", function (package) {
+		var now = Date.now();
+		if (now - lastScoreMapAt < 2000) {
+			client.emit("mapScore", { error: true });
+			return;
+		}
+		lastScoreMapAt = now;
+		// A real full-geometry editor map is ~600KB; 4MB is generous headroom that
+		// still bounds JSON.parse work on garbage.
+		if (typeof package !== "string" || package.length > 4 * 1024 * 1024) {
+			client.emit("mapScore", { error: true });
+			return;
+		}
 		try {
 			var map = JSON.parse(package);
-			if (mapFormat.isSitesOnly(map)) { map = mapFormat.reconstruct(map); }
+			map = mapFormat.hydrate(map); // enforces MAX_MAP_CELLS/bbox on sites-only payloads
+			if (!utils.validateMap(map, c).valid) {
+				client.emit("mapScore", { error: true });
+				return;
+			}
 			var meta = mapClassifier.classify(map, c);
 			var reply = {
 				balanceScore: meta.balanceScore,
