@@ -3799,9 +3799,10 @@ function drawObjects(dt) {
     // ---- HUD PASS: screen space, never zoomed (score, map title, touch
     // controls, mode indicators, game-over). ----
     applyCanvasTransform();
-    // Local Star Power trip: full-screen rainbow speed streaks, drawn FIRST in
-    // the HUD pass so the score/title/touch controls stay readable on top.
-    drawStarPowerOverlay();
+    // High-speed trip: full-screen rainbow speed streaks when a local kart
+    // exceeds normal cruise speed (ice runs, buffs). Drawn FIRST in the HUD
+    // pass so the score/title/touch controls stay readable on top.
+    drawSpeedLinesOverlay();
     if (currentState == config.stateMap.gated ||
         currentState == config.stateMap.racing ||
         currentState == config.stateMap.collapsing) {
@@ -6170,46 +6171,51 @@ function localStarPowerUntil() {
     return info ? info.until : 0;
 }
 
-// Local-only Star Power "trip": rainbow motion-trail streaks swept across the
+// Local-only "going FAST" trip: rainbow motion-trail streaks swept across the
 // whole screen (HUD pass — never zoomed, under the HUD text), flying opposite
-// the starred kart's travel so they read as extreme speed. Plus a soft
-// hue-cycling edge vignette. Fades in fast on activation and eases out as the
-// star's expiry blink begins. Cost is ~18 plain strokes + one radial gradient,
-// and only while a local star is live.
-var starFxTrip = { since: 0, until: 0, ang: 0 };
-function drawStarPowerOverlay() {
-    var info = localStarPowerInfo();
-    if (info == null) {
-        starFxTrip.until = 0;
+// the local kart's travel. Engages SUBTLY whenever a local kart exceeds the
+// normal-ground cruise ceiling (~83 u/s drag-limited) — hitting ice off a
+// grass run, speed buffs, a big punch — and ramps with how far past it you
+// are. Not a Star Power effect (the star has its own aura/trail/theme); a
+// starred kart only shows these lines when it's actually moving that fast.
+// Cost is ~18 plain strokes + one radial gradient, and only while engaged.
+var speedTrip = { ang: 0, intensity: 0 };
+var SPEED_TRIP_V0 = 90;   // u/s: engage just past the normal cruise ceiling
+var SPEED_TRIP_V1 = 135;  // u/s: full (still subtle) intensity
+var SPEED_TRIP_MAX = 0.55; // global scale: "subtle" — never the star-trip blast
+function drawSpeedLinesOverlay() {
+    // Fastest living LOCAL kart drives the effect (couch co-op: any racer
+    // hitting the threshold lights the shared screen, like the shared shake).
+    var locals = livingLocalPlayers();
+    var p = null, spd = 0;
+    for (var li = 0; li < locals.length; li++) {
+        var s = Math.sqrt(locals[li].velX * locals[li].velX + locals[li].velY * locals[li].velY);
+        if (s > spd) { spd = s; p = locals[li]; }
+    }
+    var target = Math.max(0, Math.min(1, (spd - SPEED_TRIP_V0) / (SPEED_TRIP_V1 - SPEED_TRIP_V0)));
+    // Smooth engage/release so skimming the threshold breathes instead of
+    // flickering; release a touch faster than attack.
+    speedTrip.intensity += (target - speedTrip.intensity) * (target > speedTrip.intensity ? 0.06 : 0.10);
+    if (speedTrip.intensity <= 0.02 || p == null) {
         return;
     }
     var now = Date.now();
-    if (info.until !== starFxTrip.until) { // (re)activation: restart the fade-in
-        starFxTrip.since = now;
-        starFxTrip.until = info.until;
-    }
-    var fadeIn = Math.min(1, (now - starFxTrip.since) / 350);
-    var fadeOut = Math.max(0, Math.min(1, (info.until - now) / 900));
-    var env = fadeIn * fadeOut * (0.85 + 0.15 * Math.sin(now / 300));
-    if (env <= 0.01) {
-        return;
-    }
-    // Streak direction: opposite the starred kart's travel; smoothed so a punch
-    // or wall bounce swings the whole field around rather than snapping it.
-    var p = info.player;
+    var env = speedTrip.intensity * SPEED_TRIP_MAX * (0.9 + 0.1 * Math.sin(now / 300));
+    // Streak direction: opposite the kart's travel; smoothed so a punch or
+    // wall bounce swings the whole field around rather than snapping it.
     if (Math.abs(p.velX) + Math.abs(p.velY) > 0.5) {
-        var target = Math.atan2(p.velY, p.velX);
-        var d = target - starFxTrip.ang;
+        var ta = Math.atan2(p.velY, p.velX);
+        var d = ta - speedTrip.ang;
         while (d > Math.PI) { d -= 2 * Math.PI; }
         while (d < -Math.PI) { d += 2 * Math.PI; }
-        starFxTrip.ang += d * 0.08;
+        speedTrip.ang += d * 0.08;
     }
     var w = LOGICAL_WIDTH, h = LOGICAL_HEIGHT;
     var diag = Math.sqrt(w * w + h * h);
     gameContext.save();
     gameContext.globalCompositeOperation = "lighter";
     gameContext.translate(w / 2, h / 2);
-    gameContext.rotate(starFxTrip.ang);
+    gameContext.rotate(speedTrip.ang);
     gameContext.lineCap = "round";
     var LANES = 18;
     for (var i = 0; i < LANES; i++) {
