@@ -212,10 +212,66 @@ function sessionEveryMap() {
     console.log('Session B passed: engine ran on ' + ran + ' map(s).');
 }
 
+// ---------------------------------------------------------------------------
+// Session C: scoreMap trust boundary. The handler is unauthenticated and runs
+// synchronous pathfinding (classify + balanceDebug), so it must reject abusive
+// payloads BEFORE any classifier work — and still score a legitimate map.
+// ---------------------------------------------------------------------------
+function sessionScoreMapGuards() {
+    const s = makeFakeSocket('smoke-scoremap');
+    const replies = [];
+    s.emit = (event, payload) => { if (event === 'mapScore') replies.push(payload); };
+    messenger.addMailBox(s.id, s);
+
+    // The handler throttles per socket (2s); stub the clock so each fire below
+    // lands outside the window without sleeping the CI run.
+    const realNow = Date.now;
+    let fakeNow = realNow();
+    Date.now = () => fakeNow;
+    const fire = (payload) => { fakeNow += 3000; s.fire('scoreMap', payload); return replies[replies.length - 1]; };
+    try {
+        // Oversized raw payload: rejected without parsing.
+        const huge = fire('x'.repeat(4 * 1024 * 1024 + 1));
+        if (!huge || huge.error !== true) fail('Session C: oversized scoreMap payload was not rejected');
+
+        // Sites-only map over the cell cap: hydrate must throw -> error reply.
+        const sites = [];
+        for (let i = 0; i < 5000; i++) sites.push({ x: (i % 100) * 13 + 5, y: Math.floor(i / 100) * 15 + 5, id: 1 });
+        const fat = fire(JSON.stringify({ format: 'sites-only', bbox: { xl: 0, xr: 1366, yt: 0, yb: 768 }, sites: sites }));
+        if (!fat || fat.error !== true) fail('Session C: over-cell-cap sites-only map was not rejected');
+
+        // Crafted startEdges array: validateMap must refuse it before pathfinding.
+        let evil = JSON.parse(fs.readFileSync(path.join(repoRoot, 'client', 'maps', 'Duality.json'), 'utf8'));
+        evil = mapFormat.reconstruct(evil);
+        evil.startEdges = new Array(50).fill('top');
+        const edges = fire(JSON.stringify(evil));
+        if (!edges || edges.error !== true) fail('Session C: 50-entry startEdges map was not rejected');
+
+        // Throttle: a second request inside the window is refused.
+        let real = JSON.parse(fs.readFileSync(path.join(repoRoot, 'client', 'maps', 'Duality.json'), 'utf8'));
+        real = mapFormat.reconstruct(real);
+        fire(JSON.stringify(real)); // primes lastScoreMapAt
+        s.fire('scoreMap', JSON.stringify(real)); // immediate re-fire, no clock advance
+        const throttled = replies[replies.length - 1];
+        if (!throttled || throttled.error !== true) fail('Session C: scoreMap was not throttled per socket');
+
+        // And a legitimate map still classifies after all that.
+        const ok = fire(JSON.stringify(real));
+        if (!ok || ok.error || typeof ok.balanceScore !== 'number') {
+            fail('Session C: legitimate map no longer scores (' + JSON.stringify(ok) + ')');
+        }
+    } finally {
+        Date.now = realNow;
+        messenger.removeMailBox(s.id);
+    }
+    if (failures === 0) console.log('Session C passed: scoreMap rejects abuse and still scores real maps.');
+}
+
 messenger.build(fakeIo);
 try {
     sessionFullStack();
     if (failures === 0) sessionEveryMap();
+    if (failures === 0) sessionScoreMapGuards();
 } catch (e) {
     fail('Unhandled exception during smoke test: ' + e.message + '\n' + e.stack);
 }
