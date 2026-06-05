@@ -5621,38 +5621,39 @@ function drawMapAnnouncement() {
     gameContext.restore();
 }
 
-// Bottom-left map plaque: the map's name (bold) over a dimmed "by <author>"
-// credit, on the shared HUD-panel chrome — replaces two bare strokeText lines
-// that were nearly invisible over busy terrain.
+// Bottom-left map credit: the map's name (bold) over a dimmed "by <author>"
+// line. Frameless (operator preference — no corner box): the ink/ink-outline
+// stroke treatment keeps it readable over busy terrain, matching the top
+// session readout. Fades with the rest of the persistent chrome once racing.
 function drawMapTitle() {
     if (currentMap == null) {
         return;
     }
     var nameFont = "bold 15px sans-serif";
     var creditFont = "11px sans-serif";
-    var padX = 12, h = 44;
-    var maxTextW = 300; // corner plaque stays a corner plaque, whatever the map is called
+    var maxTextW = 300; // corner credit stays in the corner, whatever the map is called
     var ink = themeColor('ink', 'black');
+    var outline = themeColor('inkOutline', 'white');
+    var fade = hudChromeAlpha();
     gameContext.save();
     gameContext.font = nameFont;
     var name = hudEllipsize(currentMap.name, maxTextW);
-    var nw = gameContext.measureText(name).width;
     gameContext.font = creditFont;
     var credit = hudEllipsize("by " + currentMap.author, maxTextW);
-    var cw = gameContext.measureText(credit).width;
-    var w = Math.max(nw, cw) + padX * 2;
-    var x = 10, y = LOGICAL_HEIGHT - 10 - h;
-    var fade = hudChromeAlpha();
-    drawHudPanel(x, y, w, h, { alpha: 0.82 * fade, borderAlpha: fade });
+    var x = 12;
     gameContext.textAlign = "left";
     gameContext.textBaseline = "alphabetic";
+    gameContext.lineWidth = 3;
+    gameContext.strokeStyle = outline;
     gameContext.fillStyle = ink;
     gameContext.font = nameFont;
     gameContext.globalAlpha = fade;
-    gameContext.fillText(name, x + padX, y + 19);
-    gameContext.globalAlpha = 0.65 * fade;
+    gameContext.strokeText(name, x, LOGICAL_HEIGHT - 27);
+    gameContext.fillText(name, x, LOGICAL_HEIGHT - 27);
+    gameContext.globalAlpha = 0.7 * fade;
     gameContext.font = creditFont;
-    gameContext.fillText(credit, x + padX, y + 34);
+    gameContext.strokeText(credit, x, LOGICAL_HEIGHT - 12);
+    gameContext.fillText(credit, x, LOGICAL_HEIGHT - 12);
     gameContext.restore();
 }
 
