@@ -1059,17 +1059,13 @@ function assignPanelDocks(open) {
 // registry isn't re-scanned by each banner. Read by all three lobby banners.
 var lobbyBannerSeasonalClaim = null;
 
-// Y for lobby-banner row `row` (0 = top). The stack hugs the top edge of the
-// canvas so the banners read as a fixed HUD strip, not stickers floating over
-// the lobby map's station zones. It only drops lower when something actually
-// renders above it: the debug session bar (?debughud=1, y 8..38) or the
-// maintenance alert panel (ends ~y94).
+// Y for lobby-banner row `row` (0 = top). The stack tucks under the frameless
+// session readout (draw.js drawGameInfo, text row around y 12..30) so the
+// top-centre HUD reads as one column, and drops below the maintenance alert
+// panel (ends ~y94) when a deploy notice is up.
 var LOBBY_BANNER_ROW_H = 38; // 32px pill + 6px gap
 function lobbyBannerRowY(row) {
-    var base = 12;
-    if (typeof hudDebugInfo !== "undefined" && hudDebugInfo) {
-        base = 46;
-    }
+    var base = 40;
     if (typeof serverMaintenance !== "undefined" && serverMaintenance != null) {
         base = 102;
     }
