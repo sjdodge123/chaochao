@@ -332,10 +332,11 @@ var teleportWarnSound = makeSound("./assets/sounds/teleport_warn.mp3");
 var brutalRoundSound = makeSound("./assets/sounds/brutalround.mp3", { duck: true });
 var volcanoErupt = makeSound("./assets/sounds/volcano-erupt.mp3");
 var speedBuff = makeSound("./assets/sounds/speedBuff.mp3");
-// Star Power activation: a bright ascending arpeggio + shimmer tail synthesized
-// for this cue (rise.mp3 was tried first but its mean is -33 dB with the peak at
-// the END — a slow build, inaudible as an activation hit under gameplay).
-var starPowerSound = makeSound("./assets/sounds/starPower.mp3");
+// Star Power theme (original synthesized cue, see assets/sounds/CREDITS.md).
+// The ?v= query busts the 30-day /assets/** browser cache (index.js) — this
+// file was re-rendered in place during development, which asset caching
+// assumes never happens. Bump it if the render ever changes again.
+var starPowerSound = makeSound("./assets/sounds/starPower.mp3?v=3");
 var speedDebuff = makeSound("./assets/sounds/speed_downgrade.mp3");
 var tileSwap = makeSound("./assets/sounds/tileswap.mp3");
 var iceCannon = makeSound("./assets/sounds/iceCannon.mp3");
