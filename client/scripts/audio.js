@@ -462,7 +462,7 @@ function volumeChange() {
     iceCannon.volume = .25 * sfx;
     tileSwap.volume = .32 * sfx;       // file has the hottest transient peak in the game (~-6 dBFS); tame the spike
     speedBuff.volume = 0.25 * sfx;
-    starPowerSound.volume = 0.07 * sfx; // a theme, not an alert — dense file; operator-tuned (0.3 -> 0.05 was a hair too quiet)
+    starPowerSound.volume = 0.1 * sfx;  // a theme, not an alert — operator-tuned; the muddled render reads quieter than the old crisp one did here
     speedDebuff.volume = 0.05 * sfx;
     volcanoErupt.volume = 0.05 * sfx;
     brutalRoundSound.volume = 0.35 * sfx;
