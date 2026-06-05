@@ -336,7 +336,10 @@ var speedBuff = makeSound("./assets/sounds/speedBuff.mp3");
 // The ?v= query busts the 30-day /assets/** browser cache (index.js) — this
 // file was re-rendered in place during development, which asset caching
 // assumes never happens. Bump it if the render ever changes again.
-var starPowerSound = makeSound("./assets/sounds/starPower.mp3?v=3");
+// maxVoices 1: the theme fires room-wide for EVERY star use and bots use the
+// ability too, so without a cap overlapping stars stack 2-3 detuned copies
+// (+6-9 dB) — one shared instance covers all concurrent stars.
+var starPowerSound = makeSound("./assets/sounds/starPower.mp3?v=3", { maxVoices: 1 });
 var speedDebuff = makeSound("./assets/sounds/speed_downgrade.mp3");
 var tileSwap = makeSound("./assets/sounds/tileswap.mp3");
 var iceCannon = makeSound("./assets/sounds/iceCannon.mp3");
