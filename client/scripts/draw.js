@@ -3799,6 +3799,9 @@ function drawObjects(dt) {
     // ---- HUD PASS: screen space, never zoomed (score, map title, touch
     // controls, mode indicators, game-over). ----
     applyCanvasTransform();
+    // Local Star Power trip: full-screen rainbow speed streaks, drawn FIRST in
+    // the HUD pass so the score/title/touch controls stay readable on top.
+    drawStarPowerOverlay();
     if (currentState == config.stateMap.gated ||
         currentState == config.stateMap.racing ||
         currentState == config.stateMap.collapsing) {
@@ -4179,6 +4182,12 @@ function computeWorldViewTarget(dt) {
     var racingScale = focusedView.scale;
     if (localAimedAbilityActive()) {
         racingScale = Math.max(1, racingScale * AIM_ZOOM_OUT_FACTOR);
+    }
+    // Star Power FOV: while a local star is live, curve the view wider with a
+    // slow breathing wobble; the exponential smoothing below (WORLD_ZOOM_TAU)
+    // turns both the onset and the release into a gentle glide.
+    if (localStarPowerUntil() > 0) {
+        racingScale = Math.max(1, racingScale * (STAR_ZOOM_OUT_FACTOR + 0.03 * Math.sin(Date.now() / 480)));
     }
     return clampViewToWorld(focusedView.cx, focusedView.cy, racingScale);
 }
@@ -5405,15 +5414,7 @@ function drawAbilties() {
     // A Star Power holder is immune to the blindfold: on a couch co-op screen the
     // overlay is shared, so any living local starred kart lifts it for the screen
     // (mirrors the server-side bot exemption in aiController.isBlinded).
-    var starImmune = false;
-    var locals = livingLocalPlayers();
-    for (var li = 0; li < locals.length; li++) {
-        if (locals[li].starPowerUntil != null && Date.now() < locals[li].starPowerUntil) {
-            starImmune = true;
-            break;
-        }
-    }
-    if (blindfold.color != null && !starImmune) {
+    if (blindfold.color != null && localStarPowerInfo() == null) {
         gameContext.save();
         gameContext.globalAlpha = blindfoldAlpha();
         gameContext.beginPath();
@@ -6149,6 +6150,99 @@ function drawStaminaMeter(player) {
 // a buff/debuff lands. Buff = wind streaks trailing the direction of travel;
 // debuff = a slow sluggish ripple. Both expire on their own with no server
 // state, and the dust system reinforces the buff via the player's higher speed.
+// The LOCAL living player with the latest-expiring live Star Power (couch co-op
+// can have several) — drives the local-only trip overlay, the FOV curve, and
+// the blindfold exemption. Null when no local star is live.
+function localStarPowerInfo() {
+    var best = null;
+    var now = Date.now();
+    var locals = livingLocalPlayers();
+    for (var i = 0; i < locals.length; i++) {
+        var u = locals[i].starPowerUntil;
+        if (u != null && u > now && (best == null || u > best.until)) {
+            best = { until: u, player: locals[i] };
+        }
+    }
+    return best;
+}
+function localStarPowerUntil() {
+    var info = localStarPowerInfo();
+    return info ? info.until : 0;
+}
+
+// Local-only Star Power "trip": rainbow motion-trail streaks swept across the
+// whole screen (HUD pass — never zoomed, under the HUD text), flying opposite
+// the starred kart's travel so they read as extreme speed. Plus a soft
+// hue-cycling edge vignette. Fades in fast on activation and eases out as the
+// star's expiry blink begins. Cost is ~18 plain strokes + one radial gradient,
+// and only while a local star is live.
+var starFxTrip = { since: 0, until: 0, ang: 0 };
+function drawStarPowerOverlay() {
+    var info = localStarPowerInfo();
+    if (info == null) {
+        starFxTrip.until = 0;
+        return;
+    }
+    var now = Date.now();
+    if (info.until !== starFxTrip.until) { // (re)activation: restart the fade-in
+        starFxTrip.since = now;
+        starFxTrip.until = info.until;
+    }
+    var fadeIn = Math.min(1, (now - starFxTrip.since) / 350);
+    var fadeOut = Math.max(0, Math.min(1, (info.until - now) / 900));
+    var env = fadeIn * fadeOut * (0.85 + 0.15 * Math.sin(now / 300));
+    if (env <= 0.01) {
+        return;
+    }
+    // Streak direction: opposite the starred kart's travel; smoothed so a punch
+    // or wall bounce swings the whole field around rather than snapping it.
+    var p = info.player;
+    if (Math.abs(p.velX) + Math.abs(p.velY) > 0.5) {
+        var target = Math.atan2(p.velY, p.velX);
+        var d = target - starFxTrip.ang;
+        while (d > Math.PI) { d -= 2 * Math.PI; }
+        while (d < -Math.PI) { d += 2 * Math.PI; }
+        starFxTrip.ang += d * 0.08;
+    }
+    var w = LOGICAL_WIDTH, h = LOGICAL_HEIGHT;
+    var diag = Math.sqrt(w * w + h * h);
+    gameContext.save();
+    gameContext.globalCompositeOperation = "lighter";
+    gameContext.translate(w / 2, h / 2);
+    gameContext.rotate(starFxTrip.ang);
+    gameContext.lineCap = "round";
+    var LANES = 18;
+    for (var i = 0; i < LANES; i++) {
+        var h1 = (typeof tfxHash === "function") ? tfxHash(i * 131 + 7) : ((i * 0.618) % 1);
+        var h2 = (typeof tfxHash === "function") ? tfxHash(i * 977 + 3) : ((i * 0.414) % 1);
+        var y = (h1 - 0.5) * diag;
+        var len = 130 + h2 * 240;
+        var speed = 500 + h1 * 700; // px/s, lanes at different speeds = parallax
+        var cycle = diag + len;
+        var x = (now * speed / 1000 + h2 * cycle * 7) % cycle;
+        var sx = diag / 2 - x; // marches backward relative to travel
+        var hue = (now / 6 + i * 24) % 360;
+        gameContext.globalAlpha = env * (0.10 + 0.16 * h2);
+        gameContext.strokeStyle = "hsl(" + hue.toFixed(0) + ",100%,70%)";
+        gameContext.lineWidth = 1.5 + h1 * 2.5;
+        gameContext.beginPath();
+        gameContext.moveTo(sx, y);
+        gameContext.lineTo(sx + len, y);
+        gameContext.stroke();
+    }
+    gameContext.restore();
+    // Soft hue-cycling vignette at the screen edges rounds out the trip without
+    // obscuring the action in the middle.
+    var hueV = (now / 8) % 360;
+    var grad = gameContext.createRadialGradient(w / 2, h / 2, h * 0.42, w / 2, h / 2, diag / 2);
+    grad.addColorStop(0, "hsla(" + hueV.toFixed(0) + ",90%,60%,0)");
+    grad.addColorStop(1, "hsla(" + hueV.toFixed(0) + ",90%,60%," + (0.16 * env).toFixed(3) + ")");
+    gameContext.save();
+    gameContext.fillStyle = grad;
+    gameContext.fillRect(0, 0, w, h);
+    gameContext.restore();
+}
+
 // Star Power: rainbow glow + cycling ring + orbiting stars around an invulnerable
 // kart, blinking out Mario-style over the last 1.5s. Drawn behind the kart body
 // (called just before the kart paint, like the burn flame) so the skin stays
