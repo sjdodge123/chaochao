@@ -336,10 +336,12 @@ var speedBuff = makeSound("./assets/sounds/speedBuff.mp3");
 // The ?v= query busts the 30-day /assets/** browser cache (index.js) — this
 // file was re-rendered in place during development, which asset caching
 // assumes never happens. Bump it if the render ever changes again.
-// maxVoices 1: the theme fires room-wide for EVERY star use and bots use the
-// ability too, so without a cap overlapping stars stack 2-3 detuned copies
-// (+6-9 dB) — one shared instance covers all concurrent stars.
-var starPowerSound = makeSound("./assets/sounds/starPower.mp3?v=3", { maxVoices: 1 });
+// The theme fires room-wide for EVERY star use and bots use the ability too;
+// the client restarts it on each activation (stopSound + play in client.js)
+// so the newest star always owns the theme. maxVoices 2 — NOT a stack
+// allowance: the old copy keeps its voice slot during stopSound's 0.25s
+// fade-out, so the restart needs one slot of crossfade headroom.
+var starPowerSound = makeSound("./assets/sounds/starPower.mp3?v=3", { maxVoices: 2 });
 var speedDebuff = makeSound("./assets/sounds/speed_downgrade.mp3");
 var tileSwap = makeSound("./assets/sounds/tileswap.mp3");
 var iceCannon = makeSound("./assets/sounds/iceCannon.mp3");
