@@ -81,6 +81,11 @@ var server = null,
     WORLD_ZOOM_LEAD_REF = 80,
     WORLD_ZOOM_LEAD_MAX = 110,
     WORLD_ZOOM_LEAD_TAU = 700,
+    // LOAD-BEARING screen-edge guarantee: the lead is additionally capped at this
+    // fraction of the (zoom-dependent) half-box, so at least (1 - this) of the
+    // half-box always stays behind a fast kart — i.e. it can never be led off
+    // screen, no matter how the zoom caps above are retuned.
+    WORLD_ZOOM_LEAD_BOX_FRAC = 0.55,
     // Max zoom-scale change per second while GATED (the countdown follows its
     // eased arc directly, with no exponential smoothing) — the designed arc
     // peaks ~0.6/s mid-smoothstep, so this only catches abrupt target shifts

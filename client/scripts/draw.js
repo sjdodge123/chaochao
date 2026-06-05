@@ -4006,9 +4006,7 @@ function computeFocusedView(dt, gatedNow) {
     // racing starts (the racing path's exponential smoothing absorbs it).
     var w = 0;
     if (ng && !gatedNow) {
-        w = 1 - (nd - WORLD_ZOOM_ENGAGE) / (WORLD_ZOOM_RELEASE - WORLD_ZOOM_ENGAGE);
-        w = Math.max(0, Math.min(1, w));
-        w = w * w * (3 - 2 * w);
+        w = smoothstep(1 - (nd - WORLD_ZOOM_ENGAGE) / (WORLD_ZOOM_RELEASE - WORLD_ZOOM_ENGAGE));
     }
     // Finish-line punch-in: raise the zoom cap from WORLD_ZOOM_MAX toward
     // (MAX + BOOST) as the group closes from ENGAGE down to GOAL_FULL.
@@ -4020,9 +4018,7 @@ function computeFocusedView(dt, gatedNow) {
     // comfortably under WORLD_ZOOM_GATE_RATE — boosted targets never reach it).
     var effMax = WORLD_ZOOM_MAX;
     if (ng && !gatedNow) {
-        var gt = (WORLD_ZOOM_ENGAGE - nd) / (WORLD_ZOOM_ENGAGE - WORLD_ZOOM_GOAL_FULL);
-        gt = Math.max(0, Math.min(1, gt));
-        effMax += WORLD_ZOOM_GOAL_BOOST * gt * gt * (3 - 2 * gt);
+        effMax += WORLD_ZOOM_GOAL_BOOST * smoothstep((WORLD_ZOOM_ENGAGE - nd) / (WORLD_ZOOM_ENGAGE - WORLD_ZOOM_GOAL_FULL));
     }
     var halfX = LOGICAL_WIDTH / (2 * effMax);
     var halfY = LOGICAL_HEIGHT / (2 * effMax);
@@ -4041,10 +4037,11 @@ function computeFocusedView(dt, gatedNow) {
         var spd = Math.sqrt(pts[i].vx * pts[i].vx + pts[i].vy * pts[i].vy);
         if (!gatedNow && spd > 1) {
             // Lead scales with speed up to full cruise (LEAD_REF), and is also
-            // capped at a fraction of the (zoom-dependent) half-box so the goal
-            // punch-in's tighter box can't shove a fast kart to the screen edge
-            // — at least ~45% of the half-box always stays behind them.
-            var lead = Math.min(WORLD_ZOOM_LEAD_MAX, halfY * 0.55) * Math.min(1, spd / WORLD_ZOOM_LEAD_REF);
+            // capped at LEAD_BOX_FRAC of the (zoom-dependent) half-box so the
+            // goal punch-in's tighter box can't shove a fast kart to the screen
+            // edge — at least (1 - LEAD_BOX_FRAC) of the half-box always stays
+            // behind them.
+            var lead = Math.min(WORLD_ZOOM_LEAD_MAX, halfY * WORLD_ZOOM_LEAD_BOX_FRAC) * clamp01(spd / WORLD_ZOOM_LEAD_REF);
             tx = pts[i].vx / spd * lead;
             ty = pts[i].vy / spd * lead;
         }
@@ -4154,11 +4151,9 @@ function computeWorldViewTarget(dt) {
             var outMs = rest * WORLD_ZOOM_GATE_OUT_FRAC;
             var inMs = rest * WORLD_ZOOM_GATE_IN_FRAC;
             if (tt < outMs) {
-                var u = tt / outMs;                       // pan out from the spawn
-                e = 1 - u * u * (3 - 2 * u);
+                e = 1 - smoothstep(tt / outMs);           // pan out from the spawn
             } else if (tt >= rest - inMs) {
-                var v = Math.min(1, (tt - (rest - inMs)) / inMs); // ease back in
-                e = v * v * (3 - 2 * v);
+                e = smoothstep((tt - (rest - inMs)) / inMs); // ease back in
             } else {
                 e = 0;                                    // whole-map beat
             }
