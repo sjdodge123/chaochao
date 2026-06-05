@@ -1887,8 +1887,11 @@ function registerEffectHandlers(server) {
 		playerAbilityUsed(owner);
 	});
 	server.on("starPower", function (owner) {
-		// ±5% per-play pitch jitter so back-to-back stars don't sound like the
-		// identical clip duplicated (rate shift also nudges the theme's tempo).
+		// The NEWEST star owns the theme: fade out any running copy and restart,
+		// so the music always covers the freshest 5s window (and concurrent stars
+		// never stack copies). ±5% per-play pitch jitter so back-to-back stars
+		// don't sound like the identical clip duplicated.
+		stopSound(starPowerSound);
 		playSoundVaried(starPowerSound, 0.05);
 		if (playerList[owner] != null) {
 			playerList[owner].starPowerUntil = Date.now() + config.tileMap.abilities.starPower.duration;
