@@ -394,6 +394,7 @@ var gameStart = makeSound("./assets/sounds/gamestart.mp3");
 
 var slowstride = makeSound("./assets/sounds/slowstride.mp3", { bus: "music" });
 var slowpipes = makeSound("./assets/sounds/slow-pipes.mp3", { bus: "music" });
+var eightBitAction1 = makeSound("./assets/sounds/8bit-action-1.mp3", { bus: "music" });
 
 var therush = makeSound("./assets/sounds/the-rush.mp3", { bus: "music" });
 var beastv2 = makeSound("./assets/sounds/beastv2.mp3", { bus: "music" });
@@ -403,6 +404,8 @@ var bumpinbits2 = makeSound("./assets/sounds/bumpinbits2.mp3", { bus: "music" })
 var bumpinbits3 = makeSound("./assets/sounds/bumpinbits3.mp3", { bus: "music" });
 var bumpinbits4 = makeSound("./assets/sounds/bumpinbits4.mp3", { bus: "music" });
 var bumpinbits5 = makeSound("./assets/sounds/bumpinbits5.mp3", { bus: "music" });
+var eightBitAction3 = makeSound("./assets/sounds/8bit-action-3.mp3", { bus: "music" });
+var eightBitAction6 = makeSound("./assets/sounds/8bit-action-6.mp3", { bus: "music" });
 
 var heavyfabric = makeSound("./assets/sounds/heavyfabric.mp3", { bus: "music" });
 var desperationSetsIn = makeSound("./assets/sounds/DesperationSetsIn.mp3", { bus: "music" });
@@ -420,6 +423,7 @@ function registerBackgroundTrack(playlist, mood, name, sound) {
 
 registerBackgroundTrack(calmBackgroundMusicList, "calm", "slowstride", slowstride);
 registerBackgroundTrack(calmBackgroundMusicList, "calm", "slow-pipes", slowpipes);
+registerBackgroundTrack(calmBackgroundMusicList, "calm", "8bit-action-1", eightBitAction1);
 
 registerBackgroundTrack(excitingBackgroundMusicList, "exciting", "mind_in_motion", mindInMotion);
 registerBackgroundTrack(excitingBackgroundMusicList, "exciting", "the-rush", therush);
@@ -429,6 +433,8 @@ registerBackgroundTrack(excitingBackgroundMusicList, "exciting", "bumpinbits2", 
 registerBackgroundTrack(excitingBackgroundMusicList, "exciting", "bumpinbits3", bumpinbits3);
 registerBackgroundTrack(excitingBackgroundMusicList, "exciting", "bumpinbits4", bumpinbits4);
 registerBackgroundTrack(excitingBackgroundMusicList, "exciting", "bumpinbits5", bumpinbits5);
+registerBackgroundTrack(excitingBackgroundMusicList, "exciting", "8bit-action-3", eightBitAction3);
+registerBackgroundTrack(excitingBackgroundMusicList, "exciting", "8bit-action-6", eightBitAction6);
 
 registerBackgroundTrack(brutalBackgroundMusicList, "brutal", "depthOfDespair", depthOfDespair);
 registerBackgroundTrack(brutalBackgroundMusicList, "brutal", "HorrorLoop", horrorLoop);
@@ -501,10 +507,13 @@ function volumeChange() {
     lobbyMusic.volume = .05 * music;
     heavyfabric.volume = .030 * music;
     slowpipes.volume = .015 * music;
+    eightBitAction1.volume = .015 * music;  // mastered like slow-pipes (mean ~-13.5 dB) — match its coeff
     slowstride.volume = .05 * music;
     therush.volume = .025 * music;
     beastv2.volume = .035 * music;
     mindInMotion.volume = .035 * music;
+    eightBitAction3.volume = .035 * music;  // mastered as hot as mind_in_motion (mean ~-13 dB) — match its coeff
+    eightBitAction6.volume = .035 * music;
     desperationSetsIn.volume = .015 * music;
     horrorLoop.volume = .015 * music;
     bumpinbits1.volume = .05 * music;

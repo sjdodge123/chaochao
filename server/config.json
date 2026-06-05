@@ -84,8 +84,8 @@
         { "id": "wild", "name": "Wild", "desc": "The spicy, unsorted pile", "filter": { "tier": "community" } }
     ],
     "music": {
-        "calm": ["slowstride", "slow-pipes"],
-        "exciting": ["mind_in_motion", "the-rush", "beastv2", "bumpinbits1", "bumpinbits2", "bumpinbits3", "bumpinbits4", "bumpinbits5"],
+        "calm": ["slowstride", "slow-pipes", "8bit-action-1"],
+        "exciting": ["mind_in_motion", "the-rush", "beastv2", "bumpinbits1", "bumpinbits2", "bumpinbits3", "bumpinbits4", "bumpinbits5", "8bit-action-3", "8bit-action-6"],
         "brutal": ["depthOfDespair", "HorrorLoop", "DesperationSetsIn", "heavyfabric"]
     },
     "musicFallbackSeconds": 600,
