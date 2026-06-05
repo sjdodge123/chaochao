@@ -5615,13 +5615,15 @@ function drawMapTitle() {
     var cw = gameContext.measureText(credit).width;
     var w = Math.max(nw, cw) + padX * 2;
     var x = 10, y = LOGICAL_HEIGHT - 10 - h;
-    drawHudPanel(x, y, w, h, { alpha: 0.82 });
+    var fade = hudChromeAlpha();
+    drawHudPanel(x, y, w, h, { alpha: 0.82 * fade, borderAlpha: fade });
     gameContext.textAlign = "left";
     gameContext.textBaseline = "alphabetic";
     gameContext.fillStyle = ink;
     gameContext.font = nameFont;
+    gameContext.globalAlpha = fade;
     gameContext.fillText(name, x + padX, y + 19);
-    gameContext.globalAlpha = 0.65;
+    gameContext.globalAlpha = 0.65 * fade;
     gameContext.font = creditFont;
     gameContext.fillText(credit, x + padX, y + 34);
     gameContext.restore();
@@ -8340,6 +8342,21 @@ if (typeof window !== "undefined") {
     window.toggleHudDebug = function () { hudDebugInfo = !hudDebugInfo; return hudDebugInfo; };
 }
 
+// Persistent-chrome fade: the round panel and the map plaque render at full
+// strength through the gate countdown, then ease down to a translucent
+// watermark shortly after the race starts so they stop competing with the
+// action. Re-arms every round (raceStartedAt is re-stamped on each startRace).
+var HUD_FADE_DELAY_MS = 800;   // grace period after the gate drops
+var HUD_FADE_MS = 900;         // fade duration
+var HUD_FADED_ALPHA = 0.4;     // resting opacity while racing
+function hudChromeAlpha() {
+    if (raceStartedAt == null) { return 1; }
+    if (currentState != config.stateMap.racing && currentState != config.stateMap.collapsing) { return 1; }
+    var e = Date.now() - raceStartedAt - HUD_FADE_DELAY_MS;
+    if (e <= 0) { return 1; }
+    return 1 - clamp01(e / HUD_FADE_MS) * (1 - HUD_FADED_ALPHA);
+}
+
 // Top-centre session bar as one panel of label/value segments with hairline
 // dividers. Default shows just ROUND once a race exists (gated/racing/
 // collapsing); the GAME/PLAYERS debug segments join it behind ?debughud=1.
@@ -8377,7 +8394,8 @@ function drawGameInfo() {
     }
     var w = padX * 2 + total + (segs.length - 1) * dividerGap * 2;
     var x = (LOGICAL_WIDTH - w) / 2;
-    drawHudPanel(x, y, w, h, null);
+    var fade = hudChromeAlpha();
+    drawHudPanel(x, y, w, h, { alpha: 0.88 * fade, borderAlpha: fade });
 
     gameContext.textBaseline = "middle";
     gameContext.textAlign = "left";
@@ -8387,21 +8405,20 @@ function drawGameInfo() {
         if (k > 0) {
             // Hairline divider between segments.
             cx += dividerGap;
-            gameContext.globalAlpha = 0.25;
+            gameContext.globalAlpha = 0.25 * fade;
             gameContext.strokeStyle = ink;
             gameContext.lineWidth = 1;
             gameContext.beginPath();
             gameContext.moveTo(cx, y + 7);
             gameContext.lineTo(cx, y + h - 7);
             gameContext.stroke();
-            gameContext.globalAlpha = 1;
             cx += dividerGap;
         }
         gameContext.fillStyle = ink;
-        gameContext.globalAlpha = 0.55;
+        gameContext.globalAlpha = 0.55 * fade;
         gameContext.font = labelFont;
         gameContext.fillText(segs[k].label, cx, cy);
-        gameContext.globalAlpha = 1;
+        gameContext.globalAlpha = fade;
         gameContext.font = valueFont;
         gameContext.fillText(segs[k].value, cx + segs[k].lw + labelGap, cy);
         cx += segs[k].w;
