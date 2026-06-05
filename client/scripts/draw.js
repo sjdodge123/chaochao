@@ -8359,16 +8359,6 @@ function drawHudPanel(x, y, w, h, opts) {
     gameContext.restore();
 }
 
-// Opt-in HUD diagnostics (mirrors the ?debugtouch convention): the GAME id and
-// PLAYERS count are operator/debug info — players browse + join rooms via
-// join.html, not by reading the id off the HUD — so they only render with
-// ?debughud=1 in the URL, or after calling toggleHudDebug() in the console.
-var hudDebugInfo = false;
-try { hudDebugInfo = /[?&]debughud/.test(window.location.search); } catch (e) { hudDebugInfo = false; }
-if (typeof window !== "undefined") {
-    window.toggleHudDebug = function () { hudDebugInfo = !hudDebugInfo; return hudDebugInfo; };
-}
-
 // Persistent-chrome fade: the round panel and the map plaque render at full
 // strength through the gate countdown, then ease down to a translucent
 // watermark shortly after the race starts so they stop competing with the
@@ -8384,30 +8374,30 @@ function hudChromeAlpha() {
     return 1 - clamp01(e / HUD_FADE_MS) * (1 - HUD_FADED_ALPHA);
 }
 
-// Top-centre session bar as one panel of label/value segments with hairline
-// dividers. Default shows just ROUND once a race exists (gated/racing/
-// collapsing); the GAME/PLAYERS debug segments join it behind ?debughud=1.
-// Draws nothing when there's nothing to show (e.g. lobby without debug).
+// Top-centre session readout: GAME <id> · PLAYERS <n> · ROUND <r>. Frameless
+// by design (operator preference — no panel box up here): small-caps dimmed
+// labels + bold values in the theme ink/ink-outline text treatment so the row
+// reads over any terrain, with small dot separators. GAME + PLAYERS always
+// show (friends read the room id off the host's screen); ROUND joins once a
+// race exists. The whole row fades to a watermark while racing (hudChromeAlpha).
 function drawGameInfo() {
-    var segs = [];
-    if (hudDebugInfo) {
-        segs.push({ label: "GAME", value: (gameID != null && gameID !== "") ? ("" + gameID) : "—" });
-        segs.push({ label: "PLAYERS", value: "" + totalPlayers });
-    }
+    var segs = [
+        { label: "GAME", value: (gameID != null && gameID !== "") ? ("" + gameID) : "—" },
+        { label: "PLAYERS", value: "" + totalPlayers }
+    ];
     var inRace = currentState == config.stateMap.gated ||
         currentState == config.stateMap.racing ||
         currentState == config.stateMap.collapsing;
     if (inRace && round > 0) {
         segs.push({ label: "ROUND", value: "" + round });
     }
-    if (segs.length === 0) {
-        return;
-    }
 
     var labelFont = "bold 10px sans-serif";
     var valueFont = "bold 15px sans-serif";
-    var padX = 16, labelGap = 6, dividerGap = 13, h = 30, y = 8;
+    var labelGap = 5, sepGap = 11;
     var ink = themeColor('ink', 'black');
+    var outline = themeColor('inkOutline', 'white');
+    var fade = hudChromeAlpha();
 
     gameContext.save();
     var total = 0;
@@ -8419,34 +8409,33 @@ function drawGameInfo() {
         segs[i].w = segs[i].lw + labelGap + segs[i].vw;
         total += segs[i].w;
     }
-    var w = padX * 2 + total + (segs.length - 1) * dividerGap * 2;
-    var x = (LOGICAL_WIDTH - w) / 2;
-    var fade = hudChromeAlpha();
-    drawHudPanel(x, y, w, h, { alpha: 0.88 * fade, borderAlpha: fade });
+    var w = total + (segs.length - 1) * sepGap * 2;
+    var cx = (LOGICAL_WIDTH - w) / 2;
+    var cy = 21;
 
     gameContext.textBaseline = "middle";
     gameContext.textAlign = "left";
-    var cy = y + h / 2 + 1;
-    var cx = x + padX;
+    gameContext.lineWidth = 3;
+    gameContext.strokeStyle = outline;
     for (var k = 0; k < segs.length; k++) {
         if (k > 0) {
-            // Hairline divider between segments.
-            cx += dividerGap;
-            gameContext.globalAlpha = 0.25 * fade;
-            gameContext.strokeStyle = ink;
-            gameContext.lineWidth = 1;
+            // Small dot separator between segments.
+            cx += sepGap;
+            gameContext.globalAlpha = 0.45 * fade;
+            gameContext.fillStyle = ink;
             gameContext.beginPath();
-            gameContext.moveTo(cx, y + 7);
-            gameContext.lineTo(cx, y + h - 7);
-            gameContext.stroke();
-            cx += dividerGap;
+            gameContext.arc(cx, cy, 1.8, 0, Math.PI * 2);
+            gameContext.fill();
+            cx += sepGap;
         }
         gameContext.fillStyle = ink;
-        gameContext.globalAlpha = 0.55 * fade;
+        gameContext.globalAlpha = 0.62 * fade;
         gameContext.font = labelFont;
+        gameContext.strokeText(segs[k].label, cx, cy);
         gameContext.fillText(segs[k].label, cx, cy);
         gameContext.globalAlpha = fade;
         gameContext.font = valueFont;
+        gameContext.strokeText(segs[k].value, cx + segs[k].lw + labelGap, cy);
         gameContext.fillText(segs[k].value, cx + segs[k].lw + labelGap, cy);
         cx += segs[k].w;
     }
