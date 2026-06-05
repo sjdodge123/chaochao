@@ -1087,6 +1087,11 @@ function drawLobbyBanner(text, y, theme) {
     var pad = (theme.pad != null) ? theme.pad : 30;
     gameContext.save();
     gameContext.font = "bold 16px sans-serif";
+    if (typeof hudEllipsize === "function") {
+        // Cap to the canvas (minus margins) so a long playlist/season label can't
+        // size the pill off-screen.
+        text = hudEllipsize(text, LOGICAL_WIDTH - 80 - pad);
+    }
     var tw = gameContext.measureText(text).width;
     var w = tw + pad;
     var h = 32;
