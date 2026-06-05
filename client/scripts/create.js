@@ -54,6 +54,19 @@ var gradedTex = {};
 // (which would discard the in-progress work). Reset by load/rebuild.
 var mapModified = false;
 
+// Preview start-gate pick: "auto" (balanced placement, the old behaviour) or an
+// edge name from the map's startEdges. On multi-gate maps the author chooses
+// which gate THEY spawn at in preview; bots still fill both sides. Persisted
+// like the AI toggle; the button only shows when the map has 2 gates.
+var previewStartEdge = "auto";
+
+// Balance-check overlay: set from the mapScore reply when the verdict is "won't
+// make Featured" so the author can SEE the problem (per-start-edge routes with
+// par times, goal centroid, and a legend explaining each deduction) instead of
+// guessing from the score line alone. Stays up while they fix the map; cleared
+// by clearBalanceOverlay() on re-check/submit/load/rebuild/reshape/Escape.
+var balanceOverlay = null;
+
 // Coarse uniform-grid spatial index over the Voronoi cells, keyed by each cell's
 // site x/y, so cellIdFromPoint() tests only the cells in the nearby bucket(s)
 // instead of all ~250 cells on every mousemove. Rebuilt lazily (and invalidated
@@ -203,6 +216,7 @@ function loadMapById(id) {
             $('#name').val(vMap.name);
             setSelectedObject(null);
             clearHistory();
+            clearBalanceOverlay(); // the verdict belonged to the previous map
             mapModified = false;
             showEditor();
             return;
@@ -273,8 +287,26 @@ function clientConnect() {
         if (Array.isArray(payload.hardFail) && payload.hardFail.length) { reasons = payload.hardFail.slice(); }
         else if (Array.isArray(payload.deductions)) { reasons = payload.deductions.slice(); }
         var why = reasons.length ? (" — " + reasons.slice(0, 3).join(", ")) : "";
+        // Stash the overlay geometry (per-edge routes + goal) so drawEditor can
+        // SHOW the problem on the map itself; it persists after Cancel so the
+        // author can paint fixes against it.
+        if (payload.debug != null) {
+            balanceOverlay = {
+                debug: payload.debug,
+                score: payload.balanceScore,
+                featuredScore: payload.featuredScore,
+                deductions: Array.isArray(payload.deductions) ? payload.deductions : [],
+                hardFail: Array.isArray(payload.hardFail) ? payload.hardFail : [],
+                par: payload.parTime,
+                idealLow: payload.idealParLow,
+                idealHigh: payload.idealParHigh
+            };
+            dirty = true;
+        }
         var msg = "This map scored " + payload.balanceScore + "/100" + why +
-            ", so it won't make the Featured playlist. It'll still be playable in the themed/Wild lists. Submit anyway?";
+            ", so it won't make the Featured playlist. It'll still be playable in the themed/Wild lists." +
+            (payload.debug != null ? " The routes behind this check are now drawn on the map (Esc hides them)." : "") +
+            " Submit anyway?";
         submitPending = false;
         showSubmitStatus("Map looks unbalanced — confirm to submit", "#8a6d00", "white");
         openWipeConfirm(msg, function () { performSubmit(); }, "Submit anyway");
@@ -512,10 +544,12 @@ function setupPage() {
         closeWipeConfirm();
         return false;
     });
-    // Escape cancels (keyboard parity with the native confirm it replaced).
+    // Escape cancels (keyboard parity with the native confirm it replaced); with
+    // no modal up it dismisses the balance overlay instead.
     $(document).on("keydown", function (e) {
-        if ((e.key === "Escape" || e.keyCode === 27) && $("#wipeConfirmModal").is(":visible")) {
-            closeWipeConfirm();
+        if (e.key === "Escape" || e.keyCode === 27) {
+            if ($("#wipeConfirmModal").is(":visible")) { closeWipeConfirm(); }
+            else { clearBalanceOverlay(); }
         }
     });
 
@@ -571,6 +605,15 @@ function setupPage() {
     var savedAI = false;
     try { savedAI = localStorage.getItem("previewEnableAI") === "true"; } catch (e) { }
     setPreviewAI(savedAI);
+    // Preview start-gate picker: cycles Auto -> each current start edge. Only
+    // rendered on multi-gate maps (see updatePreviewGateButton).
+    try { previewStartEdge = localStorage.getItem("previewStartEdge") || "auto"; } catch (e) { }
+    $("#previewGateButton").on("click", function () {
+        var opts = ["auto"].concat(startEdges);
+        var idx = opts.indexOf(previewStartEdge);
+        setPreviewGate(opts[(idx + 1) % opts.length]);
+        return false;
+    });
     $("#enableAIButton").on("click", function () {
         setPreviewAI($(this).attr("aria-pressed") !== "true");
         return false;
@@ -667,9 +710,20 @@ function mapHasContent() {
 // modal (navigable by the editor gamepad — see editorGamepad.js, which traps focus
 // to the modal's buttons while it's open) and run onConfirm if the user accepts.
 var wipeConfirmAction = null;
+// True while the confirm modal is up. Canvas input (paint/erase/place) must be
+// inert behind it: the mouse/touch handlers are window-level, so a click on the
+// modal's buttons would otherwise bubble through and paint the map underneath.
+function wipeConfirmOpen() {
+    var m = document.getElementById("wipeConfirmModal");
+    return m != null && !m.classList.contains("hidden");
+}
 function openWipeConfirm(message, onConfirm, confirmLabel) {
     // Re-entrancy guard: if a confirm is already pending, don't clobber its action.
     if (!$("#wipeConfirmModal").hasClass("hidden")) { return; }
+    // A modal can open mid-stroke (the mapScore reply is async) — close out the
+    // stroke now so the animloop doesn't keep painting under the dialog.
+    if (brushing) { brushing = false; commitStroke(); }
+    if (erasing) { erasing = false; commitStroke(); }
     wipeConfirmAction = onConfirm || null;
     var msg = document.getElementById("wipeConfirmMessage");
     if (msg != null) { msg.textContent = message || "Are you sure?"; }
@@ -698,6 +752,7 @@ function validateEmail(mail) {
 function rebuild() {
     resetStatuses();
     clearFieldErrors();
+    clearBalanceOverlay();
     setSelectedObject(null);
     vMap = generateVMap();
     invalidateCellIndex();
@@ -775,6 +830,7 @@ function drawEditor(dt) {
     renderCells();
     renderHazards();
     drawSelectedObject();
+    drawBalanceOverlay();
     drawPointerCircle();
     if (drawObject != null) {
         drawMyObject(mousex, mousey, drawObject);
@@ -842,6 +898,7 @@ function setStartEdges(edges) {
 }
 function applyStartEdges(edges) {
     startEdges = edges.slice();
+    clearBalanceOverlay(); // routes were computed against the old gate layout
     recomputeStartLayout();
     // Regenerate the playable cells in the new (gate-reserving) region so the
     // surface reshapes instead of overlapping the relocated gate.
@@ -884,6 +941,9 @@ function updateStartEdgeButtons() {
         // separate inline-blue outline, so the editor has one selection visual.
         $(this).toggleClass("tool-active", edges === activeKey);
     });
+    // The preview gate picker tracks the same edge set (every caller of this fn
+    // is a start-edge change: init, reshape, map load/restore).
+    updatePreviewGateButton();
 }
 
 function drawGate() {
@@ -912,6 +972,177 @@ function drawMap() {
         createContext.restore();
     }
 }
+// --- balance-check overlay ------------------------------------------------------
+// Visualizes the mapScore verdict on the map itself: the median race route from
+// each start edge (green = fastest side, red = slowest — the fairness deduction is
+// exactly that gap), the goal centroid vs the centre line between opposite start
+// edges (the goal deduction), and a legend translating every deduction into a fix.
+function clearBalanceOverlay() {
+    if (balanceOverlay == null) { return; }
+    balanceOverlay = null;
+    dirty = true;
+}
+
+// One-line, on-canvas explanation per deduction label ("fairness -10" -> "fairness").
+function balanceHint(label) {
+    var ov = balanceOverlay || {};
+    switch (label) {
+        case "fairness": return "start sides aren't equal — green route beats red";
+        case "length": {
+            var band = (ov.idealLow != null ? ov.idealLow : 18) + "–" + (ov.idealHigh != null ? ov.idealHigh : 40) + "s";
+            if (ov.par != null && ov.idealLow != null && ov.par < ov.idealLow) {
+                return "par " + ov.par + "s is short of the ideal " + band + " — lengthen the route";
+            }
+            return "par " + (ov.par != null ? ov.par + "s" : "time") + " is past the ideal " + band + " — shorten the route";
+        }
+        case "goal": return "goal is off-centre — move it toward the dashed centre line";
+        case "hazard": return "lava/bumper coverage is off (too heavy, or a token sliver)";
+        case "ice": return "too much of the floor is ice";
+        case "tiny": return "very few cells — the board is too small";
+        case "bland": return "too plain — add fast/ice/ability tiles or hazards";
+    }
+    return "";
+}
+
+// Small dark chip with colored text, clamped inside the world bounds.
+function overlayChip(x, y, text, color) {
+    var ctx = createContext;
+    ctx.font = "bold 15px Arial";
+    var w = ctx.measureText(text).width + 12, h = 22;
+    if (x + w > world.width - 4) { x = world.width - 4 - w; }
+    if (x < 4) { x = 4; }
+    if (y + h > world.height - 4) { y = world.height - 4 - h; }
+    if (y < 4) { y = 4; }
+    ctx.fillStyle = "rgba(20, 20, 28, 0.85)";
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = color;
+    ctx.fillText(text, x + 6, y + 16);
+}
+
+function drawBalanceOverlay() {
+    if (balanceOverlay == null || balanceOverlay.debug == null) { return; }
+    var ctx = createContext;
+    var dbg = balanceOverlay.debug;
+    var edges = Array.isArray(dbg.edges) ? dbg.edges : [];
+    ctx.save();
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+
+    // Color per edge: with several gates, green = fastest side / red = slowest
+    // (the fairness gap); a lone gate just gets the neutral amber.
+    var fastest = null, slowest = null;
+    for (var i = 0; i < edges.length; i++) {
+        if (edges[i].par > 0) {
+            if (fastest == null || edges[i].par < fastest.par) { fastest = edges[i]; }
+            if (slowest == null || edges[i].par > slowest.par) { slowest = edges[i]; }
+        }
+    }
+    for (var e = 0; e < edges.length; e++) {
+        var entry = edges[e];
+        if (!Array.isArray(entry.points) || entry.points.length < 2) {
+            // No drivable route from this gate — flag it at the gate itself.
+            for (var g = 0; g < gates.length; g++) {
+                if (gates[g].edge === entry.edge) {
+                    overlayChip(gates[g].x + gates[g].width / 2 - 60, gates[g].y + gates[g].height / 2 - 11,
+                        "no route from " + entry.edge + " start", "#ff8080");
+                }
+            }
+            continue;
+        }
+        var color = "#ffb02e";
+        if (edges.length > 1 && fastest !== slowest) {
+            if (entry === fastest) { color = "#27c46c"; }
+            else if (entry === slowest) { color = "#ff5252"; }
+        }
+        // White casing under the colored line so the route reads on any terrain.
+        for (var pass = 0; pass < 2; pass++) {
+            ctx.beginPath();
+            ctx.moveTo(entry.points[0].x, entry.points[0].y);
+            for (var p = 1; p < entry.points.length; p++) {
+                ctx.lineTo(entry.points[p].x, entry.points[p].y);
+            }
+            ctx.strokeStyle = (pass === 0) ? "rgba(255,255,255,0.85)" : color;
+            ctx.lineWidth = (pass === 0) ? 8 : 4;
+            ctx.stroke();
+        }
+        // Start dot + end dot so direction is readable at a glance.
+        ctx.beginPath();
+        ctx.arc(entry.points[0].x, entry.points[0].y, 7, 0, 2 * Math.PI);
+        ctx.fillStyle = color;
+        ctx.fill();
+        var last = entry.points[entry.points.length - 1];
+        ctx.beginPath();
+        ctx.arc(last.x, last.y, 5, 0, 2 * Math.PI);
+        ctx.fillStyle = "white";
+        ctx.fill();
+        var lp = entry.points[1];
+        overlayChip(lp.x + 10, lp.y - 11, entry.edge + " " + entry.par + "s", color);
+    }
+
+    // Goal centroid vs the centre line between opposite start gates.
+    if (dbg.goal != null) {
+        var offCentre = false;
+        for (var d = 0; d < balanceOverlay.deductions.length; d++) {
+            if (balanceOverlay.deductions[d].indexOf("goal") === 0) { offCentre = true; }
+        }
+        if (offCentre && edges.length > 1) {
+            ctx.setLineDash([10, 8]);
+            ctx.strokeStyle = "rgba(255, 213, 74, 0.9)";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            if (dbg.goal.vertical) {
+                ctx.moveTo(0, world.height / 2);
+                ctx.lineTo(world.width, world.height / 2);
+            } else {
+                ctx.moveTo(world.width / 2, 0);
+                ctx.lineTo(world.width / 2, world.height);
+            }
+            ctx.stroke();
+            // Arrow from the goal toward where it should sit.
+            var tx = dbg.goal.vertical ? dbg.goal.x : world.width / 2;
+            var ty = dbg.goal.vertical ? world.height / 2 : dbg.goal.y;
+            ctx.beginPath();
+            ctx.moveTo(dbg.goal.x, dbg.goal.y);
+            ctx.lineTo(tx, ty);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            overlayChip(dbg.goal.x + 14, dbg.goal.y + 14, "goal is off-centre", "#ffd54a");
+        }
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.arc(dbg.goal.x, dbg.goal.y, 11, 0, 2 * Math.PI);
+        ctx.strokeStyle = "rgba(255, 213, 74, 0.95)";
+        ctx.lineWidth = 3;
+        ctx.stroke();
+    }
+
+    // Legend: the verdict plus a plain-English fix per deduction / hard fail.
+    var lines = [["Balance " + balanceOverlay.score + "/100 — Featured needs " +
+        (balanceOverlay.featuredScore != null ? balanceOverlay.featuredScore : 90) + "+  (Esc hides this)", "white"]];
+    for (var hf = 0; hf < balanceOverlay.hardFail.length; hf++) {
+        lines.push(["✖ " + balanceOverlay.hardFail[hf], "#ff8080"]);
+    }
+    for (var dd = 0; dd < balanceOverlay.deductions.length; dd++) {
+        var ded = balanceOverlay.deductions[dd];
+        var hint = balanceHint(ded.split(" ")[0]);
+        lines.push(["– " + ded + (hint ? ": " + hint : ""), "#ffd54a"]);
+    }
+    ctx.font = "bold 15px Arial";
+    var maxW = 0;
+    for (var lw = 0; lw < lines.length; lw++) {
+        var tw = ctx.measureText(lines[lw][0]).width;
+        if (tw > maxW) { maxW = tw; }
+    }
+    var lx = map.x + 12, ly = map.y + 12, lh = 21;
+    ctx.fillStyle = "rgba(20, 20, 28, 0.82)";
+    ctx.fillRect(lx, ly, maxW + 20, lines.length * lh + 14);
+    for (var ll = 0; ll < lines.length; ll++) {
+        ctx.fillStyle = lines[ll][1];
+        ctx.fillText(lines[ll][0], lx + 10, ly + 22 + ll * lh);
+    }
+    ctx.restore();
+}
+
 function drawMyObject(x, y, myObject, angle) {
     if (angle == null) {
         angle = 0;
@@ -962,6 +1193,10 @@ function drawMovingBumper(x, y, angle) {
     createContext.restore();
 }
 function handleClick(event) {
+    // Canvas input is inert while the confirm modal is up — these are window-level
+    // listeners, so a click on the modal's buttons reaches here too and would
+    // paint/erase/place straight through the dialog.
+    if (wipeConfirmOpen()) { return; }
     switch (event.which) {
         case 1: {
             if (erasing) { break; } // don't start a paint while a right-erase is in progress
@@ -1034,6 +1269,7 @@ function findTrackedTouch(list) {
     return null;
 }
 function handleTouchStart(event) {
+    if (wipeConfirmOpen()) { return; } // modal up: don't capture or paint (see handleClick)
     if (touchActive || event.changedTouches.length === 0) { return; } // ignore extra fingers
     event.preventDefault();
     touchActive = true;
@@ -1748,6 +1984,7 @@ function submitToGithub() {
     submitStatus.css("color", "black");
     submitStatus.css("background-color", "#ADD8E6");
     submitStatus.text("Checking balance..");
+    clearBalanceOverlay(); // a fresh check replaces any stale overlay
     submitPending = true; // protect the indicator from input-change resets until the reply
     server.emit('scoreMap', JSON.stringify(vMap));
 }
@@ -1755,6 +1992,7 @@ function submitToGithub() {
 // The real publish step — opens the PR via the server's submitNewMap handler.
 // Reached only after the balance check (auto for a good map, or on "Submit anyway").
 function performSubmit() {
+    clearBalanceOverlay(); // they chose to submit anyway — the nudge is moot
     submitPending = true;
     // Pending state stays put until githubSuccess/githubFailure replaces it (those
     // use the auto-resetting showSubmitStatus); don't auto-hide the "Submitting.."
@@ -1887,7 +2125,11 @@ function previewMap() {
     // sessionStorage.previewMap stays the raw map (the play page reads it from
     // there); only the socket payload carries the { map, enableAI } wrapper.
     var enableAI = $("#enableAIButton").attr("aria-pressed") === "true";
-    server.emit('createPreviewRoom', JSON.stringify({ map: vMap, enableAI: enableAI }));
+    // Pin the author's spawn gate when one is picked (and still valid for the
+    // map's current edges); null lets the server place normally.
+    var startEdge = (previewStartEdge !== "auto" && startEdges.indexOf(previewStartEdge) !== -1)
+        ? previewStartEdge : null;
+    server.emit('createPreviewRoom', JSON.stringify({ map: vMap, enableAI: enableAI, startEdge: startEdge }));
 }
 
 // Reflect the "AI racers" toggle state onto its button (pressed attr for
@@ -1909,6 +2151,29 @@ function setPreviewAI(on) {
         label.textContent = on ? "AI racers: on" : "AI racers: off";
     }
     try { localStorage.setItem("previewEnableAI", on ? "true" : "false"); } catch (e) { }
+}
+
+// Apply + persist the preview start-gate pick, then refresh its button.
+function setPreviewGate(value) {
+    previewStartEdge = value || "auto";
+    try { localStorage.setItem("previewStartEdge", previewStartEdge); } catch (e) { }
+    updatePreviewGateButton();
+}
+// Keep the pick valid for the map's current edges (a stale pick falls back to
+// auto) and only show the button when there's actually a choice (2 gates).
+function updatePreviewGateButton() {
+    var btn = document.getElementById("previewGateButton");
+    if (btn == null) { return; }
+    if (previewStartEdge !== "auto" && startEdges.indexOf(previewStartEdge) === -1) {
+        previewStartEdge = "auto";
+        try { localStorage.setItem("previewStartEdge", "auto"); } catch (e) { }
+    }
+    btn.style.display = (startEdges.length > 1) ? "" : "none";
+    var label = btn.querySelector("span");
+    if (label != null) {
+        label.textContent = "Start: " + (previewStartEdge === "auto" ? "Auto"
+            : previewStartEdge.charAt(0).toUpperCase() + previewStartEdge.slice(1));
+    }
 }
 
 function basicSanitize() {

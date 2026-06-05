@@ -333,13 +333,23 @@ function checkForMail(client) {
 			var map = JSON.parse(package);
 			if (mapFormat.isSitesOnly(map)) { map = mapFormat.reconstruct(map); }
 			var meta = mapClassifier.classify(map, c);
-			client.emit("mapScore", {
+			var reply = {
 				balanceScore: meta.balanceScore,
 				tier: meta.tier,
 				featuredScore: (c.balance && c.balance.featuredScore) || 90,
 				deductions: meta.deductions,
 				hardFail: meta.hardFail
-			});
+			};
+			if (meta.tier !== "featured") {
+				// Unbalanced verdict: attach the overlay geometry (per-edge median
+				// routes + goal centroid) plus the numbers the editor's legend cites,
+				// so the author can see WHERE the deductions come from.
+				reply.debug = mapClassifier.balanceDebug(map, c);
+				reply.parTime = Math.round(meta.parTime * 10) / 10;
+				reply.idealParLow = (c.balance && c.balance.idealParLow != null) ? c.balance.idealParLow : 18;
+				reply.idealParHigh = (c.balance && c.balance.idealParHigh != null) ? c.balance.idealParHigh : 40;
+			}
+			client.emit("mapScore", reply);
 		} catch (e) {
 			client.emit("mapScore", { error: true });
 		}
@@ -462,6 +472,10 @@ function checkForMail(client) {
 			(Object.prototype.hasOwnProperty.call(parsed, "map") || Object.prototype.hasOwnProperty.call(parsed, "enableAI"));
 		var previewMap = isWrapper ? parsed.map : parsed;
 		var enableAI = isWrapper && parsed.enableAI === true;
+		// Optional pinned start gate for the author (editor "Start:" picker). Trust
+		// boundary: only the four edge names pass; anything else means "auto".
+		var startEdge = (isWrapper && ["left", "right", "top", "bottom"].indexOf(parsed.startEdge) !== -1)
+			? parsed.startEdge : null;
 		// Maps are sites-only now; rebuild full geometry at this trust boundary so a
 		// client may submit either form (the editor sends full geometry, but a raw
 		// committed map is sites-only). validateMap + the engine need cells.
@@ -476,7 +490,7 @@ function checkForMail(client) {
 			client.emit("previewRejected", { reason: result.reason });
 			return;
 		}
-		var sig = hostess.createPreviewRoom(previewMap, enableAI);
+		var sig = hostess.createPreviewRoom(previewMap, enableAI, startEdge);
 		client.emit("previewRoomCreated", { gameID: sig });
 	});
 
