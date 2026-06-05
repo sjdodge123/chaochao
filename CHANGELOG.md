@@ -16,6 +16,8 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 - Fixed: clicking the buttons on the "Submit anyway?" dialog (or any editor confirm dialog) no longer paints the map underneath — your brush is fully inert while a dialog is open.
 - New "Start:" picker next to the AI toggle on two-gate maps: choose which start gate YOU spawn at when previewing (Auto keeps the old balanced placement), so you can test each side on demand instead of hoping the coin flip lands your way. Bots still fill both gates.
 - Turning on "AI racers" for a preview now fields a proper grid of 6 bots to race against, instead of the lone bot the lobby's auto-scaling used to give a solo tester.
+- New "Fairness" button: run the balance check any time while editing — no upload needed, no name/author required. It draws each start side's estimated route and times on the map, with the same legend of fixes the submit check shows (and a ★ toast when your map would make Featured).
+- The Featured bar is friendlier to real maps: route-based penalties (start-side fairness, race length) now weigh less, since the check's routes are estimated racing lines that can't account for ability pickups or skilled ice/grass play — and the overlay says so. Several long-standing community maps (Duality, GoodLuck, Zoomies, TheIsland, …) now qualify as Featured; barren or broken maps are still flagged just as hard.
 
 ## v0.30.2 — 2026-06-08
 
