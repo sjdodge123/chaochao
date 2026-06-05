@@ -96,6 +96,10 @@ var server = null,
     // until it detonates, so it's easier to aim. Multiplies the focused scale
     // (0.62 => ~38% wider); the smoothing eases it out and back.
     AIM_ZOOM_OUT_FACTOR = 0.62,
+    // Sustained camera back-off while a LOCAL player's Star Power is live
+    // (0.82 => ~22% wider FOV) with a slow breathing wobble on top; the
+    // WORLD_ZOOM_TAU smoothing curves it gently in and back out.
+    STAR_ZOOM_OUT_FACTOR = 0.82,
     maps = [],
     oldNotches = {},
     camera,
