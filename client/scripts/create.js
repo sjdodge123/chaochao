@@ -57,6 +57,10 @@ var mapModified = false;
 // True between clicking "Test Fairness" and the mapScore reply — routes that
 // reply to the overlay + a score toast instead of the submit flow.
 var fairnessCheckPending = false;
+// Most recent non-error mapScore reply ({ payload, at }). Lets an Upload that
+// lands inside the server's per-socket throttle window reuse the verdict the
+// author is already looking at instead of racing a doomed second request.
+var lastMapScoreVerdict = null;
 
 // Preview start-gate pick: "auto" (balanced placement, the old behaviour) or an
 // edge name from the map's startEdges. On multi-gate maps the author chooses
@@ -285,6 +289,12 @@ function clientConnect() {
     //    (or errored) score submits straight through; a lower score shows a
     //    NON-BLOCKING "submit anyway?" nudge listing the main deductions.
     server.on("mapScore", function (payload) {
+        // Remember the latest real verdict: an Upload inside the server's 2s
+        // per-socket throttle window reuses it instead of racing a request whose
+        // error reply would auto-submit past the nudge (Codex review P2).
+        if (payload != null && !payload.error) {
+            lastMapScoreVerdict = { payload: payload, at: Date.now() };
+        }
         if (fairnessCheckPending) {
             fairnessCheckPending = false;
             if (payload == null || payload.error) {
@@ -301,25 +311,7 @@ function clientConnect() {
             return;
         }
         if (!submitPending) { return; }
-        if (payload == null || payload.error || payload.tier === "featured") {
-            performSubmit();
-            return;
-        }
-        var reasons = [];
-        if (Array.isArray(payload.hardFail) && payload.hardFail.length) { reasons = payload.hardFail.slice(); }
-        else if (Array.isArray(payload.deductions)) { reasons = payload.deductions.slice(); }
-        var why = reasons.length ? (" — " + reasons.slice(0, 3).join(", ")) : "";
-        // Stash the overlay geometry (per-edge routes + goal) so drawEditor can
-        // SHOW the problem on the map itself; it persists after Cancel so the
-        // author can paint fixes against it.
-        applyBalanceOverlay(payload);
-        var msg = "This map scored " + payload.balanceScore + "/100" + why +
-            ", so it won't make the Featured playlist. It'll still be playable in the themed/Wild lists." +
-            (payload.debug != null ? " The routes behind this check are now drawn on the map (Esc hides them)." : "") +
-            " Submit anyway?";
-        submitPending = false;
-        showSubmitStatus("Map looks unbalanced — confirm to submit", "#8a6d00", "white");
-        openWipeConfirm(msg, function () { performSubmit(); }, "Submit anyway");
+        handleSubmitVerdict(payload);
     });
 
     server.on("maplisting", function (mapnames) {
@@ -2031,9 +2023,49 @@ function submitToGithub() {
     submitStatus.css("color", "black");
     submitStatus.css("background-color", "#ADD8E6");
     submitStatus.text("Checking balance..");
-    clearBalanceOverlay(); // a fresh check replaces any stale overlay
     submitPending = true; // protect the indicator from input-change resets until the reply
+    // A Fairness check may already be in flight: re-route its pending reply to
+    // the submit flow rather than firing a second request into the per-socket
+    // throttle, whose error reply would auto-submit past the "Submit anyway?"
+    // nudge (Codex review P2).
+    if (fairnessCheckPending) {
+        fairnessCheckPending = false;
+        return false;
+    }
+    // Fresh verdict already in hand (e.g. the Fairness reply the author is
+    // looking at): decide from it directly instead of racing the throttle.
+    if (lastMapScoreVerdict != null && Date.now() - lastMapScoreVerdict.at < 2500) {
+        handleSubmitVerdict(lastMapScoreVerdict.payload);
+        return false;
+    }
+    clearBalanceOverlay(); // a fresh check replaces any stale overlay
     server.emit('scoreMap', JSON.stringify(vMap));
+}
+
+// Act on a balance verdict for the submit flow: featured (or unavailable) maps
+// publish straight through; anything else draws the overlay and asks "Submit
+// anyway?". Called from the mapScore reply and from submitToGithub's
+// reuse-a-fresh-verdict path.
+function handleSubmitVerdict(payload) {
+    if (payload == null || payload.error || payload.tier === "featured") {
+        performSubmit();
+        return;
+    }
+    var reasons = [];
+    if (Array.isArray(payload.hardFail) && payload.hardFail.length) { reasons = payload.hardFail.slice(); }
+    else if (Array.isArray(payload.deductions)) { reasons = payload.deductions.slice(); }
+    var why = reasons.length ? (" — " + reasons.slice(0, 3).join(", ")) : "";
+    // Stash the overlay geometry (per-edge routes + goal) so drawEditor can
+    // SHOW the problem on the map itself; it persists after Cancel so the
+    // author can paint fixes against it.
+    applyBalanceOverlay(payload);
+    var msg = "This map scored " + payload.balanceScore + "/100" + why +
+        ", so it won't make the Featured playlist. It'll still be playable in the themed/Wild lists." +
+        (payload.debug != null ? " The routes behind this check are now drawn on the map (Esc hides them)." : "") +
+        " Submit anyway?";
+    submitPending = false;
+    showSubmitStatus("Map looks unbalanced — confirm to submit", "#8a6d00", "white");
+    openWipeConfirm(msg, function () { performSubmit(); }, "Submit anyway");
 }
 
 // The real publish step — opens the PR via the server's submitNewMap handler.
