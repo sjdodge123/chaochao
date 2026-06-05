@@ -163,6 +163,9 @@ jobs:
       - name: "Headless rewarded-ads test (2x XP claim: credit / anti-abuse / ad layer)"
         run: node .github/scripts/ads-rewarded-test.js
 
+      - name: "Headless Star Power test (invulnerability gates: punch / explosion / cut / buffs / swap)"
+        run: node .github/scripts/star-power-test.js
+
   perf-tick-budget:
     # Server-side worst-case load: a full 25-kart grid in a stacked brutal round.
     # Proves one room still ticks well within the 30 Hz interval. Zero new deps —

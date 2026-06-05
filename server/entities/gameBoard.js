@@ -15,7 +15,7 @@ var { LobbyStartButton, LobbyStation } = require('./player.js');
 var { ExplosionAimer, SwapAimer } = require('./aimers.js');
 var { HazardRail, Bumper } = require('./hazards.js');
 var { CloudProj, SnowFlakeProj, BombProj, Puck } = require('./projectiles.js');
-var { Blindfold, Swap, IceCannon, Bomb, SpeedBuff, SpeedDebuff, TileSwap, Cut, BombTrigger } = require('./abilities.js');
+var { Blindfold, Swap, IceCannon, Bomb, SpeedBuff, SpeedDebuff, TileSwap, Cut, StarPower, BombTrigger } = require('./abilities.js');
 
 // Depth (px) of a starting gate measured inward from its world edge. Matches the
 // editor's gate strip width so the previewed gate lines up with the server's.
@@ -381,7 +381,7 @@ class GameBoard {
 			}
 			if (this.abilityList[id].applyBuff) {
 				this.abilityList[id].applyBuff = false;
-				this.pendingAbilityTimers.push(setTimeout(this.removeSpeedBuff, c.tileMap.abilities.speedBuff.duration, { id: this.abilityList[id].ownerId, playerList: this.playerList, delta: this.applySpeedBuff(this.abilityList[id].ownerId) }));
+				this.pendingAbilityTimers.push(setTimeout(this.removeSpeedBuff, c.tileMap.abilities.speedBuff.duration, { id: this.abilityList[id].ownerId, playerList: this.playerList, buffedIds: this.applySpeedBuff(this.abilityList[id].ownerId) }));
 			}
 			if (this.abilityList[id].applyDebuff) {
 				this.abilityList[id].applyDebuff = false;
@@ -400,6 +400,15 @@ class GameBoard {
 			if (this.abilityList[id].applyCut) {
 				this.abilityList[id].applyCut = false;
 				this.cutPlayers(id);
+			}
+			if (this.abilityList[id].applyStar) {
+				this.abilityList[id].applyStar = false;
+				// Timestamp-based effect: every damage/knockback/effect gate checks
+				// hasStarPower() against this, so there's no removal timer to track.
+				var starOwner = this.playerList[this.abilityList[id].ownerId];
+				if (starOwner != null) {
+					starOwner.starPowerUntil = Date.now() + c.tileMap.abilities.starPower.duration;
+				}
 			}
 			if (this.abilityList[id].alive == false) {
 				if (this.playerList[this.abilityList[id].ownerId] != undefined) {
@@ -626,8 +635,8 @@ class GameBoard {
 				continue;
 			}
 			// Same force-shield as applyExplosionForce: don't cut-fling a protected
-			// (invuln / spawn-pad) player. No-op outside the lobby.
-			if (this.playerList[id].isProtected()) {
+			// (invuln / spawn-pad) player — or a Star Power holder. No-op outside the lobby.
+			if (this.playerList[id].isProtected() || this.playerList[id].hasStarPower()) {
 				continue;
 			}
 			_engine.cutPlayer(this.playerList[id], this.playerList[owner], this.playerList[owner].angle);
@@ -662,7 +671,8 @@ class GameBoard {
 		}
 		while (randomPlayer.id == packet.owner ||
 			randomPlayer.alive == false ||
-			randomPlayer.awake == false) {
+			randomPlayer.awake == false ||
+			randomPlayer.hasStarPower()) {
 			if (count > 100 || Object.keys(gameBoard.playerList).length == 1 || gameBoard.alivePlayerCount == 1 || gameBoard.alivePlayerCount - gameBoard.sleepingPlayerCount == 1 || gameBoard.playerList[packet.owner] == undefined) {
 				messenger.messageRoomBySig(gameBoard.roomSig, "fizzle", packet.owner);
 				return;
@@ -785,7 +795,8 @@ class GameBoard {
 			// Force functions bypass the lava/goal damage guards (they mutate velocity
 			// directly), so respect protection here too — otherwise a bomb could fling an
 			// invuln or spawn-pad player into lava in the lobby. No-op outside the lobby.
-			if (player.isProtected()) {
+			// Star Power shrugs off explosion knockback in any state.
+			if (player.isProtected() || player.hasStarPower()) {
 				continue;
 			}
 			var distance = utils.getMag(loc.x - player.x, loc.y - player.y);
@@ -803,18 +814,32 @@ class GameBoard {
 		messenger.messageRoomBySig(this.roomSig, "spawnExplosionAimer", owner);
 	}
 	applySpeedBuff(owner) {
+		// Track exactly who got the drag break so removeSpeedBuff unwinds only
+		// them — a player skipped here (Star Power) or who joined mid-buff must
+		// not have drag ADDED on expiry that was never removed.
+		var buffedIds = [];
 		for (var id in this.playerList) {
 			if (!this.playerList[id].alive || this.playerList[id].isZombie) {
+				continue;
+			}
+			// Star Power: immune to rival speed effects (their own use still applies).
+			if (id != owner && this.playerList[id].hasStarPower()) {
 				continue;
 			}
 			if (id == owner) {
 				this.playerList[id].addSpeed(100);
 			}
 			this.playerList[id].decreaseDragMultiplier(c.tileMap.abilities.speedBuff.value)
+			buffedIds.push(id);
 		}
+		return buffedIds;
 	}
 	removeSpeedBuff(packet) {
-		for (var id in packet.playerList) {
+		for (var i = 0; i < packet.buffedIds.length; i++) {
+			var id = packet.buffedIds[i];
+			if (packet.playerList[id] == null) {
+				continue;
+			}
 			if (id == packet.id) {
 				packet.playerList[id].removeSpeed(100);
 			}
@@ -828,6 +853,11 @@ class GameBoard {
 				continue;
 			}
 			if (!this.playerList[id].alive || this.playerList[id].isZombie) {
+				continue;
+			}
+			// Star Power: debuffs bounce off (and the deltaList skip means no
+			// phantom restore when the debuff expires).
+			if (this.playerList[id].hasStarPower()) {
 				continue;
 			}
 
@@ -1651,6 +1681,11 @@ class GameBoard {
 				}
 				case c.tileMap.abilities.cut.id: {
 					player.ability = new Cut(player.id, this.roomSig);
+					player.acquiredAbility = { mapID: null };
+					break;
+				}
+				case c.tileMap.abilities.starPower.id: {
+					player.ability = new StarPower(player.id, this.roomSig);
 					player.acquiredAbility = { mapID: null };
 					break;
 				}

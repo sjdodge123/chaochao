@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### Ability changes
+
+- New ability: Star Power! Grab the star tile and pop it to go full invincible for a few seconds — you glow in cycling rainbow colours and leave a trail of rainbow stars. While it lasts, punches and pucks bounce off you, bombs and cuts can't fling you, slowdowns and swaps pass you by, and even a blindfold can't blind you — but you can still punch everyone else, so plow straight through the pack. Watch the blink: when the glow starts flashing it's about to wear off. And no, it won't save you from lava.
 
 ## v0.29.3 — 2026-06-05
 

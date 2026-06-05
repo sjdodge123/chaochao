@@ -1267,6 +1267,59 @@ function drawFoundersFlareTrail(ctx, verts, color, now, fadeMs, anim) {
  *    play.html's BUILD block, placed BEFORE draw.js (draw.js calls these).
  * ============================================================================ */
 
+// ---------------------------------------------------------------------------
+// Star Power (ability FX, not a cosmetic): rainbow 5-point stars while the
+// ability is active. Deliberately NOT in TRAIL_FX / skinRegistry — drawTrail()
+// branches here directly when player.starPowerUntil is live, overriding any
+// equipped cosmetic trail for the duration. drawStarPowerFx (draw.js) reuses
+// tfxStarPath for the orbiting stars around the kart.
+function tfxStarPath(ctx, r) {
+  // 5-point star centred on the origin, outer radius r.
+  var inner = r * 0.45;
+  ctx.beginPath();
+  for (var i = 0; i < 10; i++) {
+    var ang = -Math.PI / 2 + i * Math.PI / 5;
+    var rad = (i % 2 === 0) ? r : inner;
+    var x = Math.cos(ang) * rad, y = Math.sin(ang) * rad;
+    if (i === 0) { ctx.moveTo(x, y); } else { ctx.lineTo(x, y); }
+  }
+  ctx.closePath();
+}
+function drawStarPowerTrail(ctx, verts, color, now, fadeMs, anim) {
+  if (verts.length < 2) return;
+  var interval = Math.max(20, fadeMs / 36);
+  ctx.save();
+  tfxForEachParticle(verts, now, fadeMs, interval, function (v, ts, age, i) {
+    var a0 = tfxClamp01(1 - age / fadeMs);
+    if (a0 <= 0.02) return;
+    var tan = tfxTangent(verts, i);
+    var nx = -tan.y, ny = tan.x;
+    var seed = ts;
+    var off = (tfxHash(seed) - 0.5) * 2 * 14;
+    var px = v.x + nx * off;
+    var py = v.y + ny * off;
+    // Spawn-time hue: the rainbow runs ALONG the trail instead of the whole
+    // tail strobing one colour per frame.
+    var hue = (ts * 0.9) % 360;
+    var spin = anim * 0.004 + tfxHash(seed + 3) * TFX_TAU;
+    var sz = 5 * (0.6 + tfxHash(seed + 5) * 0.7) * (0.5 + 0.5 * a0);
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(spin);
+    tfxAlpha(ctx, a0 * 0.95);
+    ctx.fillStyle = "hsl(" + hue + ",100%,62%)";
+    tfxStarPath(ctx, sz);
+    ctx.fill();
+    // Bright core so the stars pop on dark terrain too.
+    tfxAlpha(ctx, a0 * 0.5);
+    ctx.fillStyle = "hsl(" + hue + ",100%,85%)";
+    tfxStarPath(ctx, sz * 0.45);
+    ctx.fill();
+    ctx.restore();
+  });
+  ctx.restore();
+}
+
 // Dispatch map: trail-effect id (from the trail registry / getTrailEffect) → renderer.
 // drawTrail() (draw.js) branches here for the rich effects; ids must match skinRegistry.
 var TRAIL_FX = {

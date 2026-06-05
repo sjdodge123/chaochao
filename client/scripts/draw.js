@@ -211,6 +211,8 @@ var moonIcon = new Image(576, 512);
 moonIcon.src = "../assets/img/moon-solid.svg";
 var scissorsIcon = new Image(576, 512);
 scissorsIcon.src = "../assets/img/scissors-solid.svg";
+var starIcon = new Image(576, 512);
+starIcon.src = "../assets/img/star-solid.svg";
 
 //TileTextures
 var lava = new Image(256, 256);
@@ -3518,7 +3520,7 @@ var requiredImages = [
     snowFlakeIcon, windIcon, hourglassIcon, lightningIcon, cloudyIcon,
     infinityIcon, fiestaIcon, toolBoxIcon, moneyIcon, volcanoIcon,
     bombImage, snowFlakeImage, cloudImage, infectionIcon, puckIcon,
-    explosionIcon, moonIcon, scissorsIcon, randomTileIcon,
+    explosionIcon, moonIcon, scissorsIcon, starIcon, randomTileIcon,
     lava, poison, grass, dirt, ice, sand,
     redFire, orangeFire, yellowFire, greenFire, blueFire, purpleFire
 ];
@@ -3570,6 +3572,7 @@ function loadPatterns() {
     patterns[config.tileMap.abilities.tileSwap.id] = makePattern(copyIcon, makeSeamlessPattern(gDirt));
     patterns[config.tileMap.abilities.iceCannon.id] = makePattern(snowFlakeIcon, makeSeamlessPattern(gDirt));
     patterns[config.tileMap.abilities.cut.id] = makePattern(scissorsIcon, makeSeamlessPattern(gDirt));
+    patterns[config.tileMap.abilities.starPower.id] = makePattern(starIcon, makeSeamlessPattern(gDirt));
     patterns[config.brutalRounds.infection.id] = makePattern(infectionIcon, "red");
 
     //Tiles
@@ -5399,7 +5402,18 @@ function drawAbilties() {
         }
     }
 
-    if (blindfold.color != null) {
+    // A Star Power holder is immune to the blindfold: on a couch co-op screen the
+    // overlay is shared, so any living local starred kart lifts it for the screen
+    // (mirrors the server-side bot exemption in aiController.isBlinded).
+    var starImmune = false;
+    var locals = livingLocalPlayers();
+    for (var li = 0; li < locals.length; li++) {
+        if (locals[li].starPowerUntil != null && Date.now() < locals[li].starPowerUntil) {
+            starImmune = true;
+            break;
+        }
+    }
+    if (blindfold.color != null && !starImmune) {
         gameContext.save();
         gameContext.globalAlpha = blindfoldAlpha();
         gameContext.beginPath();
@@ -5784,6 +5798,9 @@ function drawPlayer(player, dt) {
     if (player.onFire > 0) {
         drawFire(player);
     }
+    // Star Power aura sits behind the kart body like the burn flame, so the
+    // skin/colour stays readable on top of the rainbow glow.
+    drawStarPowerFx(player);
     drawSpeedFx(player);
     // Draw a halo behind your own kart(s) — the primary plus every couch co-op
     // slot — so you can always find yourself in a crowded pack.
@@ -6132,6 +6149,69 @@ function drawStaminaMeter(player) {
 // a buff/debuff lands. Buff = wind streaks trailing the direction of travel;
 // debuff = a slow sluggish ripple. Both expire on their own with no server
 // state, and the dust system reinforces the buff via the player's higher speed.
+// Star Power: rainbow glow + cycling ring + orbiting stars around an invulnerable
+// kart, blinking out Mario-style over the last 1.5s. Drawn behind the kart body
+// (called just before the kart paint, like the burn flame) so the skin stays
+// readable on top. Per-frame gradient is fine here: the effect is rare and
+// lives ~5s on at most a couple of karts at once.
+function drawStarPowerFx(player) {
+    var until = player.starPowerUntil;
+    if (until == null) {
+        return;
+    }
+    var now = Date.now();
+    var left = until - now;
+    if (left <= 0) {
+        return;
+    }
+    // Expiry warning: blink the whole aura as the star wears off.
+    if (left < 1500 && Math.floor(now / 130) % 2 === 0) {
+        return;
+    }
+    var hue = (now * 0.35) % 360;
+    var r = player.radius;
+    var pulse = 1 + 0.08 * Math.sin(now / 90);
+    var auraR = r * 2.3 * pulse;
+    gameContext.save();
+    gameContext.translate(player.x, player.y);
+    // Soft rainbow aura.
+    var grad = gameContext.createRadialGradient(0, 0, r * 0.4, 0, 0, auraR);
+    grad.addColorStop(0, "hsla(" + hue.toFixed(0) + ",100%,70%,0.55)");
+    grad.addColorStop(0.7, "hsla(" + ((hue + 60) % 360).toFixed(0) + ",100%,60%,0.25)");
+    grad.addColorStop(1, "hsla(" + ((hue + 120) % 360).toFixed(0) + ",100%,55%,0)");
+    gameContext.fillStyle = grad;
+    gameContext.beginPath();
+    gameContext.arc(0, 0, auraR, 0, 2 * Math.PI);
+    gameContext.fill();
+    // Bright colour-cycling ring hugging the kart.
+    gameContext.globalAlpha = 0.85;
+    gameContext.strokeStyle = "hsl(" + hue.toFixed(0) + ",100%,60%)";
+    gameContext.lineWidth = 2.5;
+    gameContext.beginPath();
+    gameContext.arc(0, 0, r + 4, 0, 2 * Math.PI);
+    gameContext.stroke();
+    // Three orbiting stars, hue-staggered a third of the wheel apart.
+    for (var i = 0; i < 3; i++) {
+        var ang = now / 280 + i * (2 * Math.PI / 3);
+        var ox = Math.cos(ang) * (r + 10);
+        var oy = Math.sin(ang) * (r + 10);
+        gameContext.save();
+        gameContext.translate(ox, oy);
+        gameContext.rotate(ang);
+        gameContext.globalAlpha = 0.95;
+        gameContext.fillStyle = "hsl(" + (((hue + i * 120) % 360)).toFixed(0) + ",100%,70%)";
+        if (typeof tfxStarPath === "function") {
+            tfxStarPath(gameContext, 4.5);
+        } else {
+            gameContext.beginPath();
+            gameContext.arc(0, 0, 3, 0, 2 * Math.PI);
+        }
+        gameContext.fill();
+        gameContext.restore();
+    }
+    gameContext.restore();
+}
+
 function drawSpeedFx(player) {
     var now = Date.now();
     if (player.speedBuffUntil != null && now < player.speedBuffUntil) {
@@ -6628,6 +6708,16 @@ function drawTrail(player) {
     gameContext.lineWidth = dashed ? 6 : 3;
     gameContext.lineCap = "round";
     gameContext.lineJoin = "round";
+    // Star Power overrides everything (the equipped cosmetic AND the near-victory
+    // dash) for its few seconds: a rainbow star trail marks the invulnerable kart.
+    var starActive = player.starPowerUntil != null && now < player.starPowerUntil;
+    if (starActive && typeof drawStarPowerTrail === "function") {
+        tfxBaseAlpha = baseAlpha;
+        drawStarPowerTrail(gameContext, verts, player.color, now, fadeMs, cartSkinAnimTime * 1000);
+        tfxBaseAlpha = 1;
+        gameContext.restore();
+        return;
+    }
     // Cosmetic trail effect: a rich per-effect renderer (trailEffects.js) draws the WHOLE
     // trail in the player's colour and we return. Near-victory dashing keeps priority for
     // legibility. anim is ms; tfxBaseAlpha carries the non-local dimming.

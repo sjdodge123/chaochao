@@ -615,6 +615,52 @@ var LearnAnim = (function () {
         kart(s.ctx, W / 2, H / 2, 12, BLUE);
     };
 
+    SCENES["starPower"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        // A rival kart sits in the lane; the starred kart plows straight through it
+        // untouched (the rival is bumped aside as the star passes).
+        var p = s.p; p.radius = 12; p.surface = "normal"; p.alive = true;
+        if (p.x == null || p.x > W + 30) { p.x = -30; p.y = H / 2; }
+        drive(p, 1, 0, MAXSPEED * 0.7, 120, s.dt);
+        var hue = (s.t * 0.35) % 360;
+        // Rainbow star trail behind the kart.
+        for (var i = 1; i <= 6; i++) {
+            var tx = p.x - i * 13;
+            if (tx < -10) { continue; }
+            var h2 = (hue + i * 40) % 360;
+            var ty = p.y + Math.sin(s.t / 200 + i) * 5;
+            var sz = 4.5 - i * 0.4;
+            s.ctx.save();
+            s.ctx.translate(tx, ty);
+            s.ctx.rotate(s.t / 350 + i);
+            s.ctx.globalAlpha = 1 - i * 0.13;
+            s.ctx.fillStyle = "hsl(" + h2.toFixed(0) + ",100%,65%)";
+            s.ctx.beginPath();
+            for (var k = 0; k < 10; k++) {
+                var a = -Math.PI / 2 + k * Math.PI / 5, r = (k % 2 === 0) ? sz : sz * 0.45;
+                var x = Math.cos(a) * r, y = Math.sin(a) * r;
+                if (k === 0) { s.ctx.moveTo(x, y); } else { s.ctx.lineTo(x, y); }
+            }
+            s.ctx.closePath(); s.ctx.fill();
+            s.ctx.restore();
+        }
+        // Rival shoved aside as the invulnerable kart barrels past.
+        var rx = W * 0.62, dx = p.x - rx;
+        var shove = clamp(1 - Math.abs(dx) / 50, 0, 1) * (dx > -10 ? 1 : 0);
+        kart(s.ctx, rx, H / 2 - 24 * ease(shove), 10, RED);
+        // Rainbow aura + ring on the starred kart.
+        s.ctx.save();
+        s.ctx.globalAlpha = 0.35;
+        s.ctx.fillStyle = "hsl(" + hue.toFixed(0) + ",100%,65%)";
+        s.ctx.beginPath(); s.ctx.arc(p.x, p.y, p.radius * 2, 0, 2 * Math.PI); s.ctx.fill();
+        s.ctx.globalAlpha = 0.9;
+        s.ctx.strokeStyle = "hsl(" + hue.toFixed(0) + ",100%,60%)";
+        s.ctx.lineWidth = 2;
+        s.ctx.beginPath(); s.ctx.arc(p.x, p.y, p.radius + 4, 0, 2 * Math.PI); s.ctx.stroke();
+        s.ctx.restore();
+        kart(s.ctx, p.x, p.y, p.radius, BLUE);
+    };
+
     SCENES["blindfold"] = function (s) {
         floor(s.ctx, "dirt.png", 60);
         kart(s.ctx, W * 0.3, H / 2, 11, RED); kart(s.ctx, W * 0.68, H * 0.6, 11, GREEN);
