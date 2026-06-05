@@ -981,6 +981,35 @@ function emergencyBrakeNeeded(bot) {
     return dot < 0.4;                                           // momentum badly off our intended line
 }
 
+// Drift: holding a punch charge ON ICE blends grip toward normal terrain
+// (Player.handleMapCellHit, c.iceDrift.grip) — the same trick humans use. A bot
+// starts a drift hold when it's skating off its intended line on ice WITHOUT the
+// lava emergency (that path wants the instant tap's throw-brake, not grip): the
+// traction applies for the whole hold, steering comes back, and the decideAttack
+// manager releases early once momentum is back on line or the ice ends. Looser
+// misalignment gate than emergencyBrakeNeeded — drifting is routine control,
+// braking is a panic stop.
+var DRIFT_HOLD_MS = 1200; // well clear of the 2000ms overcharge line
+function driftHoldNeeded(bot, nav) {
+    if (c.iceDrift == null || !bot.onIce || bot.isZombie) { return false; }
+    if (nav && nav.lavaAhead) { return false; }                 // emergency tap path owns that
+    var speed = mag(bot.velX, bot.velY);
+    if (speed < bot.maxVelocity * 0.25) { return false; }       // crawling: steering alone is enough
+    var tlen = mag(bot.targetDirX, bot.targetDirY);
+    if (tlen < 1e-3) { return false; }                          // nowhere we're trying to go
+    var dot = (bot.velX * bot.targetDirX + bot.velY * bot.targetDirY) / (speed * tlen);
+    return dot < 0.7;                                           // sliding off our line -> dig in
+}
+// A drifting bot has regained its line (or slowed to a crawl): the grip did its job.
+function driftRecovered(bot) {
+    var speed = mag(bot.velX, bot.velY);
+    if (speed < bot.maxVelocity * 0.15) { return true; }
+    var tlen = mag(bot.targetDirX, bot.targetDirY);
+    if (tlen < 1e-3) { return false; }
+    var dot = (bot.velX * bot.targetDirX + bot.velY * bot.targetDirY) / (speed * tlen);
+    return dot > 0.85;
+}
+
 // Top-level per-tick combat decision: fire the held ability, else consider a punch.
 function decideAttack(bot, ctx, nav) {
     // Manage an in-progress punch hold (charge): hold the button (and keep the locked
@@ -994,12 +1023,26 @@ function decideAttack(bot, ctx, nav) {
         // the still-held attack.
         if (bot.ability != null || (nav && nav.lavaAhead && emergencyBrakeNeeded(bot))) {
             bot.ai.punchHoldUntil = null;
+            bot.ai.driftHold = false;
             bot.attack = false;
             return;
         }
-        bot.angle = bot.ai.punchAngle;
+        if (bot.ai.driftHold) {
+            // Drift hold: facing stays with steering (the eventual throw is incidental,
+            // not an aimed swing), and the hold ends EARLY once the grip has done its
+            // job — momentum back on our line — or the ice ends under us.
+            if (!bot.onIce || driftRecovered(bot)) {
+                bot.ai.punchHoldUntil = null;
+                bot.ai.driftHold = false;
+                bot.attack = false; // release: the eased ice throw-brake scrubs the rest
+                return;
+            }
+        } else {
+            bot.angle = bot.ai.punchAngle;
+        }
         if (Date.now() < bot.ai.punchHoldUntil) { bot.attack = true; return; } // still charging
         bot.ai.punchHoldUntil = null;
+        bot.ai.driftHold = false;
         bot.attack = false; // release -> throw on the locked aim
         return;
     }
@@ -1023,6 +1066,14 @@ function decideAttack(bot, ctx, nav) {
         return;
     }
     bot.ai.heldAbilityId = null;
+    // Ice drift: skating off our line (no lava emergency) -> hold the charge for grip
+    // instead of tapping. Bare-handed only (an ability would fire on the press) and
+    // stamina/cooldown gated like any punch; the hold manager above releases it.
+    if (punchReady(bot) && driftHoldNeeded(bot, nav)) {
+        botPunch(bot, DRIFT_HOLD_MS);
+        bot.ai.driftHold = true;
+        return;
+    }
     if (decideCounter(bot, ctx)) { return; }
     decidePunch(bot, ctx);
 }
@@ -1678,6 +1729,8 @@ module.exports._test = {
     newBotState: newBotState,
     chargeHoldFor: chargeHoldFor,
     emergencyBrakeNeeded: emergencyBrakeNeeded,
+    driftHoldNeeded: driftHoldNeeded,
+    driftRecovered: driftRecovered,
     bombTarget: bombTarget,
     raceLeader: raceLeader,
     rivalsAhead: rivalsAhead,

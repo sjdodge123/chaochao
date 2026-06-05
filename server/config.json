@@ -401,9 +401,10 @@
         "chargedHitFrac": 0.85
     },
     "iceDrift": {
-        "_doc": "Drifting: holding a punch charge while on ice blends the kart's ice physics toward normal-tile grip by `grip` (0 = pure ice, 1 = full normal traction) — you slow slightly and gain steering control. Distance covered while drift-charging banks toward the Smooth Operator medal, but ONLY if the drift stays 'clean': the released punch must not land on (or clash with) anyone, and burning up in lava voids the pending credit. resolveMs = how long after a charged punch is thrown before its pending drift credit is judged (must exceed the ~100ms punch linger so `landed`/`clashed` have settled). keepMomentumOnRelease = playtest experiment: releasing a drift-charge on ice skips the usual punchThrowBrake velocity cut.",
+        "_doc": "Drifting: holding a punch charge while on ice blends the kart's ice physics toward normal-tile grip by `grip` (0 = pure ice, 1 = full normal traction) — you slow slightly and gain steering control. Distance covered while drift-charging banks toward the Smooth Operator medal, but ONLY if the drift stays 'clean': the released punch must not land on (or clash with) anyone, and burning up in lava voids the pending credit. resolveMs = how long after a charged punch is thrown before its pending drift credit is judged (must exceed the ~100ms punch linger so `landed`/`clashed` have settled). releaseBrakeEase = on-ice softening of the punch-release brake: releasing ON ICE keeps punchThrowBrake x this of your velocity (1.15 = 15% more glide than a solid-ground release; capped at keeping 100%) — the full-strength stop felt too harsh coming out of a drift. keepMomentumOnRelease = playtest experiment: releasing a drift-charge on ice skips the release brake entirely.",
         "grip": 0.3,
         "resolveMs": 150,
+        "releaseBrakeEase": 1.15,
         "keepMomentumOnRelease": false
     },
     "punchClash": {
