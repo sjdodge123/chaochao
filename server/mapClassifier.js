@@ -148,6 +148,125 @@ function pathPoints(map, path) {
     return pts;
 }
 
+// Cells a real racer must route around: every cell holding (or, for a moving
+// bumper, swept by) a bumper hazard. Hazards aren't tiles, so the cell graph
+// can't see them — this mirrors aiController's hazardCells/HAZARD_PATH_PENALTY
+// so the overlay's routes dodge the same obstacles the bots do. Returns null
+// when the map has no hazards. Built from the raw map JSON (anchor + angle +
+// config rail width), not live hazard objects — balanceDebug runs pre-game.
+var HAZARD_PATH_PENALTY = 12; // cost x — keep in step with aiController.js
+var HAZARD_CLEARANCE = 40;    // px a drawn racing line keeps from a bumper point
+                              // (~attackRadius 15 + player radius + dodge pad,
+                              //  mirroring aiController's BUMPER_DANGER_PAD idea)
+// { penalty: [voronoiId...] | null, points: [{x,y}...] } — the cells to penalize
+// in pathing AND the raw hazard points the smoothed line must keep clear of. A
+// bumper can stand ON a cell border, so each point penalizes a ring of cells
+// around it (centre + 8 samples at HAZARD_CLEARANCE), not just its own cell.
+function hazardAvoidance(map, config) {
+    var hazards = Array.isArray(map.hazards) ? map.hazards : [];
+    if (hazards.length === 0) { return { penalty: null, points: [] }; }
+    var cells = map.cells;
+    function nearestVid(x, y) {
+        var best = Infinity, vid = null;
+        for (var i = 0; i < cells.length; i++) {
+            var s = cells[i] && cells[i].site;
+            if (!s) { continue; }
+            var dx = s.x - x, dy = s.y - y;
+            if (dx * dx + dy * dy < best) { best = dx * dx + dy * dy; vid = s.voronoiId; }
+        }
+        return vid;
+    }
+    var seen = {}, set = [], points = [];
+    function add(vid) { if (vid != null && !seen[vid]) { seen[vid] = true; set.push(vid); } }
+    function addAround(x, y) {
+        points.push({ x: x, y: y });
+        add(nearestVid(x, y));
+        for (var a = 0; a < 8; a++) {
+            var ang = a * Math.PI / 4;
+            add(nearestVid(x + Math.cos(ang) * HAZARD_CLEARANCE, y + Math.sin(ang) * HAZARD_CLEARANCE));
+        }
+    }
+    var movingId = (config.hazards && config.hazards.movingBumper) ? config.hazards.movingBumper.id : null;
+    var railLen = (config.hazards && config.hazards.movingBumper && config.hazards.movingBumper.width) || 100;
+    for (var h = 0; h < hazards.length; h++) {
+        var hz = hazards[h];
+        if (hz == null || typeof hz.x !== "number" || typeof hz.y !== "number") { continue; }
+        addAround(hz.x, hz.y);
+        if (hz.id === movingId) {
+            // A railed bumper sweeps from its anchor along `angle` for the rail
+            // length (engine.js confines it parametrically) — penalize the swept lane.
+            var rad = (hz.angle || 0) * Math.PI / 180;
+            for (var t = 25; t <= railLen; t += 25) {
+                addAround(hz.x + Math.cos(rad) * t, hz.y + Math.sin(rad) * t);
+            }
+        }
+    }
+    return { penalty: set, points: points };
+}
+
+// Straighten a route's waypoints into a racing line: from each point, greedily
+// skip ahead to the farthest waypoint reachable by a straight, safe drive — no
+// lava, no hole, no penalized bumper cell anywhere along the segment (sampled
+// every ~15px against the containing Voronoi cell). A player drives straight
+// across open same-terrain ground; only obstacles should bend the drawn line,
+// not cell-centre dog-legs.
+function smoothRoute(map, config, pts, penaltyLookup, hazardPoints) {
+    if (!Array.isArray(pts) || pts.length <= 2) { return pts; }
+    var lavaId = tileId(config, 'lava'), emptyId = tileId(config, 'empty');
+    var cells = map.cells;
+    function cellAt(x, y) {
+        var best = Infinity, bc = null;
+        for (var i = 0; i < cells.length; i++) {
+            var s = cells[i] && cells[i].site;
+            if (!s) { continue; }
+            var dx = s.x - x, dy = s.y - y;
+            if (dx * dx + dy * dy < best) { best = dx * dx + dy * dy; bc = cells[i]; }
+        }
+        return bc;
+    }
+    // Distance from segment ab to point p — a straightened leg must clear every
+    // bumper point by HAZARD_CLEARANCE (a bumper can stand on a cell border, so
+    // the cell checks alone can't guarantee clearance).
+    function segClearsHazards(a, b) {
+        if (!hazardPoints || hazardPoints.length === 0) { return true; }
+        var abx = b.x - a.x, aby = b.y - a.y;
+        var lenSq = abx * abx + aby * aby || 1;
+        for (var i = 0; i < hazardPoints.length; i++) {
+            var p = hazardPoints[i];
+            var t = ((p.x - a.x) * abx + (p.y - a.y) * aby) / lenSq;
+            if (t < 0) { t = 0; } else if (t > 1) { t = 1; }
+            var dx = a.x + abx * t - p.x, dy = a.y + aby * t - p.y;
+            if (dx * dx + dy * dy < HAZARD_CLEARANCE * HAZARD_CLEARANCE) { return false; }
+        }
+        return true;
+    }
+    function segmentSafe(a, b) {
+        if (!segClearsHazards(a, b)) { return false; }
+        var dx = b.x - a.x, dy = b.y - a.y;
+        // 5px sampling: a straightened leg can graze a narrow lava wedge between
+        // coarser samples (Voronoi corners come to a point). Brute-force nearest-
+        // site lookups at this density are still fine for an on-demand, throttled
+        // check (~a few ms on a 250-cell map).
+        var steps = Math.max(2, Math.ceil(Math.sqrt(dx * dx + dy * dy) / 5));
+        for (var s = 1; s < steps; s++) {
+            var t = s / steps;
+            var cell = cellAt(a.x + dx * t, a.y + dy * t);
+            if (cell == null || cell.id === lavaId || cell.id === emptyId) { return false; }
+            if (penaltyLookup && cell.site && penaltyLookup[cell.site.voronoiId]) { return false; }
+        }
+        return true;
+    }
+    var out = [pts[0]];
+    var i = 0;
+    while (i < pts.length - 1) {
+        var j = pts.length - 1;
+        while (j > i + 1 && !segmentSafe(pts[i], pts[j])) { j--; }
+        out.push(pts[j]);
+        i = j;
+    }
+    return out;
+}
+
 // Overlay geometry for the editor's "looks unbalanced" nudge: the representative
 // (median-time) route from each start edge — the same sampling parForEdge feeds
 // into the fairness deduction — plus the goal centroid + centrality, so the author
@@ -156,12 +275,19 @@ function pathPoints(map, path) {
 function balanceDebug(map, config) {
     var edges = startEdgesOf(map);
     var lavaId = tileId(config, 'lava');
+    var avoid = hazardAvoidance(map, config);
+    var routeOpts = avoid.penalty ? { penaltySet: avoid.penalty, penaltyMult: HAZARD_PATH_PENALTY } : undefined;
+    var penaltyLookup = null;
+    if (avoid.penalty) {
+        penaltyLookup = {};
+        for (var pl = 0; pl < avoid.penalty.length; pl++) { penaltyLookup[avoid.penalty[pl]] = true; }
+    }
     var out = { edges: [], goal: null };
     for (var e = 0; e < edges.length; e++) {
         var samples = cellGraph.edgeSampleOrigins(edges[e]);
         var routes = [];
         for (var s = 0; s < samples.length; s++) {
-            var r = cellGraph.findPathToNearestGoal(map, samples[s]);
+            var r = cellGraph.findPathToNearestGoal(map, samples[s], routeOpts);
             if (r != null) {
                 var t = cellGraph.estimatePathTime(map, r.path);
                 if (t > 0) {
@@ -187,10 +313,12 @@ function balanceDebug(map, config) {
         if (pool.length === 0) { pool = routes; }
         pool.sort(function (a, b) { return a.time - b.time; });
         var median = pool[Math.floor(pool.length / 2)];
-        // Lead the polyline with the route's actual gate-side origin, so the line
-        // visibly launches from the start gate instead of the first cell's centre.
+        // Lead the polyline with the route's actual gate-side origin (so the line
+        // visibly launches from the start gate), then straighten the cell-centre
+        // dog-legs into the racing line a player would actually drive.
         var pts = pathPoints(map, median.path);
         pts.unshift({ x: Math.round(median.origin.x), y: Math.round(median.origin.y) });
+        pts = smoothRoute(map, config, pts, penaltyLookup, avoid.points);
         out.edges.push({
             edge: edges[e],
             par: Math.round(median.time * 10) / 10,

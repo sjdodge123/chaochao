@@ -12,7 +12,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ### Map editor
 
-- When the balance check says your map won't make Featured, the editor now draws the evidence right on the map: the race route from each start gate with its time (green = the faster side, red = the slower one — that gap is the fairness penalty), a marker showing how far off-centre your goal sits, and a legend translating every deduction into a concrete fix. The overlay stays up while you paint corrections; press Esc to hide it.
+- When the balance check says your map won't make Featured, the editor now draws the evidence right on the map: the race route from each start gate with its time (green = the faster side, red = the slower one — that gap is the fairness penalty), a marker showing how far off-centre your goal sits, and a legend translating every deduction into a concrete fix. Routes are drawn as real racing lines — straight across open ground, bending only for lava, holes, and bumpers (which they dodge the same way the AI racers do). The overlay stays up while you paint corrections; press Esc to hide it.
 - Fixed: clicking the buttons on the "Submit anyway?" dialog (or any editor confirm dialog) no longer paints the map underneath — your brush is fully inert while a dialog is open.
 - New "Start:" picker next to the AI toggle on two-gate maps: choose which start gate YOU spawn at when previewing (Auto keeps the old balanced placement), so you can test each side on demand instead of hoping the coin flip lands your way. Bots still fill both gates.
 - Turning on "AI racers" for a preview now fields a proper grid of 6 bots to race against, instead of the lone bot the lobby's auto-scaling used to give a solo tester.
