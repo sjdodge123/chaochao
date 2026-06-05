@@ -251,7 +251,6 @@ function holdParamNow(param, now) {
 function fadeOutVoice(voice, dur) {
     if (!voice) { return; }
     var ctx = getCtx();
-    activeVoices.delete(voice);
     // Mark as deliberately stopped (so its onended won't report a natural track-end)
     // and clear the descriptor's live-voice pointer NOW, rather than waiting for the
     // async onended — otherwise guards that read sound.voice see a stale "still
@@ -259,10 +258,15 @@ function fadeOutVoice(voice, dur) {
     voice.stopped = true;
     if (voice.sound.voice === voice) { voice.sound.voice = null; }
     if (!ctx) {
+        activeVoices.delete(voice);
         try { voice.source.stop(); } catch (e) {}
         voice.sound.playing = Math.max(0, voice.sound.playing - 1);
         return;
     }
+    // The voice deliberately STAYS in activeVoices until its source actually ends
+    // (onended cleans up): long crossfade tails (~20s) must remain reachable by
+    // stopAllSounds/stopSound — re-fading an already-fading voice just re-ramps it
+    // shorter, and re-calling source.stop() with an earlier time is allowed.
     var now = ctx.currentTime;
     try {
         holdParamNow(voice.gain.gain, now);
@@ -299,6 +303,9 @@ var excitingBackgroundMusicList = {};
 var brutalBackgroundMusicList = {};
 var backgroundMusicLists = {};
 var currentBackgroundMusic = null;
+// The voice still draining from the last crossfade (the ~20s tail). Tracked so a
+// quick return to that same track cuts the tail fast instead of doubling over it.
+var fadingBackgroundVoice = null;
 var backgroundBuildTimer = null;
 // Set by client.js once the socket exists; lets the server drive the next track
 // when one finishes so background music stays continuous and in sync.
@@ -507,7 +514,7 @@ function volumeChange() {
     lobbyMusic.volume = .05 * music;
     heavyfabric.volume = .030 * music;
     slowpipes.volume = .015 * music;
-    eightBitAction1.volume = .015 * music;  // mastered like slow-pipes (mean ~-13.5 dB) — match its coeff
+    eightBitAction1.volume = .075 * music;  // operator-tuned by ear mid-race (.015 -> .025 -> .075); the calm slot wants real presence
     slowstride.volume = .05 * music;
     therush.volume = .025 * music;
     beastv2.volume = .035 * music;
@@ -532,16 +539,22 @@ function applyLiveVolumes() {
     var ctx = getCtx();
     if (!ctx) { return; }
     activeVoices.forEach(function (v) {
-        if (v.sustained && v.gain) {
-            try {
-                var t = ctx.currentTime;
-                // Glide to the new level from wherever the gain actually is right now,
-                // so a volume toggle landing mid-crossfade doesn't click or jump the
-                // music straight to full.
-                holdParamNow(v.gain.gain, t);
-                v.gain.gain.setTargetAtTime(v.sound.volume, t, 0.05);
-            } catch (e) {}
+        if (!v.sustained || !v.gain) { return; }
+        if (v.stopped) {
+            // A draining crossfade tail — never ramp it back up to the sound's
+            // level. If music just got muted, cut the tail short; otherwise let
+            // it finish its scheduled fade.
+            if (v.sound.volume === 0) { fadeOutVoice(v, 0.2); }
+            return;
         }
+        try {
+            var t = ctx.currentTime;
+            // Glide to the new level from wherever the gain actually is right now,
+            // so a volume toggle landing mid-crossfade doesn't click or jump the
+            // music straight to full.
+            holdParamNow(v.gain.gain, t);
+            v.gain.gain.setTargetAtTime(v.sound.volume, t, 0.05);
+        } catch (e) {}
     });
 }
 
@@ -587,6 +600,7 @@ function stopAllSounds() {
     // The match's music was just stopped; forget it so the next setBackgroundMusic
     // starts cleanly (and the fading music voice can't report a track-end either).
     currentBackgroundMusic = null;
+    fadingBackgroundVoice = null;
 }
 
 // Browser autoplay policy keeps the AudioContext "suspended" until the user
@@ -744,19 +758,32 @@ function setBackgroundMusic(mood, trackName) {
     if (currentBackgroundMusic === track && track.voice != null) {
         return;
     }
-    // Crossfade: fade the old track out while the new one fades in.
+    // Crossfade: fade the old track out while the new one fades in. A mood flip
+    // mid-moment (e.g. you die in the lead and the room drops from exciting to
+    // calm) should wash over, not slam: the outgoing track drains away over ~20s
+    // while the incoming one eases up underneath it over ~8s. Only a cold start
+    // (no music playing) gets the quick 1.2s entrance.
+    var crossfading = false;
     if (currentBackgroundMusic != null && currentBackgroundMusic !== track) {
         if (currentBackgroundMusic.voice != null) {
-            fadeOutVoice(currentBackgroundMusic.voice, 1.2);
+            crossfading = true;
+            fadingBackgroundVoice = currentBackgroundMusic.voice;
+            fadeOutVoice(fadingBackgroundVoice, 20);
         }
         currentBackgroundMusic.voice = null;
         pendingSounds.delete(currentBackgroundMusic);
         currentBackgroundMusic.pendingPlay = false;
     }
+    // Coming back to the track that's still draining from the last crossfade —
+    // cut its tail fast so the fresh voice doesn't double over it, phase-offset.
+    if (fadingBackgroundVoice != null && fadingBackgroundVoice.sound === track) {
+        fadeOutVoice(fadingBackgroundVoice, 0.3);
+        fadingBackgroundVoice = null;
+    }
     currentBackgroundMusic = track;
     startSound(track, {
         sustained: true,
-        fadeIn: 1.2,
+        fadeIn: crossfading ? 8 : 1.2,
         // Background tracks don't loop; when the active one finishes, tell the server
         // so it can pick the next track for everyone (keeps music continuous + in sync).
         onended: function () {

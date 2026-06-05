@@ -208,7 +208,9 @@ class Game {
 		//In Racing State or Collapse State
 		if (this.currentState == this.stateMap.racing || this.currentState == this.stateMap.collapsing) {
 			this.checkForWinners();
-			this.updateMusicMood();
+			//Mood changes are deferred to startOverview — flipping the music the
+			//instant someone gains/loses near-victory mid-race felt jarring. The
+			//fallback still ticks here so a stuck track can't silence the room.
 			this.checkMusicFallback();
 		}
 		//In Overview State
@@ -837,7 +839,7 @@ class Game {
 		//re-plays the same track as a no-op, so music continues uninterrupted.
 		var mood = this.computeMusicMood();
 		if (this.currentMusic == null || this.currentMusic.mood != mood) {
-			this.setRoomMusic(mood, this.pickMusicTrack(mood, null));
+			this.setRoomMusic(mood, this.pickMusicTrack(mood, (this.lastTrackByMood || {})[mood]));
 		}
 
 		messenger.messageRoomBySig(this.roomSig, "startRace", { music: this.currentMusic, raceStartedAt: this.raceStartedAt });
@@ -899,6 +901,10 @@ class Game {
 			mapId: (justPlayed != null) ? justPlayed.id : null,
 			mapName: (justPlayed != null) ? justPlayed.name : null
 		});
+		//Round is settled — NOW reconcile the music mood (near-victory gained or
+		//lost this round). Doing it here instead of mid-race means the hype track
+		//carries the racer over the line and the change washes in on this screen.
+		this.updateMusicMood();
 		this.publishMapLeaderboard();
 	}
 

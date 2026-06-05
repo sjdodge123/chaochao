@@ -37,13 +37,19 @@ module.exports = {
 		return track;
 	},
 	//Set the room's music and remember when, so the fallback timer can recover
-	//if no client ever reports the track ending.
+	//if no client ever reports the track ending. Also remember the pick per mood:
+	//a mood that flips away and back shouldn't land on the track that just played
+	//(client-side it may still be draining from the crossfade and would double up).
 	setRoomMusic(mood, track) {
 		this.currentMusic = { mood: mood, track: track };
 		this.musicChangedAt = Date.now();
+		if (this.lastTrackByMood == null) { this.lastTrackByMood = {}; }
+		this.lastTrackByMood[mood] = track;
 	},
-	//Called every racing tick: if the room's mood changed (someone hit/left
-	//near-victory), pick a track for the new mood and tell every client to switch.
+	//Called at startOverview (round settled): if the room's mood changed (someone
+	//hit/left near-victory), pick a track for the new mood and tell every client
+	//to switch. Deliberately NOT called mid-race — an instant mood flip the moment
+	//the win condition changes hands felt jarring (see game.js update loop).
 	updateMusicMood() {
 		if (this.currentMusic == null) {
 			return;
@@ -52,7 +58,7 @@ module.exports = {
 		if (desiredMood == this.currentMusic.mood) {
 			return;
 		}
-		this.setRoomMusic(desiredMood, this.pickMusicTrack(desiredMood, null));
+		this.setRoomMusic(desiredMood, this.pickMusicTrack(desiredMood, (this.lastTrackByMood || {})[desiredMood]));
 		messenger.messageRoomBySig(this.roomSig, "musicMood", this.currentMusic);
 	},
 	//A client reported its background track finished. Background tracks don't loop,
