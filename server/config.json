@@ -400,6 +400,12 @@
         "exhaustLockMs": 3000,
         "chargedHitFrac": 0.85
     },
+    "iceDrift": {
+        "_doc": "Drifting: holding a punch charge while on ice blends the kart's ice physics toward normal-tile grip by `grip` (0 = pure ice, 1 = full normal traction) — you slow slightly and gain steering control. Distance covered while drift-charging banks toward the Smooth Operator medal, but ONLY if the drift stays 'clean': the released punch must not land on (or clash with) anyone, and burning up in lava voids the pending credit. resolveMs = how long after a charged punch is thrown before its pending drift credit is judged (must exceed the ~100ms punch linger so `landed`/`clashed` have settled). keepMomentumOnRelease = playtest experiment: releasing a drift-charge on ice skips the usual punchThrowBrake velocity cut.",
+        "grip": 0.3,
+        "resolveMs": 150,
+        "keepMomentumOnRelease": false
+    },
     "punchClash": {
         "_doc": "Two players who punch each other while facing each other clash. If their forces are within tieMargin it's a standoff: both flung back by THEIR OWN momentum (reflectKick * bonus). Otherwise the STRONGER punch wins — the weaker is cancelled and the stronger lands normally. range = max owner separation; facingDot = min dot of facing vs direction-to-rival.",
         "range": 50,

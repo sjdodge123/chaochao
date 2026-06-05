@@ -112,6 +112,7 @@ var SKINS = [
     { id: 'notes', slot: 'trail', unlock: { kind: 'level', level: 92 } },
     { id: 'neon', slot: 'trail', unlock: { kind: 'achievement' } },
     { id: 'ripple', slot: 'trail', unlock: { kind: 'achievement' } },
+    { id: 'powder', slot: 'trail', unlock: { kind: 'achievement' } },
     // --- Seasonal claims (kind:'seasonal') — granted ONCE on sign-in while the claim window
     // is open; OWNERSHIP IS PERMANENT (the id lands in unlocked_skins, exactly like an
     // achievement skin, so it stays equippable forever, even after the window closes). After
