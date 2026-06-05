@@ -175,6 +175,9 @@ class Player extends Circle {
 		this.invulnHeldInCircle = false;
 		this.onSanctuary = false;
 		this.lobbyRespawnPending = null;
+		// Current footing is ice (stamped every tick alongside onSanctuary): gates the
+		// drift-traction blend and the keepMomentumOnRelease playtest toggle.
+		this.onIce = false;
 
 		//Star Power: timestamp until which the player is invulnerable to rival
 		//abilities and punches (set by GameBoard.checkAbilities on use).
@@ -194,6 +197,19 @@ class Player extends Circle {
 		this.heavyHitCount = 0;         // fully-charged punches thrown -> Heavy Hitter
 		this.bumperHitCount = 0;        // bumper bonks taken -> Pinball
 		this.iceDistanceTravelled = 0;  // distance slid on ice tiles -> Ice Skater
+		// Smooth Operator drift bookkeeping. driftDistanceTravelled is the per-match
+		// BANKED drift total (distance covered while holding a punch charge on ice).
+		// pendingDriftDistance accrues live during the charge and only banks once the
+		// charge resolves "clean": a charge dropped without a throw banks in
+		// cancelCharge; a THROWN charge moves the credit into escrow on the punch
+		// (driftPunchRef/driftPunchPending) until the ~100ms punch linger settles —
+		// a hit or clash voids it, a whiff banks it (checkDriftEscrow). Burning up
+		// in lava voids both (handleMapCellHit's lava branch).
+		this.driftDistanceTravelled = 0;
+		this.pendingDriftDistance = 0;
+		this.driftPunchRef = null;
+		this.driftPunchPending = 0;
+		this.driftPunchAt = 0;
 		// Per-match counter for the abilitiesUsed cosmetic medal. The zombie/heavy-hit/bumper/
 		// ice medals are main's gatherAchievements medals (zombieSlayer/heavyHitter/pinball/
 		// iceSkater), which the award path already folds into medal_counts — no dup needed.
@@ -253,6 +269,7 @@ class Player extends Circle {
 		}
 		this.dt = dt;
 		this.move();
+		this.checkDriftEscrow();
 		this.checkAttack(currentState);
 		this.checkChatCoolDownTimer();
 		this.checkFireTimer();
@@ -405,8 +422,31 @@ class Player extends Circle {
 		}
 	}
 	cancelCharge() {
+		// A charge that ends here without throwing a punch can't have hit anyone — bank
+		// any drift distance it accrued on ice. throwChargedPunch moves the pending
+		// credit into punch escrow BEFORE calling this (so a thrown charge banks nothing
+		// here), and a lava death zeroes the pending BEFORE killPlayer's cancelCharge
+		// reaches us — so every path lands on the right side of the "clean drift" rule.
+		if (this.pendingDriftDistance > 0) {
+			this.driftDistanceTravelled += this.pendingDriftDistance;
+			this.pendingDriftDistance = 0;
+		}
 		this.charging = false;
 		this.chargeFrac = 0;
+	}
+	// Judge a thrown drift-charge once its punch has settled (landed/clashed are
+	// stamped within the ~100ms punch linger; resolveMs comfortably outlasts it,
+	// and the 200ms punch cooldown means the next charge can't start before this
+	// resolves): a clean whiff banks the escrowed drift distance; connecting with
+	// anyone — a hit OR a clash — voids it.
+	checkDriftEscrow() {
+		if (this.driftPunchRef == null) { return; }
+		if (Date.now() - this.driftPunchAt < c.iceDrift.resolveMs) { return; }
+		if (!this.driftPunchRef.landed && !this.driftPunchRef.clashed) {
+			this.driftDistanceTravelled += this.driftPunchPending;
+		}
+		this.driftPunchRef = null;
+		this.driftPunchPending = 0;
 	}
 	throwChargedPunch(currentState) {
 		var frac = this.chargeFrac;
@@ -429,11 +469,23 @@ class Player extends Circle {
 		this.punch.ox = this.x;
 		this.punch.oy = this.y;
 		this.punch.chargeFrac = frac; // so a fully-charged hit can play its own SFX
+		// Drift escrow: distance drifted during THIS charge rides on the thrown punch
+		// until the linger settles — a hit/clash voids it, a clean whiff banks it
+		// (checkDriftEscrow). Moved out of pending here so cancelCharge below banks nothing.
+		if (this.pendingDriftDistance > 0) {
+			this.driftPunchRef = this.punch;
+			this.driftPunchPending = this.pendingDriftDistance;
+			this.driftPunchAt = Date.now();
+			this.pendingDriftDistance = 0;
+		}
 		// Throwing a punch costs momentum: brake your velocity so even a tap isn't free
 		// — you lurch as you swing and have to rebuild speed. (The hit's force already
-		// captured your pre-brake speed via calcPunchBonus above.)
-		this.velX *= c.punchThrowBrake;
-		this.velY *= c.punchThrowBrake;
+		// captured your pre-brake speed via calcPunchBonus above.) Playtest toggle:
+		// releasing a drift-charge while ON ICE can keep its glide instead.
+		if (!(c.iceDrift.keepMomentumOnRelease && this.onIce)) {
+			this.velX *= c.punchThrowBrake;
+			this.velY *= c.punchThrowBrake;
+		}
 		// No scoring in the lobby (the bully stat isn't gated by checkForWinners).
 		if (currentState != c.stateMap.lobby) {
 			this.bully += 1;
@@ -713,6 +765,8 @@ class Player extends Circle {
 		// one escape path that bypasses handleMapCellHit, so clear the persistent burn
 		// attributor here too, mirroring the non-lava-cell clear in handleMapCellHit.
 		this.burnedBy = null;
+		// Off every cell = not on ice either (mirrors the per-tick onIce stamp).
+		this.onIce = false;
 		if (this.isZombie == true) {
 			this.acel = c.playerBaseAcel * c.brutalRounds.infection.acelModifer;
 			this.dragCoeff = c.playerDragCoeff * c.brutalRounds.infection.dragModifer;
@@ -814,6 +868,9 @@ class Player extends Circle {
 		// force-shield in isProtected(). A player only "is on" the one cell this
 		// hit reports, so this reflects their current footing every tick.
 		this.onSanctuary = (object.id == c.tileMap.background.id);
+		// Same per-tick footing stamp for ice: gates the drift-traction blend below and
+		// the keepMomentumOnRelease toggle in throwChargedPunch.
+		this.onIce = (object.id == c.tileMap.ice.id);
 		// Standing on any non-lava cell means we've escaped a burn-on-lava doom: drop
 		// the persistent burn attributor so a later, unrelated lava death isn't credited
 		// to whoever last shoved us. A burning death is itself a lava hit (id == lava),
@@ -925,6 +982,12 @@ class Player extends Circle {
 			if (this.punchedBy == null && this.burnedBy != null) {
 				this.punchedBy = this.burnedBy;
 			}
+			// Burning up in the lava voids ALL pending drift credit — the live charge's
+			// accrual and anything still in punch escrow. Must happen BEFORE killSelf:
+			// the killPlayer path calls cancelCharge(), which would otherwise bank it.
+			this.pendingDriftDistance = 0;
+			this.driftPunchRef = null;
+			this.driftPunchPending = 0;
 			this.killSelf("lava");
 			return;
 		}
@@ -932,6 +995,24 @@ class Player extends Circle {
 			this.acel = object.acel;
 			this.brakeCoeff = object.brakeCoeff;
 			this.dragCoeff = object.dragCoeff;
+			// Drifting: holding a punch charge digs the kart in for grip — blend the ice
+			// physics toward normal terrain by iceDrift.grip. The extra drag bleeds a
+			// little top speed (the deliberate "slow down slightly" trade) while the
+			// restored brake/acel give steering control back. Zombies never charge, so
+			// their infection-modded grip is untouched by construction.
+			if (this.charging) {
+				var grip = c.iceDrift.grip;
+				var solid = c.tileMap.normal;
+				this.acel += (solid.acel - object.acel) * grip;
+				this.brakeCoeff += (solid.brakeCoeff - object.brakeCoeff) * grip;
+				this.dragCoeff += (solid.dragCoeff - object.dragCoeff) * grip;
+				// Smooth Operator: drift distance accrues only in real play (like the Ice
+				// Skater clock below) and only PENDING — it banks when the charge resolves
+				// without hitting anyone (cancelCharge / checkDriftEscrow).
+				if ((this.currentState == c.stateMap.racing || this.currentState == c.stateMap.collapsing) && this.dt) {
+					this.pendingDriftDistance += utils.getMag(this.velX, this.velY) * this.dt;
+				}
+			}
 			// Ice Skater: clock the distance slid while on ice (speed x dt this tick).
 			// Only in real play — lobby ice is a teaching prop, not scored.
 			if ((this.currentState == c.stateMap.racing || this.currentState == c.stateMap.collapsing) && this.dt) {
@@ -1127,6 +1208,19 @@ class Player extends Circle {
 		this.overcharge = 0;
 		this.exhaustLockUntil = 0;
 		this.attackQueued = false;
+		// A drift still live when the round ends (e.g. carried a charge across the goal
+		// line, or a punch still in its linger) never hit anyone — bank it before
+		// clearing the transient state, then judge any unresolved escrow optimistically.
+		if (this.pendingDriftDistance > 0) {
+			this.driftDistanceTravelled += this.pendingDriftDistance;
+		}
+		if (this.driftPunchRef != null && !this.driftPunchRef.landed && !this.driftPunchRef.clashed) {
+			this.driftDistanceTravelled += this.driftPunchPending;
+		}
+		this.pendingDriftDistance = 0;
+		this.driftPunchRef = null;
+		this.driftPunchPending = 0;
+		this.onIce = false;
 		this.punch = null;
 		this.punchedBy = null;
 		this.murderedBy = null;
@@ -1159,6 +1253,7 @@ class Player extends Circle {
 			this.heavyHitCount = 0;
 			this.bumperHitCount = 0;
 			this.iceDistanceTravelled = 0;
+			this.driftDistanceTravelled = 0;
 			this.abilitiesUsedMatch = 0; // per-match counter for the abilitiesUsed cosmetic medal
 			this.goalsReachedMatch = 0;
 			this.recapWorthy = false;

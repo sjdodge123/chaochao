@@ -140,6 +140,7 @@ var ACHIEVEMENT_UNLOCKS = [
     { id: 'border_sawblade', name: "Sawblade Rim", slot: 'border', stat: 'pinball', threshold: 80 },
     { id: 'ripple', name: "Ripple", slot: 'trail', stat: 'iceSkater', threshold: 20 },
     { id: 'border_glow', name: "Glow", slot: 'border', stat: 'iceSkater', threshold: 60 },
+    { id: 'powder', name: "Powder", slot: 'trail', stat: 'smoothOperator', threshold: 20 },
     { id: 'helm', name: "Helm", slot: 'cart', stat: 'recapAppearances', threshold: 10 },
     { id: 'border_flames', name: "Flame Rim", slot: 'border', stat: 'recapAppearances', threshold: 40 },
     { id: 'circuit', name: "Circuit", slot: 'pattern', stat: 'joinInProgress', threshold: 15 },
@@ -156,7 +157,7 @@ var MEDAL_TITLES = {
     brutalist: 'Brutalist', mostMurdered: 'Picked on', resourceful: 'Resouceful',
     bully: 'Bully', doubleKill: 'Double Kill', tripleKill: 'Triple Kill',
     megaKill: 'Mega Kill', zombieSlayer: 'Zombie Slayer', heavyHitter: 'Heavy Hitter',
-    pinball: 'Pinball', iceSkater: 'Ice Skater'
+    pinball: 'Pinball', iceSkater: 'Ice Skater', smoothOperator: 'Smooth Operator'
 };
 function describeAchievement(u) {
     var n = u.threshold;

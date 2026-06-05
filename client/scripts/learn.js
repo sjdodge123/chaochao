@@ -102,7 +102,7 @@
                   detail: "Sand grabs at your wheels and bleeds off speed the moment you touch it — you trudge through it, carving a trench and throwing up dust in your wake. Plowing through a patch costs you, so it's often worth the longer line around it." },
                 { id: "tile-ice", name: "Ice", icon: tex("ice.png"), anim: "terrainIce",
                   blurb: "Almost no grip — you keep sliding.",
-                  detail: "Ice barely bites — you keep gliding long after you ease off, steering only suggests where you'd like to go, and any shove sends you skating helplessly." },
+                  detail: "Ice barely bites — you keep gliding long after you ease off, steering only suggests where you'd like to go, and any shove sends you skating helplessly. There is one trick: hold your punch charge while on ice to DRIFT — you slow slightly and your edge digs in, giving back real steering control (your charge ring frosts over icy blue while it's working). Drift far enough without your punch landing on anyone — and without burning up in lava — and you're in the running for the Smooth Operator medal." },
                 { id: "tile-lava", name: "Lava", icon: tex("lava.png"), anim: "lavaBurn",
                   blurb: "Touch it and you burn out of the round.",
                   detail: "A fiery dunk and you're done — burned out and respawned, out of the round. The collapse turns the whole arena into this, and a well-aimed punch can post a rival straight into it." },
@@ -238,7 +238,10 @@
                   detail: "Awarded to whoever got knocked around by bumpers more than anyone else — ricocheting across the arena like a ball in a pinball machine. Not necessarily on purpose." },
                 { id: "medal-iceskater", name: "Ice Skater", icon: emoji("⛸️"), anim: "medalShine",
                   blurb: "Slid the furthest on ice.",
-                  detail: "For covering the most distance gliding across ice tiles — embracing the slip instead of fighting it, and racking up the longest total slide of the match." }
+                  detail: "For covering the most distance gliding across ice tiles — embracing the slip instead of fighting it, and racking up the longest total slide of the match." },
+                { id: "medal-smoothoperator", name: "Smooth Operator", icon: emoji("🏂"), anim: "medalShine",
+                  blurb: "Drifted the furthest on ice.",
+                  detail: "For the most distance covered DRIFTING — holding a punch charge while on ice to dig in for grip. Only clean drifts count: if the charged punch lands on someone the run was a wind-up (not a drift), and burning up in lava wipes it. Control, not aggression." }
             ]
         }
     ];

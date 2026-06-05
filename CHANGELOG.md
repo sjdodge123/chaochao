@@ -10,7 +10,11 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- You can now DRIFT on ice: hold your punch charge while sliding and your kart digs in — you slow down a touch and get real steering control back. Your charge ring frosts over icy blue, frost spray kicks up behind you, and your kart visibly leans into the carve, so a drift never reads as a wind-up punch.
+- New end-of-match medal: **Smooth Operator** — awarded for drifting the furthest on ice. Only clean drifts count: if your charged punch lands on (or clashes with) someone it was a wind-up, not a drift, and burning up in lava wipes the run you were on.
+- New achievement trail: earn the Smooth Operator medal 20 times to unlock **Powder**, a kicked-up frost spray trail — and while it's equipped, your drift lean gets noticeably more dramatic.
 
 ## v0.30.1 — 2026-06-05
 

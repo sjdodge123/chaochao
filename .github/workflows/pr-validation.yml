@@ -151,6 +151,9 @@ jobs:
       - name: Headless punch-rework test (momentum, stamina, clash reflect)
         run: node .github/scripts/punch-rework-test.js
 
+      - name: Headless ice-drift test (drift traction + Smooth Operator credit rules)
+        run: node .github/scripts/ice-drift-test.js
+
       - name: Headless AI telegraph-reasoning test (ability targeting + timing)
         run: node .github/scripts/ai-telegraph-test.js
 

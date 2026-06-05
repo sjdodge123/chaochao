@@ -1094,6 +1094,46 @@ function drawRippleTrail(ctx, verts, color, now, fadeMs, anim) {
   ctx.restore();
 }
 
+// powder (Powder) — the Smooth Operator drift unlock: kicked-up frost. Low, soft
+// powder puffs (heavily whitened player colour) billow out sideways and settle,
+// dusted with tiny bright ice flecks — reads as snow spray carving off an edge.
+function drawPowderTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length; if (n < 2) return;
+  var DENSITY = TP('powder','DENSITY',22), GLOW = TP('powder','GLOW',2), PUFF = TP('powder','PUFF',7);
+  var interval = Math.max(20, fadeMs / DENSITY);
+  ctx.save();
+  // Soft puff pass under one scratch-blit glow (per-puff shadows would stack surfaces).
+  var powderPuffs = function (c) {
+    tfxForEachParticle(verts, now, fadeMs, interval, function (v, ts, age) {
+      var ph = tfxParticlePhase(age, fadeMs);
+      var alpha = ph.alpha * 0.55; if (alpha <= 0.03) return;
+      var seed = ts;
+      var side = tfxHash(seed + 1) < 0.5 ? -1 : 1;          // billow out one flank
+      var spread = (4 + tfxHash(seed + 2) * 10) * ph.drift;  // settle outward over life
+      var x = v.x + side * spread + (tfxHash(seed + 3) - 0.5) * 5;
+      var y = v.y + (tfxHash(seed + 4) - 0.5) * 6 + 2 * ph.drift;
+      var r = PUFF * (0.45 + tfxHash(seed + 5) * 0.7) * (0.7 + 0.5 * ph.drift);
+      tfxAlpha(c, alpha);
+      c.fillStyle = tfxHot(color, 0.78, 1);                  // near-white, colour-kissed
+      c.beginPath(); c.arc(x, y, r, 0, TFX_TAU); c.fill();
+    });
+  };
+  tfxGlowPaint(ctx, verts, color, GLOW, PUFF * 2 + 8, null, powderPuffs);
+  // Ice flecks: sparse, tiny, bright — the glitter on top of the powder.
+  tfxForEachParticle(verts, now, fadeMs, interval * 1.8, function (v, ts, age) {
+    var life = tfxClamp01(age / fadeMs);
+    var alpha = tfxClamp01(1 - life) * 0.9; if (alpha <= 0.03) return;
+    var seed = ts;
+    var x = v.x + (tfxHash(seed + 6) - 0.5) * 16 * (0.4 + life);
+    var y = v.y + (tfxHash(seed + 7) - 0.5) * 12 * (0.4 + life);
+    tfxAlpha(ctx, alpha);
+    ctx.fillStyle = tfxHot(color, 0.92, 1);
+    var fs = 0.8 + tfxHash(seed + 8) * 1.1;
+    ctx.beginPath(); ctx.arc(x, y, fs, 0, TFX_TAU); ctx.fill();
+  });
+  ctx.restore();
+}
+
 // ===========================================================================
 // SEASONAL: Solar Flare — the Early Adopter (Summer 2026) claim trail.
 // ---------------------------------------------------------------------------
@@ -1329,6 +1369,6 @@ var TRAIL_FX = {
   survivor: drawSurvivorTrail, ribbon: drawRibbonTrail, bolt: drawBoltTrail,
   hearts: drawHeartsTrail, smoke: drawSmokeTrail, confetti: drawConfettiTrail,
   snow: drawSnowTrail, tracks: drawTracksTrail, notes: drawNotesTrail,
-  neon: drawNeonTrail, ripple: drawRippleTrail,
+  neon: drawNeonTrail, ripple: drawRippleTrail, powder: drawPowderTrail,
   foundersFlare: drawFoundersFlareTrail
 };

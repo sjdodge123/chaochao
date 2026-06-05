@@ -104,6 +104,7 @@ var SKINS = [
     { id: 'notes', name: 'Music Notes', slot: 'trail', rarity: 'uncommon', unlock: { kind: 'level', level: 92 }, effect: 'notes' },
     { id: 'neon', name: 'Neon Wall', slot: 'trail', rarity: 'epic', unlock: { kind: 'achievement' }, effect: 'neon' },
     { id: 'ripple', name: 'Ripples', slot: 'trail', rarity: 'rare', unlock: { kind: 'achievement' }, effect: 'ripple' },
+    { id: 'powder', name: 'Powder', slot: 'trail', rarity: 'rare', unlock: { kind: 'achievement' }, effect: 'powder' },
     // --- Seasonal claims (kind:'seasonal') — claimed once on sign-in during the window, then
     // owned forever (in unlocked_skins, like an achievement skin). rarity:'seasonal' draws a
     // distinct gold cell frame in the locker. `unlock.label` is the season's player-facing name,

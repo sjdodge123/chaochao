@@ -4601,7 +4601,8 @@ var MEDAL_DESC = {
     zombieSlayer: "Most kills as a zombie",
     heavyHitter: "Most charged-up punches",
     pinball: "Bounced off the most bumpers",
-    iceSkater: "Slid the furthest on ice"
+    iceSkater: "Slid the furthest on ice",
+    smoothOperator: "Drifted the furthest on ice"
 };
 // Per-medal glyph stamped into the gold disc, so each award reads at a glance.
 // Mirrors the icons on the Learn/Codex medals page (client/scripts/learn.js).
@@ -4619,7 +4620,8 @@ var MEDAL_ICON = {
     zombieSlayer: "🧟",
     heavyHitter: "🥊",
     pinball: "🔵",
-    iceSkater: "⛸️"
+    iceSkater: "⛸️",
+    smoothOperator: "🏂"
 };
 
 // Rounded-rect path builder (caller fills/strokes it).
@@ -5712,6 +5714,86 @@ function nearestCellIdCached(player) {
     player._nearCellAt = now;
     return nearestId;
 }
+// Drifting (client-side read): winding up a punch while standing on ice. Derived
+// locally — chargeFrac is already synced per tick and the footing comes from the
+// same cached nearest-cell scan the on-fire-on-lava flash uses — so the cue needs
+// no new network field and mirrors the server's charging-on-ice traction gate.
+function isDriftingClient(player) {
+    if (player == null || !(player.charge > 0.001)) { return false; }
+    if (currentState != config.stateMap.racing && currentState != config.stateMap.collapsing
+        && currentState != config.stateMap.gated && currentState != config.stateMap.lobby) { return false; }
+    if (currentMap == null || currentMap.cells == null) { return false; }
+    return nearestCellIdCached(player) == config.tileMap.ice.id;
+}
+// ---- Ice drift cues --------------------------------------------------------
+// Shared pool of short-lived ice-spray specks kicked up by drifting karts.
+// Stored in WORLD coords; the camera offset is applied at draw time (per the
+// camera convention — never bake the offset into stored positions). A hard cap
+// keeps a whole pack drifting at once cheap; specks are plain alpha'd arc fills
+// (no per-frame shadowBlur in this hot path).
+var _driftSpray = [];
+var DRIFT_SPRAY_MAX = 240;
+// Per-frame drift state for one kart: eases the counter-steer lean (so a tap
+// punch never pops the squash), tracks the travel heading the lean tilts
+// against, and feeds the spray pool while actually drifting.
+function updateDriftCue(player, dt) {
+    var drifting = isDriftingClient(player);
+    var step = (dt || 16.7);
+    var prev = player._driftLean || 0;
+    var target = drifting ? 1 : 0;
+    var lean = prev + (target - prev) * Math.min(1, step / 140); // ~140ms ease
+    player._driftLean = lean < 0.005 ? 0 : lean;
+    var speed = Math.sqrt((player.velX || 0) * (player.velX || 0) + (player.velY || 0) * (player.velY || 0));
+    if (speed > 1) {
+        player._driftHeading = Math.atan2(player.velY, player.velX);
+    }
+    if (!drifting || speed < 8 || _driftSpray.length >= DRIFT_SPRAY_MAX) { return; }
+    // Frost chips fan out behind the kart toward both flanks, faster when you're
+    // carrying more speed into the slide.
+    var h = player._driftHeading || 0;
+    var count = 1 + (speed > 60 ? 1 : 0);
+    for (var i = 0; i < count; i++) {
+        var side = (Math.random() < 0.5 ? -1 : 1);
+        var a = h + Math.PI + side * (0.35 + Math.random() * 0.5);
+        var sp = 14 + Math.random() * 30 + speed * 0.12;
+        _driftSpray.push({
+            x: player.x - Math.cos(h) * player.radius * 0.8 + (Math.random() - 0.5) * 4,
+            y: player.y - Math.sin(h) * player.radius * 0.8 + (Math.random() - 0.5) * 4,
+            vx: Math.cos(a) * sp,
+            vy: Math.sin(a) * sp,
+            born: Date.now(),
+            life: 320 + Math.random() * 220,
+            size: 0.9 + Math.random() * 1.5
+        });
+    }
+}
+// Advance + draw every live spray speck, compacting expired ones in place.
+// Called once per frame from drawPlayers BEFORE the karts so spray sits under them.
+function drawDriftSpray(dt) {
+    if (_driftSpray.length === 0) { return; }
+    var now = Date.now();
+    var step = (dt || 16.7) / 1000;
+    var ox = camera.getCameraX(), oy = camera.getCameraY();
+    gameContext.save();
+    var w = 0;
+    for (var i = 0; i < _driftSpray.length; i++) {
+        var p = _driftSpray[i];
+        var age = now - p.born;
+        if (age >= p.life) { continue; }
+        _driftSpray[w++] = p;
+        p.x += p.vx * step;
+        p.y += p.vy * step;
+        p.vx *= 0.92; p.vy *= 0.92; // chips bleed speed fast, like spray settling
+        var lifeFrac = age / p.life;
+        gameContext.globalAlpha = 0.75 * (1 - lifeFrac);
+        gameContext.fillStyle = lifeFrac < 0.4 ? "#eafaff" : "#bfeaf7";
+        gameContext.beginPath();
+        gameContext.arc(p.x + ox, p.y + oy, p.size * (1 - lifeFrac * 0.5), 0, 2 * Math.PI);
+        gameContext.fill();
+    }
+    _driftSpray.length = w;
+    gameContext.restore();
+}
 // Map of player id -> the frame generation in which it was last seen targeted.
 // A player is "targeted this frame" iff its stamp === the current generation, so
 // the set is reused across frames (a bumped counter invalidates last frame's
@@ -5732,6 +5814,8 @@ function rebuildTargetedPlayerIds() {
 function drawPlayers(dt) {
     cartSkinAnimTime += (dt || 0) / 1000; // dt is milliseconds; this accumulator is seconds
     rebuildTargetedPlayerIds();
+    // Ice-drift spray sits UNDER every kart so the chips read as kicked-up ground frost.
+    drawDriftSpray(dt);
     // Draw remote players first, then ALL local players (the primary plus any
     // couch co-op slots) on top — so your own karts always read clearly over
     // other players' floating emojis and name labels.
@@ -5800,6 +5884,9 @@ function drawPlayer(player, dt) {
     // skin/colour stays readable on top of the rainbow glow.
     drawStarPowerFx(player);
     drawSpeedFx(player);
+    // Ice drift cue state: eases the counter-steer lean applied to the kart body
+    // below and feeds the shared ice-spray pool (drawn under all karts in drawPlayers).
+    updateDriftCue(player, dt);
     // Draw a halo behind your own kart(s) — the primary plus every couch co-op
     // slot — so you can always find yourself in a crowded pack.
     if (isLocalId(player.id)) {
@@ -5869,6 +5956,25 @@ function drawPlayer(player, dt) {
     // irregular skin silhouette and reads as an unwanted "background". The skin is
     // tinted with the player's colour, so their identity still carries.
     var hasCartSkin = cartSkinPainter(player.cart) != null;
+    // Drift lean: squash the kart slightly about its own centre — narrower along the
+    // travel axis, wider across it — like an edge digging in on a counter-steer. The
+    // transform composes with the absolute screen coords every body draw below uses
+    // (border/sprite/avatar/pattern/skin all squash together). The Powder trail
+    // (the Smooth Operator unlock) makes the lean noticeably more dramatic.
+    var driftLean = player._driftLean || 0;
+    var leaning = driftLean > 0.02;
+    if (leaning) {
+        var leanK = driftLean * (player.trailFx === 'powder' ? 0.16 : 0.09);
+        var lcx = player.x + camera.getCameraX();
+        var lcy = player.y + camera.getCameraY();
+        var lh = player._driftHeading || 0;
+        gameContext.save();
+        gameContext.translate(lcx, lcy);
+        gameContext.rotate(lh);
+        gameContext.scale(1 - leanK, 1 + leanK);
+        gameContext.rotate(-lh);
+        gameContext.translate(-lcx, -lcy);
+    }
     // try/finally so a thrown drawImage (e.g. an undecoded sprite -> InvalidStateError)
     // can't skip the restore() and leak the dimmed/flash alpha onto the rest of the frame.
     try {
@@ -5923,6 +6029,10 @@ function drawPlayer(player, dt) {
             gameContext.restore();
         }
     } finally {
+        // Restores in reverse order of the saves above: lean -> dim -> immune.
+        if (leaning) {
+            gameContext.restore();
+        }
         if (dimKart) {
             gameContext.restore();
         }
@@ -6025,6 +6135,26 @@ function punchChargeColor(frac) {
     return out;
 }
 
+// Frost white -> cyan -> deep ice blue while DRIFT-charging on ice, so a drift
+// wind-up reads at a glance as "carving for grip", not the warm white->orange->red
+// of an attacking haymaker. Same 11-bucket string cache as punchChargeColor.
+var _driftChargeColorCache = [];
+function driftChargeColor(frac) {
+    var key = frac < 0 ? 0 : (frac > 1 ? 10 : Math.round(frac * 10));
+    var cached = _driftChargeColorCache[key];
+    if (cached) { return cached; }
+    var f = key / 10, out;
+    if (f < 0.5) {
+        var t = f / 0.5;               // frost white -> cyan
+        out = "rgb(" + Math.round(235 - 95 * t) + "," + Math.round(250 - 30 * t) + ",255)";
+    } else {
+        var t2 = (f - 0.5) / 0.5;      // cyan -> deep ice blue
+        out = "rgb(" + Math.round(140 - 80 * t2) + "," + Math.round(220 - 60 * t2) + ",255)";
+    }
+    _driftChargeColorCache[key] = out;
+    return out;
+}
+
 // A radial halo around a kart that's winding up a punch. Two roles:
 //  - While CHARGING (player.charge > 0, sent for every player): a growing, brightening
 //    ring so opponents can SEE a haymaker winding up and back off / counter it.
@@ -6076,7 +6206,9 @@ function drawPunchCharge(player) {
     var y = player.y + camera.getCameraY();
     var grow = isCharging ? (0.45 + 0.55 * level) : (0.5 + 0.4 * level);
     var radius = player.radius + 3 + player.radius * 0.6 * grow;
-    var color = exhausted ? "rgb(150,150,150)" : punchChargeColor(level);
+    // A charge held ON ICE is a drift: frost the ring so it never reads as a haymaker.
+    var drifting = isCharging && isDriftingClient(player);
+    var color = exhausted ? "rgb(150,150,150)" : (drifting ? driftChargeColor(level) : punchChargeColor(level));
     gameContext.save();
     gameContext.lineCap = "round";
     // The aura ring — the primary tell, drawn for everyone winding up.
