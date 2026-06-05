@@ -58,7 +58,12 @@ var server = null,
     // then ease back IN over the final IN_FRAC, landing as the gate opens.
     WORLD_ZOOM_GATE_OUT_FRAC = 0.34,
     WORLD_ZOOM_GATE_IN_FRAC = 0.40,
-    worldViewGatedPrev = false, // was last frame gated? (drives the intro snap-to-spawn cut)
+    worldViewGatedPrev = false, // was last frame in the gated STATE? (edge-detects gate entry, camera-toggle-independent)
+    // True only when the camera was ON at the moment the gated state began —
+    // the one frame where the intro's snap cut is hidden (overview scoreboard /
+    // map swap). Toggling the camera off mid-countdown disarms the intro so a
+    // re-enable can never replay the cut with the world visible.
+    worldGatedIntroActive = false,
     // Goal-approach intensity zoom: once the goal is engaged, the zoom cap ramps
     // from WORLD_ZOOM_MAX up to (MAX + BOOST) as the group closes from ENGAGE
     // down to GOAL_FULL world-units — a finish-line punch-in. The framing box
