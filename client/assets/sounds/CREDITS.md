@@ -14,7 +14,9 @@ Attribution as required by the license: crowd sounds by Gregor Quendel (CC-BY 4.
 
 ## Star Power
 
-`starPower.mp3` is an original cue synthesized in-repo with ffmpeg (stacked
-sine partials: an ascending E-major arpeggio E5→G#5→B5→E6 with vibrato +
-echo shimmer tail, limited to -2.3 dBFS peak). No external source; public
-domain / project-owned.
+`starPower.mp3` is an original 5.5s theme synthesized in-repo (Node script:
+additive square-ish partials). Fast bouncy chiptune in A major @168 BPM —
+octave-bounce bass, eighth-note arpeggio lead, offbeat noise hats, feedback
+echo — in the spirit of kart-racer invincibility themes but an original
+composition (no Nintendo material). Runs the star's full duration and resolves
+on the tonic as it wears off. No external source; project-owned.

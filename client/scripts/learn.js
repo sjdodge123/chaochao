@@ -150,7 +150,7 @@
                   detail: "A quick, close-range swipe with no wind-up or aiming: it carves a line through the pack and flings nearby racers away from it, throwing those on each side opposite ways. An instant shove to clear bodies off you or fling a clinging rival off course." },
                 { id: "ability-starpower", name: "Star Power", icon: svg("star-solid.svg"), anim: "starPower",
                   blurb: "A few seconds of glowing invulnerability.",
-                  detail: "Light up in rainbow colours and become untouchable for a few seconds: punches and pucks bounce off, bombs and cuts can't fling you, slowdowns and swaps pass you by — and a blindfold can't blind you. You can still punch everyone else, so plow straight through the pack. The one thing it won't save you from is the ground itself: drive into lava and you're just a very shiny casualty." }
+                  detail: "Light up in rainbow colours and become untouchable for a few seconds: punches and pucks bounce off, bombs and cuts can't fling you, slowdowns and swaps pass you by, a blindfold can't blind you — and even lava can't burn you, so you can shortcut straight across it. You can still punch everyone else, so plow through the pack. Just watch the flashing: when the glow starts blinking the star is wearing off, and lava stops being a road the instant it does." }
             ]
         },
         {

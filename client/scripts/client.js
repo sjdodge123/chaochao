@@ -1231,6 +1231,9 @@ function registerStateHandlers(server) {
 		// overview before the server's async queries return.
 		mapLeaderboardData = null;
 		mapLeaderboardJustPlayed = null;
+		// The round is over: any still-running Star Power theme stops with it
+		// (the cue otherwise runs the star's full duration).
+		stopSound(starPowerSound);
 		currentState = config.stateMap.overview;
 		// Set up the "rate this map" widget for the map JUST played (currentMap is
 		// still the played map here — the next map only loads at the next gate). Reset
