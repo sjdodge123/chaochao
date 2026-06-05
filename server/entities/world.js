@@ -45,25 +45,29 @@ class World extends Rect {
 	}
 	// Dev/testing seam (RANDOM_BOT_COSMETICS, see utils.js): dress a bot in random
 	// cosmetics so a local playtest shows the full skin spread without 9 signed-in
-	// humans. Cart + trail always land (every bot reads as "skinned"); pattern and
-	// border roll independently so the mix varies. Cosmetic ids ride the normal
-	// spawn packet (compressor slots 13-16), so the client needs nothing special.
+	// humans. Slots and their Player fields come straight from the registry
+	// (SLOTS / SLOT_FIELD), so a newly-added slot is dressed automatically: cart +
+	// trail always land (every bot reads as "skinned"), other slots roll their
+	// listed chance (unlisted ones default to a coin flip). Cosmetic ids ride the
+	// normal spawn packet (compressor slots 13-16), so the client needs nothing.
 	dressBotRandomly(bot) {
-		var bySlot = { cart: [], pattern: [], trail: [], border: [] };
-		for (var i = 0; i < skinRegistry.SKINS.length; i++) {
-			var s = skinRegistry.SKINS[i];
-			if (bySlot[s.slot]) {
-				bySlot[s.slot].push(s.id);
+		var chance = { cart: 1, trail: 1, pattern: 0.7, border: 0.5 };
+		for (var i = 0; i < skinRegistry.SLOTS.length; i++) {
+			var slot = skinRegistry.SLOTS[i];
+			var field = skinRegistry.SLOT_FIELD[slot];
+			var odds = (chance[slot] != null) ? chance[slot] : 0.5;
+			if (field == null || Math.random() >= odds) {
+				continue;
 			}
-		}
-		var pick = function (arr) { return arr[Math.floor(Math.random() * arr.length)]; };
-		bot.cart = pick(bySlot.cart);
-		bot.trailFx = pick(bySlot.trail);
-		if (Math.random() < 0.7) {
-			bot.pattern = pick(bySlot.pattern);
-		}
-		if (Math.random() < 0.5) {
-			bot.border = pick(bySlot.border);
+			var ids = [];
+			for (var k = 0; k < skinRegistry.SKINS.length; k++) {
+				if (skinRegistry.SKINS[k].slot === slot) {
+					ids.push(skinRegistry.SKINS[k].id);
+				}
+			}
+			if (ids.length > 0) {
+				bot[field] = utils.pick(ids);
+			}
 		}
 	}
 	spawnPlayerRandomLoc(player) {

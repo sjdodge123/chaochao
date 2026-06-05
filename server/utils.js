@@ -438,6 +438,14 @@ function getRandomInt(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+// Uniform random element from an array (undefined when empty — callers that
+// can't tolerate that should length-guard). The canonical home for the
+// `arr[Math.floor(Math.random() * arr.length)]` pattern repeated around the
+// server (color picker, bot emotes, bot cosmetics).
+exports.pick = function (arr) {
+    return arr[Math.floor(Math.random() * arr.length)];
+};
+
 function angle(originX, originY, targetX, targetY) {
     var dx = originX - targetX;
     var dy = originY - targetY;

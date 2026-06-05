@@ -18,12 +18,12 @@ var ratings = require('./ratings.js');
 var auth = require('./auth.js');
 var progression = require('./progression.js');
 var skinRegistry = require('./skinRegistry.js');
-// Maps a cosmetic slot to the Player field that holds its equipped id. `trail` uses
-// `trailFx` (the EFFECT id) so it never collides with the client's `player.trail`
-// motion-trail object. Also the allow-list of valid slot names for setCosmetic.
+// Maps a cosmetic slot to the Player field that holds its equipped id (single-
+// sourced from the server skin registry — see SLOT_FIELD there for the field
+// naming rationale). Also the allow-list of valid slot names for setCosmetic.
 // `border` is its OWN 4th slot (player.border / selected_border) — a pattern and a border can
 // be equipped at once. Mirrors the client COSMETIC_SLOT_FIELD (skinRegistry.js).
-var COSMETIC_SLOT_FIELD = { cart: 'cart', pattern: 'pattern', trail: 'trailFx', border: 'border' };
+var COSMETIC_SLOT_FIELD = skinRegistry.SLOT_FIELD;
 var mailBoxList = {},
 	identityList = {},
 	roomMailList = {},

@@ -19,6 +19,12 @@
 // column via COSMETIC_SLOT_FIELD / COSMETIC_SLOT_COLUMN) but is its own slot for setCosmetic
 // validation (a border id has slot:'border').
 var SLOTS = ['cart', 'pattern', 'trail', 'border'];
+// Live Player-object field per slot ('trail' stores the EFFECT id in `trailFx`
+// so it never collides with the client's `player.trail` motion object). Single
+// source for everything that writes cosmetics onto a player server-side — the
+// setCosmetic equip path (messenger.js) and the RANDOM_BOT_COSMETICS dev seam
+// (entities/world.js) both consume this; add new slots HERE alongside SLOTS.
+var SLOT_FIELD = { cart: 'cart', pattern: 'pattern', trail: 'trailFx', border: 'border' };
 
 var SKINS = [
     // --- Carts (body shape; tints to player colour) ---
@@ -202,6 +208,7 @@ function currentSeasonalClaims(now) {
 
 module.exports = {
     SLOTS: SLOTS,
+    SLOT_FIELD: SLOT_FIELD,
     SKINS: SKINS,
     getSkin: getSkin,
     getSkinSlot: getSkinSlot,

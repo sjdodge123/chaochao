@@ -132,6 +132,13 @@ function clamp01(t) {
 function lerp(a, b, t) {
     return a + (b - a) * t;
 }
+// Smoothstep: the classic 0..1 cubic with zero slope at both ends (camera
+// blends, gate-intro arc). Clamps t NaN-safely via clamp01, so out-of-range or
+// 0/0 inputs degrade to the nearest endpoint instead of poisoning a transform.
+function smoothstep(t) {
+    t = clamp01(t);
+    return t * t * (3 - 2 * t);
+}
 function easeOutQuad(t) {
     return 1 - (1 - t) * (1 - t);
 }
