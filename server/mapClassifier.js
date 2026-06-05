@@ -110,8 +110,26 @@ function goalCentrality(map, edges, config) {
     return (c < 0) ? 0 : (c > 1 ? 1 : c);
 }
 
-// Resolve a route's voronoiIds back to drawable site points (rounded — these go
-// over the wire to the editor overlay, so keep the payload compact).
+// Midpoint of the boundary cellA shares with the cell whose voronoiId is bId, or
+// null when no shared edge with usable vertices exists.
+function sharedEdgeMidpoint(cellA, bId) {
+    if (cellA == null || !Array.isArray(cellA.halfedges)) { return null; }
+    for (var h = 0; h < cellA.halfedges.length; h++) {
+        var edge = cellA.halfedges[h] && cellA.halfedges[h].edge;
+        if (!edge || !edge.va || !edge.vb) { continue; }
+        if ((edge.lSite && edge.lSite.voronoiId === bId) || (edge.rSite && edge.rSite.voronoiId === bId)) {
+            return { x: Math.round((edge.va.x + edge.vb.x) / 2), y: Math.round((edge.va.y + edge.vb.y) / 2) };
+        }
+    }
+    return null;
+}
+
+// Resolve a route's voronoiIds back to drawable points (rounded — these go over
+// the wire to the editor overlay, so keep the payload compact). The polyline runs
+// centre -> shared-border midpoint -> next centre rather than centre -> centre:
+// Voronoi cells are convex, so each leg provably stays inside its own (safe) cell,
+// where a straight centre-to-centre segment can visually clip across a lava
+// neighbour's polygon even though the route never enters it.
 function pathPoints(map, path) {
     var cells = map.cells, idToIndex = {};
     for (var i = 0; i < cells.length; i++) {
@@ -120,8 +138,11 @@ function pathPoints(map, path) {
     var pts = [];
     for (var p = 0; p < path.length; p++) {
         var ci = idToIndex[path[p]];
-        if (ci != null) {
-            pts.push({ x: Math.round(cells[ci].site.x), y: Math.round(cells[ci].site.y) });
+        if (ci == null) { continue; }
+        pts.push({ x: Math.round(cells[ci].site.x), y: Math.round(cells[ci].site.y) });
+        if (p + 1 < path.length) {
+            var mid = sharedEdgeMidpoint(cells[ci], path[p + 1]);
+            if (mid != null) { pts.push(mid); }
         }
     }
     return pts;
@@ -134,6 +155,7 @@ function pathPoints(map, path) {
 // computed for the scoreMap reply, never at boot.
 function balanceDebug(map, config) {
     var edges = startEdgesOf(map);
+    var lavaId = tileId(config, 'lava');
     var out = { edges: [], goal: null };
     for (var e = 0; e < edges.length; e++) {
         var samples = cellGraph.edgeSampleOrigins(edges[e]);
@@ -142,7 +164,15 @@ function balanceDebug(map, config) {
             var r = cellGraph.findPathToNearestGoal(map, samples[s]);
             if (r != null) {
                 var t = cellGraph.estimatePathTime(map, r.path);
-                if (t > 0) { routes.push({ time: t, path: r.path }); }
+                if (t > 0) {
+                    routes.push({
+                        time: t, path: r.path, origin: samples[s],
+                        // Dijkstra allows SEEDING from a lava cell (so a gate fronted
+                        // by lava still reports reachability), but a player can't
+                        // actually launch through lava — flag those for display.
+                        safeSeed: map.cells[r.startIndex] != null && map.cells[r.startIndex].id !== lavaId
+                    });
+                }
             }
         }
         if (routes.length === 0) {
@@ -151,12 +181,20 @@ function balanceDebug(map, config) {
             out.edges.push({ edge: edges[e], par: 0, points: [] });
             continue;
         }
-        routes.sort(function (a, b) { return a.time - b.time; });
-        var median = routes[Math.floor(routes.length / 2)];
+        // Draw a route a player could really take: only fall back to a lava-seeded
+        // one when the whole gate front is lava (a problem worth seeing anyway).
+        var pool = routes.filter(function (r) { return r.safeSeed; });
+        if (pool.length === 0) { pool = routes; }
+        pool.sort(function (a, b) { return a.time - b.time; });
+        var median = pool[Math.floor(pool.length / 2)];
+        // Lead the polyline with the route's actual gate-side origin, so the line
+        // visibly launches from the start gate instead of the first cell's centre.
+        var pts = pathPoints(map, median.path);
+        pts.unshift({ x: Math.round(median.origin.x), y: Math.round(median.origin.y) });
         out.edges.push({
             edge: edges[e],
             par: Math.round(median.time * 10) / 10,
-            points: pathPoints(map, median.path)
+            points: pts
         });
     }
     var g = goalCentroid(map, config);
