@@ -23,3 +23,11 @@ of kart-racer invincibility themes but an original composition (no Nintendo
 material). Runs the star's full duration and resolves on the tonic as it wears
 off; played with ±5% per-use pitch jitter.
 No external source; project-owned.
+
+## Background music
+
+`8bit-action-1.mp3`, `8bit-action-3.mp3`, and `8bit-action-6.mp3` are from the
+**"8Bit Action"** series by **Bogart VGM**.
+
+- Changes: re-encoded to 128 kbps MP3, metadata stripped.
+- License/source URL: TODO — confirm the license terms before shipping.

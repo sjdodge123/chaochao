@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- Three new soundtracks join the music rotation: two high-energy chiptune tracks during races, and one chill chiptune track for calmer moments (Bogart VGM's "8Bit Action" series).
 
 ## v0.30.0 — 2026-06-05
 
