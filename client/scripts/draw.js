@@ -3971,7 +3971,10 @@ function focusWorldPoints() {
 // goal itself stays framed — the close-up only lands once everyone framed has
 // converged on it. Centre is kept separate from the zoom so a transition can
 // ramp only the zoom (players can't slide out of frame).
-function computeFocusedView(dt) {
+// gatedNow is computed ONCE in computeWorldViewTarget and threaded through so the
+// gated behaviors here (goal framing suppressed, look-ahead zeroed) can never
+// drift out of sync with the gated handling in updateWorldCamera.
+function computeFocusedView(dt, gatedNow) {
     var wholeMap = { cx: LOGICAL_WIDTH / 2, cy: LOGICAL_HEIGHT / 2, scale: 1 };
     var pts = focusWorldPoints();
     if (pts.length === 0) {
@@ -3996,8 +3999,13 @@ function computeFocusedView(dt) {
     // gate-countdown ramp follows the target directly (a=1): a binary engage
     // latch made the target scale STEP the instant the goal popped in/out of
     // the box, which read as a sudden zoom jerk in the gated view.
+    // Suppressed entirely while GATED: the intro arc's opening close-up (and its
+    // snap) consume this view directly, and on the many maps whose spawn gate
+    // sits within RELEASE of a goal the blend would offset/widen what is meant
+    // to be a tight shot of YOUR kart. The goal blends back in smoothly once
+    // racing starts (the racing path's exponential smoothing absorbs it).
     var w = 0;
-    if (ng) {
+    if (ng && !gatedNow) {
         w = 1 - (nd - WORLD_ZOOM_ENGAGE) / (WORLD_ZOOM_RELEASE - WORLD_ZOOM_ENGAGE);
         w = Math.max(0, Math.min(1, w));
         w = w * w * (3 - 2 * w);
@@ -4007,9 +4015,11 @@ function computeFocusedView(dt) {
     // Smoothstepped (and 0 at/beyond ENGAGE, so it's continuous with w), and
     // the goal + every player stay inside the framing box below, so the fit
     // only reaches the boosted cap once everyone has actually converged on the
-    // goal — the last stretch reads as a lunge.
+    // goal — the last stretch reads as a lunge. Suppressed while gated for the
+    // same reason as the blend above (also keeps the gated ease-in's peak rate
+    // comfortably under WORLD_ZOOM_GATE_RATE — boosted targets never reach it).
     var effMax = WORLD_ZOOM_MAX;
-    if (ng) {
+    if (ng && !gatedNow) {
         var gt = (WORLD_ZOOM_ENGAGE - nd) / (WORLD_ZOOM_ENGAGE - WORLD_ZOOM_GOAL_FULL);
         gt = Math.max(0, Math.min(1, gt));
         effMax += WORLD_ZOOM_GOAL_BOOST * gt * gt * (3 - 2 * gt);
@@ -4025,7 +4035,6 @@ function computeFocusedView(dt) {
     // lobby -> first-race path. Players just rev in the pen anyway, and the
     // lead still builds naturally from zero off the line.
     var la = 1 - Math.exp(-(dt || 16) / WORLD_ZOOM_LEAD_TAU);
-    var gatedNow = (currentState === config.stateMap.gated);
     var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     for (var i = 0; i < pts.length; i++) {
         var tx = 0, ty = 0;
@@ -4109,12 +4118,13 @@ function computeWorldViewTarget(dt) {
     // whenever we're not gated makes the intro play on EVERY entry into the gate
     // (first race out of the lobby, and later rounds out of overview alike).
     // Frame-dt (already clamped) not wall-clock, so a backgrounded tab pauses it.
-    if (currentState === config.stateMap.gated) {
+    var gatedNow = (currentState === config.stateMap.gated);
+    if (gatedNow) {
         worldViewFocusedElapsed += (dt || 16);
     } else {
         worldViewFocusedElapsed = 0;
     }
-    var focusedView = computeFocusedView(dt);
+    var focusedView = computeFocusedView(dt, gatedNow);
 
     // During the gate countdown, run a slow, eased camera arc timed to the
     // countdown — anchored on YOUR SPAWN, not the map centre: open tight on the
@@ -4127,7 +4137,16 @@ function computeWorldViewTarget(dt) {
     // player can never slide out of frame mid-transition. (The very first gated
     // frame snaps the camera to this close-up in updateWorldCamera — the world
     // isn't visible during the overview scoreboard, so the cut is invisible.)
-    if (currentState === config.stateMap.gated) {
+    if (gatedNow) {
+        // The cinematic only runs when the camera actually witnessed the gate
+        // ENTRY (worldGatedIntroActive, managed in updateWorldCamera). If the
+        // dynamic camera was toggled on mid-countdown there is no hidden frame
+        // to cut on — replaying the arc would hard-CUT to the close-up with the
+        // world fully visible — so just frame the karts like racing and let the
+        // exponential smoothing glide there.
+        if (!worldGatedIntroActive) {
+            return clampViewToWorld(focusedView.cx, focusedView.cy, focusedView.scale);
+        }
         var rest = ((config.gatedWaitTime || 9) * 1000) - WORLD_ZOOM_HOLD_MS;
         var tt = worldViewFocusedElapsed - WORLD_ZOOM_HOLD_MS;
         var e = 1; // hold phase (and degenerate configs): stay tight on the spawn
@@ -4160,19 +4179,32 @@ function updateWorldCamera(dt) {
     // Clamp the frame delta so a long stall / tab-refocus catch-up frame can't
     // snap the camera (drives both the gate ramp and the exponential smoothing).
     var cdt = Math.min(dt || 16, 100);
+    // --- gate-intro lifecycle (BEFORE the target is computed, so the arc-vs-
+    // plain-focus choice inside computeWorldViewTarget sees fresh flags). The
+    // STATE transition is tracked independently of the camera toggle: the intro
+    // (snap cut + a=1 arc) only arms when the camera was already on at the
+    // moment the gated state began — that's the frame hidden behind the
+    // overview scoreboard / lobby->arena map swap, the only frame where a hard
+    // cut is invisible. Toggling the camera off mid-countdown disarms it for
+    // the rest of that countdown, so re-enabling can never re-fire the cut
+    // with the world on screen (it glides via the smoothing instead).
+    var stateGated = (typeof config !== "undefined" && config && currentState === config.stateMap.gated);
+    var freshGate = stateGated && !worldViewGatedPrev;
+    worldViewGatedPrev = stateGated;
+    if (freshGate) {
+        worldGatedIntroActive = cameraZoomEnabled;
+    } else if (!stateGated || !cameraZoomEnabled) {
+        worldGatedIntroActive = false;
+    }
+    var followArc = (cameraZoomEnabled && stateGated && worldGatedIntroActive);
     var target = computeWorldViewTarget(cdt);
     if (worldView == null) {
+        // The init IS the snap if we're born into gated (target is already the
+        // arc's opening close-up).
         worldView = { cx: target.cx, cy: target.cy, scale: target.scale };
-        // The init IS the snap if we're born into gated — record it so the
-        // snap-to-spawn cut below doesn't re-fire on the next frame.
-        worldViewGatedPrev = (cameraZoomEnabled && typeof config !== "undefined" && config && currentState === config.stateMap.gated);
         return;
     }
-    // During the gate countdown the target is already a precise, eased time-ramp,
-    // so follow it directly (a=1) for the arc to finish exactly as the gate opens.
-    // Everywhere else, smooth exponentially for natural player/goal tracking.
-    var gatedNow = (cameraZoomEnabled && typeof config !== "undefined" && config && currentState === config.stateMap.gated);
-    if (gatedNow && !worldViewGatedPrev) {
+    if (freshGate && followArc) {
         // First gated frame: CUT straight to the spawn close-up the arc opens
         // on. Invisible — the world isn't drawn during the overview scoreboard,
         // and the first race swaps the whole map (lobby -> arena) on this frame
@@ -4180,16 +4212,18 @@ function updateWorldCamera(dt) {
         // wherever the previous state left it before the pan-out could begin.
         worldView.cx = target.cx; worldView.cy = target.cy; worldView.scale = target.scale;
     }
-    worldViewGatedPrev = gatedNow;
-    var a = gatedNow ? 1 : (1 - Math.exp(-cdt / WORLD_ZOOM_TAU));
+    // While the intro arc runs, the target is a precise, eased time-ramp — follow
+    // it directly (a=1) so it finishes exactly as the gate opens. Everywhere else
+    // (racing, lobby, and a mid-countdown camera re-enable) smooth exponentially.
+    var a = followArc ? 1 : (1 - Math.exp(-cdt / WORLD_ZOOM_TAU));
     worldView.cx += (target.cx - worldView.cx) * a;
     worldView.cy += (target.cy - worldView.cy) * a;
-    if (gatedNow) {
+    if (followArc) {
         // Direct follow, but rate-limited: the ramp itself moves the scale far
         // slower than this cap, so the cap is invisible in the normal arc — it
         // only bites when the FOCUSED target moves abruptly mid-countdown (a
-        // player sliding fast across the goal blend band, a death changing the
-        // framed group), turning what was a visible zoom jerk into a quick glide.
+        // death changing the framed group), turning what would be a visible
+        // zoom jerk into a quick glide.
         var ds = target.scale - worldView.scale;
         var maxStep = WORLD_ZOOM_GATE_RATE * cdt / 1000;
         worldView.scale += Math.max(-maxStep, Math.min(maxStep, ds));
