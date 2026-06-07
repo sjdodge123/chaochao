@@ -219,6 +219,10 @@ nav .auth-control ~ .theme-toggle {
     display: flex;
     align-items: center;
     gap: 12px;
+    /* Size to content, not to the shrink-to-fit half-viewport that left:50% + auto
+       width would impose (which wraps longer messages mid-line); max-width still
+       caps it on narrow screens, where it wraps gracefully. */
+    width: max-content;
     max-width: 92vw;
     padding: 12px 14px;
     border-radius: 10px;

@@ -320,11 +320,13 @@
         catch (e) { /* private mode — session flag still suppresses */ }
     }
     function nudgeMessage(opts) {
+        // `unlockCount` spans every cosmetic slot (carts / patterns / trails /
+        // borders), so it's "cosmetics", not "skins". Guests start with none.
         var n = opts && opts.unlockCount;
         if (typeof n === 'number' && n > 0) {
-            return 'Sign in to start earning XP and unlock ' + n + ' skins as you level up.';
+            return 'Sign in to start earning XP and unlock ' + n + ' cosmetics.';
         }
-        return 'Sign in to save your progress and earn skins.';
+        return 'Sign in to save your progress and earn cosmetics.';
     }
     function buildToast(message) {
         if (toastEl || !document.body) { return; }
