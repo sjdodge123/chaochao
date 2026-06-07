@@ -296,53 +296,91 @@
     }
 
     // --- Scoreboard login nudge ---------------------------------------------
-    // A transient, dismissible toast reminding a NOT-signed-in player to log in
-    // to save progress and earn skins. Fired from the game-over/scoreboard
-    // screen (client.js). No-op when auth is unavailable or already signed in.
-    var toastEl = null, toastTimer = null;
-    function buildToast() {
+    // A dismissible toast reminding a NOT-signed-in player to log in to start
+    // earning XP and skins. Fired from the game-over/scoreboard screen (client.js).
+    // No-op when auth is unavailable or already signed in.
+    //
+    // Redesigned after launch data showed ~5% CTR (22 shown / 1 click): the old
+    // toast auto-hid after 9s (often before the player read the busy scoreboard)
+    // and re-fired on EVERY game over (banner blindness). Now it (1) persists until
+    // the player acts or dismisses — client.js hides it on race start so it never
+    // covers gameplay, (2) leads with a concrete value prop (how many skins are up
+    // for grabs), and (3) snoozes for a few days once dismissed or acted on, so it
+    // stops nagging.
+    var NUDGE_SNOOZE_KEY = 'chaochao.nudgeSnoozeUntil';
+    var NUDGE_SNOOZE_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
+    var toastEl = null, nudgeVisible = false, nudgeDismissed = false;
+    function nudgeSnoozed() {
+        try { return parseInt(window.localStorage.getItem(NUDGE_SNOOZE_KEY) || '0', 10) > Date.now(); }
+        catch (e) { return false; }
+    }
+    function snoozeNudge() {
+        nudgeDismissed = true; // also blocks re-show for the rest of this session
+        try { window.localStorage.setItem(NUDGE_SNOOZE_KEY, String(Date.now() + NUDGE_SNOOZE_MS)); }
+        catch (e) { /* private mode — session flag still suppresses */ }
+    }
+    function nudgeMessage(opts) {
+        var n = opts && opts.unlockCount;
+        if (typeof n === 'number' && n > 0) {
+            return 'Sign in to start earning XP and unlock ' + n + ' skins as you level up.';
+        }
+        return 'Sign in to save your progress and earn skins.';
+    }
+    function buildToast(message) {
         if (toastEl || !document.body) { return; }
         toastEl = document.createElement('div');
         toastEl.className = 'cc-toast';
         toastEl.setAttribute('role', 'status');
         toastEl.innerHTML =
-            '<span class="cc-toast-msg">Sign in to save your progress and earn skins.</span>' +
+            '<span class="cc-toast-msg"></span>' +
             '<button class="cc-toast-action" type="button">Log in</button>' +
             '<button class="cc-toast-close" type="button" aria-label="Dismiss">×</button>';
+        toastEl.querySelector('.cc-toast-msg').textContent = message; // numeric count, but textContent keeps it XSS-safe
         document.body.appendChild(toastEl);
         toastEl.querySelector('.cc-toast-action').addEventListener('click', function () {
             // Nudge funnel numerator (denominator = login_nudge_shown); the
-            // conversion itself lands as `login` after the OAuth round-trip.
+            // conversion itself lands as `login` (source=nudge) after the OAuth round-trip.
             if (typeof trackEvent === 'function') { trackEvent('login_nudge_clicked'); }
             // Attribute the upcoming signIn() to the nudge — the action button just
             // opens the navbar popover, whose provider buttons call signIn() directly.
             markSignInSource('nudge');
+            snoozeNudge(); // acted on — don't re-nag while the OAuth round-trip plays out
             hideToast();
             var login = document.getElementById('authLogin');
             if (login) { login.click(); } // open the navbar sign-in popover
         });
-        toastEl.querySelector('.cc-toast-close').addEventListener('click', hideToast);
+        toastEl.querySelector('.cc-toast-close').addEventListener('click', function () {
+            snoozeNudge(); // explicit dismissal — snooze across sessions
+            hideToast();
+        });
     }
     function hideToast() {
         if (toastEl) { toastEl.classList.remove('visible'); }
-        if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+        nudgeVisible = false;
     }
-    function showLoginNudge() {
-        if (!sb || currentUser) { return; } // only signed-out players, auth on
-        buildToast();
+    function showLoginNudge(opts) {
+        if (!sb || currentUser) { return; }               // signed-out players only, auth on
+        if (nudgeDismissed || nudgeSnoozed()) { return; }  // respect a recent dismiss/login
+        if (nudgeVisible) { return; }                      // already up — don't double-count the show
+        buildToast(nudgeMessage(opts));
         if (!toastEl) { return; }
+        // First open caches the message; later openings still need their text refreshed
+        // if the count changed (e.g. unlocks added mid-session).
+        var msgEl = toastEl.querySelector('.cc-toast-msg');
+        if (msgEl) { msgEl.textContent = nudgeMessage(opts); }
         toastEl.classList.add('visible');
-        // Nudge funnel denominator (clicked/shown = nudge CTR; login/shown = the
-        // guest -> registered conversion rate the nudge actually drives).
+        nudgeVisible = true;
+        // Funnel denominator (clicked/shown = nudge CTR; login[source=nudge]/shown = the
+        // guest -> registered conversion the nudge actually drives). Persistent now;
+        // client.js hideLoginNudge() clears it at race start so it can't cover the game.
         if (typeof trackEvent === 'function') { trackEvent('login_nudge_shown'); }
-        if (toastTimer) { clearTimeout(toastTimer); }
-        toastTimer = setTimeout(hideToast, 9000);
     }
 
     window.chaochaoAuth = {
         ready: ready,
         available: !!sb,   // Supabase configured + CDN loaded (auth actually usable)
         showLoginNudge: showLoginNudge,
+        hideLoginNudge: hideToast, // clear the nudge without dismissing it (e.g. on race start)
         deviceId: deviceId,
         getHandshake: getHandshake,
         getProfile: getProfile,

@@ -1177,6 +1177,12 @@ function registerStateHandlers(server) {
 		// Stamp the gate-release moment so the start line can flash green as it fades.
 		raceStartTime = Date.now();
 		currentState = config.stateMap.racing;
+		// Clear the scoreboard login nudge (if up) so the persistent toast can never
+		// cover live gameplay. Not a dismissal — it re-shows on the next scoreboard
+		// until the player acts or dismisses it.
+		if (window.chaochaoAuth && typeof window.chaochaoAuth.hideLoginNudge === "function") {
+			window.chaochaoAuth.hideLoginNudge();
+		}
 		// Fires once per round (racing state is re-entered each round), so this is a
 		// round-start signal. `players` counts humans only (clientList = room's
 		// client roster, excludes bots); `bots` counts AI fill via the spawn-packet
@@ -1377,10 +1383,15 @@ function registerStateHandlers(server) {
 			matchEndParams.duration_seconds = Math.round((Date.now() - matchStartedAt) / 1000);
 		}
 		trackEvent('match_end', matchEndParams);
-		// Nudge signed-out players to log in (save progress / earn skins). No-op
-		// when auth is off or already signed in. Primary screen only.
+		// Nudge signed-out players to log in (start earning XP / skins). No-op
+		// when auth is off or already signed in. Primary screen only. Pass the
+		// count of unlockable cosmetics so the toast can lead with a concrete
+		// value prop (guests have no server XP/level to quote — myProgression is
+		// null for them — so the opportunity count is the honest hook).
 		if (window.chaochaoAuth && typeof window.chaochaoAuth.showLoginNudge === "function") {
-			window.chaochaoAuth.showLoginNudge();
+			var unlockableSkins = (typeof COSMETIC_OPTIONS !== "undefined" && COSMETIC_OPTIONS)
+				? COSMETIC_OPTIONS.filter(function (o) { return o.id != null; }).length : 0;
+			window.chaochaoAuth.showLoginNudge({ unlockCount: unlockableSkins });
 		}
 		// Monetization: arm the between-matches interstitial. The ad is intentionally
 		// NOT shown here — it runs at the gameOver -> lobby edge (see the startLobby
