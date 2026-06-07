@@ -679,11 +679,21 @@ function registerConnectionHandlers(server) {
 		window.location.href = "./join.html?notfound=1";
 	});
 
-	server.on("serverKick", function () {
+	server.on("serverKick", function (payload) {
 		debugLog("serverKick received -- being booted");
 		// Engagement signal: how often players idle out (AFK kick) vs leave on
 		// their own. Fired before teardown so it can't be skipped by navigation.
-		trackEvent('server_kick');
+		// `reason` defaults to 'afk' (the server's only kick path today is
+		// Room.checkAFK); a future server payload {reason} overrides it. `state`
+		// separates a benign lobby idle-out from a player who went AFK mid-race.
+		var kickReason = (payload && typeof payload === "object" && payload.reason) || "afk";
+		var kickState = "unknown";
+		if (typeof config !== "undefined" && config && config.stateMap && currentState != null) {
+			for (var sName in config.stateMap) {
+				if (config.stateMap[sName] === currentState) { kickState = sName; break; }
+			}
+		}
+		trackEvent('server_kick', { reason: kickReason, state: kickState });
 		// Per-slot teardown (§6.17): drop the primary slot. With no other local
 		// players this disconnects and navigates exactly as before (N=1); with pad
 		// players still in the game it fails over to one of them instead of ending
