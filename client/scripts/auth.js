@@ -77,6 +77,16 @@
     // first sight, and a stale one (player bailed at the OAuth screen and came
     // back later) is swept by a short timer below so it can't mis-fire days later.
     var SIGNIN_PENDING_KEY = 'chaochao.signInPending';
+    // Set when the player launches sign-in from the scoreboard login nudge, so the
+    // resulting `login` (which lands a full page-load later, post-OAuth) can be
+    // attributed to the nudge vs the navbar popover. Self-expires so an abandoned
+    // nudge can't mis-attribute a much later, unrelated navbar sign-in.
+    var pendingSignInSource = null, pendingSignInSourceTimer = null;
+    function markSignInSource(source) {
+        pendingSignInSource = source;
+        if (pendingSignInSourceTimer) { clearTimeout(pendingSignInSourceTimer); }
+        pendingSignInSourceTimer = setTimeout(function () { pendingSignInSource = null; }, 30000);
+    }
     function consumeSignInPending(user) {
         if (!user) { return; }
         var pending = null;
@@ -84,9 +94,18 @@
             pending = window.localStorage.getItem(SIGNIN_PENDING_KEY);
             if (pending) { window.localStorage.removeItem(SIGNIN_PENDING_KEY); }
         } catch (e) { /* storage unavailable */ }
-        if (pending && typeof trackEvent === 'function') {
-            // GA4's recommended sign-in event name; `method` = google | discord.
-            trackEvent('login', { method: pending });
+        if (!pending) { return; }
+        // Stamps written since the source split are JSON {provider, source}; older
+        // ones were a bare provider string. Tolerate both.
+        var provider = pending, source = 'navbar';
+        if (pending.charAt(0) === '{') {
+            try { var parsed = JSON.parse(pending); provider = parsed.provider || null; source = parsed.source || 'navbar'; }
+            catch (e) { provider = null; }
+        }
+        if (provider && typeof trackEvent === 'function') {
+            // GA4's recommended sign-in event name; `method` = google | discord,
+            // `source` = nudge | navbar (which entry point actually converted).
+            trackEvent('login', { method: provider, source: source });
         }
     }
     // Sweep a stale pending stamp: if no session showed up shortly after load,
@@ -135,9 +154,13 @@
             console.log('[auth] sign-in unavailable (auth disabled).');
             return;
         }
-        // Stamp the provider so the post-redirect load can fire the GA `login`
-        // conversion (see consumeSignInPending above).
-        try { window.localStorage.setItem(SIGNIN_PENDING_KEY, provider); } catch (e) { /* ignore */ }
+        // Stamp the provider (and which entry point launched this) so the
+        // post-redirect load can fire the GA `login` conversion with attribution
+        // (see consumeSignInPending above). Default source = navbar popover.
+        var source = pendingSignInSource || 'navbar';
+        pendingSignInSource = null;
+        if (pendingSignInSourceTimer) { clearTimeout(pendingSignInSourceTimer); pendingSignInSourceTimer = null; }
+        try { window.localStorage.setItem(SIGNIN_PENDING_KEY, JSON.stringify({ provider: provider, source: source })); } catch (e) { /* ignore */ }
         // Redirect back to the current page; supabase-js completes the session
         // from the URL on return, then a fresh socket handshake carries the token.
         sb.auth.signInWithOAuth({
@@ -291,6 +314,9 @@
             // Nudge funnel numerator (denominator = login_nudge_shown); the
             // conversion itself lands as `login` after the OAuth round-trip.
             if (typeof trackEvent === 'function') { trackEvent('login_nudge_clicked'); }
+            // Attribute the upcoming signIn() to the nudge — the action button just
+            // opens the navbar popover, whose provider buttons call signIn() directly.
+            markSignInSource('nudge');
             hideToast();
             var login = document.getElementById('authLogin');
             if (login) { login.click(); } // open the navbar sign-in popover
