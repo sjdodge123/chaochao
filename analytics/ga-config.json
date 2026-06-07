@@ -78,19 +78,19 @@
       "parameterName": "source",
       "displayName": "Login Source",
       "scope": "EVENT",
-      "description": "Which entry point launched the sign-in on the login event: nudge (scoreboard login nudge) | navbar (header popover). Measures whether the nudge actually drives conversions."
+      "description": "Sign-in entry point on the login event: nudge (scoreboard nudge) | navbar (header popover). Shows whether the nudge drives conversions."
     },
     {
       "parameterName": "state",
       "displayName": "Game State",
       "scope": "EVENT",
-      "description": "Game state the player was in when match_abandon or server_kick fired: waiting | lobby | overview | gated | racing | collapsing | gameOver. Separates a benign lobby idle-out from a mid-race AFK kick."
+      "description": "Game state on match_abandon / server_kick (gated | racing | collapsing | overview | lobby | waiting | gameOver). Idle-out vs mid-race kick."
     },
     {
       "parameterName": "reason",
       "displayName": "Disconnect Reason",
       "scope": "EVENT",
-      "description": "Close/kick reason: socket.io close reason on disconnect/connect_error (transport close, ping timeout, ...) and the kick cause on server_kick (afk)."
+      "description": "Close/kick reason: socket.io close on disconnect/connect_error (transport close, ping timeout, ...), or the server_kick cause (afk)."
     },
     {
       "parameterName": "auth_state",
