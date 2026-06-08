@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.30.2 — 2026-06-08
+
 ### General
 
 - You can now DRIFT on ice: hold your punch charge while sliding and your kart digs in — you slow down a touch and get real steering control back. Your charge ring frosts over icy blue, frost spray kicks up behind you, your kart visibly leans into the carve, and you hear the skid hiss (nearby rivals' drifts too), so a drift never reads as a wind-up punch.
