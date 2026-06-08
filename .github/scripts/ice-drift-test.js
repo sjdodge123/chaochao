@@ -17,7 +17,6 @@ const game = require(path.join(repoRoot, 'server', 'game.js'));
 const config = require(path.join(repoRoot, 'server', 'config.json'));
 const mapFormat = require(path.join(repoRoot, 'server', 'mapFormat.js'));
 const progression = require(path.join(repoRoot, 'server', 'progression.js'));
-const { Punch } = require(path.join(repoRoot, 'server', 'entities', 'punch.js'));
 
 const RACING = config.stateMap.racing;
 const ICE = config.tileMap.ice;
