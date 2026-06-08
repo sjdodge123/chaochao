@@ -12,6 +12,8 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ### General
 
+- New "Default" map playlist — now the lobby default. It plays mostly Featured maps but rolls a wildcard each round, so about 1 in 5 races pulls in a community map for variety. The plain "Featured" playlist (Featured only) is still there if you want the curated mix with no surprises.
+
 - AI racers (and the editor's balance-check routes) no longer try to thread pin-point gaps between cells that a kart physically can't fit through — those count as walls now, and tight-but-passable squeezes are only taken when no wider lane exists. Maps whose only entrance really is a pin-point now correctly read as having an unreachable goal.
 
 ### Map editor

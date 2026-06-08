@@ -75,9 +75,10 @@
         "blandnessMax": 70,
         "goalCentralityMax": 30
     },
-    "defaultPlaylist": "featured",
+    "defaultPlaylist": "default",
     "playlists": [
-        { "id": "featured", "name": "Featured", "desc": "Balanced, fair maps — the default mix", "filter": { "tier": "featured" } },
+        { "id": "default", "name": "Default", "desc": "Mostly featured, with the odd wildcard", "filter": {}, "wildcardChance": 0.2 },
+        { "id": "featured", "name": "Featured", "desc": "Balanced, fair maps only", "filter": { "tier": "featured" } },
         { "id": "all", "name": "Everything", "desc": "Every map in rotation", "filter": {} },
         { "id": "sprint", "name": "Quick Sprints", "desc": "Short and snappy", "filter": { "length": "sprint" } },
         { "id": "marathon", "name": "Marathon", "desc": "The long haul", "filter": { "length": "marathon" } },
