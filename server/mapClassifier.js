@@ -300,17 +300,22 @@ function edgeParTimes(map, config) {
                 }
             }
         }
-        // Prefer routes a player could really take: only fall back to lava-seeded
-        // ones when the whole gate front is lava.
-        var usable = routes.filter(function (x) { return x.safeSeed; });
-        if (usable.length === 0) { usable = routes; }
-        // `times` (every sample) drives fairness: how spread the spawn-to-goal times
-        // are across the gate. `draw` is up to nDraw routes spread across the gate's
-        // WIDTH (sample order) so the overlay shows the fan of real start points.
-        var times = usable.map(function (x) { return x.time; });
-        var sortedT = times.slice().sort(function (a, b) { return a - b; });
-        var par = sortedT.length ? sortedT[Math.floor(sortedT.length / 2)] : 0;
-        result.push({ edge: edges[e], par: par, times: times, draw: spreadPick(usable, nDraw) });
+        // FAIRNESS spread (`times`) counts EVERY routable sample — including ones
+        // that launch onto lava (safeSeed=false). Players spawn uniformly across
+        // the whole gate (Gate.getSafeLoc), so a lava-front start is a real, slower
+        // spawn whose time belongs in the spread (Codex review P2: don't silently
+        // drop unsafe spawns). Samples with NO route are deliberately excluded: the
+        // nearest-cell test reads an empty/lava sliver at the gate lip as "dead"
+        // even though a real player just drives off it — committed playable maps
+        // show 70-80% such false nulls — and a fully-walled gate is already a
+        // hard-fail via reachableFromEdge. DRAW/`par` prefer safe-seeded routes so
+        // the fanned lines stay the ones a player would actually take.
+        var safe = routes.filter(function (x) { return x.safeSeed; });
+        var drawPool = safe.length ? safe : routes;
+        var times = routes.map(function (x) { return x.time; });
+        var drawTimes = drawPool.map(function (x) { return x.time; }).sort(function (a, b) { return a - b; });
+        var par = drawTimes.length ? drawTimes[Math.floor(drawTimes.length / 2)] : 0;
+        result.push({ edge: edges[e], par: par, times: times, draw: spreadPick(drawPool, nDraw) });
     }
     return { edges: result, avoid: avoid };
 }
