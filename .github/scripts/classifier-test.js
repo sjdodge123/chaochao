@@ -24,7 +24,7 @@ function fail(msg) { failures++; console.log('::error::' + msg); }
 const maps = utils.loadMaps().filter(function (m) { return !m.lobbyOnly; });
 if (maps.length === 0) { fail('no race maps loaded'); }
 
-const TRAITS = ['ice', 'lava', 'bumper', 'ability', 'pure'];
+const TRAITS = ['ice', 'lava', 'bumper', 'ability', 'standard'];
 const LENGTHS = ['sprint', 'standard', 'marathon'];
 const TIERS = ['featured', 'community'];
 
