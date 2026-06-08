@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.30.3 — 2026-06-08
+
 ### General
 
 - New "Default" map playlist — now the lobby default. It plays mostly Featured maps but rolls a wildcard each round, so about 1 in 5 races pulls in a community map for variety. The plain "Featured" playlist (Featured only) is still there if you want the curated mix with no surprises.
