@@ -280,6 +280,7 @@ function edgeParTimes(map, config) {
     var lavaId = tileId(config, 'lava');
     var avoid = hazardAvoidance(map, config);
     var routeOpts = avoid.penalty ? { penaltySet: avoid.penalty, penaltyMult: HAZARD_PATH_PENALTY } : undefined;
+    var nDraw = bal(config, 'fairnessRoutesPerEdge', 4);
     var result = [];
     for (var e = 0; e < edges.length; e++) {
         var samples = cellGraph.edgeSampleOrigins(edges[e]);
@@ -299,18 +300,32 @@ function edgeParTimes(map, config) {
                 }
             }
         }
-        var route = null;
-        if (routes.length > 0) {
-            // Prefer a route a player could really take: only fall back to a
-            // lava-seeded one when the whole gate front is lava.
-            var pool = routes.filter(function (x) { return x.safeSeed; });
-            if (pool.length === 0) { pool = routes; }
-            pool.sort(function (a, b) { return a.time - b.time; });
-            route = pool[Math.floor(pool.length / 2)];
-        }
-        result.push({ edge: edges[e], par: route ? route.time : 0, route: route });
+        // Prefer routes a player could really take: only fall back to lava-seeded
+        // ones when the whole gate front is lava.
+        var usable = routes.filter(function (x) { return x.safeSeed; });
+        if (usable.length === 0) { usable = routes; }
+        // `times` (every sample) drives fairness: how spread the spawn-to-goal times
+        // are across the gate. `draw` is up to nDraw routes spread across the gate's
+        // WIDTH (sample order) so the overlay shows the fan of real start points.
+        var times = usable.map(function (x) { return x.time; });
+        var sortedT = times.slice().sort(function (a, b) { return a - b; });
+        var par = sortedT.length ? sortedT[Math.floor(sortedT.length / 2)] : 0;
+        result.push({ edge: edges[e], par: par, times: times, draw: spreadPick(usable, nDraw) });
     }
     return { edges: result, avoid: avoid };
+}
+
+// Up to n items evenly spaced across the list by INDEX (gate position), always
+// including the first and last so the fan spans the whole gate.
+function spreadPick(list, n) {
+    if (!Array.isArray(list) || list.length <= n) { return (list || []).slice(); }
+    if (n <= 1) { return [list[0]]; }
+    var out = [], seen = {};
+    for (var i = 0; i < n; i++) {
+        var idx = Math.round(i * (list.length - 1) / (n - 1));
+        if (!seen[idx]) { seen[idx] = true; out.push(list[idx]); }
+    }
+    return out;
 }
 
 // Overlay geometry for the editor's "looks unbalanced" nudge: the representative
@@ -329,22 +344,30 @@ function balanceDebug(map, config) {
     var out = { edges: [], goal: null };
     for (var e = 0; e < ept.edges.length; e++) {
         var entry = ept.edges[e];
-        if (entry.route == null) {
+        if (!entry.draw || entry.draw.length === 0) {
             // No reachable route from this edge (matches a hard-fail) — still report
             // the edge so the overlay can flag it instead of silently omitting it.
-            out.edges.push({ edge: entry.edge, par: 0, points: [] });
+            out.edges.push({ edge: entry.edge, par: 0, routes: [] });
             continue;
         }
-        // Lead the polyline with the route's actual gate-side origin (so the line
-        // visibly launches from the start gate), then straighten the cell-centre
-        // dog-legs into the racing line a player would actually drive.
-        var pts = pathPoints(map, entry.route.path);
-        pts.unshift({ x: Math.round(entry.route.origin.x), y: Math.round(entry.route.origin.y) });
-        pts = smoothRoute(map, config, pts, penaltyLookup, avoid.points);
+        // Draw every sampled start point's racing line: lead each polyline with its
+        // real gate-side origin (so it launches from the gate), then straighten the
+        // cell-centre dog-legs into the line a player would actually drive.
+        var routes = [];
+        for (var d = 0; d < entry.draw.length; d++) {
+            var rt = entry.draw[d];
+            var pts = pathPoints(map, rt.path);
+            pts.unshift({ x: Math.round(rt.origin.x), y: Math.round(rt.origin.y) });
+            pts = smoothRoute(map, config, pts, penaltyLookup, avoid.points);
+            routes.push({ par: Math.round(rt.time * 10) / 10, points: pts });
+        }
+        var ts = entry.times.slice().sort(function (a, b) { return a - b; });
         out.edges.push({
             edge: entry.edge,
-            par: Math.round(entry.route.time * 10) / 10,
-            points: pts
+            par: Math.round(entry.par * 10) / 10,        // representative (median)
+            lo: Math.round(ts[0] * 10) / 10,             // fastest start point on this gate
+            hi: Math.round(ts[ts.length - 1] * 10) / 10, // slowest
+            routes: routes
         });
     }
     var g = goalCentroid(map, config);
@@ -386,24 +409,26 @@ function classify(map, config) {
     if (par < parMin) { hardFail.push('par ' + par.toFixed(1) + 's too short (< ' + parMin + 's)'); }
     if (par > parMax) { hardFail.push('par ' + par.toFixed(1) + 's too long (> ' + parMax + 's)'); }
 
-    // --- spawn fairness (2-edge maps only): how close the per-edge par-times are ---
-    // Graded on the ABSOLUTE gap in seconds (not a ratio), using the same hazard-
-    // aware per-edge times the overlay draws. fairness (0..1) is kept for meta as a
-    // ratio for back-compat; fairnessGap drives the (strict) deduction.
+    // --- spawn fairness: how close every start point's time-to-goal is ---
+    // Graded on the ABSOLUTE spread in seconds across EVERY sampled start point on
+    // EVERY gate (the same routes the overlay fans out), so an unlucky spawn lane —
+    // whether between two gates or just across one wide gate — is what the penalty
+    // sees. fairness (0..1) kept for meta as a ratio for back-compat; fairnessGap
+    // (the spread) drives the deduction.
     var fairness = 1, fairnessGap = 0;
-    if (edges.length > 1) {
-        var ps = [];
-        var eptEdges = edgeParTimes(map, config).edges;
-        for (var k = 0; k < eptEdges.length; k++) {
-            // Round to 0.1s — the exact precision the overlay shows — so the gap the
-            // penalty grades is the gap the author can read off the two edge labels.
-            if (eptEdges[k].par > 0) { ps.push(Math.round(eptEdges[k].par * 10) / 10); }
+    var allTimes = [];
+    var eptEdges = edgeParTimes(map, config).edges;
+    for (var k = 0; k < eptEdges.length; k++) {
+        for (var ti = 0; ti < eptEdges[k].times.length; ti++) {
+            // Round to 0.1s — the precision the overlay shows — so the spread the
+            // penalty grades is the spread the author can read off the route labels.
+            allTimes.push(Math.round(eptEdges[k].times[ti] * 10) / 10);
         }
-        if (ps.length >= 2) {
-            var lo = Math.min.apply(null, ps), hi = Math.max.apply(null, ps);
-            fairnessGap = hi - lo;
-            fairness = lo / hi;
-        }
+    }
+    if (allTimes.length >= 2) {
+        var lo = Math.min.apply(null, allTimes), hi = Math.max.apply(null, allTimes);
+        fairnessGap = hi - lo;
+        fairness = lo / hi;
     }
 
     // --- soft deductions from 100 ---
@@ -414,12 +439,13 @@ function classify(map, config) {
     }
 
     // Race LENGTH rides on the bot-line estimate (abilities/skill muddy it), so it
-    // stays soft — see config.balance.lengthMax. Spawn FAIRNESS is different: a
-    // per-side time gap is a structural asymmetry (one gate is just closer) that
-    // abilities don't systematically erase, so it's graded strictly — within
-    // fairnessToleranceSec (~1s) is ideal, then a steep per-second ramp to the cap.
-    if (edges.length > 1) {
-        var tol = bal(config, 'fairnessToleranceSec', 1);
+    // stays soft — see config.balance.lengthMax. Spawn FAIRNESS grades how even the
+    // spawn-to-goal times are across every start point: within fairnessToleranceSec
+    // (~0.2s) is the shown ideal, then a per-second ramp to the cap. The ramp is
+    // gentle (config-tuned) because a wide gate inherently spreads spawn times by
+    // a few seconds, so only broadly-uneven maps should actually lose the tier.
+    {
+        var tol = bal(config, 'fairnessToleranceSec', 0.2);
         var perSec = bal(config, 'fairnessPerSec', 8);
         var fairnessMax = bal(config, 'fairnessMax', 20);
         deduct(Math.min(fairnessMax, Math.round(Math.max(0, fairnessGap - tol) * perSec)), 'fairness');

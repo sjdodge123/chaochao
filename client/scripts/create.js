@@ -1040,7 +1040,7 @@ function emitScoreMap(sig) {
 function balanceHint(label) {
     var ov = balanceOverlay || {};
     switch (label) {
-        case "fairness": return "start sides should finish within ~0.2s — green route beats red";
+        case "fairness": return "every start point should finish within ~0.2s — wider spread = bigger gap";
         case "length": {
             var band = (ov.idealLow != null ? ov.idealLow : 18) + "–" + (ov.idealHigh != null ? ov.idealHigh : 40) + "s";
             if (ov.par != null && ov.idealLow != null && ov.par < ov.idealLow) {
@@ -1082,7 +1082,9 @@ function drawBalanceOverlay() {
     ctx.lineCap = "round";
 
     // Color per edge: with several gates, green = fastest side / red = slowest
-    // (the fairness gap); a lone gate just gets the neutral amber.
+    // (representative time); a lone gate just gets the neutral amber. Each gate now
+    // fans out several routes (one per sampled start point along the gate), all in
+    // the gate's colour, so the spawn-position spread is visible at a glance.
     var fastest = null, slowest = null;
     for (var i = 0; i < edges.length; i++) {
         if (edges[i].par > 0) {
@@ -1092,7 +1094,8 @@ function drawBalanceOverlay() {
     }
     for (var e = 0; e < edges.length; e++) {
         var entry = edges[e];
-        if (!Array.isArray(entry.points) || entry.points.length < 2) {
+        var routes = Array.isArray(entry.routes) ? entry.routes : [];
+        if (routes.length === 0) {
             // No drivable route from this gate — flag it at the gate itself.
             for (var g = 0; g < gates.length; g++) {
                 if (gates[g].edge === entry.edge) {
@@ -1107,29 +1110,41 @@ function drawBalanceOverlay() {
             if (entry === fastest) { color = "#27c46c"; }
             else if (entry === slowest) { color = "#ff5252"; }
         }
-        // White casing under the colored line so the route reads on any terrain.
-        for (var pass = 0; pass < 2; pass++) {
-            ctx.beginPath();
-            ctx.moveTo(entry.points[0].x, entry.points[0].y);
-            for (var p = 1; p < entry.points.length; p++) {
-                ctx.lineTo(entry.points[p].x, entry.points[p].y);
+        for (var rIdx = 0; rIdx < routes.length; rIdx++) {
+            var rpts = routes[rIdx].points;
+            if (!Array.isArray(rpts) || rpts.length < 2) { continue; }
+            // White casing under the colored line so the route reads on any terrain.
+            for (var pass = 0; pass < 2; pass++) {
+                ctx.beginPath();
+                ctx.moveTo(rpts[0].x, rpts[0].y);
+                for (var p = 1; p < rpts.length; p++) { ctx.lineTo(rpts[p].x, rpts[p].y); }
+                ctx.strokeStyle = (pass === 0) ? "rgba(255,255,255,0.75)" : color;
+                ctx.lineWidth = (pass === 0) ? 7 : 3;
+                ctx.globalAlpha = (pass === 0) ? 0.8 : 0.9;
+                ctx.stroke();
             }
-            ctx.strokeStyle = (pass === 0) ? "rgba(255,255,255,0.85)" : color;
-            ctx.lineWidth = (pass === 0) ? 8 : 4;
-            ctx.stroke();
+            ctx.globalAlpha = 1;
+            // Start dot at each gate spawn point; end dot only once (shared goal).
+            ctx.beginPath();
+            ctx.arc(rpts[0].x, rpts[0].y, 5, 0, 2 * Math.PI);
+            ctx.fillStyle = color;
+            ctx.fill();
         }
-        // Start dot + end dot so direction is readable at a glance.
-        ctx.beginPath();
-        ctx.arc(entry.points[0].x, entry.points[0].y, 7, 0, 2 * Math.PI);
-        ctx.fillStyle = color;
-        ctx.fill();
-        var last = entry.points[entry.points.length - 1];
+        var lastR = routes[routes.length - 1].points;
+        var last = lastR[lastR.length - 1];
         ctx.beginPath();
         ctx.arc(last.x, last.y, 5, 0, 2 * Math.PI);
         ctx.fillStyle = "white";
         ctx.fill();
-        var lp = entry.points[1];
-        overlayChip(lp.x + 10, lp.y - 11, entry.edge + " " + entry.par + "s", color);
+        // One label per gate: representative time, plus the fast–slow range across
+        // its start points when they actually differ (that spread is the fairness).
+        var label = entry.edge + " " + entry.par + "s";
+        if (entry.lo != null && entry.hi != null && (entry.hi - entry.lo) > 0.3) {
+            label += " (" + entry.lo + "–" + entry.hi + "s)";
+        }
+        var anchor = routes[Math.floor(routes.length / 2)].points;
+        var lp = anchor[Math.min(1, anchor.length - 1)];
+        overlayChip(lp.x + 10, lp.y - 11, label, color);
     }
 
     // Goal centroid vs the centre line between opposite start gates.
