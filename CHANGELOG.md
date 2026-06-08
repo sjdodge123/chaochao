@@ -22,7 +22,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 - Turning on "AI racers" for a preview now fields a proper grid of 6 bots to race against, instead of the lone bot the lobby's auto-scaling used to give a solo tester.
 - New "Fairness" button: run the balance check any time while editing — no upload needed, no name/author required. It draws each start side's estimated route and times on the map, with the same legend of fixes the submit check shows (and a ★ toast when your map would make Featured).
 - The balance check is friendlier to real maps where the routes are just estimates: the race-length penalty now weighs less, since estimated racing lines can't account for ability pickups or skilled ice/grass play. Every committed map keeps its current Featured/community tier; the change only stops near-miss maps from being sunk by route-estimate noise.
-- But two-gate maps are now graded strictly on fairness: the two start sides should reach the goal within about a second of each other (a closer gate is a structural head start that no amount of skill evens out), so a bigger gap between the sides costs more the wider it gets. The two times are shown right on the overlay so you can see exactly how far apart they are.
+- But two-gate maps are now graded strictly on fairness: the two start sides should reach the goal within about a fifth of a second of each other (a closer gate is a structural head start that no amount of skill evens out), so a bigger gap between the sides costs more the wider it gets. The two times are shown right on the overlay so you can see exactly how far apart they are.
 
 ## v0.30.2 — 2026-06-08
 

@@ -57,7 +57,7 @@
     "balance": {
         "featuredScore": 90,
         "fairnessMax": 20,
-        "fairnessToleranceSec": 1,
+        "fairnessToleranceSec": 0.2,
         "fairnessPerSec": 8,
         "lengthMax": 5,
         "minDrivableFrac": 0.40,
