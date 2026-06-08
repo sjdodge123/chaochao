@@ -57,10 +57,17 @@ var mapModified = false;
 // True between clicking "Test Fairness" and the mapScore reply — routes that
 // reply to the overlay + a score toast instead of the submit flow.
 var fairnessCheckPending = false;
-// Most recent non-error mapScore reply ({ payload, at }). Lets an Upload that
-// lands inside the server's per-socket throttle window reuse the verdict the
+// Most recent non-error mapScore reply ({ payload, at, sig }). `sig` is the
+// serialized map the verdict was computed for, so an Upload only reuses it when
+// the map hasn't changed — never a stale verdict for different geometry. Lets an
+// Upload inside the server's per-socket throttle window reuse the verdict the
 // author is already looking at instead of racing a doomed second request.
 var lastMapScoreVerdict = null;
+// Serialized map of the in-flight scoreMap request (so its reply can be matched
+// back to the geometry it scored) and the emit timestamp (so the submit flow can
+// stay clear of the server's 2s per-socket throttle).
+var pendingScoreSig = null;
+var lastScoreEmitAt = 0;
 
 // Preview start-gate pick: "auto" (balanced placement, the old behaviour) or an
 // edge name from the map's startEdges. On multi-gate maps the author chooses
@@ -289,12 +296,14 @@ function clientConnect() {
     //    (or errored) score submits straight through; a lower score shows a
     //    NON-BLOCKING "submit anyway?" nudge listing the main deductions.
     server.on("mapScore", function (payload) {
-        // Remember the latest real verdict: an Upload inside the server's 2s
-        // per-socket throttle window reuses it instead of racing a request whose
-        // error reply would auto-submit past the nudge (Codex review P2).
+        // Remember the latest real verdict, keyed to the map it scored, so an
+        // Upload inside the server's 2s throttle window reuses it ONLY when the
+        // geometry is unchanged (Codex review P2: a stale verdict for a since-
+        // edited map must not draw the wrong routes or skip the nudge).
         if (payload != null && !payload.error) {
-            lastMapScoreVerdict = { payload: payload, at: Date.now() };
+            lastMapScoreVerdict = { payload: payload, at: Date.now(), sig: pendingScoreSig };
         }
+        pendingScoreSig = null; // request consumed
         if (fairnessCheckPending) {
             fairnessCheckPending = false;
             if (payload == null || payload.error) {
@@ -1015,7 +1024,16 @@ function runFairnessCheck() {
     clearBalanceOverlay();
     showSubmitStatus("Checking balance..", "#ADD8E6", "black", 8000);
     fairnessCheckPending = true;
-    server.emit('scoreMap', JSON.stringify(vMap));
+    emitScoreMap(JSON.stringify(vMap));
+}
+
+// Single point that fires a scoreMap request: records the exact serialized map
+// (so the reply can be matched back to the geometry it scored) and the emit time
+// (so the submit flow can dodge the server's 2s per-socket throttle).
+function emitScoreMap(sig) {
+    pendingScoreSig = sig;
+    lastScoreEmitAt = Date.now();
+    server.emit('scoreMap', sig);
 }
 
 // One-line, on-canvas explanation per deduction label ("fairness -10" -> "fairness").
@@ -1997,6 +2015,10 @@ function submitViaEmail() {
 }
 
 function submitToGithub() {
+    // Re-entry guard: a check or publish is already mid-flight (incl. the
+    // throttle-deferred fresh check below) — a second click must not stack a
+    // second request or double-submit.
+    if (submitPending) { return false; }
     if (!requireDetails()) {
         showSubmitStatus("Add an author and map name first", "red", "white");
         return false;
@@ -2024,22 +2046,39 @@ function submitToGithub() {
     submitStatus.css("background-color", "#ADD8E6");
     submitStatus.text("Checking balance..");
     submitPending = true; // protect the indicator from input-change resets until the reply
-    // A Fairness check may already be in flight: re-route its pending reply to
-    // the submit flow rather than firing a second request into the per-socket
-    // throttle, whose error reply would auto-submit past the "Submit anyway?"
-    // nudge (Codex review P2).
-    if (fairnessCheckPending) {
+    var sig = JSON.stringify(vMap);
+    // A Fairness check for THIS exact map is in flight: re-route its reply to the
+    // submit flow rather than firing a second (throttled) request. If the map
+    // changed since that check, its reply is stale — fall through to a fresh one.
+    if (fairnessCheckPending && pendingScoreSig === sig) {
         fairnessCheckPending = false;
         return false;
     }
-    // Fresh verdict already in hand (e.g. the Fairness reply the author is
-    // looking at): decide from it directly instead of racing the throttle.
-    if (lastMapScoreVerdict != null && Date.now() - lastMapScoreVerdict.at < 2500) {
+    // A fresh verdict for THIS exact map is already in hand (e.g. the Fairness
+    // reply the author is looking at): decide from it directly. The sig guard is
+    // what stops a since-edited map from reusing the previous map's verdict.
+    if (lastMapScoreVerdict != null && lastMapScoreVerdict.sig === sig &&
+        Date.now() - lastMapScoreVerdict.at < 2500) {
         handleSubmitVerdict(lastMapScoreVerdict.payload);
         return false;
     }
+    // Otherwise run a fresh, map-matched check. Abandon any stale in-flight
+    // Fairness reply (different map), and stay clear of the server's 2s throttle:
+    // if we emitted a scoreMap < ~2s ago, delay until the window clears so the
+    // reply is a real verdict rather than a throttle error that would auto-submit
+    // past the nudge (Codex review P2).
+    fairnessCheckPending = false;
     clearBalanceOverlay(); // a fresh check replaces any stale overlay
-    server.emit('scoreMap', JSON.stringify(vMap));
+    // Server throttle is 2s from its last ACCEPTED request; lastScoreEmitAt is the
+    // client emit (≈ receive time minus network latency), so wait a touch past 2s
+    // to clear it even on a slow link.
+    var wait = 2300 - (Date.now() - lastScoreEmitAt);
+    if (wait > 0) {
+        setTimeout(function () { if (submitPending) { emitScoreMap(sig); } }, wait);
+    } else {
+        emitScoreMap(sig);
+    }
+    return false;
 }
 
 // Act on a balance verdict for the submit flow: featured (or unavailable) maps
