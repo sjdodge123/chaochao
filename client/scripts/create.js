@@ -1040,7 +1040,7 @@ function emitScoreMap(sig) {
 function balanceHint(label) {
     var ov = balanceOverlay || {};
     switch (label) {
-        case "fairness": return "start sides aren't equal — green route beats red";
+        case "fairness": return "start sides should finish within ~1s — green route beats red";
         case "length": {
             var band = (ov.idealLow != null ? ov.idealLow : 18) + "–" + (ov.idealHigh != null ? ov.idealHigh : 40) + "s";
             if (ov.par != null && ov.idealLow != null && ov.par < ov.idealLow) {

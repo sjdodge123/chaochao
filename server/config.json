@@ -56,7 +56,9 @@
     "submitViaMail": "chaochaothegame@gmail.com",
     "balance": {
         "featuredScore": 90,
-        "fairnessMax": 12,
+        "fairnessMax": 20,
+        "fairnessToleranceSec": 1,
+        "fairnessPerSec": 8,
         "lengthMax": 5,
         "minDrivableFrac": 0.40,
         "parMin": 8,
