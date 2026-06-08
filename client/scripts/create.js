@@ -1040,7 +1040,7 @@ function emitScoreMap(sig) {
 function balanceHint(label) {
     var ov = balanceOverlay || {};
     switch (label) {
-        case "fairness": return "every start point should finish within ~0.2s — wider spread = bigger gap";
+        case "fairness": return "every start point should finish within ~0.2s — slowest line red, fastest green";
         case "length": {
             var band = (ov.idealLow != null ? ov.idealLow : 18) + "–" + (ov.idealHigh != null ? ov.idealHigh : 40) + "s";
             if (ov.par != null && ov.idealLow != null && ov.par < ov.idealLow) {
@@ -1081,16 +1081,25 @@ function drawBalanceOverlay() {
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
 
-    // Color per edge: with several gates, green = fastest side / red = slowest
-    // (representative time); a lone gate just gets the neutral amber. Each gate now
-    // fans out several routes (one per sampled start point along the gate), all in
-    // the gate's colour, so the spawn-position spread is visible at a glance.
-    var fastest = null, slowest = null;
+    // Each gate fans out several routes (one per sampled start point). Colour and
+    // label EVERY route by its own time so the slow ones are obvious: the globally
+    // slowest line is red, the fastest green, the rest amber — and each line carries
+    // its time at its start point. The min/max are the spawn-spread the fairness
+    // deduction grades.
+    var gmin = null, gmax = null;
     for (var i = 0; i < edges.length; i++) {
-        if (edges[i].par > 0) {
-            if (fastest == null || edges[i].par < fastest.par) { fastest = edges[i]; }
-            if (slowest == null || edges[i].par > slowest.par) { slowest = edges[i]; }
+        var rs = Array.isArray(edges[i].routes) ? edges[i].routes : [];
+        for (var j = 0; j < rs.length; j++) {
+            if (typeof rs[j].par !== "number") { continue; }
+            if (gmin == null || rs[j].par < gmin) { gmin = rs[j].par; }
+            if (gmax == null || rs[j].par > gmax) { gmax = rs[j].par; }
         }
+    }
+    var sharedExtreme = (gmin === gmax); // single route, or all equal
+    function routeColor(par) {
+        if (!sharedExtreme && par === gmax) { return "#ff5252"; } // slowest = red
+        if (!sharedExtreme && par === gmin) { return "#27c46c"; } // fastest = green
+        return "#ffb02e";                                          // mid = amber
     }
     for (var e = 0; e < edges.length; e++) {
         var entry = edges[e];
@@ -1105,14 +1114,14 @@ function drawBalanceOverlay() {
             }
             continue;
         }
-        var color = "#ffb02e";
-        if (edges.length > 1 && fastest !== slowest) {
-            if (entry === fastest) { color = "#27c46c"; }
-            else if (entry === slowest) { color = "#ff5252"; }
-        }
-        for (var rIdx = 0; rIdx < routes.length; rIdx++) {
-            var rpts = routes[rIdx].points;
+        // Draw slowest routes LAST so the red line sits on top where lines overlap.
+        var order = routes.map(function (rt, idx) { return idx; })
+            .sort(function (a, b) { return (routes[a].par || 0) - (routes[b].par || 0); });
+        for (var oi = 0; oi < order.length; oi++) {
+            var rt = routes[order[oi]];
+            var rpts = rt.points;
             if (!Array.isArray(rpts) || rpts.length < 2) { continue; }
+            var color = routeColor(rt.par);
             // White casing under the colored line so the route reads on any terrain.
             for (var pass = 0; pass < 2; pass++) {
                 ctx.beginPath();
@@ -1120,31 +1129,30 @@ function drawBalanceOverlay() {
                 for (var p = 1; p < rpts.length; p++) { ctx.lineTo(rpts[p].x, rpts[p].y); }
                 ctx.strokeStyle = (pass === 0) ? "rgba(255,255,255,0.75)" : color;
                 ctx.lineWidth = (pass === 0) ? 7 : 3;
-                ctx.globalAlpha = (pass === 0) ? 0.8 : 0.9;
+                ctx.globalAlpha = (pass === 0) ? 0.8 : 1;
                 ctx.stroke();
             }
             ctx.globalAlpha = 1;
-            // Start dot at each gate spawn point; end dot only once (shared goal).
+            // Start dot + its own time label at each gate spawn point.
             ctx.beginPath();
             ctx.arc(rpts[0].x, rpts[0].y, 5, 0, 2 * Math.PI);
             ctx.fillStyle = color;
             ctx.fill();
+            var labelY = (entry.edge === "bottom") ? rpts[0].y - 4 : rpts[0].y + 4;
+            overlayChip(rpts[0].x + 8, labelY, rt.par + "s", color);
         }
-        var lastR = routes[routes.length - 1].points;
-        var last = lastR[lastR.length - 1];
-        ctx.beginPath();
-        ctx.arc(last.x, last.y, 5, 0, 2 * Math.PI);
-        ctx.fillStyle = "white";
-        ctx.fill();
-        // One label per gate: representative time, plus the fast–slow range across
-        // its start points when they actually differ (that spread is the fairness).
-        var label = entry.edge + " " + entry.par + "s";
-        if (entry.lo != null && entry.hi != null && (entry.hi - entry.lo) > 0.3) {
-            label += " (" + entry.lo + "–" + entry.hi + "s)";
+    }
+    // Shared goal marker (end of every route).
+    for (var ge = 0; ge < edges.length; ge++) {
+        var grs = edges[ge].routes;
+        if (Array.isArray(grs) && grs.length && grs[0].points.length) {
+            var lastPt = grs[0].points[grs[0].points.length - 1];
+            ctx.beginPath();
+            ctx.arc(lastPt.x, lastPt.y, 5, 0, 2 * Math.PI);
+            ctx.fillStyle = "white";
+            ctx.fill();
+            break;
         }
-        var anchor = routes[Math.floor(routes.length / 2)].points;
-        var lp = anchor[Math.min(1, anchor.length - 1)];
-        overlayChip(lp.x + 10, lp.y - 11, label, color);
     }
 
     // Goal centroid vs the centre line between opposite start gates.
