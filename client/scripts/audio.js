@@ -23,6 +23,10 @@ var masterVolume = 1,        // master on/off toggle (navbar gamepad icon): 0 or
 // change). Toggled by setLobbySfxDampen() on lobby enter/exit; applied in volumeChange.
 var sfxVolumeScalar = 1;
 var LOBBY_SFX_SCALAR = 0.1;
+// Ice drift: peak level of a single drifter's synthesized skid loop (before the
+// master toggle + lobby dampen fold in). Kept low — it's a continuous bed under
+// the action, and a pack can have several going at once.
+var DRIFT_BASE_VOL = 0.16;
 function setLobbySfxDampen(on) {
     sfxVolumeScalar = on ? LOBBY_SFX_SCALAR : 1;
     volumeChange();
@@ -601,6 +605,80 @@ function stopAllSounds() {
     // starts cleanly (and the fading music voice can't report a track-end either).
     currentBackgroundMusic = null;
     fadingBackgroundVoice = null;
+    stopAllDriftSounds();
+}
+
+// ----------------------------------------------------------------------------
+// Ice drift skid — synthesized, NOT a clip. A drift is a sustained per-player
+// state, so rather than a one-shot each drifter gets its own looping voice:
+// a shared white-noise buffer through a bandpass filter (the spray "hiss") into
+// a gain we ride with the drift's intensity. It's pure Web Audio (no MP3 asset)
+// because a continuous, intensity-modulated skid is exactly what filtered noise
+// does well. Routed through the sfxBus, so the master toggle + lobby dampen
+// already apply; we fold those coefficients into the live gain ourselves since
+// these voices live outside the descriptor/volumeChange path.
+var driftNoiseBuffer = null;
+var driftVoices = {};   // player id -> { source, filter, gain }
+
+function getDriftNoiseBuffer(ctx) {
+    if (driftNoiseBuffer) { return driftNoiseBuffer; }
+    var len = Math.floor(ctx.sampleRate * 2);   // 2s of noise, looped seamlessly
+    var buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    var data = buf.getChannelData(0);
+    for (var i = 0; i < len; i++) { data[i] = Math.random() * 2 - 1; }
+    driftNoiseBuffer = buf;
+    return buf;
+}
+
+// Start (first call) or update (later calls) the drift loop for a player.
+//   intensity 0..1 — how hard they're carving; rides gain + filter brightness so
+//                    a faster slide hisses higher.
+//   level     0..1 — spatial gain (the caller's distance falloff; 1 = local kart).
+// Idempotent per id: the first call spins a voice up from silence, later calls
+// just glide the params, so it can be driven straight from the per-frame loop.
+function setDriftSound(id, intensity, level) {
+    var ctx = getCtx();
+    if (!ctx || gameMuted || masterVolume === 0 || ctx.state !== "running") { return; }
+    var vol = DRIFT_BASE_VOL * intensity * level * masterVolume * sfxVolumeScalar;
+    var now = ctx.currentTime;
+    var v = driftVoices[id];
+    if (!v) {
+        var src = ctx.createBufferSource();
+        src.buffer = getDriftNoiseBuffer(ctx);
+        src.loop = true;
+        var filt = ctx.createBiquadFilter();
+        filt.type = "bandpass";
+        filt.Q.value = 0.6;                     // wide band -> airy spray, not a tone
+        var g = ctx.createGain();
+        g.gain.value = 0.0001;                  // wash in from silence
+        src.connect(filt); filt.connect(g); g.connect(sfxBus);
+        try { src.start(); } catch (e) { try { src.disconnect(); } catch (e2) {} return; }
+        v = driftVoices[id] = { source: src, filter: filt, gain: g };
+    }
+    var freq = 850 + 1900 * intensity;          // brighter as the carve intensifies
+    try {
+        v.filter.frequency.setTargetAtTime(freq, now, 0.05);
+        v.gain.gain.setTargetAtTime(Math.max(0.0001, vol), now, 0.06);
+    } catch (e) {}
+}
+
+// Fade a player's drift voice out and tear it down (drift ended / kart died / left).
+function stopDriftSound(id) {
+    var v = driftVoices[id];
+    if (!v) { return; }
+    delete driftVoices[id];
+    var ctx = getCtx();
+    if (!ctx) { try { v.source.stop(); } catch (e) {} return; }
+    var now = ctx.currentTime;
+    try {
+        holdParamNow(v.gain.gain, now);
+        v.gain.gain.linearRampToValueAtTime(0.0001, now + 0.18);
+        v.source.stop(now + 0.22);
+    } catch (e) { try { v.source.stop(); } catch (e2) {} }
+}
+
+function stopAllDriftSounds() {
+    for (var id in driftVoices) { stopDriftSound(id); }
 }
 
 // Browser autoplay policy keeps the AudioContext "suspended" until the user
