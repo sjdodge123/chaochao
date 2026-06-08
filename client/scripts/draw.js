@@ -5794,6 +5794,43 @@ function drawDriftSpray(dt) {
     _driftSpray.length = w;
     gameContext.restore();
 }
+// World distance past which another kart's drift skid is inaudible (local kart is
+// always full volume). Linear falloff to silence keeps a far-off bot's hiss from
+// muddying the mix while a nearby carve still reads.
+var DRIFT_AUDIBLE_RANGE = 950;
+// Ids whose drift loop we started last frame, so we can stop the ones that ended
+// (a kart that released, left the ice, died, or left the room) — the audio sweep
+// owns start/stop edges centrally rather than per drawPlayer (which skips dead /
+// off-camera karts and would otherwise leak a hanging voice).
+var _driftAudioOn = {};
+function updateDriftAudio() {
+    if (typeof setDriftSound !== "function") { return; }
+    var playState = (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing
+        || currentState == config.stateMap.gated || currentState == config.stateMap.lobby);
+    var nowOn = {};
+    if (playState) {
+        var anchor = playerList[myID]; // local primary kart, for distance falloff
+        for (var id in playerList) {
+            var p = playerList[id];
+            if (p == null || p.alive === false || !isDriftingClient(p)) { continue; }
+            var speed = Math.sqrt((p.velX || 0) * (p.velX || 0) + (p.velY || 0) * (p.velY || 0));
+            if (speed < 8) { continue; } // a parked charge on ice slides nowhere -> no skid
+            var level = 1;
+            if (!isLocalId(id) && anchor != null) {
+                var dx = p.x - anchor.x, dy = p.y - anchor.y;
+                level = clamp01(1 - Math.sqrt(dx * dx + dy * dy) / DRIFT_AUDIBLE_RANGE);
+            }
+            if (level <= 0.02) { continue; }
+            var intensity = clamp01(speed / (config.playerMaxSpeed * 0.5));
+            setDriftSound(id, intensity, level);
+            nowOn[id] = true;
+        }
+    }
+    for (var oid in _driftAudioOn) {
+        if (!nowOn[oid]) { stopDriftSound(oid); }
+    }
+    _driftAudioOn = nowOn;
+}
 // Map of player id -> the frame generation in which it was last seen targeted.
 // A player is "targeted this frame" iff its stamp === the current generation, so
 // the set is reused across frames (a bumped counter invalidates last frame's
@@ -5816,6 +5853,8 @@ function drawPlayers(dt) {
     rebuildTargetedPlayerIds();
     // Ice-drift spray sits UNDER every kart so the chips read as kicked-up ground frost.
     drawDriftSpray(dt);
+    // Per-frame drift skid audio (synthesized loop per drifting kart, distance-faded).
+    updateDriftAudio();
     // Draw remote players first, then ALL local players (the primary plus any
     // couch co-op slots) on top — so your own karts always read clearly over
     // other players' floating emojis and name labels.
