@@ -86,9 +86,9 @@ function approx(a, b, eps) { return Math.abs(a - b) <= (eps || 0.01); }
     const fav = (config.playlists || []).find(function (p) { return p.id === 'favorites'; });
     if (!fav) { fail('no favorites playlist in config'); }
     else {
-        const hi = { dominantTrait: 'pure', traits: ['pure'], length: 'standard', tier: 'featured', balanceScore: 95, rating: { bayesian: 4.2 } };
-        const lo = { dominantTrait: 'pure', traits: ['pure'], length: 'standard', tier: 'featured', balanceScore: 95, rating: { bayesian: 2.0 } };
-        const none = { dominantTrait: 'pure', traits: ['pure'], length: 'standard', tier: 'featured', balanceScore: 95, rating: null };
+        const hi = { dominantTrait: 'standard', traits: ['standard'], length: 'standard', tier: 'featured', balanceScore: 95, rating: { bayesian: 4.2 } };
+        const lo = { dominantTrait: 'standard', traits: ['standard'], length: 'standard', tier: 'featured', balanceScore: 95, rating: { bayesian: 2.0 } };
+        const none = { dominantTrait: 'standard', traits: ['standard'], length: 'standard', tier: 'featured', balanceScore: 95, rating: null };
         if (!mapClassifier.matches(hi, fav.filter)) { fail('favorites excluded a high-rated map'); }
         else { ok('favorites includes a map above the rating threshold'); }
         if (mapClassifier.matches(lo, fav.filter)) { fail('favorites included a low-rated map'); }
