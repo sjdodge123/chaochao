@@ -434,6 +434,19 @@ class Player extends Circle {
 		this.charging = false;
 		this.chargeFrac = 0;
 	}
+	// Drift distance that counts toward the Smooth Operator medal: the banked total
+	// PLUS any still-clean in-progress drift — a live charge's pending accrual and a
+	// thrown charge whose punch hasn't connected. gatherAchievements reads this at
+	// gameOver, where the final round's pending/escrow hasn't been folded in by
+	// reset() yet; mirrors reset()'s clean-drift banking (a landed/clashed punch's
+	// escrow never counts). Non-mutating, so reading it can't double-count.
+	driftCreditTotal() {
+		var total = this.driftDistanceTravelled + (this.pendingDriftDistance || 0);
+		if (this.driftPunchRef != null && !this.driftPunchRef.landed && !this.driftPunchRef.clashed) {
+			total += this.driftPunchPending;
+		}
+		return total;
+	}
 	// Judge a thrown drift-charge once its punch has settled (landed/clashed are
 	// stamped within the ~100ms punch linger; resolveMs comfortably outlasts it,
 	// and the 200ms punch cooldown means the next charge can't start before this

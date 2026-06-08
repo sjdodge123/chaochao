@@ -45,8 +45,10 @@ module.exports = {
 				//doesn't split the medal; integer keeps the tie logic clean)
 				this.checkForNewMedalHolder(achievements.iceSkater, id, Math.round(player.iceDistanceTravelled));
 				//Smooth Operator — most distance drifted on ice (holding a punch charge for
-				//grip) WITHOUT the charge landing on anyone or burning up in lava
-				this.checkForNewMedalHolder(achievements.smoothOperator, id, Math.round(player.driftDistanceTravelled));
+				//grip) WITHOUT the charge landing on anyone or burning up in lava. Uses
+				//driftCreditTotal() so a kart still mid-drift at the match-ending tick gets
+				//its final, not-yet-banked drift counted (reset() folds it in only afterward).
+				this.checkForNewMedalHolder(achievements.smoothOperator, id, Math.round(player.driftCreditTotal()));
 			}
 
 			//Picked on — count kills by ANYONE (bots included), but only a HUMAN victim

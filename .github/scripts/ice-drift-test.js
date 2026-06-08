@@ -243,6 +243,25 @@ try {
     const notYet = progression.achievementsUnlocked({ smoothOperator: powder.threshold - 1 }, 0);
     check(notYet.indexOf('powder') === -1, 'one short does not');
 
+    // Final-round drift still mid-flight at the match-ending tick: gatherAchievements
+    // (called by gameOver before reset() banks it) must still count the pending +
+    // unresolved escrow, via driftCreditTotal().
+    freshA(); A.isAI = false; B.isAI = false;
+    A.driftDistanceTravelled = 50; A.pendingDriftDistance = 30; // mid-drift, not yet banked
+    B.driftDistanceTravelled = 70; B.pendingDriftDistance = 0;
+    check(A.driftCreditTotal() === 80, 'driftCreditTotal folds in live pending (50 + 30)');
+    const medalsLive = room.game.gatherAchievements();
+    check(medalsLive.smoothOperator.ids.length === 1 && medalsLive.smoothOperator.ids[0] === A.id,
+        'a kart still mid-drift at match end wins on its unbanked total (80 > 70)');
+    check(medalsLive.smoothOperator.value === 80, 'medal value includes the final unbanked drift');
+    // A thrown-but-landed escrow does NOT count toward the final total.
+    A.pendingDriftDistance = 0; A.driftPunchPending = 25;
+    A.driftPunchRef = { landed: true, clashed: false };
+    check(A.driftCreditTotal() === 50, 'a landed punch\'s escrow is excluded from the final total');
+    A.driftPunchRef = { landed: false, clashed: false };
+    check(A.driftCreditTotal() === 75, 'a still-clean escrow IS included (50 + 25)');
+    A.driftPunchRef = null; A.driftPunchPending = 0;
+
     // -----------------------------------------------------------------------
     // 8) AI drift policy: bots dig in (hold a charge) when skating off their line
     //    on ice, leave the lava emergency to the instant tap-brake, and release
