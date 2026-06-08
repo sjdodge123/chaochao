@@ -638,10 +638,16 @@ function getDriftNoiseBuffer(ctx) {
 // just glide the params, so it can be driven straight from the per-frame loop.
 function setDriftSound(id, intensity, level) {
     var ctx = getCtx();
-    if (!ctx || gameMuted || masterVolume === 0 || ctx.state !== "running") { return; }
-    var vol = DRIFT_BASE_VOL * intensity * level * masterVolume * sfxVolumeScalar;
-    var now = ctx.currentTime;
+    if (!ctx || ctx.state !== "running") { return; }
     var v = driftVoices[id];
+    // Muted (hard mute or master toggle off): don't spin up a NEW voice, but DO let
+    // an already-running one ride its gain down to silence here — drift voices live
+    // outside activeVoices, so volumeChange()/applyLiveVolumes() can't mute them, and
+    // an early return would leave the skid hissing until the drift happened to end.
+    var muted = gameMuted || masterVolume === 0;
+    if (!v && muted) { return; }
+    var vol = muted ? 0 : DRIFT_BASE_VOL * intensity * level * masterVolume * sfxVolumeScalar;
+    var now = ctx.currentTime;
     if (!v) {
         var src = ctx.createBufferSource();
         src.buffer = getDriftNoiseBuffer(ctx);
