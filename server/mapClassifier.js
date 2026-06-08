@@ -29,14 +29,6 @@ function bal(config, key, dflt) {
     return (b && b[key] != null) ? b[key] : dflt;
 }
 
-// Median par-time pooled from a SINGLE start edge. cellGraph.computeMapParTime
-// already pools across every start edge; for fairness we want each edge alone,
-// so we hand it a shallow clone pinned to one edge.
-function parForEdge(map, edge) {
-    var clone = Object.assign({}, map, { startEdges: [edge] });
-    return cellGraph.computeMapParTime(clone);
-}
-
 function startEdgesOf(map) {
     return (Array.isArray(map.startEdges) && map.startEdges.length > 0) ? map.startEdges : ['left'];
 }
@@ -277,22 +269,18 @@ function smoothRoute(map, config, pts, penaltyLookup, hazardPoints) {
     return out;
 }
 
-// Overlay geometry for the editor's "looks unbalanced" nudge: the representative
-// (median-time) route from each start edge — the same sampling parForEdge feeds
-// into the fairness deduction — plus the goal centroid + centrality, so the author
-// can SEE which side is faster and where the goal actually sits. Read-only; only
-// computed for the scoreMap reply, never at boot.
-function balanceDebug(map, config) {
+// Representative per-edge par time + chosen route for every start edge, computed
+// with the SAME hazard-aware, safe-seeded routing the overlay draws — so the
+// fairness deduction grades the exact times shown on the map (raw computeMapParTime
+// ignored bumper penalties and could even disagree on which side is faster).
+// Returns { edges: [{ edge, par, route }], avoid }; par 0 / route null when no
+// edge sample reaches the goal.
+function edgeParTimes(map, config) {
     var edges = startEdgesOf(map);
     var lavaId = tileId(config, 'lava');
     var avoid = hazardAvoidance(map, config);
     var routeOpts = avoid.penalty ? { penaltySet: avoid.penalty, penaltyMult: HAZARD_PATH_PENALTY } : undefined;
-    var penaltyLookup = null;
-    if (avoid.penalty) {
-        penaltyLookup = {};
-        for (var pl = 0; pl < avoid.penalty.length; pl++) { penaltyLookup[avoid.penalty[pl]] = true; }
-    }
-    var out = { edges: [], goal: null };
+    var result = [];
     for (var e = 0; e < edges.length; e++) {
         var samples = cellGraph.edgeSampleOrigins(edges[e]);
         var routes = [];
@@ -311,32 +299,57 @@ function balanceDebug(map, config) {
                 }
             }
         }
-        if (routes.length === 0) {
+        var route = null;
+        if (routes.length > 0) {
+            // Prefer a route a player could really take: only fall back to a
+            // lava-seeded one when the whole gate front is lava.
+            var pool = routes.filter(function (x) { return x.safeSeed; });
+            if (pool.length === 0) { pool = routes; }
+            pool.sort(function (a, b) { return a.time - b.time; });
+            route = pool[Math.floor(pool.length / 2)];
+        }
+        result.push({ edge: edges[e], par: route ? route.time : 0, route: route });
+    }
+    return { edges: result, avoid: avoid };
+}
+
+// Overlay geometry for the editor's "looks unbalanced" nudge: the representative
+// (median-time) route from each start edge — the same per-edge times the fairness
+// deduction grades — plus the goal centroid + centrality, so the author can SEE
+// which side is faster and where the goal actually sits. Read-only; only computed
+// for the scoreMap reply, never at boot.
+function balanceDebug(map, config) {
+    var ept = edgeParTimes(map, config);
+    var avoid = ept.avoid;
+    var penaltyLookup = null;
+    if (avoid.penalty) {
+        penaltyLookup = {};
+        for (var pl = 0; pl < avoid.penalty.length; pl++) { penaltyLookup[avoid.penalty[pl]] = true; }
+    }
+    var out = { edges: [], goal: null };
+    for (var e = 0; e < ept.edges.length; e++) {
+        var entry = ept.edges[e];
+        if (entry.route == null) {
             // No reachable route from this edge (matches a hard-fail) — still report
             // the edge so the overlay can flag it instead of silently omitting it.
-            out.edges.push({ edge: edges[e], par: 0, points: [] });
+            out.edges.push({ edge: entry.edge, par: 0, points: [] });
             continue;
         }
-        // Draw a route a player could really take: only fall back to a lava-seeded
-        // one when the whole gate front is lava (a problem worth seeing anyway).
-        var pool = routes.filter(function (r) { return r.safeSeed; });
-        if (pool.length === 0) { pool = routes; }
-        pool.sort(function (a, b) { return a.time - b.time; });
-        var median = pool[Math.floor(pool.length / 2)];
         // Lead the polyline with the route's actual gate-side origin (so the line
         // visibly launches from the start gate), then straighten the cell-centre
         // dog-legs into the racing line a player would actually drive.
-        var pts = pathPoints(map, median.path);
-        pts.unshift({ x: Math.round(median.origin.x), y: Math.round(median.origin.y) });
+        var pts = pathPoints(map, entry.route.path);
+        pts.unshift({ x: Math.round(entry.route.origin.x), y: Math.round(entry.route.origin.y) });
         pts = smoothRoute(map, config, pts, penaltyLookup, avoid.points);
         out.edges.push({
-            edge: edges[e],
-            par: Math.round(median.time * 10) / 10,
+            edge: entry.edge,
+            par: Math.round(entry.route.time * 10) / 10,
             points: pts
         });
     }
     var g = goalCentroid(map, config);
     if (g != null) {
+        var edges = startEdgesOf(map);
         out.goal = {
             x: Math.round(g.x),
             y: Math.round(g.y),
@@ -373,16 +386,23 @@ function classify(map, config) {
     if (par < parMin) { hardFail.push('par ' + par.toFixed(1) + 's too short (< ' + parMin + 's)'); }
     if (par > parMax) { hardFail.push('par ' + par.toFixed(1) + 's too long (> ' + parMax + 's)'); }
 
-    // --- spawn fairness (2-edge maps only): symmetry of per-edge par-times ---
-    var fairness = 1;
+    // --- spawn fairness (2-edge maps only): how close the per-edge par-times are ---
+    // Graded on the ABSOLUTE gap in seconds (not a ratio), using the same hazard-
+    // aware per-edge times the overlay draws. fairness (0..1) is kept for meta as a
+    // ratio for back-compat; fairnessGap drives the (strict) deduction.
+    var fairness = 1, fairnessGap = 0;
     if (edges.length > 1) {
         var ps = [];
-        for (var k = 0; k < edges.length; k++) {
-            var p = parForEdge(map, edges[k]);
-            if (p > 0) { ps.push(p); }
+        var eptEdges = edgeParTimes(map, config).edges;
+        for (var k = 0; k < eptEdges.length; k++) {
+            // Round to 0.1s — the exact precision the overlay shows — so the gap the
+            // penalty grades is the gap the author can read off the two edge labels.
+            if (eptEdges[k].par > 0) { ps.push(Math.round(eptEdges[k].par * 10) / 10); }
         }
         if (ps.length >= 2) {
-            fairness = Math.min.apply(null, ps) / Math.max.apply(null, ps);
+            var lo = Math.min.apply(null, ps), hi = Math.max.apply(null, ps);
+            fairnessGap = hi - lo;
+            fairness = lo / hi;
         }
     }
 
@@ -393,12 +413,16 @@ function classify(map, config) {
         if (amount > 0) { score -= amount; deductions.push(label + ' -' + amount); }
     }
 
-    // Path-derived deductions (fairness, length) ride on the bot-line routing
-    // estimate, which models neither ability pickups nor skilled ice/grass play —
-    // so they're weighted softer than the purely geometric checks (see
-    // config.balance.fairnessMax / lengthMax).
+    // Race LENGTH rides on the bot-line estimate (abilities/skill muddy it), so it
+    // stays soft — see config.balance.lengthMax. Spawn FAIRNESS is different: a
+    // per-side time gap is a structural asymmetry (one gate is just closer) that
+    // abilities don't systematically erase, so it's graded strictly — within
+    // fairnessToleranceSec (~1s) is ideal, then a steep per-second ramp to the cap.
     if (edges.length > 1) {
-        deduct(Math.round((1 - fairness) * bal(config, 'fairnessMax', 25)), 'fairness');
+        var tol = bal(config, 'fairnessToleranceSec', 1);
+        var perSec = bal(config, 'fairnessPerSec', 8);
+        var fairnessMax = bal(config, 'fairnessMax', 20);
+        deduct(Math.min(fairnessMax, Math.round(Math.max(0, fairnessGap - tol) * perSec)), 'fairness');
     }
     // hazard sanity: heavy lava and bumper-walls punish; near-zero hazard is bland
     var hd = 0;
