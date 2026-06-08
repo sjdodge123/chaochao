@@ -1545,6 +1545,30 @@ class GameBoard {
 			this.nextMap = JSON.parse(JSON.stringify(this.maps[0]));
 			return this.nextMap.id;
 		}
+		// Wildcard playlist (e.g. "Default"): roll each round so the FREQUENCY of
+		// featured vs community maps is ~ (1 - wildcardChance) : wildcardChance,
+		// not just their order — the per-tier no-repeat cycles run independently
+		// (see pickNoRepeatFrom), so a 20% community chance stays ~20% no matter
+		// how many community maps exist.
+		var def = this.activePlaylistDef();
+		var wc = (def && typeof def.wildcardChance === "number") ? def.wildcardChance : 0;
+		if (wc > 0) {
+			var pool = this.getEligibleMapIndices();
+			var feat = [], comm = [];
+			for (var wi = 0; wi < pool.length; wi++) {
+				var wmeta = this.maps[pool[wi]].meta;
+				if (wmeta && wmeta.tier === "featured") { feat.push(pool[wi]); } else { comm.push(pool[wi]); }
+			}
+			var tierPool;
+			if (feat.length && comm.length) {
+				tierPool = (Math.random() < wc) ? comm : feat;
+			} else {
+				tierPool = feat.length ? feat : comm;
+			}
+			var wid = this.pickNoRepeatFrom(tierPool);
+			this.nextMap = JSON.parse(JSON.stringify(this.maps[wid]));
+			return this.nextMap.id;
+		}
 		// Draw only from the active playlist's eligible maps, keeping the
 		// no-repeat-until-exhausted behaviour but scoped to that pool. Reset the
 		// played set once every eligible map has been seen.
@@ -1590,6 +1614,38 @@ class GameBoard {
 			}
 		}
 		return (elig.length < 2) ? all : elig;
+	}
+
+	// The config def for the room's active playlist (null if unknown).
+	activePlaylistDef() {
+		var defs = c.playlists || [];
+		for (var i = 0; i < defs.length; i++) {
+			if (defs[i] && defs[i].id === this.playlistId) { return defs[i]; }
+		}
+		return null;
+	}
+
+	// Pick a map index from `pool` honouring no-repeat-until-exhausted, scoped to
+	// that pool. Used by the wildcard draw so each tier (featured / community)
+	// cycles independently: when this pool is exhausted we forget only ITS plays
+	// from mapsPlayed, leaving the other tier's progress intact, and keep the
+	// just-played map out of the wrap so there's no back-to-back repeat.
+	pickNoRepeatFrom(pool) {
+		var lastId = this.mapsPlayed.length ? this.mapsPlayed[this.mapsPlayed.length - 1] : null;
+		var unplayed = [];
+		for (var i = 0; i < pool.length; i++) {
+			if (this.mapsPlayed.indexOf(this.maps[pool[i]].id) === -1) { unplayed.push(pool[i]); }
+		}
+		if (unplayed.length === 0) {
+			var poolIds = {};
+			for (var p = 0; p < pool.length; p++) { poolIds[this.maps[pool[p]].id] = true; }
+			this.mapsPlayed = this.mapsPlayed.filter(function (id) { return !poolIds[id]; });
+			for (var f = 0; f < pool.length; f++) {
+				if (this.maps[pool[f]].id !== lastId) { unplayed.push(pool[f]); }
+			}
+			if (unplayed.length === 0) { unplayed = pool.slice(); }
+		}
+		return unplayed[utils.getRandomInt(0, unplayed.length - 1)];
 	}
 
 	// Set the room's active playlist (from the lobby hub board). Validates the id

@@ -876,7 +876,7 @@ exports.getPlaylistSummary = function () {
     // thin, skew-prone packs cluttering the hub/editor). Featured and Everything are
     // structural and always shown. As the map library grows, themed packs unlock.
     var min = (c.balance && c.balance.playlistMinMaps != null) ? c.balance.playlistMinMaps : 20;
-    var alwaysShow = { featured: true, all: true };
+    var alwaysShow = { default: true, featured: true, all: true };
     return defs.filter(function (p) {
         return alwaysShow[p.id] || (counts[p.id] || 0) >= min;
     }).map(function (p) {
