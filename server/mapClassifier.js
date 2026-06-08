@@ -67,7 +67,7 @@ function deriveTraits(ratios, hazardDensity, config) {
     if (ratios.ice >= th.ice) { traits.push('ice'); }
     if (ratios.lava >= th.lava) { traits.push('lava'); }
     if (ratios.ability >= th.ability) { traits.push('ability'); }
-    if (traits.length === 0) { traits.push('pure'); }
+    if (traits.length === 0) { traits.push('standard'); } // no hazard trait crossed its threshold
     return traits;
 }
 

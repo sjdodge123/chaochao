@@ -86,7 +86,7 @@
         { "id": "ice", "name": "Slip & Slide", "desc": "Ice everywhere", "filter": { "trait": "ice" } },
         { "id": "pinball", "name": "Pinball", "desc": "Bumper chaos", "filter": { "trait": "bumper" } },
         { "id": "hardcore", "name": "Hardcore", "desc": "Lava gauntlets", "filter": { "trait": "lava" } },
-        { "id": "pure", "name": "Pure Racing", "desc": "Clean, low-hazard", "filter": { "trait": "pure" } },
+        { "id": "standard", "name": "Standard", "desc": "Clean, low-hazard", "filter": { "trait": "standard" } },
         { "id": "favorites", "name": "Crowd Favorites", "desc": "Top player-rated maps", "filter": { "minRating": 3.5 } },
         { "id": "wild", "name": "Wild", "desc": "The spicy, unsorted pile", "filter": { "tier": "community" } }
     ],
