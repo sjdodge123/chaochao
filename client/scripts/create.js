@@ -296,16 +296,25 @@ function clientConnect() {
     //    (or errored) score submits straight through; a lower score shows a
     //    NON-BLOCKING "submit anyway?" nudge listing the main deductions.
     server.on("mapScore", function (payload) {
+        // Correlate the reply to the map it scored: the request stamped its
+        // serialized map into pendingScoreSig. If the author edited the map after
+        // the request went out, this reply is STALE for the current geometry —
+        // ignore it (Codex review P2: a stale reply must not draw the wrong routes
+        // or feed a submit decision for a different map). A fresh check for the
+        // current map is always already scheduled/in-flight when that happens.
+        var replySig = pendingScoreSig;
+        pendingScoreSig = null; // request consumed
+        var curSig = (vMap != null) ? JSON.stringify(vMap) : null;
+        var stale = (replySig != null && replySig !== curSig);
         // Remember the latest real verdict, keyed to the map it scored, so an
         // Upload inside the server's 2s throttle window reuses it ONLY when the
-        // geometry is unchanged (Codex review P2: a stale verdict for a since-
-        // edited map must not draw the wrong routes or skip the nudge).
-        if (payload != null && !payload.error) {
-            lastMapScoreVerdict = { payload: payload, at: Date.now(), sig: pendingScoreSig };
+        // geometry is unchanged.
+        if (payload != null && !payload.error && !stale) {
+            lastMapScoreVerdict = { payload: payload, at: Date.now(), sig: replySig };
         }
-        pendingScoreSig = null; // request consumed
         if (fairnessCheckPending) {
             fairnessCheckPending = false;
+            if (stale) { return; } // map changed mid-check; ignore (no overlay for old geometry)
             if (payload == null || payload.error) {
                 // Invalid map (e.g. no goal yet) or the per-socket throttle.
                 showSubmitStatus("Couldn't check balance — add a goal, or try again in a moment", "#8a6d00", "white", 6000);
@@ -320,6 +329,14 @@ function clientConnect() {
             return;
         }
         if (!submitPending) { return; }
+        // Stale reply during a submit: the abandoned check for the old map must not
+        // drive this submit. Drop submitPending and let the user re-Upload (the
+        // map they're looking at is different from the one this reply scored).
+        if (stale) {
+            submitPending = false;
+            showSubmitStatus("Map changed — press Upload again to publish", "#8a6d00", "white", 6000);
+            return;
+        }
         handleSubmitVerdict(payload);
     });
 
@@ -2097,7 +2114,9 @@ function submitToGithub() {
     // to clear it even on a slow link.
     var wait = 2300 - (Date.now() - lastScoreEmitAt);
     if (wait > 0) {
-        setTimeout(function () { if (submitPending) { emitScoreMap(sig); } }, wait);
+        // Re-serialize at fire time: if the author edited during the wait, score the
+        // map they actually have now (so the reply correlates and never hangs).
+        setTimeout(function () { if (submitPending) { emitScoreMap(JSON.stringify(vMap)); } }, wait);
     } else {
         emitScoreMap(sig);
     }
