@@ -20,6 +20,7 @@ const bundles = {
         'client/scripts/skinRegistry.js',
         'client/scripts/celebrations.js',
         'client/scripts/gameboard.js',
+        'client/scripts/haptics.js',
         'client/scripts/lobbyHub.js',
         'client/scripts/audience.js',
         'client/scripts/recap.js',

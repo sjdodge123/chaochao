@@ -945,6 +945,10 @@ function registerScoreHandlers(server) {
 			playerList[id].recapState = RECAP_SCORED; // recap: vanish with a goal poof, not hover the goal
 		}
 		recapMarkHighlight('goal', [id]); // flag a scoring moment for the recap
+		// A buzzy celebratory pop on the finishing local player's own pad.
+		if (typeof padPulseForId === "function" && isLocalId(id)) {
+			padPulseForId(id, 0.5, 0.65, 320);
+		}
 		playSound(playerFinished);
 		// Lava was chasing when they crossed the line — the crowd erupts.
 		if (packet != null && packet.clutch) {
@@ -989,6 +993,12 @@ function registerScoreHandlers(server) {
 			if (byLava && typeof spawnSinkingCorpse === "function") {
 				spawnSinkingCorpse(playerList[id]);
 			}
+			// Buzz the dying local player's own pad — a heavier jolt for a lava
+			// plunge than a knocked-out elimination.
+			if (typeof padPulseForId === "function" && isLocalId(id)) {
+				if (byLava) { padPulseForId(id, 0.9, 0.7, 380); }
+				else { padPulseForId(id, 0.6, 0.4, 260); }
+			}
 		}
 		recapMarkHighlight('death', [id]); // flag an elimination moment for the recap
 		createDownRankSymbol(id);
@@ -1014,6 +1024,10 @@ function registerScoreHandlers(server) {
 		playerList[id].deathY = null;
 		playerList[id].deathAt = null;
 		playerList[id].infected = true;
+		// An unsettling, buzzy rumble when the local player turns zombie.
+		if (typeof padPulseForId === "function" && isLocalId(id)) {
+			padPulseForId(id, 0.5, 0.75, 420);
+		}
 		playSound(newZombie);
 	});
 	server.on("broadCastEmoji", function (payload) {
@@ -1164,6 +1178,10 @@ function registerStateHandlers(server) {
 			try { window.ads.dismissInterstitial(); } catch (e) { /* never block the race */ }
 		}
 		playSound(countDownB);
+		// Green light — a crisp launch pulse on every local pad.
+		if (typeof padPulseAll === "function") {
+			padPulseAll(0.7, 0.5, 240);
+		}
 		if (packet != null && packet.music != null) {
 			setBackgroundMusic(packet.music.mood, packet.music.track);
 		}
