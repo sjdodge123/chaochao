@@ -14,6 +14,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 - New ability: **Orbital Beam**. Aim it like a bomb, fire it, and a strike locks onto that spot "from orbit" — a clearly-marked beam line glows and pulses faster and redder for a 5-second countdown so everyone can see exactly where it's about to hit. When it fires, it **melts any ice it crosses into water**, **scorches sand into lava**, and **sets any kart caught in the line on fire like lava** (a lava-style death — though invulnerable karts, Star Power holders, and zombies shrug it off, and it never burns the caster). Use it to carve a new hazard across the track, cut off a chokepoint, or zap a rival who lingers in the open — but telegraph and all, a quick racer has five seconds to clear the line.
 - Where the Orbital Beam drops fresh water right beside the lava it just made, that new edge hardens into the same impassable **stone seam** as natural water-and-lava borders, so you bump along it instead of being shoved across into the lava.
+- AI racers now **read telegraphs and scramble clear** — they steer out of an Orbital Beam's marked strike line before it fires, and out of a charging lava-explosion blast, instead of sitting in ground that's about to turn deadly.
 
 ## v0.31.2 — 2026-06-10
 

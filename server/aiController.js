@@ -387,6 +387,12 @@ var ZOMBIE_AVOID_RADIUS = 95;   // px: non-zombies steer away from zombies (cont
 var ZOMBIE_AVOID_STRENGTH = 2.1;
 var PUCK_AVOID_RADIUS = 115;    // px: the hockey puck hits hard — give it room
 var PUCK_AVOID_STRENGTH = 2.6;
+// Telegraphed strike zones (Orbital Beam line, lava-explosion aimer): these mark
+// ground that is ABOUT to become deadly (lava/burn), so a bot steers out of the
+// marked area during the warn-up the same way it avoids live lava.
+var TELEGRAPH_AVOID_MARGIN = 26;   // px clearance beyond the strike zone's edge
+var TELEGRAPH_BEAM_STRENGTH = 2.8; // perpendicular push out of an Orbital Beam band
+var TELEGRAPH_CIRCLE_STRENGTH = 2.6; // push away from a lava-explosion aimer center
 var LIGHTNING_FEELER_MULT = 1.45; // see farther ahead when everyone's sped up
 var HAZARD_PATH_PENALTY = 12;     // cost x for routing a path through a bumper's cell
 
@@ -644,6 +650,38 @@ function pointRepulsion(bot, x, y, radius) {
         return { x: (dx / d) * w, y: (dy / d) * w };
     }
     return { x: 0, y: 0 };
+}
+
+// Sum of repulsion OUT of telegraphed strike zones (ground about to turn deadly).
+// 'circle' zones (lava-explosion aimer) push radially away from the center like a
+// hazard; 'beam' zones (Orbital Beam) push perpendicular toward the nearer edge of
+// the band so the bot clears the line by the shortest route. The caster is immune to
+// its own beam, so it doesn't avoid that one. Returns a steering contribution to add
+// alongside the other repulsions.
+function telegraphRepulsion(bot, telegraphs) {
+    var ax = 0, ay = 0;
+    for (var i = 0; i < telegraphs.length; i++) {
+        var t = telegraphs[i];
+        if (t.kind === 'circle') {
+            var pr = pointRepulsion(bot, t.x, t.y, t.radius + TELEGRAPH_AVOID_MARGIN);
+            ax += pr.x * TELEGRAPH_CIRCLE_STRENGTH; ay += pr.y * TELEGRAPH_CIRCLE_STRENGTH;
+        } else if (t.kind === 'beam') {
+            if (bot.id === t.ownerId) { continue; } // the caster isn't burned by its own beam
+            var vx = bot.x - t.x, vy = bot.y - t.y;
+            var along = vx * t.dirX + vy * t.dirY;
+            // Only inside the beam's length span (with a small cap margin) is dangerous.
+            if (along < -TELEGRAPH_AVOID_MARGIN || along > t.length + TELEGRAPH_AVOID_MARGIN) { continue; }
+            var perpX = -t.dirY, perpY = t.dirX;
+            var across = vx * perpX + vy * perpY;
+            var band = t.halfWidth + TELEGRAPH_AVOID_MARGIN;
+            if (across > band || across < -band) { continue; } // already clear of the band
+            var sign = across >= 0 ? 1 : -1;            // push toward the nearer edge
+            var depth = 1 - Math.abs(across) / band;    // 0 at the edge .. 1 dead-center
+            var strength = TELEGRAPH_BEAM_STRENGTH * (0.35 + 0.65 * depth);
+            ax += perpX * sign * strength; ay += perpY * sign * strength;
+        }
+    }
+    return { x: ax, y: ay };
 }
 
 // Is the bot currently "blinded" — blackout round, an active blindfold, or sitting
@@ -1388,6 +1426,14 @@ function steerBot(bot, ctx, dt) {
         var pr = pointRepulsion(bot, ctx.puck.x, ctx.puck.y, PUCK_AVOID_RADIUS);
         exX += pr.x * PUCK_AVOID_STRENGTH; exY += pr.y * PUCK_AVOID_STRENGTH;
     }
+    // Steer out of telegraphed strike zones (Orbital Beam line / lava-explosion aimer).
+    // Zombies are immune to the beam's lava-burn and beeliners want an undiluted line, so
+    // both skip it; a Star Power holder is immune too, so it doesn't bother dodging.
+    if (!beelining && !bot.isZombie && ctx.telegraphs && ctx.telegraphs.length &&
+        !(bot.starPowerUntil != null && bot.starPowerUntil > Date.now())) {
+        var tg = telegraphRepulsion(bot, ctx.telegraphs);
+        exX += tg.x; exY += tg.y;
+    }
 
     var lavaW = LAVA_AVOID_STRENGTH * (ctx.riskMult != null ? ctx.riskMult : 1);
     // While escaping, relax the soft lava-centering field so the bot can hug a wall
@@ -1750,6 +1796,25 @@ function update(gameBoard, currentState, dt) {
     }
     module.exports.lastRubberBand = rubberBand; // diagnostic for tests
 
+    // Telegraphed strike zones the bots should steer out of during their warn-up:
+    // pending Orbital Beam lines (gameBoard.pendingBeams) and the lava-explosion aimer
+    // (a charging circle that turns the area to lava). Both mark ground about to become
+    // deadly. A small grace past fireAt keeps a just-resolved beam from snapping off mid-tick.
+    var telegraphs = [];
+    var nowTg = Date.now();
+    if (gameBoard.pendingBeams != null) {
+        for (var bmId in gameBoard.pendingBeams) {
+            var bm = gameBoard.pendingBeams[bmId];
+            if (bm == null || nowTg > bm.fireAt + 200) { continue; }
+            telegraphs.push({ kind: 'beam', ownerId: bm.ownerId, x: bm.x, y: bm.y, dirX: bm.dirX, dirY: bm.dirY, length: bm.length, halfWidth: bm.halfWidth });
+        }
+    }
+    for (var amId in gameBoard.aimerList) {
+        var am = gameBoard.aimerList[amId];
+        if (am == null || am.alive === false || !am.isExplosionAimer) { continue; }
+        telegraphs.push({ kind: 'circle', ownerId: amId, x: am.x, y: am.y, radius: am.radius });
+    }
+
     // Active brutal modes + the special objects/state their strategies need.
     var br = c.brutalRounds;
     var infection = gameBoard.checkForActiveBrutal(br.infection.id);
@@ -1790,6 +1855,7 @@ function update(gameBoard, currentState, dt) {
         lightning: lightning,
         puck: puck,
         clouds: clouds,
+        telegraphs: telegraphs, // strike zones (Orbital Beam line / lava-explosion aimer) to dodge
         blackoutActive: gameBoard.blackoutActive === true,
         visionBlockedUntil: gameBoard.visionBlockedUntil || 0,
         rubberBand: rubberBand,
@@ -1809,6 +1875,7 @@ module.exports._test = {
     bumperSegment: bumperSegment,
     closestOnSegment: closestOnSegment,
     hazardRepulsion: hazardRepulsion,
+    telegraphRepulsion: telegraphRepulsion,
     decideAbility: decideAbility,
     newBotState: newBotState,
     chargeHoldFor: chargeHoldFor,

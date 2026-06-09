@@ -31,6 +31,10 @@ class GameBoard {
 		this.tempSpectatorList = {};
 		this.tileChanges = {};
 		this.punchList = {};
+		// Active Orbital Beam telegraphs (owner -> locked strike line), so the AI can
+		// steer out of the marked danger band during the fuse. Cleared on round reset
+		// (clean()) and when each beam fires (fireOrbitalBeam).
+		this.pendingBeams = {};
 		// Lobby-tutorial idle-reset bookkeeping (set per lobby load in loadLobbyMap).
 		this.lobbyMapDirty = false;
 		this.lobbyLastActivity = 0;
@@ -683,6 +687,20 @@ class GameBoard {
 			length: ob.beamLength,
 			width: ob.beamWidth
 		};
+		// Record the locked strike line so the AI can steer out of the band during the
+		// fuse (consumed in aiController via ctx.telegraphs). Keyed by owner so a re-cast
+		// replaces it; fireOrbitalBeam / clean() clear it.
+		var rad = angle * (Math.PI / 180);
+		this.pendingBeams[owner] = {
+			ownerId: owner,
+			x: player.x,
+			y: player.y,
+			dirX: Math.cos(rad),
+			dirY: Math.sin(rad),
+			length: ob.beamLength,
+			halfWidth: ob.beamWidth / 2,
+			fireAt: Date.now() + ob.fuse
+		};
 		messenger.messageRoomBySig(this.roomSig, "orbitalBeamCast", {
 			owner: owner,
 			x: player.x,
@@ -696,6 +714,8 @@ class GameBoard {
 	}
 	fireOrbitalBeam(packet) {
 		var gameBoard = packet.context;
+		// Telegraph is resolving — drop it whether or not the strike actually lands.
+		delete gameBoard.pendingBeams[packet.owner];
 		// Bail if the round/map changed while the fuse burned (currentMap is a fresh
 		// object each round, so a reference check catches it) — same guard as performTileSwap.
 		if (gameBoard.currentMap !== packet.map || gameBoard.currentMap == null) {
@@ -1812,6 +1832,7 @@ class GameBoard {
 		this.soloCollapseSpeed = c.lastPlayerCollapseSpeed;
 		this.soloStartDistance = this.world.height + 400;
 		this.tileChanges = {};
+		this.pendingBeams = {}; // drop any telegraph whose strike timer this reset cancels
 		this.pendingAbilityTimers = []; // bound growth; lobby ones are canceled in clearLobbyAbilities
 		// AI vision-fairness state, reset each round.
 		this.visionBlockedUntil = 0;
