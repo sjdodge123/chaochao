@@ -60,9 +60,9 @@ function unitTests() {
     r = telegraphRepulsion({ id: 'b', x: 2000, y: 10 }, [beam]);
     check(r.x === 0 && r.y === 0, 'kart beyond the beam length gets no push');
 
-    // The caster is immune to its own beam, so it doesn't dodge it.
+    // The caster is NOT exempt from its own beam, so it dodges it just like anyone else.
     r = telegraphRepulsion({ id: 'caster', x: 200, y: 10 }, [beam]);
-    check(r.x === 0 && r.y === 0, 'the caster ignores its own beam telegraph');
+    check(r.y > 0 && Math.abs(r.y) > Math.abs(r.x), 'the caster also dodges its own beam (no self-exemption)');
 
     // Circle (lava-explosion aimer) at (0,0), radius 100: a kart at (40,0) is pushed +x away.
     const circle = { kind: 'circle', ownerId: 'x', x: 0, y: 0, radius: 100 };

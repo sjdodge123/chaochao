@@ -666,7 +666,7 @@ function telegraphRepulsion(bot, telegraphs) {
             var pr = pointRepulsion(bot, t.x, t.y, t.radius + TELEGRAPH_AVOID_MARGIN);
             ax += pr.x * TELEGRAPH_CIRCLE_STRENGTH; ay += pr.y * TELEGRAPH_CIRCLE_STRENGTH;
         } else if (t.kind === 'beam') {
-            if (bot.id === t.ownerId) { continue; } // the caster isn't burned by its own beam
+            // The caster is NOT exempt from its own beam, so it dodges too (else it suicides).
             var vx = bot.x - t.x, vy = bot.y - t.y;
             var along = vx * t.dirX + vy * t.dirY;
             // Only inside the beam's length span (with a small cap margin) is dangerous.

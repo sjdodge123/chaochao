@@ -761,9 +761,9 @@ class GameBoard {
 		}
 		// Burn every kart standing in the line like lava (applyLavaBurn honors invuln /
 		// Star Power / zombie immunity and routes a fire shield through the burn timer).
-		// The caster is at the origin, so skip them — no suicide-on-cast.
+		// The caster is NOT exempt — linger in your own beam and it burns you too; a
+		// self-burn is uncredited (attacker null), like driving yourself into lava.
 		for (var id in gameBoard.playerList) {
-			if (id == packet.owner) { continue; }
 			var p = gameBoard.playerList[id];
 			if (p == null || p.alive == false) { continue; }
 			var px = p.x - ox, py = p.y - oy;
@@ -772,7 +772,7 @@ class GameBoard {
 			if (pAlong < -pad || pAlong > length + pad) { continue; }
 			var pAcross = px * perpX + py * perpY;
 			if (pAcross < -(halfW + pad) || pAcross > (halfW + pad)) { continue; }
-			p.applyLavaBurn(packet.owner);
+			p.applyLavaBurn(id === packet.owner ? null : packet.owner);
 		}
 		messenger.messageRoomBySig(gameBoard.roomSig, "orbitalBeamFired", {
 			owner: packet.owner,
