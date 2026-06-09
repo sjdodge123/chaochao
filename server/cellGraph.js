@@ -44,12 +44,18 @@ function tileWeight(id) {
         case c.tileMap.slow.id: return 3.7;   // sand — ~3.7x grass time (avoid unless clearly shorter)
         case c.tileMap.ice.id: return 1.4;    // near-frictionless glide — prefer over dirt/sand
         case c.tileMap.bumper.id: return 3.0; // knockback hazard
-        // Water: bots can't swim yet (the swim stroke reads the human move-keys, which AI
-        // doesn't set), so they only crawl across on the dismal drive physics (acel/drag
-        // ~13x grass-time). Weight it accordingly so routes AVOID water whenever any dry
-        // lane exists — without blocking it, so a water-only crossing stays reachable/valid
-        // and par-time still resolves. (Teaching bots to punch-swim is the queued follow-up.)
-        case (c.tileMap.water != null ? c.tileMap.water.id : -999): return 13.0;
+        // Water: bots now PUNCH-SWIM across (aiController strokes toward the carrot, the
+        // same swimImpulse a human gets), so water is a real lane, not the dead-crawl the
+        // old 13.0 modelled. But swimming is stamina-gated for everyone — once the bar is
+        // spent you stroke only as fast as it regens (regenPerSec/punchCost ≈ 0.4 strokes/s,
+        // each stroke a short lunge the high water drag bleeds off) — so the SUSTAINED swim
+        // speed is only ~11-13 px/s vs grass ~78, even carrying entry momentum. Measured
+        // bot crossings (headless, short and wide bands) land at ~6x grass-time, so 6.5 is
+        // the honest cost: bots route THROUGH water only when it's a genuine shortcut (the
+        // dry detour is much longer) or the only way across, and otherwise take a dry lane —
+        // matching how slow water really is. Never blocked, so maps stay reachable/par-valid
+        // and a water-only crossing is a slow slog, not a stall.
+        case (c.tileMap.water != null ? c.tileMap.water.id : -999): return 6.5;
         default: return 1.0; // goal, ability, random
     }
 }

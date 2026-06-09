@@ -1071,6 +1071,23 @@ function decideAttack(bot, ctx, nav) {
         return;
     }
     bot.ai.heldAbilityId = null;
+    // Swimming: on deep water the passive drive barely moves the kart — the only real
+    // propulsion is a STROKE, which is just a bare-handed punch (throwChargedPunch's water
+    // branch converts it to swimImpulse in the held direction). A human strokes by holding a
+    // move key; a bot has none, so stroke toward its steer vector (targetDirX/Y, the path
+    // carrot) — the same direction it's already trying to swim. A quick tap (holdMs 0) = one
+    // stroke; we don't charge, since hoarding stamina mid-water and resting between strokes
+    // (cooldown/stamina-gated, like a human) keeps drag from ever fully stalling the crossing.
+    // Kept above combat so a bot commits to crossing instead of dithering on open water; the
+    // stroke still shoves any rival it lands on, exactly as a human swim stroke does.
+    if (bot.onWater && punchReady(bot)) {
+        var swimM = mag(bot.targetDirX, bot.targetDirY);
+        if (swimM > 0.0001) {
+            facePunch(bot, bot.x + bot.targetDirX, bot.y + bot.targetDirY);
+            botPunch(bot, 0);
+            return;
+        }
+    }
     // Ice drift: skating off our line (no lava emergency) -> hold the charge for grip
     // instead of tapping. Bare-handed only (an ability would fire on the press) and
     // stamina/cooldown gated like any punch; the hold manager above releases it.
