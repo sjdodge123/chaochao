@@ -27,6 +27,21 @@ c.perfHarness = (process.env.PERF_HARNESS === '1' || process.env.PERF_HARNESS ==
 // against a fully-dressed grid without 9 signed-in humans. Default OFF so prod
 // bots stay plain — set RANDOM_BOT_COSMETICS=true on a local test server only.
 c.randomBotCosmetics = (process.env.RANDOM_BOT_COSMETICS === 'true');
+// Test-only seam: force EVERY ability spawn to one ability id so a brand-new ability
+// can be exercised in real play without waiting on the random roll (consumed in
+// gameBoard.spawnNewAbility / applyBrutalAbilityRound and player.tryAcquireAbility).
+// The committed default lives in config.json (`forceAbilitySpawn`, normally null).
+// FORCE_ABILITY_SPAWN overrides it per-run (e.g. FORCE_ABILITY_SPAWN=110 npm start).
+// HARD-disabled in production so a forced ability can never reach the live game even if
+// the config field or env var leaks in.
+if (process.env.NODE_ENV === 'production') {
+    c.forceAbilitySpawn = null;
+} else if (process.env.FORCE_ABILITY_SPAWN != null && process.env.FORCE_ABILITY_SPAWN !== '') {
+    var __forcedAbility = parseInt(process.env.FORCE_ABILITY_SPAWN, 10);
+    c.forceAbilitySpawn = isNaN(__forcedAbility) ? null : __forcedAbility;
+} else if (c.forceAbilitySpawn === undefined) {
+    c.forceAbilitySpawn = null;
+}
 
 // Test-only config override seam (CI perf harness). When CHAO_PERF_OVERRIDE is a
 // JSON object, deep-merge it over the loaded config so a separate-process server

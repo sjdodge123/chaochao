@@ -1218,6 +1218,13 @@ class Player extends Circle {
 		if (this.ability != null || this.isZombie) {
 			return true;
 		}
+		// Test override (config.forceAbilitySpawn / FORCE_ABILITY_SPAWN env, prod-disabled):
+		// force any ability tile to grant the configured ability instead. Generic ability
+		// pads already resolve to it at map generation (spawnNewAbility); this also covers
+		// ability tiles painted with a fixed id directly on a map.
+		if (c.forceAbilitySpawn != null && ABILITY_TILE_CTORS[c.forceAbilitySpawn] != null) {
+			Ctor = ABILITY_TILE_CTORS[c.forceAbilitySpawn];
+		}
 		this.ability = new Ctor(this.id, this.roomSig);
 		this.acquiredAbility = { mapID: object.voronoiId };
 		// Broadcast the GRANTED ability's id (not the tile id) so the client-side
