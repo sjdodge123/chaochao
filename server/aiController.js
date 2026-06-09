@@ -909,9 +909,14 @@ function decidePunch(bot, ctx) {
     var landRange = c.punchRadius + bot.radius + nr.player.radius + 6;
     if (nr.dist > landRange) { return; }
     var shove = lavaBeyond(ctx, bot, nr.player, SHOVE_PROBE);
+    // Bunker (battle royale): the whole point is to kill, not race. Bots fight far
+    // more readily — routine punches need much less aggression, and a guaranteed
+    // shove into the closing ring bypasses the burst cooldown entirely (otherwise
+    // they'd stand around waiting out refractory while a free kill is right there).
+    var buriedBR = (ctx.bunkerSafeIds != null);
     // A free shove into the lava is always worth it; routine aggression only in bursts.
-    if (!shove && bot.ai.aggression < 0.6) { return; }
-    if (!offensiveCombatAllowed(bot, Date.now())) { return; }
+    if (!shove && bot.ai.aggression < (buriedBR ? 0.3 : 0.6)) { return; }
+    if (!(buriedBR && shove) && !offensiveCombatAllowed(bot, Date.now())) { return; }
     // Momentum-aware timing: punch power scales with speed, so for a routine
     // offensive punch the bot holds the swing until it's actually moving fast enough
     // to land a real hit — not a limp standing tap. A free lava shove (about position,
@@ -1138,12 +1143,16 @@ function steerBot(bot, ctx, dt) {
             penaltySet: ctx.hazardCells, // route AROUND bumper cells (soft penalty)
             penaltyMult: HAZARD_PATH_PENALTY
         };
+        // Bunker round: the goal is buried (no goal tiles), so home the A* on the
+        // safe bunker island instead — otherwise findPathToNearestGoal returns null
+        // and the bot just sits there.
+        if (ctx.bunkerSafeIds != null) { pathOpts.goalSet = ctx.bunkerSafeIds; }
         var route = cellGraph.findPathToNearestGoal(ctx.map, { x: bot.x, y: bot.y }, pathOpts);
         // If the danger ring walled us off, retry without it so we still aim at a
         // goal (better a tight line than freezing in front of the lava). Keep the
         // hazard penalty on the retry — it's soft, so it never nulls the path.
         if (route == null && blocked != null) {
-            route = cellGraph.findPathToNearestGoal(ctx.map, { x: bot.x, y: bot.y }, { noiseSeed: ai.pathSeed, noiseAmount: pathOpts.noiseAmount, penaltySet: ctx.hazardCells, penaltyMult: HAZARD_PATH_PENALTY });
+            route = cellGraph.findPathToNearestGoal(ctx.map, { x: bot.x, y: bot.y }, { noiseSeed: ai.pathSeed, noiseAmount: pathOpts.noiseAmount, penaltySet: ctx.hazardCells, penaltyMult: HAZARD_PATH_PENALTY, goalSet: pathOpts.goalSet });
         }
         if (route != null) {
             var pts = [];
@@ -1598,8 +1607,10 @@ function update(gameBoard, currentState, dt) {
     // so they converge on the shrinking safe island and the combat/leader machinery
     // engages (knocking rivals into the closing ring). Real goal tiles reappear and
     // take over the instant the goal emerges for the lone survivor.
+    var bunkerSafeIds = null;
     if (gameBoard.goalBuried && gameBoard.bunkerLoc != null) {
         goalTiles = [{ x: gameBoard.bunkerLoc.x, y: gameBoard.bunkerLoc.y }];
+        bunkerSafeIds = gameBoard.bunkerSafeIds;
     }
 
     // Cells holding a bumper hazard — bumpers aren't in the cell graph, so without
@@ -1700,6 +1711,7 @@ function update(gameBoard, currentState, dt) {
         siteById: buildSiteIndex(map),
         lavaCells: lavaCells,
         goalTiles: goalTiles, // for zombie intercept (prey are racing to a goal)
+        bunkerSafeIds: bunkerSafeIds, // Bunker round: A* homes on these cells (buried goal)
         hazardCells: hazardCells, // bumper cells to penalize in pathing
         players: playerList,
         projectileList: gameBoard.projectileList,

@@ -24,6 +24,7 @@ const messenger = require(path.join(repoRoot, 'server', 'messenger.js'));
 const game = require(path.join(repoRoot, 'server', 'game.js'));
 const utils = require(path.join(repoRoot, 'server', 'utils.js'));
 const mapFormat = require(path.join(repoRoot, 'server', 'mapFormat.js'));
+const cellGraph = require(path.join(repoRoot, 'server', 'cellGraph.js'));
 const c = utils.loadConfig();
 
 const DT = c.serverTickSpeed / 1000;
@@ -97,6 +98,15 @@ console.log('Using map: ' + picked.name);
     check(countId(gb, c.tileMap.ice.id) > 0, 'ice tiles present');
     const lidCount = gb.bunkerLidIds.length;
     check(lidCount > 0, 'bunker lid remembered');
+
+    // Bots must still find a route while the goal is buried: with no goal tiles,
+    // the A* has to home on the bunker island via the goalSet option (otherwise it
+    // returns null and bots idle).
+    const far = { x: 30, y: 30 };
+    const buriedRoute = cellGraph.findPathToNearestGoal(gb.currentMap, far, { goalSet: gb.bunkerSafeIds });
+    const plainRoute = cellGraph.findPathToNearestGoal(gb.currentMap, far);
+    check(buriedRoute != null, 'A* finds a route to the buried bunker via goalSet');
+    check(plainRoute == null, 'A* finds NO route without goalSet (goal really is buried)');
 
     room.game.startRace();
     const lavaBefore = countId(gb, c.tileMap.lava.id);
