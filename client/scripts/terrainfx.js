@@ -257,12 +257,13 @@ function tfxComputeBunkerDoor(fx) {
     if (typeof currentMap === "undefined" || currentMap == null || currentMap.cells == null) { return false; }
     var lidSet = {};
     for (var i = 0; i < fx.lid.length; i++) { lidSet[fx.lid[i]] = true; }
-    var verts = [], sx = 0, sy = 0, n = 0;
+    var doorCells = [], verts = [], sx = 0, sy = 0, n = 0;
     for (var i = 0; i < currentMap.cells.length; i++) {
         var cell = currentMap.cells[i];
         if (!lidSet[cell.site.voronoiId]) { continue; }
         var vv = tfxCellVerts(cell);
         if (!vv) { continue; }
+        doorCells.push({ verts: vv }); // for clipping the door to the tile polygon
         for (var v = 0; v < vv.length; v++) { verts.push(vv[v]); sx += vv[v].x; sy += vv[v].y; n++; }
     }
     if (n === 0) { return false; }
@@ -271,6 +272,7 @@ function tfxComputeBunkerDoor(fx) {
         var dx = verts[v].x - cx, dy = verts[v].y - cy, d = Math.sqrt(dx * dx + dy * dy);
         if (d > r) { r = d; }
     }
+    fx.doorCells = doorCells;
     fx.doorCx = cx; fx.doorCy = cy; fx.doorR = Math.max(r, 20);
     return true;
 }
@@ -302,38 +304,40 @@ function tfxDrawBunker(t, camX, camY) {
     }
 
     var ctx = gameContext;
-    var cx = (fx.doorCx != null ? fx.doorCx : fx.x) + camX;
-    var cy = (fx.doorCy != null ? fx.doorCy : fx.y) + camY;
-    var R = (fx.doorR != null ? fx.doorR : Math.max(40, Math.min(fx.radius * 0.8, 72)));
+    // Without the goal-tile polygon we can't clip the door to the tile bounds — skip
+    // this frame rather than draw an oversized circle (geometry is retried next frame).
+    if (fx.doorCells == null || fx.doorCells.length === 0) { return; }
+    var cx = fx.doorCx + camX, cy = fx.doorCy + camY, R = fx.doorR;
+    var pulse = 0.5 + 0.5 * Math.sin(t * 2.0);
+    var cover = door;
 
     ctx.save();
+    // Clip EVERYTHING to the goal tile's actual polygon, so the door can never spill
+    // past the tile edge — the iris/glow are sized to overshoot and the clip trims
+    // them to the tile shape.
+    tfxPathCells(ctx, fx.doorCells, camX, camY);
+    ctx.clip();
+
     // Goal glow leaking through the iris — shrinks as the door closes, blooms as it opens.
-    var glowR = R * (0.35 + 0.55 * (1 - door));
-    var pulse = 0.5 + 0.5 * Math.sin(t * 2.0);
+    var glowR = Math.max(2, R * (0.5 + 0.8 * (1 - door)));
     var glow = ctx.createRadialGradient(cx, cy, 1, cx, cy, glowR);
     glow.addColorStop(0, "rgba(255,210,90," + (0.55 * (1 - door) + 0.10 + 0.06 * pulse) + ")");
     glow.addColorStop(1, "rgba(255,180,40,0)");
     ctx.fillStyle = glow;
-    ctx.fillRect(cx - glowR, cy - glowR, glowR * 2, glowR * 2);
+    ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
 
-    // Silo rim (always there as the hatch frame).
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = "rgba(90,96,104,0.9)";
-    ctx.beginPath(); ctx.arc(cx, cy, R, 0, 2 * Math.PI); ctx.stroke();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = "rgba(150,158,168,0.7)";
-    ctx.beginPath(); ctx.arc(cx, cy, R - 5, 0, 2 * Math.PI); ctx.stroke();
-
-    // Iris blades: 6 wedges that converge on the center as the door closes.
-    var NB = 6, cover = door;
+    // Iris blades: 6 wedges that converge on the center as the door closes. Sized to
+    // overshoot the tile (bladeR > R); the clip above trims them to the tile polygon.
+    var NB = 6;
     if (cover > 0.001) {
         var twist = (1 - cover) * 0.6;
         var inner = R * (1 - cover) * 0.95;
+        var bladeR = R * 1.3;
         for (var b = 0; b < NB; b++) {
             var a0 = (b / NB) * Math.PI * 2 + twist;
             var a1 = a0 + (Math.PI * 2 / NB);
             ctx.beginPath();
-            ctx.arc(cx, cy, R - 2, a0, a1);
+            ctx.arc(cx, cy, bladeR, a0, a1);
             ctx.arc(cx, cy, inner, a1, a0, true);
             ctx.closePath();
             ctx.fillStyle = (b % 2 === 0) ? "rgba(64,70,78,0.92)" : "rgba(52,58,66,0.92)";
@@ -344,9 +348,20 @@ function tfxDrawBunker(t, camX, camY) {
         }
         if (cover > 0.85) { // center bolt only when shut
             ctx.fillStyle = "rgba(150,158,168,0.9)";
-            ctx.beginPath(); ctx.arc(cx, cy, 4, 0, 2 * Math.PI); ctx.fill();
+            ctx.beginPath(); ctx.arc(cx, cy, Math.min(4, R * 0.18), 0, 2 * Math.PI); ctx.fill();
         }
     }
+
+    // Silo rim = the goal tile's own boundary. Drawn INSIDE the clip with a doubled
+    // line so only the inner half shows — the frame stays fully within the tile.
+    tfxPathCells(ctx, fx.doorCells, camX, camY);
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = "rgba(70,76,84,0.95)";
+    ctx.stroke();
+    tfxPathCells(ctx, fx.doorCells, camX, camY);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(150,158,168,0.55)";
+    ctx.stroke();
     ctx.restore();
 }
 
