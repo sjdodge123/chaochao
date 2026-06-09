@@ -176,4 +176,23 @@ class BombTrigger extends Ability {
 	}
 }
 
-module.exports = { Ability, Blindfold, Swap, IceCannon, Bomb, SpeedBuff, SpeedDebuff, TileSwap, Cut, StarPower, BombTrigger };
+// Aimed "from orbit" strike. use() just flags the fire — GameBoard.startOrbitalBeam
+// locks the origin + 8-way direction, telegraphs the line for the configured fuse,
+// then GameBoard.fireOrbitalBeam mutates the struck tiles and burns karts in the line.
+class OrbitalBeam extends Ability {
+	constructor(owner, roomSig) {
+		super(owner, roomSig);
+		this.fireBeam = false;
+		this.id = c.tileMap.abilities.orbitalBeam.id;
+	}
+	use() {
+		if (this.alive == false) {
+			return;
+		}
+		this.alive = false;
+		this.fireBeam = true;
+		messenger.messageRoomBySig(this.roomSig, "orbitalBeam", this.ownerId);
+	}
+}
+
+module.exports = { Ability, Blindfold, Swap, IceCannon, Bomb, SpeedBuff, SpeedDebuff, TileSwap, Cut, StarPower, BombTrigger, OrbitalBeam };

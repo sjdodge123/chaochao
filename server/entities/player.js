@@ -8,7 +8,7 @@ var _engine = require('../engine.js');
 var { emitBotEmote } = require('../botEmotes.js');
 var { Circle } = require('./shapes.js');
 var { Punch } = require('./punch.js');
-var { Blindfold, Swap, Bomb, SpeedBuff, SpeedDebuff, TileSwap, IceCannon, Cut, StarPower } = require('./abilities.js');
+var { Blindfold, Swap, Bomb, SpeedBuff, SpeedDebuff, TileSwap, IceCannon, Cut, StarPower, OrbitalBeam } = require('./abilities.js');
 
 // Ability pickup tiles -> their ability class, so handleHit can acquire any of
 // them through one path (tryAcquireAbility) instead of eight identical branches.
@@ -22,6 +22,7 @@ ABILITY_TILE_CTORS[c.tileMap.abilities.tileSwap.id] = TileSwap;
 ABILITY_TILE_CTORS[c.tileMap.abilities.iceCannon.id] = IceCannon;
 ABILITY_TILE_CTORS[c.tileMap.abilities.cut.id] = Cut;
 ABILITY_TILE_CTORS[c.tileMap.abilities.starPower.id] = StarPower;
+ABILITY_TILE_CTORS[c.tileMap.abilities.orbitalBeam.id] = OrbitalBeam;
 
 class LobbyStartButton extends Circle {
 	constructor(x, y, angle, color) {
@@ -699,6 +700,53 @@ class Player extends Circle {
 		}
 		this.onFire += value;
 		messenger.messageRoomBySig(this.roomSig, "onFire", { owner: this.id, value: this.onFire });
+	}
+	// Burn this player exactly as stepping into lava does, without synthesizing a map
+	// cell hit (that would clobber the onIce/onWater/onSanctuary footing stamps in
+	// handleMapCellHit). Used by Orbital Beam to "burn like lava" along its struck line.
+	// Honors the same immunities lava does — invuln (incl. lobby grace), Star Power,
+	// and zombies — and routes a killstreak fire shield through the same burn timer, so
+	// a shielded kart survives the line just like it survives lava. attackerId credits
+	// the caster (mirrors cutPlayers); pass null for an unattributed burn.
+	applyLavaBurn(attackerId) {
+		if (this.alive == false) {
+			return;
+		}
+		if (this.currentState == c.stateMap.lobby) {
+			// Lobby lava is a teaching prop: cosmetic death + safe respawn, never the
+			// real kill path. Invuln/Star Power holders are immune (matches the lava branch).
+			if (this.isInvuln() || this.hasStarPower()) {
+				return;
+			}
+			this.lobbyRespawnPending = "death";
+			return;
+		}
+		if (this.hasStarPower() || this.isZombie == true || this.isInvuln()) {
+			return;
+		}
+		if (attackerId != null) {
+			this.setPunchedBy(attackerId);
+		}
+		if (this.onFire > 0) {
+			// Killstreak fire shield: ride the burn timer down instead of an instant kill,
+			// exactly like lava does while onFire > 0.
+			if (this.fireTimer == null) {
+				this.fireTimer = Date.now();
+			}
+			if (this.punchedBy != null) {
+				this.burnedBy = this.punchedBy;
+			}
+			this.checkFireTimer();
+			return;
+		}
+		if (this.punchedBy == null && this.burnedBy != null) {
+			this.punchedBy = this.burnedBy;
+		}
+		// Burning up voids pending drift credit before killSelf banks it (see lava branch).
+		this.pendingDriftDistance = 0;
+		this.driftPunchRef = null;
+		this.driftPunchPending = 0;
+		this.killSelf("lava");
 	}
 	addSpeed(newValue) {
 		//New speed cant go above max speed

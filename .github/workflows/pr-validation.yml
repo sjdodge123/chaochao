@@ -175,6 +175,9 @@ jobs:
       - name: "Headless Star Power test (invulnerability gates: punch / explosion / cut / buffs / swap)"
         run: node .github/scripts/star-power-test.js
 
+      - name: "Headless Orbital Beam test (ice->water / sand->lava strike, lava burn, rebuilt stone seams)"
+        run: node .github/scripts/orbital-beam-test.js
+
   perf-tick-budget:
     # Server-side worst-case load: a full 25-kart grid in a stacked brutal round.
     # Proves one room still ticks well within the 30 Hz interval. Zero new deps —

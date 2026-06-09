@@ -21,6 +21,9 @@ exports.checkCollideCells = function (player, map) {
 exports.bounceOffStoneEdges = function (player, map) {
 	bounceOffStoneEdges(player, map);
 }
+exports.rebuildStoneEdges = function (map) {
+	rebuildStoneEdges(map);
+}
 exports.bounceZombieOffWater = function (player, map) {
 	bounceZombieOffWater(player, map);
 }
@@ -909,6 +912,17 @@ function ensureStoneEdges(map) {
 }
 function mapHasStoneEdges(map) {
 	return ensureStoneEdges(map).length > 0;
+}
+// Drop the compute-once stone-edge cache so the next ensureStoneEdges rebuilds it from
+// the cells' LIVE ids. ensureStoneEdges only walls water/lava seams that existed when
+// the map was first scanned; an ability that MANUFACTURES new water/lava adjacencies at
+// runtime (Orbital Beam: ice->water crossing sand->lava) must call this so the fresh
+// seams get walled. Cheap and rare (an occasional ability fire, never per tick). The
+// _stoneEdges property was defined writable, so reassigning undefined re-arms the lazy build.
+function rebuildStoneEdges(map) {
+	if (map == null) { return; }
+	map._stoneEdges = undefined;
+	ensureStoneEdges(map);
 }
 // Orientation sign of point (px,py) relative to directed segment a->b (cross product).
 function sideOf(ax, ay, bx, by, px, py) {

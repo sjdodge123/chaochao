@@ -868,6 +868,21 @@ function decideAbility(bot, ctx, ability, nav) {
         if ((armed && nrs != null && nrs.dist < CUT_RANGE * 1.5) || forced) { bot.attack = true; }
         return;
     }
+    if (id === AB.orbitalBeam.id) {
+        // Lock a 5s damage line down the track: it's an area-denial / threat play, so
+        // line it up on the nearest rival (the beam's locked at cast, so aim where they
+        // ARE) and fire when armed with one in range, or lay it down the lane if forced.
+        // While holding, point the telegraphed aim at that rival so it reads as a threat.
+        var nro = nearestRival(bot, ctx.players);
+        if ((nro != null && nro.dist < BOMB_THROW_RANGE && armed) || forced) {
+            if (nro != null) { bot.angle = snap45(angleDeg(bot.x, bot.y, nro.player.x, nro.player.y)); }
+            else { aimAhead(); }
+            bot.attack = true;
+        } else if (nro != null) {
+            bot.angle = snap45(angleDeg(bot.x, bot.y, nro.player.x, nro.player.y));
+        }
+        return;
+    }
 }
 
 // Offensive combat comes in BURSTS, not a continuous punch-lock: a bot engages

@@ -215,6 +215,8 @@ var starIcon = new Image(576, 512);
 starIcon.src = "../assets/img/star-solid.svg";
 var bunkerIcon = new Image(512, 512);
 bunkerIcon.src = "../assets/img/bunker-door.svg";
+var orbitalBeamIcon = new Image(576, 512);
+orbitalBeamIcon.src = "../assets/img/orbital-beam-solid.svg";
 
 //TileTextures
 var lava = new Image(256, 256);
@@ -3522,7 +3524,7 @@ var requiredImages = [
     snowFlakeIcon, windIcon, hourglassIcon, lightningIcon, cloudyIcon,
     infinityIcon, fiestaIcon, toolBoxIcon, moneyIcon, volcanoIcon,
     bombImage, snowFlakeImage, cloudImage, infectionIcon, puckIcon,
-    explosionIcon, moonIcon, scissorsIcon, starIcon, randomTileIcon,
+    explosionIcon, moonIcon, scissorsIcon, starIcon, orbitalBeamIcon, randomTileIcon,
     lava, poison, grass, dirt, ice, sand,
     redFire, orangeFire, yellowFire, greenFire, blueFire, purpleFire
 ];
@@ -3575,6 +3577,7 @@ function loadPatterns() {
     patterns[config.tileMap.abilities.iceCannon.id] = makePattern(snowFlakeIcon, makeSeamlessPattern(gDirt));
     patterns[config.tileMap.abilities.cut.id] = makePattern(scissorsIcon, makeSeamlessPattern(gDirt));
     patterns[config.tileMap.abilities.starPower.id] = makePattern(starIcon, makeSeamlessPattern(gDirt));
+    patterns[config.tileMap.abilities.orbitalBeam.id] = makePattern(orbitalBeamIcon, makeSeamlessPattern(gDirt));
     patterns[config.brutalRounds.infection.id] = makePattern(infectionIcon, "red");
 
     //Tiles
@@ -3838,6 +3841,7 @@ function drawObjects(dt) {
     if (typeof drawTerrainFX === "function") {
         drawTerrainFX(dt);
     }
+    drawOrbitalBeamTelegraph();
     drawPlayers(dt);
     drawProjectiles(dt);
     drawRecordFloats();
@@ -6821,6 +6825,9 @@ function drawAbilityIndicator(x, y, player) {
         case config.tileMap.abilities.cut.id:
             drawCutAimer(x, y, player.angle, player.color);
             break;
+        case config.tileMap.abilities.orbitalBeam.id:
+            drawProjectileAimer(x, y, player.angle, "#b388ff", config.tileMap.abilities.orbitalBeam.aimerLength);
+            break;
         case config.tileMap.abilities.swap.id:
         case config.tileMap.abilities.bombTrigger.id:
         default:
@@ -7988,6 +7995,119 @@ function drawPendingSwap() {
     // Once every tile has flipped/cleared/expired, drop the telegraph.
     if (!hasAnyKey(set)) {
         pendingSwapCells = null;
+    }
+}
+
+// --- Orbital Beam telegraph + strike ---
+// Self-timed overlay (like drawPendingSwap): the server's "orbitalBeamCast" message
+// seeds a locked beam line, this ramps a warning band along it for the fuse, then
+// "orbitalBeamFired" flips it to a brief bright strike flash before it self-expires.
+// Drawn in the world pass (raw world coords, no camera offset — same space as the
+// karts and the swap telegraph).
+var orbitalBeams = {}; // owner -> { x, y, angle, length, width, start, end, fired, firedAt }
+var ORBITAL_STRIKE_MS = 380; // hot strike-flash duration after the beam fires
+
+function markOrbitalBeam(data) {
+    if (data == null) { return; }
+    var now = Date.now();
+    orbitalBeams[data.owner] = {
+        x: data.x, y: data.y, angle: data.angle,
+        length: data.length, width: data.width,
+        start: now, end: now + data.duration,
+        fired: false, firedAt: 0
+    };
+}
+
+function orbitalBeamFiredFX(data) {
+    if (data == null) { return; }
+    var now = Date.now();
+    var b = orbitalBeams[data.owner];
+    if (b == null) {
+        // Joined mid-fuse (no telegraph tracked): synthesize one straight into the strike.
+        b = orbitalBeams[data.owner] = { start: now - 1, end: now };
+    }
+    // Trust the fire payload's authoritative geometry for the strike.
+    b.x = data.x; b.y = data.y; b.angle = data.angle;
+    b.length = data.length; b.width = data.width;
+    b.fired = true;
+    b.firedAt = now;
+}
+
+function fillBeamRect(ctx, ax, ay, px, py, halfW, dx, dy, length) {
+    var bx = ax + dx * length, by = ay + dy * length;
+    ctx.beginPath();
+    ctx.moveTo(ax + px * halfW, ay + py * halfW);
+    ctx.lineTo(bx + px * halfW, by + py * halfW);
+    ctx.lineTo(bx - px * halfW, by - py * halfW);
+    ctx.lineTo(ax - px * halfW, ay - py * halfW);
+    ctx.closePath();
+    ctx.fill();
+}
+
+function drawOrbitalBeamTelegraph() {
+    if (!hasAnyKey(orbitalBeams)) { return; }
+    var now = Date.now();
+    var ctx = gameContext;
+    for (var owner in orbitalBeams) {
+        var b = orbitalBeams[owner];
+        if (b.fired) {
+            if (now - b.firedAt > ORBITAL_STRIKE_MS) { delete orbitalBeams[owner]; continue; }
+        } else if (now > b.end + 250) {
+            // Fuse elapsed but no fire arrived (left/teardown) — drop the stale telegraph.
+            delete orbitalBeams[owner];
+            continue;
+        }
+        var rad = b.angle * Math.PI / 180;
+        var dx = Math.cos(rad), dy = Math.sin(rad);
+        var px = -dy, py = dx;            // perpendicular (band half-width axis)
+        var halfW = b.width / 2;
+        var ax = b.x, ay = b.y;
+        var ex = b.x + dx * b.length, ey = b.y + dy * b.length;
+        ctx.save();
+        if (b.fired) {
+            // Strike: a hot core that fades fast, with an outward-widening scorch halo.
+            var t = clamp01((now - b.firedAt) / ORBITAL_STRIKE_MS);
+            var fade = 1 - t;
+            ctx.globalAlpha = 0.5 * fade;
+            ctx.fillStyle = "#ff6a1a";
+            fillBeamRect(ctx, ax, ay, px, py, halfW * (1 + t * 1.6), dx, dy, b.length);
+            ctx.globalAlpha = 0.9 * fade;
+            ctx.fillStyle = "#fff3c0";
+            fillBeamRect(ctx, ax, ay, px, py, halfW * (1 - 0.5 * t), dx, dy, b.length);
+        } else {
+            var prog = clamp01((now - b.start) / (b.end - b.start));
+            // Pulse accelerates + the band reddens as the strike nears (swap-aimer feel).
+            var phase = (now / 1000) * (1.5 + 6 * prog) * Math.PI * 2;
+            var pulse = 0.5 + 0.5 * Math.sin(phase);
+            var hot = prog > 0.66;
+            // Warning band fill.
+            ctx.globalAlpha = (0.06 + 0.22 * prog) * (0.6 + 0.4 * pulse);
+            ctx.fillStyle = hot ? "#ff5a2a" : "#b388ff";
+            fillBeamRect(ctx, ax, ay, px, py, halfW, dx, dy, b.length);
+            // Bright marching center line, thickening toward the strike.
+            ctx.globalAlpha = 0.4 + 0.55 * pulse * (0.4 + 0.6 * prog);
+            ctx.strokeStyle = hot ? "#ffd24a" : "#e0c8ff";
+            ctx.lineWidth = lerp(2, 7, prog);
+            ctx.lineCap = "round";
+            ctx.setLineDash([14, 10]);
+            ctx.lineDashOffset = -(now / 18) % 24;
+            ctx.beginPath();
+            ctx.moveTo(ax, ay);
+            ctx.lineTo(ex, ey);
+            ctx.stroke();
+            // Edge rails so the impact WIDTH reads clearly.
+            ctx.setLineDash([]);
+            ctx.globalAlpha = (0.3 + 0.4 * prog) * (0.5 + 0.5 * pulse);
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = hot ? "#ffb060" : "#cdb0ff";
+            ctx.beginPath();
+            ctx.moveTo(ax + px * halfW, ay + py * halfW);
+            ctx.lineTo(ex + px * halfW, ey + py * halfW);
+            ctx.moveTo(ax - px * halfW, ay - py * halfW);
+            ctx.lineTo(ex - px * halfW, ey - py * halfW);
+            ctx.stroke();
+        }
+        ctx.restore();
     }
 }
 

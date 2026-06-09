@@ -251,6 +251,15 @@
                 "spawnable": true,
                 "duration": 5000,
                 "id": 109
+            },
+            "orbitalBeam": {
+                "_doc": "Aimed strike 'from orbit'. The origin + 8-way direction are LOCKED at cast (the holder's position/facing the moment they fire); the beam telegraphs along that fixed line for fuse ms, then strikes. On strike it MELTS ice it crosses to water, BURNS sand (the slow tile) it crosses to lava, and sets any kart standing in the line on fire like lava (lava-style death; honors invuln / Star Power / zombie immunity, skips the caster). beamLength/beamWidth size the rectangle (world is 1366x768, so the default spans the map); fuse is the 5s warn-up; aimerLength is the held-ability direction nub.",
+                "spawnable": true,
+                "id": 110,
+                "fuse": 5000,
+                "beamLength": 1600,
+                "beamWidth": 74,
+                "aimerLength": 50
             }
         }
     },

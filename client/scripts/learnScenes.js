@@ -661,6 +661,51 @@ var LearnAnim = (function () {
         kart(s.ctx, p.x, p.y, p.radius, BLUE);
     };
 
+    SCENES["orbitalBeam"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        var ctx = s.ctx;
+        var period = 4200, fire = 0.78;          // strike at 78% of the loop
+        var ph = loop(s.t, period), struck = ph >= fire;
+        var lx0 = W * 0.30, ly = H / 2, lx1 = W * 0.95, bw = 20; // beam band
+        var icePatch = W * 0.52, sandPatch = W * 0.74, pw = 16;  // the two transmuted patches
+        function patch(px, tex, fallback) {
+            var im = img(tex);
+            ctx.save(); ctx.beginPath(); ctx.rect(px - pw, ly - bw, pw * 2, bw * 2); ctx.clip();
+            if (ready(im)) { for (var yy = ly - bw; yy < ly + bw; yy += 30) { for (var xx = px - pw; xx < px + pw; xx += 30) { ctx.drawImage(im, xx, yy, 30, 30); } } }
+            else { ctx.fillStyle = fallback; ctx.fillRect(px - pw, ly - bw, pw * 2, bw * 2); }
+            ctx.restore();
+        }
+        // Before the strike: ice + sand sitting in the line. After: water + lava.
+        if (!struck) { patch(icePatch, "ice.png", "#bfe9f0"); patch(sandPatch, "sand.png", "#caa56a"); }
+        else { ctx.save(); ctx.fillStyle = "#2f6fb0"; ctx.fillRect(icePatch - pw, ly - bw, pw * 2, bw * 2); ctx.restore(); patch(sandPatch, "lava.png", "#cf1020"); }
+        if (!struck) {
+            // Warning band + center line: pulses faster and reddens as the strike nears.
+            var prog = ph / fire;
+            var pulse = 0.5 + 0.5 * Math.sin(s.t / 1000 * (1.5 + 6 * prog) * Math.PI * 2);
+            var hot = prog > 0.66;
+            ctx.save();
+            ctx.globalAlpha = (0.08 + 0.25 * prog) * (0.6 + 0.4 * pulse);
+            ctx.fillStyle = hot ? "#ff5a2a" : "#b388ff";
+            ctx.fillRect(lx0, ly - bw, lx1 - lx0, bw * 2);
+            ctx.globalAlpha = 0.4 + 0.55 * pulse;
+            ctx.strokeStyle = hot ? "#ffd24a" : "#e0c8ff";
+            ctx.lineWidth = lerp(1.5, 5, prog); ctx.lineCap = "round";
+            ctx.beginPath(); ctx.moveTo(lx0, ly); ctx.lineTo(lx1, ly); ctx.stroke();
+            ctx.restore();
+        } else {
+            // Hot strike flash, fading out.
+            var fade = 1 - clamp((ph - fire) / (1 - fire), 0, 1);
+            ctx.save();
+            ctx.globalAlpha = 0.5 * fade; ctx.fillStyle = "#ff6a1a"; ctx.fillRect(lx0, ly - bw, lx1 - lx0, bw * 2);
+            ctx.globalAlpha = 0.85 * fade; ctx.fillStyle = "#fff3c0"; ctx.fillRect(lx0, ly - bw * 0.55, lx1 - lx0, bw * 1.1);
+            ctx.restore();
+            onCycle(s.mem, s.t - period * fire, period, "ob", function () {
+                spawnExplosion(icePatch, ly, 24, "#9fe8ff"); spawnExplosion(sandPatch, ly, 24, "#ffb070");
+            });
+        }
+        kart(ctx, lx0 - 6, ly, 11, BLUE); // the caster at the beam's source
+    };
+
     SCENES["blindfold"] = function (s) {
         floor(s.ctx, "dirt.png", 60);
         kart(s.ctx, W * 0.3, H / 2, 11, RED); kart(s.ctx, W * 0.68, H * 0.6, 11, GREEN);
