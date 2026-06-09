@@ -1487,6 +1487,12 @@ function registerCombatHandlers(server) {
 		// own melee swing — not on bumper hits, which aren't a kart throwing a punch.
 		if (owner != null && punch.type == "player") {
 			owner.punchAnimAt = Date.now();
+			// On water a punch IS a swim stroke — give the local swimmer a light
+			// paddle pulse per stroke (the connecting-hit feel is handled separately
+			// via trauma in playerPunched, so this only adds the rhythm of swimming).
+			if (owner._wasOnWater && typeof padPulseForId === "function" && isLocalId(punch.ownerId)) {
+				padPulseForId(punch.ownerId, 0.25, 0.3, 130);
+			}
 		}
 		if (owner != null && owner.infected) {
 			playSoundVaried(zombieSwing, 0.1);
@@ -1683,6 +1689,10 @@ function registerCombatHandlers(server) {
 		if (packet == null) { return; }
 		var local = (typeof isLocalId === "function") ? isLocalId(packet.owner) : true;
 		playFlameExtinguish(local ? 1 : 0.6);
+		// A short fizzly steam buzz on the doused local player's own pad.
+		if (local && typeof padPulseForId === "function") {
+			padPulseForId(packet.owner, 0.3, 0.55, 280);
+		}
 	});
 	// Lobby tutorial: a player touched lava (death) or the goal (win) and was safely
 	// respawned. Reuse the real death/win cues (dampened to lobby volume) and set the
