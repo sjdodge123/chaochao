@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.31.0 — 2026-06-09
+
 ### General
 
 - New terrain: **Water**. You barely drift in deep water on your own — to actually move, **punch to swim**: each stroke shoves you in the direction you're holding, so good swimmers can cut a watery shortcut across a map in a pinch. Swimming is a real punch, so it still knocks rivals around (and spends stamina), and the water drags on the hit. Climb out and you're briefly **dripping wet** and sluggish until you shake it off. Bonus: water **puts out your flame** — drive in while you're burning from a killstreak and the fire hisses out.
