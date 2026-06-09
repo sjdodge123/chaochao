@@ -79,10 +79,15 @@ function run() {
     const caster = room.playerList[casterId];
     const victim = room.playerList[victimId];
 
-    // Fire a thin horizontal beam east across mid-map.
+    // Fire a thin horizontal beam east across mid-map. The caster sits at the origin (in
+    // its own beam) — vulnerable — so we can assert it burns too (no self-exemption).
     const ox = 40, oy = config.worldHeight / 2, angle = 0;
     caster.x = caster.newX = ox; caster.y = caster.newY = oy; caster.angle = angle;
+    caster.velX = caster.velY = 0;
     caster.currentState = config.stateMap.racing;
+    caster.alive = true; caster.isZombie = false;
+    caster.invulnUntil = 0; caster.invulnHeldInCircle = false;
+    caster.starPowerUntil = 0; caster.onFire = 0; caster.fireTimer = null;
 
     const halfW = OB.beamWidth / 2;
     const inBeam = [];
@@ -194,6 +199,7 @@ function run() {
     check(iceCell.id === WATER, 'ice on the struck line melted to water');
     check(sandCell.id === LAVA, 'sand on the struck line burned to lava');
     check(victim.alive === false, 'kart standing in the line died like lava');
+    check(caster.alive === false, 'the caster is NOT exempt — it burned in its own beam');
 
     const fired = events.filter(ev => ev.e === 'orbitalBeamFired').pop();
     check(fired != null, 'broadcast orbitalBeamFired on strike');
