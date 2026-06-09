@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- Controllers now rumble. Feel the hits you land and take, the heavy shake of a volcano or a collapsing arena, the green-light launch at race start, and a jolt when you fall to lava, turn zombie, or cross the finish. New "Rumble" toggle in the settings menu (on by default) if you'd rather race quiet.
 
 ## v0.31.3 — 2026-06-10
 

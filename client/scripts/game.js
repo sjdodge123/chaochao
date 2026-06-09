@@ -370,6 +370,14 @@ function setupPage() {
     });
     $("#colorblindControl").on("keydown", activateToggleOnKey);
     updateColorblindToggleUI();
+    // Controller rumble toggle — default on, persisted (see haptics.js).
+    if (typeof loadHapticsPref === "function") { loadHapticsPref(); }
+    $("#hapticsControl").on("click", function () {
+        if (typeof setHapticsEnabled === "function") { setHapticsEnabled(!hapticsEnabled); }
+        if (typeof updateHapticsToggleUI === "function") { updateHapticsToggleUI(); }
+    });
+    $("#hapticsControl").on("keydown", activateToggleOnKey);
+    if (typeof updateHapticsToggleUI === "function") { updateHapticsToggleUI(); }
     volumeChange();
     gameCanvas = document.getElementById('gameCanvas');
     overlayCanvas = document.getElementById('overlayCanvas');
@@ -516,6 +524,7 @@ function gameLoop(dt) {
     // below no-op unless ?fps=1 / ?diag=1 is set, so normal play is unaffected.
     var t0 = performance.now();
     pollGamepad(dt);
+    if (typeof updateHaptics === "function") { updateHaptics(); }
     var t1 = performance.now();
     drawObjects(dt);
     var t2 = performance.now();
