@@ -92,6 +92,16 @@ class GameBoard {
 		this.collapseLine = this.world.height;
 		this.visionBlockedUntil = 0;
 		this.blackoutActive = false;
+		// Bunker state — initialized here (not just in clean()) because lobby-tutorial
+		// abilities (bomb/iceCannon/lava/tileSwap) can run before the first race, and
+		// their island-protection guards index bunkerSafeIds; an undefined would throw.
+		this.goalBuried = false;
+		this.bunkerRingActive = false;
+		this.bunkerLoc = null;
+		this.bunkerArenaRadius = 0;
+		this.bunkerSafeIds = {};
+		this.bunkerLidIds = [];
+		this.bunkerStartTime = null;
 		this.soloMode = false;
 		this.soloCollapseSpeed = c.lastPlayerCollapseSpeed;
 		this.soloStartDistance = this.world.height + 400;

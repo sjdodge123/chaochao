@@ -283,6 +283,16 @@ class Game {
 		client.emit("newMap", this.gameBoard.newMapPayload);
 		//Send map tile changes
 		client.emit("tileChanges", JSON.stringify(this.gameBoard.gatherTileChanges()));
+		// Bunker round in progress: bunkerStart was a one-shot at setup, so a mid-round
+		// joiner/reconnect never set bunkerFX and would miss the silo door + offscreen
+		// bunker indicator. Replay it, flagged `sealed` so they see it already shut
+		// (no sink animation or close hiss replay).
+		if (this.gameBoard.goalBuried && this.gameBoard.bunkerLoc != null) {
+			client.emit("bunkerStart", {
+				x: this.gameBoard.bunkerLoc.x, y: this.gameBoard.bunkerLoc.y,
+				radius: this.gameBoard.bunkerArenaRadius, lid: this.gameBoard.bunkerLidIds, sealed: true
+			});
+		}
 		//Send current abilities
 		client.emit("allAbilityHoldings", JSON.stringify(this.gameBoard.gatherAbilities()));
 		// Late-join spectator: send the LIVE hazard list (the puck, mid-round volcano
