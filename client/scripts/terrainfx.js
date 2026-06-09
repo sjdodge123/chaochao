@@ -26,6 +26,14 @@ var terrainFX = {
 // socket handlers (client.js) and cleared each round (newMap). null when no
 // Bunker round is active.
 var bunkerFX = null;
+// Emerge cinematic timeline (ms from the bunkerEmerge event), shared by the door
+// animation (terrainfx), the camera pan (draw.js), and the SFX cue (client.js) so
+// the door bursts open + the sound + the camera's peak all land together:
+//   0..panOut        camera pulls back, door still sealed
+//   panOut           door bursts open + emerge SFX fire — camera at its peak
+//   panOut..+doorOpen iris retracts; camera holds at the peak
+//   ..+hold..+panIn  camera eases back to follow the survivor; overlay fades out
+var BUNKER_EMERGE = { panOut: 700, doorOpen: 450, hold: 450, panIn: 800 };
 // Map each ability tile id to its icon image (the same Images loadPatterns uses).
 function tfxBuildAbilityIcons() {
     var m = {};
@@ -280,12 +288,19 @@ function tfxDrawBunker(t, camX, camY) {
     if (typeof bunkerFX === "undefined" || bunkerFX == null) { return; }
     var fx = bunkerFX;
     if (fx.doorR == null) { tfxComputeBunkerDoor(fx); }
-    var EMERGE = 0.5;
     var door; // 1 = fully closed (goal hidden), 0 = fully open (goal exposed)
+    var overlayAlpha = 1; // fade the silo overlay out as the goal beacon takes over
     if (fx.phase === "emerging") {
-        var op = Math.min(1, (Date.now() - fx.animStart) / (EMERGE * 1000));
-        door = 1 - op;
-        if (op >= 1) { fx.phase = "done"; return; }
+        var ms = Date.now() - fx.animStart;
+        var total = BUNKER_EMERGE.panOut + BUNKER_EMERGE.hold + BUNKER_EMERGE.panIn;
+        if (ms >= total) { fx.phase = "done"; return; }
+        if (ms < BUNKER_EMERGE.panOut) {
+            door = 1; // camera still pulling back — keep it sealed for the reveal
+        } else {
+            door = Math.max(0, 1 - (ms - BUNKER_EMERGE.panOut) / BUNKER_EMERGE.doorOpen);
+        }
+        var fadeStart = BUNKER_EMERGE.panOut + BUNKER_EMERGE.doorOpen;
+        if (ms > fadeStart) { overlayAlpha = Math.max(0, 1 - (ms - fadeStart) / (total - fadeStart)); }
     } else if (fx.phase === "buried") {
         var racing = (typeof currentState !== "undefined") &&
             (currentState === config.stateMap.racing || currentState === config.stateMap.collapsing);
@@ -312,6 +327,7 @@ function tfxDrawBunker(t, camX, camY) {
     var cover = door;
 
     ctx.save();
+    if (overlayAlpha < 1) { ctx.globalAlpha = overlayAlpha; }
     // Clip EVERYTHING to the goal tile's actual polygon, so the door can never spill
     // past the tile edge — the iris/glow are sized to overshoot and the clip trims
     // them to the tile shape.

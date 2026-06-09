@@ -512,11 +512,22 @@ class Game {
 		//Start slow collapse if last player alive
 		if (this.alivePlayerCount == 1) {
 			// Battle-royale endgame: a lone survivor remains, so raise the buried goal
-			// for them to claim. The normal win path starts the finish collapse when
-			// they reach it; no generic last-player collapse during a Bunker round.
+			// for them to claim — then engage the SAME map-aware par collapse a normal
+			// last player gets, so they can't just run laps to burn everyone's time
+			// (grief). The collapse converges on the risen goal; an honest line beats
+			// it with margin, a staller gets swallowed (round ends, no winner).
 			if (this.gameBoard.checkForActiveBrutal(c.brutalRounds.bunker.id)) {
-				if (this.gameBoard.goalBuried) {
+				if (this.gameBoard.goalBuried && !this.collapseInitated) {
 					this.gameBoard.emergeBunker();
+					this.collapseInitated = true;
+					if (!this.scheduleSoloCollapse()) {
+						setTimeout(function (context) {
+							if (context.currentState == c.stateMap.racing || context.currentState == c.stateMap.collapsing) {
+								var goal = context.gameBoard.findRandomGoalTile();
+								if (goal != null) { context.startCollapse(goal.x, goal.y); }
+							}
+						}, 15000, this);
+					}
 				}
 			} else if (this.currentState != c.stateMap.collapsing && !this.collapseInitated) {
 				this.collapseInitated = true;
