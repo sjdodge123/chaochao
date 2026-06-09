@@ -4251,6 +4251,27 @@ function computeWorldViewTarget(dt) {
     if (localStarPowerUntil() > 0) {
         racingScale = Math.max(1, racingScale * (STAR_ZOOM_OUT_FACTOR + 0.03 * Math.sin(Date.now() / 480)));
     }
+    // Bunker emerge cinematic: when the goal erupts for the lone survivor, pull the
+    // camera back to frame the bunker — peaking as the door bursts open and the SFX
+    // fires (BUNKER_EMERGE timeline) — hold, then ease back to following the survivor.
+    if (typeof bunkerFX !== "undefined" && bunkerFX != null && bunkerFX.phase === "emerging" &&
+        typeof BUNKER_EMERGE !== "undefined" && bunkerFX.x != null) {
+        var ems = Date.now() - bunkerFX.animStart;
+        var peakEnd = BUNKER_EMERGE.panOut + BUNKER_EMERGE.hold;
+        var emTotal = peakEnd + BUNKER_EMERGE.panIn;
+        var w; // 0 = follow survivor, 1 = pulled back on the bunker
+        if (ems < BUNKER_EMERGE.panOut) { w = smoothstep(ems / BUNKER_EMERGE.panOut); }
+        else if (ems < peakEnd) { w = 1; }
+        else if (ems < emTotal) { w = 1 - smoothstep((ems - peakEnd) / BUNKER_EMERGE.panIn); }
+        else { w = 0; }
+        if (w > 0) {
+            var pbScale = 1 + (focusedView.scale - 1) * 0.15; // pull most of the way to whole-map
+            var pcx = focusedView.cx + (bunkerFX.x - focusedView.cx) * w;
+            var pcy = focusedView.cy + (bunkerFX.y - focusedView.cy) * w;
+            racingScale = racingScale + (pbScale - racingScale) * w;
+            return clampViewToWorld(pcx, pcy, racingScale);
+        }
+    }
     return clampViewToWorld(focusedView.cx, focusedView.cy, racingScale);
 }
 

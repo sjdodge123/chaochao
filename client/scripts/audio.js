@@ -372,6 +372,10 @@ var zombieSwing = makeSound("./assets/sounds/zombieswing.mp3");
 
 var nearVictorySound = makeSound("./assets/sounds/rise.mp3");
 var fallFromVictorySound = makeSound("./assets/sounds/reverserise.mp3");
+// Bunker (battle royale): the goal erupting back up through the silo door for the
+// lone survivor — collapse stops, door opens. A distinct rising cue (own instance
+// so its level is tuned independently of the near-victory sting).
+var bunkerEmergeSound = makeSound("./assets/sounds/rise.mp3?v=bunker", { duck: true, maxVoices: 1 });
 
 // Announcer — routed through the voice bus and flagged to duck the music under them.
 var firstBlood = makeSound("./assets/sounds/firstBlood.mp3", { bus: "voice", duck: true });
@@ -506,6 +510,7 @@ function volumeChange() {
     gameOverSound.volume = .5 * sfx;
     nearVictorySound.volume = .3 * sfx;
     fallFromVictorySound.volume = .15 * sfx;
+    bunkerEmergeSound.volume = .45 * sfx;
     collectItem.volume = .75 * sfx;    // pickup source is very quiet; was buried near the noise floor
     bombShot.volume = .2 * sfx;
     bombExplosion.volume = .2 * sfx;

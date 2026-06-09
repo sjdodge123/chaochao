@@ -1586,6 +1586,14 @@ function registerCombatHandlers(server) {
 		}
 		bunkerFX.phase = 'emerging';
 		bunkerFX.animStart = Date.now();
+		// Fire the "goal erupts / collapse stops" cue at the pan's peak — the instant
+		// the door bursts open (BUNKER_EMERGE.panOut into the cinematic).
+		var panOut = (typeof BUNKER_EMERGE !== "undefined") ? BUNKER_EMERGE.panOut : 700;
+		setTimeout(function () {
+			if (typeof playSound === "function" && typeof bunkerEmergeSound !== "undefined") {
+				playSound(bunkerEmergeSound);
+			}
+		}, panOut);
 	});
 	server.on('explodedCells', function (cells) {
 		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing || currentState == config.stateMap.lobby) {
