@@ -3923,6 +3923,13 @@ function drawOffscreenGoalIndicator() {
         return;
     }
     var goals = worldGoalPoints();
+    // Bunker round: the goal is buried (no goal tiles), but players still need to
+    // know where it is — point the arrow at the bunker. Scoped to the arrow so the
+    // camera's finish-line punch-in doesn't fire on the buried goal.
+    if (goals.length === 0 && typeof bunkerFX !== "undefined" && bunkerFX != null &&
+        bunkerFX.phase === "buried" && bunkerFX.x != null) {
+        goals = [{ x: bunkerFX.x, y: bunkerFX.y }];
+    }
     if (goals.length === 0) {
         return;
     }
