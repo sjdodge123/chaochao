@@ -10,7 +10,15 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- New terrain: **Water**. You barely drift in deep water on your own — to actually move, **punch to swim**: each stroke shoves you in the direction you're holding, so good swimmers can cut a watery shortcut across a map in a pinch. Swimming is a real punch, so it still knocks rivals around (and spends stamina), and the water drags on the hit. Climb out and you're briefly **dripping wet** and sluggish until you shake it off. Bonus: water **puts out your flame** — drive in while you're burning from a killstreak and the fire hisses out.
+- Where water meets lava, the water's edge hardens into **stone you can't cross** — you bump along it like the edge of a hole, so a swimmer can't be shoved into the lava across that seam. Water is otherwise fully open to swim through.
+- In **infection** rounds, zombies can't swim — water is a wall to them, bouncing them off the edge like a hole. So diving into water is a genuine escape from the horde (you swim, they can't follow).
+
+### Map editor
+
+- New **Water** tile in the paint palette, so you can build swimming shortcuts and water-and-lava gauntlets of your own.
 
 ## v0.30.3 — 2026-06-08
 

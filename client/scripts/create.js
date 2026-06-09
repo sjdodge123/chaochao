@@ -421,6 +421,12 @@ function loadPatterns() {
     patterns[config.tileMap.fast.id] = makeSeamlessPattern(gradedTex.grass);
     patterns[config.tileMap.normal.id] = makeSeamlessPattern(gradedTex.dirt);
     patterns[config.tileMap.slow.id] = makeSeamlessPattern(gradedTex.sand);
+    // Water has no PNG source; build the same procedural texture the in-game client
+    // uses (buildWaterTexture) so the editor surface + swatch match the live look.
+    if (config.tileMap.water != null) {
+        gradedTex.water = buildWaterTexture();
+        patterns[config.tileMap.water.id] = makeSeamlessPattern(gradedTex.water);
+    }
     patterns[config.tileMap.random.id] = makePattern(random, config.tileMap.random.color);
     patterns[config.tileMap.ability.id] = makePattern(bombIcon, makeSeamlessPattern(gradedTex.dirt));
 
@@ -460,6 +466,38 @@ function makeSeamlessPattern(image) {
     canvasPattern.height = iconHeight;
     ctxPattern.drawImage(image, 0, 0, iconWidth, iconHeight);
     return createContext.createPattern(canvasPattern, 'repeat');
+}
+// Procedural deep-water texture (no PNG asset) — mirrors draw.js buildWaterTexture so
+// the editor and the live game render water identically: a blue gradient with a few
+// lighter caustic ripple bands (full-period sines so it tiles seamlessly).
+function buildWaterTexture() {
+    // High-res tile + small `scale` so waves read small and crisp (see draw.js for the
+    // full rationale — kept identical so the editor matches the live game).
+    var size = 512;
+    var cv = document.createElement("canvas");
+    cv.width = size; cv.height = size;
+    var x = cv.getContext("2d");
+    var base = (config.tileMap.water && config.tileMap.water.color) ? config.tileMap.water.color : "#2f6fb0";
+    var g = x.createLinearGradient(0, 0, 0, size);
+    g.addColorStop(0, base);
+    g.addColorStop(1, "#23578f");
+    x.fillStyle = g;
+    x.fillRect(0, 0, size, size);
+    var BANDS = 14, PERIODS = 6, AMP = 3.5;
+    x.strokeStyle = "rgba(160,205,240,0.13)";
+    x.lineWidth = 2;
+    x.lineCap = "round";
+    for (var b = 0; b < BANDS; b++) {
+        var yBase = (b + 0.5) * size / BANDS;
+        x.beginPath();
+        for (var px = 0; px <= size; px += 4) {
+            var yy = yBase + Math.sin((px / size) * Math.PI * 2 * PERIODS) * AMP;
+            if (px === 0) { x.moveTo(px, yy); } else { x.lineTo(px, yy); }
+        }
+        x.stroke();
+    }
+    cv.scale = 0.5;
+    return cv;
 }
 
 // --- textured palette swatches ------------------------------------------------
@@ -529,6 +567,7 @@ function applyTileSwatches() {
         ["fastTileButton", { texture: gradedTex.grass }],
         ["lavaTileButton", { texture: gradedTex.lava }],
         ["iceTileButton", { texture: gradedTex.ice }],
+        ["waterTileButton", { texture: gradedTex.water }],
         ["abilityTileButton", { texture: gradedTex.dirt, icon: bombIcon }],
         ["randomTileButton", { color: config.tileMap.random.color, icon: random }],
         ["goalTileButton", { color: config.tileMap.goal.color }]
@@ -612,6 +651,7 @@ function setupPage() {
     $("#fastTileButton").on("click", function () { editorSelectTile("fast"); return false; });
     $("#lavaTileButton").on("click", function () { editorSelectTile("lava"); return false; });
     $("#iceTileButton").on("click", function () { editorSelectTile("ice"); return false; });
+    $("#waterTileButton").on("click", function () { editorSelectTile("water"); return false; });
     $("#abilityTileButton").on("click", function () { editorSelectTile("ability"); return false; });
     $("#randomTileButton").on("click", function () { editorSelectTile("random"); return false; });
     $("#goalTileButton").on("click", function () { editorSelectTile("goal"); return false; });
@@ -1460,8 +1500,8 @@ function editorDeleteSelected() {
 // Highlight the active tool/tile/hazard button.
 var TOOL_BUTTON_IDS = ["selectToolButton", "eraserToolButton", "slowTileButton",
     "normalTileButton", "fastTileButton", "lavaTileButton", "iceTileButton",
-    "abilityTileButton", "randomTileButton", "goalTileButton", "emptyTileButton",
-    "bumperButton", "movingBumperButton"];
+    "waterTileButton", "abilityTileButton", "randomTileButton", "goalTileButton",
+    "emptyTileButton", "bumperButton", "movingBumperButton"];
 function updateToolButtons() {
     for (var i = 0; i < TOOL_BUTTON_IDS.length; i++) {
         var el = document.getElementById(TOOL_BUTTON_IDS[i]);
@@ -1479,7 +1519,8 @@ function activeToolButtonId() {
     if (activeTool.kind === "tile") {
         var tileMap = {
             slow: "slowTileButton", normal: "normalTileButton", fast: "fastTileButton",
-            lava: "lavaTileButton", ice: "iceTileButton", ability: "abilityTileButton",
+            lava: "lavaTileButton", ice: "iceTileButton", water: "waterTileButton",
+            ability: "abilityTileButton",
             random: "randomTileButton", goal: "goalTileButton", empty: "emptyTileButton"
         };
         return tileMap[activeTool.name] || null;

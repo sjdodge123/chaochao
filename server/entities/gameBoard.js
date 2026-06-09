@@ -245,6 +245,8 @@ class GameBoard {
 			if (this.currentMap != null && this.currentMap.cells != null) {
 				_engine.checkCollideCells(this.playerList[player], this.currentMap);
 				_engine.bounceOffEmptyCells(this.playerList[player], this.currentMap);
+				_engine.bounceOffStoneEdges(this.playerList[player], this.currentMap);
+				_engine.bounceZombieOffWater(this.playerList[player], this.currentMap);
 			}
 			// The spawn pad is a safe zone (force-shield against bomb/ice/cut knockback).
 			// It used to inherit that from the transparent "background" sanctuary tile,
@@ -319,6 +321,8 @@ class GameBoard {
 			_engine.preventEscape(this.playerList[player], this.world);
 			_engine.checkCollideCells(this.playerList[player], this.currentMap);
 			_engine.bounceOffEmptyCells(this.playerList[player], this.currentMap);
+			_engine.bounceOffStoneEdges(this.playerList[player], this.currentMap);
+			_engine.bounceZombieOffWater(this.playerList[player], this.currentMap);
 			objectArray.push(this.playerList[player]);
 		}
 		for (var projID in this.projectileList) {
@@ -732,7 +736,7 @@ class GameBoard {
 		var explodeLoc = { x: this.projectileList[owner].x, y: this.projectileList[owner].y };
 		var cells = this.currentMap.cells;
 		for (var i = 0; i < cells.length; i++) {
-			if (cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.lava.id || cells[i].id == c.tileMap.background.id || cells[i].id == c.tileMap.empty.id) {
+			if (cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.lava.id || cells[i].id == c.tileMap.background.id || cells[i].id == c.tileMap.empty.id || cells[i].id == c.tileMap.water.id) {
 				continue;
 			}
 			var distance = utils.getMag(explodeLoc.x - cells[i].site.x, explodeLoc.y - cells[i].site.y);

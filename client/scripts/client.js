@@ -1614,6 +1614,14 @@ function registerCombatHandlers(server) {
 			playerList[owner].onFire = value;
 		}
 	});
+	// Water doused a kart's killstreak fire shield: play the synthesized steam-quench
+	// cue (the flame itself stops via the onFire:0 event above). Remote karts are a
+	// touch quieter than your own.
+	server.on("flameExtinguished", function (packet) {
+		if (packet == null) { return; }
+		var local = (typeof isLocalId === "function") ? isLocalId(packet.owner) : true;
+		playFlameExtinguish(local ? 1 : 0.6);
+	});
 	// Lobby tutorial: a player touched lava (death) or the goal (win) and was safely
 	// respawned. Reuse the real death/win cues (dampened to lobby volume) and set the
 	// post-respawn invuln window so drawPlayer can flash the sprite. No scoring here.

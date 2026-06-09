@@ -44,6 +44,12 @@ function tileWeight(id) {
         case c.tileMap.slow.id: return 3.7;   // sand — ~3.7x grass time (avoid unless clearly shorter)
         case c.tileMap.ice.id: return 1.4;    // near-frictionless glide — prefer over dirt/sand
         case c.tileMap.bumper.id: return 3.0; // knockback hazard
+        // Water: bots can't swim yet (the swim stroke reads the human move-keys, which AI
+        // doesn't set), so they only crawl across on the dismal drive physics (acel/drag
+        // ~13x grass-time). Weight it accordingly so routes AVOID water whenever any dry
+        // lane exists — without blocking it, so a water-only crossing stays reachable/valid
+        // and par-time still resolves. (Teaching bots to punch-swim is the queued follow-up.)
+        case (c.tileMap.water != null ? c.tileMap.water.id : -999): return 13.0;
         default: return 1.0; // goal, ability, random
     }
 }
