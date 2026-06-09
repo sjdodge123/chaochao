@@ -27,6 +27,10 @@ var LOBBY_SFX_SCALAR = 0.1;
 // master toggle + lobby dampen fold in). Kept low — it's a continuous bed under
 // the action, and a pack can have several going at once.
 var DRIFT_BASE_VOL = 0.16;
+// Flame-extinguished steam quench: peak level of the synthesized one-shot hiss (before
+// the master toggle + lobby dampen fold in). A brief cue, so it can sit a touch above
+// the continuous drift bed.
+var EXTINGUISH_VOL = 0.35;
 function setLobbySfxDampen(on) {
     sfxVolumeScalar = on ? LOBBY_SFX_SCALAR : 1;
     volumeChange();
@@ -685,6 +689,39 @@ function stopDriftSound(id) {
 
 function stopAllDriftSounds() {
     for (var id in driftVoices) { stopDriftSound(id); }
+}
+
+// Flame extinguished by water — synthesized one-shot "steam quench" (no MP3 asset),
+// fired when a kart carrying a killstreak fire shield steps into water. A short burst of
+// the shared white-noise buffer through a lowpass that sweeps DOWN (the hiss dying out)
+// with a fast attack and a ~0.5s steam decay. Routed through sfxBus so the master toggle
+// + lobby dampen already apply; we fold those coefficients in like the drift voices do.
+function playFlameExtinguish(level) {
+    var ctx = getCtx();
+    if (!ctx || ctx.state !== "running") { return; }
+    if (gameMuted || masterVolume === 0) { return; }
+    var lvl = (level == null) ? 1 : level;
+    var vol = EXTINGUISH_VOL * lvl * masterVolume * sfxVolumeScalar;
+    if (vol <= 0.0001) { return; }
+    var now = ctx.currentTime;
+    var src = ctx.createBufferSource();
+    src.buffer = getDriftNoiseBuffer(ctx); // reuse the shared 2s white-noise bed
+    src.loop = true;
+    var filt = ctx.createBiquadFilter();
+    filt.type = "lowpass";
+    filt.Q.value = 0.7;
+    try {
+        filt.frequency.setValueAtTime(6500, now);
+        filt.frequency.exponentialRampToValueAtTime(450, now + 0.45); // hiss settles as steam
+    } catch (e) {}
+    var g = ctx.createGain();
+    try {
+        g.gain.setValueAtTime(0.0001, now);
+        g.gain.exponentialRampToValueAtTime(Math.max(0.0001, vol), now + 0.02); // fast attack
+        g.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);                  // steam decay
+    } catch (e) {}
+    src.connect(filt); filt.connect(g); g.connect(sfxBus);
+    try { src.start(now); src.stop(now + 0.56); } catch (e) { try { src.disconnect(); } catch (e2) {} }
 }
 
 // Browser autoplay policy keeps the AudioContext "suspended" until the user

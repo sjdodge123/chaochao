@@ -137,6 +137,19 @@
             "canBeRandomed": true,
             "color": "#A5F2F3"
         },
+        "water": {
+            "_doc": "Deep water. Passive drive is almost nil (low acel + high drag) — you barely move unless you PUNCH to swim: a punch on water adds swimImpulse velocity in your held movement direction (scaled up a little by charge), so good swimmers average a speed between slow and normal. Swimming is just a punch, so it costs stamina and still knocks others back (the high drag dampens both ends). Stepping onto water extinguishes your killstreak fire shield (onFire->0). Leaving water leaves you 'dripping': drive cut to dripMoveFactor for dripMs. A water edge that borders lava is a solid stone wall (engine bounce, like an empty-cell rim) — water is otherwise fully walkable. canBeRandomed:false so the 'random' tile never rolls water for v1.",
+            "id": 11,
+            "brakeCoeff": 0.235,
+            "dragCoeff": 0.32,
+            "acel": 55,
+            "swimImpulse": 205,
+            "swimChargeBonus": 0.5,
+            "dripMs": 800,
+            "dripMoveFactor": 0.6,
+            "canBeRandomed": false,
+            "color": "#2f6fb0"
+        },
         "ability": {
             "id": 5,
             "canBeRandomed": false,

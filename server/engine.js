@@ -18,6 +18,12 @@ exports.bounceOffBoundry = function (obj, bound) {
 exports.checkCollideCells = function (player, map) {
 	checkCollideCells(player, map);
 }
+exports.bounceOffStoneEdges = function (player, map) {
+	bounceOffStoneEdges(player, map);
+}
+exports.bounceZombieOffWater = function (player, map) {
+	bounceZombieOffWater(player, map);
+}
 exports.bounceOffEmptyCells = function (player, map) {
 	bounceOffEmptyCells(player, map);
 }
@@ -117,6 +123,12 @@ class Engine {
 			var driveMult = 1;
 			if (player.staminaExhausted && c.punchStamina != null) {
 				driveMult = c.punchStamina.exhaustedMoveFactor;
+			}
+			// "Dripping wet": for a beat after climbing out of water, drive is cut so the
+			// kart trudges before regaining traction (dripUntil stamped on the player when
+			// it leaves water). Stacks multiplicatively with the exhausted penalty.
+			if (player.dripUntil && Date.now() < player.dripUntil && c.tileMap.water != null) {
+				driveMult *= c.tileMap.water.dripMoveFactor;
 			}
 
 			var newVelX, newVelY, newVel, newDirX, newDirY;
@@ -704,40 +716,43 @@ function ensureCellIndex(map) {
 	}
 	return map._cellIndex;
 }
-// Whether the map has ANY empty (hole) cells. Empty cells are authored in the map
-// JSON and never created or destroyed at runtime (explosions/collapse skip them and
-// nothing converts a tile *to* empty), so this is fixed for the map's life — cache it
-// once so the per-tick bounce check on the common case (maps with no holes) is a single
-// boolean test instead of a spatial-index lookup per player per tick.
-function mapHasEmptyCells(map) {
-	if (map._hasEmptyCells === undefined) {
-		var has = false, cells = map.cells, eid = c.tileMap.empty.id;
-		for (var i = 0; i < cells.length; i++) {
-			if (cells[i].id === eid) { has = true; break; }
-		}
-		Object.defineProperty(map, '_hasEmptyCells', { value: has, enumerable: false, writable: true, configurable: true });
+// Whether the map has ANY cell of tile id `id`. Used by the no-go-cell bounces (empty
+// holes; water, which is a hole to zombies). The answer is effectively fixed for the
+// map's life — empty cells are never created/destroyed, and water only ever turns TO
+// lava during a collapse (never the reverse) — so cache it per id so the common
+// "map has none" case is a single boolean test instead of a spatial-index lookup per
+// player per tick.
+function mapHasCellOfType(map, id) {
+	if (map._hasCellOfType === undefined) {
+		Object.defineProperty(map, '_hasCellOfType', { value: {}, enumerable: false, writable: true, configurable: true });
 	}
-	return map._hasEmptyCells;
+	if (map._hasCellOfType[id] === undefined) {
+		var has = false, cells = map.cells;
+		for (var i = 0; i < cells.length; i++) {
+			if (cells[i].id === id) { has = true; break; }
+		}
+		map._hasCellOfType[id] = has;
+	}
+	return map._hasCellOfType[id];
 }
-// The empty cell containing (x,y), or null. Empty cells are non-walkable holes
-// that show the skybox/water below; locating one means that point is over a hole.
-function emptyCellAt(x, y, map) {
+// The cell of tile id `id` containing (x,y), or null.
+function cellOfTypeAt(x, y, map, id) {
 	var candidates = ensureCellIndex(map).candidates(x, y);
 	for (var i = 0; i < candidates.length; i++) {
 		var cell = candidates[i];
-		if (cell.id === c.tileMap.empty.id && pointIntersection(x, y, cell) > 0) {
+		if (cell.id === id && pointIntersection(x, y, cell) > 0) {
 			return cell;
 		}
 	}
 	return null;
 }
-// Nearest non-empty (solid) cell to a point — the ground to steer a stranded player
-// back toward. O(cells), but only runs when a player is actually inside a hole, which
-// the rim bounce below normally prevents.
-function nearestSolidCell(x, y, map) {
-	var cells = map.cells, eid = c.tileMap.empty.id, best = Infinity, bestCell = null;
+// Nearest cell whose id ISN'T `id` — the ground to steer a stranded player back toward.
+// O(cells), but only runs when a player is actually inside a no-go cell, which the rim
+// bounce below normally prevents.
+function nearestCellNotOfType(x, y, map, id) {
+	var cells = map.cells, best = Infinity, bestCell = null;
 	for (var i = 0; i < cells.length; i++) {
-		if (cells[i].id === eid) {
+		if (cells[i].id === id) {
 			continue;
 		}
 		var s = cells[i].site, dx = s.x - x, dy = s.y - y, d = dx * dx + dy * dy;
@@ -745,31 +760,32 @@ function nearestSolidCell(x, y, map) {
 	}
 	return bestCell;
 }
-// Keep players out of empty holes the way the world edge stops them. Two cases:
-//   1. On solid ground, projected move would enter a hole -> slide along the hole's
-//      border edge: project the move/velocity onto the nearest edge's tangent, so the
-//      kart deflects AROUND the cell (even pushing straight in) instead of dead-stopping.
-//   2. Already inside a hole (a hard punch/knockback flung the center past the rim,
-//      or a spawn landed there) -> DON'T just reverse velocity; that oscillates and
-//      bleeds energy, leaving the player stranded in the void. Redirect this tick's
-//      step straight at the nearest solid ground and point their velocity that way,
-//      so they consistently climb back out.
-function bounceOffEmptyCells(player, map) {
-	if (!mapHasEmptyCells(map)) {
-		return; // no holes on this map — skip the per-tick lookup entirely
+// Keep players out of "no-go" cells of tile id `noGoId` the way the world edge stops
+// them. Two cases:
+//   1. On safe ground, projected move would enter a no-go cell -> slide along its border
+//      edge: project the move/velocity onto the nearest edge's tangent, so the kart
+//      deflects AROUND the cell (even pushing straight in) instead of dead-stopping.
+//   2. Already inside one (a hard punch/knockback flung the center past the rim, or a
+//      spawn landed there, or — for zombie/water — a survivor swimming there just got
+//      infected) -> DON'T just reverse velocity; that oscillates and bleeds energy,
+//      leaving them stranded. Redirect this tick's step straight at the nearest safe
+//      cell and point their velocity that way, so they consistently climb back out.
+function bounceOffNoGoCells(player, map, noGoId) {
+	if (!mapHasCellOfType(map, noGoId)) {
+		return; // no such cells on this map — skip the per-tick lookup entirely
 	}
-	if (emptyCellAt(player.x, player.y, map) != null) {
-		// Case 2: stranded inside a hole — eject toward solid ground.
-		var solid = nearestSolidCell(player.x, player.y, map);
+	if (cellOfTypeAt(player.x, player.y, map, noGoId) != null) {
+		// Case 2: stranded inside — eject toward safe ground.
+		var solid = nearestCellNotOfType(player.x, player.y, map, noGoId);
 		if (solid != null) {
 			var ex = solid.site.x - player.x, ey = solid.site.y - player.y;
 			var em = Math.sqrt(ex * ex + ey * ey);
 			if (em > 1e-6) {
 				var ux = ex / em, uy = ey / em;
-				// Redirect this tick's already-integrated displacement toward solid
+				// Redirect this tick's already-integrated displacement toward safe
 				// (same length, new heading) instead of letting it carry deeper. Cap
 				// the step at the distance to the target so a big knockback step can't
-				// overshoot the solid cell into a hole on its far side and zig-zag.
+				// overshoot the safe cell into a no-go cell on its far side and zig-zag.
 				var sx = player.newX - player.x, sy = player.newY - player.y;
 				var step = Math.min(Math.sqrt(sx * sx + sy * sy), em);
 				player.newX = player.x + ux * step;
@@ -781,15 +797,14 @@ function bounceOffEmptyCells(player, map) {
 		player.bounced = true;
 		return;
 	}
-	if (emptyCellAt(player.newX, player.newY, map) == null) {
-		return; // on solid ground and the projected move stays on solid ground
+	if (cellOfTypeAt(player.newX, player.newY, map, noGoId) == null) {
+		return; // on safe ground and the projected move stays on safe ground
 	}
-	// Case 1: outside -> inside. Slide ALONG the hole's actual border edge so the kart
-	// deflects around the cell even when pushing straight in (not a dead-stop). Find the
-	// hole-polygon edge nearest the kart, then project both the intended step and the
-	// velocity onto that edge's tangent — the component parallel to the rim survives, the
-	// component into the rim is dropped.
-	var hole = emptyCellAt(player.newX, player.newY, map);
+	// Case 1: outside -> inside. Slide ALONG the no-go cell's actual border edge so the
+	// kart deflects around it even when pushing straight in (not a dead-stop). Find the
+	// polygon edge nearest the kart, then project both the intended step and the velocity
+	// onto that edge's tangent — the parallel component survives, the into-rim one drops.
+	var hole = cellOfTypeAt(player.newX, player.newY, map, noGoId);
 	var hes = hole.halfedges;
 	var bestD2 = Infinity, tanX = 0, tanY = 0, foundEdge = false;
 	for (var hi = 0; hi < hes.length; hi++) {
@@ -817,10 +832,10 @@ function bounceOffEmptyCells(player, map) {
 		var slidX = player.x + sProj * tanX;
 		var slidY = player.y + sProj * tanY;
 		// Keep the tangential velocity either way so the glide carries into the next tick;
-		// only commit the slid position if it stays out of the hole (sharp-corner guard).
+		// only commit the slid position if it stays out of the no-go cell (corner guard).
 		player.velX = vProj * tanX;
 		player.velY = vProj * tanY;
-		if (emptyCellAt(slidX, slidY, map) == null) {
+		if (cellOfTypeAt(slidX, slidY, map, noGoId) == null) {
 			player.newX = slidX;
 			player.newY = slidY;
 		} else {
@@ -828,13 +843,137 @@ function bounceOffEmptyCells(player, map) {
 			player.newY = player.y;
 		}
 	} else {
-		// Degenerate hole with no usable edge — just hold position.
+		// Degenerate cell with no usable edge — just hold position.
 		player.newX = player.x;
 		player.newY = player.y;
 		player.velX = 0;
 		player.velY = 0;
 	}
 	player.bounced = true;
+}
+// Empty holes block ALL players.
+function bounceOffEmptyCells(player, map) {
+	bounceOffNoGoCells(player, map, c.tileMap.empty.id);
+}
+// Water is a hole to ZOMBIES specifically: they can't punch-to-swim (their bite is a
+// separate, swim-less path), so rather than let them wade in uselessly, water behaves
+// for them exactly like an empty cell — they bounce off its rim and can't enter at all.
+// Survivors swim freely; this is a per-tick zombie-only no-go bounce. No-op off
+// infection rounds (nothing is a zombie) and on maps with no water.
+function bounceZombieOffWater(player, map) {
+	if (!player.isZombie || c.tileMap.water == null) { return; }
+	bounceOffNoGoCells(player, map, c.tileMap.water.id);
+}
+// Precompute the map's "stone edges": the Voronoi boundary segments where a water
+// cell touches a lava cell. Authored lava only (computed once, cached) — at runtime
+// the collapse turns the whole map to lava AND converts the water cell itself, so a
+// later lava change never needs a fresh stone edge. Each entry caches the segment
+// endpoints plus its unit tangent for the slide projection. Mirrors the _cellIndex /
+// _hasEmptyCells caching pattern (non-enumerable, computed lazily, fixed for the map).
+function ensureStoneEdges(map) {
+	if (map._stoneEdges === undefined) {
+		var edges = [];
+		var cells = map.cells, waterId = c.tileMap.water != null ? c.tileMap.water.id : -999, lavaId = c.tileMap.lava.id;
+		for (var i = 0; i < cells.length; i++) {
+			var cell = cells[i];
+			if (cell.id !== waterId) { continue; }
+			var hes = cell.halfedges;
+			for (var h = 0; h < hes.length; h++) {
+				var edge = hes[h].edge;
+				// The neighbour site across this halfedge is whichever of lSite/rSite
+				// isn't this cell's own site. A null neighbour = diagram boundary (no
+				// cell beyond), never lava.
+				var neighbour = compareSite(edge.lSite, hes[h].site) ? edge.rSite : edge.lSite;
+				if (neighbour == null) { continue; }
+				// Find the neighbour cell so we can both check its (authored) tile id now
+				// and KEEP the reference — cell.id mutates in place when terrain changes
+				// (collapse, ice cannon, lava explosions), so holding both cells lets the
+				// per-tick test re-validate the seam against their LIVE ids instead of
+				// trusting the build-time snapshot (which would leave stale invisible walls
+				// where the water has since become ice/lava). See the guard in
+				// bounceOffStoneEdges.
+				var nCell = null;
+				for (var k = 0; k < cells.length; k++) {
+					if (cells[k].site.voronoiId === neighbour.voronoiId) { nCell = cells[k]; break; }
+				}
+				if (nCell == null || nCell.id !== lavaId) { continue; }
+				var a = getStartpoint(hes[h]), b = getEndpoint(hes[h]);
+				var ex = b.x - a.x, ey = b.y - a.y, el = Math.sqrt(ex * ex + ey * ey);
+				if (el < 1e-9) { continue; }
+				edges.push({ ax: a.x, ay: a.y, bx: b.x, by: b.y, tanX: ex / el, tanY: ey / el, waterCell: cell, lavaCell: nCell });
+			}
+		}
+		Object.defineProperty(map, '_stoneEdges', { value: edges, enumerable: false, writable: true, configurable: true });
+	}
+	return map._stoneEdges;
+}
+function mapHasStoneEdges(map) {
+	return ensureStoneEdges(map).length > 0;
+}
+// Orientation sign of point (px,py) relative to directed segment a->b (cross product).
+function sideOf(ax, ay, bx, by, px, py) {
+	return (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+}
+// Whether segments p0->p1 and p2->p3 properly intersect (standard cross-product test).
+function segmentsCross(p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y) {
+	var d1 = sideOf(p2x, p2y, p3x, p3y, p0x, p0y);
+	var d2 = sideOf(p2x, p2y, p3x, p3y, p1x, p1y);
+	var d3 = sideOf(p0x, p0y, p1x, p1y, p2x, p2y);
+	var d4 = sideOf(p0x, p0y, p1x, p1y, p3x, p3y);
+	return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
+}
+// Solid stone wall on the water/lava boundary: a player whose move this tick would
+// cross a stone edge is slid along it (the perpendicular component is dropped), the
+// same deflection bounceOffEmptyCells gives a hole rim — so water is fully walkable
+// EXCEPT you can't step from it into the bordering lava. Only the water/lava seam is
+// walled; lava bordering plain terrain still kills as usual (this tests the actual
+// step segment crossing the seam, not mere proximity to lava).
+function bounceOffStoneEdges(player, map) {
+	if (!mapHasStoneEdges(map)) {
+		return; // no water/lava seams on this map — skip the per-tick test entirely
+	}
+	var edges = map._stoneEdges;
+	var waterId = c.tileMap.water != null ? c.tileMap.water.id : -999, lavaId = c.tileMap.lava.id;
+	for (var i = 0; i < edges.length; i++) {
+		var e = edges[i];
+		// Re-validate against LIVE cell ids: the seam is only a wall while it's still a
+		// water cell beside a lava cell. Once a terrain change (collapse, ice cannon
+		// freezing the water, a lava explosion) flips either side, drop the wall — otherwise
+		// it lingers as an invisible barrier where the water no longer exists, blocking
+		// lava-crossers (star power / zombies / burning) and walkers on the new ice.
+		if (e.waterCell.id !== waterId || e.lavaCell.id !== lavaId) {
+			continue;
+		}
+		if (!segmentsCross(player.x, player.y, player.newX, player.newY, e.ax, e.ay, e.bx, e.by)) {
+			continue;
+		}
+		// Crossing this seam: keep only the component of the step/velocity ALONG the
+		// wall, exactly as the hole-rim slide does. Don't commit a slid position that
+		// would cross a (possibly different) seam — hold at the pre-step position so a
+		// corner can't tunnel through.
+		var sx = player.newX - player.x, sy = player.newY - player.y;
+		var sProj = sx * e.tanX + sy * e.tanY;
+		var vProj = player.velX * e.tanX + player.velY * e.tanY;
+		var slidX = player.x + sProj * e.tanX;
+		var slidY = player.y + sProj * e.tanY;
+		player.velX = vProj * e.tanX;
+		player.velY = vProj * e.tanY;
+		var crossesAgain = false;
+		for (var j = 0; j < edges.length; j++) {
+			var f = edges[j];
+			if (f.waterCell.id !== waterId || f.lavaCell.id !== lavaId) { continue; } // stale seam
+			if (segmentsCross(player.x, player.y, slidX, slidY, f.ax, f.ay, f.bx, f.by)) { crossesAgain = true; break; }
+		}
+		if (!crossesAgain) {
+			player.newX = slidX;
+			player.newY = slidY;
+		} else {
+			player.newX = player.x;
+			player.newY = player.y;
+		}
+		player.bounced = true;
+		return;
+	}
 }
 function pointIntersection(x, y, cell) {
 	{

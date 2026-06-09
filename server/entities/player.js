@@ -178,6 +178,13 @@ class Player extends Circle {
 		// Current footing is ice (stamped every tick alongside onSanctuary): gates the
 		// drift-traction blend and the keepMomentumOnRelease playtest toggle.
 		this.onIce = false;
+		// Current footing is water (stamped every tick like onIce): gates the swim
+		// impulse in throwChargedPunch and the fire-extinguish in handleMapCellHit.
+		this.onWater = false;
+		// "Dripping wet" exit slow: when a player leaves water this is set to
+		// now + water.dripMs; while active, handleMapCellHit scales their drive by
+		// water.dripMoveFactor so they trudge for a beat after climbing out.
+		this.dripUntil = 0;
 
 		//Star Power: timestamp until which the player is invulnerable to rival
 		//abilities and punches (set by GameBoard.checkAbilities on use).
@@ -461,6 +468,20 @@ class Player extends Circle {
 		this.driftPunchRef = null;
 		this.driftPunchPending = 0;
 	}
+	// The held 8-way MOVEMENT direction (from the move booleans — the same mapping
+	// the engine uses to drive), normalized, or null if nothing (or an opposed pair)
+	// is held. The swim stroke propels you along the direction you're HOLDING, not
+	// where you're aiming (this.angle), per the water design.
+	getMoveDir() {
+		var dx = 0, dy = 0;
+		if (this.moveForward && !this.moveBackward) { dy -= 1; }
+		else if (this.moveBackward && !this.moveForward) { dy += 1; }
+		if (this.turnLeft && !this.turnRight) { dx -= 1; }
+		else if (this.turnRight && !this.turnLeft) { dx += 1; }
+		if (dx === 0 && dy === 0) { return null; }
+		var m = Math.sqrt(dx * dx + dy * dy);
+		return { x: dx / m, y: dy / m };
+	}
 	throwChargedPunch(currentState) {
 		var frac = this.chargeFrac;
 		// Stamina was already drained while charging; latch exhaustion off what's left.
@@ -496,7 +517,20 @@ class Player extends Circle {
 		// captured your pre-brake speed via calcPunchBonus above.) On ICE the brake is
 		// eased by releaseBrakeEase (the full stop felt too harsh coming out of a
 		// drift), and the keepMomentumOnRelease playtest toggle skips it entirely.
-		if (!(c.iceDrift.keepMomentumOnRelease && this.onIce)) {
+		if (this.onWater) {
+			// Swimming: a punch on water PROPELS you in your held movement direction
+			// rather than braking. A bigger charge gives a slightly longer stroke
+			// (swimChargeBonus). The high water drag (config) bleeds the burst off so
+			// each stroke is a lunge-and-glide; the engine's maxVelocity caps the peak.
+			var w = c.tileMap.water;
+			var dir = this.getMoveDir();
+			if (dir != null && w != null) {
+				var impulse = w.swimImpulse * (1 + (w.swimChargeBonus || 0) * frac);
+				this.velX += dir.x * impulse;
+				this.velY += dir.y * impulse;
+			}
+		}
+		else if (!(c.iceDrift.keepMomentumOnRelease && this.onIce)) {
 			var releaseBrake = this.onIce
 				? Math.min(1, c.punchThrowBrake * (c.iceDrift.releaseBrakeEase || 1))
 				: c.punchThrowBrake;
@@ -784,6 +818,12 @@ class Player extends Circle {
 		this.burnedBy = null;
 		// Off every cell = not on ice either (mirrors the per-tick onIce stamp).
 		this.onIce = false;
+		// Off every cell = not on water either; leaving water this way still triggers
+		// the dripping-wet slow (mirrors handleMapCellHit's leave transition).
+		if (this.onWater) {
+			this.dripUntil = Date.now() + c.tileMap.water.dripMs;
+		}
+		this.onWater = false;
 		if (this.isZombie == true) {
 			this.acel = c.playerBaseAcel * c.brutalRounds.infection.acelModifer;
 			this.dragCoeff = c.playerDragCoeff * c.brutalRounds.infection.dragModifer;
@@ -888,6 +928,15 @@ class Player extends Circle {
 		// Same per-tick footing stamp for ice: gates the drift-traction blend below and
 		// the keepMomentumOnRelease toggle in throwChargedPunch.
 		this.onIce = (object.id == c.tileMap.ice.id);
+		// Water footing (gates the swim stroke in throwChargedPunch). Climbing OUT of
+		// water — was on water last tick, isn't now — starts the "dripping wet" slow
+		// (engine.updatePlayers reads dripUntil). The same transition is mirrored in
+		// handleNoCellHit for a player who leaves water by going off every cell.
+		var nowOnWater = (c.tileMap.water != null && object.id == c.tileMap.water.id);
+		if (this.onWater && !nowOnWater) {
+			this.dripUntil = Date.now() + c.tileMap.water.dripMs;
+		}
+		this.onWater = nowOnWater;
 		// Standing on any non-lava cell means we've escaped a burn-on-lava doom: drop
 		// the persistent burn attributor so a later, unrelated lava death isn't credited
 		// to whoever last shoved us. A burning death is itself a lava hit (id == lava),
@@ -947,6 +996,28 @@ class Player extends Circle {
 			this.acel = object.acel;
 			this.dragCoeff = object.dragCoeff;
 			this.brakeCoeff = object.brakeCoeff;
+			return;
+		}
+		if (c.tileMap.water != null && object.id == c.tileMap.water.id) {
+			// Deep water. Low acel + high drag (config) make passive drive almost nil —
+			// you barely move unless you PUNCH to swim (throwChargedPunch reads onWater,
+			// set above). Zombies get their infection-modded grip like any other tile.
+			if (this.isZombie == true) {
+				this.applyInfectedMods(object);
+			} else {
+				this.acel = object.acel;
+				this.dragCoeff = object.dragCoeff;
+				this.brakeCoeff = object.brakeCoeff;
+			}
+			// Water douses a killstreak fire shield: drop onFire and tell the room so the
+			// client can stop the flame and play the hiss/steam cue. Does NOT touch the
+			// burn attributor (burnedBy was already cleared above for any non-lava cell).
+			if (this.onFire > 0) {
+				this.onFire = 0;
+				this.fireTimer = null;
+				messenger.messageRoomBySig(this.roomSig, "onFire", { owner: this.id, value: 0 });
+				messenger.messageRoomBySig(this.roomSig, "flameExtinguished", { owner: this.id, x: this.x, y: this.y });
+			}
 			return;
 		}
 		if (object.id == c.tileMap.lava.id) {
@@ -1238,6 +1309,8 @@ class Player extends Circle {
 		this.driftPunchRef = null;
 		this.driftPunchPending = 0;
 		this.onIce = false;
+		this.onWater = false;
+		this.dripUntil = 0;
 		this.punch = null;
 		this.punchedBy = null;
 		this.murderedBy = null;

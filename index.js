@@ -435,7 +435,7 @@ var serverSleeping = true,
     serverUpdates = null;
 
 server.listen(c.port, () => {
-  console.log('listening on *:3000');
+  console.log('listening on *:' + c.port);
   messenger.build(io);
 });
 

@@ -3585,6 +3585,9 @@ function loadPatterns() {
     patterns[config.tileMap.fast.id] = makeSeamlessPattern(gGrass);
     patterns[config.tileMap.normal.id] = makeSeamlessPattern(gDirt);
     patterns[config.tileMap.slow.id] = makeSeamlessPattern(gSand);
+    if (config.tileMap.water != null) {
+        patterns[config.tileMap.water.id] = makeSeamlessPattern(buildWaterTexture());
+    }
     // Random tiles are replaced (applyRandomTiles) before any cell in the LIVE
     // map renders, so this pattern is only used by the next-map preview
     // thumbnail (buildMapThumbnailCanvas), which draws straight from maps[i]'s
@@ -3639,6 +3642,44 @@ function loadSpriteSheets() {
     }
 }
 
+// Procedural deep-water texture (no PNG asset): a vertical blue gradient with a few
+// lighter caustic ripple bands. Built once into a tileable canvas and handed to
+// makeSeamlessPattern so water tiles read as textured terrain, cohesive with the
+// graded grass/dirt/ice rather than a flat fill. The swim ripples (drawTrail) and any
+// terrain-FX shimmer layer on top per frame; this is just the static bed.
+function buildWaterTexture() {
+    // Render at HIGH resolution (512) and stamp it with many fine ripple bands, then
+    // hand makeSeamlessPattern a small `scale` so the tile shrinks in world space — the
+    // net effect is a crisp, "zoomed-out" water surface whose waves read small and
+    // subtle rather than a few big bands.
+    var size = 512;
+    var cv = document.createElement("canvas");
+    cv.width = size; cv.height = size;
+    var x = cv.getContext("2d");
+    var base = (config.tileMap.water && config.tileMap.water.color) ? config.tileMap.water.color : "#2f6fb0";
+    var g = x.createLinearGradient(0, 0, 0, size);
+    g.addColorStop(0, base);
+    g.addColorStop(1, "#23578f");
+    x.fillStyle = g;
+    x.fillRect(0, 0, size, size);
+    // Many tight, low-amplitude sine bands (full integer periods so the texture still
+    // tiles seamlessly). More bands + smaller wiggle = finer waves.
+    var BANDS = 14, PERIODS = 6, AMP = 3.5;
+    x.strokeStyle = "rgba(160,205,240,0.13)";
+    x.lineWidth = 2;
+    x.lineCap = "round";
+    for (var b = 0; b < BANDS; b++) {
+        var yBase = (b + 0.5) * size / BANDS;
+        x.beginPath();
+        for (var px = 0; px <= size; px += 4) {
+            var yy = yBase + Math.sin((px / size) * Math.PI * 2 * PERIODS) * AMP;
+            if (px === 0) { x.moveTo(px, yy); } else { x.lineTo(px, yy); }
+        }
+        x.stroke();
+    }
+    cv.scale = 0.5; // makeSeamlessPattern shrinks the tile -> smaller waves, retains the 512 detail
+    return cv;
+}
 function makeSeamlessPattern(image) {
     const canvasPattern = document.createElement("canvas");
     const ctxPattern = canvasPattern.getContext("2d");
@@ -5891,8 +5932,13 @@ function checkDrawPlayer(player, dt) {
         (player.x === 0 && player.y === 0)) {
         return;
     }
+    // Track the water->land exit every frame in EVERY state (lobby pool included) so the
+    // drip can fire wherever a kart can swim — not just mid-race.
+    updateWaterDrip(player);
     if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
         drawTrail(player);
+        // Swim ripples ride ON TOP of the normal trail while the kart is in water.
+        drawSwimRipple(player);
     }
     if (player.alive == false) {
         drawDeathMessage(player);
@@ -5900,6 +5946,8 @@ function checkDrawPlayer(player, dt) {
     }
     if (camera.inBounds(player)) {
         drawPlayer(player, dt);
+        // Wet sheen + droplets on top of the kart while it dries off after swimming.
+        drawWaterDrip(player);
     }
 }
 function drawPlayer(player, dt) {
@@ -6880,6 +6928,141 @@ var TRAIL_DRAW_BUCKETS = 6;
 // Reused scratch for drawTrail's per-segment bucket indices (see usage below) so
 // the trail draw doesn't allocate a fresh array per kart per frame.
 var _trailSegBucketScratch = [];
+// Cached Path2D covering every water cell (world coords), used to CLIP the swim ripple
+// so its expanding rings are cut off at the shoreline instead of spilling onto land.
+// Rebuilt only when the terrain cache changes (mapCacheRev — water turns to lava on
+// collapse); the rev-first guard caches the "no water" (null) result too.
+var _waterClipPath = null, _waterClipRev = -1;
+function ensureWaterClipPath() {
+    if (_waterClipRev === mapCacheRev) { return _waterClipPath; }
+    _waterClipRev = mapCacheRev;
+    _waterClipPath = null;
+    if (currentMap == null || currentMap.cells == null || config.tileMap.water == null ||
+        typeof Path2D === "undefined") {
+        return null;
+    }
+    var wId = config.tileMap.water.id, cells = currentMap.cells, p = new Path2D(), any = false;
+    for (var i = 0; i < cells.length; i++) {
+        var cell = cells[i];
+        if (cell.id !== wId) { continue; }
+        var hes = cell.halfedges;
+        if (!hes.length) { continue; }
+        var v = getStartpoint(hes[0]);
+        p.moveTo(v.x, v.y);
+        for (var h = 0; h < hes.length; h++) { v = getEndpoint(hes[h]); p.lineTo(v.x, v.y); }
+        p.closePath();
+        any = true;
+    }
+    _waterClipPath = any ? p : null;
+    return _waterClipPath;
+}
+// Swim ripples: an ADDITIVE overlay on top of the kart's normal trail while it sits in
+// water — reuses the Ripples cosmetic renderer (drawRippleTrail) so a swimmer leaves
+// expanding rings WITHOUT replacing their equipped trail (which still draws beneath, via
+// drawTrail just before this). Footing is read client-side from the cached nearest-cell
+// scan — the same source the drift cue uses — so no new network field is needed. Clipped
+// to the water cells so the rings can't expand past the shoreline onto land.
+function drawSwimRipple(player) {
+    var waterTile = (typeof config !== "undefined" && config.tileMap) ? config.tileMap.water : null;
+    var rippleFx = (typeof TRAIL_FX !== "undefined") ? TRAIL_FX["ripple"] : null;
+    if (waterTile == null || rippleFx == null) { return; }
+    // NOTE: intentionally NOT gated on currently-being-on-water. The per-vertex water
+    // filter below scopes the rings to the swum stretch, and letting it run after the
+    // kart climbs out means the rings on those (now aging) water vertices keep fading
+    // naturally instead of snapping off the instant it touches land.
+    var trail = player.trail;
+    if (trail == null || trail.vertices == null || trail.vertices.length < 2) { return; }
+    // Keep only the vertices that sit OVER water, so the rings hug the swum stretch and
+    // don't trail back onto the land the kart came from. Membership is cached per vertex
+    // (verts never move) so this costs ~nothing after a vertex is first seen.
+    var src = trail.vertices; // already age-trimmed by drawTrail, which ran first
+    var verts = [];
+    for (var vi = 0; vi < src.length; vi++) {
+        var sv = src[vi];
+        if (sv._overWater === undefined) {
+            var scell = (typeof nearestCell === "function") ? nearestCell(sv.x, sv.y) : null;
+            sv._overWater = (scell != null && scell.id === waterTile.id);
+        }
+        if (sv._overWater) { verts.push(sv); }
+    }
+    if (verts.length < 2) { return; }
+    var fadeMs = (typeof TRAIL_FADE_MS !== "undefined") ? TRAIL_FADE_MS : 5000;
+    // Toned-down: the swim ripple is an ambient water disturbance layered over the kart's
+    // real trail, so keep it subtle (well under the full-strength Ripples cosmetic) and in
+    // a neutral pale-water tint — NOT the player colour, so it reads as disturbed water and
+    // doesn't compete with / look like the kart's own trail.
+    var SWIM_RIPPLE_ALPHA = 0.4;
+    var SWIM_RIPPLE_COLOR = "#cfeaff";
+    var baseAlpha = (isLocalId(player.id) ? 1 : NONLOCAL_TRAIL_ALPHA) * SWIM_RIPPLE_ALPHA;
+    gameContext.save();
+    // Clip to the water surface so expanding rings are cut at the shoreline (not spilled
+    // onto land). Drawn in the same camera-translated world space as the verts.
+    var clip = ensureWaterClipPath();
+    if (clip != null) { gameContext.clip(clip); }
+    gameContext.lineWidth = 3;
+    gameContext.lineCap = "round";
+    gameContext.lineJoin = "round";
+    tfxBaseAlpha = baseAlpha;
+    rippleFx(gameContext, verts, SWIM_RIPPLE_COLOR, Date.now(), fadeMs, cartSkinAnimTime * 1000);
+    tfxBaseAlpha = 1;
+    gameContext.restore();
+}
+// "Dripping wet": derive the drip state client-side (no network field) by watching for a
+// water -> land footing transition, mirroring the server's water.dripMs window. Stamped
+// every frame so drawWaterDrip can fade a wet sheen + falling droplets as the kart dries.
+// Visual drip window — a touch longer than the server's physics slow (water.dripMs ~800)
+// so the "shaking off water" beat is clearly visible as the kart dries.
+var WATER_DRIP_VISUAL_MS = 1200;
+function updateWaterDrip(player) {
+    var waterTile = (typeof config !== "undefined" && config.tileMap) ? config.tileMap.water : null;
+    if (waterTile == null) { return; }
+    var onWater = nearestCellIdCached(player) === waterTile.id;
+    if (player._wasOnWater && !onWater) {
+        player._dripUntil = Date.now() + WATER_DRIP_VISUAL_MS;
+    }
+    player._wasOnWater = onWater;
+}
+function drawWaterDrip(player) {
+    if (!player._dripUntil) { return; }
+    var frac = (player._dripUntil - Date.now()) / WATER_DRIP_VISUAL_MS; // 1 just out -> 0 dry
+    if (frac <= 0) { return; }
+    // Same context as drawPlayer (camera-translated gameplay pass) -> raw world coords.
+    var sx = player.x, sy = player.y, r = player.radius || 7.5;
+    var dim = isLocalId(player.id) ? 1 : NONLOCAL_TRAIL_ALPHA;
+    var ctx = gameContext;
+    ctx.save();
+    // Exit splash: a quick ring sheeting off the kart in the first ~third of the drip.
+    var splash = (frac > 0.66) ? (frac - 0.66) / 0.34 : 0; // 1 at exit -> 0 a third in
+    if (splash > 0) {
+        ctx.globalAlpha = 0.55 * splash * dim;
+        ctx.strokeStyle = "rgba(195,232,255,1)";
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(sx, sy, r + (1 - splash) * 11, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+    // Wet sheen: a bright cool rim all the way around the kart, fading as it dries.
+    ctx.globalAlpha = 0.6 * frac * dim;
+    ctx.strokeStyle = "rgba(205,238,255,1)";
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(sx, sy, r + 1.5, 0, Math.PI * 2);
+    ctx.stroke();
+    // Droplets sliding off and falling, staggered so they don't drip in lockstep.
+    var drops = 5;
+    for (var i = 0; i < drops; i++) {
+        var phase = (frac * 1.4 + i / drops) % 1;          // each drop on its own fall cycle
+        var fall = (1 - phase) * (r * 3.0);
+        var dx = sx + ((i / (drops - 1)) - 0.5) * r * 1.6;
+        var dy = sy + r * 0.4 + fall;
+        ctx.globalAlpha = 0.7 * phase * frac * dim;
+        ctx.fillStyle = "rgba(150,210,250,1)";
+        ctx.beginPath();
+        ctx.arc(dx, dy, 2.4, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.restore();
+}
 function drawTrail(player) {
     var trail = player.trail;
     if (trail == null || trail.vertices == null || trail.vertices.length < 2) {
@@ -7863,6 +8046,7 @@ function renderMapToCache() {
     // transform is the one active here.
     paintTrenchSegments(mapCtx);
     drawEmptyBorders(mapCtx);
+    drawStoneBorders(mapCtx);
     mapCtx.restore();
     // Terrain changed → derived FX caches (space island depth) must rebuild.
     mapCacheRev++;
@@ -8047,6 +8231,64 @@ function drawEmptyBorders(ctx) {
     ctx.stroke();
     ctx.lineWidth = 2;
     ctx.strokeStyle = emptyBorderInner;
+    ctx.stroke();
+    ctx.restore();
+}
+// Stone seam where water meets lava: that boundary is a SOLID wall (engine
+// bounceOffStoneEdges blocks crossing it), so it must read distinctly — not like an
+// open water/lava border. Stroke each water-cell edge whose neighbour is lava as a
+// chunky stone ledge (dark lip + light highlight, like drawEmptyBorders' rim). Mirrors
+// the server's ensureStoneEdges adjacency test (lSite/rSite -> neighbour tile id).
+var stoneBorderOuter = "#2c2c33";
+var stoneBorderInner = "#9a9aa4";
+function drawStoneBorders(ctx) {
+    if (currentMap == null || currentMap.cells == null || config.tileMap.water == null) {
+        return;
+    }
+    var waterId = config.tileMap.water.id, lavaId = config.tileMap.lava.id;
+    var cells = currentMap.cells;
+    // Most maps have no water — bail before the neighbour-index build + per-edge work.
+    var anyWater = false;
+    for (var w = 0; w < cells.length; w++) {
+        if (cells[w].id === waterId) { anyWater = true; break; }
+    }
+    if (!anyWater) {
+        return;
+    }
+    var idByVoronoi = {};
+    for (var i = 0; i < cells.length; i++) {
+        idByVoronoi[cells[i].site.voronoiId] = cells[i].id;
+    }
+    ctx.save();
+    ctx.beginPath();
+    for (var c = 0; c < cells.length; c++) {
+        var cell = cells[c];
+        if (cell.id != waterId) {
+            continue;
+        }
+        var halfedges = cell.halfedges;
+        for (var h = 0; h < halfedges.length; h++) {
+            var he = halfedges[h];
+            var neighbor = compareSite(he.edge.lSite, he.site) ? he.edge.rSite : he.edge.lSite;
+            if (neighbor == null || idByVoronoi[neighbor.voronoiId] != lavaId) {
+                continue; // only the water/lava seam is a wall
+            }
+            var sp = getStartpoint(he);
+            var ep = getEndpoint(he);
+            ctx.moveTo(sp.x, sp.y);
+            ctx.lineTo(ep.x, ep.y);
+        }
+    }
+    ctx.setLineDash([]);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    // Chunky dark lip then a thinner light highlight — a raised stone ledge look that
+    // reads as impassable, distinct from the open lava border.
+    ctx.lineWidth = 7;
+    ctx.strokeStyle = stoneBorderOuter;
+    ctx.stroke();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = stoneBorderInner;
     ctx.stroke();
     ctx.restore();
 }
