@@ -525,6 +525,15 @@ class Player extends Circle {
 			// each stroke is a lunge-and-glide; the engine's maxVelocity caps the peak.
 			var w = c.tileMap.water;
 			var dir = this.getMoveDir();
+			// Bots have no move keys (getMoveDir reads them), so getMoveDir is always
+			// null for them — they steer via targetDirX/Y (the engine's isAI drive axis).
+			// Fall back to that steer vector so a bot's stroke propels it along the very
+			// direction it's already trying to swim (the path carrot). Guarded by isAI so
+			// a human's swim stays byte-for-byte unchanged (no keys held -> no stroke).
+			if (dir == null && this.isAI) {
+				var tdm = Math.sqrt(this.targetDirX * this.targetDirX + this.targetDirY * this.targetDirY);
+				if (tdm > 0.0001) { dir = { x: this.targetDirX / tdm, y: this.targetDirY / tdm }; }
+			}
 			if (dir != null && w != null) {
 				var impulse = w.swimImpulse * (1 + (w.swimChargeBonus || 0) * frac);
 				this.velX += dir.x * impulse;
