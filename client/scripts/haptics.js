@@ -3,14 +3,16 @@
 // single per-pad magnitude each frame (only one effect can play per actuator, so
 // everything is mixed down before a single playEffect call):
 //
-//   1. Ambient: mirrors the screen-shake "trauma" model (see gameboard.js). Every
-//      event that shakes the camera — punch hits on/by a local player, charged
-//      thwacks, charge-hold buzz, volcano eruptions, lava collapse — already adds
-//      trauma, gated to the local player where appropriate, so reading shakeTrauma
-//      gives correctly-targeted rumble for free and stays in sync with shake tuning.
+//   1. Ambient: a per-pad mirror of the screen-shake "trauma" model (see
+//      gameboard.js). It does NOT read the global shakeTrauma scalar — that's tied
+//      to the shared camera and would buzz every local pad for one player's hit in
+//      couch co-op. Instead each shake call site also feeds haptic trauma, routed
+//      to the right place: local-specific shakes (punch hits, charge-hold, muzzle
+//      recoil) via traumaForId/chargeTraumaForId, and global world events (volcano,
+//      collapse, explosions) via traumaAll/sustainTraumaAll. See that section below.
 //   2. Discrete pulses: one-shot envelopes for events that DON'T shake the screen
-//      but should buzz a specific local player's pad (death, finish, infection) or
-//      all local pads (race GO).
+//      but should buzz a specific local player's pad (death, finish, infection,
+//      water splash/swim/steam) or all local pads (race GO).
 //
 // Toggle: navbar #hapticsControl, persisted as localStorage "hapticsPref". Default
 // ON. Honoured by the single update entry point so the toggle gates both layers.
@@ -60,6 +62,80 @@ function traumaToMagnitude(trauma) {
     if (trauma <= 0) { return null; }
     var strong = Math.min(1, trauma * trauma * 1.4);
     return { strong: strong, weak: strong * 0.6 };
+}
+
+// --- Per-pad ambient trauma (haptic-only mirror of the screen-shake model) ---
+// The screen-shake `shakeTrauma` is a single GLOBAL scalar tied to the shared
+// camera, so reading it directly would buzz every local pad for one player's hit
+// (wrong in couch co-op). Instead, haptics keeps its OWN trauma per pad index:
+// local-specific shakes (punch hits, charge, muzzle recoil) route to the
+// originating player's pad via traumaForId/chargeTraumaForId, while genuinely
+// global world events (collapse, volcano, explosions) fan out to every local pad
+// via traumaAll/sustainTraumaAll. Each call site keeps driving the visual
+// shakeTrauma too; these run alongside it, they don't replace it.
+var hapticTrauma = {};         // padIndex -> trauma 0..1
+var hapticSustainUntil = {};   // padIndex -> ms (floor active until)
+var hapticSustainFloor = {};   // padIndex -> 0..1
+var HAPTIC_TRAUMA_DECAY = 1.6; // units/sec — matches gameboard.js shakeDecayPerSec
+
+function padIndexForId(id) {
+    if (id == null || typeof localPlayers === "undefined" || !localPlayers) { return null; }
+    for (var s = 0; s < localPlayers.length; s++) {
+        var lp = localPlayers[s];
+        if (lp && lp.myID == id && lp.padIndex != null) { return lp.padIndex; }
+    }
+    return null;
+}
+function addPadTrauma(padIndex, amount) {
+    if (padIndex == null) { return; }
+    hapticTrauma[padIndex] = Math.min(1, (hapticTrauma[padIndex] || 0) + amount);
+}
+// One-shot ambient jolt routed to the local pad that earned it (no-op if not local).
+function traumaForId(id, amount) { addPadTrauma(padIndexForId(id), amount); }
+// Fan an ambient jolt out to every local pad (genuinely global world events).
+function traumaAll(amount) {
+    if (typeof localPlayers === "undefined" || !localPlayers) { return; }
+    for (var s = 0; s < localPlayers.length; s++) {
+        var lp = localPlayers[s];
+        if (lp && lp.padIndex != null) { addPadTrauma(lp.padIndex, amount); }
+    }
+}
+// A sustained floor on every local pad for durationMs (e.g. a volcano eruption).
+function sustainTraumaAll(durationMs, intensity) {
+    if (typeof localPlayers === "undefined" || !localPlayers) { return; }
+    var until = Date.now() + durationMs;
+    for (var s = 0; s < localPlayers.length; s++) {
+        var lp = localPlayers[s];
+        if (lp && lp.padIndex != null) {
+            hapticSustainUntil[lp.padIndex] = until;
+            hapticSustainFloor[lp.padIndex] = intensity;
+            addPadTrauma(lp.padIndex, intensity);
+        }
+    }
+}
+// A held charge floor on one local player's pad (refreshed each frame while
+// charging, like gameboard.js chargeRumble): holds steady instead of ramping.
+function chargeTraumaForId(id, intensity) {
+    var idx = padIndexForId(id);
+    if (idx == null) { return; }
+    if (Date.now() < hapticSustainUntil[idx]) {
+        hapticSustainFloor[idx] = Math.max(hapticSustainFloor[idx] || 0, intensity);
+    } else {
+        hapticSustainFloor[idx] = intensity;
+    }
+    hapticSustainUntil[idx] = Date.now() + 90;
+}
+// Advance one pad's ambient trauma: apply any active sustain floor, then decay.
+function tickPadTrauma(padIndex, dt) {
+    if (Date.now() < hapticSustainUntil[padIndex] &&
+        (hapticTrauma[padIndex] || 0) < hapticSustainFloor[padIndex]) {
+        hapticTrauma[padIndex] = hapticSustainFloor[padIndex];
+    }
+    var tr = hapticTrauma[padIndex] || 0;
+    if (tr > 0) {
+        hapticTrauma[padIndex] = Math.max(0, tr - HAPTIC_TRAUMA_DECAY * (dt / 1000));
+    }
+    return hapticTrauma[padIndex] || 0;
 }
 
 // Queue a discrete pulse on a specific pad index. strong/weak are 0..1 peak
@@ -157,23 +233,29 @@ function stopAllHaptics() {
         if (act) { stopPad(i, act); }
     }
     hapticPulses = {};
+    hapticTrauma = {};
+    hapticSustainUntil = {};
+    hapticSustainFloor = {};
 }
 
 // Per-frame mixer: for each locally-bound pad, take the max of the ambient trauma
 // magnitude and any active discrete pulse, then issue (or lapse) the effect. Called
 // from the game loop after pollGamepad. Cheap: a handful of pads, mostly silent.
-function updateHaptics() {
+function updateHaptics(dt) {
     if (!hapticsEnabled || typeof localPlayers === "undefined" || !localPlayers) { return; }
     var pads = (typeof navigator !== "undefined" && navigator.getGamepads) ? navigator.getGamepads() : [];
     if (!pads) { return; }
-    var ambient = (typeof shakeTrauma !== "undefined") ? traumaToMagnitude(shakeTrauma) : null;
+    var step = (typeof dt === "number" && dt > 0) ? dt : 16;
     for (var s = 0; s < localPlayers.length; s++) {
         var lp = localPlayers[s];
         if (!lp || lp.padIndex == null) { continue; }
         var idx = lp.padIndex;
+        // Decay this pad's ambient trauma every frame (even with no actuator).
+        var trauma = tickPadTrauma(idx, step);
         var act = padActuator(pads[idx]);
         if (!act) { continue; }
         var strong = 0, weak = 0;
+        var ambient = traumaToMagnitude(trauma);
         if (ambient) { strong = ambient.strong; weak = ambient.weak; }
         var pulse = activePulse(idx);
         if (pulse) {

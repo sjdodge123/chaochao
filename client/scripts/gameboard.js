@@ -1310,6 +1310,7 @@ function fireMuzzleFlash(owner, color) {
 	}
 	if (isLocalId(owner)) {
 		addTrauma(0.18);
+		if (typeof traumaForId === "function") { traumaForId(owner, 0.18); }
 	}
 }
 

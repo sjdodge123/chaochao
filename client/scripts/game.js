@@ -524,7 +524,7 @@ function gameLoop(dt) {
     // below no-op unless ?fps=1 / ?diag=1 is set, so normal play is unaffected.
     var t0 = performance.now();
     pollGamepad(dt);
-    if (typeof updateHaptics === "function") { updateHaptics(); }
+    if (typeof updateHaptics === "function") { updateHaptics(dt); }
     var t1 = performance.now();
     drawObjects(dt);
     var t2 = performance.now();

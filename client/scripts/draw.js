@@ -6326,8 +6326,8 @@ function drawPunchCharge(player) {
     if (isLocal) {
         var ocBuilding = isCharging && ocLevel > 0.001;
         var ocLocked = !isCharging && ocLevel > 0.001;
-        if (ocBuilding) { chargeRumble(0.18 + 0.3 * ocLevel); }
-        else if (isCharging) { chargeRumble(0.1 + 0.14 * chargeLevel); }
+        if (ocBuilding) { chargeRumble(0.18 + 0.3 * ocLevel); if (typeof chargeTraumaForId === "function") { chargeTraumaForId(player.id, 0.18 + 0.3 * ocLevel); } }
+        else if (isCharging) { chargeRumble(0.1 + 0.14 * chargeLevel); if (typeof chargeTraumaForId === "function") { chargeTraumaForId(player.id, 0.1 + 0.14 * chargeLevel); } }
         if (ocLocked && !player._wasOcLocked) {
             shakeTrauma = 0;
             shakeSustainUntil = 0;
