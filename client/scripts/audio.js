@@ -759,8 +759,8 @@ function playFlameExtinguish(level) {
 // A rising charge "whine" that spools up across the 5s telegraph, then a downward
 // impact blast when the beam strikes. Both route through sfxBus so the master toggle +
 // lobby dampen apply (folded in like the drift/extinguish voices).
-var ORBITAL_CHARGE_VOL = 0.22;
-var ORBITAL_IMPACT_VOL = 0.5;
+var ORBITAL_CHARGE_VOL = 0.154; // 0.22 reduced 30%
+var ORBITAL_IMPACT_VOL = 0.35;  // 0.5 reduced 30%
 var orbitalChargeVoice = null; // { osc, osc2, noise, gain } | null (one whine at a time)
 
 function playOrbitalBeamCharge(durationMs) {
