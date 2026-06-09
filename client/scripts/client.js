@@ -1453,6 +1453,7 @@ function registerStateHandlers(server) {
 			spawnCollapseShockwave(info.originX, info.originY);
 			playSound(volcanoErupt);
 			rumbleScreen(1500);
+			if (typeof traumaAll === "function") { traumaAll(0.6); }
 		}
 	});
 
@@ -1562,6 +1563,7 @@ function registerCombatHandlers(server) {
 				playSound(chargedHitSound);
 				if ((isLocalId(victim) || isLocalId(owner)) && currentState != config.stateMap.gated) {
 					addTrauma(0.4);
+					if (typeof traumaForId === "function") { traumaForId(victim, 0.4); traumaForId(owner, 0.4); }
 				}
 			}
 			// Feel a connecting hit when a local player is on either end of it —
@@ -1569,6 +1571,7 @@ function registerCombatHandlers(server) {
 			// shouldn't rattle the camera while everyone's waiting to race).
 			else if ((isLocalId(victim) || isLocalId(owner)) && currentState != config.stateMap.gated) {
 				addTrauma(0.28);
+				if (typeof traumaForId === "function") { traumaForId(victim, 0.28); traumaForId(owner, 0.28); }
 			}
 		}
 		// Only a real scrum — several hits landing in quick succession — reads as
@@ -1648,6 +1651,7 @@ function registerCombatHandlers(server) {
 			if (typeof recapMarkMapDirty === "function") { recapMarkMapDirty(); } // exploded tiles -> recap re-snapshots
 			playSoundVaried(bombExplosion, 0.05);
 			addTrauma(0.5);
+			if (typeof traumaAll === "function") { traumaAll(0.5); }
 		}
 	});
 	server.on("snowFlakeExploded", function (payload) {
@@ -1669,6 +1673,7 @@ function registerCombatHandlers(server) {
 			}
 			playSoundVaried(iceExplosion, 0.05);
 			addTrauma(0.45);
+			if (typeof traumaAll === "function") { traumaAll(0.45); }
 		}
 	});
 	server.on("firstBlood", function () {
@@ -1872,6 +1877,7 @@ function registerAbilityHandlers(server) {
 		}
 		playerAbilityUsed(owner);
 		addTrauma(0.4);
+		if (typeof traumaAll === "function") { traumaAll(0.4); }
 	});
 	server.on("tileSwap", function (owner) {
 		// The swap is telegraphed then delayed (see tileSwapPending); the sound
@@ -1894,6 +1900,7 @@ function registerEffectHandlers(server) {
 			playSoundVaried(lavaExplosion, 0.05);
 			spawnScreenFlash("#ff5a1a", 0.3, 300);
 			addTrauma(0.5);
+			if (typeof traumaAll === "function") { traumaAll(0.5); }
 		}
 	});
 	server.on("spawnExplosionAimer", function (owner) {
@@ -1987,6 +1994,7 @@ function registerEffectHandlers(server) {
 		playSound(volcanoErupt);
 		spawnScreenFlash("#ff7a18", 0.28, 400);
 		rumbleSustained(2500, 0.7);
+		if (typeof sustainTraumaAll === "function") { sustainTraumaAll(2500, 0.7); }
 	});
 
 	server.on("speedBuff", function (owner) {
