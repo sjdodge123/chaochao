@@ -3590,6 +3590,12 @@ function loadPatterns() {
     // thumbnail (buildMapThumbnailCanvas), which draws straight from maps[i]'s
     // un-replaced cell ids. Without it the thumbnail fell back to flat purple.
     patterns[config.tileMap.random.id] = makePattern(randomTileIcon, config.tileMap.random.color);
+    // Likewise, committed maps store ability cells as the un-rolled ability.id
+    // (applyAbilites swaps them to a specific ability id only on the LIVE map at
+    // round start). The next-map preview thumbnail draws those un-rolled ids, so
+    // without this it fell back to flat grey. Show the bomb icon over dirt,
+    // matching the editor's map-list thumbnail (create.js).
+    patterns[config.tileMap.ability.id] = makePattern(bombIcon, makeSeamlessPattern(gDirt));
 
 
 
