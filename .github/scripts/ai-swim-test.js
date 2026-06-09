@@ -27,6 +27,7 @@ const messenger = require(path.join(repoRoot, 'server', 'messenger.js'));
 const config = require(path.join(repoRoot, 'server', 'config.json'));
 const mapFormat = require(path.join(repoRoot, 'server', 'mapFormat.js'));
 const cellGraph = require(path.join(repoRoot, 'server', 'cellGraph.js'));
+const abilities = require(path.join(repoRoot, 'server', 'entities', 'abilities.js'));
 
 const T = config.tileMap;
 const GRASS = T.fast.id;     // 2
@@ -197,6 +198,44 @@ try {
         if (reachedGoalAt >= 0) {
             console.log('  ..  - crossing completed in ' + reachedGoalAt + ' ticks (~' + (reachedGoalAt * DT).toFixed(1) + 's)');
         }
+    }
+
+    // ----------------------------------------------------------------------
+    console.log('\n[C] a bot SPENDS a banked ability before a water crossing (no held-ability stall)');
+    {
+        // Regression for the Codex finding: a held ability fires on attack, so it blocks the
+        // bare-handed swim stroke. A SOLO (therefore leading, rank 0) bot holding a Swap is
+        // the worst case — the "never give away the lead" guard means decideAbility would
+        // NEVER deploy it, so pre-fix the bot carries Swap into the water and can never stroke
+        // (a hard stall). The fix deploys it at the water's edge; the bot then swims across.
+        const map = buildMap('swimcross-ability', ['left'], (col) => {
+            if (col === 8) { return GOAL; }
+            if (col === 4 || col === 5) { return WATER; }
+            return GRASS;
+        });
+        const { room, bot } = bootRoom('swim-ability', map, { id: 'fish2', name: 'Fish2', title: '', skill: 0.85, aggression: 0.2, tempo: 0.4, risk: 0.3, focus: 'race' });
+        // Hand the bot a held Swap and register it the way a tile pickup does (mapID:null =
+        // no tile consumed). checkAbilities will clear bot.ability once it's actually used.
+        bot.ability = new abilities.Swap(bot.id, bot.roomSig);
+        bot.acquiredAbility = { mapID: null };
+        const maxTicks = 1700; // a swimmer that deploys at the edge finishes ~1200; a stalled
+                               // holder (Swap held to its ~33s maxHold ≈ tick 1980) cannot.
+        let everOnWater = false, deployedAt = -1, deployedX = null, reachedGoalAt = -1;
+        for (let f = 0; f < maxTicks; f++) {
+            room.game.notchesToWin = 0;
+            const heldBefore = bot.ability != null;
+            room.update(DT);
+            clock += config.serverTickSpeed;
+            if (heldBefore && bot.ability == null && deployedAt < 0) { deployedAt = f; deployedX = bot.x; }
+            if (bot.onWater) { everOnWater = true; }
+            if (reachedGoalAt < 0 && bot.reachedGoal) { reachedGoalAt = f; }
+            if (room.game.currentState === config.stateMap.gameOver) { break; }
+        }
+        check(deployedAt >= 0, 'the banked ability was deployed (bot.ability cleared) at tick ' + deployedAt + (deployedX != null ? ', x=' + deployedX.toFixed(0) : ''));
+        check(everOnWater, 'the bot still entered the water (it did not freeze on dry land holding the ability)');
+        check(bot.reachedGoal === true, 'the bot reached the goal after spending the ability (reachedGoal at tick ' + reachedGoalAt + ')');
+        check(room.game.currentState === config.stateMap.gameOver,
+            'the round reached gameOver — an ability-holding bot does not stall a water crossing');
     }
 } finally {
     Date.now = realNow;
