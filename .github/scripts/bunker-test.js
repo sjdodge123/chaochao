@@ -108,6 +108,16 @@ console.log('Using map: ' + picked.name);
     check(buriedRoute != null, 'A* finds a route to the buried bunker via goalSet');
     check(plainRoute == null, 'A* finds NO route without goalSet (goal really is buried)');
 
+    // tileSwap (ice<->fast) must not corrupt the ice bunker island.
+    const islandIds = Object.keys(gb.bunkerSafeIds);
+    gb.swapTiles();
+    let islandStillIce = true;
+    for (let i = 0; i < gb.currentMap.cells.length; i++) {
+        const cell = gb.currentMap.cells[i];
+        if (gb.bunkerSafeIds[cell.site.voronoiId] && cell.id !== c.tileMap.ice.id) { islandStillIce = false; }
+    }
+    check(islandStillIce, 'tileSwap leaves the bunker island ice intact');
+
     room.game.startRace();
     const lavaBefore = countId(gb, c.tileMap.lava.id);
     const lineBefore = gb.collapseLine;

@@ -617,6 +617,9 @@ class GameBoard {
 		var cells = this.currentMap.cells;
 		var tileDelta = {};
 		for (var i = 0; i < cells.length; i++) {
+			// The Bunker island is ice; a tileSwap would otherwise flip it to fast,
+			// corrupting the safe core (and its look under the silo door). Leave it be.
+			if (this.bunkerSafeIds[cells[i].site.voronoiId]) { continue; }
 			if (cells[i].id == c.tileMap.fast.id) {
 				cells[i].id = c.tileMap.ice.id;
 				this.tileChanges[cells[i].site.voronoiId] = cells[i].id;
