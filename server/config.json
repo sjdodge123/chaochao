@@ -1,5 +1,7 @@
 {
     "port": 3000,
+    "_forceAbilitySpawnDoc": "TEST OVERRIDE. When non-null, EVERY ability spawn (ability pads via spawnNewAbility, the brutal Ability round, and direct ability-tile pickups) yields this ability id instead of a random one — so a brand-new ability can be playtested immediately. null = normal random spawns. Force-disabled in production (utils.js nulls it when NODE_ENV=production), and FORCE_ABILITY_SPAWN env var overrides it per-run (e.g. FORCE_ABILITY_SPAWN=110 npm start). RESET TO null BEFORE MERGING TO main.",
+    "forceAbilitySpawn": 110,
     "serverTickSpeed": 33.33,
     "punchRadius": 11,
     "punchThrowBrake": 0.45,

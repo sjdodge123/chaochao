@@ -2014,7 +2014,11 @@ class GameBoard {
 			if (player.ability != null) {
 				continue;
 			}
-			var abilityID = abilitiesToGet[utils.getRandomInt(0, abilitiesToGet.length - 1)];
+			// Test override (config.forceAbilitySpawn / FORCE_ABILITY_SPAWN env, prod-disabled):
+			// the brutal Ability round also hands everyone the forced ability when set.
+			var abilityID = (c.forceAbilitySpawn != null)
+				? c.forceAbilitySpawn
+				: abilitiesToGet[utils.getRandomInt(0, abilitiesToGet.length - 1)];
 			switch (abilityID) {
 				case c.tileMap.abilities.blindfold.id: {
 					player.ability = new Blindfold(player.id, this.roomSig);
@@ -2342,6 +2346,11 @@ class GameBoard {
 		return indexMap;
 	}
 	spawnNewAbility() {
+		// Test override (config.forceAbilitySpawn / FORCE_ABILITY_SPAWN env, prod-disabled):
+		// every ability pad yields this id so a new ability can be playtested on demand.
+		if (c.forceAbilitySpawn != null) {
+			return c.forceAbilitySpawn;
+		}
 		return this.allAbilityIDs[utils.getRandomInt(0, this.allAbilityIDs.length - 1)];
 	}
 	indexAbilities() {
