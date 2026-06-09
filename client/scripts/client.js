@@ -1844,6 +1844,11 @@ function registerAbilityHandlers(server) {
 		playerAbilityUsed(owner);
 		playSound(iceCannon);
 	});
+	server.on("orbitalBeam", function (owner) {
+		// The strike is locked + telegraphed (orbitalBeamCast) then fired
+		// (orbitalBeamFired) — this just clears the held-ability aim indicator.
+		playerAbilityUsed(owner);
+	});
 }
 function registerEffectHandlers(server) {
 	server.on("lavaExplosion", function () {
@@ -1894,6 +1899,25 @@ function registerEffectHandlers(server) {
 					}
 				}, config.tileMap.abilities.swap.warnTime, aimerList[owner]);
 			}
+		}
+	});
+	server.on("orbitalBeamCast", function (data) {
+		// Locked beam line: start the self-timed telegraph + the rising charge whine.
+		if (data == null) { return; }
+		markOrbitalBeam(data);
+		playOrbitalBeamCharge(data.duration);
+		addTrauma(0.12);
+	});
+	server.on("orbitalBeamFired", function (data) {
+		// Strike: cut the charge whine, flash the locked line, blast + shake.
+		stopOrbitalBeamCharge();
+		orbitalBeamFiredFX(data);
+		if (currentState == config.stateMap.racing ||
+			currentState == config.stateMap.collapsing ||
+			currentState == config.stateMap.lobby) {
+			playOrbitalBeamImpact();
+			spawnScreenFlash("#ffd66a", 0.3, 320);
+			addTrauma(0.6);
 		}
 	});
 	server.on("playerSwapped", function (payload) {

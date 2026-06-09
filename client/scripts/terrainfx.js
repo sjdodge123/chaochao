@@ -49,6 +49,7 @@ function tfxBuildAbilityIcons() {
     set("iceCannon", typeof snowFlakeIcon !== "undefined" ? snowFlakeIcon : null);
     set("cut", typeof scissorsIcon !== "undefined" ? scissorsIcon : null);
     set("starPower", typeof starIcon !== "undefined" ? starIcon : null);
+    set("orbitalBeam", typeof orbitalBeamIcon !== "undefined" ? orbitalBeamIcon : null);
     return m;
 }
 

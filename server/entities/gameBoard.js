@@ -15,7 +15,7 @@ var { LobbyStartButton, LobbyStation } = require('./player.js');
 var { ExplosionAimer, SwapAimer } = require('./aimers.js');
 var { HazardRail, Bumper } = require('./hazards.js');
 var { CloudProj, SnowFlakeProj, BombProj, Puck } = require('./projectiles.js');
-var { Blindfold, Swap, IceCannon, Bomb, SpeedBuff, SpeedDebuff, TileSwap, Cut, StarPower, BombTrigger } = require('./abilities.js');
+var { Blindfold, Swap, IceCannon, Bomb, SpeedBuff, SpeedDebuff, TileSwap, Cut, StarPower, BombTrigger, OrbitalBeam } = require('./abilities.js');
 
 // Depth (px) of a starting gate measured inward from its world edge. Matches the
 // editor's gate strip width so the previewed gate lines up with the server's.
@@ -411,6 +411,10 @@ class GameBoard {
 				this.abilityList[id].tileSwap = false;
 				this.startTileSwap();
 			}
+			if (this.abilityList[id].fireBeam) {
+				this.abilityList[id].fireBeam = false;
+				this.startOrbitalBeam(this.abilityList[id].ownerId);
+			}
 			if (this.abilityList[id].blind) {
 				this.abilityList[id].blind = false;
 				// Room-wide vision block: bots self-handicap their steering for the
@@ -651,6 +655,113 @@ class GameBoard {
 		if (swappedIds.length > 0) {
 			messenger.messageRoomBySig(this.roomSig, "tileSwapPerformed", JSON.stringify(swappedIds));
 		}
+	}
+	// Orbital Beam: LOCK the origin + 8-way direction at cast (it's "from orbit" — a
+	// fixed line, not the holder's live aim), broadcast the cast so clients telegraph
+	// the strike line for the fuse, then schedule the actual strike. Tracked in
+	// pendingAbilityTimers like every other ability timer so a round/match teardown
+	// cancels a pending beam instead of striking a stale room.
+	startOrbitalBeam(owner) {
+		var player = this.playerList[owner];
+		if (player == null || this.currentMap == null || this.currentMap.cells == null) {
+			return;
+		}
+		var ob = c.tileMap.abilities.orbitalBeam;
+		// Same 8-way snap the bomb/ice cannon use; fall back to the raw angle if the
+		// holder's facing isn't a clean 45 (clampPlayerAngle returns undefined then).
+		var angle = this.clampPlayerAngle(player.angle);
+		if (angle == null) {
+			angle = player.angle;
+		}
+		var packet = {
+			context: this,
+			map: this.currentMap,
+			owner: owner,
+			x: player.x,
+			y: player.y,
+			angle: angle,
+			length: ob.beamLength,
+			width: ob.beamWidth
+		};
+		messenger.messageRoomBySig(this.roomSig, "orbitalBeamCast", {
+			owner: owner,
+			x: player.x,
+			y: player.y,
+			angle: angle,
+			length: ob.beamLength,
+			width: ob.beamWidth,
+			duration: ob.fuse
+		});
+		this.pendingAbilityTimers.push(setTimeout(this.fireOrbitalBeam, ob.fuse, packet));
+	}
+	fireOrbitalBeam(packet) {
+		var gameBoard = packet.context;
+		// Bail if the round/map changed while the fuse burned (currentMap is a fresh
+		// object each round, so a reference check catches it) — same guard as performTileSwap.
+		if (gameBoard.currentMap !== packet.map || gameBoard.currentMap == null) {
+			return;
+		}
+		var rad = packet.angle * (Math.PI / 180);
+		var dirX = Math.cos(rad), dirY = Math.sin(rad);
+		// Perpendicular axis for the half-width test (the beam is a rectangle: 0..length
+		// along the direction, +/- width/2 across it).
+		var perpX = -dirY, perpY = dirX;
+		var ox = packet.x, oy = packet.y, length = packet.length, halfW = packet.width / 2;
+		var iceId = c.tileMap.ice.id, waterId = c.tileMap.water.id;
+		var sandId = c.tileMap.slow.id, lavaId = c.tileMap.lava.id;
+		var cells = gameBoard.currentMap.cells;
+		var tileDelta = {};
+		var changed = false;
+		for (var i = 0; i < cells.length; i++) {
+			var cell = cells[i];
+			// Only ice and sand are transmutable by the beam; skip everything else early.
+			var newId = null;
+			if (cell.id == iceId) { newId = waterId; }
+			else if (cell.id == sandId) { newId = lavaId; }
+			else { continue; }
+			var vx = cell.site.x - ox, vy = cell.site.y - oy;
+			var along = vx * dirX + vy * dirY;
+			if (along < 0 || along > length) { continue; }
+			var across = vx * perpX + vy * perpY;
+			if (across < -halfW || across > halfW) { continue; }
+			cell.id = newId;
+			gameBoard.tileChanges[cell.site.voronoiId] = newId; // late-joiner snapshot
+			tileDelta[cell.site.voronoiId] = newId;
+			changed = true;
+		}
+		if (changed) {
+			messenger.messageRoomBySig(gameBoard.roomSig, "tileChanges", JSON.stringify(tileDelta));
+			// The beam can place water immediately beside lava (or vice-versa); the
+			// compute-once stone-edge cache won't grow those seams on its own, so rebuild
+			// it from the now-live ids. The client recomputes its seams from live cell ids
+			// each frame (drawStoneBorders), so no extra client lockstep is needed.
+			_engine.rebuildStoneEdges(gameBoard.currentMap);
+			gameBoard.lobbyMapDirty = true;
+			gameBoard.lobbyLastActivity = Date.now();
+		}
+		// Burn every kart standing in the line like lava (applyLavaBurn honors invuln /
+		// Star Power / zombie immunity and routes a fire shield through the burn timer).
+		// The caster is at the origin, so skip them — no suicide-on-cast.
+		for (var id in gameBoard.playerList) {
+			if (id == packet.owner) { continue; }
+			var p = gameBoard.playerList[id];
+			if (p == null || p.alive == false) { continue; }
+			var px = p.x - ox, py = p.y - oy;
+			var pAlong = px * dirX + py * dirY;
+			var pad = p.radius != null ? p.radius : 0;
+			if (pAlong < -pad || pAlong > length + pad) { continue; }
+			var pAcross = px * perpX + py * perpY;
+			if (pAcross < -(halfW + pad) || pAcross > (halfW + pad)) { continue; }
+			p.applyLavaBurn(packet.owner);
+		}
+		messenger.messageRoomBySig(gameBoard.roomSig, "orbitalBeamFired", {
+			owner: packet.owner,
+			x: ox,
+			y: oy,
+			angle: packet.angle,
+			length: length,
+			width: packet.width
+		});
 	}
 	cutPlayers(owner) {
 		for (var id in this.playerList) {
@@ -1947,6 +2058,11 @@ class GameBoard {
 				}
 				case c.tileMap.abilities.starPower.id: {
 					player.ability = new StarPower(player.id, this.roomSig);
+					player.acquiredAbility = { mapID: null };
+					break;
+				}
+				case c.tileMap.abilities.orbitalBeam.id: {
+					player.ability = new OrbitalBeam(player.id, this.roomSig);
 					player.acquiredAbility = { mapID: null };
 					break;
 				}

@@ -150,7 +150,10 @@
                   detail: "A quick, close-range swipe with no wind-up or aiming: it carves a line through the pack and flings nearby racers away from it, throwing those on each side opposite ways. An instant shove to clear bodies off you or fling a clinging rival off course." },
                 { id: "ability-starpower", name: "Star Power", icon: svg("star-solid.svg"), anim: "starPower",
                   blurb: "A few seconds of glowing invulnerability.",
-                  detail: "Light up in rainbow colours and become untouchable for a few seconds: punches and pucks bounce off, bombs and cuts can't fling you, slowdowns and swaps pass you by, a blindfold can't blind you — and even lava can't burn you, so you can shortcut straight across it. You can still punch everyone else, so plow through the pack. Just watch the flashing: when the glow starts blinking the star is wearing off, and lava stops being a road the instant it does." }
+                  detail: "Light up in rainbow colours and become untouchable for a few seconds: punches and pucks bounce off, bombs and cuts can't fling you, slowdowns and swaps pass you by, a blindfold can't blind you — and even lava can't burn you, so you can shortcut straight across it. You can still punch everyone else, so plow through the pack. Just watch the flashing: when the glow starts blinking the star is wearing off, and lava stops being a road the instant it does." },
+                { id: "ability-orbitalbeam", name: "Orbital Beam", icon: svg("orbital-beam-solid.svg"), anim: "orbitalBeam",
+                  blurb: "Call down a strike that melts a line of the track.",
+                  detail: "Aim it and fire, and a strike locks onto that line 'from orbit' — the path lights up and pulses faster and redder for a full five seconds so everyone sees it coming. When it lands it melts any ice it crosses into water, scorches sand into lava, and torches any kart still standing in the line like lava itself. (Invulnerable karts, Star Power holders and zombies ride it out, and it never burns you.) Lay a fresh hazard across a chokepoint, or punish a rival who lingers — but they've got five seconds to clear the line, so time it for when they can't." }
             ]
         },
         {

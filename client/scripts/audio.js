@@ -755,6 +755,122 @@ function playFlameExtinguish(level) {
     try { src.start(now); src.stop(now + 0.56); } catch (e) { try { src.disconnect(); } catch (e2) {} }
 }
 
+// --- Orbital Beam (synthesized, no MP3) ---
+// A rising charge "whine" that spools up across the 5s telegraph, then a downward
+// impact blast when the beam strikes. Both route through sfxBus so the master toggle +
+// lobby dampen apply (folded in like the drift/extinguish voices).
+var ORBITAL_CHARGE_VOL = 0.22;
+var ORBITAL_IMPACT_VOL = 0.5;
+var orbitalChargeVoice = null; // { osc, osc2, noise, gain } | null (one whine at a time)
+
+function playOrbitalBeamCharge(durationMs) {
+    var ctx = getCtx();
+    if (!ctx || ctx.state !== "running") { return; }
+    if (gameMuted || masterVolume === 0) { return; }
+    stopOrbitalBeamCharge(); // newest cast owns the whine
+    var dur = (durationMs > 0 ? durationMs : 5000) / 1000;
+    var vol = ORBITAL_CHARGE_VOL * masterVolume * sfxVolumeScalar;
+    if (vol <= 0.0001) { return; }
+    var now = ctx.currentTime;
+    var g = ctx.createGain();
+    try {
+        g.gain.setValueAtTime(0.0001, now);
+        g.gain.exponentialRampToValueAtTime(Math.max(0.0001, vol * 0.5), now + dur * 0.6); // swell
+        g.gain.exponentialRampToValueAtTime(Math.max(0.0001, vol), now + dur * 0.98);      // peak at strike
+    } catch (e) {}
+    g.connect(sfxBus);
+    // Rising sawtooth — the core spool-up.
+    var osc = ctx.createOscillator();
+    osc.type = "sawtooth";
+    var osc2 = ctx.createOscillator();
+    osc2.type = "triangle";
+    var noise = ctx.createBufferSource();
+    noise.buffer = getDriftNoiseBuffer(ctx);
+    noise.loop = true;
+    try {
+        osc.frequency.setValueAtTime(120, now);
+        osc.frequency.exponentialRampToValueAtTime(1500, now + dur);
+        osc2.frequency.setValueAtTime(240, now);
+        osc2.frequency.exponentialRampToValueAtTime(3200, now + dur); // shimmer harmonic
+    } catch (e) {}
+    var oscGain = ctx.createGain(); oscGain.gain.value = 0.5;
+    var osc2Gain = ctx.createGain(); osc2Gain.gain.value = 0.22;
+    osc.connect(oscGain); oscGain.connect(g);
+    osc2.connect(osc2Gain); osc2Gain.connect(g);
+    // Airy noise bed through a rising bandpass.
+    var nFilt = ctx.createBiquadFilter();
+    nFilt.type = "bandpass"; nFilt.Q.value = 0.8;
+    try {
+        nFilt.frequency.setValueAtTime(400, now);
+        nFilt.frequency.exponentialRampToValueAtTime(4000, now + dur);
+    } catch (e) {}
+    var nGain = ctx.createGain(); nGain.gain.value = 0.4;
+    noise.connect(nFilt); nFilt.connect(nGain); nGain.connect(g);
+    var stopAt = now + dur + 0.25; // safety stop if the fire event is missed
+    try {
+        osc.start(now); osc2.start(now); noise.start(now);
+        osc.stop(stopAt); osc2.stop(stopAt); noise.stop(stopAt);
+    } catch (e) { try { osc.disconnect(); osc2.disconnect(); noise.disconnect(); } catch (e2) {} return; }
+    orbitalChargeVoice = { osc: osc, osc2: osc2, noise: noise, gain: g };
+}
+
+function stopOrbitalBeamCharge() {
+    var v = orbitalChargeVoice;
+    if (!v) { return; }
+    orbitalChargeVoice = null;
+    var ctx = getCtx();
+    if (!ctx) { try { v.osc.stop(); v.osc2.stop(); v.noise.stop(); } catch (e) {} return; }
+    var now = ctx.currentTime;
+    try {
+        holdParamNow(v.gain.gain, now);
+        v.gain.gain.linearRampToValueAtTime(0.0001, now + 0.08);
+        v.osc.stop(now + 0.1); v.osc2.stop(now + 0.1); v.noise.stop(now + 0.12);
+    } catch (e) { try { v.osc.stop(); v.osc2.stop(); v.noise.stop(); } catch (e2) {} }
+}
+
+function playOrbitalBeamImpact() {
+    var ctx = getCtx();
+    if (!ctx || ctx.state !== "running") { return; }
+    if (gameMuted || masterVolume === 0) { return; }
+    var vol = ORBITAL_IMPACT_VOL * masterVolume * sfxVolumeScalar;
+    if (vol <= 0.0001) { return; }
+    var now = ctx.currentTime;
+    // Bright noise blast through a downward-sweeping lowpass — the beam slamming down.
+    var src = ctx.createBufferSource();
+    src.buffer = getDriftNoiseBuffer(ctx);
+    src.loop = true;
+    var filt = ctx.createBiquadFilter();
+    filt.type = "lowpass"; filt.Q.value = 0.8;
+    try {
+        filt.frequency.setValueAtTime(9000, now);
+        filt.frequency.exponentialRampToValueAtTime(300, now + 0.5);
+    } catch (e) {}
+    var g = ctx.createGain();
+    try {
+        g.gain.setValueAtTime(0.0001, now);
+        g.gain.exponentialRampToValueAtTime(Math.max(0.0001, vol), now + 0.01); // hard attack
+        g.gain.exponentialRampToValueAtTime(0.0001, now + 0.6);
+    } catch (e) {}
+    src.connect(filt); filt.connect(g); g.connect(sfxBus);
+    // A sub "boom" dropping in pitch underneath the noise.
+    var boom = ctx.createOscillator();
+    boom.type = "sine";
+    try {
+        boom.frequency.setValueAtTime(220, now);
+        boom.frequency.exponentialRampToValueAtTime(45, now + 0.4);
+    } catch (e) {}
+    var boomGain = ctx.createGain();
+    try {
+        boomGain.gain.setValueAtTime(Math.max(0.0001, vol * 0.8), now);
+        boomGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
+    } catch (e) {}
+    boom.connect(boomGain); boomGain.connect(sfxBus);
+    try {
+        src.start(now); src.stop(now + 0.66);
+        boom.start(now); boom.stop(now + 0.55);
+    } catch (e) { try { src.disconnect(); boom.disconnect(); } catch (e2) {} }
+}
+
 // Browser autoplay policy keeps the AudioContext "suspended" until the user
 // interacts with the page, so anything requested on the waiting/lobby screen
 // (before any click/keypress) can't be heard. On the first user gesture, resume the
