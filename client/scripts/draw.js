@@ -7075,6 +7075,10 @@ function updateWaterDrip(player) {
     var onWater = nearestCellIdCached(player) === waterTile.id;
     if (player._wasOnWater && !onWater) {
         player._dripUntil = Date.now() + WATER_DRIP_VISUAL_MS;
+    } else if (!player._wasOnWater && onWater &&
+        typeof padPulseForId === "function" && isLocalId(player.id)) {
+        // Splash in: a soft watery plomp on the diving local player's own pad.
+        padPulseForId(player.id, 0.4, 0.45, 200);
     }
     player._wasOnWater = onWater;
 }
