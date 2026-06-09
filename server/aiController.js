@@ -56,6 +56,11 @@ var ICE_FEELER_SAMPLES = 24;    // ray samples on ice: keep ~13px spacing (=FEEL
 // can still follow the path across instead of skating straight off into the lava.
 var ICE_ENTRY_LOOKAHEAD = 46;   // px ahead (plus a speed term) to sniff for upcoming ice
 var ICE_ENTRY_SPEED = 42;       // px/s: target speed to be at or below when entering ice
+// Water entry: a held ability fires on attack, so a bot carrying one CAN'T punch-swim (the
+// stroke is a bare-handed punch). Sniff this far ahead (plus a speed term) for upcoming water
+// while still on dry land and force the bot to SPEND its banked ability before the crossing,
+// so it enters bare-handed and can stroke instead of crawling/stalling in the water.
+var WATER_ENTRY_LOOKAHEAD = 60; // px ahead (plus a speed term) to sniff for upcoming water
 // Anti-stuck escape: in a tight/looping corridor (sidewinder) over-cautious
 // soft-field repulsion can stall a momentum car at a narrow gap — it crawls or
 // slowly orbits one spot ("line up at the 1px pinch and wait"). When a bot loiters
@@ -713,15 +718,22 @@ function decideBrutalPunch(bot, ctx) {
 // the 8-way the engine's clampPlayerAngle requires) and bot.attack.
 function decideAbility(bot, ctx, ability, nav) {
     var id = ability.id;
+    // A held ability fires on attack, so it blocks the bare-handed swim stroke. When the
+    // bot is on water or about to enter it, deploy the ability NOW rather than carry it in
+    // and crawl — spending it (even a harmless fizzle with no target) clears bot.ability so
+    // the next tick the bot can punch-swim. Prioritising the ability before the crossing is
+    // the intended behaviour (the operator's call), so this overrides the usual patient hold.
+    var waterImminent = bot.onWater === true || (nav && nav.waterAhead === true);
 
     if (id === AB.bombTrigger.id) {
-        // Two-step bomb: detonate when a rival is inside the blast, or just before
-        // the bomb auto-expires (so the trigger isn't wasted).
+        // Two-step bomb: detonate when a rival is inside the blast, just before the bomb
+        // auto-expires (so the trigger isn't wasted), or before a water crossing (a held
+        // trigger blocks the swim stroke too).
         var bomb = ctx.projectileList[bot.id];
         var held = (Date.now() - (bot.ai.bombFiredAt || 0)) / 1000;
         if (bomb == null) { bot.attack = true; return; } // bomb gone — clear the trigger
         if (nearestRivalToPoint(bomb.x, bomb.y, ctx.players, bot) < AB.bomb.explosionRadius * 0.9) { bot.attack = true; return; }
-        if (held > BOMB_MAX_HOLD) { bot.attack = true; }
+        if (held > BOMB_MAX_HOLD || waterImminent) { bot.attack = true; }
         return;
     }
     // Abilities persist the whole round, so bots HOLD them like a patient human —
@@ -742,7 +754,9 @@ function decideAbility(bot, ctx, ability, nav) {
     var maxHold = 30 + (1 - tempo) * 60;   // ~30s (eager) .. ~90s (hoarder): patience cap
     var armed = held >= minHold;
     var endgame = ctx.collapsing === true; // round ending -> deploy now or waste it
-    var forced = endgame || held > maxHold;
+    // waterImminent forces deployment for the same reason endgame does: a held ability would
+    // otherwise be carried into water and block the swim stroke (see waterImminent above).
+    var forced = endgame || held > maxHold || waterImminent;
     var goal = bot.ai.goal;
     var rank = goalRank(bot, ctx.players, goal);
     var racers = countRacers(ctx.players);
@@ -786,6 +800,12 @@ function decideAbility(bot, ctx, ability, nav) {
             // because a rival already finished (raceLeader -> null), forcing a swap
             // just arms a warning aimer that fizzles with no one to steal from.
             if (leadS != null && (forced || (leadS.dist < SWAP_RANGE && armed && landingSafe))) { bot.attack = true; }
+        } else if (waterImminent) {
+            // LEADING (rank 0) and about to swim: the "never give away the lead" guard above
+            // would bank the swap, but a held ability blocks the swim stroke, so spend it
+            // before the crossing rather than crawl across. Fizzles harmlessly if there's no
+            // one to steal from; either way it clears the ability so the bot can stroke.
+            bot.attack = true;
         }
         return;
     }
@@ -1317,6 +1337,16 @@ function steerBot(bot, ctx, dt) {
     var headX = desiredX, headY = desiredY;
     if (speed > 5) { headX = bot.velX / speed; headY = bot.velY / speed; }
 
+    // Water entry sniff: if water lies just ahead along our heading (and we're not in it
+    // yet), flag it so decideAttack/decideAbility can spend a banked ability BEFORE the
+    // crossing — a held ability fires on attack, so it would otherwise block the swim
+    // stroke and leave the bot crawling/stalling in the water.
+    var waterAhead = false;
+    if (!bot.onWater && ctx.waterId != null && ctx.waterId !== -999 && bot.ability != null) {
+        var wlook = WATER_ENTRY_LOOKAHEAD + speed * 0.5;
+        if (nearestTileId(ctx, bot.x + headX * wlook, bot.y + headY * wlook) === ctx.waterId) { waterAhead = true; }
+    }
+
     // Zombies don't die on lava (and ignore the collapse) — they cut straight across it
     // to chase prey, so a zombie turns OFF all lava avoidance. A beelining bot likewise
     // wants no avoidance bending its decisive line (it has been frozen for seconds).
@@ -1453,7 +1483,7 @@ function steerBot(bot, ctx, dt) {
     bot.braking = braking;
 
     // Combat & abilities (may override bot.angle to an 8-way aim and set bot.attack).
-    decideAttack(bot, ctx, { sharpTurn: sharpTurn, lavaAhead: fl.brake, braking: braking });
+    decideAttack(bot, ctx, { sharpTurn: sharpTurn, lavaAhead: fl.brake, braking: braking, waterAhead: waterAhead });
 }
 
 // Per-gate launch geometry, agnostic to which edge the gate hugs. A gate is thin
@@ -1725,6 +1755,7 @@ function update(gameBoard, currentState, dt) {
         lavaId: LAVA,
         emptyId: c.tileMap.empty.id,
         iceId: c.tileMap.ice.id,
+        waterId: c.tileMap.water != null ? c.tileMap.water.id : -999,
         siteById: buildSiteIndex(map),
         lavaCells: lavaCells,
         goalTiles: goalTiles, // for zombie intercept (prey are racing to a goal)
