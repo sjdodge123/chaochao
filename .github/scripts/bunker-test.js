@@ -118,6 +118,17 @@ console.log('Using map: ' + picked.name);
     }
     check(islandStillIce, 'tileSwap leaves the bunker island ice intact');
 
+    // A lava explosion (or bomb/iceCannon — same guard) must not alter the island.
+    // Contained radius: covers the island + neighbours but leaves the far map for
+    // the ring assertion below to still have cells to convert.
+    gb.explodeLava({ x: gb.bunkerLoc.x, y: gb.bunkerLoc.y }, 120);
+    let islandSurvivedBlast = true;
+    for (let i = 0; i < gb.currentMap.cells.length; i++) {
+        const cell = gb.currentMap.cells[i];
+        if (gb.bunkerSafeIds[cell.site.voronoiId] && cell.id !== c.tileMap.ice.id) { islandSurvivedBlast = false; }
+    }
+    check(islandSurvivedBlast, 'explosions cannot lava/alter the bunker island');
+
     room.game.startRace();
     const lavaBefore = countId(gb, c.tileMap.lava.id);
     const lineBefore = gb.collapseLine;

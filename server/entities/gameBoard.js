@@ -743,6 +743,8 @@ class GameBoard {
 			if (cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.lava.id || cells[i].id == c.tileMap.background.id || cells[i].id == c.tileMap.empty.id || cells[i].id == c.tileMap.water.id) {
 				continue;
 			}
+			// The Bunker island is the protected safe core — no ability may alter it.
+			if (this.bunkerSafeIds[cells[i].site.voronoiId]) { continue; }
 			var distance = utils.getMag(explodeLoc.x - cells[i].site.x, explodeLoc.y - cells[i].site.y);
 			if (c.tileMap.abilities.bomb.explosionRadius > distance) {
 				cells[i].id = c.tileMap.slow.id;
@@ -771,6 +773,7 @@ class GameBoard {
 			if (cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.background.id || cells[i].id == c.tileMap.empty.id) {
 				continue;
 			}
+			if (this.bunkerSafeIds[cells[i].site.voronoiId]) { continue; } // protect the Bunker island
 			var distance = utils.getMag(explodeLoc.x - cells[i].site.x, explodeLoc.y - cells[i].site.y);
 			if (c.tileMap.abilities.iceCannon.explosionRadius > distance) {
 				cells[i].id = c.tileMap.ice.id;
@@ -791,6 +794,7 @@ class GameBoard {
 			if (cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.background.id || cells[i].id == c.tileMap.empty.id) {
 				continue;
 			}
+			if (this.bunkerSafeIds[cells[i].site.voronoiId]) { continue; } // never lava the Bunker island
 			var distance = utils.getMag(explodeLoc.x - cells[i].site.x, explodeLoc.y - cells[i].site.y);
 			if (radius > distance) {
 				cells[i].id = c.tileMap.lava.id;
