@@ -1583,6 +1583,10 @@ function registerCombatHandlers(server) {
 			lid: payload.lid || [],
 			phase: 'buried', animStart: Date.now()
 		};
+		// Catch-up replay for a mid-round joiner: the door is already shut, so don't
+		// re-run the sink animation or fire the seal hiss (the racing-phase clamp in
+		// tfxDrawBunker renders it sealed immediately).
+		if (payload.sealed) { bunkerFX.closeHissPlayed = true; }
 	});
 	server.on('bunkerEmerge', function (payload) {
 		if (bunkerFX == null) {

@@ -83,6 +83,21 @@ const picked = pickMapWithGoal();
 if (picked == null) { console.log('::error::Bunker: no committed map with goal tiles found'); process.exit(1); }
 console.log('Using map: ' + picked.name);
 
+// ---- P1 regression: ability tile-mutators must not throw on a FRESH board ----
+// (lobby tutorial can fire bomb/iceCannon/lava/tileSwap before the first race, when
+// bunker state hasn't been set up by clean()/applyBrutalBunkerRound yet).
+(function freshBoardAbilities() {
+    const room = buildRoom('bunker-fresh', 2, picked.map);
+    const gb = room.game.gameBoard;
+    room.game.startLobby(); // loads the lobby map; clean()/bunker setup has NOT run yet
+    let threw = false;
+    try {
+        gb.swapTiles();
+        gb.explodeLava({ x: 100, y: 100 }, 60);
+    } catch (e) { threw = true; console.log('  (threw: ' + e.message + ')'); }
+    check(!threw, 'tile-mutating abilities in the lobby (pre-race) do not throw');
+})();
+
 // ---- Lifecycle: bury -> ring -> emerge -> claim ----
 (function lifecycle() {
     const room = buildRoom('bunker-life', 4, picked.map);
