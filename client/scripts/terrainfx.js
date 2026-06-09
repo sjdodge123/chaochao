@@ -318,6 +318,13 @@ function tfxDrawBunker(t, camX, camY) {
         return; // done — beacon handles the exposed goal
     }
 
+    // Pneumatic seal: fire the door-close hiss once, the instant the iris finishes
+    // shutting (Star-Trek-door "pshhh").
+    if (!fx.closeHissPlayed && fx.phase === "buried" && door >= 0.97) {
+        fx.closeHissPlayed = true;
+        if (typeof playBunkerDoorHiss === "function") { playBunkerDoorHiss(); }
+    }
+
     var ctx = gameContext;
     // Without the goal-tile polygon we can't clip the door to the tile bounds — skip
     // this frame rather than draw an oversized circle (geometry is retried next frame).
@@ -333,6 +340,17 @@ function tfxDrawBunker(t, camX, camY) {
     // them to the tile shape.
     tfxPathCells(ctx, fx.doorCells, camX, camY);
     ctx.clip();
+
+    // Goal floor BENEATH the door: paint the tile gold (+ a soft beacon core) so it
+    // reads as the goal being sealed under the hatch, not a sheet of ice. The iris
+    // closes over this; on emerge it's revealed before the real beacon takes over.
+    ctx.fillStyle = config.tileMap.goal.color;
+    ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
+    var goalCore = ctx.createRadialGradient(cx, cy, 1, cx, cy, Math.max(2, R));
+    goalCore.addColorStop(0, "rgba(255,248,210," + (0.45 + 0.25 * pulse) + ")");
+    goalCore.addColorStop(1, "rgba(255,203,48,0)");
+    ctx.fillStyle = goalCore;
+    ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
 
     // Goal glow leaking through the iris — shrinks as the door closes, blooms as it opens.
     var glowR = Math.max(2, R * (0.5 + 0.8 * (1 - door)));

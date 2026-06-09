@@ -639,6 +639,32 @@ function getDriftNoiseBuffer(ctx) {
     return buf;
 }
 
+// Bunker silo door sealing — a one-shot pneumatic "pshhh" (Star-Trek-door hiss),
+// synthesized from the shared noise buffer through a bandpass that sweeps down as
+// it vents, with a sharp attack and a quick decay. Pure Web Audio (no asset), like
+// the drift skid; routed through sfxBus so the master toggle/lobby dampen apply.
+function playBunkerDoorHiss() {
+    var ctx = getCtx();
+    if (!ctx || ctx.state !== "running") { return; }
+    if (gameMuted || masterVolume === 0) { return; }
+    var now = ctx.currentTime;
+    var src = ctx.createBufferSource();
+    src.buffer = getDriftNoiseBuffer(ctx);
+    src.loop = true;
+    var filt = ctx.createBiquadFilter();
+    filt.type = "bandpass";
+    filt.Q.value = 1.1;
+    filt.frequency.setValueAtTime(5200, now);                       // bright burst...
+    filt.frequency.exponentialRampToValueAtTime(800, now + 0.42);   // ...venting down
+    var g = ctx.createGain();
+    var peak = Math.max(0.0002, 0.16 * masterVolume * sfxVolumeScalar);
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(peak, now + 0.025);         // sharp "pss" onset
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.46);        // vent out
+    src.connect(filt); filt.connect(g); g.connect(sfxBus);
+    try { src.start(now); src.stop(now + 0.5); } catch (e) { try { src.disconnect(); } catch (e2) {} }
+}
+
 // Start (first call) or update (later calls) the drift loop for a player.
 //   intensity 0..1 — how hard they're carving; rides gain + filter brightness so
 //                    a faster slide hisses higher.
