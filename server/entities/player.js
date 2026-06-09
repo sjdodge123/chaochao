@@ -89,6 +89,7 @@ class Player extends Circle {
 		this.gateIndex = 0;
 		this.reachedGoal = false;
 		this.timeReached = null;
+		this.eliminatedAt = null;
 		// True once this player has been gated into a race (startRace); gates the
 		// game-over map rating so only actual participants can vote.
 		this.racedCurrentMap = false;
@@ -1285,6 +1286,7 @@ class Player extends Circle {
 		this.attack = false;
 		this.reachedGoal = false;
 		this.timeReached = null;
+		this.eliminatedAt = null;
 		this.pbWritten = false;
 		this.collapseMargin = null;
 		this.stamina = c.punchStamina.max;

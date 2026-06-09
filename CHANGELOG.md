@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### Brutal rounds
+
+- New **Bunker** brutal round — a last-one-standing battle royale. The goal sinks underground behind a silo door at the start, so there's nothing to race for: a wall of lava closes in from the edges, herding everyone together until only one racer is left alive. The moment you're the sole survivor the goal erupts back up for you to claim the win. Zombies don't count as "alive," so an infection can't keep the goal buried. Works on every map.
 
 ## v0.31.0 — 2026-06-09
 

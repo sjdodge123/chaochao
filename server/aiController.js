@@ -1593,6 +1593,15 @@ function update(gameBoard, currentState, dt) {
         }
     }
 
+    // Bunker (battle royale): while the goal is buried there are no goal tiles, so
+    // bots have nothing to path toward. Feed them the bunker center as a virtual goal
+    // so they converge on the shrinking safe island and the combat/leader machinery
+    // engages (knocking rivals into the closing ring). Real goal tiles reappear and
+    // take over the instant the goal emerges for the lone survivor.
+    if (gameBoard.goalBuried && gameBoard.bunkerLoc != null) {
+        goalTiles = [{ x: gameBoard.bunkerLoc.x, y: gameBoard.bunkerLoc.y }];
+    }
+
     // Cells holding a bumper hazard — bumpers aren't in the cell graph, so without
     // this A* routes straight through them and the bot gets knocked/stuck. Penalize
     // those cells so routes go AROUND. Recomputed each tick so a moving bumper's

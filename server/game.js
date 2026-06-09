@@ -407,6 +407,12 @@ class Game {
 			if (!this.playerList[player].alive && !this.playerList[player].reachedGoal) {
 				playersConcluded++;
 
+				// Survival-time stamp (used to rank Bunker non-winners by how long they
+				// lasted). Set once, the tick they're first seen concluded.
+				if (this.playerList[player].eliminatedAt == null) {
+					this.playerList[player].eliminatedAt = Date.now();
+				}
+
 				if (this.playerList[player].murderedBy != null) {
 					var killer = this.playerList[this.playerList[player].murderedBy];
 					if (killer != null) {
@@ -490,11 +496,29 @@ class Game {
 		if (playersConcluded == this.playerCount) {
 			this.gameBoard.killAFKPlayers();
 			this.startOverview();
+			return;
+		}
+
+		// Bunker (battle royale) safety valve: if survivors stalemate on the ice
+		// island past the cap (ring already frozen, goal still buried), void the round
+		// — no winner, no notch — so a camped last-man-standing can't hang the room.
+		if (this.gameBoard.bunkerRingActive && this.gameBoard.bunkerStartTime != null) {
+			if (Date.now() - this.gameBoard.bunkerStartTime > c.brutalRounds.bunker.maxRoundTime * 1000) {
+				this.startOverview();
+				return;
+			}
 		}
 
 		//Start slow collapse if last player alive
 		if (this.alivePlayerCount == 1) {
-			if (this.currentState != c.stateMap.collapsing && !this.collapseInitated) {
+			// Battle-royale endgame: a lone survivor remains, so raise the buried goal
+			// for them to claim. The normal win path starts the finish collapse when
+			// they reach it; no generic last-player collapse during a Bunker round.
+			if (this.gameBoard.checkForActiveBrutal(c.brutalRounds.bunker.id)) {
+				if (this.gameBoard.goalBuried) {
+					this.gameBoard.emergeBunker();
+				}
+			} else if (this.currentState != c.stateMap.collapsing && !this.collapseInitated) {
 				this.collapseInitated = true;
 				// A true single-player room (no rivals, no bots) gets a collapse
 				// tuned to the map so a competent line can win, instead of the

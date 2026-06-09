@@ -22,6 +22,10 @@ var terrainFX = {
     lavaSeeds: [],
     abilityIcons: null   // lazily-built map: ability tile id -> icon Image
 };
+// Bunker (battle-royale) silo-door state, set by the bunkerStart/bunkerEmerge
+// socket handlers (client.js) and cleared each round (newMap). null when no
+// Bunker round is active.
+var bunkerFX = null;
 // Map each ability tile id to its icon image (the same Images loadPatterns uses).
 function tfxBuildAbilityIcons() {
     var m = {};
@@ -237,8 +241,77 @@ function drawTerrainFX(dtIgnored) {
         tfxDrawLavaConvection(t, camX, camY);
         tfxDrawIceReflections(camX, camY);
     }
+    tfxDrawBunker(t, camX, camY);        // battle-royale silo door (no-op when inactive)
     tfxDrawGoalBeacon(t, camX, camY);    // always — cheap + gameplay-critical
     tfxDrawAbilityIcons(t, camX, camY);  // always — gameplay-critical pickup markers
+}
+
+// Battle-royale silo door over the buried goal. An iris of metal blades closes
+// over the goal at round start (sink), holds shut while the goal is buried (a warm
+// glow leaks through to telegraph where it is), then snaps open for the lone
+// survivor (emerge) — at which point the normal goal beacon takes back over.
+function tfxDrawBunker(t, camX, camY) {
+    if (typeof bunkerFX === "undefined" || bunkerFX == null) { return; }
+    var fx = bunkerFX;
+    var SINK = 1.2, EMERGE = 0.5;
+    var elapsed = (Date.now() - fx.animStart) / 1000;
+    var door; // 1 = fully closed (goal hidden), 0 = fully open (goal exposed)
+    if (fx.phase === "emerging") {
+        var op = Math.min(1, elapsed / EMERGE);
+        door = 1 - op;
+        if (op >= 1) { fx.phase = "done"; return; }
+    } else if (fx.phase === "buried") {
+        door = Math.min(1, elapsed / SINK);
+    } else {
+        return; // done — beacon handles the exposed goal
+    }
+
+    var ctx = gameContext;
+    var cx = fx.x + camX, cy = fx.y + camY;
+    var R = Math.max(40, Math.min(fx.radius * 0.8, 72));
+
+    ctx.save();
+    // Goal glow leaking through the iris — shrinks as the door closes, blooms as it opens.
+    var glowR = R * (0.35 + 0.55 * (1 - door));
+    var pulse = 0.5 + 0.5 * Math.sin(t * 2.0);
+    var glow = ctx.createRadialGradient(cx, cy, 1, cx, cy, glowR);
+    glow.addColorStop(0, "rgba(255,210,90," + (0.55 * (1 - door) + 0.10 + 0.06 * pulse) + ")");
+    glow.addColorStop(1, "rgba(255,180,40,0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(cx - glowR, cy - glowR, glowR * 2, glowR * 2);
+
+    // Silo rim (always there as the hatch frame).
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = "rgba(90,96,104,0.9)";
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, 2 * Math.PI); ctx.stroke();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(150,158,168,0.7)";
+    ctx.beginPath(); ctx.arc(cx, cy, R - 5, 0, 2 * Math.PI); ctx.stroke();
+
+    // Iris blades: 6 wedges that converge on the center as the door closes.
+    var NB = 6, cover = door;
+    if (cover > 0.001) {
+        var twist = (1 - cover) * 0.6;
+        var inner = R * (1 - cover) * 0.95;
+        for (var b = 0; b < NB; b++) {
+            var a0 = (b / NB) * Math.PI * 2 + twist;
+            var a1 = a0 + (Math.PI * 2 / NB);
+            ctx.beginPath();
+            ctx.arc(cx, cy, R - 2, a0, a1);
+            ctx.arc(cx, cy, inner, a1, a0, true);
+            ctx.closePath();
+            ctx.fillStyle = (b % 2 === 0) ? "rgba(64,70,78,0.92)" : "rgba(52,58,66,0.92)";
+            ctx.fill();
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = "rgba(28,32,38,0.8)";
+            ctx.stroke();
+        }
+        if (cover > 0.85) { // center bolt only when shut
+            ctx.fillStyle = "rgba(150,158,168,0.9)";
+            ctx.beginPath(); ctx.arc(cx, cy, 4, 0, 2 * Math.PI); ctx.fill();
+        }
+    }
+    ctx.restore();
 }
 
 // Ability pickups: float the icon above the tile (gentle bob + soft ground

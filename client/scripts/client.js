@@ -880,6 +880,7 @@ function registerConnectionHandlers(server) {
 			applyBrutalMap(payload.brutalRoundConfig);
 			loadPatterns();
 			clearInfection();
+			if (typeof bunkerFX !== "undefined") { bunkerFX = null; } // cleared each round; bunkerStart re-arms it
 			stopSound(lobbyMusic);
 		});
 
@@ -1568,6 +1569,23 @@ function registerCombatHandlers(server) {
 			collapseCells(cells);
 		});
 		if (typeof recapMarkMapDirty === "function") { recapMarkMapDirty(); } // map changed -> recap re-snapshots
+	});
+	// Bunker (battle royale): the goal sinks below a silo door at round start and
+	// rises again for the lone survivor. The tile flips (goal<->ice/normal) arrive
+	// via the normal tileChanges path; these two events drive the door animation.
+	server.on('bunkerStart', function (payload) {
+		bunkerFX = {
+			x: payload.x, y: payload.y, radius: payload.radius,
+			lid: payload.lid || [],
+			phase: 'buried', animStart: Date.now()
+		};
+	});
+	server.on('bunkerEmerge', function (payload) {
+		if (bunkerFX == null) {
+			bunkerFX = { x: payload.x, y: payload.y, radius: 80, lid: payload.lid || [] };
+		}
+		bunkerFX.phase = 'emerging';
+		bunkerFX.animStart = Date.now();
 	});
 	server.on('explodedCells', function (cells) {
 		if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing || currentState == config.stateMap.lobby) {
