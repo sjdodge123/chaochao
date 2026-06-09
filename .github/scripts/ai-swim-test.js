@@ -75,16 +75,6 @@ function buildMap(name, startEdges, tileAt) {
     });
 }
 
-function tileIdAt(map, x, y) {
-    let best = Infinity, id = -1;
-    for (let i = 0; i < map.cells.length; i++) {
-        const cl = map.cells[i];
-        if (!cl || !cl.site) { continue; }
-        const dx = cl.site.x - x, dy = cl.site.y - y, d = dx * dx + dy * dy;
-        if (d < best) { best = d; id = cl.id; }
-    }
-    return id;
-}
 // voronoiId -> tile id, so we can inspect a returned path (a list of voronoiIds).
 function idByVoronoi(map) {
     const m = {};
