@@ -4218,6 +4218,24 @@ function computeWorldViewTarget(dt) {
                 e = 0;                                    // whole-map beat
             }
         }
+        // Bunker silo door: hold open while the camera pans out to reveal the buried
+        // goal, seal shut during the whole-map beat (e≈0) so the player watches it
+        // close on the full map, then stay shut as the camera zooms back in to race.
+        if (typeof bunkerFX !== "undefined" && bunkerFX != null && bunkerFX.phase === "buried") {
+            var cover;
+            if (!(rest > 0)) {
+                cover = 1;
+            } else if (tt <= 0) {
+                cover = 0; // still holding tight on the spawn — door open
+            } else {
+                var beatStart = rest * WORLD_ZOOM_GATE_OUT_FRAC;
+                var beatEnd = rest - rest * WORLD_ZOOM_GATE_IN_FRAC;
+                if (tt < beatStart) { cover = 0; }
+                else if (beatEnd > beatStart && tt < beatEnd) { cover = smoothstep((tt - beatStart) / (beatEnd - beatStart)); }
+                else { cover = 1; }
+            }
+            bunkerFX.camCover = cover;
+        }
         var scale = 1 + (focusedView.scale - 1) * e;
         return clampViewToWorld(focusedView.cx, focusedView.cy, scale);
     }

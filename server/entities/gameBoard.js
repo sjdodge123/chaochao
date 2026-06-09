@@ -1433,37 +1433,38 @@ class GameBoard {
 			if (d > clusterRadius) { clusterRadius = d; }
 		}
 		this.bunkerLoc = { x: cx, y: cy };
-		this.bunkerArenaRadius = clusterRadius + c.brutalRounds.bunker.arenaPadding;
+		// Ring floor = just the chosen cluster's own extent: the safe island is the
+		// goal tile(s) themselves, nothing more — the lava closes right up to the
+		// goal's edge (no padded disc spilling onto neighbouring tiles).
+		this.bunkerArenaRadius = clusterRadius;
 		this.goalBuried = true;
 		this.bunkerSafeIds = {};
 		this.bunkerLidIds = [];
 
 		var cells = this.currentMap.cells;
-		var arena2 = this.bunkerArenaRadius * this.bunkerArenaRadius;
 		var tileDelta = {};
 		var maxDist = 0;
 		for (var i = 0; i < cells.length; i++) {
 			var cell = cells[i];
-			var wasGoal = (cell.id == c.tileMap.goal.id);
 			var inChosen = chosenSet[cell.site.voronoiId] === true;
 			var dx = cx - cell.site.x, dy = cy - cell.site.y;
 			var dist = Math.sqrt(dx * dx + dy * dy);
 			if (dist > maxDist) { maxDist = dist; }
-			var solid = (cell.id != c.tileMap.lava.id && cell.id != c.tileMap.empty.id && cell.id != c.tileMap.background.id);
-			if (dist * dist <= arena2 && solid) {
-				// Part of the safe ice island.
+			if (inChosen) {
+				// The bunker island: exactly the chosen goal cluster's cells, turned to
+				// ice and remembered as the silo lid to restore on emerge.
 				cell.id = c.tileMap.ice.id;
 				this.tileChanges[cell.site.voronoiId] = cell.id;
 				tileDelta[cell.site.voronoiId] = cell.id;
 				this.bunkerSafeIds[cell.site.voronoiId] = true;
-			} else if (wasGoal) {
-				// A goal cell outside the bunker arena: sacrifice it to normal floor so
-				// it has no immunity and isn't claimable while the goal is buried.
+				this.bunkerLidIds.push(cell.site.voronoiId);
+			} else if (cell.id == c.tileMap.goal.id) {
+				// Any OTHER goal cluster: sacrifice it to normal floor so it has no
+				// win-immunity and isn't claimable while the goal is buried.
 				cell.id = c.tileMap.normal.id;
 				this.tileChanges[cell.site.voronoiId] = cell.id;
 				tileDelta[cell.site.voronoiId] = cell.id;
 			}
-			if (inChosen) { this.bunkerLidIds.push(cell.site.voronoiId); }
 		}
 
 		// Ring starts fully open (line beyond the farthest cell) and closes inward

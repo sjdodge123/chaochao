@@ -338,7 +338,6 @@
             "id": 1012,
             "active": true,
             "ringSpeed": 1.0,
-            "arenaPadding": 90,
             "clusterGap": 90,
             "maxRoundTime": 100,
             "title": "Bunker"

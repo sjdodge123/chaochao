@@ -250,25 +250,61 @@ function drawTerrainFX(dtIgnored) {
 // over the goal at round start (sink), holds shut while the goal is buried (a warm
 // glow leaks through to telegraph where it is), then snaps open for the lone
 // survivor (emerge) — at which point the normal goal beacon takes back over.
+// Fit the silo door to the buried goal's ACTUAL footprint (its cell polygons), so
+// it hugs the goal tile(s) and never spills onto neighbours. Cached on fx — the
+// geometry doesn't move once set. Falls back to the server-sent centre/radius.
+function tfxComputeBunkerDoor(fx) {
+    if (typeof currentMap === "undefined" || currentMap == null || currentMap.cells == null) { return false; }
+    var lidSet = {};
+    for (var i = 0; i < fx.lid.length; i++) { lidSet[fx.lid[i]] = true; }
+    var verts = [], sx = 0, sy = 0, n = 0;
+    for (var i = 0; i < currentMap.cells.length; i++) {
+        var cell = currentMap.cells[i];
+        if (!lidSet[cell.site.voronoiId]) { continue; }
+        var vv = tfxCellVerts(cell);
+        if (!vv) { continue; }
+        for (var v = 0; v < vv.length; v++) { verts.push(vv[v]); sx += vv[v].x; sy += vv[v].y; n++; }
+    }
+    if (n === 0) { return false; }
+    var cx = sx / n, cy = sy / n, r = 0;
+    for (var v = 0; v < verts.length; v++) {
+        var dx = verts[v].x - cx, dy = verts[v].y - cy, d = Math.sqrt(dx * dx + dy * dy);
+        if (d > r) { r = d; }
+    }
+    fx.doorCx = cx; fx.doorCy = cy; fx.doorR = Math.max(r, 20);
+    return true;
+}
 function tfxDrawBunker(t, camX, camY) {
     if (typeof bunkerFX === "undefined" || bunkerFX == null) { return; }
     var fx = bunkerFX;
-    var SINK = 1.2, EMERGE = 0.5;
-    var elapsed = (Date.now() - fx.animStart) / 1000;
+    if (fx.doorR == null) { tfxComputeBunkerDoor(fx); }
+    var EMERGE = 0.5;
     var door; // 1 = fully closed (goal hidden), 0 = fully open (goal exposed)
     if (fx.phase === "emerging") {
-        var op = Math.min(1, elapsed / EMERGE);
+        var op = Math.min(1, (Date.now() - fx.animStart) / (EMERGE * 1000));
         door = 1 - op;
         if (op >= 1) { fx.phase = "done"; return; }
     } else if (fx.phase === "buried") {
-        door = Math.min(1, elapsed / SINK);
+        var racing = (typeof currentState !== "undefined") &&
+            (currentState === config.stateMap.racing || currentState === config.stateMap.collapsing);
+        if (racing) {
+            door = 1; // race underway — the door is fully sealed over the buried goal
+        } else if (fx.camCover != null) {
+            // Camera-driven close: sealed during the gated whole-map beat so the player
+            // actually watches it shut.
+            door = fx.camCover;
+        } else {
+            // Dynamic camera off (whole map always in view) — fixed sink.
+            door = Math.min(1, (Date.now() - fx.animStart) / 1200);
+        }
     } else {
         return; // done — beacon handles the exposed goal
     }
 
     var ctx = gameContext;
-    var cx = fx.x + camX, cy = fx.y + camY;
-    var R = Math.max(40, Math.min(fx.radius * 0.8, 72));
+    var cx = (fx.doorCx != null ? fx.doorCx : fx.x) + camX;
+    var cy = (fx.doorCy != null ? fx.doorCy : fx.y) + camY;
+    var R = (fx.doorR != null ? fx.doorR : Math.max(40, Math.min(fx.radius * 0.8, 72)));
 
     ctx.save();
     // Goal glow leaking through the iris — shrinks as the door closes, blooms as it opens.

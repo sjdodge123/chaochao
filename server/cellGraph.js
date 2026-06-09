@@ -261,6 +261,22 @@ function findPathToNearestGoal(map, point, options) {
         }
     }
 
+    // Optional explicit goal cells (voronoiId set/array). When given, the search
+    // homes on THESE cells instead of GOAL-id tiles — used by the Bunker round,
+    // where the goal is buried (no goal tiles exist) but bots must still path to
+    // the safe bunker island. Accepts a Set, an array, or an object map.
+    var goalSet = null;
+    if (options.goalSet) {
+        goalSet = {};
+        if (options.goalSet.forEach) {
+            options.goalSet.forEach(function (id) { goalSet[id] = true; });
+        } else if (Array.isArray(options.goalSet)) {
+            for (var gs = 0; gs < options.goalSet.length; gs++) { goalSet[options.goalSet[gs]] = true; }
+        } else {
+            for (var gk in options.goalSet) { if (options.goalSet[gk]) { goalSet[gk] = true; } }
+        }
+    }
+
     var start = nearestCellIndex(cells, point);
 
     // An empty hole is a hard no-go surface (players bounce off it), so a route can't
@@ -292,8 +308,9 @@ function findPathToNearestGoal(map, point, options) {
         }
         done[u] = true;
         // Goal found: Dijkstra pops nodes in cost order, so this is the
-        // cheapest-cost reachable goal.
-        if (cells[u].id === GOAL) {
+        // cheapest-cost reachable goal. An explicit goalSet (Bunker) overrides the
+        // GOAL-id test, since the buried goal has no goal tiles to find.
+        if (goalSet ? goalSet[cells[u].site.voronoiId] : cells[u].id === GOAL) {
             goalIndex = u;
             break;
         }
