@@ -139,6 +139,9 @@ jobs:
       - name: Headless game-loop smoke test
         run: node .github/scripts/smoke-test.js
 
+      - name: Headless Bunker brutal-round test (bury -> ring -> emerge -> claim/void)
+        run: node .github/scripts/bunker-test.js
+
       - name: Headless playlist-selection test (playlist-aware rotation)
         run: node .github/scripts/playlist-selection-test.js
 

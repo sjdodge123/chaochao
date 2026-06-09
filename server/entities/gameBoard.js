@@ -114,6 +114,7 @@ class GameBoard {
 		aiController.update(this, currentState, dt);
 		this.engine.update(dt);
 		this.collapseMap(currentState);
+		this.bunkerRingTick(currentState);
 		this.checkCollisions(currentState);
 		this.updatePlayers(currentState, dt);
 		this.updateProjectiles(currentState);
@@ -1368,6 +1369,163 @@ class GameBoard {
 			}
 		}
 	}
+	// Group the map's goal cells into spatially-distinct clusters (a map can have
+	// more than one goal zone). Two goal cells join the same cluster when within
+	// bunker.clusterGap of each other (flood fill). Returns an array of clusters,
+	// each an array of cell references.
+	getGoalClusters() {
+		var cells = this.currentMap.cells;
+		var goals = [];
+		for (var i = 0; i < cells.length; i++) {
+			if (cells[i].id == c.tileMap.goal.id) { goals.push(cells[i]); }
+		}
+		if (goals.length === 0) { return []; }
+		var gap = c.brutalRounds.bunker.clusterGap;
+		var gap2 = gap * gap;
+		var clusters = [];
+		var assigned = new Array(goals.length);
+		for (var a = 0; a < goals.length; a++) {
+			if (assigned[a]) { continue; }
+			var stack = [a];
+			assigned[a] = true;
+			var members = [];
+			while (stack.length > 0) {
+				var idx = stack.pop();
+				members.push(goals[idx]);
+				for (var b = 0; b < goals.length; b++) {
+					if (assigned[b]) { continue; }
+					var dx = goals[idx].site.x - goals[b].site.x;
+					var dy = goals[idx].site.y - goals[b].site.y;
+					if (dx * dx + dy * dy <= gap2) { assigned[b] = true; stack.push(b); }
+				}
+			}
+			clusters.push(members);
+		}
+		return clusters;
+	}
+	// Bunker (battle-royale) round setup, run once at map setup (before racing).
+	// Randomly picks ONE goal cluster as the buried "bunker"; converts that cluster
+	// (plus a small padding disc) to ice and remembers it as the silo lid; every
+	// OTHER goal cluster loses its win-immunity by becoming normal floor (so the
+	// closing ring can swallow it and only one safe island exists). The goal stays
+	// underground (no goal tile = unclaimable) until emergeBunker() restores it once
+	// a single survivor remains.
+	applyBrutalBunkerRound() {
+		var clusters = this.getGoalClusters();
+		if (clusters.length === 0) {
+			// No goal on this map (shouldn't happen for committed maps) -> nothing to
+			// bury; leave the round as a plain race so it can't softlock.
+			return;
+		}
+		var chosen = clusters[utils.getRandomInt(0, clusters.length - 1)];
+		var chosenSet = {};
+		var cx = 0, cy = 0;
+		for (var i = 0; i < chosen.length; i++) {
+			chosenSet[chosen[i].site.voronoiId] = true;
+			cx += chosen[i].site.x;
+			cy += chosen[i].site.y;
+		}
+		cx /= chosen.length;
+		cy /= chosen.length;
+		var clusterRadius = 0;
+		for (var i = 0; i < chosen.length; i++) {
+			var d = utils.getMag(cx - chosen[i].site.x, cy - chosen[i].site.y);
+			if (d > clusterRadius) { clusterRadius = d; }
+		}
+		this.bunkerLoc = { x: cx, y: cy };
+		this.bunkerArenaRadius = clusterRadius + c.brutalRounds.bunker.arenaPadding;
+		this.goalBuried = true;
+		this.bunkerSafeIds = {};
+		this.bunkerLidIds = [];
+
+		var cells = this.currentMap.cells;
+		var arena2 = this.bunkerArenaRadius * this.bunkerArenaRadius;
+		var tileDelta = {};
+		var maxDist = 0;
+		for (var i = 0; i < cells.length; i++) {
+			var cell = cells[i];
+			var wasGoal = (cell.id == c.tileMap.goal.id);
+			var inChosen = chosenSet[cell.site.voronoiId] === true;
+			var dx = cx - cell.site.x, dy = cy - cell.site.y;
+			var dist = Math.sqrt(dx * dx + dy * dy);
+			if (dist > maxDist) { maxDist = dist; }
+			var solid = (cell.id != c.tileMap.lava.id && cell.id != c.tileMap.empty.id && cell.id != c.tileMap.background.id);
+			if (dist * dist <= arena2 && solid) {
+				// Part of the safe ice island.
+				cell.id = c.tileMap.ice.id;
+				this.tileChanges[cell.site.voronoiId] = cell.id;
+				tileDelta[cell.site.voronoiId] = cell.id;
+				this.bunkerSafeIds[cell.site.voronoiId] = true;
+			} else if (wasGoal) {
+				// A goal cell outside the bunker arena: sacrifice it to normal floor so
+				// it has no immunity and isn't claimable while the goal is buried.
+				cell.id = c.tileMap.normal.id;
+				this.tileChanges[cell.site.voronoiId] = cell.id;
+				tileDelta[cell.site.voronoiId] = cell.id;
+			}
+			if (inChosen) { this.bunkerLidIds.push(cell.site.voronoiId); }
+		}
+
+		// Ring starts fully open (line beyond the farthest cell) and closes inward
+		// toward the bunker each racing tick. collapseLoc/collapseLine are reused so
+		// the AI's existing ring awareness gets the bunker for free.
+		this.collapseLoc = { x: cx, y: cy };
+		this.collapseLine = maxDist + 50;
+		this.bunkerRingActive = true;
+		this.bunkerStartTime = null;
+
+		messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(tileDelta));
+		messenger.messageRoomBySig(this.roomSig, "bunkerStart", { x: cx, y: cy, radius: this.bunkerArenaRadius, lid: this.bunkerLidIds });
+	}
+	// Advances the closing ring during a Bunker round's racing phase: lava encroaches
+	// from the perimeter inward toward the bunker, never consuming the safe ice island.
+	// The shrinking arena forces survivors together and into combat/lava until one
+	// remains. No-op outside a racing Bunker round.
+	bunkerRingTick(currentState) {
+		if (!this.bunkerRingActive || currentState != c.stateMap.racing) { return; }
+		if (this.bunkerStartTime == null) { this.bunkerStartTime = Date.now(); }
+		if (this.collapseLine > this.bunkerArenaRadius) {
+			this.collapseLine -= c.brutalRounds.bunker.ringSpeed;
+			if (this.collapseLine < this.bunkerArenaRadius) { this.collapseLine = this.bunkerArenaRadius; }
+		}
+		var collapsedCells = [];
+		var cells = this.currentMap.cells;
+		for (var i = 0; i < cells.length; i++) {
+			var cell = cells[i];
+			if (this.bunkerSafeIds[cell.site.voronoiId]) { continue; }
+			if (cell.id == c.tileMap.lava.id || cell.id == c.tileMap.empty.id || cell.id == c.tileMap.background.id) { continue; }
+			var distance = utils.getMag(this.collapseLoc.x - cell.site.x, this.collapseLoc.y - cell.site.y);
+			if (this.collapseLine < distance) {
+				cell.id = c.tileMap.lava.id;
+				this.tileChanges[cell.site.voronoiId] = cell.id;
+				collapsedCells.push(cell.site.voronoiId);
+			}
+		}
+		if (collapsedCells.length > 0) {
+			messenger.messageRoomBySig(this.roomSig, 'collapsedCells', collapsedCells);
+		}
+	}
+	// Raise the buried goal once a single survivor remains: revert the silo-lid cells
+	// back to goal tiles (so the survivor can claim the win) and tell clients to play
+	// the quick emerge animation. Idempotent.
+	emergeBunker() {
+		if (!this.goalBuried) { return; }
+		this.goalBuried = false;
+		this.bunkerRingActive = false;
+		var tileDelta = {};
+		var cells = this.currentMap.cells;
+		var lidSet = {};
+		for (var i = 0; i < this.bunkerLidIds.length; i++) { lidSet[this.bunkerLidIds[i]] = true; }
+		for (var i = 0; i < cells.length; i++) {
+			if (lidSet[cells[i].site.voronoiId]) {
+				cells[i].id = c.tileMap.goal.id;
+				this.tileChanges[cells[i].site.voronoiId] = cells[i].id;
+				tileDelta[cells[i].site.voronoiId] = cells[i].id;
+			}
+		}
+		messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(tileDelta));
+		messenger.messageRoomBySig(this.roomSig, "bunkerEmerge", { x: this.bunkerLoc.x, y: this.bunkerLoc.y, lid: this.bunkerLidIds });
+	}
 	//Occurs at gameover
 	resetGame(currentState) {
 		this.mapsPlayed = [];
@@ -1529,6 +1687,14 @@ class GameBoard {
 		// AI vision-fairness state, reset each round.
 		this.visionBlockedUntil = 0;
 		this.blackoutActive = false;
+		// Bunker (battle-royale) brutal state, reset each round.
+		this.goalBuried = false;
+		this.bunkerRingActive = false;
+		this.bunkerLoc = null;
+		this.bunkerArenaRadius = 0;
+		this.bunkerSafeIds = {};
+		this.bunkerLidIds = [];
+		this.bunkerStartTime = null;
 		this.resetProjectiles();
 		this.resetHazards();
 	}
@@ -1695,6 +1861,10 @@ class GameBoard {
 				}
 				case c.brutalRounds.cloudy.id: {
 					this.applyBrutalCloudyRound();
+					break;
+				}
+				case c.brutalRounds.bunker.id: {
+					this.applyBrutalBunkerRound();
 					break;
 				}
 			}
@@ -1925,6 +2095,12 @@ class GameBoard {
 		}
 		activeBrutalTypes = utils.shuffleArray(activeBrutalTypes);
 		brutalRoundConfig.brutalTypes.push(activeBrutalTypes[0]);
+		// Bunker (battle royale) reshapes the whole arena with its own closing ring
+		// and buried goal — it must never combine with another collapse/hazard mode,
+		// so when it's the primary pick it runs solo.
+		if (activeBrutalTypes[0] == c.brutalRounds.bunker.id) {
+			return brutalRoundConfig;
+		}
 		if (activeBrutalTypes.length == 1) {
 			return brutalRoundConfig;
 		}
@@ -1934,6 +2110,8 @@ class GameBoard {
 			if (brutalRoundConfig.brutalTypes.length == c.maxTotalBrutals) {
 				return brutalRoundConfig;
 			}
+			// Bunker only ever runs as a solo primary, never bolted onto another mode.
+			if (activeBrutalTypes[i] == c.brutalRounds.bunker.id) { continue; }
 			//Roll for next Brutal
 			var nextBrutalChance = utils.getRandomInt(1, 100);
 			//console.log("Roll for additional brutal: " + nextBrutalChance);
