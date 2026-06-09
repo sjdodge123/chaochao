@@ -870,6 +870,11 @@ function registerConnectionHandlers(server) {
 	});
 
 	server.on("newMap", function (payload) {
+		// Clear the bunker overlay SYNCHRONOUSLY (not in the deferred block below):
+		// the server sends newMap then bunkerStart, and bunkerStart's handler runs
+		// before this .then() microtask resolves — clearing it in there would wipe
+		// the door right after bunkerStart armed it (so the door never shows).
+		if (typeof bunkerFX !== "undefined") { bunkerFX = null; }
 		$.when.apply($, promises).then(function () {
 			currentState = payload.currentState;
 			loadNewMap(payload.id);
@@ -880,7 +885,6 @@ function registerConnectionHandlers(server) {
 			applyBrutalMap(payload.brutalRoundConfig);
 			loadPatterns();
 			clearInfection();
-			if (typeof bunkerFX !== "undefined") { bunkerFX = null; } // cleared each round; bunkerStart re-arms it
 			stopSound(lobbyMusic);
 		});
 
