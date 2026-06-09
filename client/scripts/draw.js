@@ -213,6 +213,8 @@ var scissorsIcon = new Image(576, 512);
 scissorsIcon.src = "../assets/img/scissors-solid.svg";
 var starIcon = new Image(576, 512);
 starIcon.src = "../assets/img/star-solid.svg";
+var bunkerIcon = new Image(512, 512);
+bunkerIcon.src = "../assets/img/bunker-door.svg";
 
 //TileTextures
 var lava = new Image(256, 256);
@@ -3615,6 +3617,7 @@ function loadPatterns() {
     brutalRoundImages[config.brutalRounds.hockey.id] = puckIcon;
     brutalRoundImages[config.brutalRounds.explosive.id] = explosionIcon;
     brutalRoundImages[config.brutalRounds.blackout.id] = moonIcon;
+    brutalRoundImages[config.brutalRounds.bunker.id] = bunkerIcon;
 
     if (brutalRoundConfig != null && brutalPatterns[brutalRoundConfig.brutalTypes.toString()] == null) {
         brutalPatterns[brutalRoundConfig.brutalTypes.toString()] = makeComplexPattern(brutalRoundConfig.brutalTypes);
