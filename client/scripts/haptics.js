@@ -87,7 +87,9 @@ function padIndexForId(id) {
     return null;
 }
 function addPadTrauma(padIndex, amount) {
-    if (padIndex == null) { return; }
+    // Discard events fired while rumble is off — otherwise trauma accumulates with
+    // the mixer paused and replays the moment the toggle comes back on.
+    if (!hapticsEnabled || padIndex == null) { return; }
     hapticTrauma[padIndex] = Math.min(1, (hapticTrauma[padIndex] || 0) + amount);
 }
 // One-shot ambient jolt routed to the local pad that earned it (no-op if not local).
@@ -102,7 +104,7 @@ function traumaAll(amount) {
 }
 // A sustained floor on every local pad for durationMs (e.g. a volcano eruption).
 function sustainTraumaAll(durationMs, intensity) {
-    if (typeof localPlayers === "undefined" || !localPlayers) { return; }
+    if (!hapticsEnabled || typeof localPlayers === "undefined" || !localPlayers) { return; }
     var until = Date.now() + durationMs;
     for (var s = 0; s < localPlayers.length; s++) {
         var lp = localPlayers[s];
@@ -116,6 +118,7 @@ function sustainTraumaAll(durationMs, intensity) {
 // A held charge floor on one local player's pad (refreshed each frame while
 // charging, like gameboard.js chargeRumble): holds steady instead of ramping.
 function chargeTraumaForId(id, intensity) {
+    if (!hapticsEnabled) { return; }
     var idx = padIndexForId(id);
     if (idx == null) { return; }
     if (Date.now() < hapticSustainUntil[idx]) {
@@ -123,7 +126,10 @@ function chargeTraumaForId(id, intensity) {
     } else {
         hapticSustainFloor[idx] = intensity;
     }
-    hapticSustainUntil[idx] = Date.now() + 90;
+    // Keep the LATER deadline: a longer world-event sustain already running (e.g. a
+    // volcano's 2.5s) must not be truncated to this 90ms charge window when the
+    // player releases charge before the event ends.
+    hapticSustainUntil[idx] = Math.max(hapticSustainUntil[idx] || 0, Date.now() + 90);
 }
 // Advance one pad's ambient trauma: apply any active sustain floor, then decay.
 function tickPadTrauma(padIndex, dt) {
@@ -142,7 +148,7 @@ function tickPadTrauma(padIndex, dt) {
 // magnitudes; the envelope decays to zero over durMs. A new pulse replaces any
 // running one on that pad (the mixer takes the max against ambient each frame).
 function padPulseIndex(padIndex, strong, weak, durMs) {
-    if (padIndex == null) { return; }
+    if (!hapticsEnabled || padIndex == null) { return; }
     hapticPulses[padIndex] = {
         strong: Math.min(1, strong),
         weak: Math.min(1, weak == null ? strong : weak),
