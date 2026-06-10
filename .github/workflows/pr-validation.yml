@@ -229,6 +229,26 @@ jobs:
       - name: Static input-validation lint
         run: node .github/scripts/lint-input-validation.js
 
+  audio-balance:
+    # Audio-mix balance gate. The whole mix is balanced by per-sound coefficients
+    # in audio.js volumeChange(); a new sound effect that lands far hotter/quieter
+    # than the rest (or ships with no coefficient at all) wrecks the mix. This job
+    # parses audio.js statically and measures each clip's loudness with ffmpeg
+    # (preinstalled on the runner — no npm deps), then enforces a per-bus
+    # effective-loudness band + anti-clipping peak ceiling. See the script header.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v6
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+      - name: Verify ffmpeg is available
+        run: ffmpeg -version | head -1
+      - name: Audio-balance check
+        run: node .github/scripts/audio-balance-test.js
+
   button-gate:
     # Runtime button gate on the LIVE DOM (incl. JS-injected controls): axe
     # interactive-control rules + >=44px touch targets + gamepad-reachability.
