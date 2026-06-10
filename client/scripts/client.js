@@ -1952,6 +1952,24 @@ function registerEffectHandlers(server) {
 		markOrbitalBeam(data);
 		playOrbitalBeamCharge(data.duration);
 		addTrauma(0.12);
+		// Telegraph rumble: a lock-in tick now, then escalating warning pulses
+		// through the countdown so the incoming strike feels imminent on every local
+		// pad (mirrors the beam line pulsing faster/redder). All kept under the
+		// strike's own jolt so the hit still lands hardest.
+		if (typeof traumaAll === "function") {
+			traumaAll(0.12);
+			var beamFuse = (data.duration != null) ? data.duration : 5000;
+			var beamTicks = [[0.5, 0.12], [0.72, 0.18], [0.9, 0.26]];
+			for (var bt = 0; bt < beamTicks.length; bt++) {
+				addTimer(function (mag) {
+					if (currentState == config.stateMap.racing ||
+						currentState == config.stateMap.collapsing ||
+						currentState == config.stateMap.lobby) {
+						traumaAll(mag);
+					}
+				}, beamFuse * beamTicks[bt][0], beamTicks[bt][1]);
+			}
+		}
 	});
 	server.on("orbitalBeamFired", function (data) {
 		// Strike: cut the charge whine, flash the locked line, blast + shake.
@@ -1963,6 +1981,9 @@ function registerEffectHandlers(server) {
 			playOrbitalBeamImpact();
 			spawnScreenFlash("#ffd66a", 0.3, 320);
 			addTrauma(0.6);
+			// The orbital strike landing — a heavy jolt on every local pad, like
+			// the volcano/collapse world events.
+			if (typeof traumaAll === "function") { traumaAll(0.6); }
 		}
 	});
 	server.on("playerSwapped", function (payload) {
