@@ -188,7 +188,19 @@ for (const [name, s] of Object.entries(sounds)) {
         continue;
     }
     const d = measure(s.file);
-    if (!d) { fail('Sound "' + name + '" references missing file ' + s.file + '.'); continue; }
+    if (!d) {
+        // A case-only mismatch is the classic macOS (case-insensitive) -> Linux
+        // (case-sensitive) trap: it plays locally but 404s on the prod server.
+        // Call it out explicitly rather than just "missing".
+        const sibling = fs.readdirSync(soundsDir).find((f) => f.toLowerCase() === s.file.toLowerCase());
+        if (sibling) {
+            fail('Sound "' + name + '" references "' + s.file + '" but the file on disk is "' + sibling +
+                '" (case mismatch). This plays on macOS but 404s on the case-sensitive prod server — fix the case in client/scripts/audio.js.');
+        } else {
+            fail('Sound "' + name + '" references missing file ' + s.file + '.');
+        }
+        continue;
+    }
     if (d.mean === null) { fail('Could not read loudness of ' + s.file + ' (ffmpeg returned no mean_volume).'); continue; }
 
     const gainDb = 20 * Math.log10(s.coeff);

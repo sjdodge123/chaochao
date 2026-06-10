@@ -384,7 +384,7 @@ var tripleKill = makeSound("./assets/sounds/tripleKill.mp3", { bus: "voice", duc
 var megaKill = makeSound("./assets/sounds/megaKill.mp3", { bus: "voice", duck: true });
 var killingSpree = makeSound("./assets/sounds/killingSpree.mp3", { bus: "voice", duck: true });
 var rampage = makeSound("./assets/sounds/rampage.mp3", { bus: "voice", duck: true });
-var godLike = makeSound("./assets/sounds/godLike.mp3", { bus: "voice", duck: true });
+var godLike = makeSound("./assets/sounds/godlike.mp3", { bus: "voice", duck: true });
 
 // Audience — a stadium crowd layered under the action that reacts to tense and
 // amazing plays (big kills, fight flurries, narrow lava escapes, clutch goals).
