@@ -16,6 +16,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 - Where the Orbital Beam drops fresh water right beside the lava it just made, that new edge hardens into the same impassable **stone seam** as natural water-and-lava borders, so you bump along it instead of being shoved across into the lava.
 - AI racers now **read telegraphs and scramble clear** — they steer out of an Orbital Beam's marked strike line before it fires, and out of a charging lava-explosion blast, instead of sitting in ground that's about to turn deadly.
 
+### Bug fixes
+
+- An ability grabbed in the lobby but not used no longer **lingers on your HUD** once the race starts. The server already dropped it at the gate (lobby pickups don't carry into the race), but the icon used to stick around looking usable; now it clears with the rest of the lobby.
+
 ## v0.31.2 — 2026-06-10
 
 ### General
