@@ -20,6 +20,7 @@ var terrainFX = {
     ice: [], lava: [], goal: [], ability: [],
     goalClusters: [],
     lavaSeeds: [],
+    embers: [],          // heatwave: spark seeds over scorched hot tiles
     abilityIcons: null   // lazily-built map: ability tile id -> icon Image
 };
 // Bunker (battle-royale) silo-door state, set by the bunkerStart/bunkerEmerge
@@ -175,6 +176,36 @@ function tfxBuildCells() {
     }
     tfxBuildGoalClusters();
     tfxBuildLavaSeeds();
+    tfxBuildHeatwaveEmbers();
+}
+// Heatwave ember seeds: scorched tiles that are now lava or an ability pad (the
+// "hot" conversions) each get a spark emitter at their centroid. Rebuilt with
+// the cell sets — every scorch-list grow path invalidates the map cache, which
+// bumps mapCacheRev and lands back here.
+function tfxBuildHeatwaveEmbers() {
+    terrainFX.embers = [];
+    if (typeof heatwaveScorch === "undefined" || heatwaveScorch == null || heatwaveScorch.length === 0) { return; }
+    var tm = config.tileMap;
+    var scorched = {};
+    for (var i = 0; i < heatwaveScorch.length; i++) { scorched[heatwaveScorch[i].vid] = true; }
+    var cells = currentMap.cells;
+    var MAX = 40;
+    for (var ci = 0; ci < cells.length && terrainFX.embers.length < MAX; ci++) {
+        var cell = cells[ci];
+        var vid = (cell.site != null) ? cell.site.voronoiId : null;
+        if (vid == null || scorched[vid] !== true) { continue; }
+        if (cell.id !== tm.lava.id && terrainFX.abilityIcons[cell.id] == null) { continue; }
+        var verts = tfxCellVerts(cell);
+        if (!verts) { continue; }
+        var c = tfxCentroid(verts);
+        var r = tfxMaxRadius(verts, c.x, c.y);
+        terrainFX.embers.push({
+            x: c.x, y: c.y,
+            r: Math.min(r * 0.7, 30) + 6,
+            ph: Math.random() * 6.28,
+            sp: 1.2 + Math.random() * 1.4
+        });
+    }
 }
 // Group touching goal cells into clusters (union-find over voronoi adjacency) so
 // a multi-cell goal reads as ONE beacon centred on the cluster, not a beacon per
@@ -249,10 +280,36 @@ function drawTerrainFX(dtIgnored) {
     if (extra) {
         tfxDrawLavaConvection(t, camX, camY);
         tfxDrawIceReflections(camX, camY);
+        tfxDrawHeatwaveEmbers(t, camX, camY); // heatwave sparks (no-op when none)
     }
     tfxDrawBunker(t, camX, camY);        // battle-royale silo door (no-op when inactive)
     tfxDrawGoalBeacon(t, camX, camY);    // always — cheap + gameplay-critical
     tfxDrawAbilityIcons(t, camX, camY);  // always — gameplay-critical pickup markers
+}
+
+// Tiny rising ember sparks over scorched hot tiles (heatwave). Additive, a few
+// dozen at most, gated behind perfExtraFx() with the other ambient FX.
+function tfxDrawHeatwaveEmbers(t, camX, camY) {
+    var embers = terrainFX.embers;
+    if (embers == null || embers.length === 0) { return; }
+    var ctx = gameContext;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    for (var i = 0; i < embers.length; i++) {
+        var e = embers[i];
+        // Each ember loops a short rise-and-fade on its own clock.
+        var prog = ((t * e.sp + e.ph) % 1.6) / 1.6;
+        var a = 0.5 * (1 - prog);
+        if (a <= 0.03) { continue; }
+        var px = e.x + camX + Math.sin((t + e.ph) * 2.1) * e.r * 0.4;
+        var py = e.y + camY - prog * 18;
+        ctx.globalAlpha = a;
+        ctx.fillStyle = "#ffae3d";
+        ctx.beginPath();
+        ctx.arc(px, py, 1.5 + (1 - prog) * 1.2, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.restore();
 }
 
 // Battle-royale silo door over the buried goal. An iris of metal blades closes

@@ -187,6 +187,9 @@
                 { id: "brutal-blackout", name: "Blackout", icon: svg("moon-solid.svg"), anim: "blackout",
                   blurb: "The lights go out.",
                   detail: "The arena goes dark and you can only see a small pool of light around your own kart. The goal, the lava and your rivals all lurk in the black until you're nearly on top of them — every move is a gamble into the unknown." },
+                { id: "brutal-heatwave", name: "Heatwave", icon: svg("heatwave-solid.svg"), anim: "heatwave",
+                  blurb: "The arena scorches over before your eyes.",
+                  detail: "As the camera pulls out before the race, a heatwave rolls across the arena: patches of sand bake into lava, ice melts into open water, grass dries out to dirt — and some dirt cracks open around bonus ability pickups, with good odds of an Ice Cannon (the heat scatters its own antidote). Every changed tile keeps a scorched rim so you can read what's new at a glance, and there is always still a path to the goal. Don't settle in: partway through the race a second, smaller wave hits — tiles flicker with what they're about to become, so get off them. Finish without touching a single scorched tile and you've earned the Firewalker medal." },
                 // --- Parked brutal modes (active:false in config today). Flip show:true when re-enabled. ---
                 { id: "brutal-gravity", name: "Gravity", icon: svg("infinity-solid.svg"), anim: "_blank", show: false,
                   blurb: "(disabled) Pull warps your movement.",
@@ -244,7 +247,10 @@
                   detail: "For covering the most distance gliding across ice tiles — embracing the slip instead of fighting it, and racking up the longest total slide of the match." },
                 { id: "medal-smoothoperator", name: "Smooth Operator", icon: emoji("🏂"), anim: "medalShine",
                   blurb: "Drifted the furthest on ice.",
-                  detail: "For the most distance covered DRIFTING — holding a punch charge while on ice to dig in for grip. Only clean drifts count: if the charged punch lands on someone the run was a wind-up (not a drift), and burning up in lava wipes it. Control, not aggression." }
+                  detail: "For the most distance covered DRIFTING — holding a punch charge while on ice to dig in for grip. Only clean drifts count: if the charged punch lands on someone the run was a wind-up (not a drift), and burning up in lava wipes it. Control, not aggression." },
+                { id: "medal-firewalker", name: "Firewalker", icon: emoji("👣"), anim: "medalShine",
+                  blurb: "Finished a Heatwave round on clean ground.",
+                  detail: "Earned by finishing Heatwave rounds without ever touching scorched ground — none of the fresh lava's neighbours-turned-hazards, the melted water, the dried-out dirt, not even the heat-spawned ability pads. The arena changed and you refused to acknowledge it. Goes to whoever pulled it off the most times in the match." }
             ]
         }
     ];

@@ -875,6 +875,10 @@ function registerConnectionHandlers(server) {
 		// before this .then() microtask resolves — clearing it in there would wipe
 		// the door right after bunkerStart armed it (so the door never shows).
 		if (typeof bunkerFX !== "undefined") { bunkerFX = null; }
+		// Heatwave reveal state resets synchronously too (same microtask gotcha as
+		// bunkerFX) so a prior round's reveal can never bleed across the map swap.
+		if (typeof heatwaveFX !== "undefined") { heatwaveFX = null; heatwaveScorch = []; heatwaveFlashes = []; }
+		if (typeof stopHeatwaveDrone === "function") { stopHeatwaveDrone(); }
 		$.when.apply($, promises).then(function () {
 			currentState = payload.currentState;
 			loadNewMap(payload.id);
@@ -883,6 +887,9 @@ function registerConnectionHandlers(server) {
 			applyHazards(payload.hazards);
 			applyAbilites(payload.abilities);
 			applyBrutalMap(payload.brutalRoundConfig);
+			// After random tiles + abilities: heatwave's delta was computed server-side
+			// on top of both, so arming it last keeps the from-states consistent.
+			armHeatwave(payload.heatwave, payload.currentState);
 			loadPatterns();
 			clearInfection();
 			stopSound(lobbyMusic);
@@ -1210,6 +1217,14 @@ function registerStateHandlers(server) {
 		// Stamp the gate-release moment so the start line can flash green as it fades.
 		raceStartTime = Date.now();
 		currentState = config.stateMap.racing;
+		// Heatwave: the gate is open, so the reveal must be complete on this client
+		// no matter what the camera intro did (world camera toggled off, hidden tab,
+		// degenerate countdown) — and the ambient heat drone carries the round.
+		if (typeof heatwaveForceComplete === "function") { heatwaveForceComplete(); }
+		if (typeof startHeatwaveDrone === "function" && brutalRound && brutalRoundConfig != null &&
+			brutalRoundConfig.brutalTypes.indexOf(config.brutalRounds.heatwave.id) != -1) {
+			startHeatwaveDrone();
+		}
 		// Clear the scoreboard login nudge (if up) so the persistent toast can never
 		// cover live gameplay. Not a dismissal — it re-shows on the next scoreboard
 		// until the player acts or dismisses it.
@@ -1263,6 +1278,7 @@ function registerStateHandlers(server) {
 		previewReturnToEditor();
 		resetRound();
 		stopSound(lavaCollapse);
+		if (typeof stopHeatwaveDrone === "function") { stopHeatwaveDrone(); }
 		resetTrails();
 		updatePlayerNotches(packet.notchUpdates);
 		// Notches just changed — escalate the crowd toward "edge of their seats"
@@ -1395,6 +1411,9 @@ function registerStateHandlers(server) {
 		recapHarvestRound();      // fold the final round's clips into the archive first
 		recapBuild(achievements); // then assemble the montage from the whole-match archive
 		stopAllSounds();
+		// The heat drone is a custom looping voice outside activeVoices (drift-SFX
+		// pattern), so stopAllSounds doesn't reach it — stop it explicitly.
+		if (typeof stopHeatwaveDrone === "function") { stopHeatwaveDrone(); }
 		playSound(gameOverSound);
 		// Decode the SERVER colour (not the live .color, which colour-blind assist
 		// may have remapped to an off-palette CVD hex that Colors.decode can't name).
@@ -1830,6 +1849,22 @@ function registerAbilityHandlers(server) {
 		$.when.apply($, promises).then(function () {
 			var ids = JSON.parse(payload);
 			tileSwapLanded(ids);
+		});
+	});
+	// Heatwave second wave: the warn-up telegraph (destination ghost pulsing on
+	// each marked tile, same pipeline as the tileSwap but with pinned dest ids)...
+	server.on("heatwavePending", function (payload) {
+		$.when.apply($, promises).then(function () {
+			var data = JSON.parse(payload);
+			markPendingHeatwave(data.ids, data.duration);
+			if (typeof playHeatwaveWarning === "function") { playHeatwaveWarning(); }
+		});
+	});
+	// ...and the landing. The tile ids themselves flip via the tileChanges
+	// broadcast sent just before this; here we bake scorch + flash + sizzle.
+	server.on("heatwaveWaveFired", function (payload) {
+		$.when.apply($, promises).then(function () {
+			heatwaveWaveLanded(JSON.parse(payload));
 		});
 	});
 

@@ -470,6 +470,17 @@ class Game {
 				if (this.gameBoard.brutalRound) {
 					this.playerList[player].brutalist += 1;
 				}
+				// Firewalker: finished a Heatwave round without ever touching a
+				// heatwave-converted (scorched) tile. Latched once per round — this
+				// block re-runs every conclusion tick (survivalist/brutalist above
+				// deliberately accumulate), but a clean finish is a 0/1 event.
+				if (!this.playerList[player].firewalkerJudged) {
+					this.playerList[player].firewalkerJudged = true;
+					if (this.gameBoard.checkForActiveBrutal(c.brutalRounds.heatwave.id) &&
+						!this.playerList[player].touchedScorchedTile) {
+						this.playerList[player].firewalkerCount += 1;
+					}
+				}
 				if (this.firstPlaceSig == null) {
 					if (this.playerList[player].notches == this.notchesToWin) {
 						//Game over player wins
@@ -876,6 +887,18 @@ class Game {
 				blackoutDelay = utils.getRandomInt(1, 2);
 			}
 			setTimeout(this.gameBoard.applyBrutalBlackoutRound, blackoutDelay * 1000, { context: this });
+		}
+		// Heatwave second wave: another (smaller) scorch pulse mid-race, paced to
+		// the map like the volcano — around half of par, so front-runners are deep
+		// in the course when the ground shifts. Warn fires first (tile telegraph);
+		// the flip itself is scheduled from the warn handler after selection.
+		var hwCfg = c.brutalRounds.heatwave;
+		if (this.gameBoard.checkForActiveBrutal(hwCfg.id) && hwCfg.secondWave && hwCfg.secondWave.active) {
+			var bestPar = this.gameBoard.currentMap.parTime;
+			var waveDelay = (bestPar > 0) ? bestPar * hwCfg.secondWave.parFactor : utils.getRandomInt(hwCfg.secondWave.minDelay, hwCfg.secondWave.maxDelay);
+			if (waveDelay < hwCfg.secondWave.minDelay) { waveDelay = hwCfg.secondWave.minDelay; }
+			if (waveDelay > hwCfg.secondWave.maxDelay) { waveDelay = hwCfg.secondWave.maxDelay; }
+			setTimeout(this.gameBoard.warnOfHeatwaveWave, waveDelay * 1000, { context: this, map: this.gameBoard.currentMap });
 		}
 
 

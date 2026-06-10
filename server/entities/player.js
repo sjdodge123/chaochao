@@ -219,6 +219,14 @@ class Player extends Circle {
 		this.driftPunchRef = null;
 		this.driftPunchPending = 0;
 		this.driftPunchAt = 0;
+		// Firewalker bookkeeping: heatwaveScorchedIds is the gameBoard's scorched-tile
+		// set shared by reference for the active heatwave round (null otherwise);
+		// touchedScorchedTile / firewalkerJudged re-arm per round in gatePlayer;
+		// firewalkerCount is the per-match medal tally (clean heatwave finishes).
+		this.heatwaveScorchedIds = null;
+		this.touchedScorchedTile = false;
+		this.firewalkerJudged = false;
+		this.firewalkerCount = 0;
 		// Per-match counter for the abilitiesUsed cosmetic medal. The zombie/heavy-hit/bumper/
 		// ice medals are main's gatherAchievements medals (zombieSlayer/heavyHitter/pinball/
 		// iceSkater), which the award path already folds into medal_counts — no dup needed.
@@ -995,6 +1003,16 @@ class Player extends Circle {
 			this.dripUntil = Date.now() + c.tileMap.water.dripMs;
 		}
 		this.onWater = nowOnWater;
+		// Firewalker: footing on any heatwave-converted (scorched) tile during real
+		// play voids this round's clean-run credit. heatwaveScorchedIds is the
+		// gameBoard's set shared by reference (null outside heatwave rounds), keyed
+		// by voronoiId; a tile stays scorched even after an ability pickup reverts
+		// its id, which is why this checks the set rather than the tile type.
+		if (this.heatwaveScorchedIds != null && object.voronoiId != null &&
+			this.heatwaveScorchedIds[object.voronoiId] === true &&
+			(this.currentState == c.stateMap.racing || this.currentState == c.stateMap.collapsing)) {
+			this.touchedScorchedTile = true;
+		}
 		// Standing on any non-lava cell means we've escaped a burn-on-lava doom: drop
 		// the persistent burn attributor so a later, unrelated lava death isn't credited
 		// to whoever last shoved us. A burning death is itself a lava hit (id == lava),
@@ -1397,6 +1415,7 @@ class Player extends Circle {
 		if (currentState == c.stateMap.gameOver) {
 			this.survivalist = 0;
 			this.brutalist = 0;
+			this.firewalkerCount = 0;
 			this.resourceful = 0;
 			this.bully = 0;
 			this.ability = null;

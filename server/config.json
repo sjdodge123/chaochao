@@ -352,6 +352,29 @@
             "clusterGap": 90,
             "maxRoundTime": 100,
             "title": "Bunker"
+        },
+        "heatwave": {
+            "id": 1013,
+            "active": true,
+            "title": "Heatwave",
+            "sandToLavaPct": 15,
+            "iceToWaterPct": 15,
+            "grassToDirtPct": 10,
+            "dirtToAbilityPct": 10,
+            "minConvertibleTiles": 6,
+            "maxPathRetries": 8,
+            "gateMargin": 60,
+            "secondWave": {
+                "active": true,
+                "sandToLavaPct": 5,
+                "iceToWaterPct": 5,
+                "grassToDirtPct": 5,
+                "dirtToAbilityPct": 5,
+                "parFactor": 0.5,
+                "minDelay": 8,
+                "maxDelay": 25,
+                "warnMs": 3000
+            }
         }
     },
     "hazards": {
