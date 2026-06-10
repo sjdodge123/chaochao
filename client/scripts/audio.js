@@ -504,7 +504,7 @@ function volumeChange() {
     countDownA.volume = .05 * sfx;
     countDownB.volume = .05 * sfx;
     lavaCollapse.volume = .1 * sfx;
-    meleeSound.volume = .05 * sfx;
+    meleeSound.volume = .03 * sfx; // punch wind-up/swing snap — reduced 40% (.05->.03)
     meleeHitSound.volume = .016 * sfx;
     chargedHitSound.volume = .5 * sfx;
     gameOverSound.volume = .5 * sfx;
