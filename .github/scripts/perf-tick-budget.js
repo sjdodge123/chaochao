@@ -89,7 +89,7 @@ const f = (n) => (Number.isFinite(n) ? n.toFixed(3) : 'n/a');
 
 function pickMap() {
     const dir = path.join(repoRoot, 'client', 'maps');
-    const want = process.env.PERF_MAP || '4suns!.json';
+    const want = process.env.PERF_MAP || '4Suns!.json';
     if (fs.existsSync(path.join(dir, want))) return want;
     return fs.readdirSync(dir).filter(x => x.endsWith('.json')).sort()[0];
 }

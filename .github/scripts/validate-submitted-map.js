@@ -35,21 +35,16 @@ const OUTPUT_DIR = process.env.MAP_REVIEW_OUTPUT || path.join(repoRoot, 'map-rev
 
 // --- tunables ---------------------------------------------------------------
 const MAX_CELLS = 2500;          // largest committed map is 470; this is generous headroom
-const GATE_DEPTH = 75;           // mirrors server/game.js GATE_DEPTH
 const SIM_MAX_SECONDS = 90;      // playability sim budget ceiling (per attempt)
 const SIM_ATTEMPTS = 3;          // retry with fresh bot RNG before giving up (AI is chaotic)
 const PAR_MISMATCH_FRAC = 0.5;   // warn if embedded parTime drifts >50% from recompute
 
-// Competing-lines analysis — uses the SAME pathing the AI racers use
-// (server/aiController.js): cellGraph.findPathToNearestGoal with a per-racer
-// noiseSeed for route diversity, a skill-derived noiseAmount, and a hazard-cell
-// penalty set. We fix the seeds (the AI randomises them per bot) so the review
-// artifact is reproducible across re-pushes.
+// Competing-lines analysis is delegated to mapClassifier.competingLines — the SAME
+// fairness machinery that drives the editor's balance overlay and the `fairness`
+// deduction (hazard-aware safe-seeded edge sampling + smoothed racing lines). The
+// review artifact thus matches exactly what the author saw in the editor; the only
+// knobs we pass are how many distinct lines to show and the "same line" threshold.
 const MAX_ROUTES = 3;
-const AI_HAZARD_PENALTY = 12;                       // aiController HAZARD_PATH_PENALTY
-const AI_SKILL = 0.7;                               // aiController default skill
-const AI_NOISE = 0.15 + (1 - AI_SKILL) * 0.2;       // aiController noiseAmount formula
-const ROUTE_SEEDS = [101, 211, 337, 449, 577, 691]; // fixed per-racer route-diversity seeds
 const ROUTE_DEDUPE_OVERLAP = 0.6;                   // two routes sharing >60% of cells are "the same line"
 
 const inputFiles = process.argv.slice(2).filter(f => f.endsWith('.json'));
@@ -74,6 +69,7 @@ for (const file of inputFiles) {
 // the changed files at least parse (a broken changed file is reported above).
 const utils = require(path.join(repoRoot, 'server', 'utils.js'));
 const cellGraph = require(path.join(repoRoot, 'server', 'cellGraph.js'));
+const mapClassifier = require(path.join(repoRoot, 'server', 'mapClassifier.js'));
 const config = require(path.join(repoRoot, 'server', 'config.json'));
 const messenger = require(path.join(repoRoot, 'server', 'messenger.js'));
 const mapFormat = require(path.join(repoRoot, 'server', 'mapFormat.js'));
@@ -113,121 +109,24 @@ function effectiveStartEdges(map) {
 
 function isFiniteNum(n) { return typeof n === 'number' && isFinite(n); }
 
-// The playable surface, clamped to the world. The voronoi cells only cover the
-// map's bbox, which CAN be inset from the world edge (e.g. a "bottom"-start map
-// whose surface stops short of y=worldHeight). Sampling gate origins along the
-// raw world edge then lands them in that empty margin, where nearestCellIndex
-// snaps each to a far interior/corner cell — so the rendered lines appear to
-// start from random points mid-map instead of the gate. deriveBbox recovers the
-// surface bounds from the cell polygons (reconstruct() drops the bbox field).
-function playableBounds(map) {
-    const W = config.worldWidth, H = config.worldHeight;
-    let b = null;
-    try { b = mapFormat.deriveBbox(map); } catch (e) { b = null; }
-    if (!b || !isFiniteNum(b.xl) || !isFiniteNum(b.yt) || !isFiniteNum(b.xr) || !isFiniteNum(b.yb) || b.xr <= b.xl || b.yb <= b.yt) {
-        return { xl: 0, yt: 0, xr: W, yb: H };
-    }
-    return { xl: Math.max(0, b.xl), yt: Math.max(0, b.yt), xr: Math.min(W, b.xr), yb: Math.min(H, b.yb) };
-}
-
-// Sample a handful of start positions along an edge's gate (inset from the edge
-// and its ends), mirroring where racers actually gate. Sampled along the PLAYABLE
-// surface edge (not the world edge) and inset ~half of GATE_DEPTH, so every origin
-// sits inside a real cell near the gate rather than in the empty world margin.
-function gateOrigins(edge, map) {
-    const IN = 40, N = 6;
-    const b = playableBounds(map);
-    const lin = (a, c2) => { const out = []; for (let i = 0; i < N; i++) { out.push(a + (c2 - a) * (i / (N - 1))); } return out; };
-    switch (edge) {
-        case 'right':  return lin(b.yt + IN, b.yb - IN).map(y => ({ x: b.xr - IN, y }));
-        case 'top':    return lin(b.xl + IN, b.xr - IN).map(x => ({ x, y: b.yt + IN }));
-        case 'bottom': return lin(b.xl + IN, b.xr - IN).map(x => ({ x, y: b.yb - IN }));
-        case 'left':
-        default:       return lin(b.yt + IN, b.yb - IN).map(y => ({ x: b.xl + IN, y }));
-    }
-}
-
-// Cells holding a hazard, penalised in pathing exactly as the AI does (the
-// nearest cell to each hazard — aiController's static-bumper branch). Returns a
-// Set of voronoiIds, or null if the map has no hazards.
-function buildHazardCells(map) {
-    if (!Array.isArray(map.hazards) || map.hazards.length === 0) { return null; }
-    const set = new Set();
-    for (const hz of map.hazards) {
-        if (!hz || !isFiniteNum(hz.x) || !isFiniteNum(hz.y)) { continue; }
-        let bestI = -1, bestD = Infinity;
-        for (let i = 0; i < map.cells.length; i++) {
-            const c = map.cells[i];
-            if (!c || !c.site) { continue; }
-            const dx = c.site.x - hz.x, dy = c.site.y - hz.y, d = dx * dx + dy * dy;
-            if (d < bestD) { bestD = d; bestI = i; }
-        }
-        if (bestI >= 0) { set.add(map.cells[bestI].site.voronoiId); }
-    }
-    return set.size ? set : null;
-}
-
-// A few DISTINCT competing lines a racer would take, using the AI's own path
-// planner + cost model, each timed by the engine's physics-walk (estimatePathTime,
-// the same routine that produces par time). Returns up to MAX_ROUTES, fastest
+// A few DISTINCT competing lines a racer would take. Delegated to
+// mapClassifier.competingLines so the review uses the EXACT fairness machinery the
+// editor's balance overlay and the `fairness` deduction use (hazard-aware,
+// safe-seeded edge sampling + smoothed racing lines) — keeping the two in lockstep
+// instead of a parallel re-implementation. We only add the display layer here
+// (fastest-first labels + a colour per line). Returns up to MAX_ROUTES, fastest
 // first: [{ label, seconds, color, points:[{x,y}] }].
 function competingPaths(map) {
-    if (!Array.isArray(map.cells) || map.cells.length === 0) { return []; }
-    const hazardCells = buildHazardCells(map);
-    const siteById = {};
-    for (const c of map.cells) { if (c && c.site) { siteById[c.site.voronoiId] = { x: c.site.x, y: c.site.y }; } }
-
-    const origins = [];
-    for (const edge of effectiveStartEdges(map)) { origins.push(...gateOrigins(edge, map)); }
-
-    const cands = [];
-    for (let i = 0; i < origins.length; i++) {
-        let route;
-        try {
-            route = cellGraph.findPathToNearestGoal(map, origins[i], {
-                noiseSeed: ROUTE_SEEDS[i % ROUTE_SEEDS.length],
-                noiseAmount: AI_NOISE,
-                penaltySet: hazardCells || undefined,
-                penaltyMult: hazardCells ? AI_HAZARD_PENALTY : 1
-            });
-        } catch (e) { route = null; }
-        if (route && Array.isArray(route.path) && route.path.length >= 2) {
-            let secs = 0;
-            try { secs = cellGraph.estimatePathTime(map, route.path) || 0; } catch (e) { secs = 0; }
-            if (secs > 0) { cands.push({ path: route.path, seconds: secs, origin: origins[i] }); }
-        }
-    }
-
-    // Keep the fastest, then add only lines that are spatially distinct from the
-    // ones already chosen (so we show genuinely different routes, not 6 near-copies).
-    cands.sort((a, b) => a.seconds - b.seconds);
-    const chosen = [];
-    for (const c of cands) {
-        const setC = new Set(c.path);
-        let dup = false;
-        for (const ch of chosen) {
-            let inter = 0;
-            for (const v of setC) { if (ch.set.has(v)) { inter++; } }
-            const uni = setC.size + ch.set.size - inter;
-            if (uni > 0 && inter / uni > ROUTE_DEDUPE_OVERLAP) { dup = true; break; }
-        }
-        if (!dup) { chosen.push({ ...c, set: setC }); }
-        if (chosen.length >= MAX_ROUTES) { break; }
-    }
-
-    return chosen.map((c, i) => {
-        const sitePts = c.path.map(id => siteById[id]).filter(Boolean);
-        // Anchor the rendered line at its gate origin so it visibly starts ON the
-        // gate; path[0]'s site is the cell centroid (inset from the edge) and, when
-        // the gate sits over a no-cell margin, can resolve to a far interior cell.
-        const points = c.origin ? [{ x: c.origin.x, y: c.origin.y }, ...sitePts] : sitePts;
-        return {
-            label: i === 0 ? 'Fastest line' : 'Alt ' + String.fromCharCode(64 + i), // Alt A, Alt B…
-            seconds: +c.seconds.toFixed(1),
-            color: ROUTE_COLORS[i % ROUTE_COLORS.length].name,
-            points
-        };
+    const lines = mapClassifier.competingLines(map, config, {
+        maxRoutes: MAX_ROUTES,
+        dedupeOverlap: ROUTE_DEDUPE_OVERLAP
     });
+    return lines.map((ln, i) => ({
+        label: i === 0 ? 'Fastest line' : 'Alt ' + String.fromCharCode(64 + i), // Alt A, Alt B…
+        seconds: +ln.seconds.toFixed(1),
+        color: ROUTE_COLORS[i % ROUTE_COLORS.length].name,
+        points: ln.points
+    }));
 }
 
 function deepValidate(map) {

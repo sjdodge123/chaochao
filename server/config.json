@@ -57,7 +57,7 @@
     "TESTSingleMap": false,
     "submitViaMail": "chaochaothegame@gmail.com",
     "balance": {
-        "featuredScore": 90,
+        "featuredScore": 85,
         "fairnessMax": 8,
         "fairnessToleranceSec": 0.2,
         "fairnessPerSec": 2,
@@ -70,7 +70,7 @@
         "idealParHigh": 40,
         "lengthSprintMax": 14,
         "lengthMarathonMin": 45,
-        "traitThresholds": { "ice": 0.28, "lava": 0.30, "bumper": 0.12, "ability": 0.10, "bumperHazardDensity": 0.20 },
+        "traitThresholds": { "ice": 0.28, "lava": 0.30, "water": 0.18, "bumper": 0.12, "ability": 0.10, "bumperHazardDensity": 0.20 },
         "ratingAuthedWeight": 3,
         "ratingConfidenceFloor": 5,
         "playlistMinMaps": 20,

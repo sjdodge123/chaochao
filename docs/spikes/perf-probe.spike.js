@@ -12,7 +12,7 @@ const { chromium } = require("playwright");
 const PORT = 28910;
 const ORIGIN = `http://localhost:${PORT}`;
 const CONFIG = path.join(__dirname, "server", "config.json");
-const MAP_FILE = path.join(__dirname, "client", "maps", "4suns!.json");
+const MAP_FILE = path.join(__dirname, "client", "maps", "4Suns!.json");
 
 function pct(arr, p) {
   if (!arr.length) return NaN;

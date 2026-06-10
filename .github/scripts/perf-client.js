@@ -45,7 +45,7 @@ const { chromium } = require('playwright');
 const repoRoot = path.join(__dirname, '..', '..');
 const PORT = Number(process.env.PERF_PORT) || 28911;
 const ORIGIN = `http://localhost:${PORT}`;
-const MAP_FILE = process.env.PERF_MAP || '4suns!.json';
+const MAP_FILE = process.env.PERF_MAP || '4Suns!.json';
 const SAMPLE_SECONDS = Number(process.env.PERF_SAMPLE_SECONDS) || 6;
 // COLLECT: how many scene-valid windows we gather before filtering. We then keep the
 // ones rendered near the runner's own peak fps (see PEAK_FRACTION) and take the

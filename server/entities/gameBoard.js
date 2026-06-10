@@ -1074,7 +1074,7 @@ class GameBoard {
 	}
 	// Instantiate the walk-up hub stations for this lobby. Positions come from an
 	// optional map-JSON `stations` array (authored on verified-clear ground, like
-	// `spawnPad` — see _lobbyTutorial.json); if the map omits it we fall back to code
+	// `spawnPad` — see _LobbyTutorial.json); if the map omits it we fall back to code
 	// defaults that flank the central start button on the center row, so the lobby
 	// always has reachable stations even on a plain field.
 	buildLobbyStations() {
@@ -1085,7 +1085,7 @@ class GameBoard {
 			{ id: "ai", kind: "ai", cx: this.world.width * 0.67, cy: this.world.height * 0.5, color: "#3ad17a" },
 			// The playlist board sits above the central start button so three stations
 			// don't crowd the center row (fallback layout only; the real lobby authors
-			// station positions in _lobbyTutorial.json).
+			// station positions in _LobbyTutorial.json).
 			{ id: "playlist", kind: "playlist", cx: this.world.width * 0.5, cy: this.world.height * 0.28, color: "#FFCB30" }
 		];
 		var authored = (this.currentMap != null && Array.isArray(this.currentMap.stations))

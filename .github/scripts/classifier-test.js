@@ -83,7 +83,7 @@ console.log('\n' + rows.length + ' race maps, ' + featured + ' Featured (thresho
 // the goal jammed near one edge — the "2-second non-track" that used to score ~87.
 // Built on a real voronoi base so the geometry is valid; only ids/edges differ.
 (function () {
-    var base = require(path.join(repoRoot, 'client', 'maps', 'crossroads.json'));
+    var base = require(path.join(repoRoot, 'client', 'maps', 'Crossroads.json'));
     if (mapFormat.isSitesOnly(base)) { base = mapFormat.reconstruct(base); }
     var m = JSON.parse(JSON.stringify(base));
     var NORMAL = config.tileMap.normal.id, GOAL = config.tileMap.goal.id;

@@ -33,11 +33,22 @@ function startEdgesOf(map) {
     return (Array.isArray(map.startEdges) && map.startEdges.length > 0) ? map.startEdges : ['left'];
 }
 
+// Every drivable terrain tile the balance model grades the COMPOSITION of: its
+// share of the board feeds traits, the interest/blandness check, and the hazard
+// deductions. background/empty (the non-drivable void) are excluded on purpose.
+// This is the authoritative "which tiles does fairness understand" list for the
+// composition layer — unbalancedTiles() checks every config.tileMap tile against
+// it (paired with cellGraph's routing-cost coverage) so a newly-added tile that
+// nobody balanced is caught by CI instead of silently scoring as if it weren't
+// there. ADD A NEW TILE HERE (and give it a tileWeight in cellGraph) when you add
+// one to config.tileMap.
+var COMPOSITION_TILES = ['slow', 'normal', 'fast', 'lava', 'ice', 'water', 'ability', 'goal', 'bumper', 'random'];
+
 // Tile-composition ratios over DRIVABLE cells (background/empty excluded), plus
 // the drivable fraction of the whole board.
 function composition(map, config) {
     var bg = tileId(config, 'background'), empty = tileId(config, 'empty');
-    var names = ['slow', 'normal', 'fast', 'lava', 'ice', 'ability', 'goal', 'bumper', 'random'];
+    var names = COMPOSITION_TILES;
     var idOf = {};
     names.forEach(function (n) { idOf[n] = tileId(config, n); });
 
@@ -55,17 +66,46 @@ function composition(map, config) {
     return { ratios: ratios, total: total, drivable: drivable, drivableFrac: drivable / Math.max(1, total) };
 }
 
+// Audit which paintable terrain tiles in config.tileMap the balance model does NOT
+// yet account for. A tile is "balanced" only when BOTH layers cover it: its
+// composition share (COMPOSITION_TILES) AND its routing cost
+// (cellGraph.BALANCE_WEIGHTED_TILES, which feeds par times + the fairness spread).
+// background/empty are the non-drivable void and are skipped; the nested `abilities`
+// container has no top-level numeric id and is skipped too. The content-validation
+// CI calls this to WARN when someone adds a tile to config.tileMap but forgets to
+// balance it — so an unbalanced tile can't silently skew (or be ignored by) the
+// fairness score. Returns [{ name, id, missing: ['composition'|'routing'] }].
+function unbalancedTiles(config) {
+    var tm = (config && config.tileMap) || {};
+    var skip = { background: true, empty: true };
+    var comp = {}; COMPOSITION_TILES.forEach(function (n) { comp[n] = true; });
+    var weighted = {};
+    (cellGraph.BALANCE_WEIGHTED_TILES || []).forEach(function (n) { weighted[n] = true; });
+    var out = [];
+    for (var name in tm) {
+        if (!Object.prototype.hasOwnProperty.call(tm, name) || skip[name]) { continue; }
+        var t = tm[name];
+        if (!t || typeof t.id !== 'number') { continue; } // not a paintable tile (e.g. the abilities container)
+        var missing = [];
+        if (!comp[name]) { missing.push('composition'); }
+        if (!weighted[name]) { missing.push('routing'); }
+        if (missing.length) { out.push({ name: name, id: t.id, missing: missing }); }
+    }
+    return out;
+}
+
 // Every character trait a map qualifies for (a map can be both ice AND pinball).
 // Bumper/pinball identity comes from EITHER bumper tiles OR a high density of
 // bumper hazards (BumperCity & friends place bumpers as hazards, not tiles, so
 // a tile-only check misses them). dominantTrait is just traits[0] for display.
 function deriveTraits(ratios, hazardDensity, config) {
-    var th = bal(config, 'traitThresholds', { ice: 0.20, lava: 0.20, bumper: 0.12, ability: 0.10, bumperHazardDensity: 0.20 });
+    var th = bal(config, 'traitThresholds', { ice: 0.20, lava: 0.20, water: 0.15, bumper: 0.12, ability: 0.10, bumperHazardDensity: 0.20 });
     var traits = [];
     var bumperish = (ratios.bumper || 0) >= th.bumper || hazardDensity >= (th.bumperHazardDensity || 0.20);
     if (bumperish) { traits.push('bumper'); }
     if (ratios.ice >= th.ice) { traits.push('ice'); }
     if (ratios.lava >= th.lava) { traits.push('lava'); }
+    if (th.water != null && (ratios.water || 0) >= th.water) { traits.push('water'); }
     if (ratios.ability >= th.ability) { traits.push('ability'); }
     if (traits.length === 0) { traits.push('standard'); } // no hazard trait crossed its threshold
     return traits;
@@ -333,6 +373,26 @@ function spreadPick(list, n) {
     return out;
 }
 
+// Penalty-cell lookup ({ voronoiId: true }) from a hazardAvoidance() result, or
+// null when the map has no hazards. Shared by the overlay and the competing-lines
+// export so both penalise the same cells.
+function penaltyLookupFrom(avoid) {
+    if (!avoid || !avoid.penalty) { return null; }
+    var lk = {};
+    for (var i = 0; i < avoid.penalty.length; i++) { lk[avoid.penalty[i]] = true; }
+    return lk;
+}
+
+// Turn a routed sample ({ path:[voronoiId...], origin:{x,y} }) into the drawable,
+// straightened racing line: gate-side origin first, then the smoothed line. The ONE
+// place this geometry is built, so the editor overlay (balanceDebug) and the CI
+// "competing lines" artifact (competingLines) stay byte-identical.
+function routePolyline(map, config, route, penaltyLookup, avoid) {
+    var pts = pathPoints(map, route.path);
+    pts.unshift({ x: Math.round(route.origin.x), y: Math.round(route.origin.y) });
+    return smoothRoute(map, config, pts, penaltyLookup, avoid.points);
+}
+
 // Overlay geometry for the editor's "looks unbalanced" nudge: the representative
 // (median-time) route from each start edge — the same per-edge times the fairness
 // deduction grades — plus the goal centroid + centrality, so the author can SEE
@@ -341,11 +401,7 @@ function spreadPick(list, n) {
 function balanceDebug(map, config) {
     var ept = edgeParTimes(map, config);
     var avoid = ept.avoid;
-    var penaltyLookup = null;
-    if (avoid.penalty) {
-        penaltyLookup = {};
-        for (var pl = 0; pl < avoid.penalty.length; pl++) { penaltyLookup[avoid.penalty[pl]] = true; }
-    }
+    var penaltyLookup = penaltyLookupFrom(avoid);
     var out = { edges: [], goal: null };
     for (var e = 0; e < ept.edges.length; e++) {
         var entry = ept.edges[e];
@@ -361,10 +417,7 @@ function balanceDebug(map, config) {
         var routes = [];
         for (var d = 0; d < entry.draw.length; d++) {
             var rt = entry.draw[d];
-            var pts = pathPoints(map, rt.path);
-            pts.unshift({ x: Math.round(rt.origin.x), y: Math.round(rt.origin.y) });
-            pts = smoothRoute(map, config, pts, penaltyLookup, avoid.points);
-            routes.push({ par: Math.round(rt.time * 10) / 10, points: pts });
+            routes.push({ par: Math.round(rt.time * 10) / 10, points: routePolyline(map, config, rt, penaltyLookup, avoid) });
         }
         var ts = entry.times.slice().sort(function (a, b) { return a - b; });
         out.edges.push({
@@ -386,6 +439,63 @@ function balanceDebug(map, config) {
         };
     }
     return out;
+}
+
+// Distinct competing racing lines across the whole map, fastest first — built from
+// the SAME fairness machinery the editor overlay and the `fairness` deduction use
+// (edgeParTimes' hazard-aware safe-seeded sampling + smoothRoute's racing line), so
+// a reviewer's "competing lines" view matches exactly what the author saw in the
+// editor. The map-submission review CI calls this instead of re-deriving its own
+// pathing. Flattens every gate's fanned sample lines into one pool, then keeps only
+// lines spatially distinct from those already chosen (cell-path overlap > dedupe
+// threshold = "the same line"). Returns up to maxRoutes: [{ seconds, points:[{x,y}] }].
+function competingLines(map, config, opts) {
+    opts = opts || {};
+    var maxRoutes = (opts.maxRoutes != null) ? opts.maxRoutes : 3;
+    var overlapThresh = (opts.dedupeOverlap != null) ? opts.dedupeOverlap : 0.6;
+    if (!Array.isArray(map.cells) || map.cells.length === 0) { return []; }
+
+    var ept = edgeParTimes(map, config);
+    var avoid = ept.avoid;
+    var penaltyLookup = penaltyLookupFrom(avoid);
+
+    // Every fanned sample line from every edge (edgeParTimes already prefers the
+    // safe-seeded, hazard-avoiding routes), with its cell path (for dedupe) and its
+    // physics-walk time (the same estimatePathTime that produces par).
+    var cands = [];
+    for (var e = 0; e < ept.edges.length; e++) {
+        var draw = ept.edges[e].draw || [];
+        for (var d = 0; d < draw.length; d++) {
+            var rt = draw[d];
+            if (!rt || !Array.isArray(rt.path) || rt.path.length < 2 || !(rt.time > 0)) { continue; }
+            cands.push({ seconds: rt.time, path: rt.path, origin: rt.origin });
+        }
+    }
+    cands.sort(function (a, b) { return a.seconds - b.seconds; });
+
+    var chosen = [];
+    for (var c = 0; c < cands.length; c++) {
+        var setC = {}, sizeC = 0;
+        for (var pi = 0; pi < cands[c].path.length; pi++) {
+            if (!setC[cands[c].path[pi]]) { setC[cands[c].path[pi]] = true; sizeC++; }
+        }
+        var dup = false;
+        for (var ch = 0; ch < chosen.length; ch++) {
+            var inter = 0;
+            for (var v in setC) { if (chosen[ch].set[v]) { inter++; } }
+            var uni = sizeC + chosen[ch].size - inter;
+            if (uni > 0 && inter / uni > overlapThresh) { dup = true; break; }
+        }
+        if (!dup) { chosen.push({ cand: cands[c], set: setC, size: sizeC }); }
+        if (chosen.length >= maxRoutes) { break; }
+    }
+
+    // Straighten each chosen route into the drawable racing line (shared with the
+    // editor overlay via routePolyline).
+    return chosen.map(function (entry) {
+        var rt = entry.cand;
+        return { seconds: Math.round(rt.seconds * 10) / 10, points: routePolyline(map, config, rt, penaltyLookup, avoid) };
+    });
 }
 
 // Main entry: map (reconstructed, full geometry) + config -> meta object.
@@ -476,7 +586,7 @@ function classify(map, config) {
     // that are non-baseline tiles (fast/lava/ice/ability/bumper/random) plus a
     // hazard-density boost. Every committed map clears the threshold by a wide
     // margin (min featureShare ~0.36), so this fires only on barren maps.
-    var featureShare = r.fast + r.lava + r.ice + r.ability + r.bumper + r.random;
+    var featureShare = r.fast + r.lava + r.ice + r.water + r.ability + r.bumper + r.random;
     var interest = featureShare + Math.min(0.40, hazardDensity * 2);
     var blandT = bal(config, 'blandnessThreshold', 0.30);
     if (interest < blandT) {
@@ -494,7 +604,7 @@ function classify(map, config) {
     if (score < 0) { score = 0; }
     if (score > 100) { score = 100; }
 
-    var featuredScore = bal(config, 'featuredScore', 90);
+    var featuredScore = bal(config, 'featuredScore', 85);
     var tier = (hardFail.length === 0 && score >= featuredScore) ? 'featured' : 'community';
 
     var traits = deriveTraits(r, hazardDensity, config);
@@ -555,6 +665,9 @@ function resolvePlaylists(meta, playlistDefs) {
 module.exports = {
     classify: classify,
     balanceDebug: balanceDebug,
+    competingLines: competingLines,
+    unbalancedTiles: unbalancedTiles,
+    COMPOSITION_TILES: COMPOSITION_TILES,
     matches: matches,
     resolvePlaylists: resolvePlaylists
 };
