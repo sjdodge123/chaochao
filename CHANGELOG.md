@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.31.3 — 2026-06-10
+
 ### Ability changes
 
 - [headline] New ability — **Orbital Beam**: call down a telegraphed strike from orbit that melts ice to water, scorches sand into lava, and torches any kart caught in its line.
