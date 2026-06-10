@@ -9,7 +9,10 @@ var config,
 	previewReturnScheduled = false,
 	recentPunchTimes = [],
 	nextFightReactionTime = 0,
-	playerWon = null;
+	playerWon = null,
+	// Teams modes: the winning team ({id, name, color, members}) from startGameover,
+	// so the game-over screen celebrates Crimson/Jade. null in FFA matches.
+	gameOverTeam = null;
 
 // Set true when a match-over (startGameover) fires; consumed by the next startLobby
 // to gate the between-matches interstitial. An explicit flag is required because the
@@ -361,6 +364,20 @@ function registerLobbyHubHandlers(server) {
 		// debounced-emit de-race pattern as the playlist above.
 		if (payload != null && typeof payload.id === "string") {
 			lobbyGameMode = payload.id;
+		}
+	});
+	server.on("teamUpdate", function (snap) {
+		// Teams modes: one-shot roster/score sync (match start, late arrivals,
+		// every score change). Never per-tick.
+		if (typeof applyTeamUpdate === "function") {
+			applyTeamUpdate(snap);
+		}
+	});
+	server.on("teamPointsDelta", function (payload) {
+		// A single team-points event (+finish/+kill/-death): float it over the kart
+		// that caused it (see drawTeamPointFloats).
+		if (typeof pushTeamPointFloat === "function") {
+			pushTeamPointFloat(payload);
 		}
 	});
 	server.on("stationEnter", function (payload) {
@@ -843,6 +860,10 @@ function registerConnectionHandlers(server) {
 		if (gameState.lobbyGameMode != null) {
 			lobbyGameMode = gameState.lobbyGameMode;
 		}
+		// Teams snapshot for a mid-match joiner (null outside teams modes).
+		if (typeof applyTeamUpdate === "function") {
+			applyTeamUpdate(gameState.teams);
+		}
 		// Refresh the hint UI now the primary has joined (solo bottom bar by
 		// default; switches to per-player blocks once a 2nd local player joins).
 		if (typeof onLocalPlayersChanged === "function") {
@@ -898,6 +919,9 @@ function registerConnectionHandlers(server) {
 		if (typeof heatwaveFX !== "undefined") { heatwaveFX = null; heatwaveScorch = []; heatwaveFlashes = []; }
 		if (typeof heatwaveWarnBanner !== "undefined") { heatwaveWarnBanner = null; }
 		if (typeof stopHeatwaveDrone === "function") { stopHeatwaveDrone(); }
+		// A new round starts a fresh team scoring ledger (NOT cleared at overview —
+		// the overview is where the just-ended round's ledger is shown).
+		if (typeof teamRoundLedger !== "undefined") { teamRoundLedger = []; }
 		$.when.apply($, promises).then(function () {
 			currentState = payload.currentState;
 			loadNewMap(payload.id);
@@ -1408,6 +1432,7 @@ function registerStateHandlers(server) {
 		blackoutStart = null;
 		blindfold = {};
 		playerWon = packet.winner;
+		gameOverTeam = packet.team || null;
 		achievements = packet.achievements;
 		// Set up the "rate this map" widget for the game-over screen.
 		ratingMapId = (packet.mapId != null) ? packet.mapId : ((currentMap && currentMap.id) || null);

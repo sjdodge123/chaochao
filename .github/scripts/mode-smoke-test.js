@@ -304,10 +304,44 @@ function sessionFullMatchPerMode(picked) {
         const finisherId = sig + '-p0';
         roomEmits = [];
         let rounds = 0;
-        while (g.currentState !== c.stateMap.gameOver && rounds < 10) {
+        let teamsChecked = false;
+        let round1Brutal = null;
+        // Generous cap: a 3-player teams match nets ~+4/round, so it ends via the
+        // maxRounds leader rule (round 12) rather than the points target.
+        while (g.currentState !== c.stateMap.gameOver && rounds < 15) {
             rounds++;
             if (!playRound(room, finisherId, label + ' round ' + rounds)) { break; }
             if (failures > 0) { break; }
+            if (rounds === 1) {
+                round1Brutal = (gb.brutalConfig != null && gb.brutalConfig.brutal === true);
+            }
+            // Teams invariants, checked once after the first completed round.
+            if (mode.teams === true && !teamsChecked) {
+                teamsChecked = true;
+                const counts = {};
+                let unassigned = 0;
+                for (const id in room.playerList) {
+                    const t = room.playerList[id].teamId;
+                    if (t == null) { unassigned++; } else { counts[t] = (counts[t] || 0) + 1; }
+                }
+                const sizes = Object.values(counts);
+                check(unassigned === 0, label + ': every player has a team');
+                check(sizes.length === 2 && Math.abs(sizes[0] - sizes[1]) <= 1,
+                    label + ': teams are balanced (' + JSON.stringify(counts) + ')');
+                // Points ledger after round 1: the finisher banked firstPlace (5),
+                // minus at most one teammate death (-1) => their team holds >= 4 and
+                // leads the opponents (whose deaths floor them at 0).
+                const ft = room.playerList[finisherId].teamId;
+                const pts = g.teamPointsCfg();
+                check(g.teamPoints != null && g.teamPoints[ft] >= pts.firstPlace + pts.death,
+                    label + ': first place + deaths settled into the team points (' + JSON.stringify(g.teamPoints) + ')');
+            }
+            if (mode.teams !== true && !teamsChecked) {
+                teamsChecked = true;
+                let anyTeam = false;
+                for (const id in room.playerList) { if (room.playerList[id].teamId != null) { anyTeam = true; } }
+                check(!anyTeam, label + ': FFA mode assigns no teams');
+            }
         }
         if (failures > 0) { return; }
 
@@ -315,12 +349,19 @@ function sessionFullMatchPerMode(picked) {
         const over = roomEmits.filter(e => e.event === 'startGameover').pop();
         check(over != null && over.payload && over.payload.winner === finisherId,
             label + ': the repeat first-finisher won the match');
+        if (mode.teams === true) {
+            const team = over && over.payload ? over.payload.team : null;
+            check(team != null && team.id === room.playerList[finisherId].teamId
+                && Array.isArray(team.members) && team.members.indexOf(finisherId) !== -1,
+                label + ': gameOver names the clincher\'s TEAM (with members) as the winner');
+        }
 
         // Standard (non-brutal) regression guard: round 1 rolls against a 0%
-        // chance, so a standard-mode match must NOT open on a brutal round.
-        // (Brutal modes assert the inverse inside playRound every round.)
+        // base chance, so a standard-mode match must NOT open on a brutal round —
+        // a real assertion, so a regression that forces brutal rounds in standard
+        // modes fails here. (Brutal modes assert the inverse inside playRound.)
         if (mode.brutal !== true) {
-            console.log('ok: ' + label + ': non-brutal mode left the brutal roller alone');
+            check(round1Brutal === false, label + ': non-brutal mode left the brutal roller alone (round 1 not brutal)');
         }
 
         // Mode persistence: the room keeps its mode across gameOver (it only
@@ -329,6 +370,108 @@ function sessionFullMatchPerMode(picked) {
         check(gb.gameModeId === mode.id, label + ': mode persisted through gameOver');
         console.log('Session 2 passed for ' + label + ' (' + rounds + ' rounds).\n');
     }
+}
+
+// ---------------------------------------------------------------------------
+// Session 4: teams-specific mechanics — friendly fire, late-join balance, and
+// the team-aware bunker emerge. Runs against the first ACTIVE teams mode.
+// ---------------------------------------------------------------------------
+function fakePunchFrom(attacker, victim) {
+    return {
+        clashed: false, mapOwned: false, landed: false, type: 'player',
+        ownerId: attacker.id, ownerTeamId: attacker.teamId, ownerInfected: !!attacker.isZombie,
+        x: victim.x + 6, y: victim.y, getBonus() { return 3; }
+    };
+}
+function sessionTeamMechanics(picked) {
+    const teamsMode = activeModes().find(m => m.teams === true);
+    if (teamsMode == null) { console.log('Session 4 skipped: no active teams mode.'); return; }
+    const sig = 'mode-teams-mech';
+    const room = buildRoom(sig, 4, picked.map);
+    const g = room.game, gb = g.gameBoard;
+    g.startLobby();
+    gb.setGameMode(teamsMode.id);
+    g.startGated();
+    g.startRace();
+    for (let f = 0; f < 5; f++) { tick(room, 'teams-mech'); }
+
+    const ids = Object.keys(room.playerList);
+    const byTeam = { 0: [], 1: [] };
+    for (const id of ids) { byTeam[room.playerList[id].teamId].push(room.playerList[id]); }
+    check(byTeam[0].length === 2 && byTeam[1].length === 2, 'teams-mech: 4 players split 2v2');
+    if (byTeam[0].length < 2 || byTeam[1].length < 2) { return; }
+
+    // Friendly fire: a teammate's punch is a no-op; an enemy's punch shoves.
+    const victim = byTeam[0][0], mate = byTeam[0][1], enemy = byTeam[1][0];
+    victim.velX = 0; victim.velY = 0;
+    victim.handlePunchHit(fakePunchFrom(mate, victim));
+    check(victim.velX === 0 && victim.velY === 0 && victim.punchedBy == null,
+        'teams-mech: teammate punch is a no-op (no shove, no attribution)');
+    victim.handlePunchHit(fakePunchFrom(enemy, victim));
+    check(victim.velX !== 0 || victim.velY !== 0, 'teams-mech: enemy punch still shoves');
+    check(victim.punchedBy === enemy.id, 'teams-mech: enemy punch attributes the hit');
+    // Zombified teammate overrides the team gate (infection round behaviour).
+    victim.velX = 0; victim.velY = 0; victim.punchedBy = null;
+    mate.isZombie = true;
+    victim.handlePunchHit(fakePunchFrom(mate, victim));
+    check(victim.velX !== 0 || victim.velY !== 0, 'teams-mech: a ZOMBIE teammate\'s bite still lands');
+    mate.isZombie = false;
+
+    // Late joiner mid-match: lands on the smaller team. Kill one Jade member off
+    // the roster entirely (leave) to skew counts, then join someone new.
+    const leaver = byTeam[1][1];
+    delete room.playerList[leaver.id];
+    const joiner = room.world.createNewPlayer(sig + '-late');
+    room.playerList[joiner.id] = joiner;
+    g.determineGameState(joiner);
+    check(joiner.teamId === byTeam[1][0].teamId,
+        'teams-mech: late joiner assigned to the smaller team');
+
+    // The clinch: a team HOLDING the points target whose member takes first place
+    // wins the match on the spot, mid-round (uses the TEAM_POINTS_START dev seam
+    // to open round 1 at the target).
+    process.env.TEAM_POINTS_START = '60';
+    try {
+        const room3 = buildRoom('mode-teams-clinch', 4, picked.map);
+        room3.game.startLobby();
+        room3.game.gameBoard.setGameMode(teamsMode.id);
+        roomEmits = [];
+        check(playRound(room3, 'mode-teams-clinch-p0', 'teams-clinch'),
+            'teams-mech: seeded match-point round completed');
+        check(room3.game.currentState === c.stateMap.gameOver,
+            'teams-mech: first place AT the target clinched the match mid-round');
+        const overC = roomEmits.filter(e => e.event === 'startGameover').pop();
+        check(overC != null && overC.payload && overC.payload.team != null
+            && overC.payload.team.id === room3.playerList['mode-teams-clinch-p0'].teamId,
+            'teams-mech: the clincher\'s team is the winner');
+    } finally {
+        delete process.env.TEAM_POINTS_START;
+    }
+
+    // Team-aware bunker emerge: with Crimson fully dead and TWO Jade players still
+    // alive, the door must open (one TEAM remains — not one player).
+    c.brutalTypesForce = [c.brutalRounds.bunker.id];
+    try {
+        const room2 = buildRoom('mode-teams-bunker', 4, picked.map);
+        const g2 = room2.game, gb2 = room2.game.gameBoard;
+        room2.game.startLobby();
+        gb2.setGameMode(teamsMode.id);
+        g2.startGated();
+        check(gb2.goalBuried === true, 'teams-mech: bunker round set up (goal buried)');
+        g2.startRace();
+        for (let f = 0; f < 5; f++) { tick(room2, 'teams-bunker'); }
+        const teams2 = { 0: [], 1: [] };
+        for (const id in room2.playerList) { teams2[room2.playerList[id].teamId].push(room2.playerList[id]); }
+        teams2[0].forEach(p => { p.alive = false; });
+        let guard = 0;
+        while (gb2.goalBuried && guard++ < 600) { tick(room2, 'teams-bunker'); }
+        const jadeAlive = teams2[1].filter(p => p.alive).length;
+        check(gb2.goalBuried === false && jadeAlive === 2,
+            'teams-mech: bunker emerged with one TEAM remaining (' + jadeAlive + ' teammates still alive)');
+    } finally {
+        delete c.brutalTypesForce;
+    }
+    if (failures === 0) { console.log('Session 4 passed: team mechanics.\n'); }
 }
 
 // ---------------------------------------------------------------------------
@@ -395,6 +538,7 @@ console.log('Full-match map: ' + picked.name + '\n');
 try {
     sessionPlumbing();
     if (failures === 0) { sessionFullMatchPerMode(picked); }
+    if (failures === 0) { sessionTeamMechanics(picked); }
     if (failures === 0) { sessionEveryMapEveryMode(); }
 } catch (e) {
     failures++;

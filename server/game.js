@@ -148,6 +148,14 @@ class Game {
 		this.notchesToWin = c.baseNotchesToWin;
 		this.firstPlaceSig = null;
 		this.secondPlaceSig = null;
+		// Teams (teams game modes only): the shared POINTS score per team id and the
+		// winning team (read by awardProgression/startGameover). Points flow from
+		// race placement and combat (see creditTeamPoints / c.teams.points): first/
+		// second/other finishes earn, enemy kills earn, ANY member death costs. The
+		// match ends at a ROUND boundary once a team is at the target (or the round
+		// cap hits) and the score isn't tied. null/none in FFA modes.
+		this.teamPoints = null;
+		this.winningTeamId = null;
 		//AI racers: grid size is rolled once per game and held across rounds.
 		this.botTarget = null;
 		// SPIKE (lobby AI hub): a room-level override set from the lobby AI station.
@@ -208,6 +216,7 @@ class Game {
 		//In Racing State or Collapse State
 		if (this.currentState == this.stateMap.racing || this.currentState == this.stateMap.collapsing) {
 			this.checkForWinners();
+			this.flushTeamBroadcast(); // coalesced teamUpdate (score changes this tick)
 			//Mood changes are deferred to startOverview — flipping the music the
 			//instant someone gains/loses near-victory mid-race felt jarring. The
 			//fallback still ticks here so a stuck track can't silence the room.
@@ -236,7 +245,215 @@ class Game {
 		}
 		return colors;
 	}
+	// ---- Teams (teams game modes) ------------------------------------------------
+	isTeamsMode() {
+		return this.gameBoard.isTeamsMode();
+	}
+	teamDefs() {
+		return (c.teams && Array.isArray(c.teams.defs)) ? c.teams.defs : [{ id: 0, name: "Crimson", color: "#DC143C" }, { id: 1, name: "Jade", color: "#00A86B" }];
+	}
+	// Team points tuning (c.teams.points) with safe defaults. All knobs in config.
+	teamPointsCfg() {
+		var p = (c.teams && c.teams.points) ? c.teams.points : {};
+		return {
+			firstPlace: (typeof p.firstPlace === "number") ? p.firstPlace : 5,
+			secondPlace: (typeof p.secondPlace === "number") ? p.secondPlace : 3,
+			finish: (typeof p.finish === "number") ? p.finish : 1,
+			kill: (typeof p.kill === "number") ? p.kill : 2,
+			death: (typeof p.death === "number") ? p.death : -1,
+			target: (typeof p.target === "number") ? p.target : 30,
+			maxRounds: (typeof p.maxRounds === "number") ? p.maxRounds : 10
+		};
+	}
+	// "Match point": the team holds the target — their next FIRST-PLACE finish wins
+	// the match outright (the clinch in checkForWinners). Drives the team-wide
+	// near-victory cues (victory tail, gold rows, sting, brutal boost). Deaths can
+	// drop a team back UNDER the line, so match point is defensible.
+	teamMatchPointAt() {
+		return this.teamPointsCfg().target;
+	}
+	teamMemberCount(teamId) {
+		var n = 0;
+		for (var id in this.playerList) {
+			if (this.playerList[id] != null && this.playerList[id].teamId === teamId) { n++; }
+		}
+		return n;
+	}
+	// Assign a team to every UNASSIGNED player: each goes to the currently-smaller
+	// team (ties -> Crimson). Called at match start (everyone) and again whenever
+	// someone arrives mid-match (late-join humans via determineGameState, topped-up
+	// bots via startGated) — assigned players are never moved, so humans keep their
+	// team for the whole match and only NEW arrivals rebalance the count.
+	ensureTeamAssignments() {
+		var defs = this.teamDefs();
+		var a = defs[0].id, b = defs[1].id;
+		var changed = false;
+		for (var id in this.playerList) {
+			var p = this.playerList[id];
+			if (p == null || p.teamId != null) { continue; }
+			p.teamId = (this.teamMemberCount(a) <= this.teamMemberCount(b)) ? a : b;
+			changed = true;
+		}
+		return changed;
+	}
+	resetTeams() {
+		for (var id in this.playerList) {
+			if (this.playerList[id] != null) { this.playerList[id].teamId = null; }
+		}
+		this.teamPoints = null;
+		this.winningTeamId = null;
+		this._teamMatchPoint = null;
+		this._teamsDirty = false;
+	}
+	// One-shot team sync: assignments + the shared score. Broadcast on every change
+	// (assignment or score) and included in the gameState snapshot for late joiners.
+	teamSnapshot() {
+		// Gate on the pool, not just the mode: a teams room idling in the lobby has
+		// no rosters/score yet, and a non-null-but-empty snapshot would latch the
+		// client's teams UI on (it keys every team render off teamInfo != null).
+		if (!this.isTeamsMode() || this.teamPoints == null) { return null; }
+		var assignments = [];
+		for (var id in this.playerList) {
+			var p = this.playerList[id];
+			if (p != null && p.teamId != null) { assignments.push([id, p.teamId]); }
+		}
+		return {
+			assignments: assignments,
+			score: this.teamPoints,
+			target: this.teamPointsCfg().target,
+			matchPointAt: this.teamMatchPointAt(),
+			defs: this.teamDefs()
+		};
+	}
+	broadcastTeams() {
+		var snap = this.teamSnapshot();
+		if (snap != null) {
+			messenger.messageRoomBySig(this.roomSig, "teamUpdate", snap);
+		}
+	}
+	// Teams with at least one player still standing this round. Zombies, spectators
+	// and finished players don't keep a team "standing" — this drives the bunker's
+	// emerge trigger in team modes (door opens at ONE TEAM remaining, not one player).
+	aliveTeamCount() {
+		var seen = {};
+		var n = 0;
+		for (var id in this.playerList) {
+			var p = this.playerList[id];
+			// !awake matches FFA's accounting: checkForWinners counts asleep players
+			// as concluded, so an AFK kart must not keep its team "standing" either.
+			if (p == null || p.teamId == null || !p.alive || !p.awake || p.isSpectator || p.isZombie || p.reachedGoal) { continue; }
+			if (!seen[p.teamId]) { seen[p.teamId] = true; n++; }
+		}
+		return n;
+	}
+	// Credit a finisher's notches to their team's shared pool, mirroring addNotch's
+	// clamp-at-target semantics: the pool parks at the target and the NEXT first
+	// finish from that team clinches the match (checkForWinners). While a team is
+	// parked at the target every member reads nearVictory (brutal-roll boost + the
+	// same "gun for the leader" HUD cue as FFA).
+	initTeamPool() {
+		this.teamPoints = {};
+		// Dev/testing seam: TEAM_POINTS_START=<n> seeds every team's score at match
+		// start (e.g. 55 vs the 60 target = round 1 opens at match point, lighting
+		// the team-wide victory tails and making the first round decisive). Env-
+		// gated like PERF_MONITOR / TOUCH_DEBUG — absent in prod, no config surface.
+		var seed = parseInt(process.env.TEAM_POINTS_START, 10);
+		if (isNaN(seed) || seed < 0) { seed = 0; }
+		var defs = this.teamDefs();
+		for (var d = 0; d < defs.length; d++) { this.teamPoints[defs[d].id] = seed; }
+	}
+	// Credit (or charge) team points THROUGH the player who caused it: finishes and
+	// enemy kills earn, a member dying costs. The score floors at 0 — a bleeding
+	// team can't dig a negative hole. Every change re-derives the whole team's
+	// nearVictory from "match point" (one first-place finish from the target) and
+	// broadcasts BOTH the new score (teamUpdate) and a per-player delta
+	// (teamPointsDelta) so the client can float +5/+2/-1 over the kart involved.
+	creditTeamPoints(player, amount, reason) {
+		if (!this.isTeamsMode() || player == null || player.teamId == null || amount === 0) { return; }
+		if (this.teamPoints == null) { this.initTeamPool(); }
+		var team = player.teamId;
+		var next = (this.teamPoints[team] || 0) + amount;
+		if (next < 0) { next = 0; }
+		this.teamPoints[team] = next;
+		// Rewrite the team's nearVictory only when the match-point boolean actually
+		// FLIPS — not on every credit — so a burst of deaths isn't N playerList walks.
+		var matchPoint = next >= this.teamMatchPointAt();
+		if (this._teamMatchPoint == null) { this._teamMatchPoint = {}; }
+		if (this._teamMatchPoint[team] !== matchPoint) {
+			this._teamMatchPoint[team] = matchPoint;
+			for (var id in this.playerList) {
+				var p = this.playerList[id];
+				if (p != null && p.teamId === team) { p.nearVictory = matchPoint; }
+			}
+		}
+		// `reason` ('first'|'second'|'finish'|'kill'|'death') feeds the client's
+		// round ledger — the teams overview itemizes where the round's points came from.
+		// The per-event delta goes out immediately (the floating +N/-N popups need the
+		// moment), but the full teamUpdate snapshot is COALESCED to one per tick
+		// (flushTeamBroadcast) — a collapse killing half the grid in one tick would
+		// otherwise rebuild + fan out N snapshots inside the heaviest tick of the round.
+		messenger.messageRoomBySig(this.roomSig, "teamPointsDelta", {
+			id: player.id, teamId: team, amount: amount, reason: reason || null
+		});
+		this._teamsDirty = true;
+	}
+	// One coalesced teamUpdate per tick at most (set by creditTeamPoints; called
+	// from update() right after the racing-state checkForWinners pass).
+	flushTeamBroadcast() {
+		if (this._teamsDirty) {
+			this._teamsDirty = false;
+			this.broadcastTeams();
+		}
+	}
+	// Round-cap BACKSTOP only (called when every racer has concluded, before the
+	// overview). The real win is the mid-round CLINCH in checkForWinners: a team
+	// holding the target whose member takes first place wins on the spot. This
+	// backstop just stops an endless match — once maxRounds have been played, the
+	// leading team takes it (a dead heat plays on, sudden-death style).
+	checkTeamPointsWin() {
+		if (!this.isTeamsMode() || this.teamPoints == null) { return false; }
+		var pts = this.teamPointsCfg();
+		var defs = this.teamDefs();
+		var a = defs[0].id, b = defs[1].id;
+		var sa = this.teamPoints[a] || 0, sb = this.teamPoints[b] || 0;
+		var atRoundCap = (pts.maxRounds > 0 && this.gameBoard.round >= pts.maxRounds);
+		if (!atRoundCap) { return false; }
+		if (sa === sb) { return false; }
+		var winnerTeam = (sa > sb) ? a : b;
+		// Stamp the winner BEFORE picking the anchor kart: gameOver prefers this
+		// pre-set winningTeamId, so the backstop still crowns the right team even
+		// when it has no remaining members (e.g. its only human disconnected).
+		this.winningTeamId = winnerTeam;
+		// Winner sig anchors the game-over screen/recap: this round's first finisher
+		// when they're on the winning team, else any member, else ANY player at all
+		// (the TEAM is the winner; the sig is just the recap anchor).
+		var sig = null;
+		if (this.firstPlaceSig != null && this.playerList[this.firstPlaceSig] != null
+			&& this.playerList[this.firstPlaceSig].teamId === winnerTeam) {
+			sig = this.firstPlaceSig;
+		} else {
+			for (var id in this.playerList) {
+				if (this.playerList[id] != null && this.playerList[id].teamId === winnerTeam) { sig = id; break; }
+			}
+		}
+		if (sig == null) {
+			for (var anyId in this.playerList) {
+				if (this.playerList[anyId] != null) { sig = anyId; break; }
+			}
+		}
+		if (sig == null) { return false; } // empty room — nothing to end
+		this.recordAllPendingFinishes();
+		this.gameOver(sig);
+		return true;
+	}
+
 	determineGameState(newPlayer) {
+		// Teams: a player arriving after the match started (late-join human; bots go
+		// through here too when fillGridWithBots tops up) joins the SMALLER team.
+		// Lobby/waiting arrivals wait for the match-start assignment in startGated.
+		if (this.isTeamsMode() && this.locked && newPlayer.teamId == null) {
+			if (this.ensureTeamAssignments()) { this.broadcastTeams(); }
+		}
 		if (this.currentState == c.stateMap.lobby && this.gameBoard.currentMap != null && this.gameBoard.currentMap.spawnPad != null) {
 			// Mid-lobby join: drop onto the safe spawn pad, not a random spot (which
 			// could be the lava island now that lobby terrain is live).
@@ -437,20 +654,39 @@ class Game {
 				// lasted). Set once, the tick they're first seen concluded.
 				if (this.playerList[player].eliminatedAt == null) {
 					this.playerList[player].eliminatedAt = Date.now();
+					// Teams: ANY member death costs the team points (the once-per-round
+					// latch is this eliminatedAt stamp — zombie re-deaths never re-charge).
+					this.creditTeamPoints(this.playerList[player], this.teamPointsCfg().death, 'death');
 				}
 
 				if (this.playerList[player].murderedBy != null) {
 					var killer = this.playerList[this.playerList[player].murderedBy];
 					if (killer != null) {
 						this.playerList[player].murderedBy = null;
-						// Zombie Slayer: addKill() ignores zombie attackers (zombies don't
-						// rack up the normal kill stat), so tally infected kills here where
-						// both killer and victim are in hand.
-						if (killer.isZombie) {
-							killer.zombieKillCount += 1;
+						// Teams: killing a TEAMMATE (only possible via abilities — punches
+						// already no-op) earns nothing: no kill stat, no fire/streak, no
+						// first blood. The death still happened; only the reward is denied,
+						// so a bomb "accident" can't be farmed. Zombies override teams.
+						if (killer.teamId != null && killer.teamId === this.playerList[player].teamId
+							&& !killer.isZombie && !this.playerList[player].isZombie) {
+							// no credit
+						} else {
+							// Zombie Slayer: addKill() ignores zombie attackers (zombies don't
+							// rack up the normal kill stat), so tally infected kills here where
+							// both killer and victim are in hand.
+							if (killer.isZombie) {
+								killer.zombieKillCount += 1;
+							}
+							killer.addKill(this.playerList[player]);
+							this.gameBoard.checkForFirstBlood();
+							// Teams: an enemy kill earns the killer's team points — but only a
+							// LIVING, non-zombie killer scores, mirroring addKill's own gate, so
+							// a trade-kill can't bank team points the kill stat itself denies
+							// (zombies play for the horde, not a team).
+							if (!killer.isZombie && killer.alive) {
+								this.creditTeamPoints(killer, this.teamPointsCfg().kill, 'kill');
+							}
 						}
-						killer.addKill(this.playerList[player]);
-						this.gameBoard.checkForFirstBlood();
 					}
 				}
 
@@ -498,7 +734,16 @@ class Game {
 					}
 				}
 				if (this.firstPlaceSig == null) {
-					if (this.playerList[player].notches == this.notchesToWin) {
+					// The clinch: FFA — the first finisher already parked at the personal
+					// cap wins the match. Teams — a team HOLDING the points target whose
+					// member takes first place wins on the spot (the score is checked
+					// before this finish's +5, so you must arrive at the line already at
+					// the target — and deaths can knock you back under it).
+					var clinched = this.isTeamsMode()
+						? (this.teamPoints != null && this.playerList[player].teamId != null
+							&& (this.teamPoints[this.playerList[player].teamId] || 0) >= this.teamPointsCfg().target)
+						: (this.playerList[player].notches == this.notchesToWin);
+					if (clinched) {
 						//Game over player wins
 						// Sweep up any OTHER racers who reached the goal on this
 						// same tick — gameOver's early-return below skips the rest
@@ -513,6 +758,13 @@ class Game {
 					this.firstPlaceSig = player;
 					this.playerList[player].addNotch(this.notchesToWin);
 					this.playerList[player].addNotch(this.notchesToWin);
+					if (this.isTeamsMode() && !this.playerList[player].teamPointsCredited) {
+						this.playerList[player].teamPointsCredited = true;
+						this.creditTeamPoints(this.playerList[player], this.teamPointsCfg().firstPlace, 'first');
+						// Personal addNotch may have flagged nearVictory at the PERSONAL
+						// cap; creditTeamPoints just rewrote the whole team from the
+						// points score, which is the only victory signal in teams.
+					}
 					this.gameBoard.firstPlaceSig = player;
 					emitBotEmote(this.playerList[player], "win");
 					botsCheerFor(this.playerList, player); // others clap/react
@@ -524,7 +776,18 @@ class Game {
 					this.secondPlaceSig = player;
 					messenger.messageRoomBySig(this.roomSig, "secondPlaceWinner", player);
 					this.playerList[player].addNotch(this.notchesToWin);
+					if (this.isTeamsMode() && !this.playerList[player].teamPointsCredited) {
+						this.playerList[player].teamPointsCredited = true;
+						this.creditTeamPoints(this.playerList[player], this.teamPointsCfg().secondPlace, 'second');
+					}
 					continue;
+				}
+				// Teams: every OTHER finisher past the podium still banks the small
+				// finish bonus — once (the per-round latch covers the every-tick rescan
+				// of players whose reachedGoal stays true).
+				if (this.isTeamsMode() && !this.playerList[player].teamPointsCredited) {
+					this.playerList[player].teamPointsCredited = true;
+					this.creditTeamPoints(this.playerList[player], this.teamPointsCfg().finish, 'finish');
 				}
 			}
 		}
@@ -532,6 +795,12 @@ class Game {
 
 		if (playersConcluded == this.playerCount) {
 			this.gameBoard.killAFKPlayers();
+			// Teams: the match is decided at round boundaries — first team at/over the
+			// points target (or leading at the round cap), ties play on. Fires INSTEAD
+			// of the overview when it ends the match.
+			if (this.checkTeamPointsWin()) {
+				return;
+			}
 			this.startOverview();
 			return;
 		}
@@ -541,18 +810,27 @@ class Game {
 		// — no winner, no notch — so a camped last-man-standing can't hang the room.
 		if (this.gameBoard.bunkerRingActive && this.gameBoard.bunkerStartTime != null) {
 			if (Date.now() - this.gameBoard.bunkerStartTime > c.brutalRounds.bunker.maxRoundTime * 1000) {
+				// Round ends here too, so the teams round-cap backstop must get its
+				// look-in — otherwise a bunker void at/after maxRounds plays on.
+				if (this.checkTeamPointsWin()) {
+					return;
+				}
 				this.startOverview();
 				return;
 			}
 		}
 
-		//Start slow collapse if last player alive
-		if (this.alivePlayerCount == 1) {
-			// Battle-royale endgame: a lone survivor remains, so raise the buried goal
-			// for them to claim — then engage the SAME map-aware par collapse a normal
-			// last player gets, so they can't just run laps to burn everyone's time
-			// (grief). The collapse converges on the risen goal; an honest line beats
-			// it with margin, a staller gets swallowed (round ends, no winner).
+		//Start slow collapse once the round has a "last stand": the lone survivor in
+		// FFA, or — in a teams mode — only ONE TEAM still standing (teammates aren't
+		// rivals, so a surviving squad gets the same hurry-up pressure a lone
+		// survivor does, in bunker AND normal rounds alike).
+		var lastStand = this.isTeamsMode() ? (this.aliveTeamCount() <= 1) : (this.alivePlayerCount == 1);
+		if (lastStand) {
+			// Battle-royale endgame: the last player/team remains, so raise the buried
+			// goal for them to claim — then engage the SAME map-aware par collapse a
+			// normal last stand gets, so they can't just run laps to burn everyone's
+			// time (grief). The collapse converges on the risen goal; an honest line
+			// beats it with margin, a staller gets swallowed (round ends, no winner).
 			if (this.gameBoard.checkForActiveBrutal(c.brutalRounds.bunker.id)) {
 				if (this.gameBoard.goalBuried && !this.collapseInitated) {
 					this.gameBoard.emergeBunker();
@@ -568,10 +846,11 @@ class Game {
 				}
 			} else if (this.currentState != c.stateMap.collapsing && !this.collapseInitated) {
 				this.collapseInitated = true;
-				// A true single-player room (no rivals, no bots) gets a collapse
-				// tuned to the map so a competent line can win, instead of the
-				// map-blind 15s/random-goal last-player collapse.
-				if (this.playerCount == 1 && this.scheduleSoloCollapse()) {
+				// The map-tuned par collapse (a competent line can win) covers a true
+				// single-player room AND a last-team-standing in teams mode; the
+				// remaining multi-rival FFA case keeps the legacy map-blind
+				// 15s/random-goal collapse (also the fallback when no par is known).
+				if ((this.playerCount == 1 || this.isTeamsMode()) && this.scheduleSoloCollapse()) {
 					return;
 				}
 				setTimeout(function (context) {
@@ -623,6 +902,12 @@ class Game {
 				var capLeft = (c.maxPlayersInRoom || 25) - humanCount;
 				if (capLeft < 0) { capLeft = 0; }
 				this.botTarget = humanCount + utils.autoBotsForHumans(humanCount, capLeft);
+				// Teams + Auto fill: an odd grid leaves one side a kart short every
+				// round, so round the auto target up to even (capacity permitting).
+				// An explicit lobby override is respected as-is.
+				if (this.isTeamsMode() && this.botTarget % 2 === 1 && this.botTarget < (c.maxPlayersInRoom || 25)) {
+					this.botTarget += 1;
+				}
 			}
 			desiredBots = this.botTarget - humanCount;
 		}
@@ -830,12 +1115,17 @@ class Game {
 		}
 		console.log("Start Gated");
 		this.locked = true;
+		var matchStarting = (this.currentState == this.stateMap.lobby);
 		// Leaving the lobby tutorial (this is the lobby->race transition; later rounds
 		// arrive here from overview): drop any ability picked up in the lobby so it
 		// can't be carried into the first real round. reset() only clears ability at
 		// gameOver, so abilities legitimately persist between rounds — hence the guard.
-		if (this.currentState == this.stateMap.lobby) {
+		if (matchStarting) {
 			this.gameBoard.clearLobbyAbilities();
+			// Teams: a fresh match rebuilds the rosters from scratch (the mode may
+			// have just changed at the hub, and last match's split shouldn't stick).
+			// Assignment itself happens below, after the bot grid fills.
+			this.resetTeams();
 		}
 		this.resetForRace();
 		this.currentState = this.stateMap.gated;
@@ -847,6 +1137,22 @@ class Game {
 		// rooms are unaffected (isPreview is false -> always fill, as before).
 		if (!this.gameBoard.isPreview || this.gameBoard.previewAI) {
 			this.fillGridWithBots();
+		}
+		// Teams: with the full grid (humans + bots) known, hand every unassigned
+		// player to the smaller team and announce the rosters + pool. Later rounds
+		// only ever ADD arrivals (top-up bots above, late-join humans via
+		// determineGameState) — assigned players never move.
+		if (this.isTeamsMode()) {
+			if (matchStarting || this.teamPoints == null) { this.initTeamPool(); }
+			this.ensureTeamAssignments();
+			this.broadcastTeams();
+		} else if (matchStarting) {
+			// Authoritative teams CLEAR at every non-teams match start: clients latch
+			// teamInfo from the last snapshot they saw, and broadcastTeams can never
+			// emit in FFA (teamSnapshot is null) — without this, a room that played a
+			// teams match and switched modes would render the whole FFA match through
+			// the stale teams UI (score pill, team overview panels, underglows).
+			messenger.messageRoomBySig(this.roomSig, "teamUpdate", null);
 		}
 		messenger.messageRoomBySig(this.roomSig, "startGated", null);
 	}
@@ -1221,6 +1527,8 @@ class Game {
 		this.locked = false;
 		this.collapseInitated = false;
 		this.notchesToWin = c.baseNotchesToWin;
+		// Teams reassign fresh at the next match start (the MODE persists; rosters don't).
+		this.resetTeams();
 		this.currentMusic = null;
 		this.musicChangedAt = null;
 		// A full game is over: drop the AI racers and re-roll the grid for the
@@ -1284,15 +1592,22 @@ class Game {
 		// for that final race, so those round-placement fields are null here — relying
 		// on them would deny the winner their win bonus and never increment `wins`.
 		var winnerId = (winnerSig != null) ? String(winnerSig) : null;
+		// Teams: the whole winning team wins — every member gets the win bonus and
+		// the win counter, not just the clincher (winningTeamId is stamped by
+		// gameOver before this runs).
+		var winningTeamId = this.isTeamsMode() ? this.winningTeamId : null;
 		// Runner-up = the non-winner with the most notches (match standing). secondPlaceSig
 		// is null on the match-ending tick (and resetForRace clears it), so derive it from
-		// notches instead, which IS the durable match score. Ties: first found.
+		// notches instead, which IS the durable match score. Ties: first found. In teams,
+		// the runner-up is the best of the LOSING team (the winning side already gets
+		// the win bonus member-wide).
 		var runnerUpId = null;
 		var bestNotches = -1;
 		for (var rid in this.playerList) {
 			if (rid === winnerId) { continue; }
 			var rp = this.playerList[rid];
 			if (rp == null) { continue; }
+			if (winningTeamId != null && rp.teamId === winningTeamId) { continue; }
 			var rn = rp.notches || 0;
 			if (rn > bestNotches) { bestNotches = rn; runnerUpId = rid; }
 		}
@@ -1325,7 +1640,7 @@ class Game {
 			if (p == null || p.isAI || !p.verifiedUserId || !p.racedCurrentMap) {
 				continue; // bots + guests + late-join spectators (never raced) earn no progression
 			}
-			var isWinner = (id === winnerId);
+			var isWinner = (winningTeamId != null) ? (p.teamId === winningTeamId) : (id === winnerId);
 			var countsAsWin = isWinner && enoughHumans; // a "win" requires real competition
 			var isRunnerUp = (id === runnerUpId);
 			var breakdown = {
@@ -1413,6 +1728,28 @@ class Game {
 	gameOver(player) {
 		console.log("Game Over");
 		this.currentState = this.stateMap.gameOver;
+		// Teams: the clincher's whole team wins. Stamped BEFORE awardProgression so
+		// the win bonus / win counter reach every member, and carried on the payload
+		// so the game-over screen celebrates Crimson/Jade rather than one kart.
+		var winningTeam = null;
+		if (this.isTeamsMode()) {
+			// checkTeamPointsWin pre-stamps winningTeamId (its anchor kart may not be
+			// on the winning team when that team emptied out); the clinch path derives
+			// it from the clincher.
+			if (this.winningTeamId == null && this.playerList[player] != null && this.playerList[player].teamId != null) {
+				this.winningTeamId = this.playerList[player].teamId;
+			}
+		}
+		if (this.isTeamsMode() && this.winningTeamId != null) {
+			var defs = this.teamDefs();
+			var def = null;
+			for (var d = 0; d < defs.length; d++) { if (defs[d].id === this.winningTeamId) { def = defs[d]; break; } }
+			var members = [];
+			for (var mid in this.playerList) {
+				if (this.playerList[mid] != null && this.playerList[mid].teamId === this.winningTeamId) { members.push(mid); }
+			}
+			winningTeam = { id: this.winningTeamId, name: def ? def.name : "Team", color: def ? def.color : "#fff", members: members };
+		}
 		var achievements = this.gatherAchievements();
 		// Award XP/medals/unlocks and queue this match's celebration toasts (shown on next
 		// lobby arrival), then carry the just-played map's id/name so the game-over screen
@@ -1421,6 +1758,7 @@ class Game {
 		var ratedMap = (this.gameBoard && this.gameBoard.currentMap) ? this.gameBoard.currentMap : null;
 		messenger.messageRoomBySig(this.roomSig, 'startGameover', {
 			winner: player,
+			team: winningTeam,
 			achievements: achievements,
 			mapId: ratedMap ? ratedMap.id : null,
 			mapName: ratedMap ? ratedMap.name : null

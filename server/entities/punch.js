@@ -2,12 +2,17 @@
 var { Circle } = require('./shapes.js');
 
 class Punch extends Circle {
-	constructor(x, y, radius, color, ownerId, roomSig, punchBonus, infected) {
+	constructor(x, y, radius, color, ownerId, roomSig, punchBonus, infected, ownerTeamId) {
 		super(x, y, radius, color);
 		this.ownerId = ownerId;
 		this.roomSig = roomSig;
 		this.isPunch = true;
 		this.ownerInfected = infected;
+		// Team friendly-fire gate (Player.handlePunchHit) + the teammate-clash skip
+		// read this. A constructor param (not a post-construction stamp) so a future
+		// punch site can't silently ship with friendly fire enabled by forgetting
+		// the stamp; null (no team) deliberately fails open to FFA rules.
+		this.ownerTeamId = (ownerTeamId != null) ? ownerTeamId : null;
 		this.punchBonus = punchBonus;
 		this.type = "player";
 		this.mapOwned = false;

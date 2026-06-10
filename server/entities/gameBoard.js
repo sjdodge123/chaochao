@@ -200,6 +200,11 @@ class GameBoard {
 				if (!this.clashEligible(pb)) { continue; }
 				var ownerB = this.playerList[pb.ownerId];
 				if (ownerB == null || !ownerB.alive || ownerB.isInvuln()) { continue; }
+				// Teammates' simultaneous punches don't clash: each punch passes through
+				// and then no-ops on the teammate (handlePunchHit's friendly-fire gate),
+				// so two teammates swinging side by side at a rival aren't flung apart.
+				// Zombie bites already never clash (clashEligible excludes ownerInfected).
+				if (pa.ownerTeamId != null && pa.ownerTeamId === pb.ownerTeamId) { continue; }
 				if (!this.isPunchClash(ownerA, pa, ownerB, pb, cfg)) { continue; }
 				var bonusA = pa.getBonus(), bonusB = pb.getBonus();
 				if (Math.abs(bonusA - bonusB) <= cfg.tieMargin) {
@@ -2269,6 +2274,12 @@ class GameBoard {
 	isBrutalMode() {
 		var def = this.gameModeDef();
 		return def != null && def.brutal === true;
+	}
+	// True when the room's mode plays in teams (standard_teams / brutal_teams):
+	// Crimson vs Jade, shared notch pool, teammate punches are no-ops.
+	isTeamsMode() {
+		var def = this.gameModeDef();
+		return def != null && def.teams === true;
 	}
 	// Set the room's game mode (from the lobby hub mode station). Validates the id
 	// against the ACTIVE configured modes and reports whether it actually changed.
