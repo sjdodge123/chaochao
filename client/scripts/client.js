@@ -1141,6 +1141,16 @@ function registerStateHandlers(server) {
 		// round's gate phase — covers lobby -> round 1 (lobby trench accrued while
 		// idling) and between rounds — and runs before the gate/countdown renders.
 		if (typeof discardTrenchDecal === "function") { discardTrenchDecal(); }
+		// Mirror the server's clearLobbyAbilities (LOBBY->race only): nothing grabbed in
+		// the lobby carries into the race, so drop the held-ability HUD for every slot.
+		// Without this the server-cleared ability lingers on-screen as a usable-looking
+		// phantom (the server kept no record of it, so it can't actually fire). Guarded on
+		// the OLD state so between-round abilities — which legitimately persist — are kept.
+		if (currentState == config.stateMap.lobby) {
+			for (var abilSlot in playerList) {
+				if (playerList[abilSlot]) { playerList[abilSlot].ability = null; }
+			}
+		}
 		// Stamp the countdown start so the start-line glow can ramp toward release.
 		gatedStartTime = Date.now();
 		raceStartTime = null;
