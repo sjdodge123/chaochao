@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.31.2 — 2026-06-10
+
 ### General
 
 - The AI racers can **swim** now. Bots punch-to-swim across deep water just like you do, so they'll stroke their way over a water crossing instead of getting stuck at the shoreline — and they'll cut through a stretch of water when it's genuinely the faster line, while still taking the dry route when one's clearly quicker. (Water is slow going for everyone, bots included, so they won't dive in unless it pays off.)
