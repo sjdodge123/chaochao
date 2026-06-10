@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.32.0 — 2026-06-10
+
 ### Map editor
 
 - The **Featured** bar is a touch friendlier: maps now make the Featured playlist at a balance score of **85+** (was 90+), so a few more well-built tracks earn the badge.
