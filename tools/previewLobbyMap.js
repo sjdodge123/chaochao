@@ -10,7 +10,7 @@ const fs = require("fs");
 const path = require("path");
 const ROOT = path.join(__dirname, "..");
 
-const mapFile = process.argv[2] || path.join(ROOT, "client/maps/_lobbyTutorial.json");
+const mapFile = process.argv[2] || path.join(ROOT, "client/maps/_LobbyTutorial.json");
 // Written into client/ so the static server serves it; textures use relative paths.
 const outHtml = process.argv[3] || path.join(ROOT, "client/_lobby_preview.html");
 const map = JSON.parse(fs.readFileSync(mapFile, "utf8"));

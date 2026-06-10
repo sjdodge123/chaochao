@@ -177,8 +177,24 @@ function pollEditorGamepad() {
         return;
     }
 
-    // B always goes back one screen (editor -> map list -> home), in any mode.
+    // B is the pad's Escape — mirror create.js's Esc handler exactly: a confirm
+    // modal cancels FIRST, then a visible balance overlay clears, and only with
+    // neither up does B go back one screen (editor -> map list -> home). Without the
+    // modal-first check, B would clear the fairness overlay out from under an open
+    // "submit anyway?" modal (which is shown WITH the overlay) instead of answering it.
     if (egPressed(pad, EG_BTN_B)) {
+        if (egModalOpen()) {
+            var cancelBtn = document.getElementById("wipeConfirmCancel");
+            if (cancelBtn) { cancelBtn.click(); }
+            egRecord(pad);
+            return;
+        }
+        if (typeof balanceOverlay !== "undefined" && balanceOverlay != null &&
+            typeof clearBalanceOverlay === "function") {
+            clearBalanceOverlay();
+            egRecord(pad);
+            return;
+        }
         if (egAttackHeld && typeof handleUnClick === "function") {
             handleUnClick({ which: 1 }); // stop an in-progress paint
             egAttackHeld = false;

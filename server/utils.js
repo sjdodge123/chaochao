@@ -10,6 +10,7 @@ var c = require('./config.json');
 var cellGraph = require('./cellGraph.js');
 var mapFormat = require('./mapFormat.js');
 var mapClassifier = require('./mapClassifier.js');
+var mapNaming = require('./mapNaming.js');
 c.port = process.env.PORT || c.port;
 // Dev/testing seam: when set, EVERY cosmetic is equippable regardless of level/achievement
 // gating (server accepts any equip; client shows all unlocked). Default OFF so prod stays
@@ -145,8 +146,16 @@ exports.submitPullRequest = async function (map) {
     // maxlength>. DEL is the orphan control byte between the C0 range and the
     // printable extended chars (which we keep so accented names work). Map name
     // has its own stricter rule below (it becomes a filename + branch ref).
+    // Normalize the display name to the house convention (Title Case With Spaces)
+    // BEFORE deriving the filename/branch, so every committed map — and its
+    // <name>.json file — lands consistent without a manual cleanup pass. Shared with
+    // the content CI via server/mapNaming.js (single source of truth for the rule).
+    if (map != null && typeof map.name === 'string') { map.name = mapNaming.normalizeMapName(map.name); }
+
     var author = String(map.author).replace(/ /g, '').replace(/[\x00-\x1f\x7f]/g, '');
-    var mapName = String(map.name).replace(/ /g, '');
+    // The committed filename base — derived through the shared helper so the rule
+    // (normalized name, spaces stripped) lives in exactly one place (mapNaming.js).
+    var mapName = mapNaming.mapFileBase(map.name);
     var email = String(map.email).replace(/ /g, '').replace(/[\x00-\x1f\x7f]/g, '');
     if (author == '' || email == '' || mapName == '') {
         console.log("Can't submit to github; required info missing:" + author + ":" + email + ":" + mapName);
@@ -744,7 +753,7 @@ exports.validateMap = function (vMap, config) {
             return { valid: false, reason: "Map has a cell with no geometry." };
         }
         // Just a numeric-id check: the engine tolerates extra tile ids beyond
-        // config.tileMap (the curated _lobbyTutorial map uses station-sentinel
+        // config.tileMap (the curated _LobbyTutorial map uses station-sentinel
         // ids 102-108 that lobbyStations[] interprets specially), so rejecting
         // by membership would falsely fail validate-content on real maps. The
         // realistic crafted-submit threat is already covered upstream — the
@@ -834,7 +843,7 @@ exports.getContentCount = function () {
 exports.getMapListings = function () {
     return mapListing;
 }
-// The map-editor map list excludes lobbyOnly maps (e.g. _lobbyTutorial.json):
+// The map-editor map list excludes lobbyOnly maps (e.g. _LobbyTutorial.json):
 // they're lobby/tutorial-only, not user-editable race maps. Built in loadMaps()
 // from each map's own object (no index-alignment assumption). The full
 // getMapListings() is still used for contentDelivery so the play client can
@@ -961,7 +970,7 @@ function loadMaps() {
             }
         }
         maps.push(loadedMap);
-        // The editor list excludes lobbyOnly maps (e.g. _lobbyTutorial.json).
+        // The editor list excludes lobbyOnly maps (e.g. _LobbyTutorial.json).
         // Built here from this file's own map object so it never relies on
         // index alignment between mapListing and maps.
         if (!loadedMap.lobbyOnly) {

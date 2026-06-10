@@ -37,6 +37,16 @@ var adjacencyCache = new Map();
 // letting bots route onto grass→ice glides instead of avoiding them — while still
 // just behind grass so they don't dive onto ice from a standstill, where ice's
 // dismal accel (15) would bog them down.
+// Every drivable tile whose traversal COST the router has deliberately tuned —
+// either an explicit weight below or the considered 1.0 default (goal/ability/
+// random). A drivable tile outside this list has no thought-through routing cost,
+// so par times and the fairness time-spread that cross it are untrustworthy. This
+// is the authoritative "which tiles does the router understand" list for the
+// timing layer; mapClassifier.unbalancedTiles() pairs it with the composition list
+// so CI warns when a newly-added config.tileMap tile hasn't been balanced. ADD A
+// NEW TILE HERE (give it a weight in tileWeight) when you add one to config.
+var BALANCE_WEIGHTED_TILES = ['fast', 'normal', 'slow', 'ice', 'bumper', 'water', 'lava', 'goal', 'ability', 'random'];
+
 function tileWeight(id) {
     switch (id) {
         case c.tileMap.fast.id: return 1.0;   // grass — fastest (baseline)
@@ -518,6 +528,7 @@ module.exports = {
     reachableGoalExists: reachableGoalExists,
     reachableFromEdge: reachableFromEdge,
     tileWeight: tileWeight,
+    BALANCE_WEIGHTED_TILES: BALANCE_WEIGHTED_TILES,
     estimatePathTime: estimatePathTime,
     computeMapParTime: computeMapParTime
 };

@@ -361,7 +361,7 @@ function checkForMail(client) {
 			var reply = {
 				balanceScore: meta.balanceScore,
 				tier: meta.tier,
-				featuredScore: (c.balance && c.balance.featuredScore) || 90,
+				featuredScore: (c.balance && c.balance.featuredScore) || 85,
 				deductions: meta.deductions,
 				hardFail: meta.hardFail
 			};

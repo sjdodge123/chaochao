@@ -324,7 +324,7 @@ function clientConnect() {
             if (payload.tier === "featured") {
                 showSubmitStatus("★ " + payload.balanceScore + "/100 — would make Featured!", "green", "white", 6000);
             } else {
-                showSubmitStatus(payload.balanceScore + "/100 — see the overlay for fixes (Esc hides it)", "#8a6d00", "white", 6000);
+                showSubmitStatus(payload.balanceScore + "/100 — see the overlay for fixes (" + balanceHideHint("hides it") + ")", "#8a6d00", "white", 6000);
             }
             return;
         }
@@ -1055,6 +1055,18 @@ function clearBalanceOverlay() {
     dirty = true;
 }
 
+// The control that dismisses the balance overlay, named for whatever the player is
+// holding: the face button (B / ○) when a controller is connected — editorGamepad
+// maps that to clearBalanceOverlay, keyboard parity with Esc — otherwise "Esc". The
+// verb is provided by the caller ("hides this" / "hides them") so each instruction
+// reads naturally.
+function balanceHideHint(verb) {
+    if (typeof egConnected !== "undefined" && egConnected && typeof egGlyphB === "function") {
+        return egGlyphB() + " " + verb;
+    }
+    return "Esc " + verb;
+}
+
 // Stash a mapScore payload's overlay geometry for drawEditor. Shared by the
 // pre-submit nudge and the on-demand "Test Fairness" button.
 function applyBalanceOverlay(payload) {
@@ -1251,7 +1263,7 @@ function drawBalanceOverlay() {
 
     // Legend: the verdict plus a plain-English fix per deduction / hard fail.
     var lines = [["Balance " + balanceOverlay.score + "/100 — Featured needs " +
-        (balanceOverlay.featuredScore != null ? balanceOverlay.featuredScore : 90) + "+  (Esc hides this)", "white"]];
+        (balanceOverlay.featuredScore != null ? balanceOverlay.featuredScore : 85) + "+  (" + balanceHideHint("hides this") + ")", "white"]];
     for (var hf = 0; hf < balanceOverlay.hardFail.length; hf++) {
         lines.push(["✖ " + balanceOverlay.hardFail[hf], "#ff8080"]);
     }
@@ -2183,7 +2195,7 @@ function handleSubmitVerdict(payload) {
     applyBalanceOverlay(payload);
     var msg = "This map scored " + payload.balanceScore + "/100" + why +
         ", so it won't make the Featured playlist. It'll still be playable in the themed/Wild lists." +
-        (payload.debug != null ? " The routes behind this check are now drawn on the map (Esc hides them)." : "") +
+        (payload.debug != null ? " The routes behind this check are now drawn on the map (" + balanceHideHint("hides them") + ")." : "") +
         " Submit anyway?";
     submitPending = false;
     showSubmitStatus("Map looks unbalanced — confirm to submit", "#8a6d00", "white");

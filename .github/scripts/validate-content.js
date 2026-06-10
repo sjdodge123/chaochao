@@ -32,6 +32,12 @@ function fail(msg) {
     console.log('::error::' + msg);
 }
 
+// Non-fatal: surfaced as a GitHub Actions warning annotation (doesn't fail the
+// build), for things a human should look at but that don't break the game.
+function warn(msg) {
+    console.log('::warning::' + msg);
+}
+
 function done() {
     if (errors.length > 0) {
         console.log('\nContent validation FAILED with ' + errors.length + ' error(s).');
@@ -109,10 +115,45 @@ if (config.tileMap == null || typeof config.tileMap !== 'object') {
     }
 }
 
+// Balance coverage: warn (don't fail) when a paintable tile in config.tileMap isn't
+// accounted for by the fairness model. mapClassifier.unbalancedTiles checks the SAME
+// two lists the algorithm uses — its composition tiles (traits/interest/hazard
+// deductions) and cellGraph's routing-cost tiles (par times + the fairness spread) —
+// so adding a tile to config.tileMap without balancing it surfaces here instead of
+// silently skewing or being ignored by the score. Required only after config parses.
+if (config.tileMap != null && typeof config.tileMap === 'object') {
+    const mapClassifier = require(path.join(repoRoot, 'server', 'mapClassifier.js'));
+    const unbalanced = mapClassifier.unbalancedTiles(config);
+    for (const t of unbalanced) {
+        warn('config.json: tile "' + t.name + '" (id ' + t.id + ') is not balanced for ' +
+            t.missing.join(' + ') + ' — give it ' +
+            (t.missing.indexOf('composition') !== -1 ? 'a slot in mapClassifier.COMPOSITION_TILES' : '') +
+            (t.missing.length === 2 ? ' and ' : '') +
+            (t.missing.indexOf('routing') !== -1 ? 'a tileWeight in cellGraph (BALANCE_WEIGHTED_TILES)' : '') +
+            ' so the map-fairness score accounts for it.');
+    }
+}
+
 // utils.validateMap dereferences config.hazards.movingBumper.id.
 if (config.hazards == null || config.hazards.movingBumper == null ||
     typeof config.hazards.movingBumper.id !== 'number') {
     fail('config.json: hazards.movingBumper.id must be a number');
+}
+
+// Naming convention: every map's display name should already be in the house
+// "Title Case With Spaces" form (server/mapNaming.js — the same normalizer the
+// submit path applies, so an editor submission is auto-fixed on the way in). A
+// committed map that drifts (e.g. hand-added) is WARNED, not failed, and tells the
+// author exactly what it should be.
+const mapNaming = require(path.join(repoRoot, 'server', 'mapNaming.js'));
+for (const { file, map } of parsedMaps) {
+    if (map == null || typeof map.name !== 'string') { continue; }
+    if (!mapNaming.isNormalized(map.name)) {
+        warn('client/maps/' + file + ': map name ' + JSON.stringify(map.name) +
+            ' is not in the standard format — expected ' +
+            JSON.stringify(mapNaming.normalizeMapName(map.name)) +
+            ' (Title Case With Spaces). The editor normalizes this on submit; fix it if added by hand.');
+    }
 }
 
 for (const { file, map } of parsedMaps) {

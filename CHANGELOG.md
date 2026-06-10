@@ -10,7 +10,12 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### Map editor
+
+- The **Featured** bar is a touch friendlier: maps now make the Featured playlist at a balance score of **85+** (was 90+), so a few more well-built tracks earn the badge.
+- The map editor's fairness check now works fully on a controller: when a pad is connected, the "press Esc to hide" prompt shows the right face button (**B** / **○**) and you can dismiss the balance overlay with it.
+- Maps built with **water** are now scored and sorted correctly — water counts toward a map's character and balance check instead of being treated as blank ground, so a water-heavy map gets the credit (and the right playlist) it deserves.
+- Map names now follow one consistent style (Title Case With Spaces) across the whole library — so names read cleanly everywhere instead of a mix of `swim_fish_swim`, `RaceCondition`, and `4suns!`. New submissions are tidied up automatically.
 
 ## v0.31.4 — 2026-06-10
 

@@ -23,7 +23,7 @@
  * Deterministic: fixed seed -> identical map every run.
  *
  * Usage:  node tools/genLobbyTutorialMap.js
- * Output: client/maps/_lobbyTutorial.json
+ * Output: client/maps/_LobbyTutorial.json
  */
 const fs = require("fs");
 const vm = require("vm");
@@ -330,7 +330,7 @@ function main() {
 	diagram.lobbyOnly = true;
 	diagram.spawnPad = SPAWN_PAD;
 
-	const outPath = path.join(ROOT, "client/maps/_lobbyTutorial.json");
+	const outPath = path.join(ROOT, "client/maps/_LobbyTutorial.json");
 	fs.writeFileSync(outPath, JSON.stringify(diagram));
 
 	const names = { 0: "slow", 1: "normal", 2: "fast", 3: "lava", 4: "ice", 6: "goal", 9: "background", 102: "bomb", 104: "speedBuff", 105: "speedDebuff", 107: "iceCannon", 108: "cut" };
