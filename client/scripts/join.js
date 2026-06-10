@@ -86,7 +86,7 @@ function roomsSignature(rooms) {
     var parts = [];
     for (var i = 0; i < ids.length; i++) {
         var r = rooms[ids[i]];
-        parts.push([r.gameID, r.state, r.round, r.currentMap, r.players,
+        parts.push([r.gameID, r.state, r.mode, r.round, r.currentMap, r.players,
             r.joinable, r.locked, r.aiCount, r.aiAuto, r.aiPlanned].join('|'));
     }
     return parts.join('||');
@@ -135,6 +135,14 @@ function buildCard(room, maxPlayers) {
     state.className = 'card-state';
     state.textContent = stateLabel(room.state);
     info.appendChild(state);
+
+    // Game-mode badge: ALWAYS shown (including Standard FFA) so what kind of game
+    // a room is playing is never implicit. Brutal modes get the warning tint.
+    var mode = document.createElement('span');
+    var modeDef = gameModeDef(room.mode);
+    mode.className = 'card-mode' + ((modeDef && modeDef.brutal) ? ' card-mode-brutal' : '');
+    mode.textContent = modeDef ? modeDef.name : 'Standard FFA';
+    info.appendChild(mode);
 
     info.appendChild(buildStat('Game ID', room.gameID));
     info.appendChild(buildStat('Round', room.round));
@@ -197,6 +205,17 @@ function aiStatLabel(room) {
     }
     if (room.aiPlanned != null) {
         return room.aiPlanned <= 0 ? 'Off' : (room.aiPlanned + ' next');
+    }
+    return null;
+}
+
+// The configured definition for a room's mode id (config.gameModes rides the
+// `config` payload). Unknown/absent ids (older server, default rooms) read as
+// Standard FFA via the caller's fallback.
+function gameModeDef(id) {
+    var defs = (config && Array.isArray(config.gameModes)) ? config.gameModes : [];
+    for (var i = 0; i < defs.length; i++) {
+        if (defs[i] && defs[i].id === id) { return defs[i]; }
     }
     return null;
 }

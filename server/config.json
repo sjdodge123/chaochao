@@ -92,6 +92,13 @@
         { "id": "favorites", "name": "Crowd Favorites", "desc": "Top player-rated maps", "filter": { "minRating": 3.5 } },
         { "id": "wild", "name": "Wild", "desc": "The spicy, unsorted pile", "filter": { "tier": "community" } }
     ],
+    "defaultGameMode": "standard_ffa",
+    "gameModes": [
+        { "id": "standard_ffa", "name": "Standard FFA", "desc": "Classic free-for-all racing", "teams": false, "brutal": false, "active": true },
+        { "id": "standard_teams", "name": "Team Race", "desc": "Crimson vs Jade, shared team score", "teams": true, "brutal": false, "active": false },
+        { "id": "brutal_ffa", "name": "Brutal FFA", "desc": "Free-for-all, every round is brutal", "teams": false, "brutal": true, "active": true },
+        { "id": "brutal_teams", "name": "Brutal Teams", "desc": "Crimson vs Jade, every round brutal", "teams": true, "brutal": true, "active": false }
+    ],
     "music": {
         "calm": ["slowstride", "slow-pipes", "8bit-action-1"],
         "exciting": ["mind_in_motion", "the-rush", "beastv2", "bumpinbits1", "bumpinbits2", "bumpinbits3", "bumpinbits4", "bumpinbits5", "8bit-action-3", "8bit-action-6"],

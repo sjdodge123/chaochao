@@ -3879,6 +3879,10 @@ function drawObjects(dt) {
     if (typeof drawLobbyHubHud === "function") {
         drawLobbyHubHud();
     }
+    // Brutal-mode match intro: a round-1, gated-state-only banner (guards inside).
+    if (typeof drawGameModeIntro === "function") {
+        drawGameModeIntro();
+    }
 
     if (currentState == config.stateMap.gameOver) {
         drawGameOverScreen(dt);

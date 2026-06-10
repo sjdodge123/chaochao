@@ -26,6 +26,14 @@ var lobbyPlaylist = null;
 var lobbyPlaylistInfo = [];
 var plEmitTimer = null;
 var plEmitSock = null;
+// Room-wide game mode mirrored from the server (lobbyGameModeChanged broadcast +
+// the gameState snapshot for late joiners). The hub "mode station" steps through
+// the ACTIVE config.gameModes entries; last-writer-wins with a debounced emit,
+// exactly like the playlist board. Deliberately NOT cleared in lobbyHubReset —
+// the mode is room-lifetime state (it labels the race in progress too).
+var lobbyGameMode = null;
+var gmEmitTimer = null;
+var gmEmitSock = null;
 // Per-slot HUD hit areas, rebuilt every frame in drawLobbyHubHud (logical coords).
 // slot -> { prompt: rect|null, options: [{rect, action}], close: rect|null }.
 var stationHudHit = {};
@@ -196,6 +204,12 @@ function stationPanelNav(lp, dx, dy) {
     if (lp.stationPanel.kind === "playlist") {
         if (dx !== 0) {
             adjustPlaylist(lp, dx > 0 ? 1 : -1);
+        }
+        return;
+    }
+    if (lp.stationPanel.kind === "mode") {
+        if (dx !== 0) {
+            adjustGameMode(lp, dx > 0 ? 1 : -1);
         }
         return;
     }
@@ -494,6 +508,51 @@ function adjustPlaylist(lp, dir) {
     if (plEmitTimer) { clearTimeout(plEmitTimer); }
     plEmitTimer = setTimeout(flushLobbyPlaylistEmit, 140);
 }
+// --- game-mode station model ---------------------------------------------------
+
+// The configured game modes ride along on the `config` payload (server
+// config.json). Only ACTIVE modes are offered by the station — inactive entries
+// (e.g. team modes before they ship) exist in config but can't be selected.
+function gameModeDefList() {
+    var all = (typeof config !== "undefined" && config && Array.isArray(config.gameModes)) ? config.gameModes : [];
+    return all.filter(function (m) { return m && m.active === true; });
+}
+function defaultGameModeId() {
+    return (typeof config !== "undefined" && config && config.defaultGameMode) ? config.defaultGameMode : "standard_ffa";
+}
+function currentGameModeId() {
+    if (lobbyGameMode) { return lobbyGameMode; }
+    return defaultGameModeId();
+}
+function gameModeDef(id) {
+    var defs = (typeof config !== "undefined" && config && Array.isArray(config.gameModes)) ? config.gameModes : [];
+    for (var i = 0; i < defs.length; i++) { if (defs[i] && defs[i].id === id) { return defs[i]; } }
+    return null;
+}
+function currentGameModeLabel() {
+    var def = gameModeDef(currentGameModeId());
+    return def ? def.name : currentGameModeId();
+}
+// Step the station to the prev/next ACTIVE mode (wraps), update the room-wide
+// setting optimistically, and emit debounced (the lobbyGameModeChanged broadcast
+// is the authority — same de-race pattern as the playlist board).
+function adjustGameMode(lp, dir) {
+    var defs = gameModeDefList();
+    if (!defs.length) { return; }
+    var idx = 0;
+    for (var i = 0; i < defs.length; i++) { if (defs[i].id === currentGameModeId()) { idx = i; break; } }
+    idx = (idx + dir + defs.length) % defs.length;
+    lobbyGameMode = defs[idx].id;
+    gmEmitSock = (lp && lp.socket) ? lp.socket : (typeof server !== "undefined" ? server : null);
+    if (gmEmitTimer != null) { clearTimeout(gmEmitTimer); }
+    gmEmitTimer = setTimeout(flushLobbyGameModeEmit, 140);
+}
+function flushLobbyGameModeEmit() {
+    gmEmitTimer = null;
+    if (!gmEmitSock || typeof gmEmitSock.emit !== "function") { return; }
+    gmEmitSock.emit("setLobbyGameMode", { id: currentGameModeId() });
+}
+
 function flushLobbyPlaylistEmit() {
     plEmitTimer = null;
     if (!plEmitSock) { return; }
@@ -730,12 +789,14 @@ function stationTitle(kind) {
     if (kind === "ai") { return "AI Bots"; }
     if (kind === "skin") { return "Skins"; }
     if (kind === "playlist") { return "Playlist"; }
+    if (kind === "mode") { return "Game Mode"; }
     return "Station";
 }
 function stationGlyph(kind) {
     if (kind === "ai") { return "🤖"; }
     if (kind === "skin") { return "🎨"; }
     if (kind === "playlist") { return "🗺️"; }
+    if (kind === "mode") { return "⚔️"; }
     return "⚙";
 }
 
@@ -831,7 +892,8 @@ function drawLobbyHubHud() {
     // Resolve the active seasonal claim ONCE per HUD frame (it can't change within a frame);
     // all three banners read this cached value instead of re-scanning the registry each.
     lobbyBannerSeasonalClaim = activeSeasonalClaim();
-    drawSeasonalClaimBanner(); // top slot when active; AI + playlist drop a row below it
+    drawSeasonalClaimBanner(); // top slot when active; mode + AI + playlist drop a row below it
+    drawLobbyGameModeStatus();
     drawLobbyAIStatus();
     drawLobbyPlaylistStatus();
     // Couch co-op: when SEVERAL seats have a panel open at once, kart-anchored panels
@@ -984,6 +1046,7 @@ function drawHubJoinChip(c, x, y, chipH, S) {
 function stationPanelBaseSize(kind) {
     var w = 250, h = 132;
     if (kind === "playlist") { w = 280; h = 150; }
+    if (kind === "mode") { w = 280; h = 150; }
     if (kind === "skin") { w = 300; h = skinPanelHeight(); }
     var fw = (kind === "skin") ? (w + 8 + EQUIP_PREVIEW_W) : w;
     return { w: w, h: h, fw: fw };
@@ -1111,7 +1174,30 @@ function drawLobbyPlaylistStatus() {
     if (!playlistDefList().length) { return; }
     var count = playlistCount(currentPlaylistId());
     var text = "🗺️ Playlist: " + currentPlaylistLabel() + (count != null ? " (" + count + ")" : "");
-    drawLobbyBanner(text, lobbyBannerRowY(lobbyBannerSeasonalClaim ? 2 : 1));
+    drawLobbyBanner(text, lobbyBannerRowY(lobbyBannerSeasonalClaim ? 3 : 2));
+}
+
+// The room's game mode gets the TOP banner row — it's what kind of game this is,
+// so it outranks the AI/playlist settings beneath it. Synced via lobbyGameModeChanged
+// (+ the gameState snapshot for late joiners).
+function drawLobbyGameModeStatus() {
+    if (!gameModeDefList().length) { return; }
+    var text = "⚔️ Mode: " + currentGameModeLabel();
+    drawLobbyBanner(text, lobbyBannerRowY(lobbyBannerSeasonalClaim ? 1 : 0));
+}
+
+// One-shot match-start announcement for brutal MODES: during the ROUND-1 gate
+// countdown a warning banner tells the room that EVERY round will be brutal.
+// Round 1 only — later rounds get the normal per-round brutal reveal, so this
+// never re-stings. Drawn from the HUD pass (draw.js), which runs in all states;
+// the guards here keep it to the gated intro of a brutal-mode match.
+function drawGameModeIntro() {
+    if (typeof config === "undefined" || config == null || currentState !== config.stateMap.gated) { return; }
+    if (typeof round === "undefined" || round !== 1) { return; }
+    var def = gameModeDef(currentGameModeId());
+    if (!def || def.brutal !== true) { return; }
+    drawLobbyBanner("☠ " + def.name + " — every round is a BRUTAL round!", lobbyBannerRowY(0),
+        { fill: "#3a0606", ink: "#ff4d4d", text: "#ffd9d9", alpha: 0.96, pad: 34, glow: "rgba(255,77,77,0.6)" });
 }
 
 // The seasonal claim the LOCAL player can still act on this frame — the first open claim they
@@ -1187,8 +1273,8 @@ function drawLobbyAIStatus() {
         var eff = Math.min(lvl, aiMaxBots());
         text = "🤖 AI bots next race: " + eff + (eff === 1 ? " bot" : " bots");
     }
-    // Under the session info bar; +1 row when the seasonal banner takes the top slot.
-    drawLobbyBanner(text, lobbyBannerRowY(lobbyBannerSeasonalClaim ? 1 : 0));
+    // Under the mode banner; +1 row when the seasonal banner takes the top slot.
+    drawLobbyBanner(text, lobbyBannerRowY(lobbyBannerSeasonalClaim ? 2 : 1));
 }
 
 function lhRoundRect(ctx, x, y, w, h, r) {
@@ -1375,6 +1461,8 @@ function drawStationPanel(lp, sp) {
         drawAIPanelBody(x, y, w, h, hit, S);
     } else if (kind === "playlist") {
         drawPlaylistPanelBody(x, y, w, h, hit, S);
+    } else if (kind === "mode") {
+        drawModePanelBody(x, y, w, h, hit, S);
     } else if (kind === "skin") {
         drawSkinPanelBody(lp, x, y, w, h, hit, S);
         drawEquippedPreview(lp, x, y, w, h, tint, S);
@@ -1605,6 +1693,42 @@ function drawPlaylistPanelBody(x, y, w, h, hit, S) {
     gameContext.fillStyle = "#9aa";
     gameContext.font = hubFont(S, 12);
     gameContext.fillText("applies next race", x + w / 2, y + h - 14 * S);
+}
+
+// Mode station body: a ◄ name ► stepper through the ACTIVE config.gameModes,
+// with a one-line description. Selection is room-wide (last-writer-wins) and
+// locks once the gate goes up — it applies for the whole match.
+function drawModePanelBody(x, y, w, h, hit, S) {
+    if (!(S > 0)) { S = 1; }
+    var id = currentGameModeId();
+    var def = gameModeDef(id);
+    var name = def ? def.name : id;
+    var midY = y + 62 * S;
+    // mode name, centred
+    gameContext.textAlign = "center";
+    gameContext.textBaseline = "middle";
+    gameContext.fillStyle = "#fff";
+    gameContext.font = hubFont(S, 22, true);
+    gameContext.fillText(name, x + w / 2, midY);
+    // ◄ / ► buttons
+    var dec = { x: x + 12 * S, y: midY - 20 * S, w: 40 * S, h: 40 * S };
+    var inc = { x: x + w - 52 * S, y: midY - 20 * S, w: 40 * S, h: 40 * S };
+    gameContext.font = hubFont(S, 28, true);
+    gameContext.fillStyle = HUB_ACCENT;
+    gameContext.fillText("◄", dec.x + dec.w / 2, dec.y + dec.h / 2);
+    gameContext.fillText("►", inc.x + inc.w / 2, inc.y + inc.h / 2);
+    hit.options.push({ rect: dec, action: "dec" });
+    hit.options.push({ rect: inc, action: "inc" });
+    // one-line description
+    if (def && def.desc) {
+        gameContext.fillStyle = "#9aa";
+        gameContext.font = hubFont(S, 12);
+        gameContext.fillText(def.desc, x + w / 2, y + h - 30 * S);
+    }
+    // footer caption
+    gameContext.fillStyle = "#9aa";
+    gameContext.font = hubFont(S, 12);
+    gameContext.fillText("room-wide • locks at race start", x + w / 2, y + h - 14 * S);
 }
 
 // === Tabbed/paged skin picker ================================================

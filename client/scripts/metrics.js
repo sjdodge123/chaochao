@@ -157,7 +157,8 @@ window.addEventListener("pagehide", function () {
 			state: stateName,
 			round_number: (typeof round === "number") ? round : 0,
 			map: (typeof currentMap !== "undefined" && currentMap && currentMap.name) || "unknown",
-			playlist: (typeof currentPlaylistIdForMetrics === "function") ? currentPlaylistIdForMetrics() : "unknown"
+			playlist: (typeof currentPlaylistIdForMetrics === "function") ? currentPlaylistIdForMetrics() : "unknown",
+			mode: (typeof currentGameModeIdForMetrics === "function") ? currentGameModeIdForMetrics() : "unknown"
 		});
 	} catch (e) { /* analytics must never break page teardown */ }
 });

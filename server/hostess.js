@@ -51,6 +51,9 @@ exports.getRooms = function () {
 		}
 		rooms[sig] = {
 			state: room.game.currentState,
+			// Room game mode, so the join page can label every card with what kind
+			// of game it is (Standard FFA / Brutal FFA / teams) before joining.
+			mode: room.game.gameBoard.gameModeId,
 			round: room.game.gameBoard.round,
 			currentMap: room.game.gameBoard.currentMap.name,
 			gameID: Number(sig),

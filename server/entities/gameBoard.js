@@ -75,6 +75,11 @@ class GameBoard {
 		// "featured" pool. A too-thin playlist transparently falls back to the
 		// full pool (see getEligibleMapIndices) so rotation can never starve.
 		this.playlistId = (c.defaultPlaylist || "featured");
+		// Room-wide game mode (lobby hub mode station, last-writer-wins). Like the
+		// playlist it persists across rounds AND game-overs for the life of the room;
+		// it only changes from the lobby (see messenger setLobbyGameMode). The mode's
+		// flags (teams/brutal) are read from c.gameModes via gameModeDef().
+		this.gameModeId = (c.defaultGameMode || "standard_ffa");
 		this.currentMap = {};
 		this.nextMap = {};
 		// Injected-map (preview) mode: when set, every round loads previewMap
@@ -863,16 +868,28 @@ class GameBoard {
 	}
 	spawnBomb(owner) {
 		var player = this.playerList[owner];
-		var bomb = new BombProj(player.x, player.y, 10, "black", owner, this.roomSig, this.clampPlayerAngle(player.angle));
+		var bomb = new BombProj(player.x, player.y, 10, "black", owner, this.roomSig, this.launchAngle(player));
 		this.projectileList[owner] = bomb;
 		messenger.messageRoomBySig(this.roomSig, "spawnBomb", owner);
 	}
 	spawnSnowFlake(owner) {
 		var player = this.playerList[owner];
 		player.addSpeed(100);
-		var snowFlake = new SnowFlakeProj(player.x, player.y, c.tileMap.abilities.iceCannon.snowFlakeRadius, "black", owner, this.roomSig, this.clampPlayerAngle(player.angle));
+		var snowFlake = new SnowFlakeProj(player.x, player.y, c.tileMap.abilities.iceCannon.snowFlakeRadius, "black", owner, this.roomSig, this.launchAngle(player));
 		this.projectileList[owner] = snowFlake;
 		messenger.messageRoomBySig(this.roomSig, "spawnSnowFlake", owner);
+	}
+	// The angle a player's projectile launches at: the 8-way snap when their facing
+	// is a clean 45, else their RAW facing — the same fallback startOrbitalBeam uses.
+	// clampPlayerAngle returns undefined for unaligned angles (mouse-aim players send
+	// free angles via mousemove), and an undefined launch angle NaNs the projectile's
+	// velocity AND position; since the CellIndex spatial grid landed, a NaN position
+	// makes checkCollideCells dereference an undefined bucket and CRASHES the room
+	// tick. The fallback keeps clean-angle shots identical and makes free-angle shots
+	// fly where the player is actually facing.
+	launchAngle(player) {
+		var angle = this.clampPlayerAngle(player.angle);
+		return (angle == null) ? player.angle : angle;
 	}
 	clampPlayerAngle(angle) {
 		if (angle % 90 == 0) {
@@ -1073,6 +1090,8 @@ class GameBoard {
 			// Sync the room-wide playlist to everyone when the lobby (re)loads, so a
 			// late joiner / fresh lobby shows the current pick (default 'featured').
 			messenger.messageRoomBySig(this.roomSig, "lobbyPlaylistChanged", { id: this.playlistId });
+			// Same for the room's game mode (mode persists across game-overs).
+			messenger.messageRoomBySig(this.roomSig, "lobbyGameModeChanged", { id: this.gameModeId });
 		// Deliver the lobby bumpers so the client creates them (gameUpdates only moves
 		// hazards the client already knows about; creation is via this applyHazards path,
 		// the same payload shape the newMap event uses for races).
@@ -2234,6 +2253,34 @@ class GameBoard {
 		return true;
 	}
 
+	// The active mode's config entry (from c.gameModes), or null if the id is
+	// somehow unknown — callers treat null as Standard FFA (no flags).
+	gameModeDef() {
+		var defs = c.gameModes || [];
+		for (var i = 0; i < defs.length; i++) {
+			if (defs[i] && defs[i].id === this.gameModeId) { return defs[i]; }
+		}
+		return null;
+	}
+	// True when the room's mode guarantees a brutal round every round (brutal_ffa /
+	// brutal_teams). Only the GUARANTEE comes from the mode — the type pick and the
+	// additional-brutal stacking rolls in checkForBrutalRound stay exactly as in
+	// standard play.
+	isBrutalMode() {
+		var def = this.gameModeDef();
+		return def != null && def.brutal === true;
+	}
+	// Set the room's game mode (from the lobby hub mode station). Validates the id
+	// against the ACTIVE configured modes and reports whether it actually changed.
+	// Last-writer-wins, like setPlaylist.
+	setGameMode(modeId) {
+		var defs = c.gameModes || [];
+		var known = defs.some(function (m) { return m && m.id === modeId && m.active === true; });
+		if (!known || modeId === this.gameModeId) { return false; }
+		this.gameModeId = modeId;
+		return true;
+	}
+
 	loadNextMap(currentState) {
 		if (Object.keys(this.nextMap) == 0) {
 			this.determineNextMap();
@@ -2489,8 +2536,11 @@ class GameBoard {
 		}
 		//console.log("Current roll: " + brutalChance);
 		//console.log("Chance for brutal round: " + this.chanceOfBrutalRound);
-		//No brutal round
-		if (brutalChance > this.chanceOfBrutalRound) {
+		//No brutal round. A brutal MODE (brutal_ffa / brutal_teams) guarantees the
+		//floor — every round is brutal — but changes nothing past this gate: the
+		//type pick, the additional-brutal stacking rolls, and bunker exclusivity
+		//all run exactly as in a standard game.
+		if (brutalChance > this.chanceOfBrutalRound && !this.isBrutalMode()) {
 			return brutalRoundConfig;
 		}
 

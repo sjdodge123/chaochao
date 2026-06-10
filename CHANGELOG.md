@@ -10,7 +10,15 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- New **Game Mode station** in the lobby (the ⚔️ purple ring, top-right): drive in to pick what kind of game your room plays. The pick is room-wide, shows on a banner at the top of the lobby for everyone, and locks in when the race starts.
+- New game mode — **Brutal FFA**: every single round is a brutal round. No mercy rolls, no warm-up — the chaos starts at round 1 and never lets up (brutal rounds can still stack extra modes on top, just like before). A warning banner at the round-1 gate reminds everyone what they signed up for. Standard FFA stays the default — and the mode your room picked sticks around for the next match, too.
+- The **join page now shows each room's game mode** on its card (brutal modes get a red badge), so you know what kind of game you're walking into before you click Join.
+
+### Bug fixes
+
+- Firing the **Ice Cannon** (or tossing a bomb) while facing an in-between angle — easy to do steering with the mouse — no longer launches a broken projectile that could **crash the whole room**. The shot now flies exactly where you're facing.
 
 ## v0.32.3 — 2026-06-11
 
