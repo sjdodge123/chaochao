@@ -1018,7 +1018,13 @@ function armHeatwave(payload, state) {
 }
 
 function addHeatwaveScorch(vid, newId) {
-	heatwaveScorch.push({ vid: vid, water: (config.tileMap.water != null && newId == config.tileMap.water.id) });
+	// newId is kept so paintScorchMarks (draw.js) can prune marks whose ground
+	// changed again — most importantly the round-end collapse flooding over them.
+	heatwaveScorch.push({
+		vid: vid,
+		newId: newId,
+		water: (config.tileMap.water != null && newId == config.tileMap.water.id)
+	});
 }
 
 // Advance the reveal to `progress` (0..1): flip every tile whose stagger slot has

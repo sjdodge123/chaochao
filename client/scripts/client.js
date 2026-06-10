@@ -878,6 +878,7 @@ function registerConnectionHandlers(server) {
 		// Heatwave reveal state resets synchronously too (same microtask gotcha as
 		// bunkerFX) so a prior round's reveal can never bleed across the map swap.
 		if (typeof heatwaveFX !== "undefined") { heatwaveFX = null; heatwaveScorch = []; heatwaveFlashes = []; }
+		if (typeof heatwaveWarnBanner !== "undefined") { heatwaveWarnBanner = null; }
 		if (typeof stopHeatwaveDrone === "function") { stopHeatwaveDrone(); }
 		$.when.apply($, promises).then(function () {
 			currentState = payload.currentState;
@@ -1858,6 +1859,13 @@ function registerAbilityHandlers(server) {
 			var data = JSON.parse(payload);
 			markPendingHeatwave(data.ids, data.duration);
 			if (typeof playHeatwaveWarning === "function") { playHeatwaveWarning(); }
+			// HUD twin for the warning chirps: banner for the whole telegraph
+			// window + a brief warm flash + a light pad pulse at the alarm moment.
+			if (typeof heatwaveWarnBanner !== "undefined") {
+				heatwaveWarnBanner = { startedAt: Date.now(), duration: data.duration || 3000 };
+			}
+			if (typeof spawnScreenFlash === "function") { spawnScreenFlash("#ff7a18", 0.2, 350); }
+			if (typeof padPulseAll === "function") { padPulseAll(0.25, 0.15, 250); }
 		});
 	});
 	// ...and the landing. The tile ids themselves flip via the tileChanges
