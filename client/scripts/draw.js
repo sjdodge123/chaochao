@@ -517,12 +517,38 @@ function cartSkinPainter(name) {
 // Draw a kart's core appearance (skin or plain colour disc) centred at screen
 // (sx,sy). No highlights/avatar/FX — just the body — so callers like the ice
 // reflection get a faithful, skin-aware image for any current or future skin.
+// Team underglow (teams modes only): a Crimson/Jade ring + faint disc BENEATH the
+// kart, so team identity reads without touching colours/cosmetics. Called from BOTH
+// kart body paths — the live drawPlayer (which inlines its own border/sprite/skin
+// sequence and does NOT go through drawKartAppearance) and the drawKartAppearance
+// chokepoint (overview scoreboard, ice reflection, lava-burn, recap). Cheap painters
+// only — one arc fill + stroke, no shadow/filter surfaces (the GPU killers; see
+// cosmetic-perf notes).
+function drawTeamUnderglow(player, sx, sy) {
+    if (player.teamId == null || typeof teamInfo === "undefined" || teamInfo == null) { return; }
+    var tdef = (typeof teamDefFor === "function") ? teamDefFor(player.teamId) : null;
+    if (tdef == null) { return; }
+    var tr = player.radius * (cartSkinPainter(player.cart) != null ? CART_SKIN_VISUAL_SCALE : 1) + 5;
+    gameContext.save();
+    gameContext.beginPath();
+    gameContext.arc(sx, sy, tr, 0, 2 * Math.PI);
+    gameContext.globalAlpha = 0.16;
+    gameContext.fillStyle = tdef.color;
+    gameContext.fill();
+    gameContext.globalAlpha = 0.9;
+    gameContext.strokeStyle = tdef.color;
+    gameContext.lineWidth = 2.5;
+    gameContext.stroke();
+    gameContext.restore();
+}
+
 function drawKartAppearance(player, sx, sy, headingOverride) {
     // Two INDEPENDENT body cosmetics: the BORDER (player.border) rings ANY cart from behind,
     // and the PATTERN (player.pattern) textures the plain sphere only. Both can be equipped at
     // once. Border FIRST — it rings from BEHIND so the cart body always sits on top (only the
     // rim past the body shows).
     var painter = cartSkinPainter(player.cart);
+    drawTeamUnderglow(player, sx, sy);
     var bid = player.border;
     var bskin = (typeof getSkin === "function" && bid) ? getSkin(bid) : null;
     if (bskin && bskin.slot === 'border') {
@@ -3854,6 +3880,7 @@ function drawObjects(dt) {
     drawPlayers(dt);
     drawProjectiles(dt);
     drawRecordFloats();
+    drawTeamPointFloats();
     drawEffects();
     drawAbilties();
     drawOverlay();
@@ -4850,19 +4877,24 @@ function gameOverInk(bgHex) {
         : { fill: "#ffffff", stroke: "rgba(0,0,0,0.92)" };
 }
 function drawGameOverScreen(dt) {
+    // Teams: the TEAM is the winner — Crimson/Jade backdrop + headline, with the
+    // clincher's recap below as usual. The team payload survives removeBots(), so
+    // a bot clinching for its team can't blank the screen.
+    var teamWin = (typeof gameOverTeam !== "undefined") ? gameOverTeam : null;
     // playerList[playerWon] can be gone if the winner was an AI racer that
     // removeBots() cleared at the gameOver->waiting transition — guard the deref.
-    if (playerWon == null || playerList[playerWon] == null) {
+    if (playerWon == null || (teamWin == null && playerList[playerWon] == null)) {
         return;
     }
+    var backdrop = teamWin ? teamWin.color : playerList[playerWon].color;
     gameContext.save();
-    gameContext.fillStyle = playerList[playerWon].color;
+    gameContext.fillStyle = backdrop;
     gameContext.rect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
     gameContext.fill();
     gameContext.restore();
 
     // Readable ink for everything drawn over the winner-coloured backdrop.
-    var ink = gameOverInk(playerList[playerWon].color);
+    var ink = gameOverInk(backdrop);
 
     gameContext.save();
     gameContext.fillStyle = ink.fill;
@@ -4870,7 +4902,7 @@ function drawGameOverScreen(dt) {
     gameContext.lineWidth = 4;
     gameContext.lineJoin = "round";
     gameContext.font = '48px serif';
-    var winString = decodedColorName + " won the game.";
+    var winString = teamWin ? ("Team " + teamWin.name + " won the game!") : (decodedColorName + " won the game.");
     // When a recap montage is showing, lift the header so the header + clip
     // block is vertically centred (recap.js owns the shared layout). No recap
     // (or recap.js absent) -> the usual vertical-centre baseline.
@@ -6076,6 +6108,11 @@ function drawPlayer(player, dt) {
         drawLocalPlayerHighlight(player);
         drawStaminaMeter(player);
     }
+    // Team underglow under the LIVE kart body (the live path inlines its own body
+    // draw below and never goes through drawKartAppearance). Before the punch-charge
+    // telegraph and OUTSIDE the dim/immune alpha scopes, so team identity stays
+    // readable even on dimmed rival karts. Camera offset applied per convention.
+    drawTeamUnderglow(player, player.x + camera.getCameraX(), player.y + camera.getCameraY());
     // Charge "fist": a telegraph on every winding-up kart (so you can see a haymaker
     // coming), plus a momentum self-preview on your own idle kart.
     drawPunchCharge(player);
@@ -8792,6 +8829,7 @@ function compareSite(siteA, siteB) {
 function drawHUD() {
     drawGameInfo();
     drawRaceTimer();
+    drawTeamScoreHud();
     drawBrutalBadges();
     drawSpectatorLeaderboard();
     drawWorldRecordBanner();
@@ -8836,6 +8874,41 @@ function drawHeatwaveWarnBanner() {
     gameContext.strokeText("Flickering ground is about to burn over", cx, by + 19);
     gameContext.fillStyle = "white";
     gameContext.fillText("Flickering ground is about to burn over", cx, by + 19);
+    gameContext.restore();
+}
+
+// Teams modes: the shared Crimson-vs-Jade score, centre-top through the race so
+// both sides always know it. One pill, each side's name+score in its team colour.
+// Racing/collapsing ONLY: in the overview the team panels carry the score (and
+// the pill's overview slot sat on top of the GAME/PLAYERS/ROUND readout — browser-
+// verified overlap), and the lobby/gate slot belongs to the mode-intro banners.
+function drawTeamScoreHud() {
+    if (typeof teamInfo === "undefined" || teamInfo == null || teamInfo.score == null) { return; }
+    if (currentState != config.stateMap.racing && currentState != config.stateMap.collapsing) { return; }
+    var defs = (Array.isArray(teamInfo.defs) && teamInfo.defs.length >= 2) ? teamInfo.defs : null;
+    if (defs == null) { return; }
+    var a = defs[0], b = defs[1];
+    var sa = teamInfo.score[a.id] || 0, sb = teamInfo.score[b.id] || 0;
+    gameContext.save();
+    gameContext.font = "bold 16px sans-serif";
+    var segA = a.name + " " + sa;
+    var segMid = (teamInfo.target != null) ? ("  /" + teamInfo.target + "  ") : "  –  ";
+    var segB = sb + " " + b.name;
+    var wA = gameContext.measureText(segA).width;
+    var wM = gameContext.measureText(segMid).width;
+    var wB = gameContext.measureText(segB).width;
+    var w = wA + wM + wB + 28;
+    var h = 30;
+    var x = (LOGICAL_WIDTH - w) / 2;
+    // Below the session readout (GAME/PLAYERS/ROUND ends ~y30).
+    var y = 38;
+    drawHudPanel(x, y, w, h, { fill: "rgba(10,12,16,0.78)", alpha: 0.92, border: "rgba(255,255,255,0.35)" });
+    gameContext.textBaseline = "middle";
+    gameContext.textAlign = "left";
+    var tx = x + 14, ty = y + h / 2 + 1;
+    gameContext.fillStyle = a.color; gameContext.fillText(segA, tx, ty); tx += wA;
+    gameContext.fillStyle = "#cfd6dd"; gameContext.fillText(segMid, tx, ty); tx += wM;
+    gameContext.fillStyle = b.color; gameContext.fillText(segB, tx, ty);
     gameContext.restore();
 }
 
@@ -9115,6 +9188,42 @@ function paintRecordFloat(f, x, y, alpha) {
 }
 
 // World-space rendering — used during the racing/collapsing draw pass.
+// Floating team-point deltas (+5 / +2 / -1) over the kart that caused them, in the
+// team's colour: rise + fade over TEAM_FLOAT_MS, riding the kart while it exists
+// (a removed kart's float parks at its last seen spot). World pass — camera offset
+// applied per convention. `lane` stacks simultaneous same-kart floats upward.
+function drawTeamPointFloats() {
+    if (typeof teamPointFloats === "undefined" || teamPointFloats.length === 0) { return; }
+    var now = Date.now();
+    teamPointFloats = teamPointFloats.filter(function (f) { return now - f.start < TEAM_FLOAT_MS; });
+    if (teamPointFloats.length === 0) { return; }
+    gameContext.save();
+    gameContext.textAlign = "center";
+    gameContext.textBaseline = "alphabetic";
+    gameContext.font = "bold 17px sans-serif";
+    gameContext.lineWidth = 3.5;
+    gameContext.lineJoin = "round";
+    for (var i = 0; i < teamPointFloats.length; i++) {
+        var f = teamPointFloats[i];
+        var player = playerList ? playerList[f.id] : null;
+        if (player != null && player.x != null && player.y != null) {
+            f.x = player.x; f.y = player.y; // ride the kart while it exists
+        }
+        if (f.x == null || f.y == null) { continue; }
+        var age = (now - f.start) / TEAM_FLOAT_MS;        // 0..1
+        var rise = 26 * age;                              // drift upward
+        var alpha = age < 0.6 ? 1 : (1 - (age - 0.6) / 0.4); // hold, then fade out
+        var x = f.x + camera.getCameraX();
+        var y = f.y + camera.getCameraY() - 26 - rise - f.lane * 16;
+        gameContext.globalAlpha = Math.max(0, alpha);
+        gameContext.strokeStyle = "rgba(0,0,0,0.85)";
+        gameContext.strokeText(f.text, x, y);
+        gameContext.fillStyle = f.color;
+        gameContext.fillText(f.text, x, y);
+    }
+    gameContext.restore();
+}
+
 function drawRecordFloats() {
     drainRecordFloats();
     if (recordFloats.length === 0) { return; }
@@ -9736,7 +9845,14 @@ function drawOverviewBoard() {
     // to run twice per frame). All overview renderers read page.geom / page.rail.
     page.geom = computeStandingsRowGeom(page);
     page.rail = overviewRailRects(page);
-    drawStandingsPanel(page);
+    // Teams modes: the per-player notch track can't decide a team match, so the
+    // standings band shows the two team score panels instead (totals + an itemized
+    // "where this round's points came from" ledger).
+    if (typeof teamInfo !== "undefined" && teamInfo != null) {
+        drawTeamStandingsPanel(page);
+    } else {
+        drawStandingsPanel(page);
+    }
     drawNextMap(page);
     drawMapLeaderboardCard(page);
     // Late-arriving PB floats — the last finisher's playerPbResult lands AFTER
@@ -9958,6 +10074,147 @@ function computeStandingsRowGeom(page) {
     };
 }
 
+// ---- Teams overview ---------------------------------------------------------
+// The medal-card-style round summary for team modes: one panel per team showing
+// the TOTAL points pool (vs the target) and an itemized list of where THIS
+// round's points came from (teamRoundLedger, fed by the live teamPointsDelta
+// events). Podium finishes name the racer; kills name the killer (up to 3, then
+// roll up); finishes and deaths aggregate into one line each.
+function teamLedgerLines(teamId) {
+    var lines = [];
+    var kills = [], finishes = 0, finishPts = 0, deaths = 0, deathPts = 0;
+    for (var i = 0; i < teamRoundLedger.length; i++) {
+        var e = teamRoundLedger[i];
+        if (e.teamId !== teamId) { continue; }
+        if (e.reason === "first") { lines.push({ icon: "🏁", text: "First place — " + e.label, pts: e.amount }); }
+        else if (e.reason === "second") { lines.push({ icon: "🥈", text: "Second place — " + e.label, pts: e.amount }); }
+        else if (e.reason === "kill") { kills.push(e); }
+        else if (e.reason === "finish") { finishes++; finishPts += e.amount; }
+        else if (e.reason === "death") { deaths++; deathPts += e.amount; }
+        else { lines.push({ icon: "•", text: e.label, pts: e.amount }); }
+    }
+    for (var k = 0; k < kills.length && k < 3; k++) {
+        lines.push({ icon: "⚔️", text: "KO — " + kills[k].label, pts: kills[k].amount });
+    }
+    if (kills.length > 3) {
+        var extra = 0;
+        for (var x = 3; x < kills.length; x++) { extra += kills[x].amount; }
+        lines.push({ icon: "⚔️", text: "KOs ×" + (kills.length - 3) + " more", pts: extra });
+    }
+    if (finishes > 0) { lines.push({ icon: "🏳️", text: "Finished ×" + finishes, pts: finishPts }); }
+    if (deaths > 0) { lines.push({ icon: "💀", text: "Deaths ×" + deaths, pts: deathPts }); }
+    return lines;
+}
+function drawTeamStandingsPanel(page) {
+    var r = page.standings;
+    ovLabel(r.x, r.y, "Team Scores");
+    var defs = (teamInfo && Array.isArray(teamInfo.defs) && teamInfo.defs.length >= 2) ? teamInfo.defs : null;
+    if (defs == null) { return; }
+    var top = r.y + OV.headerH;
+    var h = r.h - OV.headerH;
+    var gap = 14;
+    var pw = (r.w - gap) / 2;
+    for (var t = 0; t < 2; t++) {
+        var def = defs[t];
+        var px = r.x + t * (pw + gap);
+        var total = (teamInfo.score && teamInfo.score[def.id] != null) ? teamInfo.score[def.id] : 0;
+        var lines = teamLedgerLines(def.id);
+        var net = 0;
+        for (var n = 0; n < lines.length; n++) { net += lines[n].pts; }
+        gameContext.save();
+        // Panel: dark card with the team-colour border (the overview's row chrome).
+        gameContext.fillStyle = "rgba(20,23,30,0.92)";
+        drawRoundRectPath(px, top, pw, h, 12);
+        gameContext.fill();
+        gameContext.lineWidth = 2.5;
+        gameContext.strokeStyle = def.color;
+        gameContext.stroke();
+        // Header: team name left, big total right ("23 / 60").
+        gameContext.textBaseline = "middle";
+        gameContext.textAlign = "left";
+        gameContext.fillStyle = def.color;
+        gameContext.font = "bold 24px Arial";
+        gameContext.fillText(def.name, px + 18, top + 28);
+        gameContext.textAlign = "right";
+        gameContext.font = "bold 26px Arial";
+        var totalStr = String(total) + ((teamInfo.target != null) ? ("  /" + teamInfo.target) : "");
+        gameContext.fillText(totalStr, px + pw - 18, top + 28);
+        // Round net under the header, signed and tinted by direction.
+        gameContext.textAlign = "left";
+        gameContext.font = "bold 14px Arial";
+        gameContext.fillStyle = net > 0 ? "#7fe3a0" : (net < 0 ? "#ff7a7a" : "#9aa5b1");
+        gameContext.fillText("this round: " + (net > 0 ? "+" : "") + net, px + 18, top + 52);
+        // Divider.
+        gameContext.strokeStyle = "rgba(255,255,255,0.14)";
+        gameContext.lineWidth = 1;
+        gameContext.beginPath();
+        gameContext.moveTo(px + 14, top + 64);
+        gameContext.lineTo(px + pw - 14, top + 64);
+        gameContext.stroke();
+        // Itemized lines (bounded by the panel height; the bottom band is reserved
+        // for the member roster strip).
+        var rowH = 26;
+        var rosterH = 46;
+        var maxRows = Math.max(1, Math.floor((h - 78 - rosterH) / rowH));
+        var shown = Math.min(lines.length, maxRows);
+        for (var li = 0; li < shown; li++) {
+            var line = lines[li];
+            var ly = top + 78 + li * rowH + rowH / 2;
+            // A truncated list rolls its tail into the final visible row.
+            if (li === maxRows - 1 && lines.length > maxRows) {
+                var rest = 0;
+                for (var ri = li; ri < lines.length; ri++) { rest += lines[ri].pts; }
+                line = { icon: "…", text: "+" + (lines.length - li) + " more events", pts: rest };
+            }
+            gameContext.font = "16px Arial";
+            gameContext.textAlign = "left";
+            gameContext.fillStyle = "#e8edf2";
+            gameContext.fillText(line.icon + "  " + line.text, px + 18, ly);
+            gameContext.textAlign = "right";
+            gameContext.font = "bold 16px Arial";
+            gameContext.fillStyle = line.pts >= 0 ? "#7fe3a0" : "#ff7a7a";
+            gameContext.fillText((line.pts > 0 ? "+" : "") + line.pts, px + pw - 18, ly);
+        }
+        if (lines.length === 0) {
+            gameContext.font = "italic 15px Arial";
+            gameContext.textAlign = "center";
+            gameContext.fillStyle = "#8b95a1";
+            gameContext.fillText("no scoring this round", px + pw / 2, top + 78 + rowH / 2);
+        }
+        // Member roster strip along the panel bottom: every kart on the team with
+        // full cosmetics, and — crucially — their between-round chat emotes, which
+        // in FFA render on the standings rows this panel replaces. Same reposition
+        // trick as drawStandingsRow: drawEmoji anchors at player.x/y.
+        var members = [];
+        for (var pid in playerList) {
+            if (playerList[pid] != null && playerList[pid].teamId === def.id) { members.push(playerList[pid]); }
+        }
+        var slotW = 34;
+        var maxFit = Math.max(1, Math.floor((pw - 36) / slotW));
+        var shownMembers = Math.min(members.length, maxFit);
+        var ry = top + h - rosterH / 2 - 4;
+        var rx0 = px + pw / 2 - ((shownMembers - 1) * slotW) / 2;
+        for (var mi = 0; mi < shownMembers; mi++) {
+            var member = members[mi];
+            var mx = rx0 + mi * slotW;
+            drawOverviewKart(member, mx, ry, 11);
+            if (member.chatMessage != null) {
+                var msx = member.x, msy = member.y;
+                member.x = mx; member.y = ry - 8;
+                drawEmoji(member);
+                member.x = msx; member.y = msy;
+            }
+        }
+        if (members.length > shownMembers) {
+            gameContext.font = "bold 12px Arial";
+            gameContext.textAlign = "left";
+            gameContext.fillStyle = "#9aa5b1";
+            gameContext.fillText("+" + (members.length - shownMembers), rx0 + shownMembers * slotW - 10, ry + 4);
+        }
+        gameContext.restore();
+    }
+}
+
 function drawStandingsPanel(page) {
     var r = page.standings;
     ovLabel(r.x, r.y, "Round Standings");
@@ -10007,6 +10264,11 @@ function overviewAnimStep(player) {
 
 // nearVictory transitions + their sounds, preserved from the legacy drawGoalPost.
 function overviewVictoryState(player) {
+    // Teams modes: personal notches parking at the cap means nothing — the team
+    // POOL is the victory signal, and its one-shot sting fires from applyTeamUpdate
+    // the moment a pool reaches the target. Suppress the per-player cues here so a
+    // personally-capped kart doesn't false-alarm the room.
+    if (typeof teamInfo !== "undefined" && teamInfo != null) { return; }
     var gl = gameLength || (config && config.baseNotchesToWin) || 5;
     if (player.distanceToMove == 0 && playerAnimating !== player.id) {
         if (player.notches == gl && player.nearVictory == false) {
@@ -10080,6 +10342,11 @@ function drawStandingsRow(player, idx, px, py, pw, rh) {
     var atLine = (player.notches >= gl) && player.distanceToMove == 0;
     var pendingFromLine = (oldNotches[player.id] === gl) && player.distanceToMove != 0;
     var nearWin = atLine || pendingFromLine;
+    // Teams modes: the threat is a TEAM whose pool is at the target — light up every
+    // member's row (and nobody else's), instead of personally-capped individuals.
+    if (typeof teamInfo !== "undefined" && teamInfo != null) {
+        nearWin = (typeof isNearVictoryDisplay === "function") && isNearVictoryDisplay(player);
+    }
     if (nearWin) {
         var pulse = 0.5 + 0.5 * Math.sin(Date.now() / 260);
         gameContext.save();

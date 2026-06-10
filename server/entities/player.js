@@ -106,6 +106,10 @@ class Player extends Circle {
 		this.infected = false;
 		this.isZombie = false;
 		this.exploded = false;
+		// Team id (0 = Crimson, 1 = Jade) in a teams game mode; null in FFA modes.
+		// Assigned once at match start (Game.ensureTeamAssignments) — humans never
+		// switch mid-match; late joiners go to the smaller team. Cleared at resetGame.
+		this.teamId = null;
 
 		//Movement
 		this.moveForward = false;
@@ -374,7 +378,8 @@ class Player extends Circle {
 	// but with the infection bite radius + infected flag, no charge/stamina.
 	throwBite(currentState) {
 		this.punchedTimer = Date.now();
-		this.punch = new Punch(this.x, this.y, c.brutalRounds.infection.punchRadius, this.color, this.id, this.roomSig, 1, true);
+		// (bite still lands on teammates — ownerInfected overrides the team gate)
+		this.punch = new Punch(this.x, this.y, c.brutalRounds.infection.punchRadius, this.color, this.id, this.roomSig, 1, true, this.teamId);
 		this.punch.angle = this.angle;
 		this.punch.ox = this.x;
 		this.punch.oy = this.y;
@@ -508,7 +513,7 @@ class Player extends Circle {
 		// hardest. Stash facing + owner position for the clash pass.
 		var chargeMult = 1 + (c.punchCharge.maxChargeMult - 1) * frac;
 		var bonus = this.calcPunchBonus() * chargeMult;
-		this.punch = new Punch(this.x, this.y, punchRadius, this.color, this.id, this.roomSig, bonus, this.isZombie);
+		this.punch = new Punch(this.x, this.y, punchRadius, this.color, this.id, this.roomSig, bonus, this.isZombie, this.teamId);
 		this.punch.angle = this.angle;
 		this.punch.ox = this.x;
 		this.punch.oy = this.y;
@@ -948,6 +953,16 @@ class Player extends Circle {
 		if (this.hasStarPower()) {
 			return;
 		}
+		// Team friendly fire (punches only — abilities stay team-blind): a teammate's
+		// punch is a complete no-op — no shove, no attribution, no hit cue. Infection
+		// overrides teams in BOTH directions: a zombified teammate's bite lands
+		// (ownerInfected), and punching a zombified teammate works (this.isZombie).
+		// Bumper/hazard punches are mapOwned and never team-gated.
+		if (!object.mapOwned && object.ownerTeamId != null && this.teamId != null
+			&& object.ownerTeamId === this.teamId
+			&& !object.ownerInfected && !this.isZombie) {
+			return;
+		}
 		if (object.ownerInfected) {
 			this.infect();
 		}
@@ -1369,6 +1384,7 @@ class Player extends Circle {
 		this.reachedGoal = false;
 		this.timeReached = null;
 		this.eliminatedAt = null;
+		this.teamPointsCredited = false; // per-round latch: finish points credited once
 		this.pbWritten = false;
 		this.collapseMargin = null;
 		this.stamina = c.punchStamina.max;

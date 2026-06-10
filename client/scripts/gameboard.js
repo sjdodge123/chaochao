@@ -27,6 +27,15 @@ var mousex,
 	blackoutStart = null,
 	brutalRound = false,
 	brutalRoundConfig = null,
+	// Teams modes: { assignments, score: {teamId: points}, target, matchPointAt, defs }
+	// mirrored from the server's one-shot teamUpdate broadcasts (+ the gameState
+	// snapshot). null in FFA modes — every team render path keys off this being non-null.
+	teamInfo = null,
+	// Live floating +N/-N team-point deltas (see pushTeamPointFloat / drawTeamPointFloats).
+	teamPointFloats = [],
+	// THIS round's team scoring events ({id, teamId, amount, reason}) — the teams
+	// overview itemizes them ("where the points came from"). Cleared at each newMap.
+	teamRoundLedger = [],
 	clientList;
 
 // DEBUG: force my player's trail to render in near-victory (dashed) style. Set to false for real play.
@@ -49,6 +58,9 @@ function resetGameboard() {
 	brutalRoundConfig = null;
 	projectileList = {};
 	gameID = null;
+	teamInfo = null;
+	teamPointFloats = [];
+	teamRoundLedger = [];
 	effectsList = [];
 	shakeTrauma = 0;
 	shakeSustainUntil = 0;
@@ -63,6 +75,10 @@ function resetRound() {
 	infection = false;
 	// Transient visuals shouldn't bleed into the next round.
 	effectsList = [];
+	teamPointFloats = [];
+	// NOTE: teamRoundLedger is deliberately NOT cleared here — resetRound runs in
+	// the startOverview handler, and the overview is exactly where the ledger is
+	// displayed. It clears on the NEXT round's newMap instead.
 	shakeTrauma = 0;
 	shakeSustainUntil = 0;
 	shakeSustainFloor = 0;
@@ -252,6 +268,7 @@ function createPlayer(dataArray) {
 	playerList[index].pattern = dataArray[14] || null;     // pattern overlay id (tints to colour)
 	playerList[index].trailFx = dataArray[15] || null;     // trail-effect id (renders in colour)
 	playerList[index].border = dataArray[16] || null;      // border (rim) id — independent 4th slot
+	playerList[index].teamId = (dataArray[17] != null) ? dataArray[17] : null; // 0/1 in teams modes, else null
 	playerList[index].deathMessage = null;
 	playerList[index].trail = new Trail({ x: dataArray[1], y: dataArray[2] });
 	playerList[index].fizzle = function () {
@@ -315,6 +332,120 @@ function smoothEntities(dt) {
 			smoothPos(hazardList[id], SMOOTH_TAU_REMOTE, dt);
 		}
 	}
+}
+
+// Apply a server team snapshot ({assignments, score, target, defs}): stash it for
+// the HUD/scoreboard and stamp each player's teamId (assignment is one-shot, not
+// per-tick — see compressor newPlayerPacket[17] for spawn/append delivery).
+function applyTeamUpdate(snap) {
+	if (snap == null || !Array.isArray(snap.assignments)) {
+		// Authoritative CLEAR (server sends teamUpdate:null at every non-teams match
+		// start, and gameState carries teams:null outside team matches): drop the
+		// snapshot AND every kart's teamId mirror, so no team render path — score
+		// pill, overview panels, underglows, victory tails — can survive a mode
+		// switch on stale state.
+		teamInfo = null;
+		teamPointFloats = [];
+		teamRoundLedger = [];
+		for (var pid in playerList) {
+			if (playerList[pid] != null) { playerList[pid].teamId = null; }
+		}
+		return;
+	}
+	var prev = teamInfo;
+	teamInfo = snap;
+	for (var i = 0; i < snap.assignments.length; i++) {
+		var id = snap.assignments[i][0];
+		if (playerList[id] != null) {
+			playerList[id].teamId = snap.assignments[i][1];
+		}
+	}
+	// Team match-point sting: fires when a team's score crosses INTO match point
+	// (one first-place finish from the target). The per-player overview rise/fall
+	// cues are suppressed in teams mode (overviewVictoryState), so this is THE
+	// audio cue — and prev==null (fresh join snapshot) stays silent.
+	var at = (snap.matchPointAt != null) ? snap.matchPointAt : snap.target;
+	if (prev != null && prev.score != null && snap.score != null && at != null) {
+		for (var t in snap.score) {
+			if (snap.score[t] >= at && (prev.score[t] || 0) < at) {
+				if (typeof playSound === "function" && typeof nearVictorySound !== "undefined") {
+					playSound(nearVictorySound);
+				}
+			}
+		}
+	}
+}
+
+// Floating team-point deltas (+5 / +2 / -1) over the kart that earned/cost them.
+// Fed by the server's per-credit `teamPointsDelta` events; drawn in the world pass
+// (drawTeamPointFloats) riding the kart while it exists, parked at the last seen
+// spot once it's gone. Bounded + time-expired so it can never grow unchecked.
+var TEAM_FLOAT_MS = 1500;
+function pushTeamPointFloat(payload) {
+	if (payload == null || typeof payload.amount !== "number" || payload.amount === 0) { return; }
+	// Ledger first (even when the kart is gone): the teams overview itemizes the
+	// round's scoring from this. Names resolve at render time so a removed bot
+	// still shows its line.
+	teamRoundLedger.push({
+		id: payload.id,
+		teamId: payload.teamId,
+		amount: payload.amount,
+		reason: payload.reason || null,
+		label: teamLedgerLabel(payload.id)
+	});
+	var def = teamDefFor(payload.teamId);
+	var p = playerList[payload.id];
+	teamPointFloats.push({
+		id: payload.id,
+		text: (payload.amount > 0 ? "+" : "") + payload.amount,
+		color: def ? def.color : "#fff",
+		start: Date.now(),
+		x: p != null ? p.x : null,
+		y: p != null ? p.y : null,
+		// Stack multiple same-kart floats (e.g. a kill +2 over a death -1 victim
+		// nearby) so simultaneous deltas don't overprint.
+		lane: teamPointFloats.reduce(function (n, f) { return n + (f.id === payload.id ? 1 : 0); }, 0)
+	});
+	if (teamPointFloats.length > 40) { teamPointFloats.shift(); }
+}
+// A short display name for a scoring-ledger line: "You" for any local seat, a
+// bot's name, else the kart's colour name. Captured at event time so the line
+// survives the player leaving/bot teardown.
+function teamLedgerLabel(id) {
+	var p = playerList ? playerList[id] : null;
+	if (p == null) { return "racer"; }
+	if (typeof isLocalId === "function" && isLocalId(id)) { return "You"; }
+	if (p.name) { return p.name; }
+	var col = (p._serverColor != null) ? p._serverColor : p.color;
+	if (typeof Colors !== "undefined" && Colors && typeof Colors.decode === "function") {
+		return Colors.decode(col) || "racer";
+	}
+	return "racer";
+}
+
+// Near-victory for DISPLAY (victory tail, overview gold row): in a teams mode a
+// single kart being personally capped means nothing — the threat is a TEAM at
+// "match point" (one first-place finish from the points target; the server sends
+// the threshold as matchPointAt). The cue lights up the WHOLE team, and only then;
+// FFA keeps the classic personal notches==gameLength check.
+function isNearVictoryDisplay(player) {
+	if (teamInfo != null && teamInfo.score != null && player.teamId != null) {
+		var at = (teamInfo.matchPointAt != null) ? teamInfo.matchPointAt : teamInfo.target;
+		if (at == null) { return false; }
+		return (teamInfo.score[player.teamId] || 0) >= at;
+	}
+	return player.notches == gameLength;
+}
+
+// The config def ({id, name, color}) for a team id, from the snapshot (server
+// includes defs) or config.teams as fallback.
+function teamDefFor(teamId) {
+	var defs = (teamInfo && Array.isArray(teamInfo.defs)) ? teamInfo.defs
+		: ((typeof config !== "undefined" && config && config.teams && Array.isArray(config.teams.defs)) ? config.teams.defs : []);
+	for (var i = 0; i < defs.length; i++) {
+		if (defs[i] && defs[i].id === teamId) { return defs[i]; }
+	}
+	return null;
 }
 
 function updatePlayerList(packet) {
@@ -812,6 +943,11 @@ function resetProjectiles() {
 function fullReset() {
 	gameLength = config.baseNotchesToWin;
 	playerWon = null;
+	gameOverTeam = null;
+	// Belt-and-braces teams teardown at match end (the authoritative clear is the
+	// server's teamUpdate:null at the next non-teams match start, but a match that
+	// ended shouldn't keep painting team UI into the lobby either).
+	if (typeof applyTeamUpdate === "function") { applyTeamUpdate(null); }
 	achievements = null;
 	decodedColorName = '';
 	oldNotches = {};
@@ -1806,7 +1942,11 @@ class Trail {
 		this.vertices.push({ x: currentPosition.x, y: currentPosition.y, t: now });
 		if (player != null) {
 			this.lastColor = player.color;
-			var isNV = player.notches == gameLength;
+			// Team-aware: in teams modes the victory tail shows on the WHOLE team,
+			// and only when the TEAM pool is at the line (see isNearVictoryDisplay).
+			var isNV = (typeof isNearVictoryDisplay === "function")
+				? isNearVictoryDisplay(player)
+				: (player.notches == gameLength);
 			if (DEBUG_FORCE_NEAR_VICTORY && player.id == myID) {
 				isNV = true;
 			}

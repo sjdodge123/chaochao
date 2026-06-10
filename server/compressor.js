@@ -206,6 +206,9 @@ function newPlayerPacket(player) {
 	packet[14] = player.pattern || null;  // pattern overlay id (tints to colour)
 	packet[15] = player.trailFx || null;  // trail-effect id (renders in colour)
 	packet[16] = player.border || null;   // border (rim) id — independent 4th slot
+	// Team id (0/1) in a teams game mode, null in FFA. Spawn/append only — mid-match
+	// (re)assignments ride the one-shot `teamUpdate` broadcast, not the tick stream.
+	packet[17] = (player.teamId != null) ? player.teamId : null;
 	return packet;
 }
 

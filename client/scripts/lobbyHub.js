@@ -1195,9 +1195,19 @@ function drawGameModeIntro() {
     if (typeof config === "undefined" || config == null || currentState !== config.stateMap.gated) { return; }
     if (typeof round === "undefined" || round !== 1) { return; }
     var def = gameModeDef(currentGameModeId());
-    if (!def || def.brutal !== true) { return; }
-    drawLobbyBanner("☠ " + def.name + " — every round is a BRUTAL round!", lobbyBannerRowY(0),
-        { fill: "#3a0606", ink: "#ff4d4d", text: "#ffd9d9", alpha: 0.96, pad: 34, glow: "rgba(255,77,77,0.6)" });
+    if (!def) { return; }
+    var row = 0;
+    if (def.teams === true) {
+        var defs = (config.teams && Array.isArray(config.teams.defs)) ? config.teams.defs : [];
+        var vs = (defs.length >= 2) ? (defs[0].name + " vs " + defs[1].name) : "Team battle";
+        var target = (typeof teamInfo !== "undefined" && teamInfo && teamInfo.target != null) ? teamInfo.target : null;
+        drawLobbyBanner("⚔️ " + vs + (target != null ? " — first team to " + target + "!" : "!"), lobbyBannerRowY(row++),
+            { fill: "#1c1026", ink: "#c9a4ff", text: "#efe3ff", alpha: 0.96, pad: 34, glow: "rgba(178,102,255,0.55)" });
+    }
+    if (def.brutal === true) {
+        drawLobbyBanner("☠ " + def.name + " — every round is a BRUTAL round!", lobbyBannerRowY(row),
+            { fill: "#3a0606", ink: "#ff4d4d", text: "#ffd9d9", alpha: 0.96, pad: 34, glow: "rgba(255,77,77,0.6)" });
+    }
 }
 
 // The seasonal claim the LOCAL player can still act on this frame — the first open claim they

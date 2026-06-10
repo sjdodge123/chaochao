@@ -583,7 +583,14 @@ function punchReady(bot) {
     return bot.punchedTimer == null || (Date.now() - bot.punchedTimer) >= bot.punchWaitTime;
 }
 function isRacer(p, self) {
-    return p !== self && p.alive && !p.reachedGoal && !p.isSpectator;
+    if (p === self || !p.alive || p.reachedGoal || p.isSpectator) { return false; }
+    // Teams: a (living, non-zombie) teammate is never a "rival" — bots don't waste
+    // punches/bombs/swaps/blindfolds on their own side (teammate punches are no-ops
+    // anyway). Zombies override teams in both directions, exactly like the
+    // friendly-fire gate in Player.handlePunchHit.
+    if (p.teamId != null && self.teamId != null && p.teamId === self.teamId
+        && !p.isZombie && !self.isZombie) { return false; }
+    return true;
 }
 function nearestRival(bot, players) {
     var best = null, bd = Infinity;
@@ -614,7 +621,7 @@ function countRacers(players) {
 // the nearest human; everyone else targets the nearest rival of any kind.
 function preferredTarget(bot, ctx) {
     if (bot.ai && bot.ai.focus === 'human') {
-        var h = nearestMatch(bot, ctx.players, function (p) { return !p.isAI; });
+        var h = nearestMatch(bot, ctx.players, function (p) { return !p.isAI && isRacer(p, bot); });
         if (h != null) { return h; }
     }
     return nearestRival(bot, ctx.players);

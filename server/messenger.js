@@ -607,7 +607,10 @@ function checkForMail(client) {
 			lobbyPlaylist: room.game.gameBoard.playlistId,
 			// Room-wide game mode so a late joiner (any state) knows what kind of
 			// game this room is playing.
-			lobbyGameMode: room.game.gameBoard.gameModeId
+			lobbyGameMode: room.game.gameBoard.gameModeId,
+			// Teams snapshot (assignments + shared pool) so a mid-match joiner
+			// renders rosters/score immediately. Null outside teams modes.
+			teams: room.game.teamSnapshot()
 		};
 		client.emit("gameState", gameState);
 		//Update all existing players with the new player's info
@@ -885,7 +888,15 @@ function checkForMail(client) {
 	// (setGameMode does this) and only echoed when it actually changed.
 	client.on('setLobbyGameMode', function (payload) {
 		var room = hostess.getRoomBySig(roomMailList[client.id]);
-		if (room == undefined || room.game.currentState != c.stateMap.lobby) {
+		if (room == undefined) {
+			return;
+		}
+		if (room.game.currentState != c.stateMap.lobby) {
+			// The client steps its mode display optimistically with a debounced emit;
+			// an emit that lands after the lobby ended is rejected — echo the REAL
+			// mode back to that client so its optimistic value can't stay wrong for
+			// the whole match (round-1 gate banner + the GA mode param read it).
+			client.emit("lobbyGameModeChanged", { id: room.game.gameBoard.gameModeId });
 			return;
 		}
 		var id = payload && payload.id;

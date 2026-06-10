@@ -89,6 +89,11 @@
                     id: "game-modes", name: "Game Modes", icon: emoji("⚔️"), anim: "brutalIntro",
                     blurb: "The lobby's mode station sets what kind of game your room plays.",
                     detail: "Drive into the purple ⚔️ Game Mode station in the lobby to pick the room's mode — the pick is room-wide (last pick wins, like the playlist board), shows on a banner everyone can see, and locks in once the race starts. Standard FFA is the classic free-for-all. Brutal FFA makes EVERY round a brutal round, from round 1 on — the brutal twist still varies (and can still stack) each round. Your room keeps its mode between matches, and the join page shows each room's mode before you join."
+                },
+                {
+                    id: "team-modes", name: "Team Modes", icon: emoji("🛡️"), anim: "goalRun",
+                    blurb: "Crimson vs Jade — racing AND fighting score team points; deaths cost them.",
+                    detail: "Team Race and Brutal Teams split the room into Crimson and Jade — your team shows as a colored glow under your kart while your own colors and cosmetics stay yours. Teams play for a shared POINTS score: first across the line +5, second +3, any other finisher +1, an enemy knockout +2 — and every death on your side costs a point (the score floors at 0). Points float over the kart that earned or lost them. Once your team HOLDS the target score, the next first-place finish by anyone on it wins the match on the spot — and deaths can drop your team back under the line, so match point must be defended. If the round cap runs out first, the leading team takes it, and a tie plays on. Teams are fixed for the whole match; new arrivals join the smaller side. Teammate punches do nothing (brawl shoulder-to-shoulder safely), but abilities stay team-blind — a bomb is everyone's problem, you just earn nothing for clipping your own side and their death still costs your team. Zombies ignore teams entirely, and in a Brutal Teams bunker round the door opens once only one team is left standing."
                 }
             ]
         },

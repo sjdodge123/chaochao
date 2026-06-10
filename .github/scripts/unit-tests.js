@@ -302,10 +302,10 @@ group('compressor', function () {
     eq(hazRow[0][1], 11, 'hazard[1] = x');
     eq(hazRow[0][2], 22, 'hazard[2] = y');
 
-    // spawn/append packet (static fields, sent once) — pin ALL 17 indices so any
+    // spawn/append packet (static fields, sent once) — pin ALL 18 indices so any
     // reorder of the spawn layout trips the test, not just a length change.
     const spawn = JSON.parse(compressor.appendPlayer(fakePlayer));
-    eq(spawn.length, 17, 'spawn packet has 17 fields');
+    eq(spawn.length, 18, 'spawn packet has 18 fields');
     eq(spawn[0], 'p1', 'spawn[0] = id');
     eq(spawn[1], 10, 'spawn[1] = x');
     eq(spawn[2], 20, 'spawn[2] = y');
@@ -323,6 +323,7 @@ group('compressor', function () {
     eq(spawn[14], 'stripes', 'spawn[14] = pattern');
     eq(spawn[15], 'comet', 'spawn[15] = trailFx');
     eq(spawn[16], 'border_ring', 'spawn[16] = border');
+    eq(spawn[17], null, 'spawn[17] = teamId (null in FFA modes)');
 });
 
 // ---------------------------------------------------------------------------

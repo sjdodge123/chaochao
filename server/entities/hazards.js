@@ -68,7 +68,7 @@ class Bumper extends Hazard {
 			return;
 		}
 		if (this.punch == null) {
-			this.punch = new Punch(this.x, this.y, c.hazards.bumper.attackRadius, c.hazards.bumper.color, this.ownerId, this.roomSig, c.hazards.bumper.punchBonus, false);
+			this.punch = new Punch(this.x, this.y, c.hazards.bumper.attackRadius, c.hazards.bumper.color, this.ownerId, this.roomSig, c.hazards.bumper.punchBonus, false, null);
 			this.punch.mapOwned = true;
 			this.punch.type = "bumper";
 		}
