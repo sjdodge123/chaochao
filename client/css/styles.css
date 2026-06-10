@@ -392,6 +392,21 @@ canvas {
     color: var(--text-soft);
     white-space: nowrap;
 }
+/* Game-mode badge on a room card: a small pill so the mode reads at a glance.
+   Brutal modes get a red warning tint. */
+.card-mode {
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    border: 1px solid var(--text-muted);
+    color: var(--text-soft);
+    white-space: nowrap;
+}
+.card-mode-brutal {
+    border-color: #d9534f;
+    color: #d9534f;
+}
 .card-stat-label {
     color: var(--text-muted);
 }

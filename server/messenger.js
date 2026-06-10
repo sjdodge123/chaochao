@@ -604,7 +604,10 @@ function checkForMail(client) {
 			lobbyAI: room.game.botOverride,
 			// Room-wide playlist so a late joiner sees the real selection (not the
 			// default Featured) and can't overwrite it by stepping the board.
-			lobbyPlaylist: room.game.gameBoard.playlistId
+			lobbyPlaylist: room.game.gameBoard.playlistId,
+			// Room-wide game mode so a late joiner (any state) knows what kind of
+			// game this room is playing.
+			lobbyGameMode: room.game.gameBoard.gameModeId
 		};
 		client.emit("gameState", gameState);
 		//Update all existing players with the new player's info
@@ -873,6 +876,24 @@ function checkForMail(client) {
 		}
 		if (room.game.gameBoard.setPlaylist(id)) {
 			messageRoomBySig(room.sig, "lobbyPlaylistChanged", { id: id });
+		}
+	});
+
+	// Room-wide game mode pick from the lobby hub mode station. Lobby-only (the
+	// mode is locked once the gate goes up so a mid-game switch can't half-apply);
+	// last-writer-wins; validated against the ACTIVE c.gameModes entries
+	// (setGameMode does this) and only echoed when it actually changed.
+	client.on('setLobbyGameMode', function (payload) {
+		var room = hostess.getRoomBySig(roomMailList[client.id]);
+		if (room == undefined || room.game.currentState != c.stateMap.lobby) {
+			return;
+		}
+		var id = payload && payload.id;
+		if (typeof id !== "string") {
+			return;
+		}
+		if (room.game.gameBoard.setGameMode(id)) {
+			messageRoomBySig(room.sig, "lobbyGameModeChanged", { id: id });
 		}
 	});
 

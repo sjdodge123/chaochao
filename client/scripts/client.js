@@ -240,6 +240,13 @@ function currentPlaylistIdForMetrics() {
 	return (typeof config !== "undefined" && config && config.defaultPlaylist) ? config.defaultPlaylist : "featured";
 }
 
+// The room's game mode id for analytics, so rounds/matches segment by mode
+// (mode adoption is the first thing to watch once new modes ship).
+function currentGameModeIdForMetrics() {
+	if (typeof lobbyGameMode !== "undefined" && lobbyGameMode) { return lobbyGameMode; }
+	return (typeof config !== "undefined" && config && config.defaultGameMode) ? config.defaultGameMode : "standard_ffa";
+}
+
 // Hit-test a pointer (logical coords) against the map-rating star widget. On a hit,
 // optimistically fills the stars and emits the vote (server confirms via mapRated).
 // Returns true if the tap was consumed by the widget. Shown on the per-round overview
@@ -347,6 +354,13 @@ function registerLobbyHubHandlers(server) {
 		// this broadcast.
 		if (payload != null && typeof payload.id === "string") {
 			lobbyPlaylist = payload.id;
+		}
+	});
+	server.on("lobbyGameModeChanged", function (payload) {
+		// Room-wide game mode selection (mode station). Same always-apply /
+		// debounced-emit de-race pattern as the playlist above.
+		if (payload != null && typeof payload.id === "string") {
+			lobbyGameMode = payload.id;
 		}
 	});
 	server.on("stationEnter", function (payload) {
@@ -825,6 +839,10 @@ function registerConnectionHandlers(server) {
 		if (gameState.lobbyPlaylist != null) {
 			lobbyPlaylist = gameState.lobbyPlaylist;
 		}
+		// Same for the room's game mode (any state — it labels the match itself).
+		if (gameState.lobbyGameMode != null) {
+			lobbyGameMode = gameState.lobbyGameMode;
+		}
 		// Refresh the hint UI now the primary has joined (solo bottom bar by
 		// default; switches to per-player blocks once a 2nd local player joins).
 		if (typeof onLocalPlayersChanged === "function") {
@@ -1242,7 +1260,8 @@ function registerStateHandlers(server) {
 			players: clientList ? Object.keys(clientList).length : 0,
 			bots: countBotsInPlayerList(),
 			map: (currentMap && currentMap.name) || 'unknown',
-			playlist: currentPlaylistIdForMetrics()
+			playlist: currentPlaylistIdForMetrics(),
+			mode: currentGameModeIdForMetrics()
 		});
 		// Lifetime-once onboarding conversion: the player's very first race, with
 		// time_to_first_match (seconds since navigation start). See metrics.js.
@@ -1314,6 +1333,7 @@ function registerStateHandlers(server) {
 		var roundCompleteParams = {
 			map: (currentMap && currentMap.name) || 'unknown',
 			playlist: currentPlaylistIdForMetrics(),
+			mode: currentGameModeIdForMetrics(),
 			round_number: (typeof round === "number") ? round : 0
 		};
 		if (raceStartedAt != null) {
@@ -1429,6 +1449,7 @@ function registerStateHandlers(server) {
 			won: (packet.winner === myID),
 			map: (currentMap && currentMap.name) || 'unknown',
 			playlist: currentPlaylistIdForMetrics(),
+			mode: currentGameModeIdForMetrics(),
 			players: clientList ? Object.keys(clientList).length : 0,
 			bots: countBotsInPlayerList()
 		};

@@ -148,6 +148,9 @@ jobs:
       - name: "Headless Heatwave brutal-round test (tile delta / path guarantee / second wave / Firewalker)"
         run: node .github/scripts/heatwave-test.js
 
+      - name: "Game-mode matrix test (every ACTIVE config.gameModes mode: plumbing, full match to gameOver, every-map sweep)"
+        run: node .github/scripts/mode-smoke-test.js
+
       - name: Headless playlist-selection test (playlist-aware rotation)
         run: node .github/scripts/playlist-selection-test.js
 
