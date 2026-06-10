@@ -142,6 +142,9 @@ jobs:
       - name: Headless Bunker brutal-round test (bury -> ring -> emerge -> claim/void)
         run: node .github/scripts/bunker-test.js
 
+      - name: "Headless Heatwave brutal-round test (tile delta / path guarantee / second wave / Firewalker)"
+        run: node .github/scripts/heatwave-test.js
+
       - name: Headless playlist-selection test (playlist-aware rotation)
         run: node .github/scripts/playlist-selection-test.js
 

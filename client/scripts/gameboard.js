@@ -976,6 +976,141 @@ function tileSwapLanded(ids) {
 	}
 }
 
+// --- Heatwave (brutal 1013) client state ---
+// heatwaveFX arms from the newMap payload (client.js): the converted tiles keep
+// their OLD ids on this client until the gated camera's whole-map beat, then flip
+// one by one (staggered burn-in) leaving permanent scorch marks baked into the
+// map cache. The server map is already mutated — everyone is held at the gate,
+// so deferring the visual is safe. heatwaveScorch is the cumulative decal list
+// for the CURRENT map; renderMapToCache replays it (paintScorchMarks, draw.js).
+var heatwaveFX = null;
+var heatwaveScorch = [];  // [{vid, water}] — water conversions get the wet-stone rim
+var heatwaveFlashes = []; // transient per-tile burn-in flashes [{vid, at}]
+
+function armHeatwave(payload, state) {
+	heatwaveScorch = [];
+	heatwaveFlashes = [];
+	heatwaveFX = null;
+	if (payload == null || payload.changes == null) {
+		return;
+	}
+	var pending = [];
+	for (var vid in payload.changes) {
+		// Stagger slots in [0.05, 0.85] of the reveal window so the first flip
+		// lands just after the camera settles and the last flash fades before
+		// the zoom back in.
+		pending.push({ vid: vid, newId: payload.changes[vid], t: 0.05 + Math.random() * 0.8 });
+	}
+	if (pending.length === 0) {
+		return;
+	}
+	// Mid-round joiner / reconnect: the reveal already happened — the live tile
+	// ids arrive via the tileChanges snapshot; just bake the scorch, no animation.
+	if (state == config.stateMap.racing || state == config.stateMap.collapsing) {
+		for (var i = 0; i < pending.length; i++) {
+			addHeatwaveScorch(pending[i].vid, pending[i].newId);
+		}
+		invalidateMapCache();
+		return;
+	}
+	pending.sort(function (a, b) { return a.t - b.t; });
+	heatwaveFX = { pending: pending, cursor: 0, started: false, done: false, camReveal: null, gatedAt: Date.now() };
+}
+
+function addHeatwaveScorch(vid, newId) {
+	heatwaveScorch.push({ vid: vid, water: (config.tileMap.water != null && newId == config.tileMap.water.id) });
+}
+
+// Advance the reveal to `progress` (0..1): flip every tile whose stagger slot has
+// passed, stamp its scorch + flash, and apply the new id to the live map. Driven
+// per frame from the gated camera (draw.js); flips are batched per frame and the
+// cache re-bake is already throttled (MAP_BAKE_MIN_MS), so a burst stays cheap.
+function heatwaveRevealAdvance(progress) {
+	if (heatwaveFX == null || heatwaveFX.done) {
+		return;
+	}
+	if (!heatwaveFX.started && progress > 0) {
+		heatwaveFX.started = true;
+		if (typeof playHeatwaveSizzle === "function") { playHeatwaveSizzle(); }
+		// Soft ambient pulse on every local pad as the burn rolls across the map.
+		if (typeof padPulseAll === "function") { padPulseAll(0.25, 0.15, 350); }
+	}
+	var flipped = false;
+	while (heatwaveFX.cursor < heatwaveFX.pending.length &&
+		heatwaveFX.pending[heatwaveFX.cursor].t <= progress) {
+		var item = heatwaveFX.pending[heatwaveFX.cursor];
+		heatwaveFX.cursor++;
+		for (var i = 0; i < currentMap.cells.length; i++) {
+			if (currentMap.cells[i].site.voronoiId == item.vid) {
+				currentMap.cells[i].id = item.newId;
+				break;
+			}
+		}
+		addHeatwaveScorch(item.vid, item.newId);
+		heatwaveFlashes.push({ vid: item.vid, at: Date.now() });
+		flipped = true;
+	}
+	if (flipped) {
+		invalidateMapCache();
+	}
+	if (heatwaveFX.cursor >= heatwaveFX.pending.length) {
+		heatwaveFX.done = true;
+	}
+}
+
+// Safety flush at gate-open (startRace handler): whatever the camera or clock
+// did, the visible map must match the server now. No-op once done.
+function heatwaveForceComplete() {
+	heatwaveRevealAdvance(1.01);
+}
+
+// Heatwave second-wave telegraph: same pending-pulse pipeline as the tileSwap
+// (drawPendingSwap), but each entry pins its DESTINATION id explicitly — the
+// swap telegraph infers fast<->ice, while heatwave flips to lava/water/dirt/
+// ability and the ghost texture must preview the right one.
+function markPendingHeatwave(idMap, duration) {
+	if (idMap == null) {
+		return;
+	}
+	var now = Date.now();
+	var end = now + duration;
+	var set = (pendingSwapCells != null) ? pendingSwapCells.set : {};
+	var any = false;
+	for (var vid in idMap) {
+		var existing = set[vid];
+		if (existing == null || end < existing.end) {
+			set[vid] = { start: now, end: end, destId: idMap[vid] };
+		}
+		any = true;
+	}
+	if (any) {
+		pendingSwapCells = { set: set };
+	}
+}
+
+// Second wave landed: the tile ids themselves flip via the tileChanges broadcast
+// that rides alongside (already applied — this event follows it), so here we
+// bake the scorch from the now-live ids, flash, and sizzle.
+function heatwaveWaveLanded(payload) {
+	var ids = (payload != null) ? payload.ids : null;
+	if (ids == null || ids.length === 0) {
+		return;
+	}
+	for (var i = 0; i < ids.length; i++) {
+		var newId = null;
+		for (var ci = 0; ci < currentMap.cells.length; ci++) {
+			if (currentMap.cells[ci].site.voronoiId == ids[i]) {
+				newId = currentMap.cells[ci].id;
+				break;
+			}
+		}
+		addHeatwaveScorch(ids[i], newId);
+		heatwaveFlashes.push({ vid: ids[i], at: Date.now() });
+	}
+	if (typeof playHeatwaveSizzle === "function") { playHeatwaveSizzle(); }
+	if (typeof padPulseAll === "function") { padPulseAll(0.3, 0.2, 300); }
+	invalidateMapCache();
+}
 
 function playerAbilityUsed(owner) {
 	playerList[owner].ability = null;

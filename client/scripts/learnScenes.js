@@ -777,6 +777,39 @@ var LearnAnim = (function () {
         onCycle(s.mem, s.t - 1620, 3600, "erupt", function () { spawnExplosion(cx, cy, 70, "#cf1020"); });
     };
 
+    SCENES["heatwave"] = function (s) {
+        floor(s.ctx, "sand.png", 60);
+        var ph = loop(s.t, 3000), ctx = s.ctx;
+        var px = W * 0.5, py = H * 0.55, r = 34;
+        // A patch of ground burns over: a hot flash, then a lingering scorched rim.
+        if (ph > 0.3) {
+            var burn = Math.min(1, (ph - 0.3) / 0.15);
+            ctx.save();
+            ctx.globalAlpha = 0.85 * burn;
+            ctx.fillStyle = "#d8431f";
+            ctx.beginPath(); ctx.arc(px, py, r, 0, 2 * Math.PI); ctx.fill();
+            ctx.globalAlpha = 0.9 * burn;
+            ctx.strokeStyle = "#1d130b";
+            ctx.lineWidth = 5;
+            ctx.stroke();
+            ctx.restore();
+        }
+        if (ph > 0.3 && ph < 0.5) {
+            var fl = 1 - (ph - 0.3) / 0.2;
+            ctx.save();
+            ctx.globalAlpha = 0.6 * fl;
+            ctx.fillStyle = "#ffb24a";
+            ctx.beginPath(); ctx.arc(px, py, r + 8, 0, 2 * Math.PI); ctx.fill();
+            ctx.restore();
+        }
+        // Warm grade washes over the card while the heat is on.
+        ctx.save();
+        ctx.globalAlpha = 0.10 * (ph > 0.3 ? 1 : ph / 0.3);
+        ctx.fillStyle = "#ff7a26";
+        ctx.fillRect(0, 0, W, H);
+        ctx.restore();
+    };
+
     SCENES["infection"] = function (s) {
         floor(s.ctx, "dirt.png", 60);
         var ph = loop(s.t, 4000), carrierX = lerp(W * 0.1, W * 0.9, ph);

@@ -157,7 +157,8 @@ var MEDAL_TITLES = {
     brutalist: 'Brutalist', mostMurdered: 'Picked on', resourceful: 'Resouceful',
     bully: 'Bully', doubleKill: 'Double Kill', tripleKill: 'Triple Kill',
     megaKill: 'Mega Kill', zombieSlayer: 'Zombie Slayer', heavyHitter: 'Heavy Hitter',
-    pinball: 'Pinball', iceSkater: 'Ice Skater', smoothOperator: 'Smooth Operator'
+    pinball: 'Pinball', iceSkater: 'Ice Skater', smoothOperator: 'Smooth Operator',
+    firewalker: 'Firewalker'
 };
 function describeAchievement(u) {
     var n = u.threshold;

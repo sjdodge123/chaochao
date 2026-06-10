@@ -49,6 +49,10 @@ module.exports = {
 				//driftCreditTotal() so a kart still mid-drift at the match-ending tick gets
 				//its final, not-yet-banked drift counted (reset() folds it in only afterward).
 				this.checkForNewMedalHolder(achievements.smoothOperator, id, Math.round(player.driftCreditTotal()));
+				//Firewalker — most Heatwave rounds finished without touching a single
+				//scorched (heatwave-converted) tile. Judged once per round at the
+				//conclusion tick (game.js), so this is a small clean-finish count.
+				this.checkForNewMedalHolder(achievements.firewalker, id, player.firewalkerCount);
 			}
 
 			//Picked on — count kills by ANYONE (bots included), but only a HUMAN victim

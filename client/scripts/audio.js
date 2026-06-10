@@ -615,6 +615,7 @@ function stopAllSounds() {
     currentBackgroundMusic = null;
     fadingBackgroundVoice = null;
     stopAllDriftSounds();
+    stopHeatwaveDrone();
 }
 
 // ----------------------------------------------------------------------------
@@ -663,6 +664,108 @@ function playBunkerDoorHiss() {
     g.gain.exponentialRampToValueAtTime(0.0001, now + 0.46);        // vent out
     src.connect(filt); filt.connect(g); g.connect(sfxBus);
     try { src.start(now); src.stop(now + 0.5); } catch (e) { try { src.disconnect(); } catch (e2) {} }
+}
+
+// ----------------------------------------------------------------------------
+// Heatwave (brutal round) — three synthesized cues from the shared noise buffer
+// + oscillators (no assets), all through sfxBus so the master toggle and lobby
+// dampen apply. Volumes are set for MID-RACE listening (never judge in the
+// lobby; it damps all SFX to 10%).
+//   playHeatwaveSizzle  — one-shot reveal wash: a bright searing band sweeping
+//                         down into a low rumble while the tiles burn over.
+//   start/stopHeatwaveDrone — looping ambient heat shimmer for the round; lives
+//                         OUTSIDE activeVoices (drift-skid pattern), so generic
+//                         stops can't reach it — it must be stopped explicitly
+//                         (stopAllSounds does, plus the round-end handlers).
+//   playHeatwaveWarning — second-wave alarm: two quick rising chirps.
+var HEATWAVE_DRONE_VOL = 0.05;
+var heatwaveDroneVoice = null;
+
+function playHeatwaveSizzle() {
+    var ctx = getCtx();
+    if (!ctx || ctx.state !== "running") { return; }
+    if (gameMuted || masterVolume === 0) { return; }
+    var now = ctx.currentTime;
+    var dur = 2.2;
+    var src = ctx.createBufferSource();
+    src.buffer = getDriftNoiseBuffer(ctx);
+    src.loop = true;
+    var filt = ctx.createBiquadFilter();
+    filt.type = "bandpass";
+    filt.Q.value = 0.7;
+    filt.frequency.setValueAtTime(6000, now);                       // searing hiss...
+    filt.frequency.exponentialRampToValueAtTime(420, now + dur);    // ...settling to a rumble
+    var g = ctx.createGain();
+    var peak = Math.max(0.0002, 0.14 * masterVolume * sfxVolumeScalar);
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(peak, now + 0.35);
+    g.gain.setValueAtTime(peak, now + dur * 0.7);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    src.connect(filt); filt.connect(g); g.connect(sfxBus);
+    try { src.start(now); src.stop(now + dur + 0.05); } catch (e) { try { src.disconnect(); } catch (e2) {} }
+}
+
+function startHeatwaveDrone() {
+    var ctx = getCtx();
+    if (!ctx || ctx.state !== "running") { return; }
+    if (gameMuted || masterVolume === 0) { return; }
+    if (heatwaveDroneVoice != null) { return; }
+    var now = ctx.currentTime;
+    // Two slightly detuned low sines beating (~3.5Hz shimmer) under a narrow
+    // noise band — distant heat-haze that sits beneath the music.
+    var oscA = ctx.createOscillator();
+    oscA.type = "sine"; oscA.frequency.value = 68;
+    var oscB = ctx.createOscillator();
+    oscB.type = "sine"; oscB.frequency.value = 71.5;
+    var noise = ctx.createBufferSource();
+    noise.buffer = getDriftNoiseBuffer(ctx);
+    noise.loop = true;
+    var nFilt = ctx.createBiquadFilter();
+    nFilt.type = "bandpass"; nFilt.Q.value = 2.2; nFilt.frequency.value = 2600;
+    var nGain = ctx.createGain(); nGain.gain.value = 0.18;
+    var g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, HEATWAVE_DRONE_VOL * masterVolume * sfxVolumeScalar), now + 1.6);
+    oscA.connect(g); oscB.connect(g);
+    noise.connect(nFilt); nFilt.connect(nGain); nGain.connect(g);
+    g.connect(sfxBus);
+    try { oscA.start(now); oscB.start(now); noise.start(now); }
+    catch (e) { try { g.disconnect(); } catch (e2) {} return; }
+    heatwaveDroneVoice = { oscA: oscA, oscB: oscB, noise: noise, gain: g };
+}
+
+function stopHeatwaveDrone() {
+    var v = heatwaveDroneVoice;
+    if (v == null) { return; }
+    heatwaveDroneVoice = null;
+    var ctx = getCtx();
+    if (!ctx) { try { v.oscA.stop(); v.oscB.stop(); v.noise.stop(); } catch (e) {} return; }
+    var now = ctx.currentTime;
+    try {
+        v.gain.gain.setTargetAtTime(0.0001, now, 0.3);
+        v.oscA.stop(now + 1.2); v.oscB.stop(now + 1.2); v.noise.stop(now + 1.2);
+    } catch (e) {}
+}
+
+function playHeatwaveWarning() {
+    var ctx = getCtx();
+    if (!ctx || ctx.state !== "running") { return; }
+    if (gameMuted || masterVolume === 0) { return; }
+    var now = ctx.currentTime;
+    var peak = Math.max(0.0002, 0.12 * masterVolume * sfxVolumeScalar);
+    for (var i = 0; i < 2; i++) {
+        var t0 = now + i * 0.28;
+        var osc = ctx.createOscillator();
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(540, t0);
+        osc.frequency.exponentialRampToValueAtTime(880, t0 + 0.16);
+        var g = ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(peak, t0 + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
+        osc.connect(g); g.connect(sfxBus);
+        try { osc.start(t0); osc.stop(t0 + 0.25); } catch (e) {}
+    }
 }
 
 // Start (first call) or update (later calls) the drift loop for a player.

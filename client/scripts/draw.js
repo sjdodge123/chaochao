@@ -193,6 +193,8 @@ var moneyIcon = new Image(576, 512);
 moneyIcon.src = "../assets/img/sack-dollar-solid.svg";
 var volcanoIcon = new Image(576, 512);
 volcanoIcon.src = "../assets/img/volcano-solid.svg";
+var heatwaveIcon = new Image(576, 512);
+heatwaveIcon.src = "../assets/img/heatwave-solid.svg";
 var bombImage = new Image();
 bombImage.src = "../assets/img/bomb.svg";
 var snowFlakeImage = new Image(576, 512);
@@ -3621,6 +3623,7 @@ function loadPatterns() {
     brutalRoundImages[config.brutalRounds.explosive.id] = explosionIcon;
     brutalRoundImages[config.brutalRounds.blackout.id] = moonIcon;
     brutalRoundImages[config.brutalRounds.bunker.id] = bunkerIcon;
+    brutalRoundImages[config.brutalRounds.heatwave.id] = heatwaveIcon;
 
     if (brutalRoundConfig != null && brutalPatterns[brutalRoundConfig.brutalTypes.toString()] == null) {
         brutalPatterns[brutalRoundConfig.brutalTypes.toString()] = makeComplexPattern(brutalRoundConfig.brutalTypes);
@@ -3827,6 +3830,12 @@ function drawObjects(dt) {
         drawGate();
         drawArenaVignette();
         drawPendingSwap();
+        // Heatwave: wall-clock reveal fallback (camera intro inactive) + the
+        // per-tile burn-in flashes for freshly converted tiles (both waves).
+        if (typeof updateHeatwaveReveal === "function") {
+            updateHeatwaveReveal();
+            drawHeatwaveFlashes();
+        }
         drawPingCircles();
         drawCollapseShockwaves();
     }
@@ -3853,6 +3862,11 @@ function drawObjects(dt) {
     // ---- HUD PASS: screen space, never zoomed (score, map title, touch
     // controls, mode indicators, game-over). ----
     applyCanvasTransform();
+    // Heatwave warm grade: a subtle screen-space heat tint over the rendered
+    // world (drawn before the HUD text so readouts stay crisp).
+    if (typeof drawHeatwaveGrade === "function") {
+        drawHeatwaveGrade();
+    }
     if (currentState == config.stateMap.gated ||
         currentState == config.stateMap.racing ||
         currentState == config.stateMap.collapsing) {
@@ -4249,6 +4263,23 @@ function computeWorldViewTarget(dt) {
                 else { cover = 1; }
             }
             bunkerFX.camCover = cover;
+        }
+        // Heatwave reveal: tiles burn over during the whole-map beat — exactly the
+        // bunker-door window — so every player watches the arena transform at full
+        // zoom-out, then races the changed map. camReveal being non-null tells the
+        // wall-clock fallback (updateHeatwaveReveal) the camera intro owns the clock.
+        if (typeof heatwaveFX !== "undefined" && heatwaveFX != null && !heatwaveFX.done) {
+            var reveal = 0;
+            if (!(rest > 0)) {
+                reveal = 1;
+            } else if (tt > 0) {
+                var hwStart = rest * WORLD_ZOOM_GATE_OUT_FRAC;
+                var hwEnd = rest - rest * WORLD_ZOOM_GATE_IN_FRAC;
+                if (tt >= hwEnd) { reveal = 1; }
+                else if (tt > hwStart && hwEnd > hwStart) { reveal = (tt - hwStart) / (hwEnd - hwStart); }
+            }
+            heatwaveFX.camReveal = reveal;
+            heatwaveRevealAdvance(reveal);
         }
         var scale = 1 + (focusedView.scale - 1) * e;
         return clampViewToWorld(focusedView.cx, focusedView.cy, scale);
@@ -4702,7 +4733,8 @@ var MEDAL_DESC = {
     heavyHitter: "Most charged-up punches",
     pinball: "Bounced off the most bumpers",
     iceSkater: "Slid the furthest on ice",
-    smoothOperator: "Drifted the furthest on ice"
+    smoothOperator: "Drifted the furthest on ice",
+    firewalker: "Finished a Heatwave round untouched by scorched ground"
 };
 // Per-medal glyph stamped into the gold disc, so each award reads at a glance.
 // Mirrors the icons on the Learn/Codex medals page (client/scripts/learn.js).
@@ -4721,7 +4753,8 @@ var MEDAL_ICON = {
     heavyHitter: "🥊",
     pinball: "🔵",
     iceSkater: "⛸️",
-    smoothOperator: "🏂"
+    smoothOperator: "🏂",
+    firewalker: "👣"
 };
 
 // Rounded-rect path builder (caller fills/strokes it).
@@ -7927,10 +7960,13 @@ function traceCellPath(ctx, cell) {
 // (gameboard.js) for the lifecycle.
 var SWAP_WARN_COLOR = "#ffcf57"; // fallback tint if a destination texture isn't decoded yet
 
-function drawSwapTelegraphTile(cell, prog, now) {
+function drawSwapTelegraphTile(cell, prog, now, explicitDestId) {
     var ctx = gameContext;
     var fastId = config.tileMap.fast.id, iceId = config.tileMap.ice.id;
-    var destId = (cell.id === fastId) ? iceId : (cell.id === iceId ? fastId : null);
+    // The tileSwap telegraph infers its destination (fast<->ice); a heatwave
+    // second-wave entry pins it explicitly (lava/water/dirt/ability ghosts).
+    var destId = (explicitDestId != null) ? explicitDestId
+        : (cell.id === fastId) ? iceId : (cell.id === iceId ? fastId : null);
     var pat = (destId != null) ? patterns[destId] : null;
     // 0 until the last ~40%, then ramps to 1 — gates how much the slow pulse shows.
     var lastPhase = clamp01((prog - 0.6) / 0.4);
@@ -7993,13 +8029,153 @@ function drawPendingSwap() {
         // Per-tile progress so overlapping swaps each ramp on their own clock.
         var span = tile.end - tile.start;
         var prog = span > 0 ? clamp01((now - tile.start) / span) : 1;
-        drawSwapTelegraphTile(cell, prog, now);
+        drawSwapTelegraphTile(cell, prog, now, tile.destId);
     }
     gameContext.restore();
     // Once every tile has flipped/cleared/expired, drop the telegraph.
     if (!hasAnyKey(set)) {
         pendingSwapCells = null;
     }
+}
+
+// --- Heatwave reveal + scorch visuals ---
+// The round-start reveal is normally clocked by the gated camera arc (see the
+// heatwave block in computeWorldViewTarget — same whole-map beat as the bunker
+// door). This fallback drives it on the same beat fractions from wall-clock when
+// that arc isn't running (world camera off, intro disarmed mid-countdown);
+// camReveal being non-null means the camera owns the clock this round. startRace
+// force-completes whatever is left either way.
+function updateHeatwaveReveal() {
+    if (typeof heatwaveFX === "undefined" || heatwaveFX == null || heatwaveFX.done) {
+        return;
+    }
+    if (currentState !== config.stateMap.gated || heatwaveFX.camReveal != null) {
+        return;
+    }
+    var rest = ((config.gatedWaitTime || 9) * 1000) - WORLD_ZOOM_HOLD_MS;
+    var tt = (Date.now() - heatwaveFX.gatedAt) - WORLD_ZOOM_HOLD_MS;
+    var reveal = 0;
+    if (!(rest > 0)) {
+        reveal = 1;
+    } else if (tt > 0) {
+        var hwStart = rest * WORLD_ZOOM_GATE_OUT_FRAC;
+        var hwEnd = rest - rest * WORLD_ZOOM_GATE_IN_FRAC;
+        if (tt >= hwEnd) { reveal = 1; }
+        else if (tt > hwStart && hwEnd > hwStart) { reveal = (tt - hwStart) / (hwEnd - hwStart); }
+    }
+    heatwaveRevealAdvance(reveal);
+}
+
+// Short burn-in flash on each freshly converted tile: an additive hot fill that
+// pops and fades over ~450ms, leaving the baked scorch rim behind. Serves both
+// the round-start reveal and the mid-race second wave. World coords (same pass
+// as the swap telegraph).
+var HEATWAVE_FLASH_MS = 450;
+function drawHeatwaveFlashes() {
+    if (typeof heatwaveFlashes === "undefined" || heatwaveFlashes.length === 0 ||
+        currentMap == null || currentMap.cells == null) {
+        return;
+    }
+    var now = Date.now();
+    var ctx = gameContext;
+    var kept = [];
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    for (var i = 0; i < heatwaveFlashes.length; i++) {
+        var f = heatwaveFlashes[i];
+        var age = now - f.at;
+        if (age > HEATWAVE_FLASH_MS) { continue; }
+        kept.push(f);
+        var cell = null;
+        for (var ci = 0; ci < currentMap.cells.length; ci++) {
+            if (currentMap.cells[ci].site.voronoiId == f.vid) { cell = currentMap.cells[ci]; break; }
+        }
+        if (cell == null || !traceCellPath(ctx, cell)) { continue; }
+        var a = 1 - age / HEATWAVE_FLASH_MS;
+        ctx.globalAlpha = 0.55 * a;
+        ctx.fillStyle = "#ffb24a";
+        ctx.fill();
+    }
+    ctx.restore();
+    heatwaveFlashes = kept;
+}
+
+// Subtle screen-space warm tint while a Heatwave round is live, so the mode is
+// felt mid-race and not just at the reveal. One translucent fill — cheap on
+// every profile. Ramps in with the reveal so the heat "arrives" with the burn.
+function drawHeatwaveGrade() {
+    if (typeof brutalRoundConfig === "undefined" || brutalRoundConfig == null ||
+        brutalRoundConfig.brutalTypes.indexOf(config.brutalRounds.heatwave.id) === -1) {
+        return;
+    }
+    if (currentState != config.stateMap.gated &&
+        currentState != config.stateMap.racing &&
+        currentState != config.stateMap.collapsing) {
+        return;
+    }
+    var strength = 1;
+    if (typeof heatwaveFX !== "undefined" && heatwaveFX != null && !heatwaveFX.done) {
+        strength = (heatwaveFX.camReveal != null) ? heatwaveFX.camReveal : (heatwaveFX.started ? 1 : 0);
+    }
+    if (strength <= 0) {
+        return;
+    }
+    gameContext.save();
+    gameContext.globalAlpha = 0.06 * strength;
+    gameContext.fillStyle = "#ff7a26";
+    gameContext.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
+    gameContext.restore();
+}
+
+// Permanent heatwave scorch, baked into the map cache (sand-trench pattern: zero
+// per-frame cost, replayed on every cache rebuild while the world->cache
+// transform is active). Each converted tile gets a charred rim traced along its
+// border plus soot speckles; melted-ice water gets a dark wet-stone shoreline
+// instead. Seeded by voronoiId so every re-bake lays identical marks.
+function paintScorchMarks(ctx) {
+    if (typeof heatwaveScorch === "undefined" || heatwaveScorch.length === 0 ||
+        currentMap == null || currentMap.cells == null) {
+        return;
+    }
+    var byVid = {};
+    for (var i = 0; i < currentMap.cells.length; i++) {
+        byVid[currentMap.cells[i].site.voronoiId] = currentMap.cells[i];
+    }
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (var s = 0; s < heatwaveScorch.length; s++) {
+        var mark = heatwaveScorch[s];
+        var cell = byVid[mark.vid];
+        if (cell == null || !traceCellPath(ctx, cell)) { continue; }
+        // Wide soft band, then a tighter dark lip on the same path.
+        ctx.globalAlpha = mark.water ? 0.30 : 0.34;
+        ctx.strokeStyle = mark.water ? "#2e3d46" : "#1d130b";
+        ctx.lineWidth = 9;
+        ctx.stroke();
+        ctx.globalAlpha = mark.water ? 0.45 : 0.55;
+        ctx.lineWidth = 3.5;
+        ctx.stroke();
+        if (!mark.water) {
+            var seed = 0;
+            var vidStr = String(mark.vid);
+            for (var ch = 0; ch < vidStr.length; ch++) { seed = (seed * 31 + vidStr.charCodeAt(ch)) >>> 0; }
+            ctx.fillStyle = "#16100a";
+            ctx.globalAlpha = 0.28;
+            for (var p = 0; p < 5; p++) {
+                seed = (seed * 1103515245 + 12345) >>> 0;
+                var ang = (seed % 360) * Math.PI / 180;
+                seed = (seed * 1103515245 + 12345) >>> 0;
+                var dist = 4 + (seed % 18);
+                seed = (seed * 1103515245 + 12345) >>> 0;
+                var r = 1 + (seed % 100) / 50;
+                ctx.beginPath();
+                ctx.arc(cell.site.x + Math.cos(ang) * dist, cell.site.y + Math.sin(ang) * dist, r, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+    }
+    ctx.restore();
 }
 
 // --- Orbital Beam telegraph + strike ---
@@ -8218,6 +8394,9 @@ function renderMapToCache() {
     // hazard pass + karts, which draw after the cache blit) — its world->cache
     // transform is the one active here.
     paintTrenchSegments(mapCtx);
+    // Heatwave scorch rims bake here too (same zero-per-frame trick); before the
+    // stone seams so a wet shoreline never paints over a water/lava ledge.
+    paintScorchMarks(mapCtx);
     drawEmptyBorders(mapCtx);
     drawStoneBorders(mapCtx);
     mapCtx.restore();

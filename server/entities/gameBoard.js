@@ -106,6 +106,12 @@ class GameBoard {
 		this.bunkerSafeIds = {};
 		this.bunkerLidIds = [];
 		this.bunkerStartTime = null;
+		// Heatwave state — the scorched-tile set is shared BY REFERENCE with every
+		// player (handleMapCellHit reads it for the Firewalker medal), so the second
+		// wave can extend the same object in place. Initialized here as well as in
+		// clean() so pre-first-race code can never index an undefined.
+		this.heatwaveScorchedIds = null;
+		this.pendingHeatwaveWave = null;
 		this.soloMode = false;
 		this.soloCollapseSpeed = c.lastPlayerCollapseSpeed;
 		this.soloStartDistance = this.world.height + 400;
@@ -1675,6 +1681,244 @@ class GameBoard {
 		messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(tileDelta));
 		messenger.messageRoomBySig(this.roomSig, "bunkerEmerge", { x: this.bunkerLoc.x, y: this.bunkerLoc.y, lid: this.bunkerLidIds });
 	}
+	// --- Heatwave (brutal id 1013) ---
+	// Tile-name decoder for everything below: config `slow` renders as SAND,
+	// `normal` renders as DIRT, `fast` renders as GRASS (see draw.js patterns).
+	// Sand/ice are the "dramatic" conversions (lava/water) the mode is built on.
+	countHeatwaveConvertibles() {
+		var cells = (this.currentMap != null) ? this.currentMap.cells : null;
+		if (cells == null) { return 0; }
+		var n = 0;
+		for (var i = 0; i < cells.length; i++) {
+			if (cells[i].id == c.tileMap.slow.id || cells[i].id == c.tileMap.ice.id) { n++; }
+		}
+		return n;
+	}
+	// True when every start edge can still walk to a goal on the LIVE cell ids.
+	// Heatwave's only blocking conversion is sand->lava, so this is the guard that
+	// keeps "there is always a walkable path to the goal" true.
+	heatwavePathOk() {
+		var edges = this.resolveStartEdges();
+		for (var e = 0; e < edges.length; e++) {
+			if (!cellGraph.reachableFromEdge(this.currentMap, edges[e])) { return false; }
+		}
+		return true;
+	}
+	// Heatwave's bonus ability pads lean toward counterplay: half of them carry the
+	// Ice Cannon (the heat scatters its own extinguisher), the rest roll normally.
+	spawnHeatwaveAbility() {
+		if (c.forceAbilitySpawn != null) { return c.forceAbilitySpawn; }
+		var iceCannon = c.tileMap.abilities.iceCannon;
+		if (iceCannon != null && iceCannon.spawnable && utils.getRandomInt(1, 100) <= 50) {
+			return iceCannon.id;
+		}
+		return this.spawnNewAbility();
+	}
+	// Pick this wave's conversions WITHOUT permanently touching the map: candidates
+	// are applied only to validate the path guarantee, then reverted. Returns
+	// { newIds: {vid: newTileId}, fromIds: {vid: oldTileId}, count } or null.
+	// `pcts` is either the top-level heatwave config (round start) or its
+	// secondWave block — both carry the four *Pct knobs.
+	selectHeatwaveChanges(pcts) {
+		var hw = c.brutalRounds.heatwave;
+		var cells = (this.currentMap != null) ? this.currentMap.cells : null;
+		if (cells == null) { return null; }
+		var sandId = c.tileMap.slow.id, lavaId = c.tileMap.lava.id;
+		var iceId = c.tileMap.ice.id, waterId = c.tileMap.water.id;
+		var grassId = c.tileMap.fast.id, dirtId = c.tileMap.normal.id;
+		// Gate strips never receive lava: gate spawn points don't avoid hazards, so a
+		// converted tile under a spawn would burn someone at GO.
+		var margin = GATE_DEPTH + (hw.gateMargin || 0);
+		var edges = this.resolveStartEdges();
+		var W = this.world.width, H = this.world.height;
+		var nearGate = function (site) {
+			for (var e = 0; e < edges.length; e++) {
+				if (edges[e] === "left" && site.x < margin) { return true; }
+				if (edges[e] === "right" && site.x > W - margin) { return true; }
+				if (edges[e] === "top" && site.y < margin) { return true; }
+				if (edges[e] === "bottom" && site.y > H - margin) { return true; }
+			}
+			return false;
+		};
+		var sand = [], ice = [], grass = [], dirt = [];
+		for (var i = 0; i < cells.length; i++) {
+			var cell = cells[i];
+			if (cell.id == sandId) { if (!nearGate(cell.site)) { sand.push(cell); } }
+			else if (cell.id == iceId) { ice.push(cell); }
+			else if (cell.id == grassId) { grass.push(cell); }
+			else if (cell.id == dirtId) { dirt.push(cell); }
+		}
+		var pctCount = function (bucket, pct) {
+			return Math.round(bucket.length * (pct || 0) / 100);
+		};
+		var newIds = {}, fromIds = {}, count = 0;
+		var take = function (bucket, n, makeId) {
+			bucket = utils.shuffleArray(bucket);
+			for (var k = 0; k < n && k < bucket.length; k++) {
+				var vid = bucket[k].site.voronoiId;
+				newIds[vid] = (typeof makeId === "function") ? makeId() : makeId;
+				fromIds[vid] = bucket[k].id;
+				count++;
+			}
+		};
+		var self = this;
+		take(ice, pctCount(ice, pcts.iceToWaterPct), waterId);
+		take(grass, pctCount(grass, pcts.grassToDirtPct), dirtId);
+		take(dirt, pctCount(dirt, pcts.dirtToAbilityPct), function () { return self.spawnHeatwaveAbility(); });
+		// Sand->lava is the only conversion that can wall off the goal, so it gets
+		// the retry loop: re-roll the picks, halving the count for the back half of
+		// the attempts, and drop the lava conversions entirely if nothing validates.
+		var lavaFull = pctCount(sand, pcts.sandToLavaPct);
+		var applySel = function () {
+			for (var v in newIds) {
+				for (var ci = 0; ci < cells.length; ci++) {
+					if (cells[ci].site.voronoiId == v) { cells[ci].id = newIds[v]; break; }
+				}
+			}
+		};
+		var revertSel = function () {
+			for (var v in fromIds) {
+				for (var ci = 0; ci < cells.length; ci++) {
+					if (cells[ci].site.voronoiId == v) { cells[ci].id = fromIds[v]; break; }
+				}
+			}
+		};
+		if (lavaFull > 0) {
+			var retries = hw.maxPathRetries || 8;
+			for (var attempt = 0; attempt < retries; attempt++) {
+				var lavaN = (attempt < retries / 2) ? lavaFull : Math.max(1, Math.floor(lavaFull / 2));
+				var lavaPicks = utils.shuffleArray(sand).slice(0, lavaN);
+				for (var lp = 0; lp < lavaPicks.length; lp++) {
+					var lvid = lavaPicks[lp].site.voronoiId;
+					newIds[lvid] = lavaId;
+					fromIds[lvid] = sandId;
+				}
+				applySel();
+				var ok = this.heatwavePathOk();
+				revertSel();
+				if (ok) { count += lavaPicks.length; break; }
+				for (var rp = 0; rp < lavaPicks.length; rp++) {
+					var rvid = lavaPicks[rp].site.voronoiId;
+					delete newIds[rvid];
+					delete fromIds[rvid];
+				}
+			}
+		}
+		if (count === 0) { return null; }
+		// The non-lava conversions can't block, but validate the whole selection
+		// once so the guarantee holds even if a future conversion type changes that.
+		applySel();
+		var finalOk = this.heatwavePathOk();
+		revertSel();
+		if (!finalOk) { return null; }
+		return { newIds: newIds, fromIds: fromIds, count: count };
+	}
+	// Commit a selection to the live map: flip the cells, fold the delta into the
+	// late-joiner snapshot, grow the shared scorched set, and rebuild stone seams
+	// when new water appeared. Returns the {vid: newTileId} delta.
+	commitHeatwaveChanges(sel) {
+		var cells = this.currentMap.cells;
+		var waterMade = false;
+		var applied = {};
+		for (var i = 0; i < cells.length; i++) {
+			var vid = cells[i].site.voronoiId;
+			var newId = sel.newIds[vid];
+			if (newId == null) { continue; }
+			cells[i].id = newId;
+			this.tileChanges[vid] = newId;
+			applied[vid] = newId;
+			if (newId == c.tileMap.water.id) { waterMade = true; }
+		}
+		if (this.heatwaveScorchedIds == null) { this.heatwaveScorchedIds = {}; }
+		for (var v in applied) { this.heatwaveScorchedIds[v] = true; }
+		// Share by reference with everyone already seated; gatePlayer covers anyone
+		// gated after this point. The second wave extends this same object, so the
+		// players' references stay live.
+		for (var pid in this.playerList) {
+			if (this.playerList[pid] != null) {
+				this.playerList[pid].heatwaveScorchedIds = this.heatwaveScorchedIds;
+			}
+		}
+		if (waterMade) {
+			// New water can now sit beside lava; grow the stone seams from the live
+			// ids (same rule as the Orbital Beam).
+			_engine.rebuildStoneEdges(this.currentMap);
+		}
+		return applied;
+	}
+	// Round-start application. Runs inside loadNextMap so the delta ships in the
+	// newMap payload (clients animate the reveal during the gated zoom-out; the
+	// server map is authoritative immediately — everyone is held at the gate).
+	applyBrutalHeatwaveRound() {
+		if (!this.checkForActiveBrutal(c.brutalRounds.heatwave.id)) { return null; }
+		var sel = this.selectHeatwaveChanges(c.brutalRounds.heatwave);
+		if (sel == null) { return null; }
+		var applied = this.commitHeatwaveChanges(sel);
+		return { changes: applied };
+	}
+	// --- Heatwave second wave (mid-race) ---
+	// Scheduled from startRace (volcano pattern: unbound via setTimeout, everything
+	// through packet.context). Selection happens at WARN time so the telegraph
+	// matches exactly what flips; the flip drops any tile something else changed
+	// during the warn window (collapse, tileSwap, ice cannon, ability pickup).
+	warnOfHeatwaveWave(packet) {
+		var game = packet.context;
+		var gb = game.gameBoard;
+		if (gb.currentMap !== packet.map || gb.currentMap == null) { return; }
+		if (game.currentState != c.stateMap.racing) { return; }
+		var sw = c.brutalRounds.heatwave.secondWave;
+		var sel = gb.selectHeatwaveChanges(sw);
+		if (sel == null || sel.count === 0) { return; }
+		gb.pendingHeatwaveWave = sel;
+		messenger.messageRoomBySig(gb.roomSig, "heatwavePending", JSON.stringify({ ids: sel.newIds, duration: sw.warnMs }));
+		setTimeout(gb.fireHeatwaveWave, sw.warnMs, packet);
+	}
+	fireHeatwaveWave(packet) {
+		var game = packet.context;
+		var gb = game.gameBoard;
+		var sel = gb.pendingHeatwaveWave;
+		gb.pendingHeatwaveWave = null;
+		if (sel == null || gb.currentMap !== packet.map || gb.currentMap == null) { return; }
+		if (game.currentState != c.stateMap.racing && game.currentState != c.stateMap.collapsing) { return; }
+		var cells = gb.currentMap.cells;
+		// Drop picks whose ground changed since the warn — flipping those would
+		// stomp a collapse/swap/cannon result the players already saw.
+		var fresh = { newIds: {}, fromIds: {}, count: 0 };
+		for (var i = 0; i < cells.length; i++) {
+			var vid = cells[i].site.voronoiId;
+			if (sel.newIds[vid] != null && cells[i].id == sel.fromIds[vid]) {
+				fresh.newIds[vid] = sel.newIds[vid];
+				fresh.fromIds[vid] = sel.fromIds[vid];
+				fresh.count++;
+			}
+		}
+		if (fresh.count === 0) { return; }
+		var applied = gb.commitHeatwaveChanges(fresh);
+		// Re-check the path guarantee on the live map (the warn-time validation can
+		// be stale if something added lava since): if blocked, melt this wave's lava
+		// back to sand — water/dirt/ability conversions can't block, so they stay.
+		if (!gb.heatwavePathOk()) {
+			var lavaId = c.tileMap.lava.id, sandId = c.tileMap.slow.id;
+			for (var ci = 0; ci < cells.length; ci++) {
+				var cvid = cells[ci].site.voronoiId;
+				if (applied[cvid] == lavaId) {
+					cells[ci].id = sandId;
+					gb.tileChanges[cvid] = sandId;
+					delete applied[cvid];
+					delete gb.heatwaveScorchedIds[cvid];
+				}
+			}
+			if (Object.keys(applied).length === 0) { return; }
+		}
+		messenger.messageRoomBySig(gb.roomSig, "tileChanges", JSON.stringify(applied));
+		messenger.messageRoomBySig(gb.roomSig, "heatwaveWaveFired", JSON.stringify({ ids: Object.keys(applied) }));
+		// Fold the wave into the stored newMap payload so a late joiner's scorch
+		// list (read from payload.heatwave) covers both waves.
+		if (gb.newMapPayload != null) {
+			if (gb.newMapPayload.heatwave == null) { gb.newMapPayload.heatwave = { changes: {} }; }
+			for (var av in applied) { gb.newMapPayload.heatwave.changes[av] = applied[av]; }
+		}
+	}
 	//Occurs at gameover
 	resetGame(currentState) {
 		this.mapsPlayed = [];
@@ -1718,6 +1962,13 @@ class GameBoard {
 		return best;
 	}
 	gatePlayer(player, gateIndex) {
+		// Firewalker per-round state: share the heatwave scorched-tile set by
+		// reference (null outside heatwave rounds) and re-arm the clean-run latch.
+		// gatePlayer runs for every racer each round — setup, AI grid fill, and
+		// late joins alike — so this is the one reset point that covers them all.
+		player.heatwaveScorchedIds = this.heatwaveScorchedIds;
+		player.touchedScorchedTile = false;
+		player.firewalkerJudged = false;
 		// Editor preview with a pinned start gate: humans always spawn at the chosen
 		// edge (every round, and on couch co-op joins), overriding the round-robin /
 		// least-populated placement. Bots keep normal placement so both sides race.
@@ -1845,6 +2096,9 @@ class GameBoard {
 		this.bunkerSafeIds = {};
 		this.bunkerLidIds = [];
 		this.bunkerStartTime = null;
+		// Heatwave brutal state, reset each round.
+		this.heatwaveScorchedIds = null;
+		this.pendingHeatwaveWave = null;
 		this.resetProjectiles();
 		this.resetHazards();
 	}
@@ -1992,7 +2246,13 @@ class GameBoard {
 		this.brutalConfig = this.checkForBrutalRound();
 		var randomGen = this.generateRandomTiles();
 		this.generateHazards();
-		this.newMapPayload = { id: this.currentMap.id, abilities: this.generateAbilities(), round: this.round, randomTiles: randomGen, brutalRoundConfig: this.brutalConfig, hazards: compressor.newHazards(this.hazardList), currentState: currentState };
+		var abilityGen = this.generateAbilities();
+		// Heatwave mutates cells AFTER random tiles resolve (so a random-rolled sand/
+		// ice tile is eligible) and after ability generation (its dirt->ability tiles
+		// are a bonus on top, never subject to the chanceToSpawnAbility roll). Riding
+		// in the newMap payload means joiners always get the scorch list with the map.
+		var heatwaveGen = this.applyBrutalHeatwaveRound();
+		this.newMapPayload = { id: this.currentMap.id, abilities: abilityGen, round: this.round, randomTiles: randomGen, brutalRoundConfig: this.brutalConfig, hazards: compressor.newHazards(this.hazardList), heatwave: heatwaveGen, currentState: currentState };
 		messenger.messageRoomBySig(this.roomSig, "newMap", this.newMapPayload);
 	}
 	checkApplyBrutalConfig() {
@@ -2244,6 +2504,15 @@ class GameBoard {
 			if (c.brutalRounds[prop].active == true) {
 				activeBrutalTypes.push(c.brutalRounds[prop].id);
 			}
+		}
+
+		// Heatwave needs raw material to scorch: on maps with too little sand/ice
+		// (the dramatic lava/water conversions) the round would land as a dud, so
+		// pull it from this round's pool instead of letting the shuffle pick it.
+		var hw = c.brutalRounds.heatwave;
+		if (hw != null && activeBrutalTypes.indexOf(hw.id) != -1 &&
+			this.countHeatwaveConvertibles() < hw.minConvertibleTiles) {
+			activeBrutalTypes.splice(activeBrutalTypes.indexOf(hw.id), 1);
 		}
 
 		if (activeBrutalTypes.length == 0) {
