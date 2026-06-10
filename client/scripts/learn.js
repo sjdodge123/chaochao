@@ -114,7 +114,7 @@
                   detail: "A pickup pad. Roll across it to grab a random single-use power. It goes dormant briefly after someone claims it, then lights back up for the next racer." },
                 { id: "tile-bumper", name: "Bumpers", icon: art("bumper"), anim: "bumper",
                   blurb: "Springy obstacles that fling you back.",
-                  detail: "Bump one and you're flung away — maddening in a hurry, but a clever way to launch a chasing rival off their line. Some maps add moving bumpers that sweep across the track, so the safe lane keeps shifting." },
+                  detail: "Bump one and you're flung away — maddening in a hurry, but a clever way to launch a chasing rival off their line. Some maps add moving bumpers that sweep across the track, so the safe lane keeps shifting. Rival AI racers time those sweeps like you do — they hold at the edge of the bumper's path and dart through behind it, favoring the ends of its run where the gap stays open longest." },
                 { id: "tile-random", name: "Random Ground", icon: swatch("#7c3aed"), anim: "randomTile",
                   blurb: "A wildcard disguised as another surface.",
                   detail: "A trickster tile. It masquerades as one of the ordinary surfaces, so you won't know whether you're about to hit speedy grass or draggy sand until you're already committed to it." }

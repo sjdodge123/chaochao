@@ -184,6 +184,9 @@ jobs:
       - name: "Headless AI telegraph-dodge test (bots steer out of Orbital Beam line / lava-explosion aimer)"
         run: node .github/scripts/ai-telegraph-dodge-test.js
 
+      - name: "Headless AI bumper-cross test (bots time a moving-bumper rail instead of lining up forever)"
+        run: node .github/scripts/ai-bumper-cross-test.js
+
   perf-tick-budget:
     # Server-side worst-case load: a full 25-kart grid in a stacked brutal round.
     # Proves one room still ticks well within the 30 Hz interval. Zero new deps —

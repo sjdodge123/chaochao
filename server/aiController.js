@@ -31,6 +31,41 @@ var BRAKE_SPEED_MIN = 30;       // only brake for turns/lava when moving faster 
 var HAZARD_AVOID_RADIUS = 64;   // px: start steering away from a bumper within this
 var HAZARD_AVOID_STRENGTH = 1.7;// weight of hazard repulsion vs desired heading
 var BUMPER_DANGER_PAD = 22;     // px: extra clearance for a bumper's strike (radius+punch)
+// MOVING-bumper rail crossing. The whole swept rail used to be a permanent
+// repulsive wall, so on a route that HAD to cross it the bots queued up at the
+// rail and oscillated forever — there was no notion of timing the gap. But the
+// bumper's motion is fully deterministic (constant sweep, exact reflection at the
+// rail ends), so it can be predicted: when the bumper cannot come within strike
+// range of the bot's crossing point before the bot has cleared the strike band,
+// the gap is OPEN — drop the rail repulsion and let the carrot carry the bot
+// across, exactly like a human darting through behind the bumper. While the gap
+// is CLOSED, stage just outside the strike band (not the big avoid radius, so the
+// dash is short when it opens) and slide toward the nearer rail END, where the
+// bumper spends the least time and the windows are widest.
+var RAIL_STRIKE = c.hazards.movingBumper.attackRadius + c.playerBaseRadius + 4; // px: bumper strike reach vs a kart (+pad)
+var RAIL_WAIT_GAP = 16;         // px: staging standoff outside the strike band while the gap is closed
+var RAIL_WAIT_STRENGTH = 2.5;   // closed-gap wall: holds the equilibrium just outside the band
+var RAIL_END_SLIDE = 0.35;      // tangential drift toward the nearer rail end while waiting
+var RAIL_CROSS_SPEED = 48;      // px/s: dash-speed fallback when the tile under the bot is unknown
+var RAIL_CROSS_MARGIN = 1.05;   // safety factor on the predicted exposure time
+var RAIL_SAMPLE_STEP = 0.06;    // s: resolution of the predicted bumper walk
+// On slow ground (terminal speed ~17-21px/s) NO window on a standard 100px rail is
+// ever provably safe — the crossing takes longer than the bumper's whole round
+// trip. A human there darts right behind the bumper as it sweeps past and accepts
+// the risk of a glancing bump (knockback, not death). When the best window the
+// rail can EVER offer doesn't cover the exposure, degrade to that: go once the
+// bumper has swept past and at least this fraction of the exposure fits before it
+// can return. Without this, slow-tile rails freeze bots exactly like the old wall.
+var RAIL_DART_FRACTION = 0.6;
+// Tile id -> tile def, for estimating the dash speed off the ground under the bot
+// (terminal speed = acel*dt/drag, times the engine's 0.8 bot-input scale).
+var TILE_BY_ID = {};
+for (var tileKey in c.tileMap) {
+    var tileDef = c.tileMap[tileKey];
+    if (tileDef && tileDef.id != null && tileDef.acel != null && tileDef.dragCoeff != null) {
+        TILE_BY_ID[tileDef.id] = tileDef;
+    }
+}
 var COLLAPSE_DANGER_MARGIN = 55;// px: also block cells this close to the lava front
 var LAVA_AVOID_RADIUS = 70;     // px: soft repulsion from a lava cell center within this
 var LAVA_AVOID_STRENGTH = 2.2;  // weight of the soft lava field
@@ -235,14 +270,80 @@ function carrotPoint(bot, waypoints, startIndex) {
     return { x: waypoints[last].x, y: waypoints[last].y };
 }
 
+// Whether the gap is open for THIS bot to cross h's rail right now. Walks the
+// bumper's deterministic future (constant sweep, reflecting at the rail ends)
+// across the bot's exposure window — from entering the strike band to clearing
+// its far side — and reports closed if the bumper can be within strike range of
+// the bot's crossing point at any sampled moment of that window.
+function railCrossingOpen(bot, h, dt, vFloor) {
+    var rail = h.rail;
+    var rad = rail.angle * Math.PI / 180;
+    var dirX = Math.cos(rad), dirY = Math.sin(rad);
+    var len = rail.width;
+    var tB = (h.x - rail.x) * dirX + (h.y - rail.y) * dirY;     // bumper's rail param
+    var tP = (bot.x - rail.x) * dirX + (bot.y - rail.y) * dirY; // bot's crossing param
+    if (tP < 0) { tP = 0; } else if (tP > len) { tP = len; }
+    // Perpendicular distance from the bot to the rail line.
+    var perp = Math.abs((bot.x - rail.x) * dirY - (bot.y - rail.y) * dirX);
+    // engine.updateHazards steps the rail param by speed*dt² per tick -> speed*dt px/s.
+    var vBump = h.speed * dt;
+    if (!(vBump > 0)) { return true; } // frozen bumper: nothing to time
+    var vBot = mag(bot.velX, bot.velY);
+    var floor = vFloor != null ? vFloor : RAIL_CROSS_SPEED;
+    if (vBot < floor) { vBot = floor; }
+    var tEnter = (perp - RAIL_STRIKE) / vBot;                    // first moment the bot is strikable
+    if (tEnter < 0) { tEnter = 0; }
+    var tExit = ((perp + RAIL_STRIKE) / vBot) * RAIL_CROSS_MARGIN; // bot fully clear of the band
+    var dir = (h.angle === rail.angle) ? 1 : -1;
+    // The longest gap this rail can EVER offer at this crossing point: the bumper
+    // retreating from it into the longer arm and coming all the way back. If even
+    // that doesn't cover the exposure (slow ground), no safe window exists — dart
+    // right behind the receding bumper instead, once enough of the exposure fits
+    // before it can possibly return (best effort; a glancing bump beats freezing).
+    var longArm = (tP > len - tP ? tP : len - tP) - RAIL_STRIKE;
+    if (longArm < 0) { longArm = 0; }
+    if (tExit >= (2 * longArm) / vBump) {
+        if ((tP - tB) * dir >= 0) { return false; } // still bearing down on the crossing point
+        if (Math.abs(tP - tB) < RAIL_STRIKE) { return false; } // not clear of it yet
+        var end = dir > 0 ? len : 0;
+        var timeBack = (Math.abs(end - tB) + Math.abs(end - tP) - RAIL_STRIKE) / vBump;
+        return timeBack >= tExit * RAIL_DART_FRACTION;
+    }
+    var t = tB;
+    for (var s = 0; s <= tExit; s += RAIL_SAMPLE_STEP) {
+        if (s >= tEnter && Math.abs(t - tP) < RAIL_STRIKE) { return false; }
+        t += dir * vBump * RAIL_SAMPLE_STEP;
+        if (t >= len) { t = len; dir = -1; }
+        else if (t <= 0) { t = 0; dir = 1; }
+    }
+    return true;
+}
+
+// Dash-speed floor for the crossing prediction, from the ground under the bot:
+// terminal speed on the tile (acel*dt/drag) times the engine's 0.8 bot-input
+// scale. Slow tiles crawl (~17px/s) while fast tiles fly (~62px/s) — assuming one
+// global dash speed opened windows on slow ground that weren't really safe.
+function railDashFloor(bot, ctx) {
+    var tile = TILE_BY_ID[nearestTileId(ctx, bot.x, bot.y)];
+    if (!tile) { return RAIL_CROSS_SPEED; }
+    var v = (tile.acel * (c.serverTickSpeed / 1000) / tile.dragCoeff) * 0.8;
+    return v < 14 ? 14 : v;
+}
+
 // Sum of repulsion away from nearby bumpers/moving bumpers, scaled so it ramps
 // up sharply as the bot closes on a hazard's strike range. Returns {x,y} (may be
 // {0,0} when clear). A moving bumper (has a rail) is dodged from the closest point
 // on the WHOLE swept segment — not its flickering instantaneous position — so the
 // push stays a stable "stay off the track" vector instead of jittering as the
 // bumper races back and forth, which is what let bots thread in and get clipped.
-function hazardRepulsion(bot, hazardList) {
+// EXCEPT when the bot's route actually crosses the rail: then the segment-as-wall
+// would pin it there forever, so it times the gap instead (railCrossingOpen) —
+// commit across while open, stage at the band edge and drift toward a rail end
+// while closed.
+function hazardRepulsion(bot, ctx, desiredX, desiredY, dt) {
     var rx = 0, ry = 0;
+    var hazardList = ctx.hazardList;
+    var vFloor = null; // computed lazily, once, only when a railed bumper is in play
     for (var id in hazardList) {
         var h = hazardList[id];
         if (h.alive === false) { continue; }
@@ -250,6 +351,34 @@ function hazardRepulsion(bot, hazardList) {
         if (h.moveable && h.rail != null) {
             var seg = bumperSegment(h);
             var cp = closestOnSegment(bot.x, bot.y, seg.ax, seg.ay, seg.bx, seg.by);
+            // Crossing intent: the desired heading drives INTO the rail (the route
+            // continues on the other side). Only then does gap timing apply — a bot
+            // merely skirting alongside keeps the plain stay-away field below.
+            var nx = bot.x - cp.x, ny = bot.y - cp.y;
+            var nd = mag(nx, ny);
+            if (nd > 0.0001 && (desiredX * nx + desiredY * ny) / nd < -0.1) {
+                if (vFloor == null) { vFloor = railDashFloor(bot, ctx); }
+                if (railCrossingOpen(bot, h, dt, vFloor)) { continue; } // gap open: commit across
+                // Gap closed: hold just outside the strike band so the dash is short
+                // when it opens...
+                var waitRange = RAIL_STRIKE + RAIL_WAIT_GAP;
+                if (nd < waitRange) {
+                    var ww = (waitRange - nd) / waitRange; // linear: a hard wall, not a soft field
+                    rx += (nx / nd) * ww * RAIL_WAIT_STRENGTH;
+                    ry += (ny / nd) * ww * RAIL_WAIT_STRENGTH;
+                }
+                // ...and drift toward the nearer rail END, where the bumper spends the
+                // least time and the crossing windows are widest.
+                if (nd < HAZARD_AVOID_RADIUS + waitRange) {
+                    var radR = h.rail.angle * Math.PI / 180;
+                    var ax = Math.cos(radR), ay = Math.sin(radR);
+                    var tP = (bot.x - h.rail.x) * ax + (bot.y - h.rail.y) * ay;
+                    var toEnd = (tP < h.rail.width / 2) ? -1 : 1;
+                    rx += ax * toEnd * RAIL_END_SLIDE;
+                    ry += ay * toEnd * RAIL_END_SLIDE;
+                }
+                continue;
+            }
             hx = cp.x; hy = cp.y;
         }
         var dx = bot.x - hx, dy = bot.y - hy;
@@ -394,7 +523,12 @@ var TELEGRAPH_AVOID_MARGIN = 26;   // px clearance beyond the strike zone's edge
 var TELEGRAPH_BEAM_STRENGTH = 2.8; // perpendicular push out of an Orbital Beam band
 var TELEGRAPH_CIRCLE_STRENGTH = 2.6; // push away from a lava-explosion aimer center
 var LIGHTNING_FEELER_MULT = 1.45; // see farther ahead when everyone's sped up
-var HAZARD_PATH_PENALTY = 12;     // cost x for routing a path through a bumper's cell
+// Cost multiplier for routing a path through a bumper's cell. Was 12 back when a
+// moving bumper's rail was an uncrossable wall to the local steering — which sent
+// routes on absurd detours and, where no detour existed, parked the bots in front
+// of the rail forever. Now that they can TIME a rail crossing (railCrossingOpen),
+// a rail cell just costs "a short wait + some risk", so price it like one.
+var HAZARD_PATH_PENALTY = 4;
 
 var AB = c.tileMap.abilities;
 
@@ -1405,7 +1539,7 @@ function steerBot(bot, ctx, dt) {
     // wants no avoidance bending its decisive line (it has been frozen for seconds).
     var ignoreLava = bot.isZombie === true || beelining;
     var fl = ignoreLava ? { x: 0, y: 0, brake: false } : feelerAvoid(bot, ctx, headX, headY, speed);
-    var hz = beelining ? { x: 0, y: 0 } : hazardRepulsion(bot, ctx.hazardList);
+    var hz = beelining ? { x: 0, y: 0 } : hazardRepulsion(bot, ctx, desiredX, desiredY, dt);
     var lv = ignoreLava ? { x: 0, y: 0 } : lavaRepulsion(bot, ctx.lavaCells);
 
     // Lava dead ahead means the current line is bad — re-path next tick to find a
@@ -1875,6 +2009,7 @@ module.exports._test = {
     bumperSegment: bumperSegment,
     closestOnSegment: closestOnSegment,
     hazardRepulsion: hazardRepulsion,
+    railCrossingOpen: railCrossingOpen,
     telegraphRepulsion: telegraphRepulsion,
     decideAbility: decideAbility,
     newBotState: newBotState,

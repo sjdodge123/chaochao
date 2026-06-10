@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### Bug fixes
+
+- AI racers can finally get past **moving bumpers**. They used to treat the bumper's whole sweep as a wall — lining up in front of it and shuffling back and forth forever without ever crossing. Now they time it like a player: hold just outside the strike zone, drift toward the end of the bumper's run where the gap stays open longest, and dart through behind it as it sweeps away. On slow ground, where no perfectly safe window exists, they'll chance a crossing right behind the bumper rather than freeze.
 
 ## v0.32.1 — 2026-06-11
 
