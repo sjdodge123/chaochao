@@ -8141,6 +8141,39 @@ function paintScorchMarks(ctx) {
     for (var i = 0; i < currentMap.cells.length; i++) {
         byVid[currentMap.cells[i].site.voronoiId] = currentMap.cells[i];
     }
+    // Prune marks whose ground moved on (the trench-pruning rule): a mark only
+    // lives while its tile still holds the id the heatwave gave it — so the
+    // round-end collapse (or a bomb/swap/cannon) flooding a scorched tile takes
+    // the char outline with it. Two refinements:
+    //   - a sand->lava rim ALSO drops once every neighbour is lava (the collapse
+    //     reached it — a char outline floating mid-lava-sea reads as a glitch);
+    //   - a picked-up heatwave ability pad (ability id -> dirt) KEEPS its rim,
+    //     because the ground still counts as scorched for the Firewalker medal.
+    var lavaId = config.tileMap.lava.id, dirtId = config.tileMap.normal.id;
+    var keptMarks = [];
+    for (var pm = 0; pm < heatwaveScorch.length; pm++) {
+        var m = heatwaveScorch[pm];
+        var mcell = byVid[m.vid];
+        if (mcell == null) { continue; }
+        var keep;
+        if (m.newId == null || mcell.id === m.newId) {
+            keep = true;
+            if (mcell.id === lavaId) {
+                var hasNonLavaNeighbor = false;
+                var mhes = mcell.halfedges;
+                for (var mh = 0; mh < mhes.length; mh++) {
+                    var nb = compareSite(mhes[mh].edge.lSite, mhes[mh].site) ? mhes[mh].edge.rSite : mhes[mh].edge.lSite;
+                    var nbCell = (nb != null) ? byVid[nb.voronoiId] : null;
+                    if (nbCell == null || nbCell.id !== lavaId) { hasNonLavaNeighbor = true; break; }
+                }
+                keep = hasNonLavaNeighbor;
+            }
+        } else {
+            keep = (m.newId > 99 && mcell.id === dirtId);
+        }
+        if (keep) { keptMarks.push(m); }
+    }
+    heatwaveScorch = keptMarks;
     ctx.save();
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
@@ -8743,11 +8776,48 @@ function drawHUD() {
     drawBrutalBadges();
     drawSpectatorLeaderboard();
     drawWorldRecordBanner();
+    drawHeatwaveWarnBanner();
     drawMaintenanceBanner();
     drawVirtualButtons();
     drawTouchControls();
     drawTitle();
     drawMapAnnouncement();
+}
+
+// Second-wave HUD warning (top-center, world-record-banner styling): armed by
+// the heatwavePending handler alongside the warning chirps and lasting the whole
+// telegraph window, so the audio cue always has a visual twin — the tile flicker
+// alone is easy to miss at racing speed. Cleared on newMap; self-expires.
+var heatwaveWarnBanner = null;
+function drawHeatwaveWarnBanner() {
+    if (heatwaveWarnBanner == null) { return; }
+    var dur = heatwaveWarnBanner.duration || 3000;
+    var t = (Date.now() - heatwaveWarnBanner.startedAt) / dur;
+    if (t >= 1) { heatwaveWarnBanner = null; return; }
+    // Slide-down + fade-in, hold, slide-up + fade-out (worldRecordBanner timing),
+    // with an urgent pulse riding the hold.
+    var alpha, slide;
+    if (t < 0.12) { var k = t / 0.12; alpha = k; slide = -40 * (1 - k); }
+    else if (t > 0.78) { var k2 = (t - 0.78) / 0.22; alpha = 1 - k2; slide = -40 * k2; }
+    else { alpha = 1; slide = 0; }
+    alpha *= 0.75 + 0.25 * Math.sin(Date.now() / 140);
+    var cx = LOGICAL_WIDTH / 2;
+    var by = 70 + slide;
+    gameContext.save();
+    gameContext.globalAlpha = Math.max(0, Math.min(1, alpha));
+    gameContext.textAlign = "center";
+    gameContext.textBaseline = "alphabetic";
+    gameContext.font = "bold 22px Arial";
+    gameContext.lineWidth = 3;
+    gameContext.strokeStyle = "rgba(0,0,0,0.85)";
+    gameContext.strokeText("Heatwave incoming!", cx, by);
+    gameContext.fillStyle = "#ff7a26";
+    gameContext.fillText("Heatwave incoming!", cx, by);
+    gameContext.font = "15px Arial";
+    gameContext.strokeText("Flickering ground is about to burn over", cx, by + 19);
+    gameContext.fillStyle = "white";
+    gameContext.fillText("Flickering ground is about to burn over", cx, by + 19);
+    gameContext.restore();
 }
 
 // Deploy heads-up banner (top-center, every state — drawHUD runs in both the

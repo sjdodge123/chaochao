@@ -13,7 +13,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 ### Brutal rounds
 
 - New brutal round — **Heatwave**: as the camera pulls out before the race, a heatwave rolls across the arena and you watch it transform — patches of sand bake into lava, ice melts into open water, grass dries out to dirt, and some dirt cracks open around bonus ability pickups (with good odds of an Ice Cannon — the heat scatters its own antidote). Every changed tile keeps a **scorched rim** so you can always tell what's new, and there's always still a path to the goal.
-- Heatwave strikes twice: partway through the race a **second, smaller wave** hits — tiles flicker with what they're about to become first, so watch your footing and get clear before they flip.
+- Heatwave strikes twice: partway through the race a **second, smaller wave** hits — a "Heatwave incoming!" warning flashes on screen with an alarm, and the doomed tiles flicker with what they're about to become, so get clear before they flip.
 - Heatwave rounds feel hot: a warm haze settles over the arena, embers rise off freshly scorched ground, the burn rolls in with a searing sizzle, and a low heat-shimmer drone hums under the music until the round ends.
 - New medal — **Firewalker** 👣: finish Heatwave rounds without ever touching a scorched tile. The arena changed; you refused to acknowledge it.
 - Heatwave joins the normal brutal rotation and can stack with other twists (it skips maps without enough sand or ice to scorch, so it always lands with real drama).
