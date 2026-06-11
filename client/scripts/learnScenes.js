@@ -425,6 +425,36 @@ var LearnAnim = (function () {
     SCENES["terrainSlow"] = terrain("slow", "sand.png", 60, MAXSPEED * 0.22, 42, false);
     SCENES["terrainIce"] = terrain("ice", "ice.png", 80, MAXSPEED * 0.72, 115, true);
 
+    SCENES["terrainWater"] = function (s) {
+        // Deep water (procedural in-game, no texture): flat blue with a kart
+        // punch-swimming across — a stroke pulse every beat, ripples trailing.
+        var ctx = s.ctx;
+        ctx.fillStyle = "#2f6fb0";
+        ctx.fillRect(0, 0, W, H);
+        var p = s.p; p.radius = 12; p.alive = true; p.surface = "normal";
+        if (p.x == null || p.x > W + 30) { p.x = -30; p.y = H / 2; }
+        // Slow baseline drift; each "stroke" adds a surge that decays.
+        var beat = loop(s.t, 900);
+        var surge = Math.max(0, 1 - beat * 3);
+        p.x += (8 + surge * 55) * (s.dt / 1000) * 4;
+        onCycle(s.mem, s.t, 900, "stroke", function () {
+            s.mem.ripples = s.mem.ripples || [];
+            s.mem.ripples.push({ x: p.x, y: p.y, at: s.t });
+        });
+        var ripples = s.mem.ripples || [];
+        ctx.save();
+        for (var i = ripples.length - 1; i >= 0; i--) {
+            var age = (s.t - ripples[i].at) / 1100;
+            if (age > 1) { ripples.splice(i, 1); continue; }
+            ctx.globalAlpha = 0.4 * (1 - age);
+            ctx.strokeStyle = "#bcd9f5";
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(ripples[i].x, ripples[i].y, 6 + age * 26, 0, 2 * Math.PI); ctx.stroke();
+        }
+        ctx.restore();
+        kart(ctx, p.x, p.y, p.radius, BLUE);
+    };
+
     SCENES["lavaBurn"] = function (s) {
         floor(s.ctx, "lava.png", 80);
         var p = s.p; p.radius = 12; p.alive = true; p.surface = "normal";
@@ -775,6 +805,32 @@ var LearnAnim = (function () {
         var ph = loop(s.t, 3600), cx = W / 2, cy = H / 2;
         if (ph < 0.45) { var rr = 6 + ease(ph / 0.45) * 26; s.ctx.save(); s.ctx.globalAlpha = 0.8; s.ctx.strokeStyle = "#ff8a3a"; s.ctx.lineWidth = 2; s.ctx.beginPath(); s.ctx.arc(cx, cy, rr, 0, 2 * Math.PI); s.ctx.stroke(); s.ctx.restore(); }
         onCycle(s.mem, s.t - 1620, 3600, "erupt", function () { spawnExplosion(cx, cy, 70, "#cf1020"); });
+    };
+
+    SCENES["bunker"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        var ph = loop(s.t, 4200), ctx = s.ctx, cx = W / 2, cy = H / 2;
+        // The lava ring closes in from the edges toward the buried goal...
+        var maxR = Math.min(W, H) * 0.62, minR = 44;
+        var r = maxR - (maxR - minR) * ease(Math.min(1, ph / 0.75));
+        ctx.save();
+        ctx.globalAlpha = 0.75;
+        ctx.strokeStyle = "#cf1020";
+        ctx.lineWidth = 16;
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, 2 * Math.PI); ctx.stroke();
+        ctx.restore();
+        // ...over a sealed silo door that bursts gold for the lone survivor.
+        var open = ph > 0.8;
+        ctx.save();
+        ctx.fillStyle = open ? "#e7c54a" : "#6b6f7a";
+        ctx.beginPath(); ctx.arc(cx, cy, 26, 0, 2 * Math.PI); ctx.fill();
+        ctx.strokeStyle = "#2c2c33"; ctx.lineWidth = 3; ctx.stroke();
+        if (!open) {
+            ctx.strokeStyle = "#3a3e47"; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(cx - 18, cy); ctx.lineTo(cx + 18, cy); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(cx, cy - 18); ctx.lineTo(cx, cy + 18); ctx.stroke();
+        }
+        ctx.restore();
     };
 
     SCENES["heatwave"] = function (s) {
