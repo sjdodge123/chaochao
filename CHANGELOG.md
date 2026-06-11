@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.32.2 — 2026-06-11
+
 ### General
 
 - The in-game Codex now covers the **Bunker** brutal round and the **Water** tile — both had shipped without their reference cards, so the Learn page finally explains the buried goal, the closing lava ring, and how punch-swimming works.
