@@ -52,10 +52,11 @@ var RAIL_SAMPLE_STEP = 0.06;    // s: resolution of the predicted bumper walk
 // On slow ground (terminal speed ~17-21px/s) NO window on a standard 100px rail is
 // ever provably safe — the crossing takes longer than the bumper's whole round
 // trip. A human there darts right behind the bumper as it sweeps past and accepts
-// the risk of a glancing bump (knockback, not death). When the best window the
-// rail can EVER offer doesn't cover the exposure, degrade to that: go once the
-// bumper has swept past and at least this fraction of the exposure fits before it
-// can return. Without this, slow-tile rails freeze bots exactly like the old wall.
+// the risk of a glancing bump (knockback, not death). When the rail can't offer a
+// safe window ANYWHERE for this bot's speed, degrade to that dart: go behind the
+// receding bumper while at least this fraction of the pass's best headroom
+// remains (relative, so it fires once per sweep at any ground speed — an absolute
+// time bound is unsatisfiable on slow tiles and froze staged bots).
 var RAIL_DART_FRACTION = 0.6;
 // Tile id -> tile def, for estimating the dash speed off the ground under the bot
 // (terminal speed = acel*dt/drag, times the engine's 0.8 bot-input scale).
@@ -103,6 +104,14 @@ var WATER_ENTRY_LOOKAHEAD = 60; // px ahead (plus a speed term) to sniff for upc
 // lava field + kills the random wobble so it can hug a wall and thread the gap.
 var STUCK_RADIUS = 40;          // px: staying within this of an anchor spot = no real headway
 var STUCK_TRIGGER = 1.6;        // s loitering inside STUCK_RADIUS before an escape fires
+// A bot CRUISING isn't stuck. On slow tiles the terminal speed (~17-21px/s)
+// covers less than STUCK_RADIUS per STUCK_TRIGGER window, so without a speed
+// gate the escape branch re-anchors every window while the bot drives flat-out
+// — a treadmill that pins every slow-ground bot in permanent escape/beeline
+// (headwayAt can never reset because the anchor leapfrogs along). Only treat a
+// bot as wedged when it's actually near-stationary; 12px/s sits safely under
+// every tile's bot terminal speed while still catching real pinch grinds.
+var STUCK_SPEED_MAX = 12;
 var ESCAPE_MS = 1400;           // ms an escape lasts once triggered
 var ESCAPE_LAVA_RELAX = 0.45;   // shrink the SOFT lava-centering field during an escape (thread the gap)
 var ESCAPE_WANDER_KILL = true;  // suppress the random wobble during an escape so it doesn't fight the gap
@@ -295,19 +304,27 @@ function railCrossingOpen(bot, h, dt, vFloor) {
     if (tEnter < 0) { tEnter = 0; }
     var tExit = ((perp + RAIL_STRIKE) / vBot) * RAIL_CROSS_MARGIN; // bot fully clear of the band
     var dir = (h.angle === rail.angle) ? 1 : -1;
-    // The longest gap this rail can EVER offer at this crossing point: the bumper
-    // retreating from it into the longer arm and coming all the way back. If even
-    // that doesn't cover the exposure (slow ground), no safe window exists — dart
-    // right behind the receding bumper instead, once enough of the exposure fits
-    // before it can possibly return (best effort; a glancing bump beats freezing).
-    var longArm = (tP > len - tP ? tP : len - tP) - RAIL_STRIKE;
-    if (longArm < 0) { longArm = 0; }
-    if (tExit >= (2 * longArm) / vBump) {
+    // The longest gap this rail can offer ANYWHERE (crossing right at an end while
+    // the bumper runs the full rail and back). If even that doesn't cover this
+    // bot's exposure — slow ground — then no safe window exists at any crossing
+    // point and waiting can never pay off (the old absolute check here was
+    // unsatisfiable from the staging band, so staged bots sat until the stuck
+    // beeline rammed them through). Dart instead: go right behind the receding
+    // bumper while most of THIS pass's headroom remains — best effort, judged
+    // relative to the best this pass can offer, so it actually fires once per
+    // sweep at any ground speed (a glancing bump beats freezing).
+    if (tExit >= (2 * (len - RAIL_STRIKE)) / vBump) {
         if ((tP - tB) * dir >= 0) { return false; } // still bearing down on the crossing point
         if (Math.abs(tP - tB) < RAIL_STRIKE) { return false; } // not clear of it yet
         var end = dir > 0 ? len : 0;
-        var timeBack = (Math.abs(end - tB) + Math.abs(end - tP) - RAIL_STRIKE) / vBump;
-        return timeBack >= tExit * RAIL_DART_FRACTION;
+        var arm = Math.abs(end - tP); // run the bumper is heading into, from the crossing point
+        var head = arm - RAIL_STRIKE; // headroom left at the moment the bumper CLEARS the point
+        if (head <= 0) { return false; } // it reflects right back onto the point — wait for the other sweep
+        var timeBack = (Math.abs(end - tB) + arm - RAIL_STRIKE) / vBump;
+        // Judge against the most a post-clearance dart can ever have (2*head/vBump),
+        // NOT a gap-0 ideal the clearance guard makes unreachable — that off-by-a-
+        // strike-radius made the window ~0.1s and slow bots never caught it.
+        return timeBack >= (2 * head / vBump) * RAIL_DART_FRACTION;
     }
     var t = tB;
     for (var s = 0; s <= tExit; s += RAIL_SAMPLE_STEP) {
@@ -358,7 +375,22 @@ function hazardRepulsion(bot, ctx, desiredX, desiredY, dt) {
             var nd = mag(nx, ny);
             if (nd > 0.0001 && (desiredX * nx + desiredY * ny) / nd < -0.1) {
                 if (vFloor == null) { vFloor = railDashFloor(bot, ctx); }
-                if (railCrossingOpen(bot, h, dt, vFloor)) { continue; } // gap open: commit across
+                // Committed dart in flight: once a window fires, hold the door open
+                // for the whole estimated crossing. Without this latch a slow bot
+                // re-evaluates every tick, the brief window flickers shut before it
+                // has moved, and the wait wall shoves it right back out.
+                var aiSt = bot.ai;
+                var goKey = 'rg' + id;
+                var nowMs = Date.now();
+                if (aiSt && aiSt.railGo && aiSt.railGo[goKey] > nowMs) { continue; }
+                if (railCrossingOpen(bot, h, dt, vFloor)) { // gap open: commit across
+                    if (aiSt) {
+                        if (aiSt.railGo == null) { aiSt.railGo = {}; }
+                        var crossMs = ((nd + RAIL_STRIKE) / (vFloor < 14 ? 14 : vFloor)) * 1500; // 1.5x est. crossing time
+                        aiSt.railGo[goKey] = nowMs + (crossMs > 8000 ? 8000 : crossMs);
+                    }
+                    continue;
+                }
                 // Gap closed: hold just outside the strike band so the dash is short
                 // when it opens...
                 var waitRange = RAIL_STRIKE + RAIL_WAIT_GAP;
@@ -523,12 +555,16 @@ var TELEGRAPH_AVOID_MARGIN = 26;   // px clearance beyond the strike zone's edge
 var TELEGRAPH_BEAM_STRENGTH = 2.8; // perpendicular push out of an Orbital Beam band
 var TELEGRAPH_CIRCLE_STRENGTH = 2.6; // push away from a lava-explosion aimer center
 var LIGHTNING_FEELER_MULT = 1.45; // see farther ahead when everyone's sped up
-// Cost multiplier for routing a path through a bumper's cell. Was 12 back when a
-// moving bumper's rail was an uncrossable wall to the local steering — which sent
-// routes on absurd detours and, where no detour existed, parked the bots in front
-// of the rail forever. Now that they can TIME a rail crossing (railCrossingOpen),
-// a rail cell just costs "a short wait + some risk", so price it like one.
-var HAZARD_PATH_PENALTY = 4;
+// Cost multipliers for routing through a bumper's cell — priced per hazard class.
+// STATIC bumpers stay harsh (12): they sit on the spot forever and a route through
+// one means getting knocked, so only a big detour saving justifies it. MOVING
+// rails are mild (4): the bots can TIME a rail crossing (railCrossingOpen), so a
+// rail cell just costs "a short wait + some risk". Lowering the static penalty
+// along with the rail one made A* thread static-bumper fields (goldeyes,
+// sidewinder) for modest detour savings — exactly the knock/stuck routes the
+// penalty exists to prevent.
+var HAZARD_PATH_PENALTY = 12;
+var RAIL_PATH_PENALTY = 4;
 
 var AB = c.tileMap.abilities;
 
@@ -1331,7 +1367,8 @@ function steerBot(bot, ctx, dt) {
             ai.progressAt = nowProbe;
             ai.headwayAt = nowProbe; // real headway -> reset the continuous-stuck clock
             ai.escapeUntil = 0; ai.escapeStage = 0; ai.lastEscapeAt = 0; // real headway -> escape over
-        } else if ((nowProbe - ai.progressAt) / 1000 >= STUCK_TRIGGER && nowProbe >= ai.escapeUntil) {
+        } else if ((nowProbe - ai.progressAt) / 1000 >= STUCK_TRIGGER && nowProbe >= ai.escapeUntil &&
+            mag(bot.velX, bot.velY) < STUCK_SPEED_MAX) {
             // Re-triggering after a previous escape that real progress never cleared
             // means the gentle approach didn't free it -> escalate the push (keyed off
             // lastEscapeAt, which only survives if no re-anchor reset it — so a different,
@@ -1364,8 +1401,10 @@ function steerBot(bot, ctx, dt) {
             blocked: blocked,
             noiseSeed: ai.pathSeed,
             noiseAmount: 0.15 + (1 - ai.skill) * 0.2,
-            penaltySet: ctx.hazardCells, // route AROUND bumper cells (soft penalty)
-            penaltyMult: HAZARD_PATH_PENALTY
+            penaltySet: ctx.staticHazardCells, // route AROUND static bumpers (harsh soft penalty)
+            penaltyMult: HAZARD_PATH_PENALTY,
+            penaltySet2: ctx.railCells, // moving rails are timeable — mild penalty
+            penaltyMult2: RAIL_PATH_PENALTY
         };
         // Bunker round: the goal is buried (no goal tiles), so home the A* on the
         // safe bunker island instead — otherwise findPathToNearestGoal returns null
@@ -1376,7 +1415,7 @@ function steerBot(bot, ctx, dt) {
         // goal (better a tight line than freezing in front of the lava). Keep the
         // hazard penalty on the retry — it's soft, so it never nulls the path.
         if (route == null && blocked != null) {
-            route = cellGraph.findPathToNearestGoal(ctx.map, { x: bot.x, y: bot.y }, { noiseSeed: ai.pathSeed, noiseAmount: pathOpts.noiseAmount, penaltySet: ctx.hazardCells, penaltyMult: HAZARD_PATH_PENALTY, goalSet: pathOpts.goalSet });
+            route = cellGraph.findPathToNearestGoal(ctx.map, { x: bot.x, y: bot.y }, { noiseSeed: ai.pathSeed, noiseAmount: pathOpts.noiseAmount, penaltySet: ctx.staticHazardCells, penaltyMult: HAZARD_PATH_PENALTY, penaltySet2: ctx.railCells, penaltyMult2: RAIL_PATH_PENALTY, goalSet: pathOpts.goalSet });
         }
         if (route != null) {
             var pts = [];
@@ -1860,9 +1899,12 @@ function update(gameBoard, currentState, dt) {
     // those cells so routes go AROUND. Recomputed each tick so a moving bumper's
     // cell is tracked (re-pathing is throttled; local repulsion handles the rest).
     // A MOVING bumper sweeps a whole rail at ~2000px/s, so penalizing only the cell
-    // it sits in this instant is useless — the route must go around the entire
-    // track. Penalize every cell whose center is near the swept segment.
-    var hazardCells = null;
+    // it sits in this instant is useless — penalize every cell whose center is near
+    // the swept segment. The two classes are priced separately (see the penalty
+    // constants): static bumpers in staticHazardCells (harsh), timeable moving
+    // rails in railCells (mild).
+    var staticHazardCells = null;
+    var railCells = null;
     var hazardList = gameBoard.hazardList;
     var RAIL_PENALTY_MARGIN = 48; // px from the swept segment to still penalize a cell
     for (var hkey in hazardList) {
@@ -1877,8 +1919,8 @@ function update(gameBoard, currentState, dt) {
                 var cpr = closestOnSegment(rc.site.x, rc.site.y, seg.ax, seg.ay, seg.bx, seg.by);
                 var rdx = rc.site.x - cpr.x, rdy = rc.site.y - cpr.y;
                 if (rdx * rdx + rdy * rdy < marginSq) {
-                    if (hazardCells == null) { hazardCells = new Set(); }
-                    hazardCells.add(rc.site.voronoiId);
+                    if (railCells == null) { railCells = new Set(); }
+                    railCells.add(rc.site.voronoiId);
                 }
             }
             continue;
@@ -1892,8 +1934,8 @@ function update(gameBoard, currentState, dt) {
             if (dd < bestD) { bestD = dd; bestI = ci2; }
         }
         if (bestI >= 0) {
-            if (hazardCells == null) { hazardCells = new Set(); }
-            hazardCells.add(map.cells[bestI].site.voronoiId);
+            if (staticHazardCells == null) { staticHazardCells = new Set(); }
+            staticHazardCells.add(map.cells[bestI].site.voronoiId);
         }
     }
 
@@ -1974,7 +2016,8 @@ function update(gameBoard, currentState, dt) {
         lavaCells: lavaCells,
         goalTiles: goalTiles, // for zombie intercept (prey are racing to a goal)
         bunkerSafeIds: bunkerSafeIds, // Bunker round: A* homes on these cells (buried goal)
-        hazardCells: hazardCells, // bumper cells to penalize in pathing
+        staticHazardCells: staticHazardCells, // static bumper cells (harsh path penalty)
+        railCells: railCells, // moving-rail swept cells (mild path penalty — timeable)
         players: playerList,
         projectileList: gameBoard.projectileList,
         hazardList: gameBoard.hazardList,

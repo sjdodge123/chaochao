@@ -30,6 +30,7 @@ const aiController = require(path.join(repoRoot, 'server', 'aiController.js'));
 
 const T = config.tileMap;
 const GRASS = T.fast.id;
+const SLOW = T.slow.id;
 const EMPTY = T.empty.id;
 const GOAL = T.goal.id;
 const DT = config.serverTickSpeed / 1000;
@@ -63,12 +64,13 @@ const COLS = [76, 228, 380, 532, 684, 836, 988, 1140, 1290];
 const ROWS = [77, 280, 384, 488, 691];
 const RAIL_X = COLS[4];          // 684 — mid-corridor column
 const CORRIDOR_TOP = (ROWS[1] + ROWS[2]) / 2;  // 332
-function buildMap(name, hazards) {
+function buildMap(name, hazards, tile) {
+    const corridorTile = tile != null ? tile : GRASS;
     const sites = [];
     for (let col = 0; col < COLS.length; col++) {
         for (let row = 0; row < ROWS.length; row++) {
             let id = EMPTY;
-            if (row === 2) { id = (col === 8) ? GOAL : GRASS; }
+            if (row === 2) { id = (col === 8) ? GOAL : corridorTile; }
             sites.push({ x: COLS[col], y: ROWS[row], id: id });
         }
     }
@@ -174,6 +176,37 @@ try {
         if (reachedGoalAt >= 0) {
             console.log('  ..  - crossing completed in ' + reachedGoalAt + ' ticks (~' + (reachedGoalAt * DT).toFixed(1) + 's)');
         }
+    }
+
+    // ----------------------------------------------------------------------
+    console.log('\n[C] SLOW-ground rail crossing darts behind the bumper (no stuck-beeline stall)');
+    {
+        // Codex-review repro: on slow tiles (terminal ~17px/s) no provably-safe
+        // window exists on a 100px rail, and the original absolute dart bound was
+        // unsatisfiable from the staging band — staged bots sat ~57s until the
+        // 4.5s-stuck beeline rammed them through. The relative dart (go behind the
+        // receding bumper while most of the pass's headroom remains) must cross
+        // without ever needing the beeline.
+        const map = buildMap('railgate-slow', [{ id: MOVING_BUMPER, x: RAIL_X, y: CORRIDOR_TOP, angle: 90 }], SLOW);
+        const { room, bot } = bootRoom('bumper-cross-slow', map, { id: 'mud', name: 'Mud', title: '', skill: 0.85, aggression: 0.2, tempo: 0.5, risk: 0.3, focus: 'race' });
+
+        const maxTicks = 4200; // ~140s: the whole corridor is a ~17px/s crawl
+        let maxX = -Infinity, reachedGoalAt = -1, maxStallMs = 0;
+        for (let f = 0; f < maxTicks; f++) {
+            room.game.notchesToWin = 0;
+            room.update(DT);
+            clock += config.serverTickSpeed;
+            if (bot.x > maxX) { maxX = bot.x; }
+            if (bot.alive && bot.ai && bot.ai.headwayAt != null) {
+                const stall = clock - bot.ai.headwayAt;
+                if (stall > maxStallMs) { maxStallMs = stall; }
+            }
+            if (reachedGoalAt < 0 && bot.reachedGoal) { reachedGoalAt = f; }
+            if (room.game.currentState === config.stateMap.gameOver) { break; }
+        }
+        check(maxX > RAIL_X + 60, 'the bot CROSSED the rail line on slow ground (max x=' + maxX.toFixed(0) + ')');
+        check(maxStallMs < 4500, 'no stuck-beeline was needed (max continuous stall ' + maxStallMs.toFixed(0) + 'ms < 4500ms)');
+        check(bot.reachedGoal === true, 'the bot reached the goal (tick ' + reachedGoalAt + ', ~' + (reachedGoalAt * DT).toFixed(1) + 's)');
     }
 } finally {
     Date.now = realNow;

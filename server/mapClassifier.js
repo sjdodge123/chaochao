@@ -186,7 +186,9 @@ function pathPoints(map, path) {
 // so the overlay's routes dodge the same obstacles the bots do. Returns null
 // when the map has no hazards. Built from the raw map JSON (anchor + angle +
 // config rail width), not live hazard objects — balanceDebug runs pre-game.
-var HAZARD_PATH_PENALTY = 12; // cost x — keep in step with aiController.js
+var HAZARD_PATH_PENALTY = 12; // cost x — matches aiController's STATIC bumper penalty
+                              // (bots price MOVING rails milder — RAIL_PATH_PENALTY 4,
+                              //  they time the gaps; the overlay stays conservative)
 var HAZARD_CLEARANCE = 40;    // px a drawn racing line keeps from a bumper point
                               // (~attackRadius 15 + player radius + dodge pad,
                               //  mirroring aiController's BUMPER_DANGER_PAD idea)

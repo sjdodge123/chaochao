@@ -266,16 +266,19 @@ function findPathToNearestGoal(map, point, options) {
     // a last resort (e.g. cells holding bumper hazards, which aren't in the graph).
     // A multiplier (not a hard block) so a hazard in a chokepoint doesn't null the
     // path. options.penaltySet: Set/array of voronoiIds; options.penaltyMult: cost x.
-    var penaltyMult = options.penaltyMult || 1;
+    // A second independent pair (penaltySet2/penaltyMult2) lets a caller price two
+    // hazard classes differently (e.g. static bumpers harsh, timeable moving rails
+    // mild); on overlap the harsher multiplier wins.
     var penalty = null;
-    if (options.penaltySet && penaltyMult > 1) {
-        penalty = {};
-        if (options.penaltySet.forEach) {
-            options.penaltySet.forEach(function (id) { penalty[id] = true; });
-        } else {
-            for (var pj = 0; pj < options.penaltySet.length; pj++) { penalty[options.penaltySet[pj]] = true; }
-        }
+    function addPenalties(set, mult) {
+        if (!set || !(mult > 1)) { return; }
+        if (penalty == null) { penalty = {}; }
+        var put = function (id) { if (!(penalty[id] >= mult)) { penalty[id] = mult; } };
+        if (set.forEach) { set.forEach(put); }
+        else { for (var pj = 0; pj < set.length; pj++) { put(set[pj]); } }
     }
+    addPenalties(options.penaltySet, options.penaltyMult || 1);
+    addPenalties(options.penaltySet2, options.penaltyMult2 || 1);
 
     // Optional explicit goal cells (voronoiId set/array). When given, the search
     // homes on THESE cells instead of GOAL-id tiles — used by the Bunker round,
@@ -353,7 +356,7 @@ function findPathToNearestGoal(map, point, options) {
                 continue;
             }
             var step = dist(cells[u].site, cells[v].site);
-            var pen = (penalty && penalty[cells[v].site.voronoiId]) ? penaltyMult : 1;
+            var pen = (penalty && penalty[cells[v].site.voronoiId]) || 1;
             // Kart fits but it's a squeeze: take it only when no wider lane exists.
             var tight = (doors[k] < MIN_DOORWAY) ? TIGHT_DOORWAY_PENALTY : 1;
             var nc = cost[u] + step * tileWeight(cells[v].id) * cellJitter(cells[v].site.voronoiId) * pen * tight;
