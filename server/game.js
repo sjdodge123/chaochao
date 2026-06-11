@@ -152,8 +152,9 @@ class Game {
 		// winning team (read by awardProgression/startGameover). Points flow from
 		// race placement and combat (see creditTeamPoints / c.teams.points): first/
 		// second/other finishes earn, enemy kills earn, ANY member death costs. The
-		// match ends at a ROUND boundary once a team is at the target (or the round
-		// cap hits) and the score isn't tied. null/none in FFA modes.
+		// match ends mid-round on the CLINCH — a team holding the target whose
+		// member takes first place (checkForWinners) — with a round-cap leader
+		// backstop (checkTeamPointsWin). null/none in FFA modes.
 		this.teamPoints = null;
 		this.winningTeamId = null;
 		//AI racers: grid size is rolled once per game and held across rounds.
@@ -265,13 +266,6 @@ class Game {
 			maxRounds: (typeof p.maxRounds === "number") ? p.maxRounds : 10
 		};
 	}
-	// "Match point": the team holds the target — their next FIRST-PLACE finish wins
-	// the match outright (the clinch in checkForWinners). Drives the team-wide
-	// near-victory cues (victory tail, gold rows, sting, brutal boost). Deaths can
-	// drop a team back UNDER the line, so match point is defensible.
-	teamMatchPointAt() {
-		return this.teamPointsCfg().target;
-	}
 	teamMemberCount(teamId) {
 		var n = 0;
 		for (var id in this.playerList) {
@@ -302,8 +296,10 @@ class Game {
 		}
 		this.teamPoints = null;
 		this.winningTeamId = null;
-		this._teamMatchPoint = null;
 		this._teamsDirty = false;
+		for (var rid in this.playerList) {
+			if (this.playerList[rid] != null) { this.playerList[rid].teamPointsEarned = 0; }
+		}
 	}
 	// One-shot team sync: assignments + the shared score. Broadcast on every change
 	// (assignment or score) and included in the gameState snapshot for late joiners.
@@ -317,11 +313,13 @@ class Game {
 			var p = this.playerList[id];
 			if (p != null && p.teamId != null) { assignments.push([id, p.teamId]); }
 		}
+		// `target` doubles as match point: a team AT/OVER it wins on its next
+		// first-place finish (the clinch in checkForWinners), and deaths can drop
+		// it back under — so the same number drives the victory tails/sting.
 		return {
 			assignments: assignments,
 			score: this.teamPoints,
 			target: this.teamPointsCfg().target,
-			matchPointAt: this.teamMatchPointAt(),
 			defs: this.teamDefs()
 		};
 	}
@@ -364,10 +362,12 @@ class Game {
 	}
 	// Credit (or charge) team points THROUGH the player who caused it: finishes and
 	// enemy kills earn, a member dying costs. The score floors at 0 — a bleeding
-	// team can't dig a negative hole. Every change re-derives the whole team's
-	// nearVictory from "match point" (one first-place finish from the target) and
-	// broadcasts BOTH the new score (teamUpdate) and a per-player delta
-	// (teamPointsDelta) so the client can float +5/+2/-1 over the kart involved.
+	// team can't dig a negative hole — and deliberately does NOT cap at the target:
+	// the rule is "hold the target and take first place" (overshoot like 62/60 is
+	// real, and deaths still drag it back down). Every change re-derives the team's
+	// nearVictory (at/over the target = match point) and broadcasts a per-player
+	// delta (teamPointsDelta) for the floating +5/+2/-1; the full teamUpdate
+	// snapshot is coalesced per tick (flushTeamBroadcast).
 	creditTeamPoints(player, amount, reason) {
 		if (!this.isTeamsMode() || player == null || player.teamId == null || amount === 0) { return; }
 		if (this.teamPoints == null) { this.initTeamPool(); }
@@ -375,17 +375,20 @@ class Game {
 		var next = (this.teamPoints[team] || 0) + amount;
 		if (next < 0) { next = 0; }
 		this.teamPoints[team] = next;
-		// Rewrite the team's nearVictory only when the match-point boolean actually
-		// FLIPS — not on every credit — so a burst of deaths isn't N playerList walks.
-		var matchPoint = next >= this.teamMatchPointAt();
-		if (this._teamMatchPoint == null) { this._teamMatchPoint = {}; }
-		if (this._teamMatchPoint[team] !== matchPoint) {
-			this._teamMatchPoint[team] = matchPoint;
-			for (var id in this.playerList) {
-				var p = this.playerList[id];
-				if (p != null && p.teamId === team) { p.nearVictory = matchPoint; }
-			}
+		// ALWAYS re-derive the team's nearVictory from the score it mirrors (cheap:
+		// one small loop per credit). Deriving unconditionally — rather than only on
+		// a match-point flip — also scrubs the stale personal flag addNotch sets
+		// when a player parks at the personal notch cap, which would otherwise
+		// wrongly boost brutal rolls and the music mood all match in teams play.
+		var matchPoint = next >= this.teamPointsCfg().target;
+		for (var id in this.playerList) {
+			var p = this.playerList[id];
+			if (p != null && p.teamId === team) { p.nearVictory = matchPoint; }
 		}
+		// Per-player NET contribution this match (placement + kills - deaths):
+		// the teams runner-up derivation reads this, since personal notches
+		// saturate at the cap over a long teams match.
+		player.teamPointsEarned = (player.teamPointsEarned || 0) + amount;
 		// `reason` ('first'|'second'|'finish'|'kill'|'death') feeds the client's
 		// round ledger — the teams overview itemizes where the round's points came from.
 		// The per-event delta goes out immediately (the floating +N/-N popups need the
@@ -795,9 +798,9 @@ class Game {
 
 		if (playersConcluded == this.playerCount) {
 			this.gameBoard.killAFKPlayers();
-			// Teams: the match is decided at round boundaries — first team at/over the
-			// points target (or leading at the round cap), ties play on. Fires INSTEAD
-			// of the overview when it ends the match.
+			// Teams round-cap backstop ONLY (the real win is the mid-round clinch in
+			// the first-place branch above): once maxRounds have been played the
+			// leading team takes it, ties play on. Fires INSTEAD of the overview.
 			if (this.checkTeamPointsWin()) {
 				return;
 			}
@@ -1145,15 +1148,13 @@ class Game {
 		if (this.isTeamsMode()) {
 			if (matchStarting || this.teamPoints == null) { this.initTeamPool(); }
 			this.ensureTeamAssignments();
-			this.broadcastTeams();
-		} else if (matchStarting) {
-			// Authoritative teams CLEAR at every non-teams match start: clients latch
-			// teamInfo from the last snapshot they saw, and broadcastTeams can never
-			// emit in FFA (teamSnapshot is null) — without this, a room that played a
-			// teams match and switched modes would render the whole FFA match through
-			// the stale teams UI (score pill, team overview panels, underglows).
-			messenger.messageRoomBySig(this.roomSig, "teamUpdate", null);
 		}
+		// EVERY round start broadcasts the authoritative teams state: the snapshot
+		// in team modes, null in FFA. The null is the clients' CLEAR — they latch
+		// teamInfo from the last snapshot they saw, so a room that played a teams
+		// match and switched modes would otherwise render the whole FFA match
+		// through stale team UI (score pill, team overview panels, underglows).
+		messenger.messageRoomBySig(this.roomSig, "teamUpdate", this.teamSnapshot());
 		messenger.messageRoomBySig(this.roomSig, "startGated", null);
 	}
 	startRace() {
@@ -1596,20 +1597,20 @@ class Game {
 		// the win counter, not just the clincher (winningTeamId is stamped by
 		// gameOver before this runs).
 		var winningTeamId = this.isTeamsMode() ? this.winningTeamId : null;
-		// Runner-up = the non-winner with the most notches (match standing). secondPlaceSig
-		// is null on the match-ending tick (and resetForRace clears it), so derive it from
-		// notches instead, which IS the durable match score. Ties: first found. In teams,
-		// the runner-up is the best of the LOSING team (the winning side already gets
-		// the win bonus member-wide).
+		// Runner-up = the best non-winner. FFA ranks by notches (the durable match
+		// score; secondPlaceSig is null on the match-ending tick). Teams rank the
+		// LOSING side by NET team-points contribution (teamPointsEarned) — personal
+		// notches saturate at the cap over a long teams match, which would reduce
+		// the pick to playerList iteration order. Ties: first found.
 		var runnerUpId = null;
-		var bestNotches = -1;
+		var bestScore = -Infinity;
 		for (var rid in this.playerList) {
 			if (rid === winnerId) { continue; }
 			var rp = this.playerList[rid];
 			if (rp == null) { continue; }
 			if (winningTeamId != null && rp.teamId === winningTeamId) { continue; }
-			var rn = rp.notches || 0;
-			if (rn > bestNotches) { bestNotches = rn; runnerUpId = rid; }
+			var rn = (winningTeamId != null) ? (rp.teamPointsEarned || 0) : (rp.notches || 0);
+			if (rn > bestScore) { bestScore = rn; runnerUpId = rid; }
 		}
 
 		// Per-player medal deltas: each medal a player holds this match counts +1

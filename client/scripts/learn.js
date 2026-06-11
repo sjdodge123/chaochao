@@ -88,7 +88,7 @@
                 {
                     id: "game-modes", name: "Game Modes", icon: emoji("⚔️"), anim: "brutalIntro",
                     blurb: "The lobby's mode station sets what kind of game your room plays.",
-                    detail: "Drive into the purple ⚔️ Game Mode station in the lobby to pick the room's mode — the pick is room-wide (last pick wins, like the playlist board), shows on a banner everyone can see, and locks in once the race starts. Standard FFA is the classic free-for-all. Brutal FFA makes EVERY round a brutal round, from round 1 on — the brutal twist still varies (and can still stack) each round. Your room keeps its mode between matches, and the join page shows each room's mode before you join."
+                    detail: "Drive into the purple ⚔️ Game Mode station in the lobby to pick the room's mode — the pick is room-wide (last pick wins, like the playlist board), shows in the lobby's status card for everyone, and locks in once the race starts. Standard FFA is the classic free-for-all. Brutal FFA makes EVERY round a brutal round, from round 1 on — the brutal twist still varies (and can still stack) each round. Your room keeps its mode between matches, and the join page shows each room's mode before you join."
                 },
                 {
                     id: "team-modes", name: "Team Modes", icon: emoji("🛡️"), anim: "goalRun",

@@ -1191,7 +1191,8 @@ function seasonalClaimText() {
     var claim = lobbyBannerSeasonalClaim;
     if (!claim) { return null; }
     var signedIn = !!((typeof myProgression !== "undefined") ? myProgression : null);
-    var endMs = Date.parse(claim.unlock.claimEnd);
+    if (claim.__endMs === undefined) { claim.__endMs = Date.parse(claim.unlock.claimEnd); }
+    var endMs = claim.__endMs;
     var daysLeft = isNaN(endMs) ? null : Math.max(1, Math.ceil((endMs - Date.now()) / 86400000));
     var nm = (typeof skinDisplayName === "function") ? skinDisplayName(claim.id) : claim.name;
     var label = (claim.unlock && claim.unlock.label) ? claim.unlock.label : "Limited";
@@ -1214,15 +1215,19 @@ function botsStatusValue() {
 // The card's cells for this frame. `stable` is the widest value the cell can
 // show, so the bar doesn't resize when a value steps (bots Off -> 3, mode
 // toggles); the playlist cell resizes only on an actual selection change.
+var statusCardWidestMode = null; // config-static; computed once
 function lobbyStatusCells() {
     var cells = [];
     var modes = gameModeDefList();
     if (modes.length) {
-        var widest = "";
-        for (var m = 0; m < modes.length; m++) {
-            if (modes[m].name.length > widest.length) { widest = modes[m].name; }
+        if (statusCardWidestMode == null) {
+            var widest = "";
+            for (var m = 0; m < modes.length; m++) {
+                if (modes[m].name.length > widest.length) { widest = modes[m].name; }
+            }
+            statusCardWidestMode = widest;
         }
-        cells.push({ label: "⚔️ MODE", value: currentGameModeLabel(), stable: widest });
+        cells.push({ label: "⚔️ MODE", value: currentGameModeLabel(), stable: statusCardWidestMode });
     }
     cells.push({ label: "🤖 BOTS", value: botsStatusValue(), stable: "10 (auto)" });
     if (playlistDefList().length) {
@@ -1233,6 +1238,11 @@ function lobbyStatusCells() {
     return cells;
 }
 
+// Measured layout cache: text metrics + ellipsis rerun only when the rendered
+// strings actually change (mode/bots/playlist step, claim copy ticks a day).
+// The card draws every lobby frame at 60fps; uncached it cost ~14 measureText
+// + ~10 font re-parses per frame for constant strings.
+var statusCardLayout = null;
 function drawLobbyStatusCard() {
     var cells = lobbyStatusCells();
     var gold = seasonalClaimText();
@@ -1240,9 +1250,24 @@ function drawLobbyStatusCard() {
     var ink = hubInk();
     var ctx = gameContext;
     ctx.save();
+    var i;
+    var key = (gold || "") + "\u0000" + LOGICAL_WIDTH;
+    for (i = 0; i < cells.length; i++) {
+        key += "\u0000" + cells[i].label + "\u0001" + cells[i].value + "\u0001" + cells[i].stable;
+    }
+    var w;
+    if (statusCardLayout != null && statusCardLayout.key === key) {
+        // Cache hit: reuse widths + pre-ellipsized strings; skip all measuring.
+        w = statusCardLayout.w;
+        for (i = 0; i < cells.length; i++) {
+            cells[i].w = statusCardLayout.widths[i];
+            cells[i].val = statusCardLayout.vals[i];
+        }
+        gold = statusCardLayout.gold;
+    } else {
     // Per-cell widths from whichever is widest: label, current value, or the
     // stable template (see lobbyStatusCells).
-    var i, w = 0;
+    w = 0;
     for (i = 0; i < cells.length; i++) {
         var c = cells[i];
         ctx.font = "bold 15px sans-serif";
@@ -1270,6 +1295,23 @@ function drawLobbyStatusCard() {
         var k = maxW / w;
         for (i = 0; i < cells.length; i++) { cells[i].w *= k; }
         w = maxW;
+    }
+    // Ellipsize once, here, while we're already measuring.
+    ctx.font = "bold 15px sans-serif";
+    for (i = 0; i < cells.length; i++) {
+        cells[i].val = (typeof hudEllipsize === "function") ? hudEllipsize(cells[i].value, cells[i].w - 14) : cells[i].value;
+    }
+    if (gold != null) {
+        ctx.font = "bold 13px sans-serif";
+        gold = (typeof hudEllipsize === "function") ? hudEllipsize(gold, w - 24) : gold;
+    }
+    statusCardLayout = {
+        key: key,
+        w: w,
+        widths: cells.map(function (cc) { return cc.w; }),
+        vals: cells.map(function (cc) { return cc.val; }),
+        gold: gold
+    };
     }
     var bandH = (gold != null) ? STATUS_CARD_BAND_H : 0;
     var h = bandH + (cells.length ? STATUS_CARD_CELLS_H : 0);
@@ -1303,9 +1345,8 @@ function drawLobbyStatusCard() {
         ctx.lineWidth = 2;
         ctx.stroke();
         ctx.font = "bold 13px sans-serif";
-        var goldText = (typeof hudEllipsize === "function") ? hudEllipsize(gold, w - 24) : gold;
         ctx.fillStyle = STATUS_CARD_GOLD.text;
-        ctx.fillText(goldText, x + w / 2, y + bandH / 2 + 1);
+        ctx.fillText(gold, x + w / 2, y + bandH / 2 + 1);
     }
     // Cells: dimmed small-caps label over a bold value, thin dividers between.
     var cx = x;
@@ -1330,9 +1371,8 @@ function drawLobbyStatusCard() {
         ctx.fillText(cell.label, midX, y + bandH + 12);
         ctx.restore();
         ctx.font = "bold 15px sans-serif";
-        var val = (typeof hudEllipsize === "function") ? hudEllipsize(cell.value, cell.w - 14) : cell.value;
         ctx.fillStyle = ink;
-        ctx.fillText(val, midX, y + bandH + 29);
+        ctx.fillText(cell.val, midX, y + bandH + 29);
         cx += cell.w;
     }
     ctx.restore();
