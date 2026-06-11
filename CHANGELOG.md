@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.33.0 — 2026-06-11
+
 ### General
 
 - New **Game Mode station** in the lobby (the ⚔️ purple ring, top-right): drive in to pick what kind of game your room plays. The pick is room-wide, shows on a banner at the top of the lobby for everyone, and locks in when the race starts.
