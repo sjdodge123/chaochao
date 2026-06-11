@@ -74,6 +74,11 @@ const sandbox = {
     playerList: {},
     gameContext: makeCtx(),
 };
+// draw.js helpers lobbyHub.js reaches that live outside the registry: the HUD
+// panel chrome (status card / station panels) and the text ellipsizer. Geometry
+// is what this harness asserts, so identity/no-op stubs are correct.
+sandbox.drawHudPanel = function () { };
+sandbox.hudEllipsize = function (t) { return t; };
 // Stub every draw.js painter referenced by the registry's array literal.
 (regSrc.match(/draw[A-Z][A-Za-z0-9_]*/g) || []).forEach(function (name) {
     sandbox[name] = function () { };
