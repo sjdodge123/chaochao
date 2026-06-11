@@ -106,6 +106,9 @@ class Player extends Circle {
 		this.infected = false;
 		this.isZombie = false;
 		this.exploded = false;
+		// Net team points this player earned/cost their team this match (teams
+		// modes; awardProgression's runner-up derivation reads it).
+		this.teamPointsEarned = 0;
 		// Team id (0 = Crimson, 1 = Jade) in a teams game mode; null in FFA modes.
 		// Assigned once at match start (Game.ensureTeamAssignments) — humans never
 		// switch mid-match; late joiners go to the smaller team. Cleared at resetGame.

@@ -110,7 +110,7 @@
             "finish": 1,
             "kill": 2,
             "death": -1,
-            "target": 60,
+            "target": 50,
             "maxRounds": 12
         }
     },

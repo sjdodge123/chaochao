@@ -8900,8 +8900,10 @@ function drawTeamScoreHud() {
     var w = wA + wM + wB + 28;
     var h = 30;
     var x = (LOGICAL_WIDTH - w) / 2;
-    // Below the session readout (GAME/PLAYERS/ROUND ends ~y30).
-    var y = 38;
+    // Below the session readout (GAME/PLAYERS/ROUND ends ~y30) — and below the
+    // deploy/maintenance panel (y44..94) when one is up, mirroring the lobby
+    // banner stack's shift, so a restart countdown never hides the team score.
+    var y = (typeof serverMaintenance !== "undefined" && serverMaintenance != null) ? 102 : 38;
     drawHudPanel(x, y, w, h, { fill: "rgba(10,12,16,0.78)", alpha: 0.92, border: "rgba(255,255,255,0.35)" });
     gameContext.textBaseline = "middle";
     gameContext.textAlign = "left";

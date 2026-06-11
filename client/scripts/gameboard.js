@@ -27,9 +27,10 @@ var mousex,
 	blackoutStart = null,
 	brutalRound = false,
 	brutalRoundConfig = null,
-	// Teams modes: { assignments, score: {teamId: points}, target, matchPointAt, defs }
-	// mirrored from the server's one-shot teamUpdate broadcasts (+ the gameState
-	// snapshot). null in FFA modes — every team render path keys off this being non-null.
+	// Teams modes: { assignments, score: {teamId: points}, target, defs } mirrored
+	// from the server's one-shot teamUpdate broadcasts (+ the gameState snapshot).
+	// `target` doubles as match point (at/over it = next first place wins). null in
+	// FFA modes — every team render path keys off this being non-null.
 	teamInfo = null,
 	// Live floating +N/-N team-point deltas (see pushTeamPointFloat / drawTeamPointFloats).
 	teamPointFloats = [],
@@ -58,9 +59,10 @@ function resetGameboard() {
 	brutalRoundConfig = null;
 	projectileList = {};
 	gameID = null;
-	teamInfo = null;
-	teamPointFloats = [];
-	teamRoundLedger = [];
+	// Team-state teardown has ONE owner — applyTeamUpdate(null) — so room-switch
+	// resets and server clears can never drift apart (hoisted; the playerList
+	// sweep is a no-op on the fresh empty list above).
+	applyTeamUpdate(null);
 	effectsList = [];
 	shakeTrauma = 0;
 	shakeSustainUntil = 0;
@@ -360,12 +362,16 @@ function applyTeamUpdate(snap) {
 			playerList[id].teamId = snap.assignments[i][1];
 		}
 	}
-	// Team match-point sting: fires when a team's score crosses INTO match point
-	// (one first-place finish from the target). The per-player overview rise/fall
-	// cues are suppressed in teams mode (overviewVictoryState), so this is THE
-	// audio cue — and prev==null (fresh join snapshot) stays silent.
-	var at = (snap.matchPointAt != null) ? snap.matchPointAt : snap.target;
-	if (prev != null && prev.score != null && snap.score != null && at != null) {
+	// Team match-point sting: fires when a team's score crosses AT/OVER the target
+	// (their next first-place finish wins). The per-player overview rise/fall cues
+	// are suppressed in teams mode (overviewVictoryState), so this is THE audio
+	// cue — prev==null (fresh join snapshot) stays silent, and so does the
+	// game-over screen (the match-ending tick's final flush lands after
+	// startGameover; "match point!" over the victory screen would be noise).
+	var onGameOver = (typeof config !== "undefined" && config && typeof currentState !== "undefined"
+		&& currentState === config.stateMap.gameOver);
+	var at = snap.target;
+	if (!onGameOver && prev != null && prev.score != null && snap.score != null && at != null) {
 		for (var t in snap.score) {
 			if (snap.score[t] >= at && (prev.score[t] || 0) < at) {
 				if (typeof playSound === "function" && typeof nearVictorySound !== "undefined") {
@@ -430,9 +436,8 @@ function teamLedgerLabel(id) {
 // FFA keeps the classic personal notches==gameLength check.
 function isNearVictoryDisplay(player) {
 	if (teamInfo != null && teamInfo.score != null && player.teamId != null) {
-		var at = (teamInfo.matchPointAt != null) ? teamInfo.matchPointAt : teamInfo.target;
-		if (at == null) { return false; }
-		return (teamInfo.score[player.teamId] || 0) >= at;
+		if (teamInfo.target == null) { return false; }
+		return (teamInfo.score[player.teamId] || 0) >= teamInfo.target;
 	}
 	return player.notches == gameLength;
 }

@@ -2276,7 +2276,8 @@ class GameBoard {
 		return def != null && def.brutal === true;
 	}
 	// True when the room's mode plays in teams (standard_teams / brutal_teams):
-	// Crimson vs Jade, shared notch pool, teammate punches are no-ops.
+	// Crimson vs Jade, shared POINTS score (personal notches still run as in FFA),
+	// teammate punches are no-ops.
 	isTeamsMode() {
 		var def = this.gameModeDef();
 		return def != null && def.teams === true;
