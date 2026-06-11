@@ -8066,6 +8066,24 @@ function updateHeatwaveReveal() {
     heatwaveRevealAdvance(reveal);
 }
 
+// vid -> cell index for the per-frame heatwave paths. Rebuilt lazily when the
+// map OBJECT changes (each round loads a fresh map; within a round cells mutate
+// ids in place but never re-key), so the per-frame flash fills below are O(1)
+// lookups instead of full-cell scans.
+var _hwCellIndex = { map: null, byVid: null };
+function heatwaveCellByVid(vid) {
+    if (currentMap == null || currentMap.cells == null) { return null; }
+    if (_hwCellIndex.map !== currentMap) {
+        var byVid = {};
+        for (var i = 0; i < currentMap.cells.length; i++) {
+            byVid[currentMap.cells[i].site.voronoiId] = currentMap.cells[i];
+        }
+        _hwCellIndex = { map: currentMap, byVid: byVid };
+    }
+    var cell = _hwCellIndex.byVid[vid];
+    return (cell != null) ? cell : null;
+}
+
 // Short burn-in flash on each freshly converted tile: an additive hot fill that
 // pops and fades over ~450ms, leaving the baked scorch rim behind. Serves both
 // the round-start reveal and the mid-race second wave. World coords (same pass
@@ -8086,10 +8104,7 @@ function drawHeatwaveFlashes() {
         var age = now - f.at;
         if (age > HEATWAVE_FLASH_MS) { continue; }
         kept.push(f);
-        var cell = null;
-        for (var ci = 0; ci < currentMap.cells.length; ci++) {
-            if (currentMap.cells[ci].site.voronoiId == f.vid) { cell = currentMap.cells[ci]; break; }
-        }
+        var cell = heatwaveCellByVid(f.vid);
         if (cell == null || !traceCellPath(ctx, cell)) { continue; }
         var a = 1 - age / HEATWAVE_FLASH_MS;
         ctx.globalAlpha = 0.55 * a;
