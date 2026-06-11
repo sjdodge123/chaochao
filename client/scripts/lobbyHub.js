@@ -885,17 +885,16 @@ function drawLobbyHubHud() {
     if (typeof localPlayers === "undefined" || typeof gameContext === "undefined" || !gameContext) {
         return;
     }
-    // The AI setting and playlist are both room-wide, so show them persistently to the
-    // whole lobby (not just inside a panel) — everyone sees a change before the race
-    // starts. Drawn FIRST so an open station panel layers on top of them, otherwise they
-    // z-order over the picker near the top of the screen.
-    // Resolve the active seasonal claim ONCE per HUD frame (it can't change within a frame);
-    // all three banners read this cached value instead of re-scanning the registry each.
+    // The mode, AI setting, and playlist are all room-wide, so show them persistently
+    // to the whole lobby (not just inside a panel) — everyone sees a change before the
+    // race starts. ONE unified status card (gold seasonal band + MODE/BOTS/PLAYLIST
+    // cells) rather than a stack of self-sized pills. Drawn FIRST so an open station
+    // panel layers on top of it, otherwise it z-orders over the picker near the top of
+    // the screen.
+    // Resolve the active seasonal claim ONCE per HUD frame (it can't change within a
+    // frame); the card reads this cached value instead of re-scanning the registry.
     lobbyBannerSeasonalClaim = activeSeasonalClaim();
-    drawSeasonalClaimBanner(); // top slot when active; mode + AI + playlist drop a row below it
-    drawLobbyGameModeStatus();
-    drawLobbyAIStatus();
-    drawLobbyPlaylistStatus();
+    drawLobbyStatusCard();
     // Couch co-op: when SEVERAL seats have a panel open at once, kart-anchored panels
     // overlap and hide each other. Dock them to fixed non-overlapping screen cells
     // instead (side-by-side for two, a 2×2 grid for three/four) so every open menu
@@ -1119,7 +1118,7 @@ function assignPanelDocks(open) {
 }
 
 // The active seasonal claim for THIS HUD frame (or null), cached by drawLobbyHubHud so the
-// registry isn't re-scanned by each banner. Read by all three lobby banners.
+// registry isn't re-scanned per draw. Read by the lobby status card.
 var lobbyBannerSeasonalClaim = null;
 
 // Y for lobby-banner row `row` (0 = top). The stack tucks under the frameless
@@ -1136,7 +1135,8 @@ function lobbyBannerRowY(row) {
 }
 
 // Draws ONE fixed top-centre lobby banner (rounded pill, centered bold text) at row `y`. Backs
-// all three lobby banners so their geometry stays identical. The pill chrome itself is the
+// the gated-intro warning banners (drawGameModeIntro); the lobby itself uses the unified
+// status card below. The pill chrome itself is the
 // shared HUD panel (draw.js drawHudPanel) so these match the session bar / map plaque exactly.
 // theme overrides the neutral hub panel look: { fill, ink (border), text (defaults to ink),
 // alpha, pad, glow }.
@@ -1168,22 +1168,174 @@ function drawLobbyBanner(text, y, theme) {
     gameContext.restore();
 }
 
-// A fixed top-centre banner showing the live room-wide playlist. Sits under the AI banner,
-// dropping a row when the seasonal banner takes the top slot. Synced via lobbyPlaylistChanged.
-function drawLobbyPlaylistStatus() {
-    if (!playlistDefList().length) { return; }
-    var count = playlistCount(currentPlaylistId());
-    var text = "🗺️ Playlist: " + currentPlaylistLabel() + (count != null ? " (" + count + ")" : "");
-    drawLobbyBanner(text, lobbyBannerRowY(lobbyBannerSeasonalClaim ? 3 : 2));
+// ---- Unified lobby status card ----------------------------------------------
+// ONE top-centre dashboard bar replacing the old stack of per-fact pills: an
+// optional gold seasonal-claim band on top, then a row of labeled cells
+// (MODE / BOTS / PLAYLIST) sharing a single panel. Same chrome as every other
+// HUD element (drawHudPanel) and the same small-caps-label/bold-value type
+// treatment as the session readout above it, so the whole top-centre column
+// reads as one family. Values are synced room-wide (lobbyGameModeChanged /
+// lobbyAIChanged / lobbyPlaylistChanged + the gameState snapshot).
+
+var STATUS_CARD_GOLD = { fill: "rgba(58,43,6,0.96)", border: "#ffb31f", text: "#ffe9a8", glow: "rgba(255,179,31,0.7)" };
+var STATUS_CARD_BAND_H = 28;   // gold CTA band (only while a claim is open)
+var STATUS_CARD_CELLS_H = 42;  // label row + value row
+var STATUS_CARD_CELL_PAD = 26; // horizontal padding inside a cell
+var STATUS_CARD_CELL_MAX = 250; // one long playlist name can't hog the bar
+
+// Copy for the gold band, or null when no claim is open. Sign-in nudge for
+// guests; "claim it / Nd left" for signed-in. Data-driven (season label +
+// cosmetic name + slot noun) from the registry entry, so a future season
+// needs no edit here.
+function seasonalClaimText() {
+    var claim = lobbyBannerSeasonalClaim;
+    if (!claim) { return null; }
+    var signedIn = !!((typeof myProgression !== "undefined") ? myProgression : null);
+    var endMs = Date.parse(claim.unlock.claimEnd);
+    var daysLeft = isNaN(endMs) ? null : Math.max(1, Math.ceil((endMs - Date.now()) / 86400000));
+    var nm = (typeof skinDisplayName === "function") ? skinDisplayName(claim.id) : claim.name;
+    var label = (claim.unlock && claim.unlock.label) ? claim.unlock.label : "Limited";
+    var noun = cosmeticSlotNoun(claim.slot);
+    var tail = (daysLeft != null ? " — " + daysLeft + "d left" : "");
+    return signedIn
+        ? ("🌟 Claim your " + label + " " + nm + " " + noun + tail)
+        : ("🌟 Sign in to claim the limited " + label + " " + nm + " " + noun + tail);
 }
 
-// The room's game mode gets the TOP banner row — it's what kind of game this is,
-// so it outranks the AI/playlist settings beneath it. Synced via lobbyGameModeChanged
-// (+ the gameState snapshot for late joiners).
-function drawLobbyGameModeStatus() {
-    if (!gameModeDefList().length) { return; }
-    var text = "⚔️ Mode: " + currentGameModeLabel();
-    drawLobbyBanner(text, lobbyBannerRowY(lobbyBannerSeasonalClaim ? 1 : 0));
+// Value text for the BOTS cell. The small-caps cell label carries the "AI bots
+// next race" context the old pill spelled out, so the value stays short.
+function botsStatusValue() {
+    var lvl = currentAILevel();
+    if (lvl == null) { return autoEffectiveBots() + " (auto)"; }
+    if (lvl <= 0) { return "Off"; }
+    return "" + Math.min(lvl, aiMaxBots());
+}
+
+// The card's cells for this frame. `stable` is the widest value the cell can
+// show, so the bar doesn't resize when a value steps (bots Off -> 3, mode
+// toggles); the playlist cell resizes only on an actual selection change.
+function lobbyStatusCells() {
+    var cells = [];
+    var modes = gameModeDefList();
+    if (modes.length) {
+        var widest = "";
+        for (var m = 0; m < modes.length; m++) {
+            if (modes[m].name.length > widest.length) { widest = modes[m].name; }
+        }
+        cells.push({ label: "⚔️ MODE", value: currentGameModeLabel(), stable: widest });
+    }
+    cells.push({ label: "🤖 BOTS", value: botsStatusValue(), stable: "10 (auto)" });
+    if (playlistDefList().length) {
+        var count = playlistCount(currentPlaylistId());
+        var v = currentPlaylistLabel() + (count != null ? " · " + count + " maps" : "");
+        cells.push({ label: "🗺️ PLAYLIST", value: v, stable: v });
+    }
+    return cells;
+}
+
+function drawLobbyStatusCard() {
+    var cells = lobbyStatusCells();
+    var gold = seasonalClaimText();
+    if (!cells.length && gold == null) { return; }
+    var ink = hubInk();
+    var ctx = gameContext;
+    ctx.save();
+    // Per-cell widths from whichever is widest: label, current value, or the
+    // stable template (see lobbyStatusCells).
+    var i, w = 0;
+    for (i = 0; i < cells.length; i++) {
+        var c = cells[i];
+        ctx.font = "bold 15px sans-serif";
+        var vw = Math.max(ctx.measureText(c.value).width, ctx.measureText(c.stable).width);
+        ctx.font = "bold 10px sans-serif";
+        var lw = ctx.measureText(c.label).width;
+        c.w = Math.min(Math.max(vw, lw) + STATUS_CARD_CELL_PAD, STATUS_CARD_CELL_MAX);
+        w += c.w;
+    }
+    // The gold band can be wider than the cells; pad every cell out evenly so
+    // the band never overhangs. Then cap the whole card to the canvas.
+    if (gold != null) {
+        ctx.font = "bold 13px sans-serif";
+        var gw = ctx.measureText(gold).width + 36;
+        if (gw > w && cells.length) {
+            var extra = (gw - w) / cells.length;
+            for (i = 0; i < cells.length; i++) { cells[i].w += extra; }
+            w = gw;
+        } else if (!cells.length) {
+            w = gw;
+        }
+    }
+    var maxW = LOGICAL_WIDTH - 80;
+    if (w > maxW) {
+        var k = maxW / w;
+        for (i = 0; i < cells.length; i++) { cells[i].w *= k; }
+        w = maxW;
+    }
+    var bandH = (gold != null) ? STATUS_CARD_BAND_H : 0;
+    var h = bandH + (cells.length ? STATUS_CARD_CELLS_H : 0);
+    var x = (LOGICAL_WIDTH - w) / 2;
+    var y = lobbyBannerRowY(0);
+    drawHudPanel(x, y, w, h, {
+        fill: hubSurface(),
+        alpha: 0.92,
+        border: ink,
+        glow: (gold != null) ? STATUS_CARD_GOLD.glow : undefined
+    });
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    if (gold != null) {
+        // Band fill clipped to the panel's rounded corners, then the panel border
+        // re-stroked (the fill paints over its inner half along the top edge).
+        ctx.save();
+        lhRoundRect(ctx, x, y, w, h, 9);
+        ctx.clip();
+        ctx.fillStyle = STATUS_CARD_GOLD.fill;
+        ctx.fillRect(x, y, w, bandH);
+        ctx.strokeStyle = STATUS_CARD_GOLD.border;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x, y + bandH);
+        ctx.lineTo(x + w, y + bandH);
+        ctx.stroke();
+        ctx.restore();
+        lhRoundRect(ctx, x, y, w, h, 9);
+        ctx.strokeStyle = ink;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.font = "bold 13px sans-serif";
+        var goldText = (typeof hudEllipsize === "function") ? hudEllipsize(gold, w - 24) : gold;
+        ctx.fillStyle = STATUS_CARD_GOLD.text;
+        ctx.fillText(goldText, x + w / 2, y + bandH / 2 + 1);
+    }
+    // Cells: dimmed small-caps label over a bold value, thin dividers between.
+    var cx = x;
+    for (i = 0; i < cells.length; i++) {
+        var cell = cells[i];
+        var midX = cx + cell.w / 2;
+        if (i > 0) {
+            ctx.save();
+            ctx.globalAlpha = 0.18;
+            ctx.strokeStyle = ink;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(cx, y + bandH + 7);
+            ctx.lineTo(cx, y + h - 7);
+            ctx.stroke();
+            ctx.restore();
+        }
+        ctx.save();
+        ctx.globalAlpha = 0.55;
+        ctx.fillStyle = ink;
+        ctx.font = "bold 10px sans-serif";
+        ctx.fillText(cell.label, midX, y + bandH + 12);
+        ctx.restore();
+        ctx.font = "bold 15px sans-serif";
+        var val = (typeof hudEllipsize === "function") ? hudEllipsize(cell.value, cell.w - 14) : cell.value;
+        ctx.fillStyle = ink;
+        ctx.fillText(val, midX, y + bandH + 29);
+        cx += cell.w;
+    }
+    ctx.restore();
 }
 
 // One-shot match-start announcement for brutal MODES: during the ROUND-1 gate
@@ -1232,28 +1384,6 @@ function cosmeticSlotNoun(slot) {
     return (slot === "cart" || slot === "pattern" || slot === "trail" || slot === "border") ? slot : "cosmetic";
 }
 
-// A limited-time, eye-catching GOLD banner advertising the open seasonal claim (Early Adopter
-// etc.), drawn as the TOP banner of the lobby stack (above the AI-bots banner) so the limited
-// CTA gets first billing; the AI + playlist banners drop one row while it's showing. Copy is
-// data-driven (season label + cosmetic name + slot noun) from the registry entry, so a future
-// season needs no edit here. Sign-in nudge for guests; "claim it / Nd left" for signed-in.
-function drawSeasonalClaimBanner() {
-    var claim = lobbyBannerSeasonalClaim;
-    if (!claim) { return; }
-    var signedIn = !!((typeof myProgression !== "undefined") ? myProgression : null);
-    var endMs = Date.parse(claim.unlock.claimEnd);
-    var daysLeft = isNaN(endMs) ? null : Math.max(1, Math.ceil((endMs - Date.now()) / 86400000));
-    var nm = (typeof skinDisplayName === "function") ? skinDisplayName(claim.id) : claim.name;
-    var label = (claim.unlock && claim.unlock.label) ? claim.unlock.label : "Limited";
-    var noun = cosmeticSlotNoun(claim.slot);
-    var tail = (daysLeft != null ? " — " + daysLeft + "d left" : "");
-    var text = signedIn
-        ? ("🌟 Claim your " + label + " " + nm + " " + noun + tail)
-        : ("🌟 Sign in to claim the limited " + label + " " + nm + " " + noun + tail);
-    // Gold theme + soft glow so it reads as premium/limited, not a routine status band.
-    drawLobbyBanner(text, lobbyBannerRowY(0), { fill: "#3a2b06", ink: "#ffb31f", text: "#ffe9a8", alpha: 0.96, pad: 34, glow: "rgba(255,179,31,0.7)" });
-}
-
 // Triangular-tier auto fill: a few bots scale up with humans (1H→1, 2-3H→2,
 // 4-6H→3, 7-10H→4, 11-15H→5, 16H→6). 17+ humans fills the remaining slots,
 // clamped to whatever room space is left so the banner never overpromises.
@@ -1265,26 +1395,6 @@ function autoEffectiveBots() {
     var n = 1, end = 1;
     while (end < h) { n++; end += n; }
     return n > capLeft ? capLeft : n;
-}
-
-// A fixed top-centre banner showing the live room-wide AI setting during the lobby.
-// Synced to every client (lobbyAIChanged / the gameState snapshot), so all players
-// read the same value. Styled with the game's own panel theme (surface + ink) so it
-// sits in the world rather than reading as a foreign UI sticker.
-function drawLobbyAIStatus() {
-    var lvl = currentAILevel();
-    var text;
-    if (lvl == null) {
-        var auto = autoEffectiveBots();
-        text = "🤖 AI bots next race: " + auto + (auto === 1 ? " bot" : " bots") + " (auto)";
-    } else if (lvl <= 0) {
-        text = "🤖 AI bots next race: Off";
-    } else {
-        var eff = Math.min(lvl, aiMaxBots());
-        text = "🤖 AI bots next race: " + eff + (eff === 1 ? " bot" : " bots");
-    }
-    // Under the mode banner; +1 row when the seasonal banner takes the top slot.
-    drawLobbyBanner(text, lobbyBannerRowY(lobbyBannerSeasonalClaim ? 2 : 1));
 }
 
 function lhRoundRect(ctx, x, y, w, h, r) {
