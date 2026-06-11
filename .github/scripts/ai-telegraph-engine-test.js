@@ -9,6 +9,9 @@
 // the fake socket.io `io` RECORDS every emit so we can assert the ability actually
 // fired end-to-end (bombUsed/spawnBomb, iceCannon/spawnSnowFlake, swapUsed,
 // blindfoldUsed) and that the spawned projectile was aimed where we expect.
+// Math.random is seeded (mulberry32, repo headless-test convention) — unseeded, the
+// AI brain's per-tick jitter (wander, off-moments, ability dice) made this test
+// ~10% flaky, usually on the blindfold scenario.
 
 const fs = require('fs');
 const path = require('path');
@@ -58,7 +61,22 @@ function lavaWithin(map, x, y, r) {
 }
 
 const realNow = Date.now;
+const realRandom = Math.random;
 let clock = 1000000;
+
+// Deterministic PRNG (mulberry32) over Math.random for the whole run — same
+// convention as ai-swim-test.js / ai-bumper-cross-test.js, and the fix for this
+// test's long-standing ~10% flake (the unseeded AI-brain jitter occasionally
+// rolled a run where the blindfold deployment dithered past the tick budget).
+function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function () {
+        a |= 0; a = (a + 0x6D2B79F5) | 0;
+        let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
 
 // Boot a fresh room with `nBots` bots (+ optional human), pinned to `map`, in racing.
 function bootRoom(sig, map, nBots, withHuman) {
@@ -125,6 +143,7 @@ function tickUntil(room, pins, eventHeader, maxTicks) {
 
 try {
     Date.now = () => clock;
+    Math.random = mulberry32(0x7E1E);
 
     const mapsDir = path.join(repoRoot, 'client', 'maps');
     const file = fs.readdirSync(mapsDir).filter(f => f.endsWith('.json'))[0];
@@ -270,6 +289,7 @@ try {
     }
 } finally {
     Date.now = realNow;
+    Math.random = realRandom;
 }
 
 console.log('');
