@@ -1046,12 +1046,8 @@ function heatwaveRevealAdvance(progress) {
 		heatwaveFX.pending[heatwaveFX.cursor].t <= progress) {
 		var item = heatwaveFX.pending[heatwaveFX.cursor];
 		heatwaveFX.cursor++;
-		for (var i = 0; i < currentMap.cells.length; i++) {
-			if (currentMap.cells[i].site.voronoiId == item.vid) {
-				currentMap.cells[i].id = item.newId;
-				break;
-			}
-		}
+		var flipCell = (typeof heatwaveCellByVid === "function") ? heatwaveCellByVid(item.vid) : null;
+		if (flipCell != null) { flipCell.id = item.newId; }
 		addHeatwaveScorch(item.vid, item.newId);
 		heatwaveFlashes.push({ vid: item.vid, at: Date.now() });
 		flipped = true;
@@ -1103,14 +1099,8 @@ function heatwaveWaveLanded(payload) {
 		return;
 	}
 	for (var i = 0; i < ids.length; i++) {
-		var newId = null;
-		for (var ci = 0; ci < currentMap.cells.length; ci++) {
-			if (currentMap.cells[ci].site.voronoiId == ids[i]) {
-				newId = currentMap.cells[ci].id;
-				break;
-			}
-		}
-		addHeatwaveScorch(ids[i], newId);
+		var waveCell = (typeof heatwaveCellByVid === "function") ? heatwaveCellByVid(ids[i]) : null;
+		addHeatwaveScorch(ids[i], (waveCell != null) ? waveCell.id : null);
 		heatwaveFlashes.push({ vid: ids[i], at: Date.now() });
 	}
 	if (typeof playHeatwaveSizzle === "function") { playHeatwaveSizzle(); }

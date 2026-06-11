@@ -171,6 +171,38 @@ c.brutalTypesForce = [c.brutalRounds.heatwave.id];
         'players share the scorched set by reference');
 })();
 
+// ---- Late-join snapshot: gated joiners must not get the delta early ----
+// (Codex P2: the tileChanges snapshot flipped the converted tiles instantly on a
+// gated reconnect, skipping the reveal. The gated snapshot now excludes the
+// heatwave delta — it arrives via the armed reveal — while racing keeps it.)
+(function gatedJoinSnapshot() {
+    const room = buildRoom('hw-join', 3, picked.map);
+    const gb = room.game.gameBoard;
+    room.game.startLobby();
+    room.game.startGated();
+    const hwVids = Object.keys(gb.newMapPayload.heatwave.changes);
+
+    function snapshotFor(state) {
+        const sent = [];
+        const fakeClient = { emit(name, data) { sent.push({ name: name, data: data }); } };
+        room.game.checkSendGameStateUpdates(fakeClient);
+        const msg = sent.find(m => m.name === 'tileChanges');
+        return (msg != null) ? JSON.parse(msg.data) : null;
+    }
+
+    const gatedSnap = snapshotFor('gated');
+    check(gatedSnap != null, 'gated joiner receives a tileChanges snapshot');
+    let leaked = false;
+    for (const vid of hwVids) { if (gatedSnap[vid] != null) { leaked = true; } }
+    check(!leaked, 'gated snapshot excludes the heatwave delta (reveal owns it)');
+
+    room.game.startRace();
+    const racingSnap = snapshotFor('racing');
+    let present = true;
+    for (const vid of hwVids) { if (racingSnap[vid] == null) { present = false; } }
+    check(present, 'racing snapshot still carries the full heatwave delta');
+})();
+
 // ---- Firewalker medal bookkeeping ----
 (function firewalker() {
     const room = buildRoom('hw-medal', 3, picked.map);

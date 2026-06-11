@@ -281,8 +281,24 @@ class Game {
 		//Send map configuration - Change current state so that its accurate
 		this.gameBoard.newMapPayload.currentState = this.currentState;
 		client.emit("newMap", this.gameBoard.newMapPayload);
-		//Send map tile changes
-		client.emit("tileChanges", JSON.stringify(this.gameBoard.gatherTileChanges()));
+		//Send map tile changes. During the GATED phase of a Heatwave round the
+		//heatwave delta must NOT ride this snapshot: the joiner just armed the
+		//zoom-out reveal from the newMap payload above, and the snapshot would
+		//flip those tiles instantly (no reveal, and scorch marks out of sync
+		//with the burn-in). The delta reaches them through the reveal instead;
+		//once racing/collapsing, armHeatwave applies it immediately on arm, so
+		//the full snapshot is correct (and idempotent) there. Filter on a COPY —
+		//gatherTileChanges returns the live accumulator.
+		var tileSnapshot = this.gameBoard.gatherTileChanges();
+		var hwPayload = (this.gameBoard.newMapPayload != null) ? this.gameBoard.newMapPayload.heatwave : null;
+		if (this.currentState == c.stateMap.gated && hwPayload != null && hwPayload.changes != null) {
+			var filtered = {};
+			for (var tv in tileSnapshot) {
+				if (hwPayload.changes[tv] == null) { filtered[tv] = tileSnapshot[tv]; }
+			}
+			tileSnapshot = filtered;
+		}
+		client.emit("tileChanges", JSON.stringify(tileSnapshot));
 		// Bunker round in progress: bunkerStart was a one-shot at setup, so a mid-round
 		// joiner/reconnect never set bunkerFX and would miss the silo door + offscreen
 		// bunker indicator. Replay it, flagged `sealed` so they see it already shut
