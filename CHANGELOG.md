@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.34.0 — 2026-06-11
+
 ### General
 
 - [headline] **Team modes are here — Crimson vs Jade!** Pick **Team Race** or **Brutal Teams** at the lobby's new Game Mode station and the room splits into two teams playing for a shared **points** score: first across the line banks **+5** for your side, second **+3**, every other finisher **+1**, and knocking an enemy out earns **+2** — but **every death costs your team a point**, so survival matters as much as speed. Points float over the kart that earned (or lost) them the moment it happens. Once your team holds the target score, the next FIRST-PLACE finish by anyone on it wins the match on the spot — and watch your backs: deaths can knock your team back under the line, so match point is something you defend. If the rounds run out first, the leading team takes it. Your kart keeps its own colors and cosmetics; your team shows as a Crimson or Jade glow under your wheels, with the team score front and center all race.
