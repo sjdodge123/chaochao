@@ -1272,7 +1272,7 @@ function drawLobbyStatusCard() {
         var c = cells[i];
         ctx.font = "bold 15px sans-serif";
         var vw = Math.max(ctx.measureText(c.value).width, ctx.measureText(c.stable).width);
-        ctx.font = "bold 10px sans-serif";
+        ctx.font = "bold 11px sans-serif";
         var lw = ctx.measureText(c.label).width;
         c.w = Math.min(Math.max(vw, lw) + STATUS_CARD_CELL_PAD, STATUS_CARD_CELL_MAX);
         w += c.w;
@@ -1367,7 +1367,7 @@ function drawLobbyStatusCard() {
         ctx.save();
         ctx.globalAlpha = 0.55;
         ctx.fillStyle = ink;
-        ctx.font = "bold 10px sans-serif";
+        ctx.font = "bold 11px sans-serif";
         ctx.fillText(cell.label, midX, y + bandH + 12);
         ctx.restore();
         ctx.font = "bold 15px sans-serif";
