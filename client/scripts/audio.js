@@ -678,7 +678,12 @@ function playBunkerDoorHiss() {
 //                         stops can't reach it — it must be stopped explicitly
 //                         (stopAllSounds does, plus the round-end handlers).
 //   playHeatwaveWarning — second-wave alarm: two quick rising chirps.
-var HEATWAVE_DRONE_VOL = 0.05;
+var HEATWAVE_DRONE_VOL = 0.03;
+// The beating low sines are the dominant (and most fatiguing) part of the drone;
+// they get their own attenuation below so the throb sits well under the music
+// while the airy noise shimmer carries the "heat" read. (Playtest: the bass
+// pulse was too loud at full osc level.)
+var HEATWAVE_DRONE_BASS = 0.45;
 var heatwaveDroneVoice = null;
 
 function playHeatwaveSizzle() {
@@ -723,10 +728,11 @@ function startHeatwaveDrone() {
     var nFilt = ctx.createBiquadFilter();
     nFilt.type = "bandpass"; nFilt.Q.value = 2.2; nFilt.frequency.value = 2600;
     var nGain = ctx.createGain(); nGain.gain.value = 0.18;
+    var bassGain = ctx.createGain(); bassGain.gain.value = HEATWAVE_DRONE_BASS;
     var g = ctx.createGain();
     g.gain.setValueAtTime(0.0001, now);
     g.gain.exponentialRampToValueAtTime(Math.max(0.0002, HEATWAVE_DRONE_VOL * masterVolume * sfxVolumeScalar), now + 1.6);
-    oscA.connect(g); oscB.connect(g);
+    oscA.connect(bassGain); oscB.connect(bassGain); bassGain.connect(g);
     noise.connect(nFilt); nFilt.connect(nGain); nGain.connect(g);
     g.connect(sfxBus);
     try { oscA.start(now); oscB.start(now); noise.start(now); }
