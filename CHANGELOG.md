@@ -24,6 +24,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 - New **Game Mode station** in the lobby (the ⚔️ purple ring, top-right): drive in to pick what kind of game your room plays. The pick is room-wide, shows on a banner at the top of the lobby for everyone, and locks in when the race starts.
 - New game mode — **Brutal FFA**: every single round is a brutal round. No mercy rolls, no warm-up — the chaos starts at round 1 and never lets up (brutal rounds can still stack extra modes on top, just like before). A warning banner at the round-1 gate reminds everyone what they signed up for. Standard FFA stays the default — and the mode your room picked sticks around for the next match, too.
 - The **join page now shows each room's game mode** on its card (brutal modes get a red badge), so you know what kind of game you're walking into before you click Join.
+- The lobby's room settings now read as **one tidy status card** — Mode, Bots, and Playlist side by side in a single panel (with the limited-time claim banner riding on top when one is live) — instead of a stack of separately-floating pills.
 
 ### Bug fixes
 
