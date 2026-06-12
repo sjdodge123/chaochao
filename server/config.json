@@ -441,7 +441,7 @@
             "thumperMaxCount": 3,
             "thumperPeriod": 1.9,
             "repelRadius": 110,
-            "slamImpulse": 260,
+            "slamImpulse": 480,
             "minSandTiles": 10
         }
     },
