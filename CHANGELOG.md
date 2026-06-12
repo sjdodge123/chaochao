@@ -10,9 +10,14 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+### General
+
+- **New hazard: the Bumper Wall.** A pinball-style slingshot line that flings your kart straight off its face the instant you touch it — same springy sting as a round bumper, stretched into a whole wall. Map authors can place and rotate them in the editor (look in the Hazards palette) to fence off shortcuts or bank karts around corners. Rival AI racers steer wide of them rather than ride them.
+
 ### Bug fixes
 
 - Join a room mid-round and the moving bumpers' rails now draw where they actually are — they used to show the rail starting from wherever the bumper happened to be at the moment you joined, instead of its true track.
+- Two map hazards placed so their coordinates added up to the same total used to silently cancel one of them out at round start — every authored hazard now spawns.
 
 ## v0.35.0 — 2026-06-12
 

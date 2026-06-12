@@ -2679,7 +2679,14 @@ class GameBoard {
 			if (kind == null) {
 				continue;
 			}
-			var mapID = utils.generateHash(this.roomSig, String(entry.x + entry.y));
+			// The array index + kind + full coordinates make the hash input unique
+			// per map entry — the old form hashed only the coordinate SUM (as
+			// generateHash's numeric seed), so two hazards sharing an x+y total
+			// (e.g. (100,200) and (150,150)) collided and one silently vanished.
+			// The uniqueness must live in the hashed STRING: generateHash's second
+			// arg is a numeric seed, and a non-numeric string there coerces to NaN
+			// -> 0, which would collapse every hazard to one id.
+			var mapID = utils.generateHash(this.roomSig + ":" + i + ":" + entry.id + ":" + entry.x + "," + entry.y, 0);
 			var hazard = kind.build(entry, mapID, this.roomSig);
 			if (kind.railed && this.checkForActiveBrutal(c.brutalRounds.lightning.id)) {
 				hazard.speed *= c.brutalRounds.lightning.movingHazardSpeedMod;

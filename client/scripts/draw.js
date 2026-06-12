@@ -9018,6 +9018,9 @@ function buildHazardDrawers() {
     hazardDrawers[config.hazards.movingBumper.id] = function (h) {
         drawMovingBumper(h.x, h.y, h.railX, h.railY, h.angle);
     };
+    hazardDrawers[config.hazards.bumperWall.id] = function (h) {
+        drawBumperWall(h.x, h.y, h.angle);
+    };
 }
 function drawHazard(hazard) {
     if (hazardDrawers == null) {
@@ -9066,6 +9069,29 @@ function drawMovingBumper(x, y, railX, railY, angle) {
     gameContext.arc(x, y, config.hazards.movingBumper.radius, 0, 2 * Math.PI);
     gameContext.fillStyle = config.hazards.movingBumper.color;
     gameContext.fill();
+    gameContext.restore();
+}
+// A pinball slingshot wall: a rounded band from its anchor along `angle` for the
+// configured length — red rim over the bumper-orange core, matching the round
+// bumpers' palette so "this colour flings you" stays one visual rule.
+function drawBumperWall(x, y, angle) {
+    var rad = (angle || 0) * (Math.PI / 180);
+    var bx = x + Math.cos(rad) * config.hazards.bumperWall.width;
+    var by = y + Math.sin(rad) * config.hazards.bumperWall.width;
+    gameContext.save();
+    gameContext.lineCap = "round";
+    gameContext.beginPath();
+    gameContext.moveTo(x, y);
+    gameContext.lineTo(bx, by);
+    gameContext.strokeStyle = bumperRingColor;
+    gameContext.lineWidth = config.hazards.bumperWall.height + 6;
+    gameContext.stroke();
+    gameContext.beginPath();
+    gameContext.moveTo(x, y);
+    gameContext.lineTo(bx, by);
+    gameContext.strokeStyle = config.hazards.bumperWall.color;
+    gameContext.lineWidth = config.hazards.bumperWall.height;
+    gameContext.stroke();
     gameContext.restore();
 }
 

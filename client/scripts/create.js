@@ -541,6 +541,10 @@ function buildHazardSwatchDataURL(kind) {
         ctx.fillRect(0, 0, size, size);
     }
     var cx = size / 2, cy = size / 2;
+    if (kind.swatchPaint) {
+        kind.swatchPaint(ctx, size);
+        return c.toDataURL();
+    }
     if (kind.railed) {
         ctx.strokeStyle = "#111";
         ctx.lineWidth = 10;
@@ -1299,13 +1303,39 @@ function drawMyObject(x, y, myObject, angle) {
     }
     var kind = editorHazardKindById(myObject);
     if (kind != null) {
-        paintHazardShape(createContext, kind, x, y, angle, "red");
+        (kind.paint || paintHazardShape)(createContext, kind, x, y, angle, "red");
     }
 }
+// Wall-band painter (bumperWall's `paint` hook). Mirrors the in-game look
+// (draw.js drawBumperWall): rim band over the bumper-orange core, anchored at
+// (x,y) and extending `width` along `angle`.
+function paintBumperWallShape(ctx, kind, x, y, angle, ringColor) {
+    var cfg = config.hazards[kind.key];
+    if (cfg == null) { return; }
+    var rad = (angle || 0) * (Math.PI / 180);
+    var bx = x + Math.cos(rad) * cfg.width;
+    var by = y + Math.sin(rad) * cfg.width;
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(bx, by);
+    ctx.strokeStyle = "#E5392B";
+    ctx.lineWidth = cfg.height + 6;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(bx, by);
+    ctx.strokeStyle = cfg.color;
+    ctx.lineWidth = cfg.height;
+    ctx.stroke();
+    ctx.restore();
+}
 // Shared per-kind hazard painter for the editor canvas (placement preview +
-// placed hazards) and the load-list thumbnails — one place to teach a new
-// kind its look. Railed kinds draw their rail bar from (x,y) along `angle`;
-// every kind draws the attack ring + disc from its config entry.
+// placed hazards) and the load-list thumbnails — the default `paint` hook.
+// Railed kinds draw their rail bar from (x,y) along `angle`; every kind draws
+// the attack ring + disc from its config entry. Kinds with a different look
+// (e.g. the bumper wall's band) set their own `paint` on EDITOR_HAZARD_KINDS.
 function paintHazardShape(ctx, kind, x, y, angle, ringColor) {
     var cfg = config.hazards[kind.key];
     if (cfg == null) { return; }
@@ -1572,12 +1602,37 @@ function commitStroke() {
 // The editor's view of the map-authorable hazard kinds (server counterpart:
 // the registry in server/entities/hazards.js — keep the key sets in sync).
 // Adding a hazard kind in the editor = one entry here. Each entry drives the
-// palette button (label/title/shortcut), the swatch, the canvas painter
-// (railed kinds get the rail bar), and the angle requirement in the mirrored
-// validateMap below. key indexes config.hazards.
+// palette button (label/title/shortcut), the swatch, the canvas painter, the
+// hit-test, and the angle requirement in the mirrored validateMap below.
+// key indexes config.hazards. Optional hooks (defaults cover disc-style kinds):
+//   paint(ctx, kind, x, y, angle, ringColor) — custom canvas/thumbnail painter
+//   swatchPaint(ctx, size) — custom palette-swatch overlay
+//   segmentSelect — hit-test against the centerline segment, not the anchor disc
+//   directional — map entry needs a finite angle (railed kinds are directional)
 var EDITOR_HAZARD_KINDS = [
-    { key: "bumper", label: "Bumper", shortcut: "b", railed: false },
-    { key: "movingBumper", label: "Moving Bumper", shortcut: "m", railed: true }
+    { key: "bumper", label: "Bumper", shortcut: "b", railed: false, directional: false },
+    { key: "movingBumper", label: "Moving Bumper", shortcut: "m", railed: true, directional: true },
+    {
+        key: "bumperWall", label: "Bumper Wall", shortcut: "w", railed: false, directional: true,
+        segmentSelect: true, paint: paintBumperWallShape,
+        swatchPaint: function (ctx, size) {
+            // The in-game look at swatch scale: red rim band over the orange core.
+            var cy = size / 2;
+            ctx.lineCap = "round";
+            ctx.strokeStyle = "#E5392B";
+            ctx.lineWidth = 22;
+            ctx.beginPath();
+            ctx.moveTo(16, cy);
+            ctx.lineTo(size - 16, cy);
+            ctx.stroke();
+            ctx.strokeStyle = "orange";
+            ctx.lineWidth = 13;
+            ctx.beginPath();
+            ctx.moveTo(16, cy);
+            ctx.lineTo(size - 16, cy);
+            ctx.stroke();
+        }
+    }
 ];
 function editorHazardKindById(id) {
     for (var i = 0; i < EDITOR_HAZARD_KINDS.length; i++) {
@@ -1645,9 +1700,29 @@ function hazardIndexUnderPoint(x, y) {
     for (var i = hazards.length - 1; i >= 0; i--) { // topmost (last drawn) first
         var cfg = hazardConfigById(hazards[i].id);
         if (cfg == null) { continue; }
+        // Segment-style kinds (the bumper wall) are selectable anywhere along
+        // their band, not just at the anchor: hit-test distance to the
+        // centerline segment instead.
+        var hitKind = editorHazardKindById(hazards[i].id);
+        if (hitKind != null && hitKind.segmentSelect) {
+            var rad = (hazards[i].angle || 0) * Math.PI / 180;
+            var p = closestOnSegmentEditor(x, y, hazards[i].x, hazards[i].y,
+                hazards[i].x + Math.cos(rad) * cfg.width, hazards[i].y + Math.sin(rad) * cfg.width);
+            if (getMagSq(x, y, p.x, p.y) < Math.pow(cfg.radius, 2)) { return i; }
+            continue;
+        }
         if (getMagSq(x, y, hazards[i].x, hazards[i].y) < Math.pow(cfg.radius, 2)) { return i; }
     }
     return -1;
+}
+// Nearest point on segment AB to P (editor-local copy of the server helper).
+function closestOnSegmentEditor(px, py, ax, ay, bx, by) {
+    var abx = bx - ax, aby = by - ay;
+    var len2 = abx * abx + aby * aby;
+    if (len2 < 1e-6) { return { x: ax, y: ay }; }
+    var t = ((px - ax) * abx + (py - ay) * aby) / len2;
+    if (t < 0) { t = 0; } else if (t > 1) { t = 1; }
+    return { x: ax + abx * t, y: ay + aby * t };
 }
 function hazardUnderPoint(x, y) { return hazardIndexUnderPoint(x, y) >= 0; }
 function removeHazardUnderPoint(x, y) {
@@ -2036,7 +2111,7 @@ function renderMapThumbnail(map) {
             if (hz == null) { continue; }
             var hzKind = editorHazardKindById(hz.id);
             if (hzKind == null) { continue; }
-            paintHazardShape(ctx, hzKind, hz.x, hz.y, hz.angle || 0, "#E5392B");
+            (hzKind.paint || paintHazardShape)(ctx, hzKind, hz.x, hz.y, hz.angle || 0, "#E5392B");
         }
     }
     var url = cv.toDataURL("image/jpeg", 0.7);
@@ -2285,13 +2360,14 @@ function validateMap(map) {
                 typeof hazard.x !== "number" || typeof hazard.y !== "number") {
                 return { valid: false, reason: "Map has a malformed hazard." };
             }
-            // Railed kinds ride a rail at a given angle; without a numeric
-            // angle the engine's rail math goes NaN. (Server mirror:
-            // utils.validateMap, driven by the hazard-kind registry.)
+            // Directional kinds (railed bumpers, bumper walls) extend along an
+            // angle; without a numeric angle the rail/segment math goes NaN.
+            // (Server mirror: utils.validateMap, driven by the hazard-kind
+            // registry.)
             var hzKind = editorHazardKindById(hazard.id);
-            if (hzKind != null && hzKind.railed &&
+            if (hzKind != null && hzKind.directional &&
                 typeof hazard.angle !== "number") {
-                return { valid: false, reason: "Map has a moving hazard with no direction." };
+                return { valid: false, reason: "Map has a directional hazard with no direction." };
             }
         }
     }

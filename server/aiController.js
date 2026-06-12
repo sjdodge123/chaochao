@@ -365,6 +365,13 @@ function hazardRepulsion(bot, ctx, desiredX, desiredY, dt) {
         var h = hazardList[id];
         if (h.alive === false) { continue; }
         var hx = h.x, hy = h.y;
+        // A bumper wall is a static segment: repel from the nearest point on its
+        // centerline (the generic radial field below does the rest). No gap to
+        // time — the whole line knocks back, like a row of static bumpers.
+        if (h.isWall) {
+            var cpw = closestOnSegment(bot.x, bot.y, h.ax, h.ay, h.bx, h.by);
+            hx = cpw.x; hy = cpw.y;
+        }
         if (h.moveable && h.rail != null) {
             var seg = bumperSegment(h);
             var cp = closestOnSegment(bot.x, bot.y, seg.ax, seg.ay, seg.bx, seg.by);
@@ -415,7 +422,8 @@ function hazardRepulsion(bot, ctx, desiredX, desiredY, dt) {
         }
         var dx = bot.x - hx, dy = bot.y - hy;
         var d = mag(dx, dy);
-        var range = HAZARD_AVOID_RADIUS + (h.radius || 0) + BUMPER_DANGER_PAD;
+        // Walls have no radius (they're rects); their half-thickness plays the role.
+        var range = HAZARD_AVOID_RADIUS + (h.radius || (h.height || 0) / 2) + BUMPER_DANGER_PAD;
         if (d > 0 && d < range) {
             var w = (range - d) / range; // 0 at edge -> 1 at center
             w = w * w;                   // ramp harder up close
@@ -1928,6 +1936,23 @@ function update(gameBoard, currentState, dt) {
                 if (rdx * rdx + rdy * rdy < marginSq) {
                     if (railCells == null) { railCells = new Set(); }
                     railCells.add(rc.site.voronoiId);
+                }
+            }
+            continue;
+        }
+        // A bumper wall covers its whole centerline, not a point — penalize every
+        // cell near the segment, like a rail, but at the harsh STATIC price: there
+        // is no gap to time, the entire line knocks back whenever it's touched.
+        if (hz.isWall) {
+            var wallMarginSq = RAIL_PENALTY_MARGIN * RAIL_PENALTY_MARGIN;
+            for (var wi = 0; wi < map.cells.length; wi++) {
+                var wc = map.cells[wi];
+                if (!wc || !wc.site) { continue; }
+                var cpw = closestOnSegment(wc.site.x, wc.site.y, hz.ax, hz.ay, hz.bx, hz.by);
+                var wdx = wc.site.x - cpw.x, wdy = wc.site.y - cpw.y;
+                if (wdx * wdx + wdy * wdy < wallMarginSq) {
+                    if (staticHazardCells == null) { staticHazardCells = new Set(); }
+                    staticHazardCells.add(wc.site.voronoiId);
                 }
             }
             continue;

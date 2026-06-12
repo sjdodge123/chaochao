@@ -426,6 +426,15 @@
             "attackRadius": 15,
             "radius": 10,
             "punchBonus": 10
+        },
+        "bumperWall": {
+            "id": 902,
+            "color": "#F07B36",
+            "width": 120,
+            "height": 10,
+            "attackRadius": 15,
+            "radius": 12,
+            "punchBonus": 10
         }
     },
     "lobbyWaitTime": 5,

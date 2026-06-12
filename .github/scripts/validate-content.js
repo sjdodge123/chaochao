@@ -134,10 +134,15 @@ if (config.tileMap != null && typeof config.tileMap === 'object') {
     }
 }
 
-// utils.validateMap dereferences config.hazards.movingBumper.id.
+// utils.validateMap dereferences config.hazards.movingBumper.id and
+// config.hazards.bumperWall.id (the directional-hazard angle check).
 if (config.hazards == null || config.hazards.movingBumper == null ||
     typeof config.hazards.movingBumper.id !== 'number') {
     fail('config.json: hazards.movingBumper.id must be a number');
+}
+if (config.hazards == null || config.hazards.bumperWall == null ||
+    typeof config.hazards.bumperWall.id !== 'number') {
+    fail('config.json: hazards.bumperWall.id must be a number');
 }
 
 // Naming convention: every map's display name should already be in the house
