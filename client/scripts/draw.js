@@ -6292,50 +6292,46 @@ function drawZombieBody(player, sx, sy, headingOverride) {
     var pinned = (typeof headingOverride === "number");
     var heading = pinned ? headingOverride : getCartHeading(player);
     var t = pinned ? 0 : cartSkinAnimTime;
-    var span = player.radius * ZOMBIE_BODY_SCALE;
+    // Radius fallback: a partially-initialised player record (just-joined, mid-reset)
+    // would otherwise feed NaN through every sizing expression below and silently
+    // corrupt the canvas state for the rest of the frame.
+    var span = (player.radius || 7.5) * ZOMBIE_BODY_SCALE;
     var frame = Math.floor((t * ZOMBIE_ARM_RATE / (2 * Math.PI)) * ZOMBIE_FRAMES) % ZOMBIE_FRAMES;
     if (frame < 0) { frame += ZOMBIE_FRAMES; }
     ctx.save();
-    // soft ground shadow — unrotated ambient blob, like the prototype's
-    ctx.fillStyle = "rgba(0,0,0,0.25)";
-    ctx.beginPath();
-    ctx.ellipse(sx, sy + span * 0.02, span * 0.17, span * 0.085, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.translate(sx, sy);
-    ctx.rotate(heading + Math.PI / 2); // sheet faces -y; heading 0 = due east
-    if (!pinned) {
-        ctx.rotate(Math.sin(t * 2.5 * ZOMBIE_PACE) * 0.05); // drunken stagger
-        ctx.translate(0, Math.sin(t * 10 * ZOMBIE_PACE) * 0.5 * (span / ZOMBIE_SPAN)); // lurch bob
-    }
-    // punch lunge — same impact cue as drawCartSkin; forward is local -y here
-    if (player.punchAnimAt != null) {
-        var pe = (Date.now() - player.punchAnimAt) / 220;
-        if (pe >= 0 && pe < 1) {
-            var pk = (pe < 0.3) ? (pe / 0.3) : (1 - (pe - 0.3) / 0.7);
-            ctx.translate(0, -pk * span * 0.12);
-            ctx.scale(1 + pk * 0.14, 1 + pk * 0.14);
+    // try/finally so nothing between save and restore can leak the translated/
+    // rotated transform onto the rest of the frame (same convention as the kart
+    // body draws in drawPlayer).
+    try {
+        // soft ground shadow — unrotated ambient blob, like the prototype's
+        ctx.fillStyle = "rgba(0,0,0,0.25)";
+        ctx.beginPath();
+        ctx.ellipse(sx, sy + span * 0.02, span * 0.17, span * 0.085, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.translate(sx, sy);
+        ctx.rotate(heading + Math.PI / 2); // sheet faces -y; heading 0 = due east
+        if (!pinned) {
+            ctx.rotate(Math.sin(t * 2.5 * ZOMBIE_PACE) * 0.05); // drunken stagger
+            ctx.translate(0, Math.sin(t * 10 * ZOMBIE_PACE) * 0.5 * (span / ZOMBIE_SPAN)); // lurch bob
         }
+        // punch lunge — same impact cue as drawCartSkin; forward is local -y here
+        if (player.punchAnimAt != null) {
+            var pe = (Date.now() - player.punchAnimAt) / 220;
+            if (pe >= 0 && pe < 1) {
+                var pk = (pe < 0.3) ? (pe / 0.3) : (1 - (pe - 0.3) / 0.7);
+                ctx.translate(0, -pk * span * 0.12);
+                ctx.scale(1 + pk * 0.14, 1 + pk * 0.14);
+            }
+        }
+        ctx.drawImage(zombieSheet, frame * ZOMBIE_FRAME_PX, 0, ZOMBIE_FRAME_PX, ZOMBIE_FRAME_PX,
+            -span / 2, -span / 2, span, span);
+    } finally {
+        ctx.restore();
     }
-    ctx.drawImage(zombieSheet, frame * ZOMBIE_FRAME_PX, 0, ZOMBIE_FRAME_PX, ZOMBIE_FRAME_PX,
-        -span / 2, -span / 2, span, span);
-    ctx.restore();
 }
 
 function drawPlayer(player, dt) {
 
-    if (player.infected == true) {
-        // Tag-radius telegraph. Used to be a filled biohazard disc, but that disc
-        // (r=15 world units) completely swallowed the zombie body that now replaces
-        // the kart below — so it's a thin toxic-green ring instead: the reach cue
-        // survives, the zombie reads.
-        gameContext.save();
-        gameContext.beginPath();
-        gameContext.lineWidth = 2;
-        gameContext.arc(player.x, player.y, config.brutalRounds.infection.radius, 0, 2 * Math.PI);
-        gameContext.strokeStyle = "rgba(124,252,0,0.55)";
-        gameContext.stroke();
-        gameContext.restore();
-    }
     if (DEBUG_FORCE_FIRE && player.id == myID) {
         player.onFire = 500;
     }
@@ -6518,6 +6514,23 @@ function drawPlayer(player, dt) {
         if (immune) {
             gameContext.restore();
         }
+    }
+
+    if (player.infected == true) {
+        // Tag-radius telegraph. Used to be a filled biohazard disc, but that disc
+        // (r=15 world units) completely swallowed the zombie body that replaces the
+        // kart above — so it's a thin toxic-green ring instead: the reach cue
+        // survives, the zombie reads. Drawn AFTER the body so the ring always sits
+        // on top of the sprite, and anchored to the same camera-offset coords as
+        // the body so the two can never drift apart on offset-camera devices.
+        gameContext.save();
+        gameContext.beginPath();
+        gameContext.lineWidth = 2;
+        gameContext.arc(player.x + camera.getCameraX(), player.y + camera.getCameraY(),
+            config.brutalRounds.infection.radius, 0, 2 * Math.PI);
+        gameContext.strokeStyle = "rgba(124,252,0,0.55)";
+        gameContext.stroke();
+        gameContext.restore();
     }
 
     if (player.ability != null) {

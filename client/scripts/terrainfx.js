@@ -560,8 +560,11 @@ function tfxDrawIceReflections(camX, camY) {
         if (p == null || p.alive === false) { continue; }
         var rad = p.radius || 16;
         // Half-extent of the painted appearance: borders ring out to ~1.4r and the
-        // punch pop scales up to ~1.3x, so 2.2r covers every current cosmetic.
-        var ext = rad * 2.2;
+        // punch pop scales up to ~1.3x, so 2.2r covers every current cosmetic. The
+        // infection zombie body is bigger — its design box spans r*5.6 (half-extent
+        // 2.8r, see ZOMBIE_BODY_SCALE in draw.js) — so widen the bound for infected
+        // karts or the scratch canvas clips the reaching arms out of the reflection.
+        var ext = rad * (p.infected == true ? 2.9 : 2.2);
         // World bbox the reflection can touch (it casts BELOW the kart, see pivot
         // math under the blit): x +- ext, y .. y + ~4r, plus the 2.5px blur bleed.
         var rminX = p.x - ext - 4, rmaxX = p.x + ext + 4;
