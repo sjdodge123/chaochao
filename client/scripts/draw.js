@@ -6098,7 +6098,8 @@ function checkDrawPlayer(player, dt) {
 var ZOMBIE_FRAMES = 16;
 var ZOMBIE_FRAME_PX = 128;          // baked at ~2.5x the on-screen size, so it stays crisp
 var ZOMBIE_SPAN = 122;              // design units per frame (~118-unit box + margin)
-var ZOMBIE_BODY_SCALE = 3.4;        // frame box spans radius*3.4 px on screen (~51px kart)
+var ZOMBIE_BODY_SCALE = 5.6;        // frame box spans radius*5.6 world units — arms clear the
+                                    // r=15 tag ring (kart radius is 7.5, so span = 42)
 var ZOMBIE_PACE = 1.6;              // sprinter preset: everything lurches faster
 var ZOMBIE_BULK = 0.95;
 var ZOMBIE_ARM_RATE = 2.2 * ZOMBIE_PACE; // rad/s; one baked cycle = 2PI/this seconds
@@ -6317,13 +6318,15 @@ function drawZombieBody(player, sx, sy, headingOverride) {
 function drawPlayer(player, dt) {
 
     if (player.infected == true) {
+        // Tag-radius telegraph. Used to be a filled biohazard disc, but that disc
+        // (r=15 world units) completely swallowed the zombie body that now replaces
+        // the kart below — so it's a thin toxic-green ring instead: the reach cue
+        // survives, the zombie reads.
         gameContext.save();
         gameContext.beginPath();
-        gameContext.lineWidth = 1;
+        gameContext.lineWidth = 2;
         gameContext.arc(player.x, player.y, config.brutalRounds.infection.radius, 0, 2 * Math.PI);
-        gameContext.fillStyle = patterns[config.brutalRounds.infection.id];
-        gameContext.fill();
-        gameContext.strokeStyle = "green";
+        gameContext.strokeStyle = "rgba(124,252,0,0.55)";
         gameContext.stroke();
         gameContext.restore();
     }
