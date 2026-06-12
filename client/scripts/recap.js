@@ -1463,20 +1463,10 @@ function recapDrawCar(pr, exits, frameT) {
 		drawSpeedFx(p);
 	}
 
-	// Infection aura (matches drawPlayer's infected ring) if this kart is a zombie.
-	if (pr[RF_INFECTED] && typeof config !== "undefined" && config != null && config.brutalRounds != null &&
-		config.brutalRounds.infection != null && typeof patterns !== "undefined" &&
-		patterns != null && patterns[config.brutalRounds.infection.id] != null) {
-		gameContext.save();
-		gameContext.beginPath();
-		gameContext.lineWidth = 1;
-		gameContext.arc(p.x, p.y, config.brutalRounds.infection.radius, 0, 2 * Math.PI);
-		gameContext.fillStyle = patterns[config.brutalRounds.infection.id];
-		gameContext.fill();
-		gameContext.strokeStyle = "green";
-		gameContext.stroke();
-		gameContext.restore();
-	}
+	// Infection: mirror live play — the zombie body replaces every kart cosmetic
+	// (drawn below in the body section) and the tag-radius cue is a thin green
+	// ring on top, not the old filled biohazard disc.
+	p.infected = !!pr[RF_INFECTED];
 
 	// Burn flame BEHIND the body/skin (matches live play) — the big flame sprite would
 	// otherwise engulf the small kart and hide the skin entirely.
@@ -1489,6 +1479,21 @@ function recapDrawCar(pr, exits, frameT) {
 	// Independent body cosmetics: border (p.border) rings ANY cart; pattern (p.pattern) is
 	// sphere-only. Both can be present.
 	// Border FIRST (behind the body) so the cart always sits on top.
+	if (p.infected && typeof drawZombieBody === "function") {
+		// Zombie replaces the whole body (no border/skin/pattern), then the
+		// tag-radius ring rides on top — same order and look as drawPlayer.
+		try { drawZombieBody(p, p.x, p.y); } catch (e) { /* keep the montage alive */ }
+		if (typeof config !== "undefined" && config != null && config.brutalRounds != null &&
+			config.brutalRounds.infection != null) {
+			gameContext.save();
+			gameContext.beginPath();
+			gameContext.lineWidth = 2;
+			gameContext.arc(p.x, p.y, config.brutalRounds.infection.radius, 0, 2 * Math.PI);
+			gameContext.strokeStyle = "rgba(124,252,0,0.55)";
+			gameContext.stroke();
+			gameContext.restore();
+		}
+	} else {
 	var recapBskin = (typeof getSkin === "function" && p.border) ? getSkin(p.border) : null;
 	if (recapBskin && recapBskin.slot === 'border' && typeof drawBorderOverlay === "function") {
 		var recapBorder0 = (typeof getSkinPainter === "function") ? getSkinPainter(p.border) : null;
@@ -1514,6 +1519,7 @@ function recapDrawCar(pr, exits, frameT) {
 			}
 		}
 	}
+	} // end non-infected body draws
 
 	if (p.ability != null && typeof drawAbilityIndicator === "function") {
 		drawAbilityIndicator(p.x, p.y, p);
