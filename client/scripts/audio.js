@@ -774,6 +774,134 @@ function playHeatwaveWarning() {
     }
 }
 
+// ----------------------------------------------------------------------------
+// Antlions (brutal round) — three synthesized one-shots from the shared noise
+// buffer + oscillators (no assets), through sfxBus so the master toggle and
+// lobby dampen apply. Volumes set for MID-RACE listening (the lobby damps all
+// SFX to 10% and will mislead any tuning done there). Each takes `level` 0..1,
+// the caller's distance falloff to the event.
+//   playThumperSlam     — the Nova Prospekt pound: a deep pitch-dropping sine
+//                         body under a short lowpassed noise thud.
+//   playAntlionEruption — sand burst: a bandpassed noise whoosh sweeping up
+//                         then settling, with a quick chitter chirp on top.
+//   playAntlionBite     — mandible snap on a landed shove: a tight noise tick
+//                         plus a low knock.
+function playThumperSlam(level) {
+    var ctx = getCtx();
+    if (!ctx || ctx.state !== "running") { return; }
+    if (gameMuted || masterVolume === 0) { return; }
+    var lvl = (level == null) ? 1 : Math.max(0, Math.min(1, level));
+    if (lvl <= 0.02) { return; }
+    var now = ctx.currentTime;
+    // deep body: sine dropping 88 -> 36 Hz over ~0.32s
+    var osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(88, now);
+    osc.frequency.exponentialRampToValueAtTime(36, now + 0.32);
+    var og = ctx.createGain();
+    var oPeak = Math.max(0.0002, 0.34 * lvl * masterVolume * sfxVolumeScalar);
+    og.gain.setValueAtTime(0.0001, now);
+    og.gain.exponentialRampToValueAtTime(oPeak, now + 0.012);
+    og.gain.exponentialRampToValueAtTime(0.0001, now + 0.38);
+    osc.connect(og); og.connect(sfxBus);
+    // dirt thud: a short burst of lowpassed noise
+    var src = ctx.createBufferSource();
+    src.buffer = getDriftNoiseBuffer(ctx);
+    src.loop = true;
+    var filt = ctx.createBiquadFilter();
+    filt.type = "lowpass";
+    filt.Q.value = 0.8;
+    filt.frequency.setValueAtTime(900, now);
+    filt.frequency.exponentialRampToValueAtTime(140, now + 0.22);
+    var ng = ctx.createGain();
+    var nPeak = Math.max(0.0002, 0.16 * lvl * masterVolume * sfxVolumeScalar);
+    ng.gain.setValueAtTime(0.0001, now);
+    ng.gain.exponentialRampToValueAtTime(nPeak, now + 0.01);
+    ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.26);
+    src.connect(filt); filt.connect(ng); ng.connect(sfxBus);
+    try { osc.start(now); osc.stop(now + 0.42); src.start(now); src.stop(now + 0.3); }
+    catch (e) { try { osc.disconnect(); src.disconnect(); } catch (e2) {} }
+}
+
+function playAntlionEruption(level) {
+    var ctx = getCtx();
+    if (!ctx || ctx.state !== "running") { return; }
+    if (gameMuted || masterVolume === 0) { return; }
+    var lvl = (level == null) ? 1 : Math.max(0, Math.min(1, level));
+    if (lvl <= 0.02) { return; }
+    var now = ctx.currentTime;
+    // sandy whoosh
+    var src = ctx.createBufferSource();
+    src.buffer = getDriftNoiseBuffer(ctx);
+    src.loop = true;
+    var filt = ctx.createBiquadFilter();
+    filt.type = "bandpass";
+    filt.Q.value = 0.9;
+    filt.frequency.setValueAtTime(420, now);
+    filt.frequency.exponentialRampToValueAtTime(2400, now + 0.16); // burst up...
+    filt.frequency.exponentialRampToValueAtTime(600, now + 0.45);  // ...grains settling
+    var g = ctx.createGain();
+    var peak = Math.max(0.0002, 0.15 * lvl * masterVolume * sfxVolumeScalar);
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(peak, now + 0.05);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
+    src.connect(filt); filt.connect(g); g.connect(sfxBus);
+    // chitter: two quick descending triangle chirps
+    var cPeak = Math.max(0.0002, 0.07 * lvl * masterVolume * sfxVolumeScalar);
+    for (var i = 0; i < 2; i++) {
+        var t0 = now + 0.12 + i * 0.09;
+        var osc = ctx.createOscillator();
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(1900 - i * 350, t0);
+        osc.frequency.exponentialRampToValueAtTime(900 - i * 200, t0 + 0.07);
+        var cg = ctx.createGain();
+        cg.gain.setValueAtTime(0.0001, t0);
+        cg.gain.exponentialRampToValueAtTime(cPeak, t0 + 0.012);
+        cg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.09);
+        osc.connect(cg); cg.connect(sfxBus);
+        try { osc.start(t0); osc.stop(t0 + 0.11); } catch (e) {}
+    }
+    try { src.start(now); src.stop(now + 0.55); }
+    catch (e) { try { src.disconnect(); } catch (e2) {} }
+}
+
+function playAntlionBite(level) {
+    var ctx = getCtx();
+    if (!ctx || ctx.state !== "running") { return; }
+    if (gameMuted || masterVolume === 0) { return; }
+    var lvl = (level == null) ? 1 : Math.max(0, Math.min(1, level));
+    if (lvl <= 0.02) { return; }
+    var now = ctx.currentTime;
+    // snap: a very short bright noise tick
+    var src = ctx.createBufferSource();
+    src.buffer = getDriftNoiseBuffer(ctx);
+    src.loop = true;
+    var filt = ctx.createBiquadFilter();
+    filt.type = "bandpass";
+    filt.Q.value = 2.4;
+    filt.frequency.setValueAtTime(3200, now);
+    filt.frequency.exponentialRampToValueAtTime(1400, now + 0.05);
+    var g = ctx.createGain();
+    var peak = Math.max(0.0002, 0.12 * lvl * masterVolume * sfxVolumeScalar);
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(peak, now + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.07);
+    src.connect(filt); filt.connect(g); g.connect(sfxBus);
+    // knock under it
+    var osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(190, now);
+    osc.frequency.exponentialRampToValueAtTime(95, now + 0.08);
+    var og = ctx.createGain();
+    var oPeak = Math.max(0.0002, 0.1 * lvl * masterVolume * sfxVolumeScalar);
+    og.gain.setValueAtTime(0.0001, now);
+    og.gain.exponentialRampToValueAtTime(oPeak, now + 0.008);
+    og.gain.exponentialRampToValueAtTime(0.0001, now + 0.1);
+    osc.connect(og); og.connect(sfxBus);
+    try { src.start(now); src.stop(now + 0.09); osc.start(now); osc.stop(now + 0.12); }
+    catch (e) { try { src.disconnect(); osc.disconnect(); } catch (e2) {} }
+}
+
 // Start (first call) or update (later calls) the drift loop for a player.
 //   intensity 0..1 — how hard they're carving; rides gain + filter brightness so
 //                    a faster slide hisses higher.

@@ -373,10 +373,14 @@ function sessionThumperSlam() {
     if (failures > 0) { return; }
     const th = thumpers[0];
 
-    // Park both players far from the thumper so seek pulls the antlion AWAY
-    // from it only weakly compared to the slam.
+    // Park both players on real walkable ground (an arbitrary offset can land
+    // on lava — dead players empty the target list and the swarm digs out,
+    // freezing the antlion mid-assertion), far from the thumper so seek is weak
+    // compared to the slam.
     const ids = Object.keys(room.playerList);
-    const far = { x: Math.min(config.worldWidth - 100, th.x + 600), y: th.y };
+    const far = pickOffSandSite(gb.currentMap);
+    assert(far != null, 'slam: no walkable off-sand parking site found');
+    if (failures > 0) { return; }
     const holds = ids.map(id => ({ player: room.playerList[id], x: far.x, y: far.y }));
     for (const h of holds) { pinPlayer(h.player, far.x, far.y); }
 

@@ -219,6 +219,8 @@ var bunkerIcon = new Image(512, 512);
 bunkerIcon.src = "../assets/img/bunker-door.svg";
 var orbitalBeamIcon = new Image(576, 512);
 orbitalBeamIcon.src = "../assets/img/orbital-beam-solid.svg";
+var antlionIcon = new Image(576, 512);
+antlionIcon.src = "../assets/img/bug-solid.svg";
 
 //TileTextures
 var lava = new Image(256, 256);
@@ -3664,6 +3666,7 @@ function loadPatterns() {
     brutalRoundImages[config.brutalRounds.blackout.id] = moonIcon;
     brutalRoundImages[config.brutalRounds.bunker.id] = bunkerIcon;
     brutalRoundImages[config.brutalRounds.heatwave.id] = heatwaveIcon;
+    brutalRoundImages[config.brutalRounds.antlion.id] = antlionIcon;
 
     if (brutalRoundConfig != null && brutalPatterns[brutalRoundConfig.brutalTypes.toString()] == null) {
         brutalPatterns[brutalRoundConfig.brutalTypes.toString()] = makeComplexPattern(brutalRoundConfig.brutalTypes);
@@ -8161,6 +8164,9 @@ function drawMap() {
             drawHazard(hazardList[id]);
         }
     }
+    // Antlion dig-down fades play where a despawned antlion just was — it's no
+    // longer in hazardList, so this is its own short-lived pass.
+    drawAntlionBurrows();
 }
 
 // Shallows + reflection for the water floor, drawn UNDER the terrain blit (the
@@ -9044,6 +9050,12 @@ function drawHazard(hazard) {
     if (drawer != null) {
         drawer(hazard);
     }
+    if (config.hazards.antlion != null && hazard.id == config.hazards.antlion.id) {
+        drawAntlionHazard(hazard);
+    }
+    if (config.hazards.thumper != null && hazard.id == config.hazards.thumper.id) {
+        drawThumperHazard(hazard);
+    }
 }
 
 var bumperRingColor = "#E5392B";
@@ -9304,6 +9316,554 @@ function drawMine(x, y, state) {
         gameContext.fill();
     }
     gameContext.restore();
+}
+
+// --- Antlions brutal round: antlion + thumper hazard rendering -----------------
+// Ported from docs/spikes/antlion-prototype.html (drawAntlion, hl2 palette) and
+// docs/spikes/restrictor-prototype.html (drawThumper, Nova Prospekt heavy
+// variant). Hot-path rules: every gradient/shadowBlur surface is baked ONCE into
+// an offscreen sprite (zombie-sheet pattern); per-frame work is shadow ellipses,
+// rotated blits, and cheap stroked arcs/fills. Coordinates are raw world coords,
+// the same convention as drawBumper/the map blit they share drawMap with.
+
+var ANTLION_FRAMES = 12;
+var ANTLION_FRAME_PX = 128;
+var ANTLION_SPAN = 122;        // design units per frame (~118 box + margin)
+var ANTLION_WORLD_SPAN = 76;   // world px the frame box spans on screen
+var ANTLION_RATE = 9;          // rad/s skitter; one baked cycle = 2PI/9 s
+var ANTLION_PAL = {
+    shell: '#cfc29a', shellDark: '#8e8560', belly: '#b7a87c',
+    plate: '#a8bb8a', plateDark: '#6f8a5c',
+    mandible: '#4f3f2a', mandibleHi: '#8a774f',
+    leg: '#7d7252', legDark: '#4e4734',
+    glow: '#9fe6b8', eye: '#1f241c'
+};
+var antlionSheet = null;
+
+function antlionBakeLeg(ctx, P, hx, hy, kx, ky, fx, fy, w) {
+    ctx.strokeStyle = P.legDark; ctx.lineWidth = w + 2.4;
+    ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(kx, ky); ctx.lineTo(fx, fy); ctx.stroke();
+    ctx.strokeStyle = P.leg; ctx.lineWidth = w;
+    ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(kx, ky); ctx.lineTo(fx, fy); ctx.stroke();
+    // claw tip
+    ctx.strokeStyle = P.legDark; ctx.lineWidth = Math.max(1.4, w * 0.45);
+    ctx.beginPath(); ctx.moveTo(fx, fy);
+    ctx.lineTo(fx + (fx - kx) * 0.18, fy + (fy - ky) * 0.18); ctx.stroke();
+}
+function antlionBakeGrad(ctx, x0, y0, x1, y1, c0, c1) {
+    var g = ctx.createLinearGradient(x0, y0, x1, y1);
+    g.addColorStop(0, c0); g.addColorStop(1, c1);
+    return g;
+}
+// One pose of the skitter cycle, origin = body centre, facing -y. ph runs 0..2PI
+// and every sine rate is an integer multiple of it so the baked loop closes
+// seamlessly. Gradients/shadowBlur are fine HERE (bake time only).
+function bakeAntlionFrame(ctx, ph) {
+    var S = Math.sin, C = Math.cos, PI = Math.PI;
+    var P = ANTLION_PAL;
+    var s, i;
+    ctx.save();
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.translate(0, S(ph) * 0.8); // idle bob (snapped to 1x leg rate)
+
+    // rear legs (under everything)
+    for (i = 0; i < 2; i++) {
+        s = (i === 0) ? 1 : -1;
+        var phR = ph + (s > 0 ? 2.1 : 2.1 + PI * 0.8);
+        antlionBakeLeg(ctx, P,
+            s * 8, 1,
+            s * (27 + S(phR) * 1.2), 9 + C(phR) * 1.0,
+            s * (39 + S(phR) * 2.2), 20 + C(phR) * 1.6,
+            3.4);
+    }
+    // abdomen — tail first so forward segments overlap
+    var segs = [
+        { y: 12, rx: 12.5, ry: 8 },
+        { y: 21.5, rx: 10.8, ry: 7 },
+        { y: 30, rx: 8.8, ry: 6 },
+        { y: 38, rx: 6.2, ry: 4.6 },
+        { y: 44, rx: 3.8, ry: 3 }
+    ];
+    for (i = segs.length - 1; i >= 0; i--) {
+        var g = segs[i];
+        var rx = g.rx * (1 + 0.02 * S(ph + i));
+        ctx.fillStyle = antlionBakeGrad(ctx, 0, g.y - g.ry, 0, g.y + g.ry, P.shell, P.shellDark);
+        ctx.strokeStyle = P.shellDark; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.ellipse(0, g.y, rx, g.ry, 0, 0, PI * 2);
+        ctx.fill(); ctx.stroke();
+    }
+    // glow vents between segments (2x rate pulse)
+    for (i = 0; i < 3; i++) {
+        var vy = (segs[i].y + segs[i + 1].y) / 2;
+        var vx = segs[i + 1].rx * 0.55;
+        ctx.fillStyle = P.glow;
+        ctx.globalAlpha = Math.min(1, Math.max(0, (0.25 + 0.35 * S(ph * 2 + i * 1.3)) * 0.6));
+        ctx.beginPath(); ctx.arc(-vx, vy, 1.5, 0, PI * 2); ctx.arc(vx, vy, 1.5, 0, PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+    }
+    // front legs — big digging scythes
+    for (i = 0; i < 2; i++) {
+        s = (i === 0) ? 1 : -1;
+        var phF = ph + (s > 0 ? 0 : PI * 0.8);
+        antlionBakeLeg(ctx, P,
+            s * 9, -12,
+            s * (28 + S(phF) * 1.4), -27 + C(phF) * 1.2,
+            s * (43 + S(phF) * 2.6), -40 + C(phF) * 2.0,
+            4.6);
+    }
+    // thorax
+    ctx.fillStyle = antlionBakeGrad(ctx, 0, -20, 0, 5, P.shell, P.belly);
+    ctx.strokeStyle = P.shellDark; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.ellipse(0, -8, 14, 12.5, 0, 0, PI * 2); ctx.fill(); ctx.stroke();
+    // elytra (wing carapace)
+    for (i = 0; i < 2; i++) {
+        s = (i === 0) ? 1 : -1;
+        ctx.fillStyle = antlionBakeGrad(ctx, 0, -6, s * 16, -6, P.plate, P.plateDark);
+        ctx.strokeStyle = P.plateDark; ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(s * 0.9, -21);
+        ctx.bezierCurveTo(s * 12, -20, s * 17, -9, s * 14.5, 1);
+        ctx.bezierCurveTo(s * 12.5, 8, s * 6, 11, s * 0.9, 10.5);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(s * 3, -19);
+        ctx.quadraticCurveTo(s * 12, -15, s * 11.5, -2);
+        ctx.stroke();
+    }
+    // glowing carapace seam — shadowBlur is OK at bake time only
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, Math.max(0, (0.35 + 0.25 * S(ph)) * 0.6));
+    ctx.strokeStyle = P.glow; ctx.lineWidth = 1.4;
+    ctx.shadowColor = P.glow; ctx.shadowBlur = 6;
+    ctx.beginPath(); ctx.moveTo(0, -20); ctx.lineTo(0, 10); ctx.stroke();
+    ctx.restore();
+    // head shield
+    ctx.fillStyle = antlionBakeGrad(ctx, 0, -36, 0, -14, P.shell, P.shellDark);
+    ctx.strokeStyle = P.shellDark; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-10, -18);
+    ctx.quadraticCurveTo(-12, -28, -6, -33);
+    ctx.quadraticCurveTo(0, -37, 6, -33);
+    ctx.quadraticCurveTo(12, -28, 10, -18);
+    ctx.quadraticCurveTo(0, -13, -10, -18);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = P.shellDark; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, -34.5); ctx.lineTo(0, -15); ctx.stroke();
+    // eye pits
+    ctx.fillStyle = P.eye;
+    for (i = 0; i < 2; i++) {
+        s = (i === 0) ? 1 : -1;
+        ctx.beginPath(); ctx.arc(s * 5.2, -26.5, 1.4, 0, PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(s * 7.6, -21.5, 1.0, 0, PI * 2); ctx.fill();
+    }
+    // antennae (1x rate sway)
+    ctx.strokeStyle = P.legDark; ctx.lineWidth = 1.1;
+    for (i = 0; i < 2; i++) {
+        s = (i === 0) ? 1 : -1;
+        ctx.beginPath();
+        ctx.moveTo(s * 4.2, -32.5);
+        ctx.quadraticCurveTo(s * 8.5, -39 + S(ph + s) * 1.2, s * 12, -45 + S(ph + s) * 2);
+        ctx.stroke();
+    }
+    // mandibles — crescent hooks that snap once per cycle
+    var snap = Math.pow(Math.max(0, S(ph - 1)), 6) * 0.5;
+    var open = 0.10 + snap;
+    for (i = 0; i < 2; i++) {
+        s = (i === 0) ? 1 : -1;
+        ctx.save();
+        ctx.scale(s, 1);
+        ctx.translate(8.5, -29.5);
+        ctx.rotate(open);
+        ctx.fillStyle = P.mandible;
+        ctx.strokeStyle = P.mandibleHi; ctx.lineWidth = 0.9;
+        ctx.beginPath();
+        ctx.moveTo(-2, 2.5);
+        ctx.bezierCurveTo(7.5, 1.5, 11, -9, 1.5, -20);
+        ctx.bezierCurveTo(5.5, -11.5, 4, -5.5, -3.2, -0.5);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        // inner teeth
+        ctx.fillStyle = P.mandible;
+        ctx.beginPath();
+        ctx.moveTo(3.2, -5.5); ctx.lineTo(0.8, -7.4); ctx.lineTo(4.0, -8.8); ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(4.4, -10.5); ctx.lineTo(1.9, -12.0); ctx.lineTo(4.6, -13.8); ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    }
+    ctx.restore();
+}
+function buildAntlionSheet() {
+    antlionSheet = document.createElement('canvas');
+    antlionSheet.width = ANTLION_FRAMES * ANTLION_FRAME_PX;
+    antlionSheet.height = ANTLION_FRAME_PX;
+    var ctx = antlionSheet.getContext('2d');
+    for (var i = 0; i < ANTLION_FRAMES; i++) {
+        ctx.save();
+        ctx.translate(i * ANTLION_FRAME_PX + ANTLION_FRAME_PX / 2, ANTLION_FRAME_PX / 2);
+        ctx.scale(ANTLION_FRAME_PX / ANTLION_SPAN, ANTLION_FRAME_PX / ANTLION_SPAN);
+        bakeAntlionFrame(ctx, (i / ANTLION_FRAMES) * Math.PI * 2);
+        ctx.restore();
+    }
+}
+
+// Per-tick packets carry no angle, so the heading is derived client-side from
+// the (already render-smoothed) position deltas and eased so it can't twitch.
+function antlionHeading(hz) {
+    if (hz.headAngle == null) { hz.headAngle = 0; }
+    var lx = (hz._hx == null) ? hz.x : hz._hx;
+    var ly = (hz._hy == null) ? hz.y : hz._hy;
+    var dx = hz.x - lx, dy = hz.y - ly;
+    hz._hx = hz.x; hz._hy = hz.y;
+    if (dx * dx + dy * dy > 0.05) {
+        var target = Math.atan2(dy, dx);
+        var diff = target - hz.headAngle;
+        while (diff > Math.PI) { diff -= Math.PI * 2; }
+        while (diff < -Math.PI) { diff += Math.PI * 2; }
+        hz.headAngle += diff * 0.22;
+    }
+    return hz.headAngle;
+}
+
+function drawAntlionHazard(hz) {
+    if (antlionSheet == null) { buildAntlionSheet(); }
+    var ctx = gameContext;
+    var now = Date.now();
+    var heading = antlionHeading(hz);
+    var frame = Math.floor((cartSkinAnimTime * ANTLION_RATE / (2 * Math.PI)) * ANTLION_FRAMES) % ANTLION_FRAMES;
+    if (frame < 0) { frame += ANTLION_FRAMES; }
+    // Emergence: scale/fade up out of the sand over the first ~0.7s after the
+    // applyHazards stamp, with a sand mound + dust ring (cheap fills only).
+    var e = 1;
+    if (hz.spawnAt != null) {
+        e = (now - hz.spawnAt) / 700;
+        if (e >= 1) { e = 1; hz.spawnAt = null; }
+    }
+    ctx.save();
+    try {
+        if (e < 1) {
+            // sand mound swell under the digger
+            ctx.globalAlpha = 0.5 * (1 - e);
+            ctx.fillStyle = '#c7b078';
+            ctx.beginPath();
+            ctx.ellipse(hz.x, hz.y, 16 + 14 * e, 9 + 8 * e, 0, 0, Math.PI * 2);
+            ctx.fill();
+            // kicked-up dust ring
+            ctx.fillStyle = '#d9c9a0';
+            for (var d = 0; d < 7; d++) {
+                var da = d * (Math.PI * 2 / 7) + 0.4;
+                var dd = 12 + e * 30;
+                ctx.globalAlpha = 0.45 * (1 - e);
+                ctx.beginPath();
+                ctx.arc(hz.x + Math.cos(da) * dd, hz.y + Math.sin(da) * dd, 2 + e * 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+        }
+        // soft ground shadow
+        ctx.globalAlpha = Math.min(1, 0.25 * (0.3 + 0.7 * e));
+        ctx.fillStyle = 'black';
+        ctx.beginPath();
+        ctx.ellipse(hz.x, hz.y + 3, ANTLION_WORLD_SPAN * 0.18, ANTLION_WORLD_SPAN * 0.09, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = Math.min(1, 0.25 + 0.75 * e);
+        ctx.translate(hz.x, hz.y);
+        ctx.rotate(heading + Math.PI / 2); // sheet faces -y; heading 0 = due east
+        var span = ANTLION_WORLD_SPAN * (0.35 + 0.65 * e);
+        ctx.drawImage(antlionSheet, frame * ANTLION_FRAME_PX, 0, ANTLION_FRAME_PX, ANTLION_FRAME_PX,
+            -span / 2, -span / 2, span, span);
+    } finally {
+        ctx.restore();
+    }
+}
+
+// Burrow-away FX: the dig-down fade played where a despawned antlion was
+// (fed by removeHazards in gameboard.js).
+var antlionBurrows = [];
+function spawnAntlionBurrowFX(x, y) {
+    antlionBurrows.push({ x: x, y: y, at: Date.now() });
+}
+function drawAntlionBurrows() {
+    if (antlionBurrows.length === 0) { return; }
+    if (antlionSheet == null) { buildAntlionSheet(); }
+    var ctx = gameContext;
+    var now = Date.now();
+    for (var i = antlionBurrows.length - 1; i >= 0; i--) {
+        var b = antlionBurrows[i];
+        var e = (now - b.at) / 500;
+        if (e >= 1) { antlionBurrows.splice(i, 1); continue; }
+        ctx.save();
+        try {
+            // sinking, shrinking body
+            ctx.globalAlpha = 0.9 * (1 - e);
+            var span = ANTLION_WORLD_SPAN * (1 - 0.7 * e);
+            ctx.translate(b.x, b.y + e * 4);
+            ctx.drawImage(antlionSheet, 0, 0, ANTLION_FRAME_PX, ANTLION_FRAME_PX,
+                -span / 2, -span / 2, span, span);
+            // collapsing sand dimple + dust
+            ctx.globalAlpha = 0.5 * (1 - e);
+            ctx.fillStyle = '#c7b078';
+            ctx.beginPath();
+            ctx.ellipse(0, 2, 18 * (1 - 0.4 * e), 10 * (1 - 0.4 * e), 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#d9c9a0';
+            for (var d = 0; d < 5; d++) {
+                var da = d * (Math.PI * 2 / 5) + 1.1;
+                ctx.beginPath();
+                ctx.arc(Math.cos(da) * (10 + e * 16), Math.sin(da) * (10 + e * 16), 2.4, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        } finally {
+            ctx.restore();
+        }
+    }
+}
+
+// --- Thumper ---
+var THUMPER_SPAN = 122;        // design units (~118 box + margin)
+var THUMPER_WORLD_SPAN = 100;  // world px the frame box spans on screen
+var THUMPER_BULK = 1.22;       // Nova Prospekt heavy variant
+var THUMPER_PAL = {
+    pad: '#6b6e72', padDark: '#44474b', metal: '#767e88', metalDark: '#454c55',
+    slab: '#5f6873', stripe: '#c9a23a', stripeDark: '#26262a', rust: '#704832',
+    light: '#ff7030', dust: '#a8a298', glow: '#ffb060'
+};
+var thumperPadSprite = null;   // static base pad (gradients baked once)
+var thumperHeadSprite = null;  // piston head at rest scale (radial grad baked once)
+var THUMPER_HEAD_PX = 128;
+
+function buildThumperSprites() {
+    var P = THUMPER_PAL;
+    var B = THUMPER_BULK;
+    var E = 22 * B;
+    var PI = Math.PI;
+    // -- base pad --
+    thumperPadSprite = document.createElement('canvas');
+    thumperPadSprite.width = THUMPER_HEAD_PX;
+    thumperPadSprite.height = THUMPER_HEAD_PX;
+    var ctx = thumperPadSprite.getContext('2d');
+    ctx.save();
+    ctx.translate(THUMPER_HEAD_PX / 2, THUMPER_HEAD_PX / 2);
+    ctx.scale(THUMPER_HEAD_PX / THUMPER_SPAN, THUMPER_HEAD_PX / THUMPER_SPAN);
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    var pg = ctx.createLinearGradient(0, -E, 0, E);
+    pg.addColorStop(0, P.pad); pg.addColorStop(1, P.padDark);
+    ctx.fillStyle = pg;
+    ctx.strokeStyle = P.padDark; ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.roundRect(-E, -E, E * 2, E * 2, 7 * B);
+    ctx.fill(); ctx.stroke();
+    // hazard chevrons along top + bottom edges
+    ctx.save();
+    ctx.beginPath(); ctx.roundRect(-E + 2, -E + 2, E * 2 - 4, E * 2 - 4, 5 * B); ctx.clip();
+    var eys = [-E + 4, E - 8];
+    for (var c = 0; c < 2; c++) {
+        var ey = eys[c];
+        for (var i = 0; i < 9; i++) {
+            var x = -E + 3 + i * (E * 2 - 6) / 9;
+            ctx.fillStyle = (i % 2 === 0) ? P.stripe : P.stripeDark;
+            ctx.beginPath();
+            ctx.moveTo(x, ey + 4); ctx.lineTo(x + 3, ey);
+            ctx.lineTo(x + 8, ey); ctx.lineTo(x + 5, ey + 4);
+            ctx.closePath(); ctx.fill();
+        }
+    }
+    ctx.restore();
+    // corner bolts + struts
+    var signs = [1, -1];
+    for (var sx = 0; sx < 2; sx++) {
+        for (var sy = 0; sy < 2; sy++) {
+            var kx = signs[sx], ky = signs[sy];
+            ctx.strokeStyle = P.metalDark; ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.moveTo(kx * (E - 5), ky * (E - 5)); ctx.lineTo(kx * 8 * B, ky * 8 * B); ctx.stroke();
+            ctx.strokeStyle = P.metal; ctx.lineWidth = 1.4;
+            ctx.beginPath(); ctx.moveTo(kx * (E - 5), ky * (E - 5)); ctx.lineTo(kx * 8 * B, ky * 8 * B); ctx.stroke();
+            ctx.fillStyle = P.metalDark;
+            ctx.beginPath(); ctx.arc(kx * (E - 4), ky * (E - 4), 1.6, 0, PI * 2); ctx.fill();
+        }
+    }
+    // rust streaks (heavy variant)
+    ctx.strokeStyle = P.rust; ctx.globalAlpha = 0.5; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(-10 * B, 10 * B); ctx.quadraticCurveTo(-14 * B, 15 * B, -12 * B, E - 3); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(12 * B, 8 * B); ctx.quadraticCurveTo(15 * B, 13 * B, 14 * B, E - 5); ctx.stroke();
+    ctx.globalAlpha = 1;
+    // fixed column collar
+    ctx.strokeStyle = P.metalDark; ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.arc(0, 0, 10 * B, 0, PI * 2); ctx.stroke();
+    ctx.restore();
+    // -- piston head (rest scale; live draw scales it with the lift) --
+    var R = 16 * B;
+    thumperHeadSprite = document.createElement('canvas');
+    thumperHeadSprite.width = THUMPER_HEAD_PX;
+    thumperHeadSprite.height = THUMPER_HEAD_PX;
+    ctx = thumperHeadSprite.getContext('2d');
+    ctx.save();
+    ctx.translate(THUMPER_HEAD_PX / 2, THUMPER_HEAD_PX / 2);
+    // the head only spans ~2R of the 122 box — bake it larger for crispness
+    var headScale = THUMPER_HEAD_PX / (R * 2 + 14);
+    ctx.scale(headScale, headScale);
+    var hg = ctx.createRadialGradient(-R * 0.3, -R * 0.3, R * 0.15, 0, 0, R * 1.05);
+    hg.addColorStop(0, P.metal); hg.addColorStop(1, P.metalDark);
+    ctx.fillStyle = hg; ctx.strokeStyle = P.metalDark; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(0, 0, R, 0, PI * 2); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = P.metalDark; ctx.lineWidth = 1.1;
+    ctx.beginPath(); ctx.arc(0, 0, R - 2.6, 0, PI * 2); ctx.stroke();
+    ctx.fillStyle = P.slab;
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.66, 0, PI * 2); ctx.fill();
+    ctx.strokeStyle = P.metalDark;
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.66, 0, PI * 2); ctx.stroke();
+    var cg = ctx.createRadialGradient(-2, -2, 1, 0, 0, R * 0.36);
+    cg.addColorStop(0, P.metal); cg.addColorStop(1, P.metalDark);
+    ctx.fillStyle = cg;
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.36, 0, PI * 2); ctx.fill();
+    ctx.fillStyle = P.metalDark;
+    ctx.beginPath(); ctx.arc(0, 0, 2.2, 0, PI * 2); ctx.fill();
+    ctx.strokeStyle = P.metal; ctx.lineWidth = 0.9;
+    ctx.beginPath(); ctx.moveTo(-1.4, 0); ctx.lineTo(1.4, 0); ctx.stroke();
+    ctx.fillStyle = P.metalDark;
+    for (var rb = 0; rb < 6; rb++) {
+        var ra = rb * PI / 3 + 0.26;
+        ctx.beginPath(); ctx.arc(Math.cos(ra) * (R - 5), Math.sin(ra) * (R - 5), 1.3, 0, PI * 2); ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1.1;
+    for (var tk = 0; tk < 3; tk++) {
+        ctx.beginPath();
+        ctx.moveTo(-R * 0.52 + tk * 3.4, -R * 0.78); ctx.lineTo(-R * 0.52 + tk * 3.4 + 1.6, -R * 0.62);
+        ctx.stroke();
+    }
+    ctx.restore();
+}
+
+// Slam moment feedback: deep synth thump + camera trauma + a rumble pulse on
+// each local pad, all attenuated by that kart's distance. Race states only —
+// thumpers also render on the overview/recap-free map states where feedback
+// would be noise.
+function onThumperSlamFX(hz) {
+    if (currentState != config.stateMap.racing && currentState != config.stateMap.collapsing) { return; }
+    var level = (typeof antlionSfxLevel === "function") ? antlionSfxLevel(hz.x, hz.y) : 0.5;
+    if (typeof playThumperSlam === "function") { playThumperSlam(level); }
+    if (level > 0.45) { addTrauma(0.16 * level); }
+    if (typeof padPulseForId === "function" && typeof localPlayers !== "undefined" && localPlayers) {
+        for (var s = 0; s < localPlayers.length; s++) {
+            var lp = localPlayers[s];
+            if (lp == null || lp.myID == null) { continue; }
+            var p = playerList[lp.myID];
+            if (p == null) { continue; }
+            var d = Math.sqrt((p.x - hz.x) * (p.x - hz.x) + (p.y - hz.y) * (p.y - hz.y));
+            var lvl = 1 - d / 650;
+            if (lvl > 0.1) { padPulseForId(lp.myID, 0.45 * lvl, 0.25 * lvl, 140); }
+        }
+    }
+}
+
+function drawThumperHazard(hz) {
+    if (thumperPadSprite == null) { buildThumperSprites(); }
+    var ctx = gameContext;
+    var now = Date.now();
+    var cfg = config.brutalRounds.antlion;
+    var period = cfg.thumperPeriod * 1000;
+    if (hz.nextSlamAt == null) { hz.nextSlamAt = now + period; hz.lastSlamAt = 0; }
+    // Hidden-tab catch-up: fast-forward whole missed cycles silently so a
+    // refocus doesn't machine-gun the slam FX.
+    if (now - hz.nextSlamAt > period) {
+        hz.nextSlamAt += Math.ceil((now - hz.nextSlamAt) / period) * period;
+    }
+    if (now >= hz.nextSlamAt) {
+        hz.lastSlamAt = hz.nextSlamAt;
+        hz.nextSlamAt += period;
+        onThumperSlamFX(hz);
+    }
+    // Lift phase: slow rise over most of the cycle, brief hold, fast drop that
+    // lands exactly on the server's slam tick (u = 1).
+    var u = 1 - (hz.nextSlamAt - now) / period;
+    if (u < 0) { u = 0; }
+    var h;
+    if (u < 0.82) { var k = u / 0.82; h = k * k * (3 - 2 * k); }
+    else if (u < 0.93) { h = 1; }
+    else { h = 1 - (u - 0.93) / 0.07; }
+    var s = (hz.lastSlamAt > 0) ? (now - hz.lastSlamAt) / 1000 : 9; // s since slam
+    var worldScale = THUMPER_WORLD_SPAN / THUMPER_SPAN;
+    var B = THUMPER_BULK, R = 16 * B * worldScale, E = 22 * B * worldScale;
+    ctx.save();
+    try {
+        ctx.translate(hz.x, hz.y);
+        // repel-radius ground ring (true gameplay radius), flashing on the slam
+        ctx.save();
+        ctx.setLineDash([6, 6]);
+        ctx.strokeStyle = THUMPER_PAL.stripe;
+        ctx.globalAlpha = 0.10 + 0.30 * Math.exp(-s * 3);
+        ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.arc(0, 0, cfg.repelRadius, 0, Math.PI * 2); ctx.stroke();
+        ctx.restore();
+        // shockwave rings
+        for (var w = 0; w < 2; w++) {
+            var wr = 18 * B * worldScale + (s + w * 0.06) * 170;
+            if (wr > cfg.repelRadius * 1.25) { continue; }
+            var wa = Math.max(0, 0.5 * Math.exp(-s * 2.2) - w * 0.12);
+            if (wa <= 0.01) { continue; }
+            ctx.strokeStyle = 'rgba(230,225,210,' + wa.toFixed(3) + ')';
+            ctx.lineWidth = 2.5 - w;
+            ctx.beginPath(); ctx.arc(0, 0, wr, 0, Math.PI * 2); ctx.stroke();
+        }
+        // dust puffs
+        var dustA = 0.35 * Math.exp(-s * 3.5);
+        if (dustA > 0.02) {
+            ctx.fillStyle = THUMPER_PAL.dust;
+            for (var dp = 0; dp < 8; dp++) {
+                var dpa = dp * Math.PI / 4 + 0.3;
+                var dpd = 19 * B * worldScale + s * 60;
+                ctx.globalAlpha = dustA;
+                ctx.beginPath();
+                ctx.arc(Math.cos(dpa) * dpd, Math.sin(dpa) * dpd, 2.2 + s * 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+        }
+        // ground jitter right after impact
+        var j = Math.exp(-s * 9) * 1.4;
+        ctx.translate(Math.sin(s * 70) * j, Math.cos(s * 55) * j);
+        // base pad (baked)
+        ctx.drawImage(thumperPadSprite, -THUMPER_WORLD_SPAN / 2, -THUMPER_WORLD_SPAN / 2, THUMPER_WORLD_SPAN, THUMPER_WORLD_SPAN);
+        // indicator lights — blink faster while the head is up (cheap arcs)
+        var animT = now / 1000;
+        for (var li = 0; li < 2; li++) {
+            var ls = (li === 0) ? 1 : -1;
+            var on = Math.sin(animT * (4 + h * 6) + ls) > 0;
+            ctx.fillStyle = THUMPER_PAL.light;
+            ctx.globalAlpha = on ? 1 : 0.22;
+            ctx.beginPath(); ctx.arc(ls * (E - 4 * worldScale * B), E - 4 * worldScale * B, 1.7, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = 1;
+        }
+        // piston head drop shadow slides out as it lifts
+        ctx.fillStyle = 'rgba(0,0,0,' + (0.18 + h * 0.14).toFixed(3) + ')';
+        ctx.beginPath();
+        ctx.ellipse(h * 6, h * 8, R * (1 + 0.1 * h), R * (0.92 + 0.1 * h), 0, 0, Math.PI * 2);
+        ctx.fill();
+        // piston head (baked; scales up with lift = closer to camera)
+        var headSpan = (R * 2 + 14 * worldScale) * (1 + 0.22 * h);
+        ctx.drawImage(thumperHeadSprite, -headSpan / 2, -headSpan / 2, headSpan, headSpan);
+        // protective cage (heavy variant) — cheap strokes over the head
+        ctx.strokeStyle = THUMPER_PAL.metalDark; ctx.lineWidth = 2.6;
+        ctx.beginPath(); ctx.arc(0, 0, R + 4.5, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = THUMPER_PAL.metal; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.arc(0, 0, R + 4.5, 0, Math.PI * 2); ctx.stroke();
+        var cageAngles = [Math.PI / 4, 3 * Math.PI / 4, 5 * Math.PI / 4, 7 * Math.PI / 4];
+        ctx.strokeStyle = THUMPER_PAL.metalDark; ctx.lineWidth = 2.2;
+        for (var ca = 0; ca < 4; ca++) {
+            var a = cageAngles[ca];
+            var den = Math.max(Math.abs(Math.cos(a)), Math.abs(Math.sin(a)));
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(a) * (R + 4.5), Math.sin(a) * (R + 4.5));
+            ctx.lineTo(Math.cos(a) * (E - 4 * worldScale) / den, Math.sin(a) * (E - 4 * worldScale) / den);
+            ctx.stroke();
+        }
+    } finally {
+        ctx.restore();
+    }
 }
 
 function locateColor(id) {
