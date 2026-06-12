@@ -223,15 +223,19 @@ function hazardAvoidance(map, config) {
     }
     var movingId = (config.hazards && config.hazards.movingBumper) ? config.hazards.movingBumper.id : null;
     var railLen = (config.hazards && config.hazards.movingBumper && config.hazards.movingBumper.width) || 100;
+    var wallId = (config.hazards && config.hazards.bumperWall) ? config.hazards.bumperWall.id : null;
+    var wallLen = (config.hazards && config.hazards.bumperWall && config.hazards.bumperWall.width) || 120;
     for (var h = 0; h < hazards.length; h++) {
         var hz = hazards[h];
         if (hz == null || typeof hz.x !== "number" || typeof hz.y !== "number") { continue; }
         addAround(hz.x, hz.y);
-        if (hz.id === movingId) {
+        if (hz.id === movingId || hz.id === wallId) {
             // A railed bumper sweeps from its anchor along `angle` for the rail
-            // length (engine.js confines it parametrically) — penalize the swept lane.
+            // length (engine.js confines it parametrically), and a bumper wall
+            // stands along the same anchor->angle line — penalize the whole lane.
+            var len = (hz.id === wallId) ? wallLen : railLen;
             var rad = (hz.angle || 0) * Math.PI / 180;
-            for (var t = 25; t <= railLen; t += 25) {
+            for (var t = 25; t <= len; t += 25) {
                 addAround(hz.x + Math.cos(rad) * t, hz.y + Math.sin(rad) * t);
             }
         }

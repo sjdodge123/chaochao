@@ -196,6 +196,9 @@ jobs:
       - name: "Headless AI bumper-cross test (bots time a moving-bumper rail instead of lining up forever)"
         run: node .github/scripts/ai-bumper-cross-test.js
 
+      - name: "Headless bumper-wall test (slingshot wall geometry, bounce physics, bots route around)"
+        run: node .github/scripts/bumper-wall-test.js
+
   perf-tick-budget:
     # Server-side worst-case load: a full 25-kart grid in a stacked brutal round.
     # Proves one room still ticks well within the 30 Hz interval. Zero new deps —
