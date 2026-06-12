@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ChaoChao — Lobby Map Redesign Prototype</title>
+<style>
+  body { background:#0e0f13; color:#dfe3ea; font-family:-apple-system,"Segoe UI",sans-serif; margin:0; padding:24px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:#8b93a3; font-size:13px; margin-bottom:16px; }
+  .tabs { margin:12px 0; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .tabs button { background:#1a1d26; color:#dfe3ea; border:1px solid #2c313f; border-radius:8px;
+                 padding:8px 18px; font-size:14px; cursor:pointer; }
+  .tabs button.active { background:#27406b; border-color:#4aa3ff; }
+  .tabs .spacer { flex:1; }
+  .tabs button.export { border-color:#3ad17a; }
+  #wrap { max-width:1160px; }
+  canvas { width:100%; border:1px solid #2c313f; border-radius:10px; background:#000; display:block; }
+  .legend { display:flex; gap:14px; flex-wrap:wrap; margin:10px 0 4px; font-size:12px; color:#aab2c2; }
+  .legend span { display:inline-flex; align-items:center; gap:5px; }
+  .legend i { width:14px; height:14px; border-radius:3px; display:inline-block; border:1px solid rgba(255,255,255,.25); }
+  .notes { max-width:1160px; margin-top:22px; font-size:14px; line-height:1.55; color:#c3c9d6; }
+  .notes h2 { font-size:16px; color:#fff; margin:18px 0 6px; }
+  .notes ul { margin:6px 0; padding-left:22px; }
+  .notes li { margin:3px 0; }
+  .notes b.z { color:#fff; }
+  code { background:#1a1d26; padding:1px 5px; border-radius:4px; font-size:12.5px; }
+  #exportMsg { color:#3ad17a; font-size:13px; margin-left:6px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>Lobby Map Redesign — prototype</h1>
+  <div class="sub">World 1366&times;768 &middot; rendered from real voronoi sites (same format as <code>client/maps/_LobbyTutorial.json</code>) &middot; start spinner is code-pinned at world center (683,&thinsp;384)</div>
+  <div class="tabs">
+    <button id="tabProposed" class="active">Proposed</button>
+    <button id="tabCurrent">Current (with issues)</button>
+    <label style="font-size:13px;color:#aab2c2;"><input type="checkbox" id="chkLabels" checked> labels</label>
+    <div class="spacer"></div>
+    <button class="export" id="btnExport">Export proposed map JSON</button><span id="exportMsg"></span>
+  </div>
+  <canvas id="cv" width="1366" height="768"></canvas>
+  <div class="legend">
+    <span><i style="background:#5fae5f"></i>grass (fast)</span>
+    <span><i style="background:#94714b"></i>dirt (normal)</span>
+    <span><i style="background:#d9c47e"></i>sand (slow)</span>
+    <span><i style="background:#a5f2f3"></i>ice</span>
+    <span><i style="background:#2f6fb0"></i>water</span>
+    <span><i style="background:#cf1020"></i>lava</span>
+    <span><i style="background:#ffcb30"></i>goal</span>
+    <span><i style="background:#c8c8c8"></i>ability pickup pad</span>
+    <span><i style="background:#16161c"></i>void rim</span>
+  </div>
+
+  <div class="notes">
+    <h2>Design intent</h2>
+    <ul>
+      <li><b class="z">Hub Plaza (west)</b> — all four stations (Skin / Playlist / Mode / AI) form an arc around the spawn pad, all on clean grass/dirt. You spawn facing every lobby decision, then exit east through the arc toward the spinner.</li>
+      <li><b class="z">Spinner Court (center)</b> — a clean grass/dirt clearing (~220px radius) around the start spinner. The static bumper, water pool, lava pocket, and ice field that currently crowd the center are all moved out. A dirt road runs spawn &rarr; spinner &rarr; east testing grounds.</li>
+      <li><b class="z">Ability Alley (north strip)</b> — bomb, speed-up, slow-down, and cut pickup pads consolidated on one dirt strip, clear of both the plaza and the court.</li>
+      <li><b class="z">Ice Rink (north-east)</b> — the ice field moves to the corner, with ice-cannon pads at its entry and a goal tile at the far corner to practice sliding into a finish.</li>
+      <li><b class="z">Bumper Court + Splash Pool (east)</b> — both bumpers (static + moving rail) live on a dirt court next to the water pool. Water never touches lava, so no stone seams appear.</li>
+      <li><b class="z">Lava Springs (south-east)</b> — the lava lake keeps its corner but gains a full sand shore, with a goal on the far sand as a risk/reward gauntlet.</li>
+      <li><b class="z">Sand Drag (south strip)</b> — a pure slow-tile strip for feeling drag, well below the court.</li>
+    </ul>
+    <h2>What this fixes</h2>
+    <ul>
+      <li>Stations are no longer scattered across the whole map (skin NW, playlist far E, mode far NE, AI SW) — they centralize around spawn.</li>
+      <li>Spawn plaza loses the speed-buff pads, cut pads, and sand field that crowd it today.</li>
+      <li>The spinner loses its adjacent static bumper (540,384), water+lava pocket (~750–830, 400–470), and the mid-path ice field (~450–530, 300–505).</li>
+      <li>No interior void islands — one connected walkable field, so new players can't get visually "fenced".</li>
+    </ul>
+    <h2>Implementation notes</h2>
+    <ul>
+      <li>The spinner isn't map data — <code>game.js</code> spawns <code>LobbyStartButton</code> at <code>world.center</code> — so the map just keeps that area clean.</li>
+      <li>Stations and spawn pad are authored in the map JSON (<code>stations[]</code>, <code>spawnPad</code>); hazards keep ids 900/901. Export produces a drop-in replacement for <code>client/maps/_LobbyTutorial.json</code>.</li>
+      <li>Ability pads use the real pickup tile ids (102 bomb, 104 speed+, 105 speed−, 107 ice cannon, 108 cut), so the lobby idle-reset keeps restoring them.</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+const CURRENT_MAP = {"bbox":{"xl":0,"xr":1366,"yt":0,"yb":768},"sites":[{"x":388.9,"y":38.6,"id":10},{"x":681.2,"y":38.6,"id":10},{"x":610.1,"y":41.8,"id":10},{"x":1246.7,"y":47.9,"id":10},{"x":517.5,"y":48.2,"id":10},{"x":1160.1,"y":48.5,"id":10},{"x":600,"y":49.1,"id":10},{"x":925.8,"y":51.2,"id":10},{"x":385.6,"y":52,"id":2},{"x":100.7,"y":52.4,"id":10},{"x":1014,"y":52.4,"id":10},{"x":659.8,"y":55.3,"id":10},{"x":1180.8,"y":57,"id":2},{"x":253.1,"y":57.2,"id":10},{"x":483.9,"y":58.2,"id":1},{"x":1041.8,"y":59.8,"id":10},{"x":942,"y":62.1,"id":10},{"x":665.9,"y":65.4,"id":10},{"x":358.4,"y":65.7,"id":2},{"x":1208.9,"y":68.9,"id":10},{"x":606.1,"y":69.4,"id":10},{"x":263.6,"y":72.4,"id":10},{"x":710.9,"y":72.9,"id":10},{"x":540.7,"y":73,"id":10},{"x":666.9,"y":73.4,"id":10},{"x":293.4,"y":74,"id":2},{"x":643.7,"y":75.8,"id":10},{"x":793.8,"y":77.3,"id":10},{"x":257.7,"y":82.7,"id":10},{"x":132.9,"y":83.6,"id":10},{"x":1125.4,"y":85.6,"id":10},{"x":1056,"y":89,"id":10},{"x":788.9,"y":89.9,"id":10},{"x":271.7,"y":90.1,"id":2},{"x":921.2,"y":91.4,"id":10},{"x":700.9,"y":94.9,"id":2},{"x":141.3,"y":95.4,"id":10},{"x":195,"y":96.1,"id":2},{"x":611.5,"y":98.6,"id":1},{"x":130.3,"y":99.1,"id":10},{"x":303,"y":99.1,"id":2},{"x":384.1,"y":99.9,"id":1},{"x":134.5,"y":100.1,"id":10},{"x":497.9,"y":102.8,"id":1},{"x":874,"y":104.2,"id":10},{"x":1253.1,"y":104.6,"id":10},{"x":1088.5,"y":105,"id":10},{"x":157.4,"y":105.2,"id":10},{"x":828.5,"y":105.5,"id":10},{"x":914.8,"y":107.1,"id":4},{"x":248.1,"y":108.3,"id":2},{"x":705.4,"y":109,"id":102},{"x":826.8,"y":109.6,"id":10},{"x":278.9,"y":110.9,"id":2},{"x":946.3,"y":112.4,"id":4},{"x":715.5,"y":115.2,"id":102},{"x":1177.1,"y":119,"id":107},{"x":976.9,"y":119.9,"id":2},{"x":1158.2,"y":120.3,"id":107},{"x":71.5,"y":121.4,"id":10},{"x":1261.3,"y":123.1,"id":1},{"x":740,"y":125.1,"id":2},{"x":1074.1,"y":126.3,"id":10},{"x":891.8,"y":126.7,"id":4},{"x":1116.9,"y":128.6,"id":10},{"x":216.3,"y":131.2,"id":104},{"x":137.6,"y":131.9,"id":10},{"x":805.3,"y":132.2,"id":10},{"x":673.4,"y":134.9,"id":102},{"x":1173.7,"y":135.6,"id":107},{"x":298,"y":136.7,"id":2},{"x":241.5,"y":137.4,"id":2},{"x":453.8,"y":137.8,"id":1},{"x":889.5,"y":138.3,"id":4},{"x":485.9,"y":138.6,"id":1},{"x":887.8,"y":138.6,"id":4},{"x":511.1,"y":139,"id":1},{"x":745.2,"y":146,"id":2},{"x":907.7,"y":148.4,"id":4},{"x":168.5,"y":148.5,"id":104},{"x":875.4,"y":153.7,"id":4},{"x":723.5,"y":154.5,"id":102},{"x":996.5,"y":161.1,"id":2},{"x":329.6,"y":162.1,"id":1},{"x":1084,"y":163.7,"id":10},{"x":152.2,"y":164.6,"id":10},{"x":165.3,"y":165.4,"id":1},{"x":780.9,"y":166.6,"id":2},{"x":1279.6,"y":168.5,"id":10},{"x":1070.7,"y":168.7,"id":10},{"x":407.6,"y":169.8,"id":1},{"x":316.8,"y":170,"id":1},{"x":132.1,"y":170.8,"id":10},{"x":663,"y":172.1,"id":102},{"x":468,"y":173.1,"id":1},{"x":659.6,"y":174.5,"id":102},{"x":663.9,"y":176.7,"id":102},{"x":1143.7,"y":177.1,"id":2},{"x":1140.7,"y":178,"id":10},{"x":698.6,"y":178.4,"id":102},{"x":567.1,"y":184.1,"id":2},{"x":1202.5,"y":184.2,"id":1},{"x":1101.9,"y":185.3,"id":10},{"x":229.1,"y":186.7,"id":2},{"x":725.2,"y":187.1,"id":2},{"x":591.9,"y":188.7,"id":2},{"x":815.5,"y":190,"id":2},{"x":555.3,"y":190.4,"id":2},{"x":1154.7,"y":191.7,"id":1},{"x":884.5,"y":192,"id":4},{"x":432.2,"y":193.9,"id":2},{"x":1128.1,"y":194.8,"id":2},{"x":1252.5,"y":194.9,"id":10},{"x":412.4,"y":196.6,"id":1},{"x":1089.5,"y":196.8,"id":2},{"x":540.9,"y":197.1,"id":2},{"x":992.6,"y":197.5,"id":2},{"x":647.4,"y":198.8,"id":2},{"x":527.9,"y":199.4,"id":2},{"x":1217.1,"y":201.2,"id":2},{"x":653.7,"y":201.9,"id":2},{"x":377.5,"y":202.8,"id":2},{"x":99,"y":203.1,"id":10},{"x":958.5,"y":203.7,"id":4},{"x":1053,"y":205.9,"id":2},{"x":554.1,"y":206.1,"id":2},{"x":987.3,"y":207.7,"id":2},{"x":284.5,"y":209.1,"id":2},{"x":108.5,"y":211.8,"id":10},{"x":519.4,"y":214.4,"id":2},{"x":108,"y":217,"id":1},{"x":488.5,"y":221.9,"id":2},{"x":871.7,"y":223.6,"id":4},{"x":999.2,"y":227.3,"id":2},{"x":258.7,"y":228.2,"id":1},{"x":573.4,"y":229.2,"id":10},{"x":151.6,"y":230.9,"id":10},{"x":1254.2,"y":233.6,"id":6},{"x":654.2,"y":233.8,"id":2},{"x":326.3,"y":234.6,"id":2},{"x":998.3,"y":239,"id":2},{"x":499.6,"y":240.8,"id":10},{"x":1111.9,"y":242.5,"id":2},{"x":1083,"y":242.9,"id":2},{"x":515.8,"y":243.9,"id":10},{"x":150.5,"y":244.9,"id":1},{"x":560.2,"y":249.6,"id":2},{"x":405.3,"y":250.3,"id":2},{"x":451.2,"y":252.2,"id":2},{"x":1015.3,"y":253,"id":2},{"x":757.9,"y":253.9,"id":1},{"x":1274.6,"y":256.7,"id":10},{"x":1172.5,"y":256.8,"id":2},{"x":823.7,"y":258.4,"id":4},{"x":298.3,"y":259.8,"id":2},{"x":349.4,"y":259.9,"id":2},{"x":192.9,"y":260.3,"id":1},{"x":363.9,"y":261.6,"id":2},{"x":915.8,"y":262.6,"id":4},{"x":1100,"y":263.7,"id":2},{"x":1244.6,"y":267.2,"id":2},{"x":471.2,"y":272,"id":1},{"x":1244.9,"y":272.5,"id":2},{"x":1289.9,"y":274.1,"id":10},{"x":621.8,"y":274.5,"id":10},{"x":360.5,"y":274.6,"id":2},{"x":297.2,"y":275.5,"id":2},{"x":957.3,"y":275.8,"id":2},{"x":308.3,"y":277.5,"id":2},{"x":1282.3,"y":280.4,"id":10},{"x":375.6,"y":280.5,"id":2},{"x":638.9,"y":282.5,"id":2},{"x":419,"y":283.7,"id":2},{"x":915.9,"y":285.6,"id":2},{"x":1070.4,"y":286.4,"id":2},{"x":873.6,"y":289.6,"id":4},{"x":278.4,"y":290.2,"id":2},{"x":659.7,"y":291.9,"id":2},{"x":626.3,"y":292.3,"id":2},{"x":428.2,"y":292.4,"id":2},{"x":1200.2,"y":292.4,"id":10},{"x":281.4,"y":294.8,"id":2},{"x":1278.2,"y":296.8,"id":10},{"x":1198.9,"y":299.7,"id":10},{"x":515.4,"y":300.1,"id":4},{"x":647.2,"y":304,"id":2},{"x":300,"y":304.6,"id":2},{"x":710.2,"y":305.7,"id":1},{"x":455.3,"y":306.9,"id":10},{"x":922.4,"y":307.9,"id":2},{"x":452.2,"y":308.1,"id":1},{"x":1068.8,"y":308.1,"id":2},{"x":126.8,"y":309.5,"id":2},{"x":149,"y":312.3,"id":2},{"x":262.1,"y":314,"id":2},{"x":461,"y":315,"id":1},{"x":1118.2,"y":317,"id":1},{"x":185.7,"y":317.1,"id":2},{"x":1101.2,"y":317.5,"id":1},{"x":811.9,"y":317.6,"id":2},{"x":896.3,"y":317.8,"id":4},{"x":204.7,"y":318.3,"id":2},{"x":726.9,"y":318.6,"id":1},{"x":1154.9,"y":318.6,"id":10},{"x":1051.8,"y":320.2,"id":1},{"x":636.6,"y":321.8,"id":2},{"x":1193.3,"y":328.4,"id":10},{"x":691,"y":329.2,"id":1},{"x":693.3,"y":331.1,"id":1},{"x":936.2,"y":333.4,"id":4},{"x":307.2,"y":333.5,"id":1},{"x":533.7,"y":334.3,"id":4},{"x":829.8,"y":334.6,"id":2},{"x":772.6,"y":335.3,"id":2},{"x":924.3,"y":340,"id":2},{"x":231.6,"y":340.5,"id":2},{"x":691.8,"y":344,"id":1},{"x":579.2,"y":352.6,"id":2},{"x":319.5,"y":356.3,"id":2},{"x":1041.5,"y":356.3,"id":2},{"x":604.4,"y":356.9,"id":2},{"x":1191.1,"y":357.3,"id":1},{"x":1149.7,"y":360.6,"id":1},{"x":978,"y":362.2,"id":2},{"x":502.3,"y":365.6,"id":2},{"x":780.7,"y":366,"id":2},{"x":451.8,"y":367.4,"id":4},{"x":238.1,"y":370.4,"id":2},{"x":590.7,"y":372.3,"id":2},{"x":417.2,"y":373.4,"id":2},{"x":477.7,"y":374.2,"id":4},{"x":805.7,"y":374.2,"id":2},{"x":1146.6,"y":375.5,"id":1},{"x":634.6,"y":376.2,"id":1},{"x":265.7,"y":381.6,"id":2},{"x":963.8,"y":383.3,"id":2},{"x":529.4,"y":384,"id":2},{"x":711.2,"y":385.4,"id":1},{"x":741.3,"y":386.2,"id":1},{"x":604.8,"y":389.3,"id":1},{"x":510.4,"y":390.2,"id":2},{"x":826,"y":390.2,"id":2},{"x":1246.9,"y":390.9,"id":2},{"x":1193.9,"y":391.1,"id":2},{"x":358,"y":393.7,"id":2},{"x":438.7,"y":394.4,"id":4},{"x":83.4,"y":394.9,"id":2},{"x":1257.6,"y":395.2,"id":2},{"x":347.1,"y":395.6,"id":2},{"x":812.5,"y":396.7,"id":2},{"x":805.2,"y":398.6,"id":2},{"x":768.7,"y":401.9,"id":11},{"x":530.3,"y":402.6,"id":2},{"x":1216.9,"y":405,"id":2},{"x":429.6,"y":407.9,"id":2},{"x":637.6,"y":410.5,"id":1},{"x":1226.2,"y":412.2,"id":2},{"x":473.6,"y":413.5,"id":4},{"x":1059.3,"y":414.7,"id":1},{"x":688.2,"y":415,"id":1},{"x":1237.2,"y":417.5,"id":2},{"x":223.7,"y":418.5,"id":2},{"x":700.3,"y":420.4,"id":1},{"x":827.3,"y":422.3,"id":11},{"x":136.9,"y":422.8,"id":2},{"x":1041.4,"y":425.7,"id":1},{"x":1255.2,"y":428,"id":2},{"x":707,"y":430.7,"id":1},{"x":1066.2,"y":434.6,"id":1},{"x":400.7,"y":434.7,"id":2},{"x":1024,"y":437.2,"id":1},{"x":736.2,"y":437.5,"id":11},{"x":1129.6,"y":437.6,"id":2},{"x":582.1,"y":439.9,"id":2},{"x":396.1,"y":440.2,"id":2},{"x":1128.7,"y":440.7,"id":2},{"x":265.8,"y":441.3,"id":2},{"x":441,"y":443.4,"id":10},{"x":583.9,"y":443.9,"id":2},{"x":376.6,"y":444.4,"id":2},{"x":1013.7,"y":444.9,"id":2},{"x":312.6,"y":447.2,"id":1},{"x":750,"y":448.2,"id":3},{"x":202.7,"y":451.5,"id":2},{"x":706,"y":453.4,"id":1},{"x":771.6,"y":454.7,"id":3},{"x":805.5,"y":456,"id":11},{"x":695.4,"y":461.8,"id":1},{"x":1200.9,"y":464,"id":2},{"x":729.4,"y":464.2,"id":11},{"x":206.5,"y":465.3,"id":2},{"x":1232.3,"y":465.3,"id":2},{"x":701.3,"y":467.6,"id":1},{"x":773.2,"y":467.6,"id":3},{"x":992.6,"y":471.2,"id":0},{"x":1216.3,"y":471.5,"id":2},{"x":1208.1,"y":472.2,"id":2},{"x":158,"y":473.1,"id":2},{"x":517.3,"y":475.5,"id":4},{"x":1139.2,"y":476,"id":2},{"x":72.8,"y":477.2,"id":1},{"x":1106.4,"y":478.8,"id":2},{"x":168,"y":479,"id":2},{"x":1101.9,"y":479.5,"id":2},{"x":1199.2,"y":479.8,"id":10},{"x":265.8,"y":480.1,"id":1},{"x":1071,"y":480.5,"id":2},{"x":72.7,"y":487.1,"id":1},{"x":575.5,"y":489.2,"id":1},{"x":1133.1,"y":489.3,"id":2},{"x":1160.6,"y":491.7,"id":2},{"x":1115.3,"y":503.6,"id":2},{"x":457.6,"y":504.2,"id":1},{"x":525.3,"y":505,"id":4},{"x":562.5,"y":507,"id":10},{"x":360.6,"y":508.2,"id":0},{"x":971.2,"y":509.7,"id":3},{"x":256.3,"y":510.9,"id":1},{"x":858,"y":514.2,"id":3},{"x":933.6,"y":514.8,"id":3},{"x":1159.1,"y":515.5,"id":2},{"x":427,"y":515.6,"id":0},{"x":205.5,"y":515.7,"id":1},{"x":968.9,"y":520.1,"id":3},{"x":384.4,"y":521,"id":0},{"x":1093.6,"y":522.2,"id":2},{"x":1156.5,"y":525.8,"id":2},{"x":1010.4,"y":526,"id":3},{"x":530.4,"y":529.4,"id":10},{"x":950.2,"y":529.7,"id":3},{"x":1049.6,"y":530.3,"id":0},{"x":824.4,"y":532.2,"id":4},{"x":205,"y":532.9,"id":1},{"x":214.2,"y":534.2,"id":1},{"x":281.6,"y":537,"id":0},{"x":1105.3,"y":541.1,"id":2},{"x":962.7,"y":544.2,"id":3},{"x":216.2,"y":545.4,"id":1},{"x":198.2,"y":546.1,"id":1},{"x":215.2,"y":546.5,"id":1},{"x":281.2,"y":547.6,"id":0},{"x":646.9,"y":550.1,"id":2},{"x":941.2,"y":551.8,"id":0},{"x":500.5,"y":552.2,"id":2},{"x":757.3,"y":555,"id":10},{"x":405.3,"y":558.3,"id":0},{"x":682.6,"y":562.7,"id":2},{"x":277.5,"y":565.6,"id":0},{"x":141.8,"y":566.3,"id":2},{"x":1230.2,"y":566.5,"id":6},{"x":1047.1,"y":566.7,"id":0},{"x":928,"y":567.7,"id":3},{"x":481.5,"y":568.3,"id":0},{"x":894.3,"y":572,"id":3},{"x":720.1,"y":572.1,"id":2},{"x":265.3,"y":572.4,"id":0},{"x":277.1,"y":573.3,"id":0},{"x":569.7,"y":575.5,"id":2},{"x":738.7,"y":576.3,"id":2},{"x":484,"y":577,"id":1},{"x":748.3,"y":577.6,"id":2},{"x":881.6,"y":578.5,"id":3},{"x":1055.4,"y":579.1,"id":0},{"x":1118.8,"y":579.5,"id":10},{"x":853.1,"y":580.3,"id":0},{"x":316.8,"y":581,"id":0},{"x":893.1,"y":581.9,"id":3},{"x":1124.7,"y":582,"id":2},{"x":539.4,"y":591.1,"id":2},{"x":1154.9,"y":591.7,"id":105},{"x":626.4,"y":594.6,"id":2},{"x":1039,"y":595.4,"id":0},{"x":137.5,"y":595.5,"id":2},{"x":1233.6,"y":597,"id":10},{"x":74.7,"y":598.5,"id":10},{"x":489.8,"y":600.9,"id":2},{"x":651.2,"y":601.4,"id":102},{"x":773.9,"y":604.3,"id":2},{"x":693.7,"y":609.1,"id":102},{"x":1265.2,"y":610.5,"id":10},{"x":574.9,"y":615.3,"id":2},{"x":841.4,"y":618.5,"id":10},{"x":312,"y":622.2,"id":0},{"x":1088.8,"y":624.1,"id":2},{"x":734.4,"y":627.2,"id":102},{"x":963.1,"y":627.2,"id":0},{"x":547.4,"y":628.5,"id":10},{"x":440,"y":629.6,"id":1},{"x":418.7,"y":629.8,"id":1},{"x":384.3,"y":630.3,"id":1},{"x":162,"y":631.8,"id":108},{"x":177.8,"y":632.9,"id":108},{"x":113.7,"y":633.3,"id":10},{"x":723.6,"y":637,"id":102},{"x":136.3,"y":637.8,"id":10},{"x":822.4,"y":639,"id":10},{"x":434,"y":641.4,"id":1},{"x":573.8,"y":643,"id":10},{"x":588.6,"y":643.9,"id":10},{"x":204.3,"y":644.4,"id":108},{"x":312.9,"y":646.4,"id":1},{"x":741.7,"y":646.4,"id":2},{"x":736.7,"y":647.4,"id":2},{"x":683.4,"y":647.8,"id":102},{"x":189.9,"y":647.9,"id":108},{"x":472.9,"y":658.2,"id":10},{"x":770.2,"y":660.1,"id":10},{"x":672.3,"y":661.6,"id":102},{"x":284.5,"y":664.3,"id":2},{"x":1251.4,"y":665,"id":10},{"x":127.7,"y":665.6,"id":10},{"x":627.9,"y":666.8,"id":2},{"x":769.9,"y":667.2,"id":10},{"x":220.8,"y":669.5,"id":2},{"x":881.5,"y":669.7,"id":10},{"x":541.2,"y":670.6,"id":10},{"x":1224,"y":670.7,"id":10},{"x":459,"y":671.8,"id":10},{"x":172,"y":672.3,"id":2},{"x":915.3,"y":672.7,"id":10},{"x":871.4,"y":673,"id":10},{"x":857.5,"y":673.3,"id":10},{"x":172.6,"y":675.8,"id":10},{"x":1037.9,"y":675.8,"id":10},{"x":628.1,"y":676.1,"id":10},{"x":866.1,"y":680,"id":10},{"x":1231.7,"y":681.1,"id":10},{"x":439.3,"y":683,"id":10},{"x":1213.5,"y":683.4,"id":10},{"x":1011.3,"y":683.6,"id":10},{"x":1154.6,"y":684.5,"id":10},{"x":1074,"y":684.7,"id":10},{"x":628.2,"y":685.6,"id":10},{"x":765.7,"y":686.7,"id":10},{"x":338.4,"y":688.2,"id":10},{"x":247.4,"y":689.8,"id":10},{"x":917.6,"y":690,"id":10},{"x":152.4,"y":690.1,"id":10},{"x":870.5,"y":692.3,"id":10},{"x":445.2,"y":695.4,"id":10},{"x":534.1,"y":696.2,"id":10},{"x":1170.4,"y":696.7,"id":10},{"x":1065.1,"y":698.4,"id":10},{"x":1230.3,"y":698.8,"id":10},{"x":333.1,"y":699,"id":10},{"x":723.9,"y":699.1,"id":2},{"x":257,"y":702.6,"id":10},{"x":501.7,"y":703,"id":10},{"x":929.9,"y":703.6,"id":10},{"x":195.8,"y":704.6,"id":10},{"x":392.7,"y":705.3,"id":10},{"x":939.6,"y":705.7,"id":10},{"x":901.3,"y":707.5,"id":10},{"x":691,"y":707.8,"id":10},{"x":758.2,"y":708.3,"id":10},{"x":454.6,"y":708.7,"id":10},{"x":1124.6,"y":709.1,"id":10},{"x":320.7,"y":709.8,"id":10},{"x":71.3,"y":712.7,"id":10},{"x":1075.8,"y":714.1,"id":10},{"x":1296.6,"y":714.6,"id":10},{"x":1223.3,"y":716,"id":10},{"x":1211.8,"y":717,"id":10},{"x":666,"y":718.5,"id":10},{"x":1178,"y":718.5,"id":10},{"x":572.9,"y":719,"id":10},{"x":451.6,"y":719.7,"id":10},{"x":172.6,"y":720.7,"id":10},{"x":156.7,"y":722.8,"id":10},{"x":298.8,"y":728.1,"id":10}],"hazards":[{"id":900,"x":540,"y":384,"angle":0},{"id":901,"x":1090,"y":384,"angle":90}],"id":"lobbyTutorialIslandsV1","name":"LobbyTutorial","author":"system","email":"","lobbyOnly":true,"spawnPad":{"cx":175,"cy":384,"r":75},"stations":[{"id":"ai","kind":"ai","cx":265,"cy":480,"r":60,"color":"#3ad17a"},{"id":"skin","kind":"skin","cx":390,"cy":150,"r":60,"color":"#4aa3ff"},{"id":"playlist","kind":"playlist","cx":900,"cy":384,"r":60,"color":"#FFCB30"},{"id":"mode","kind":"mode","cx":1100,"cy":250,"r":60,"color":"#b266ff"}]};
+
+// ---------------------------------------------------------------- proposed map
+const W = 1366, H = 768, CX = 683, CY = 384;
+
+const P_SPAWN = { cx: 175, cy: 384, r: 75 };
+const P_STATIONS = [
+  { id: "skin",     kind: "skin",     cx: 255, cy: 163, r: 60, color: "#4aa3ff" },
+  { id: "playlist", kind: "playlist", cx: 388, cy: 285, r: 60, color: "#FFCB30" },
+  { id: "mode",     kind: "mode",     cx: 388, cy: 483, r: 60, color: "#b266ff" },
+  { id: "ai",       kind: "ai",       cx: 255, cy: 605, r: 60, color: "#3ad17a" }
+];
+const P_HAZARDS = [
+  { id: 900, x: 1010, y: 355, angle: 0 },   // static bumper
+  { id: 901, x: 1010, y: 435, angle: 0 }    // moving bumper rail
+];
+// Hand-placed cells: ability pickup pads + the two goals (with an exclusion
+// radius so generated filler sites don't shrink them to slivers).
+const P_SPECIALS = [
+  { x: 548, y: 100, id: 102 }, { x: 574, y: 124, id: 102 }, { x: 552, y: 142, id: 102 },
+  { x: 672, y: 100, id: 104 }, { x: 698, y: 124, id: 104 }, { x: 676, y: 142, id: 104 },
+  { x: 796, y: 100, id: 105 }, { x: 822, y: 124, id: 105 }, { x: 800, y: 142, id: 105 },
+  { x: 884, y: 100, id: 108 }, { x: 908, y: 124, id: 108 }, { x: 888, y: 142, id: 108 },
+  { x: 972, y: 206, id: 107 }, { x: 996, y: 230, id: 107 }, { x: 974, y: 252, id: 107 },
+  { x: 1248, y: 96, id: 6 }, { x: 1272, y: 118, id: 6 }, { x: 1248, y: 140, id: 6 },
+  { x: 1272, y: 582, id: 6 }, { x: 1294, y: 602, id: 6 }, { x: 1270, y: 618, id: 6 }
+];
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const d2 = (x, y, px, py) => (x - px) * (x - px) + (y - py) * (y - py);
+
+// Zone classifier — priority order matters.
+function classifyProposed(x, y, rnd) {
+  if (x < 58 || x > W - 58 || y < 55 || y > H - 55) return 10;          // void rim
+  if (x >= 950 && y <= 300) return 4;                                    // ice rink (NE)
+  { const ex = (x - 1190) / 115, ey = (y - 400) / 72;
+    if (ex * ex + ey * ey < 1) return 11; }                              // splash pool (E)
+  if (x >= 935 && x <= 1085 && y >= 315 && y <= 475) return 1;           // bumper court (dirt)
+  { const ex = (x - 1100) / 170, ey = (y - 600) / 85;
+    if (ex * ex + ey * ey < 1) return 3; }                               // lava springs (SE)
+  { const ex = (x - 1100) / 235, ey = (y - 600) / 135;
+    if (ex * ex + ey * ey < 1) return 0; }                               // sand shore around lava
+  if (x >= 465 && x <= 885 && y >= 632) return 0;                        // sand drag (S strip)
+  if (x >= 465 && x <= 930 && y <= 148) return 1;                        // ability alley (N strip, dirt)
+  if (d2(x, y, P_SPAWN.cx, P_SPAWN.cy) < 105 * 105) return 1;            // dirt under spawn pad
+  for (const st of P_STATIONS) if (d2(x, y, st.cx, st.cy) < 70 * 70) return 1; // dirt under stations
+  if (d2(x, y, CX, CY) < 115 * 115) return 1;                            // dirt under spinner
+  if (Math.abs(y - 384) < 42 && x >= 240 && x <= 950) return 1;          // main dirt road
+  return rnd() < 0.06 ? 1 : 2;                                           // grass field w/ dirt specks
+}
+
+function buildProposedMap() {
+  const rnd = mulberry32(0xC4A0);
+  const sites = P_SPECIALS.map(s => ({ x: s.x, y: s.y, id: s.id }));
+  // solid void ring (the jittered fill grid alone leaves the rim patchy)
+  for (let gx = 10; gx < W; gx += 50) {
+    sites.push({ x: gx, y: 24, id: 10 }, { x: gx + 25, y: H - 24, id: 10 });
+  }
+  for (let gy = 60; gy < H - 50; gy += 50) {
+    sites.push({ x: 24, y: gy, id: 10 }, { x: W - 24, y: gy + 25, id: 10 });
+  }
+  for (let gy = 18; gy < H - 10; gy += 42) {
+    for (let gx = 18; gx < W - 10; gx += 42) {
+      const x = Math.round((gx + (rnd() * 30 - 15)) * 10) / 10;
+      const y = Math.round((gy + (rnd() * 30 - 15)) * 10) / 10;
+      if (x < 4 || x > W - 4 || y < 4 || y > H - 4) continue;
+      let tooClose = false;
+      for (const s of P_SPECIALS) if (d2(x, y, s.x, s.y) < 30 * 30) { tooClose = true; break; }
+      if (tooClose) continue;
+      sites.push({ x, y, id: classifyProposed(x, y, rnd) });
+    }
+  }
+  return {
+    bbox: { xl: 0, xr: W, yt: 0, yb: H },
+    sites,
+    hazards: P_HAZARDS,
+    id: "lobbyHubPlazaV2",
+    name: "LobbyTutorial",
+    author: "system",
+    email: "",
+    lobbyOnly: true,
+    spawnPad: P_SPAWN,
+    stations: P_STATIONS
+  };
+}
+
+// ---------------------------------------------------------------- rendering
+const TILE_RGB = (() => {
+  const hex = { 0: "#d9c47e", 1: "#94714b", 2: "#5fae5f", 3: "#cf1020", 4: "#a5f2f3",
+                5: "#c8c8c8", 6: "#ffcb30", 7: "#f07b36", 8: "#7e57c2", 9: "#2b2b2b",
+                10: "#16161c", 11: "#2f6fb0" };
+  const out = {};
+  for (const k in hex) {
+    const h = hex[k];
+    out[k] = [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+  }
+  return out;
+})();
+function rgbFor(id) { return id >= 100 ? TILE_RGB[5] : (TILE_RGB[id] || TILE_RGB[9]); }
+
+// Nearest-site voronoi raster at half resolution, bucket-grid accelerated.
+function renderTerrain(map, ctx) {
+  const SW = W >> 1, SH = H >> 1, B = 64, BW = Math.ceil(W / B), BH = Math.ceil(H / B);
+  const buckets = new Array(BW * BH).fill(null).map(() => []);
+  for (const s of map.sites) {
+    const bx = Math.min(BW - 1, Math.max(0, Math.floor(s.x / B)));
+    const by = Math.min(BH - 1, Math.max(0, Math.floor(s.y / B)));
+    buckets[by * BW + bx].push(s);
+  }
+  const idBuf = new Int16Array(SW * SH);
+  const img = new ImageData(SW, SH);
+  const px = img.data;
+  for (let py = 0; py < SH; py++) {
+    const wy = py * 2 + 1;
+    const by0 = Math.floor(wy / B);
+    for (let pxi = 0; pxi < SW; pxi++) {
+      const wx = pxi * 2 + 1;
+      const bx0 = Math.floor(wx / B);
+      let best = null, bestD = Infinity;
+      for (let r = 2; r <= 8 && best == null; r += 2) {
+        for (let by = Math.max(0, by0 - r); by <= Math.min(BH - 1, by0 + r); by++) {
+          for (let bx = Math.max(0, bx0 - r); bx <= Math.min(BW - 1, bx0 + r); bx++) {
+            const arr = buckets[by * BW + bx];
+            for (let i = 0; i < arr.length; i++) {
+              const s = arr[i], d = d2(wx, wy, s.x, s.y);
+              if (d < bestD) { bestD = d; best = s; }
+            }
+          }
+        }
+      }
+      idBuf[py * SW + pxi] = best ? best.id : 10;
+    }
+  }
+  for (let py = 0; py < SH; py++) {
+    for (let pxi = 0; pxi < SW; pxi++) {
+      const i = py * SW + pxi, id = idBuf[i];
+      let [r, g, b] = rgbFor(id);
+      // cell boundary darkening + a touch of per-pixel grain
+      const edge = (pxi + 1 < SW && idBuf[i + 1] !== id) || (py + 1 < SH && idBuf[i + SW] !== id);
+      let f = edge ? 0.55 : 1 + ((((pxi * 73856093) ^ (py * 19349663)) >>> 0) % 17 / 17 - 0.5) * 0.09;
+      const o = i * 4;
+      px[o] = Math.min(255, r * f); px[o + 1] = Math.min(255, g * f); px[o + 2] = Math.min(255, b * f);
+      px[o + 3] = 255;
+    }
+  }
+  const off = document.createElement("canvas");
+  off.width = SW; off.height = SH;
+  off.getContext("2d").putImageData(img, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(off, 0, 0, W, H);
+}
+
+function labelPill(ctx, x, y, text, opts) {
+  opts = opts || {};
+  ctx.save();
+  ctx.font = (opts.bold ? "bold " : "") + (opts.size || 13) + "px sans-serif";
+  const w = ctx.measureText(text).width + 14, h = (opts.size || 13) + 10;
+  ctx.fillStyle = opts.bg || "rgba(10,12,16,0.72)";
+  ctx.beginPath();
+  ctx.roundRect(x - w / 2, y - h / 2, w, h, 6);
+  ctx.fill();
+  if (opts.border) { ctx.strokeStyle = opts.border; ctx.lineWidth = 1.2; ctx.stroke(); }
+  ctx.fillStyle = opts.color || "#fff";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(text, x, y + 0.5);
+  ctx.restore();
+}
+
+const PAD_GLYPH = { 100: "BLD", 101: "SWP", 102: "B", 103: "BT", 104: "S+", 105: "S−",
+                    106: "TS", 107: "IC", 108: "C", 109: "ST", 110: "OB" };
+
+function drawOverlays(map, ctx, showLabels) {
+  // ability-pad glyphs straight off the sites
+  ctx.save();
+  ctx.font = "bold 11px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (const s of map.sites) {
+    if (s.id >= 100) { ctx.fillStyle = "#222"; ctx.fillText(PAD_GLYPH[s.id] || "?", s.x, s.y); }
+  }
+  ctx.restore();
+
+  // hazards
+  for (const hz of (map.hazards || [])) {
+    ctx.save();
+    if (hz.id === 901) {
+      ctx.translate(hz.x, hz.y);
+      ctx.rotate((hz.angle || 0) * Math.PI / 180);
+      ctx.strokeStyle = "rgba(240,123,54,0.9)"; ctx.lineWidth = 4;
+      ctx.setLineDash([7, 6]);
+      ctx.beginPath(); ctx.moveTo(-50, 0); ctx.lineTo(50, 0); ctx.stroke();
+      ctx.setLineDash([]);
+    } else {
+      ctx.translate(hz.x, hz.y);
+    }
+    ctx.fillStyle = "#f07b36";
+    ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "rgba(240,123,54,0.55)"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, 0, 16, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+    if (showLabels) labelPill(ctx, hz.x, hz.y - 28, hz.id === 901 ? "MOVING BUMPER" : "BUMPER", { size: 11, color: "#ffc9a3" });
+  }
+
+  // spawn pad
+  const sp = map.spawnPad;
+  if (sp) {
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 3; ctx.setLineDash([10, 7]);
+    ctx.beginPath(); ctx.arc(sp.cx, sp.cy, sp.r, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(255,255,255,0.10)";
+    ctx.beginPath(); ctx.arc(sp.cx, sp.cy, sp.r, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    labelPill(ctx, sp.cx, sp.cy, "SPAWN", { bold: true });
+  }
+
+  // stations
+  for (const st of (map.stations || [])) {
+    ctx.save();
+    ctx.fillStyle = st.color + "33";
+    ctx.beginPath(); ctx.arc(st.cx, st.cy, st.r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = st.color; ctx.lineWidth = 3.5;
+    ctx.beginPath(); ctx.arc(st.cx, st.cy, st.r, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = st.color + "66"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(st.cx, st.cy, st.r + 8, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+    labelPill(ctx, st.cx, st.cy, st.kind.toUpperCase(), { bold: true, color: st.color, border: st.color + "88" });
+  }
+
+  // start spinner (code-pinned at world center)
+  ctx.save();
+  ctx.translate(CX, CY);
+  for (let i = 0; i < 3; i++) {
+    const r = 28 + i * 18, a0 = i * 1.1;
+    ctx.strokeStyle = i === 0 ? "#ff5b5b" : "rgba(255,120,120," + (0.75 - i * 0.2) + ")";
+    ctx.lineWidth = 6 - i;
+    for (let k = 0; k < 3; k++) {
+      ctx.beginPath();
+      ctx.arc(0, 0, r, a0 + k * (Math.PI * 2 / 3), a0 + k * (Math.PI * 2 / 3) + 1.45);
+      ctx.stroke();
+    }
+  }
+  ctx.strokeStyle = "rgba(255,120,120,0.3)"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(0, 0, 75, 0, Math.PI * 2); ctx.stroke();
+  ctx.restore();
+  labelPill(ctx, CX, CY + 96, "START SPINNER", { bold: true, color: "#ff9a9a" });
+}
+
+const P_ZONE_LABELS = [
+  { x: 300, y: 330, t: "HUB PLAZA" },
+  { x: 683, y: 545, t: "SPINNER COURT" },
+  { x: 700, y: 78, t: "ABILITY ALLEY" },
+  { x: 1125, y: 178, t: "ICE RINK" },
+  { x: 1010, y: 296, t: "BUMPER COURT" },
+  { x: 1190, y: 400, t: "SPLASH POOL" },
+  { x: 1075, y: 648, t: "LAVA SPRINGS" },
+  { x: 672, y: 672, t: "SAND DRAG" }
+];
+
+const CUR_CALLOUTS = [
+  { x: 540, y: 384, r: 42, t: "Bumper on the main path" },
+  { x: 778, y: 438, r: 88, t: "Water + lava beside the spinner" },
+  { x: 490, y: 400, r: 95, t: "Ice field mid-path" },
+  { x: 192, y: 140, r: 52, t: "Speed pads in spawn plaza" },
+  { x: 184, y: 640, r: 52, t: "Cut pads in spawn plaza" },
+  { x: 340, y: 560, r: 88, t: "Sand crowding spawn approach" }
+];
+
+function drawProposedExtras(ctx, showLabels) {
+  if (!showLabels) return;
+  for (const z of P_ZONE_LABELS) labelPill(ctx, z.x, z.y, z.t, { bold: true, size: 14, bg: "rgba(10,12,16,0.6)" });
+}
+
+function drawCurrentExtras(map, ctx, showLabels) {
+  if (!showLabels) return;
+  ctx.save();
+  // scatter lines spawn -> stations to visualize the walk
+  const sp = map.spawnPad;
+  ctx.strokeStyle = "rgba(255,255,255,0.4)"; ctx.lineWidth = 1.5; ctx.setLineDash([4, 6]);
+  for (const st of (map.stations || [])) {
+    ctx.beginPath(); ctx.moveTo(sp.cx, sp.cy); ctx.lineTo(st.cx, st.cy); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  for (const c of CUR_CALLOUTS) {
+    ctx.strokeStyle = "rgba(255,70,70,0.9)"; ctx.lineWidth = 2.5; ctx.setLineDash([8, 6]);
+    ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+    labelPill(ctx, c.x, c.y - c.r - 14, c.t, { size: 12, color: "#ff9a9a", border: "rgba(255,70,70,0.6)" });
+  }
+  labelPill(ctx, 683, 736, "Dashed white lines: how far apart the stations are today", { size: 12, color: "#cfd6e4" });
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------- page wiring
+const PROPOSED_MAP = buildProposedMap();
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+let activeTab = "proposed";
+
+function redraw() {
+  const showLabels = document.getElementById("chkLabels").checked;
+  ctx.clearRect(0, 0, W, H);
+  const map = activeTab === "proposed" ? PROPOSED_MAP : CURRENT_MAP;
+  renderTerrain(map, ctx);
+  drawOverlays(map, ctx, showLabels);
+  if (activeTab === "proposed") drawProposedExtras(ctx, showLabels);
+  else drawCurrentExtras(map, ctx, showLabels);
+}
+
+function setTab(t) {
+  activeTab = t;
+  document.getElementById("tabProposed").classList.toggle("active", t === "proposed");
+  document.getElementById("tabCurrent").classList.toggle("active", t === "current");
+  redraw();
+}
+document.getElementById("tabProposed").onclick = () => setTab("proposed");
+document.getElementById("tabCurrent").onclick = () => setTab("current");
+document.getElementById("chkLabels").onchange = redraw;
+
+document.getElementById("btnExport").onclick = () => {
+  const json = JSON.stringify(PROPOSED_MAP);
+  const blob = new Blob([json], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "_LobbyTutorial.proposed.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+  if (navigator.clipboard) navigator.clipboard.writeText(json).catch(() => {});
+  document.getElementById("exportMsg").textContent = "downloaded + copied to clipboard";
+  setTimeout(() => { document.getElementById("exportMsg").textContent = ""; }, 4000);
+};
+
+redraw();
+</script>
+</body>
+</html>
