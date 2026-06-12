@@ -17,6 +17,7 @@
 // classifies. See docs/spikes/map-playlists-and-ratings.md for the rationale.
 
 var cellGraph = require('./cellGraph.js');
+var mapDifficulty = require('./mapDifficulty.json');
 
 // Resolve a tileMap name -> numeric id from the live config (don't hardcode).
 function tileId(config, name) {
@@ -500,6 +501,42 @@ function competingLines(map, config, opts) {
     });
 }
 
+// Difficulty tier (easy|mid|hard|brutal) for the match-phase map ramp
+// (gameBoard.determineNextMap). Primary source: the measured AI per-round
+// finisher fraction in server/mapDifficulty.json (sweep documented in
+// docs/spikes/gameplay-balance-analysis.md), graded against the cutoffs in
+// config.difficultyRamp.tierCutoffs:
+//
+//   frac <  brutalMax (0.10) -> 'brutal'  (spawn-kill / attrition-lottery tail)
+//   frac <  hardMax   (0.20) -> 'hard'
+//   frac <  midMax    (0.35) -> 'mid'     (the healthy band)
+//   frac >= midMax           -> 'easy'
+//
+// Maps with no sim entry (new editor submissions) or flagged as AI artifacts
+// (mapDifficulty.aiArtifacts — their sim score measures bot pathing failure,
+// not difficulty) fall back to a geometry heuristic: heavy lava (the
+// signature of every measured hard map) reads 'hard', everything else 'mid'.
+// The heuristic NEVER returns 'brutal' (a guess shouldn't exclude a map from
+// early rounds) and never 'easy' (so unmeasured maps aren't over-served to
+// fresh lobbies).
+function difficultyTier(map, config) {
+    var cuts = (config && config.difficultyRamp && config.difficultyRamp.tierCutoffs) || {};
+    var brutalMax = (cuts.brutalMax != null) ? cuts.brutalMax : 0.10;
+    var hardMax = (cuts.hardMax != null) ? cuts.hardMax : 0.20;
+    var midMax = (cuts.midMax != null) ? cuts.midMax : 0.35;
+    var key = String(map.name || '').replace(/\s+/g, '');
+    var artifacts = mapDifficulty.aiArtifacts || [];
+    var frac = (mapDifficulty.perRoundFrac || {})[key];
+    if (typeof frac === 'number' && artifacts.indexOf(key) === -1) {
+        if (frac < brutalMax) { return 'brutal'; }
+        if (frac < hardMax) { return 'hard'; }
+        if (frac < midMax) { return 'mid'; }
+        return 'easy';
+    }
+    var lavaFrac = composition(map, config).ratios.lava;
+    return (lavaFrac >= 0.30) ? 'hard' : 'mid';
+}
+
 // Main entry: map (reconstructed, full geometry) + config -> meta object.
 // `parTime` is read from the map if already computed (loadMaps does this) and
 // otherwise computed here, so the classifier is safe to call standalone.
@@ -625,6 +662,7 @@ function classify(map, config) {
         fairness: fairness,
         balanceScore: score,
         tier: tier,
+        difficulty: difficultyTier(map, config),
         hardFail: hardFail,
         deductions: deductions,
         rating: null,      // filled by the ratings layer (Phase 4); null until then
@@ -671,5 +709,6 @@ module.exports = {
     unbalancedTiles: unbalancedTiles,
     COMPOSITION_TILES: COMPOSITION_TILES,
     matches: matches,
-    resolvePlaylists: resolvePlaylists
+    resolvePlaylists: resolvePlaylists,
+    difficultyTier: difficultyTier
 };

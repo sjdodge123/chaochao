@@ -78,6 +78,16 @@
         "blandnessMax": 70,
         "goalCentralityMax": 30
     },
+    "difficultyRamp": {
+        "enabled": true,
+        "earlyRounds": 2,
+        "tierCutoffs": { "brutalMax": 0.10, "hardMax": 0.20, "midMax": 0.35 },
+        "weights": {
+            "early": { "easy": 3, "mid": 1, "hard": 0.25, "brutal": 0 },
+            "mid": { "easy": 1, "mid": 1, "hard": 1, "brutal": 1 },
+            "late": { "easy": 0.25, "mid": 1, "hard": 3, "brutal": 2 }
+        }
+    },
     "defaultPlaylist": "default",
     "playlists": [
         { "id": "default", "name": "Default", "desc": "Mostly featured, with the odd wildcard", "filter": {}, "wildcardChance": 0.2 },

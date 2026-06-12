@@ -154,6 +154,9 @@ jobs:
       - name: Headless playlist-selection test (playlist-aware rotation)
         run: node .github/scripts/playlist-selection-test.js
 
+      - name: Headless difficulty-ramp test (phase-weighted map draw distribution)
+        run: node .github/scripts/difficulty-ramp-test.js
+
       - name: Headless start-edges test (single edges + opposite-edge combos)
         run: node .github/scripts/start-edges-test.js
 
