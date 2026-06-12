@@ -30,6 +30,11 @@ function makeBoard() {
     gb.isPreview = false;
     gb.previewMap = null;
     gb.playlistId = 'featured';
+    // Selection now also reads the difficulty-ramp phase inputs; give the stub
+    // real values (mid-match, nobody near victory = today's uniform behavior)
+    // instead of relying on for-in-over-undefined semantics.
+    gb.round = 3;
+    gb.playerList = {};
     return gb;
 }
 

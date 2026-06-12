@@ -88,7 +88,7 @@
                 {
                     id: "map-ramp", name: "Map Difficulty Ramp", icon: emoji("🌡️"), anim: "goalRun",
                     blurb: "Early rounds favor friendly maps; match point brings out the gauntlets.",
-                    detail: "The map shuffle reads the room. Rounds 1 and 2 lean toward the catalog's friendlier, more open maps so everyone gets racing — the true meat grinders never show up that early. Through the middle of a match every map gets its fair shake, same as always. But the moment anyone reaches match point, the rotation turns up the heat: deciding rounds skew toward the hardest maps in the playlist, so closing out a win means surviving the gauntlet. It's a lean, not a lock — every map in your playlist stays in rotation, no map repeats until the pool runs dry, and a playlist with no easy maps simply shuffles like it always did."
+                    detail: "The map shuffle reads the room. Rounds 1 and 2 lean toward the catalog's friendlier, more open maps so everyone gets racing — the true meat grinders sit out that early whenever anything gentler is left in the rotation. Through the middle of a match every map gets its fair shake, same as always. But the moment anyone reaches match point, the rotation turns up the heat: deciding rounds skew toward the hardest maps in the playlist, so closing out a win means surviving the gauntlet. It's a lean, not a lock — every map in your playlist stays in rotation, no map repeats until the pool runs dry, and a playlist with no easy maps simply shuffles like it always did."
                 },
                 {
                     id: "game-modes", name: "Game Modes", icon: emoji("⚔️"), anim: "brutalIntro",

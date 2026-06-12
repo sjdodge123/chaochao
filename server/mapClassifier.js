@@ -519,21 +519,37 @@ function competingLines(map, config, opts) {
 // The heuristic NEVER returns 'brutal' (a guess shouldn't exclude a map from
 // early rounds) and never 'easy' (so unmeasured maps aren't over-served to
 // fresh lobbies).
-function difficultyTier(map, config) {
+// The lookup key into mapDifficulty.json: the map name with whitespace removed
+// (the balance sweep's naming). This is a cross-file contract — validate-content's
+// orphan check and validate-submitted-map's paste-ready snippet must produce the
+// SAME key the runtime looks up, so they all call this and never inline the format.
+function difficultyKey(name) {
+    return String(name || '').replace(/\s+/g, '');
+}
+
+// Grade a measured perRoundFrac against config.difficultyRamp.tierCutoffs. The
+// single source of truth for the ladder (and its fallback cutoffs) — the
+// submission CI grades its fresh measurements with this same function, so the
+// tier shown in a PR review comment can never drift from what the live server
+// assigns once the entry lands.
+function gradeDifficultyFrac(frac, config) {
     var cuts = (config && config.difficultyRamp && config.difficultyRamp.tierCutoffs) || {};
-    var brutalMax = (cuts.brutalMax != null) ? cuts.brutalMax : 0.10;
-    var hardMax = (cuts.hardMax != null) ? cuts.hardMax : 0.20;
-    var midMax = (cuts.midMax != null) ? cuts.midMax : 0.35;
-    var key = String(map.name || '').replace(/\s+/g, '');
+    if (frac < ((cuts.brutalMax != null) ? cuts.brutalMax : 0.10)) { return 'brutal'; }
+    if (frac < ((cuts.hardMax != null) ? cuts.hardMax : 0.20)) { return 'hard'; }
+    if (frac < ((cuts.midMax != null) ? cuts.midMax : 0.35)) { return 'mid'; }
+    return 'easy';
+}
+
+function difficultyTier(map, config, ratios) {
+    var key = difficultyKey(map.name);
     var artifacts = mapDifficulty.aiArtifacts || [];
     var frac = (mapDifficulty.perRoundFrac || {})[key];
     if (typeof frac === 'number' && artifacts.indexOf(key) === -1) {
-        if (frac < brutalMax) { return 'brutal'; }
-        if (frac < hardMax) { return 'hard'; }
-        if (frac < midMax) { return 'mid'; }
-        return 'easy';
+        return gradeDifficultyFrac(frac, config);
     }
-    var lavaFrac = composition(map, config).ratios.lava;
+    // `ratios` lets classify() pass the composition it already computed; only a
+    // standalone call (no precomputed composition) pays for a fresh scan.
+    var lavaFrac = (ratios || composition(map, config).ratios).lava;
     return (lavaFrac >= 0.30) ? 'hard' : 'mid';
 }
 
@@ -662,7 +678,7 @@ function classify(map, config) {
         fairness: fairness,
         balanceScore: score,
         tier: tier,
-        difficulty: difficultyTier(map, config),
+        difficulty: difficultyTier(map, config, r),
         hardFail: hardFail,
         deductions: deductions,
         rating: null,      // filled by the ratings layer (Phase 4); null until then
@@ -710,5 +726,7 @@ module.exports = {
     COMPOSITION_TILES: COMPOSITION_TILES,
     matches: matches,
     resolvePlaylists: resolvePlaylists,
-    difficultyTier: difficultyTier
+    difficultyTier: difficultyTier,
+    difficultyKey: difficultyKey,
+    gradeDifficultyFrac: gradeDifficultyFrac
 };

@@ -2221,11 +2221,14 @@ class GameBoard {
 	// cycling is untouched: callers compute `unplayed` exactly as before and
 	// this only replaces the final uniform pick.
 	pickByDifficultyWeight(unplayed) {
-		var uniform = unplayed[utils.getRandomInt(0, unplayed.length - 1)];
+		// Drawn lazily so the fallback only consumes RNG state when actually taken
+		// (keeps seeded harnesses byte-identical to a plain uniform draw when the
+		// ramp is off).
+		var uniform = function () { return unplayed[utils.getRandomInt(0, unplayed.length - 1)]; };
 		var ramp = c.difficultyRamp;
-		if (ramp == null || ramp.enabled === false || ramp.weights == null) { return uniform; }
+		if (ramp == null || ramp.enabled === false || ramp.weights == null) { return uniform(); }
 		var row = ramp.weights[this.difficultyPhase()];
-		if (row == null) { return uniform; }
+		if (row == null) { return uniform(); }
 		var weights = [];
 		var total = 0;
 		for (var i = 0; i < unplayed.length; i++) {
@@ -2235,7 +2238,7 @@ class GameBoard {
 			weights.push(w);
 			total += w;
 		}
-		if (total <= 0) { return uniform; }
+		if (total <= 0) { return uniform(); }
 		var roll = Math.random() * total;
 		for (var j = 0; j < unplayed.length; j++) {
 			roll -= weights[j];

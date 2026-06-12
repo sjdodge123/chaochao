@@ -11,7 +11,7 @@
     "aiArtifacts: maps whose sim score is an AI pathing artifact, NOT difficulty",
     "(GoodLuck spawn-lava map issue, TheIsland AI-uncompletable gauntlet) - they",
     "are excluded from sim-based inference and fall back to the geometry heuristic.",
-    "Regenerate by re-running the sweep and copying perRoundFinisherFrac per map."
+    "Regenerate with `node .github/scripts/measure-map-difficulty.js --write` (report-only without the flag) after AI behavior changes or bulk map additions."
   ],
   "aiArtifacts": [
     "GoodLuck",

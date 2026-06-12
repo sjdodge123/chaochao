@@ -75,6 +75,7 @@ const config = require(path.join(repoRoot, 'server', 'config.json'));
 const messenger = require(path.join(repoRoot, 'server', 'messenger.js'));
 const mapFormat = require(path.join(repoRoot, 'server', 'mapFormat.js'));
 const { renderMapToPng, ROUTE_COLORS } = require(path.join(__dirname, 'lib', 'render-map.js'));
+const simWindow = require(path.join(__dirname, 'lib', 'sim-window.js'));
 
 const DT = config.serverTickSpeed / 1000;
 
@@ -199,42 +200,6 @@ function deepValidate(map) {
     return { errors, warnings, parTime };
 }
 
-// Mock clock for full-round difficulty sims, identical to ai-fitness.js (the
-// sweep behind server/mapDifficulty.json): a tight synchronous tick loop
-// freezes wall-clock, so without this no setTimeout fires and nothing
-// Date.now-based (cooldowns, fuses, round timers) ever advances — which
-// inflates finisher fractions on collapse-pressure maps. Installed ONLY around
-// difficultySim and restored after, so the playability attempts keep today's
-// exact behavior.
-const simClock = {
-    now: 1e6,
-    pend: [],
-    realDateNow: Date.now,
-    realSetTimeout: global.setTimeout,
-    active: false,
-    install() {
-        this.active = true;
-        this.now = 1e6;
-        this.pend = [];
-        Date.now = () => this.now;
-        global.setTimeout = (fn, d, ...a) => { this.pend.push({ at: this.now + (d || 0), fn, a }); return this.pend.length; };
-    },
-    restore() {
-        this.active = false;
-        Date.now = this.realDateNow;
-        global.setTimeout = this.realSetTimeout;
-        this.pend = [];
-    },
-    tick(ms) {
-        this.now += ms;
-        this.pend.sort((a, b) => a.at - b.at);
-        while (this.pend.length && this.pend[0].at <= this.now) {
-            const t = this.pend.shift();
-            try { t.fn(...t.a); } catch (e) { /* timer callbacks are best-effort, as in ai-fitness */ }
-        }
-    }
-};
-
 // One playability attempt: boot a real preview room with AI racers and tick the
 // live engine until a racer reaches the goal or the budget elapses.
 function playabilityAttempt(game, map, maxTicks) {
@@ -300,92 +265,24 @@ function playabilitySim(map, parTime) {
     }
 }
 
-// Difficulty measurement for the match-phase map ramp, replicating the balance
-// sweep behind server/mapDifficulty.json (ai-fitness.js + the spike extension
-// in docs/spikes/gameplay-balance-analysis.md) so the number is COMPARABLE to
-// the shipped per-map data: an all-bot room with the 6-racer cast grid, mocked
-// clock, seeded RNG, ticked through DIFFICULTY_WINDOWS continuous 120s windows
-// where rounds chain naturally; perRoundFrac = finish events / (rounds observed
-// x bots), partial last rounds included — exactly the sweep's metric (fewer
-// windows than its 8 seeds, so it's an ESTIMATE; the review comment labels it
-// as such). The tier is graded with the live difficultyRamp cutoffs. Until the
-// entry is added the map plays via the classifier's geometry heuristic, so this
-// is data hygiene, not a gate — any failure here is a warning, never a
-// rejection.
-function difficultyWindow(game, map, seed) {
-    const sig = 'mapdiff-' + seed + '-' + map.id;
-    let room = null;
-    try {
-        room = game.getRoom(sig, config.maxPlayersInRoom || 8);
-        room.game.gameBoard.isPreview = true;
-        room.game.gameBoard.previewMap = map;
-        const cast = (config.aiRacers && config.aiRacers.cast) || [];
-        const bots = [];
-        for (let i = 0; i < 6; i++) {
-            const bid = sig + '-bot' + i;
-            const b = room.world.createNewBot(bid, cast.length ? cast[i % cast.length] : null);
-            room.playerList[bid] = b;
-            bots.push(b);
-        }
-        room.game.determineGameState(bots[0]);
-        room.game.startLobby();
-        room.game.startGated();
-        // Warm-up ticks let the gate countdown fire startRace via the mocked
-        // timers, exactly as ai-fitness does.
-        for (let g = 0; g < 30; g++) { simClock.tick(config.serverTickSpeed); room.update(DT); }
-        const ticks = Math.ceil(120 / DT);
-        const prevGoal = {};
-        for (const b of bots) { prevGoal[b.id] = b.reachedGoal === true; }
-        let finishEvents = 0;
-        let rounds = room.game.currentState === config.stateMap.racing ? 1 : 0;
-        let prevState = room.game.currentState;
-        for (let f = 0; f < ticks; f++) {
-            simClock.tick(config.serverTickSpeed);
-            room.update(DT);
-            for (const b of bots) {
-                const g2 = b.reachedGoal === true;
-                if (g2 && !prevGoal[b.id]) { finishEvents++; }
-                prevGoal[b.id] = g2;
-            }
-            const st = room.game.currentState;
-            if (st === config.stateMap.racing && prevState !== config.stateMap.racing) { rounds++; }
-            prevState = st;
-        }
-        return { finishEvents, rounds, bots: bots.length };
-    } finally {
-        if (room) { try { for (const id in room.playerList) { delete room.playerList[id]; } } catch (e) { /* best effort */ } }
-    }
-}
-
+// Difficulty measurement for the match-phase map ramp. The methodology (all-bot
+// 6-racer windows, mocked clock, seeded RNG — the balance sweep behind
+// server/mapDifficulty.json) lives in lib/sim-window.js, SHARED with the
+// catalog-wide regenerator so a submission is measured on the same ruler as the
+// shipped data; the tier is graded by the same mapClassifier ladder the live
+// server uses. Until the entry is added the map plays via the classifier's
+// geometry heuristic, so this is data hygiene, not a gate — any failure here is
+// a warning, never a rejection.
 function difficultySim(map) {
     const game = require(path.join(repoRoot, 'server', 'game.js'));
-    // Seeded RNG per window (same generator AND seed schedule as ai-fitness.js)
-    // so the measurement is deterministic in CI; restored afterwards.
-    const realRandom = Math.random;
-    function mulberry32(seed) { let a = seed >>> 0; return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
-    let events = 0, rounds = 0, botsPerWindow = 6;
-    simClock.install();
-    try {
-        for (let s = 0; s < DIFFICULTY_WINDOWS; s++) {
-            Math.random = mulberry32(0xA11CE + s * 7919);
-            const w = difficultyWindow(game, JSON.parse(JSON.stringify(map)), s);
-            events += w.finishEvents;
-            rounds += w.rounds;
-            botsPerWindow = w.bots;
-        }
-    } finally {
-        Math.random = realRandom;
-        simClock.restore();
-    }
-    if (rounds === 0) { return null; }
-    const frac = +(events / (rounds * botsPerWindow)).toFixed(3);
-    const cuts = (config.difficultyRamp && config.difficultyRamp.tierCutoffs) || {};
-    const tier = frac < (cuts.brutalMax != null ? cuts.brutalMax : 0.10) ? 'brutal'
-        : frac < (cuts.hardMax != null ? cuts.hardMax : 0.20) ? 'hard'
-        : frac < (cuts.midMax != null ? cuts.midMax : 0.35) ? 'mid' : 'easy';
-    // The key format mapDifficulty.json uses: map name with whitespace removed.
-    const key = String(map.name || '').replace(/\s+/g, '');
-    return { perRoundFrac: frac, tier, rounds, windows: DIFFICULTY_WINDOWS, key };
+    const m = simWindow.measurePerRoundFrac(game, config, map, DIFFICULTY_WINDOWS);
+    if (m == null) { return null; }
+    return {
+        perRoundFrac: m.perRoundFrac,
+        tier: mapClassifier.gradeDifficultyFrac(m.perRoundFrac, config),
+        rounds: m.rounds,
+        key: mapClassifier.difficultyKey(map.name)
+    };
 }
 
 function safeName(file) {
@@ -502,7 +399,7 @@ for (const r of results) {
     }
     if (r.difficulty) {
         console.log('  difficulty: ' + r.difficulty.tier + ' (perRoundFrac ~' + r.difficulty.perRoundFrac +
-            ' over ' + r.difficulty.rounds + ' rounds / ' + r.difficulty.windows + ' windows) — add to ' +
+            ' over ' + r.difficulty.rounds + ' rounds / ' + DIFFICULTY_WINDOWS + ' windows) — add to ' +
             'server/mapDifficulty.json perRoundFrac: "' + r.difficulty.key + '": ' + r.difficulty.perRoundFrac);
     }
 }
