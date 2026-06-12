@@ -245,6 +245,7 @@ function clientConnect() {
     server.on("config", function (c) {
         config = c;
         buildHazardById();
+        buildHazardButtons();
         tryStart();
     });
 
@@ -524,8 +525,8 @@ function buildSwatchDataURL(opts) {
     }
     return c.toDataURL();
 }
-// A hazard swatch draws the in-game look (orange disc + red attack ring; the
-// moving bumper adds its black rail) over a dirt ground — like a bumper sitting on
+// A hazard swatch draws the in-game look (orange disc + red attack ring; railed
+// kinds add their black rail) over a dirt ground — like a bumper sitting on
 // terrain — so it contrasts in both themes and reads as "what you'll place".
 function buildHazardSwatchDataURL(kind) {
     var size = 96;
@@ -540,7 +541,7 @@ function buildHazardSwatchDataURL(kind) {
         ctx.fillRect(0, 0, size, size);
     }
     var cx = size / 2, cy = size / 2;
-    if (kind === "movingBumper") {
+    if (kind.railed) {
         ctx.strokeStyle = "#111";
         ctx.lineWidth = 10;
         ctx.beginPath();
@@ -548,12 +549,13 @@ function buildHazardSwatchDataURL(kind) {
         ctx.lineTo(size - 16, cy);
         ctx.stroke();
     }
+    var hzCfg = config.hazards[kind.key];
     ctx.strokeStyle = "red";
     ctx.lineWidth = 5;
     ctx.beginPath();
     ctx.arc(cx, cy, 28, 0, 2 * Math.PI);
     ctx.stroke();
-    ctx.fillStyle = "orange";
+    ctx.fillStyle = hzCfg.color || "orange";
     ctx.beginPath();
     ctx.arc(cx, cy, 19, 0, 2 * Math.PI);
     ctx.fill();
@@ -578,12 +580,12 @@ function applyTileSwatches() {
         el.classList.add("swatch");
         el.style.backgroundImage = "url(" + buildSwatchDataURL(tiles[i][1]) + ")";
     }
-    var hazards = [["bumperButton", "bumper"], ["movingBumperButton", "movingBumper"]];
-    for (var h = 0; h < hazards.length; h++) {
-        var hb = document.getElementById(hazards[h][0]);
-        if (hb == null) { continue; }
+    for (var h = 0; h < EDITOR_HAZARD_KINDS.length; h++) {
+        var kind = EDITOR_HAZARD_KINDS[h];
+        var hb = document.getElementById(kind.key + "Button");
+        if (hb == null || config.hazards[kind.key] == null) { continue; }
         hb.classList.add("swatch");
-        hb.style.backgroundImage = "url(" + buildHazardSwatchDataURL(hazards[h][1]) + ")";
+        hb.style.backgroundImage = "url(" + buildHazardSwatchDataURL(kind) + ")";
     }
 }
 
@@ -661,8 +663,7 @@ function setupPage() {
         setStartEdges(edges);
         return false;
     });
-    $("#bumperButton").on("click", function () { editorSelectHazard("bumper"); return false; });
-    $("#movingBumperButton").on("click", function () { editorSelectHazard("movingBumper"); return false; });
+    // Hazard buttons are generated (buildHazardButtons) and bind their own clicks.
     $("#fairnessButton").on("click", function () {
         runFairnessCheck();
         return false;
@@ -1296,50 +1297,39 @@ function drawMyObject(x, y, myObject, angle) {
     if (angle == null) {
         angle = 0;
     }
-    if (myObject == config.hazards.bumper.id) {
-        drawBumper(x, y);
-        return;
-    }
-    if (myObject == config.hazards.movingBumper.id) {
-        drawMovingBumper(x, y, angle);
-        return;
+    var kind = editorHazardKindById(myObject);
+    if (kind != null) {
+        paintHazardShape(createContext, kind, x, y, angle, "red");
     }
 }
-function drawBumper(x, y) {
-    createContext.save();
-    createContext.beginPath();
-    createContext.strokeStyle = "red";
-    createContext.lineWidth = 3;
-    createContext.arc(x, y, config.hazards.bumper.attackRadius, 0, 2 * Math.PI);
-    createContext.stroke();
-    createContext.beginPath();
-    createContext.arc(x, y, config.hazards.bumper.radius, 0, 2 * Math.PI);
-    createContext.fillStyle = config.hazards.bumper.color;
-    createContext.fill();
-    createContext.restore();
-}
-function drawMovingBumper(x, y, angle) {
-    createContext.save();
-    createContext.beginPath();
-    createContext.translate(x, y);
-    createContext.rotate(angle * (Math.PI / 180));
-    createContext.rect(0, -config.hazards.movingBumper.height / 2, config.hazards.movingBumper.width, config.hazards.movingBumper.height);
-    createContext.fillStyle = "black";
-    createContext.fill();
-    createContext.restore();
-
-    createContext.save();
-    createContext.beginPath();
-    createContext.strokeStyle = "red";
-    createContext.lineWidth = 3;
-    createContext.arc(x, y, config.hazards.movingBumper.attackRadius, 0, 2 * Math.PI);
-    createContext.stroke();
-    createContext.beginPath();
-    createContext.arc(x, y, config.hazards.movingBumper.radius, 0, 2 * Math.PI);
-    createContext.fillStyle = config.hazards.movingBumper.color;
-    createContext.fill();
-
-    createContext.restore();
+// Shared per-kind hazard painter for the editor canvas (placement preview +
+// placed hazards) and the load-list thumbnails — one place to teach a new
+// kind its look. Railed kinds draw their rail bar from (x,y) along `angle`;
+// every kind draws the attack ring + disc from its config entry.
+function paintHazardShape(ctx, kind, x, y, angle, ringColor) {
+    var cfg = config.hazards[kind.key];
+    if (cfg == null) { return; }
+    if (kind.railed) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.translate(x, y);
+        ctx.rotate((angle || 0) * (Math.PI / 180));
+        ctx.rect(0, -cfg.height / 2, cfg.width, cfg.height);
+        ctx.fillStyle = "black";
+        ctx.fill();
+        ctx.restore();
+    }
+    ctx.save();
+    ctx.beginPath();
+    ctx.strokeStyle = ringColor;
+    ctx.lineWidth = 3;
+    ctx.arc(x, y, cfg.attackRadius, 0, 2 * Math.PI);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x, y, cfg.radius, 0, 2 * Math.PI);
+    ctx.fillStyle = cfg.color;
+    ctx.fill();
+    ctx.restore();
 }
 function handleClick(event) {
     // Canvas input is inert while the confirm modal is up — these are window-level
@@ -1513,10 +1503,18 @@ function editorDeleteSelected() {
 var TOOL_BUTTON_IDS = ["selectToolButton", "eraserToolButton", "slowTileButton",
     "normalTileButton", "fastTileButton", "lavaTileButton", "iceTileButton",
     "waterTileButton", "abilityTileButton", "randomTileButton", "goalTileButton",
-    "emptyTileButton", "bumperButton", "movingBumperButton"];
+    "emptyTileButton"];
+function allToolButtonIds() {
+    var ids = TOOL_BUTTON_IDS.slice();
+    for (var i = 0; i < EDITOR_HAZARD_KINDS.length; i++) {
+        ids.push(EDITOR_HAZARD_KINDS[i].key + "Button");
+    }
+    return ids;
+}
 function updateToolButtons() {
-    for (var i = 0; i < TOOL_BUTTON_IDS.length; i++) {
-        var el = document.getElementById(TOOL_BUTTON_IDS[i]);
+    var buttonIds = allToolButtonIds();
+    for (var i = 0; i < buttonIds.length; i++) {
+        var el = document.getElementById(buttonIds[i]);
         if (el != null) { el.classList.remove("tool-active"); }
     }
     var activeId = activeToolButtonId();
@@ -1538,7 +1536,7 @@ function activeToolButtonId() {
         return tileMap[activeTool.name] || null;
     }
     if (activeTool.kind === "hazard") {
-        return activeTool.name === "movingBumper" ? "movingBumperButton" : "bumperButton";
+        return activeTool.name + "Button";
     }
     return null;
 }
@@ -1568,6 +1566,51 @@ function commitStroke() {
         undo: function () { for (var i = 0; i < changes.length; i++) { var cell = vMap.cells[changes[i].idx]; if (cell) { cell.id = changes[i].from; } } },
         redo: function () { for (var i = 0; i < changes.length; i++) { var cell = vMap.cells[changes[i].idx]; if (cell) { cell.id = changes[i].to; } } }
     });
+}
+
+// --- hazard kinds (editor side) ------------------------------------------------
+// The editor's view of the map-authorable hazard kinds (server counterpart:
+// the registry in server/entities/hazards.js — keep the key sets in sync).
+// Adding a hazard kind in the editor = one entry here. Each entry drives the
+// palette button (label/title/shortcut), the swatch, the canvas painter
+// (railed kinds get the rail bar), and the angle requirement in the mirrored
+// validateMap below. key indexes config.hazards.
+var EDITOR_HAZARD_KINDS = [
+    { key: "bumper", label: "Bumper", shortcut: "b", railed: false },
+    { key: "movingBumper", label: "Moving Bumper", shortcut: "m", railed: true }
+];
+function editorHazardKindById(id) {
+    for (var i = 0; i < EDITOR_HAZARD_KINDS.length; i++) {
+        var cfg = config != null && config.hazards != null ? config.hazards[EDITOR_HAZARD_KINDS[i].key] : null;
+        if (cfg != null && cfg.id === id) { return EDITOR_HAZARD_KINDS[i]; }
+    }
+    return null;
+}
+// Generate one palette button per kind into #hazardButtonGrid (the HTML ships
+// an empty grid — buttons can't be static because labels/shortcuts live here).
+// Runs on the config socket message; idempotent for reconnects.
+function buildHazardButtons() {
+    var grid = document.getElementById("hazardButtonGrid");
+    if (grid == null || config == null || config.hazards == null) { return; }
+    if (grid.childElementCount > 0) { return; }
+    for (var i = 0; i < EDITOR_HAZARD_KINDS.length; i++) {
+        (function (kind) {
+            if (config.hazards[kind.key] == null) { return; }
+            var btn = document.createElement("button");
+            btn.id = kind.key + "Button";
+            btn.className = "mapEditorTile";
+            btn.title = kind.label + (kind.shortcut ? " (" + kind.shortcut.toUpperCase() + ")" : "");
+            btn.setAttribute("data-gp-nav", "");
+            var span = document.createElement("span");
+            span.textContent = kind.label;
+            btn.appendChild(span);
+            btn.addEventListener("click", function (e) {
+                e.preventDefault();
+                editorSelectHazard(kind.key);
+            });
+            grid.appendChild(btn);
+        })(EDITOR_HAZARD_KINDS[i]);
+    }
 }
 
 // --- hazard helpers (index/reference based — also fixes the stacked-duplicate
@@ -1985,31 +2028,15 @@ function renderMapThumbnail(map) {
         ctx.fill();
         paintCellEdgeAO(ctx, cell, thumbIds);
     }
-    // Hazards (same look as the editor canvas: orange disc + red attack ring,
-    // plus a black rail bar for moving bumpers). Without this, the load-list
-    // thumbnails dropped every bumper a map authored.
+    // Hazards (same look as the editor canvas, via the shared per-kind painter).
+    // Without this, the load-list thumbnails dropped every hazard a map authored.
     if (Array.isArray(map.hazards)) {
         for (var hi = 0; hi < map.hazards.length; hi++) {
             var hz = map.hazards[hi];
             if (hz == null) { continue; }
-            if (hz.id === config.hazards.movingBumper.id) {
-                ctx.save();
-                ctx.translate(hz.x, hz.y);
-                ctx.rotate((hz.angle || 0) * Math.PI / 180);
-                ctx.fillStyle = "black";
-                ctx.fillRect(0, -config.hazards.movingBumper.height / 2,
-                    config.hazards.movingBumper.width, config.hazards.movingBumper.height);
-                ctx.restore();
-            }
-            ctx.beginPath();
-            ctx.arc(hz.x, hz.y, config.hazards.bumper.attackRadius, 0, 2 * Math.PI);
-            ctx.strokeStyle = "#E5392B";
-            ctx.lineWidth = 3;
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.arc(hz.x, hz.y, config.hazards.bumper.radius, 0, 2 * Math.PI);
-            ctx.fillStyle = config.hazards.bumper.color;
-            ctx.fill();
+            var hzKind = editorHazardKindById(hz.id);
+            if (hzKind == null) { continue; }
+            paintHazardShape(ctx, hzKind, hz.x, hz.y, hz.angle || 0, "#E5392B");
         }
     }
     var url = cv.toDataURL("image/jpeg", 0.7);
@@ -2258,11 +2285,13 @@ function validateMap(map) {
                 typeof hazard.x !== "number" || typeof hazard.y !== "number") {
                 return { valid: false, reason: "Map has a malformed hazard." };
             }
-            // A moving bumper rides a rail at a given angle; without a numeric
-            // angle the engine's rail math goes NaN.
-            if (hazard.id === config.hazards.movingBumper.id &&
+            // Railed kinds ride a rail at a given angle; without a numeric
+            // angle the engine's rail math goes NaN. (Server mirror:
+            // utils.validateMap, driven by the hazard-kind registry.)
+            var hzKind = editorHazardKindById(hazard.id);
+            if (hzKind != null && hzKind.railed &&
                 typeof hazard.angle !== "number") {
-                return { valid: false, reason: "Map has a moving bumper with no direction." };
+                return { valid: false, reason: "Map has a moving hazard with no direction." };
             }
         }
     }

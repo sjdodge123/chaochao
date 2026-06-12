@@ -9005,12 +9005,30 @@ function drawStoneBorders(ctx) {
     ctx.stroke();
     ctx.restore();
 }
+// Per-kind hazard drawers, keyed by hazard id. Adding a new hazard kind on the
+// client = one entry here (the server-side counterpart is the kind registry in
+// server/entities/hazards.js). Built lazily on first draw — config arrives via
+// socket, and hazards can't exist client-side before it has.
+var hazardDrawers = null;
+function buildHazardDrawers() {
+    hazardDrawers = {};
+    hazardDrawers[config.hazards.bumper.id] = function (h) {
+        drawBumper(h.x, h.y);
+    };
+    hazardDrawers[config.hazards.movingBumper.id] = function (h) {
+        drawMovingBumper(h.x, h.y, h.railX, h.railY, h.angle);
+    };
+}
 function drawHazard(hazard) {
-    if (hazard.id == config.hazards.bumper.id) {
-        drawBumper(hazard.x, hazard.y);
+    if (hazardDrawers == null) {
+        if (config == null) {
+            return;
+        }
+        buildHazardDrawers();
     }
-    if (hazard.id == config.hazards.movingBumper.id) {
-        drawMovingBumper(hazard.x, hazard.y, hazard.railX, hazard.railY, hazard.angle);
+    var drawer = hazardDrawers[hazard.id];
+    if (drawer != null) {
+        drawer(hazard);
     }
 }
 

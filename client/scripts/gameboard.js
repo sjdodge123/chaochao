@@ -529,6 +529,15 @@ function updateHazardList(packet) {
 			// bumpers from stepping at the 30Hz tick rate.
 			hazardList[hazard[0]].tx = hazard[1];
 			hazardList[hazard[0]].ty = hazard[2];
+			// Optional per-kind slots (encoder: compressor.sendHazardUpdates):
+			// [3] angle for kinds that stream facing, [4] small phase/state int.
+			// Bumpers send neither — rows stay 3 long and nothing changes.
+			if (hazard.length > 3 && hazard[3] != null) {
+				hazardList[hazard[0]].angle = hazard[3];
+			}
+			if (hazard.length > 4 && hazard[4] != null) {
+				hazardList[hazard[0]].state = hazard[4];
+			}
 		}
 	}
 }
@@ -761,9 +770,13 @@ function applyHazards(payload) {
 		hazardList[hazard[0]].ty = hazard[3];
 		hazardList[hazard[0]].angle = hazard[4];
 
-		hazardList[hazard[0]].railX = hazardList[hazard[0]].x;
-		hazardList[hazard[0]].railY = hazardList[hazard[0]].y;
-
+		// Rail origin/angle come from the payload (compressor.newHazards sends the
+		// rail's own geometry) so a late-join spectator draws the rail from its true
+		// origin even when the hazard is caught mid-rail. Fallback to the hazard's
+		// position covers static kinds.
+		hazardList[hazard[0]].railX = hazard[5] != null ? hazard[5] : hazard[2];
+		hazardList[hazard[0]].railY = hazard[6] != null ? hazard[6] : hazard[3];
+		hazardList[hazard[0]].state = hazard.length > 7 ? hazard[7] : null;
 	}
 }
 function clearInfection() {

@@ -65,7 +65,7 @@ direction is strictly downward (no cycles): `game.js` → entities → `shapes.j
 | `player.js` | ~740 | `Player` (extends `Circle`) and `LobbyStartButton`. The big behavioral class: movement, punch/puck, fire, sleep/AFK, infection, `handleHit` (type dispatcher → `handlePunchHit`/`handlePuckHit`/`handleMapCellHit`), ability pickup via the `ABILITY_TILE_CTORS` table + `tryAcquireAbility`, scoring/notches, kill/reset. |
 | `abilities.js` | ~165 | `Ability` base + `Blindfold`, `Swap`, `IceCannon`, `Bomb`, `SpeedBuff`, `SpeedDebuff`, `TileSwap`, `Cut`, `BombTrigger`. |
 | `projectiles.js` | ~145 | `Projectile` (extends `Circle`) + `CloudProj`, `SnowFlakeProj`, `BombProj`, `Puck`. |
-| `hazards.js` | ~80 | `HazardRail`, `Hazard`, `Bumper`. |
+| `hazards.js` | ~120 | `HazardRail`, `Hazard`, `Bumper`, plus the **hazard-kind registry** (`HAZARD_KINDS`, `hazardKindById`, `registerHazardKind`) — single source of truth for map-authorable hazard kinds. **Adding a hazard kind touches:** a `config.json` `hazards` entry, one `registerHazardKind` call here (with `railed` + `build`), a drawer in `client/scripts/draw.js` (`buildHazardDrawers`), and an editor entry in `client/scripts/create.js` (`EDITOR_HAZARD_KINDS`). `gameBoard.generateHazards`, `utils.validateMap`, the lightning speed-up, the editor palette/swatch/thumbnail/shortcut, and the wire payloads are all registry-driven and need no changes. |
 | `aimers.js` | ~100 | `ExplosionAimer`, `SwapAimer` (telegraph circles). |
 | `punch.js` | ~25 | `Punch` (extends `Circle`) — the melee hitbox; created by `Player` and `Bumper`. |
 

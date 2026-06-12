@@ -75,4 +75,45 @@ class Bumper extends Hazard {
 	}
 }
 
-module.exports = { HazardRail, Hazard, Bumper };
+// --- hazard-kind registry ------------------------------------------------------
+// Single source of truth for the map-authorable hazard kinds. Everything with
+// per-kind behavior keys off this: gameBoard.generateHazards builds via
+// kind.build, utils.validateMap enforces kind.railed => finite angle, and the
+// lightning brutal round speeds up every railed kind. Adding a new hazard kind
+// server-side = a config.hazards entry + one registerHazardKind call here (the
+// client needs a matching drawer in draw.js and an editor entry in create.js).
+//
+// Kind contract:
+//   railed — rides a HazardRail; map entries must carry a finite .angle, and
+//            compressor.newHazards ships the rail origin/angle so clients draw
+//            the rail from its true origin (not wherever the hazard happens to
+//            be when a spectator joins mid-round).
+//   build(entry, mapID, roomSig) — construct the live hazard from its map JSON
+//            entry ({id, x, y, [angle]}). Must return a Hazard subclass.
+var HAZARD_KINDS = {};
+var _kindById = {};
+function registerHazardKind(key, def) {
+	def.key = key;
+	def.id = c.hazards[key].id;
+	HAZARD_KINDS[key] = def;
+	_kindById[def.id] = def;
+}
+function hazardKindById(id) {
+	return Object.prototype.hasOwnProperty.call(_kindById, id) ? _kindById[id] : null;
+}
+
+registerHazardKind("bumper", {
+	railed: false,
+	build: function (entry, mapID, roomSig) {
+		return new Bumper(entry.x, entry.y, c.hazards.bumper.radius, c.hazards.bumper.color, mapID, roomSig);
+	}
+});
+registerHazardKind("movingBumper", {
+	railed: true,
+	build: function (entry, mapID, roomSig) {
+		var rail = new HazardRail(entry.x, entry.y, c.hazards.movingBumper.width, c.hazards.movingBumper.height, entry.angle, c.hazards.bumper.color, mapID, roomSig);
+		return new Bumper(entry.x, entry.y, c.hazards.bumper.radius, c.hazards.bumper.color, mapID, roomSig, rail);
+	}
+});
+
+module.exports = { HazardRail, Hazard, Bumper, HAZARD_KINDS, hazardKindById, registerHazardKind };

@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### Bug fixes
+
+- Join a room mid-round and the moving bumpers' rails now draw where they actually are — they used to show the rail starting from wherever the bumper happened to be at the moment you joined, instead of its true track.
 
 ## v0.35.0 — 2026-06-12
 
