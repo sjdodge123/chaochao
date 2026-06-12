@@ -190,7 +190,7 @@
                   detail: "Partway through, the arena erupts — lava blooms out and floods inward with only a brief warning before it blows. Read the rumble, get clear of where it's about to open, and ride out the eruption to claim the goal." },
                 { id: "brutal-infection", name: "Infection", icon: svg("biohazard-solid.svg"), anim: "infection",
                   blurb: "Get tagged and you join the horde.",
-                  detail: "One racer starts infected and their touch spreads it — get tagged and you turn too, joining a horde that hunts whoever's left. The last clean racer wins; once infected, there's no winning, so your only job is to drag everyone else down with you." },
+                  detail: "One racer starts infected and their touch spreads it — get tagged and you turn too, joining a horde that hunts whoever's left. Infected racers lose their kart entirely and shamble on as green, arms-out zombies, so you can spot the horde at a glance. The last clean racer wins; once infected, there's no winning, so your only job is to drag everyone else down with you." },
                 { id: "brutal-hockey", name: "Air Hockey", icon: svg("hockey-puck-solid.svg"), anim: "hockey",
                   blurb: "A puck rockets around, launching karts.",
                   detail: "A giant puck ricochets around the arena, gaining speed with every wall it slams into. Get clipped and you're launched across the map; smack it to redirect it into rivals, but stay clear of its line because it only gets faster." },
