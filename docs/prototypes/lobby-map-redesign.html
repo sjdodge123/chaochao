@@ -54,13 +54,13 @@
   <div class="notes">
     <h2>Design intent</h2>
     <ul>
-      <li><b class="z">Hub Plaza (west)</b> — all four stations (Skin / Playlist / Mode / AI) form an arc around the spawn pad, all on clean grass/dirt. You spawn facing every lobby decision, then exit east through the arc toward the spinner.</li>
-      <li><b class="z">Spinner Court (center)</b> — a clean grass/dirt clearing (~220px radius) around the start spinner. The static bumper, water pool, lava pocket, and ice field that currently crowd the center are all moved out. A dirt road runs spawn &rarr; spinner &rarr; east testing grounds.</li>
+      <li><b class="z">Hub Plaza (west)</b> — all four stations arc around the spawn pad on clean grass/dirt, arranged by priority: <b>Skins and Bots (AI) hold the central spots</b> flanking the road exit, while Playlist and Game Mode (room-wide, set-once) sit on the plaza outskirts.</li>
+      <li><b class="z">Spinner Court (center)</b> — a clean grass/dirt clearing around the start spinner; the grass road runs spawn &rarr; spinner &rarr; east testing grounds. The dirt ring around the court is freckled with four small ice patches for casual sliding without crowding the spinner itself.</li>
       <li><b class="z">Ability Alley (north strip)</b> — bomb, speed-up, slow-down, and cut pickup pads consolidated on one grass strip, clear of both the plaza and the court.</li>
       <li><b class="z">Ice Rink (north-east)</b> — the ice field moves to the corner, with ice-cannon pads at its entry, a goal tile at the far corner to practice sliding into a finish, and a <b>lava pocket melted into its south edge</b> (the lava&ndash;ice interaction).</li>
       <li><b class="z">Bumper Court + Splash Pool (east)</b> — both bumpers (static + moving rail) live on a grass court; the water pool sits south-east of it, and its <b>south rim runs into the lava springs and sand shore</b> — a deliberate water + lava + sand tri-point that also demos the stone-seam wall on water&ndash;lava edges.</li>
-      <li><b class="z">Lava Springs (south-east)</b> — the lava lake keeps its corner with a full sand shore, a goal on the far sand as a risk/reward gauntlet, and the splash pool touching its north-east arc.</li>
-      <li><b class="z">Sand Drag (south strip)</b> — a pure slow-tile strip for feeling drag, well below the court.</li>
+      <li><b class="z">Lava Springs (south-east)</b> — the lava lake keeps its corner with a full sand shore, a goal on the far sand as a risk/reward gauntlet, and the splash pool touching its north-east arc. <b>Star Power pads</b> sit on the western shore — grab one and the lava gauntlet becomes runnable.</li>
+      <li><b class="z">Sand Drag (south strip)</b> — a slow-tile strip for feeling drag, well below the court, with <b>Swap and Tile-Swap pads</b> buried in the sand.</li>
       <li><b class="z">Ground scheme</b> — dirt (normal) is the base field; grass (fast) marks the main road, hub plaza pads, spinner court, ability alley, and bumper court, so the fast tile literally reads as the path network.</li>
     </ul>
     <h2>What this fixes</h2>
@@ -86,11 +86,13 @@ const CURRENT_MAP = {"bbox":{"xl":0,"xr":1366,"yt":0,"yb":768},"sites":[{"x":388
 const W = 1366, H = 768, CX = 683, CY = 384;
 
 const P_SPAWN = { cx: 175, cy: 384, r: 75 };
+// Priority ring: skin + ai (personal, most used) take the central spots flanking
+// the road exit; playlist + mode (room-wide, set once) sit on the plaza outskirts.
 const P_STATIONS = [
-  { id: "skin",     kind: "skin",     cx: 255, cy: 163, r: 60, color: "#4aa3ff" },
-  { id: "playlist", kind: "playlist", cx: 388, cy: 285, r: 60, color: "#FFCB30" },
-  { id: "mode",     kind: "mode",     cx: 388, cy: 483, r: 60, color: "#b266ff" },
-  { id: "ai",       kind: "ai",       cx: 255, cy: 605, r: 60, color: "#3ad17a" }
+  { id: "skin",     kind: "skin",     cx: 388, cy: 285, r: 60, color: "#4aa3ff" },
+  { id: "ai",       kind: "ai",       cx: 388, cy: 483, r: 60, color: "#3ad17a" },
+  { id: "playlist", kind: "playlist", cx: 245, cy: 155, r: 60, color: "#FFCB30" },
+  { id: "mode",     kind: "mode",     cx: 245, cy: 612, r: 60, color: "#b266ff" }
 ];
 const P_HAZARDS = [
   { id: 900, x: 1010, y: 355, angle: 0 },   // static bumper
@@ -105,7 +107,14 @@ const P_SPECIALS = [
   { x: 884, y: 100, id: 108 }, { x: 908, y: 124, id: 108 }, { x: 888, y: 142, id: 108 },
   { x: 972, y: 206, id: 107 }, { x: 996, y: 230, id: 107 }, { x: 974, y: 252, id: 107 },
   { x: 1248, y: 96, id: 6 }, { x: 1272, y: 118, id: 6 }, { x: 1248, y: 140, id: 6 },
-  { x: 1272, y: 582, id: 6 }, { x: 1294, y: 602, id: 6 }, { x: 1270, y: 618, id: 6 }
+  { x: 1272, y: 582, id: 6 }, { x: 1294, y: 602, id: 6 }, { x: 1270, y: 618, id: 6 },
+  { x: 530, y: 664, id: 101 }, { x: 556, y: 686, id: 101 }, { x: 532, y: 700, id: 101 },
+  { x: 700, y: 664, id: 106 }, { x: 726, y: 686, id: 106 }, { x: 702, y: 700, id: 106 },
+  { x: 905, y: 555, id: 109 }, { x: 928, y: 577, id: 109 }, { x: 906, y: 594, id: 109 }
+];
+// Small ice freckles in the dirt ring around (not in) the spinner court.
+const P_ICE_PATCHES = [
+  [520, 245, 55, 40], [850, 250, 50, 38], [545, 545, 55, 40], [830, 535, 50, 38]
 ];
 
 function mulberry32(a) {
@@ -137,6 +146,10 @@ function classifyProposed(x, y, rnd) {
   for (const st of P_STATIONS) if (d2(x, y, st.cx, st.cy) < 70 * 70) return 2; // grass under stations
   if (d2(x, y, CX, CY) < 115 * 115) return 2;                            // grass under spinner
   if (Math.abs(y - 384) < 42 && x >= 240 && x <= 950) return 2;          // main grass road (fast lane)
+  for (const p of P_ICE_PATCHES) {
+    const ex = (x - p[0]) / p[2], ey = (y - p[1]) / p[3];
+    if (ex * ex + ey * ey < 1) return 4;                                 // court-ring ice freckles
+  }
   return rnd() < 0.06 ? 2 : 1;                                           // dirt field w/ grass specks
 }
 
