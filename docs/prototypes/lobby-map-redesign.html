@@ -56,11 +56,12 @@
     <ul>
       <li><b class="z">Hub Plaza (west)</b> — all four stations (Skin / Playlist / Mode / AI) form an arc around the spawn pad, all on clean grass/dirt. You spawn facing every lobby decision, then exit east through the arc toward the spinner.</li>
       <li><b class="z">Spinner Court (center)</b> — a clean grass/dirt clearing (~220px radius) around the start spinner. The static bumper, water pool, lava pocket, and ice field that currently crowd the center are all moved out. A dirt road runs spawn &rarr; spinner &rarr; east testing grounds.</li>
-      <li><b class="z">Ability Alley (north strip)</b> — bomb, speed-up, slow-down, and cut pickup pads consolidated on one dirt strip, clear of both the plaza and the court.</li>
-      <li><b class="z">Ice Rink (north-east)</b> — the ice field moves to the corner, with ice-cannon pads at its entry and a goal tile at the far corner to practice sliding into a finish.</li>
-      <li><b class="z">Bumper Court + Splash Pool (east)</b> — both bumpers (static + moving rail) live on a dirt court next to the water pool. Water never touches lava, so no stone seams appear.</li>
-      <li><b class="z">Lava Springs (south-east)</b> — the lava lake keeps its corner but gains a full sand shore, with a goal on the far sand as a risk/reward gauntlet.</li>
+      <li><b class="z">Ability Alley (north strip)</b> — bomb, speed-up, slow-down, and cut pickup pads consolidated on one grass strip, clear of both the plaza and the court.</li>
+      <li><b class="z">Ice Rink (north-east)</b> — the ice field moves to the corner, with ice-cannon pads at its entry, a goal tile at the far corner to practice sliding into a finish, and a <b>lava pocket melted into its south edge</b> (the lava&ndash;ice interaction).</li>
+      <li><b class="z">Bumper Court + Splash Pool (east)</b> — both bumpers (static + moving rail) live on a grass court; the water pool sits south-east of it, and its <b>south rim runs into the lava springs and sand shore</b> — a deliberate water + lava + sand tri-point that also demos the stone-seam wall on water&ndash;lava edges.</li>
+      <li><b class="z">Lava Springs (south-east)</b> — the lava lake keeps its corner with a full sand shore, a goal on the far sand as a risk/reward gauntlet, and the splash pool touching its north-east arc.</li>
       <li><b class="z">Sand Drag (south strip)</b> — a pure slow-tile strip for feeling drag, well below the court.</li>
+      <li><b class="z">Ground scheme</b> — dirt (normal) is the base field; grass (fast) marks the main road, hub plaza pads, spinner court, ability alley, and bumper court, so the fast tile literally reads as the path network.</li>
     </ul>
     <h2>What this fixes</h2>
     <ul>
@@ -120,21 +121,23 @@ const d2 = (x, y, px, py) => (x - px) * (x - px) + (y - py) * (y - py);
 // Zone classifier — priority order matters.
 function classifyProposed(x, y, rnd) {
   if (x < 58 || x > W - 58 || y < 55 || y > H - 55) return 10;          // void rim
+  { const ex = (x - 1160) / 85, ey = (y - 290) / 48;
+    if (ex * ex + ey * ey < 1) return 3; }                               // melt pocket: lava–ice edge
   if (x >= 950 && y <= 300) return 4;                                    // ice rink (NE)
-  { const ex = (x - 1190) / 115, ey = (y - 400) / 72;
-    if (ex * ex + ey * ey < 1) return 11; }                              // splash pool (E)
-  if (x >= 935 && x <= 1085 && y >= 315 && y <= 475) return 1;           // bumper court (dirt)
+  { const ex = (x - 1210) / 115, ey = (y - 470) / 85;
+    if (ex * ex + ey * ey < 1) return 11; }                              // splash pool: south rim meets lava+sand
+  if (x >= 935 && x <= 1085 && y >= 315 && y <= 475) return 2;           // bumper court (grass)
   { const ex = (x - 1100) / 170, ey = (y - 600) / 85;
     if (ex * ex + ey * ey < 1) return 3; }                               // lava springs (SE)
   { const ex = (x - 1100) / 235, ey = (y - 600) / 135;
     if (ex * ex + ey * ey < 1) return 0; }                               // sand shore around lava
   if (x >= 465 && x <= 885 && y >= 632) return 0;                        // sand drag (S strip)
-  if (x >= 465 && x <= 930 && y <= 148) return 1;                        // ability alley (N strip, dirt)
-  if (d2(x, y, P_SPAWN.cx, P_SPAWN.cy) < 105 * 105) return 1;            // dirt under spawn pad
-  for (const st of P_STATIONS) if (d2(x, y, st.cx, st.cy) < 70 * 70) return 1; // dirt under stations
-  if (d2(x, y, CX, CY) < 115 * 115) return 1;                            // dirt under spinner
-  if (Math.abs(y - 384) < 42 && x >= 240 && x <= 950) return 1;          // main dirt road
-  return rnd() < 0.06 ? 1 : 2;                                           // grass field w/ dirt specks
+  if (x >= 465 && x <= 930 && y <= 148) return 2;                        // ability alley (N strip, grass)
+  if (d2(x, y, P_SPAWN.cx, P_SPAWN.cy) < 105 * 105) return 2;            // grass under spawn pad
+  for (const st of P_STATIONS) if (d2(x, y, st.cx, st.cy) < 70 * 70) return 2; // grass under stations
+  if (d2(x, y, CX, CY) < 115 * 115) return 2;                            // grass under spinner
+  if (Math.abs(y - 384) < 42 && x >= 240 && x <= 950) return 2;          // main grass road (fast lane)
+  return rnd() < 0.06 ? 2 : 1;                                           // dirt field w/ grass specks
 }
 
 function buildProposedMap() {
@@ -336,11 +339,13 @@ const P_ZONE_LABELS = [
   { x: 300, y: 330, t: "HUB PLAZA" },
   { x: 683, y: 545, t: "SPINNER COURT" },
   { x: 700, y: 78, t: "ABILITY ALLEY" },
-  { x: 1125, y: 178, t: "ICE RINK" },
+  { x: 1100, y: 165, t: "ICE RINK" },
   { x: 1010, y: 296, t: "BUMPER COURT" },
-  { x: 1190, y: 400, t: "SPLASH POOL" },
-  { x: 1075, y: 648, t: "LAVA SPRINGS" },
-  { x: 672, y: 672, t: "SAND DRAG" }
+  { x: 1210, y: 448, t: "SPLASH POOL" },
+  { x: 1040, y: 660, t: "LAVA SPRINGS" },
+  { x: 672, y: 672, t: "SAND DRAG" },
+  { x: 1160, y: 228, t: "lava + ice", s: 11 },
+  { x: 1118, y: 528, t: "water + lava + sand", s: 11 }
 ];
 
 const CUR_CALLOUTS = [
@@ -354,7 +359,7 @@ const CUR_CALLOUTS = [
 
 function drawProposedExtras(ctx, showLabels) {
   if (!showLabels) return;
-  for (const z of P_ZONE_LABELS) labelPill(ctx, z.x, z.y, z.t, { bold: true, size: 14, bg: "rgba(10,12,16,0.6)" });
+  for (const z of P_ZONE_LABELS) labelPill(ctx, z.x, z.y, z.t, { bold: true, size: z.s || 14, bg: "rgba(10,12,16,0.6)", color: z.s ? "#ffd9a3" : "#fff" });
 }
 
 function drawCurrentExtras(map, ctx, showLabels) {
