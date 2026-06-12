@@ -780,11 +780,14 @@ exports.validateMap = function (vMap, config) {
                 !Number.isFinite(hazard.x) || !Number.isFinite(hazard.y)) {
                 return { valid: false, reason: "Map has a malformed hazard." };
             }
-            // A moving bumper rides a rail at a given angle; a non-finite angle
-            // sends the engine's rail math to NaN.
-            if (hazard.id === config.hazards.movingBumper.id &&
+            // Railed kinds ride a rail at a given angle; a non-finite angle sends
+            // the engine's rail math to NaN. Railed-ness comes from the hazard-kind
+            // registry — required lazily because entities/hazards.js requires
+            // utils.js at load time (a top-level require here would be circular).
+            var hazardKind = require('./entities/hazards.js').hazardKindById(hazard.id);
+            if (hazardKind != null && hazardKind.railed &&
                 !Number.isFinite(hazard.angle)) {
-                return { valid: false, reason: "Map has a moving bumper with no direction." };
+                return { valid: false, reason: "Map has a moving hazard with no direction." };
             }
         }
     }

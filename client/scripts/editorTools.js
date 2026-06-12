@@ -126,16 +126,25 @@ function handleEditorShortcut(e) {
             editorSelectTool("select"); e.preventDefault(); return;
         case "e": case "E":
             editorSelectTool("eraser"); e.preventDefault(); return;
-        case "b": case "B":
-            editorSelectHazard("bumper"); e.preventDefault(); return;
-        case "m": case "M":
-            editorSelectHazard("movingBumper"); e.preventDefault(); return;
         case "r": case "R":
             editorRotateSelected(e.shiftKey ? -15 : 15); e.preventDefault(); return;
         case "Delete":
             editorDeleteSelected(); e.preventDefault(); return;
         case "Escape":
             editorDeselect(); return; // modal Escape is handled separately in create.js
+    }
+
+    // Hazard-kind shortcuts come from EDITOR_HAZARD_KINDS (create.js) so a new
+    // kind's key binding ships with its palette entry.
+    if (typeof EDITOR_HAZARD_KINDS !== "undefined") {
+        for (var hk = 0; hk < EDITOR_HAZARD_KINDS.length; hk++) {
+            var kindDef = EDITOR_HAZARD_KINDS[hk];
+            if (kindDef.shortcut && e.key.toLowerCase() === kindDef.shortcut) {
+                editorSelectHazard(kindDef.key);
+                e.preventDefault();
+                return;
+            }
+        }
     }
 
     // Number row 1..9 → tile brushes, in the palette's visual order.

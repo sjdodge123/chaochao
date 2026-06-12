@@ -77,6 +77,17 @@ exports.sendHazardUpdates = function (hazardList) {
 			hazard.x,
 			hazard.y
 		];
+		// Optional per-kind state slots (decoder: gameboard.js updateHazardList).
+		// streamAngle: kinds whose facing animates per tick (e.g. a rotor) opt in;
+		// bumpers must NOT — their .angle flips ±180 to encode rail direction and
+		// re-sending it would mirror the client's rail. netState: small integer for
+		// phase-driven kinds (charging/firing/open/closed); null means "no change".
+		if (hazard.streamAngle || hazard.netState != null) {
+			listItem.push(hazard.streamAngle ? hazard.angle : null);
+			if (hazard.netState != null) {
+				listItem.push(hazard.netState);
+			}
+		}
 		packet.push(listItem);
 	}
 	hazard = null;
@@ -248,12 +259,20 @@ exports.newHazards = function (hazardList) {
 	var packet = [];
 	for (prop in hazardList) {
 		hazard = hazardList[prop];
+		// Railed hazards ship the RAIL's origin/angle, not their own: a late-join
+		// spectator catches the hazard mid-rail with a possibly-flipped direction
+		// angle, and the client must still draw the rail from its true origin.
+		// (decoder: gameboard.js applyHazards)
+		var rail = hazard.rail != null ? hazard.rail : null;
 		listItem = [
 			hazard.ownerId,
 			hazard.id,
 			hazard.x,
 			hazard.y,
-			hazard.angle
+			rail != null ? rail.angle : hazard.angle,
+			rail != null ? rail.x : hazard.x,
+			rail != null ? rail.y : hazard.y,
+			hazard.netState != null ? hazard.netState : null
 		];
 		packet.push(listItem);
 	}

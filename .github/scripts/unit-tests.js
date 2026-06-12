@@ -302,6 +302,33 @@ group('compressor', function () {
     eq(hazRow[0][1], 11, 'hazard[1] = x');
     eq(hazRow[0][2], 22, 'hazard[2] = y');
 
+    // Optional per-kind slots (hazard-framework): a kind that streams its facing
+    // (streamAngle, e.g. a future rotor) grows the row to 4; a phase-driven kind
+    // (netState) appends its state int at [4] with [3] nulled if angle isn't
+    // streamed. Plain bumpers stay at 3 fields — pinned above.
+    const hazAng = compressor.sendHazardUpdates({ a: { ownerId: 'o', x: 1, y: 2, angle: 33, streamAngle: true } });
+    eq(hazAng[0].length, 4, 'streamAngle hazard row grows to 4 fields');
+    eq(hazAng[0][3], 33, 'streamAngle hazard[3] = angle');
+    const hazState = compressor.sendHazardUpdates({ a: { ownerId: 'o', x: 1, y: 2, angle: 33, netState: 2 } });
+    eq(hazState[0].length, 5, 'netState hazard row grows to 5 fields');
+    eq(hazState[0][3], null, 'netState-only hazard[3] = null (angle not streamed)');
+    eq(hazState[0][4], 2, 'netState hazard[4] = state');
+
+    // newHazards creation rows: railed kinds ship the RAIL's origin/angle (not
+    // the hazard's own, which sits mid-rail with a flipped direction angle on a
+    // late join); static kinds fall back to their own position/angle.
+    const created = JSON.parse(compressor.newHazards({
+        a: { ownerId: 'o', id: 901, x: 55, y: 66, angle: 180, rail: { x: 5, y: 6, angle: 0 } },
+        b: { ownerId: 'p', id: 900, x: 7, y: 8, angle: 0 }
+    }));
+    eq(created[0].length, 8, 'created hazard row has 8 fields');
+    eq(created[0][4], 0, 'railed created[4] = rail angle, not the flipped hazard angle');
+    eq(created[0][5], 5, 'railed created[5] = rail origin x');
+    eq(created[0][6], 6, 'railed created[6] = rail origin y');
+    eq(created[1][5], 7, 'static created[5] falls back to hazard x');
+    eq(created[1][6], 8, 'static created[6] falls back to hazard y');
+    eq(created[1][7], null, 'created[7] = netState (null when unset)');
+
     // spawn/append packet (static fields, sent once) — pin ALL 18 indices so any
     // reorder of the spawn layout trips the test, not just a length change.
     const spawn = JSON.parse(compressor.appendPlayer(fakePlayer));

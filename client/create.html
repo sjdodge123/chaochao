@@ -727,10 +727,9 @@
           </div>
           <div class="ed-section">
             <div class="ed-section-title">Hazards</div>
-            <div class="ed-swatch-grid">
-              <button id="bumperButton" data-gp-nav title="Bumper (B)" class="mapEditorTile"><span>Bumper</span></button>
-              <button id="movingBumperButton" data-gp-nav title="Moving Bumper (M)" class="mapEditorTile"><span>Moving Bumper</span></button>
-            </div>
+            <!-- Buttons are generated from EDITOR_HAZARD_KINDS (create.js) once the
+                 config arrives — one button per registered hazard kind. -->
+            <div class="ed-swatch-grid" id="hazardButtonGrid"></div>
           </div>
           <div id="startEdgePalette" class="ed-section">
             <div class="ed-section-title">Start edge</div>

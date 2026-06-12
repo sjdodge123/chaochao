@@ -13,7 +13,7 @@ var aiController = require('../aiController.js');
 var { Gate } = require('./shapes.js');
 var { LobbyStartButton, LobbyStation } = require('./player.js');
 var { ExplosionAimer, SwapAimer } = require('./aimers.js');
-var { HazardRail, Bumper } = require('./hazards.js');
+var { hazardKindById } = require('./hazards.js');
 var { CloudProj, SnowFlakeProj, BombProj, Puck } = require('./projectiles.js');
 var { Blindfold, Swap, IceCannon, Bomb, SpeedBuff, SpeedDebuff, TileSwap, Cut, StarPower, BombTrigger, OrbitalBeam } = require('./abilities.js');
 
@@ -2671,21 +2671,20 @@ class GameBoard {
 		if (this.currentMap.hazards == null) {
 			return;
 		}
+		// Build through the hazard-kind registry (entities/hazards.js) — unknown ids
+		// are skipped (validateMap already rejects them at the submit boundary).
 		for (var i = 0; i < this.currentMap.hazards.length; i++) {
-			if (this.currentMap.hazards[i].id == c.hazards.bumper.id) {
-				var mapID = utils.generateHash(this.roomSig, String(this.currentMap.hazards[i].x + this.currentMap.hazards[i].y));
-				var hazard = new Bumper(this.currentMap.hazards[i].x, this.currentMap.hazards[i].y, c.hazards.bumper.radius, c.hazards.bumper.color, mapID, this.roomSig);
-				this.hazardList[mapID] = hazard;
+			var entry = this.currentMap.hazards[i];
+			var kind = hazardKindById(entry.id);
+			if (kind == null) {
+				continue;
 			}
-			if (this.currentMap.hazards[i].id == c.hazards.movingBumper.id) {
-				var mapID = utils.generateHash(this.roomSig, String(this.currentMap.hazards[i].x + this.currentMap.hazards[i].y));
-				var rail = new HazardRail(this.currentMap.hazards[i].x, this.currentMap.hazards[i].y, c.hazards.movingBumper.width, c.hazards.movingBumper.height, this.currentMap.hazards[i].angle, c.hazards.bumper.color, mapID, this.roomSig);
-				var bumper = new Bumper(this.currentMap.hazards[i].x, this.currentMap.hazards[i].y, c.hazards.bumper.radius, c.hazards.bumper.color, mapID, this.roomSig, rail);
-				if (this.checkForActiveBrutal(c.brutalRounds.lightning.id)) {
-					bumper.speed *= c.brutalRounds.lightning.movingHazardSpeedMod;
-				}
-				this.hazardList[mapID] = bumper;
+			var mapID = utils.generateHash(this.roomSig, String(entry.x + entry.y));
+			var hazard = kind.build(entry, mapID, this.roomSig);
+			if (kind.railed && this.checkForActiveBrutal(c.brutalRounds.lightning.id)) {
+				hazard.speed *= c.brutalRounds.lightning.movingHazardSpeedMod;
 			}
+			this.hazardList[mapID] = hazard;
 		}
 	}
 	generateAbilities() {
