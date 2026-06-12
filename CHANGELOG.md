@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- **Matches now warm up before they bite.** The first couple of rounds favor friendlier, more open maps so everyone gets racing — the real gauntlets (the maps where karts barely make it off the start line) never appear in rounds 1–2. Mid-match the map draw is the same shuffle as before, but once anyone reaches match point the rotation turns up the heat and deciding rounds skew toward the catalog's hardest maps. Works in every playlist — a playlist with no easy maps just shuffles like it always did.
 
 ## v0.34.1 — 2026-06-12
 

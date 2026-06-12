@@ -2189,9 +2189,59 @@ class GameBoard {
 			}
 			if (unplayed.length === 0) { unplayed = eligible; }
 		}
-		var nextMapId = unplayed[utils.getRandomInt(0, unplayed.length - 1)];
+		var nextMapId = this.pickByDifficultyWeight(unplayed);
 		this.nextMap = JSON.parse(JSON.stringify(this.maps[nextMapId]));
 		return this.nextMap.id;
+	}
+
+	// Match phase for the difficulty ramp. "late" the moment ANY player sits at
+	// match point (the same player.nearVictory flag the brutal-round boost in
+	// checkForBrutalRound reads — teams mode mirrors it onto every member, so a
+	// team at match point also reads late). "early" while the UPCOMING round
+	// number is within difficultyRamp.earlyRounds (this.round is the count of
+	// rounds already loaded — loadNextMap increments after the draw). Otherwise
+	// "mid", which is also the answer whenever the ramp is disabled.
+	difficultyPhase() {
+		var ramp = c.difficultyRamp;
+		if (ramp == null || ramp.enabled === false) { return "mid"; }
+		for (var id in this.playerList) {
+			if (this.playerList[id] != null && this.playerList[id].nearVictory === true) { return "late"; }
+		}
+		var earlyRounds = (typeof ramp.earlyRounds === "number") ? ramp.earlyRounds : 2;
+		if (this.round < earlyRounds) { return "early"; }
+		return "mid";
+	}
+
+	// Weighted draw over `unplayed` map indices, biasing by each map's
+	// meta.difficulty tier per the current phase's difficultyRamp.weights row.
+	// A bias, not a bucket: a map missing meta/difficulty (or a tier missing
+	// from the weights row) reads weight 1, and an all-zero pool — e.g. a
+	// brutal-only playlist in the early phase, or a single brutal map — falls
+	// back to a uniform draw so the pick can never come up empty. No-repeat
+	// cycling is untouched: callers compute `unplayed` exactly as before and
+	// this only replaces the final uniform pick.
+	pickByDifficultyWeight(unplayed) {
+		var uniform = unplayed[utils.getRandomInt(0, unplayed.length - 1)];
+		var ramp = c.difficultyRamp;
+		if (ramp == null || ramp.enabled === false || ramp.weights == null) { return uniform; }
+		var row = ramp.weights[this.difficultyPhase()];
+		if (row == null) { return uniform; }
+		var weights = [];
+		var total = 0;
+		for (var i = 0; i < unplayed.length; i++) {
+			var meta = this.maps[unplayed[i]].meta;
+			var tier = meta && meta.difficulty;
+			var w = (tier != null && typeof row[tier] === "number" && row[tier] >= 0) ? row[tier] : 1;
+			weights.push(w);
+			total += w;
+		}
+		if (total <= 0) { return uniform; }
+		var roll = Math.random() * total;
+		for (var j = 0; j < unplayed.length; j++) {
+			roll -= weights[j];
+			if (roll < 0) { return unplayed[j]; }
+		}
+		return unplayed[unplayed.length - 1];
 	}
 
 	// Indices into this.maps eligible for the room's current playlist. A map is
@@ -2243,7 +2293,7 @@ class GameBoard {
 			}
 			if (unplayed.length === 0) { unplayed = pool.slice(); }
 		}
-		return unplayed[utils.getRandomInt(0, unplayed.length - 1)];
+		return this.pickByDifficultyWeight(unplayed);
 	}
 
 	// Set the room's active playlist (from the lobby hub board). Validates the id
