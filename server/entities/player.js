@@ -1439,6 +1439,10 @@ class Player extends Circle {
 			this.bully = 0;
 			this.ability = null;
 			this.notches = 0;
+			// Match-point flag must die with the match: it survives rounds by design,
+			// but left true it would make every rematch read as "late" to the
+			// difficulty ramp and inflate the brutal-round boost from round 1.
+			this.nearVictory = false;
 			this.totalKills = 0;
 			this.onFire = 0;
 			this.savior = 0;

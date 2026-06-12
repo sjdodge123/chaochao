@@ -165,11 +165,19 @@ for (const { file, map } of parsedMaps) {
 //     heuristic, but the map-submission CI prints a measured value ready to
 //     paste, so nudge until the data catches up.
 {
-    const mapDifficulty = require(path.join(repoRoot, 'server', 'mapDifficulty.json'));
-    const squash = (n) => String(n || '').replace(/\s+/g, '');
+    // Parse ourselves (like config/maps above) so a hand-edited trailing comma
+    // yields a clean ::error:: instead of an unhandled require stack trace.
+    let mapDifficulty = null;
+    try {
+        mapDifficulty = JSON.parse(fs.readFileSync(path.join(repoRoot, 'server', 'mapDifficulty.json'), 'utf8'));
+    } catch (e) {
+        fail('server/mapDifficulty.json: invalid JSON — ' + e.message);
+    }
+    const mapClassifier = require(path.join(repoRoot, 'server', 'mapClassifier.js'));
     const diskKeys = new Set(
-        parsedMaps.filter(({ map }) => map && !map.lobbyOnly).map(({ map }) => squash(map.name))
+        parsedMaps.filter(({ map }) => map && !map.lobbyOnly).map(({ map }) => mapClassifier.difficultyKey(map.name))
     );
+    if (mapDifficulty != null) {
     for (const key of Object.keys(mapDifficulty.perRoundFrac || {})) {
         if (!diskKeys.has(key)) {
             fail('server/mapDifficulty.json: perRoundFrac key "' + key + '" matches no map in client/maps — ' +
@@ -187,7 +195,8 @@ for (const { file, map } of parsedMaps) {
     if (unmeasured.length > 0) {
         warn('server/mapDifficulty.json: ' + unmeasured.length + ' map(s) have no measured perRoundFrac and use ' +
             'the geometry-heuristic difficulty tier: ' + unmeasured.join(', ') + '. Add the measured value from ' +
-            'the map-submission PR review comment (or re-run the balance sweep — see mapDifficulty.json _doc).');
+            'the map-submission PR review comment (or run node .github/scripts/measure-map-difficulty.js).');
+    }
     }
 }
 
