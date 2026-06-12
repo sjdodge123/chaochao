@@ -866,6 +866,78 @@ var LearnAnim = (function () {
         ctx.restore();
     };
 
+    SCENES["antlion"] = function (s) {
+        floor(s.ctx, "sand.png", 60);
+        var ctx = s.ctx;
+        var ph = loop(s.t, 4200);
+        // Thumper sanctuary on the right: a gray pad whose dashed ring flashes on
+        // every pound; the kart flees into it, the antlion gets bounced back out.
+        var tx = W * 0.78, ty = H * 0.52, ringR = 46;
+        var pulse = loop(s.t, 950); // one pound per 0.95s
+        ctx.save();
+        ctx.setLineDash([5, 5]);
+        ctx.strokeStyle = "#c9a23a";
+        ctx.globalAlpha = 0.25 + 0.5 * Math.max(0, 1 - pulse * 3);
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(tx, ty, ringR, 0, 2 * Math.PI); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = "#6b6e72";
+        ctx.fillRect(tx - 12, ty - 12, 24, 24);
+        ctx.fillStyle = "#767e88";
+        ctx.beginPath(); ctx.arc(tx, ty, 8 + Math.max(0, 1 - pulse * 4) * 3, 0, 2 * Math.PI); ctx.fill();
+        ctx.strokeStyle = "#454c55"; ctx.lineWidth = 2; ctx.stroke();
+        ctx.restore();
+        // Kart dawdles on the sand, then bolts for the ring once the bug erupts.
+        var kx = ph < 0.3 ? W * 0.25 : lerp(W * 0.25, tx - 18, ease(clamp((ph - 0.3) / 0.45, 0, 1)));
+        var ky = H * 0.52;
+        kart(ctx, kx, ky, 11, BLUE);
+        // The antlion: erupts at ph 0.3 from a dune behind the kart, chases just
+        // a bit slower, and gets held at (and bounced off) the sanctuary ring.
+        if (ph > 0.3) {
+            var ae = clamp((ph - 0.3) / 0.08, 0, 1); // pop-out scale
+            var ax = lerp(W * 0.12, tx - ringR - 12, ease(clamp((ph - 0.34) / 0.55, 0, 1)));
+            var bounce = Math.max(0, 1 - pulse * 2.5) * (ph > 0.78 ? 14 : 0);
+            ax -= bounce;
+            var ay = ky + Math.sin(s.t / 90) * 2;
+            ctx.save();
+            ctx.translate(ax, ay);
+            ctx.scale(ae, ae);
+            // legs
+            ctx.strokeStyle = "#4e4734"; ctx.lineWidth = 2; ctx.lineCap = "round";
+            for (var l = 0; l < 3; l++) {
+                var lw = Math.sin(s.t / 60 + l * 2.1) * 2;
+                ctx.beginPath(); ctx.moveTo(-4 + l * 4, -4); ctx.lineTo(-8 + l * 5 + lw, -11); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(-4 + l * 4, 4); ctx.lineTo(-8 + l * 5 - lw, 11); ctx.stroke();
+            }
+            // segmented body (tail to the left, head toward the kart)
+            ctx.fillStyle = "#8e8560";
+            ctx.beginPath(); ctx.ellipse(-9, 0, 6, 4.5, 0, 0, 2 * Math.PI); ctx.fill();
+            ctx.fillStyle = "#cfc29a"; ctx.strokeStyle = "#8e8560"; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.ellipse(-1, 0, 6.5, 5.5, 0, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+            ctx.fillStyle = "#a8bb8a";
+            ctx.beginPath(); ctx.ellipse(2, 0, 4.5, 4, 0, 0, 2 * Math.PI); ctx.fill();
+            // mandibles snapping
+            var snap = Math.max(0, Math.sin(s.t / 140)) * 0.5;
+            ctx.strokeStyle = "#4f3f2a"; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(7, -2); ctx.quadraticCurveTo(13, -4 - snap * 4, 15, -1); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(7, 2); ctx.quadraticCurveTo(13, 4 + snap * 4, 15, 1); ctx.stroke();
+            ctx.restore();
+            // eruption dust on the pop
+            if (ph < 0.42) {
+                ctx.save();
+                ctx.fillStyle = "#d9c9a0";
+                ctx.globalAlpha = 1 - (ph - 0.3) / 0.12;
+                for (var dd = 0; dd < 5; dd++) {
+                    var da = dd * 1.26;
+                    ctx.beginPath();
+                    ctx.arc(W * 0.12 + Math.cos(da) * (8 + ae * 12), ay + Math.sin(da) * (6 + ae * 9), 2.5, 0, 2 * Math.PI);
+                    ctx.fill();
+                }
+                ctx.restore();
+            }
+        }
+    };
+
     SCENES["infection"] = function (s) {
         floor(s.ctx, "dirt.png", 60);
         var ph = loop(s.t, 4000), carrierX = lerp(W * 0.1, W * 0.9, ph);

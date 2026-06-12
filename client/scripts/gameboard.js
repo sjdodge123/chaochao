@@ -796,6 +796,48 @@ function applyHazards(payload) {
 		hazardList[hazard[0]].railX = hazard[5] != null ? hazard[5] : hazard[2];
 		hazardList[hazard[0]].railY = hazard[6] != null ? hazard[6] : hazard[3];
 		hazardList[hazard[0]].state = hazard.length > 7 ? hazard[7] : null;
+
+		// Antlion (mid-round eruption): stamp the spawn time so drawAntlionHazard
+		// plays the dig-out emergence, and cue the sandy burst. Antlions never ride
+		// the newMap payload, so anything with this id arriving here erupted live.
+		if (config != null && config.hazards.antlion != null && hazard[1] == config.hazards.antlion.id) {
+			hazardList[hazard[0]].spawnAt = Date.now();
+			if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
+				if (typeof playAntlionEruption === "function") {
+					playAntlionEruption(antlionSfxLevel(hazard[2], hazard[3]));
+				}
+			}
+		}
+		// Thumper: the angle slot is the cycle anchor — ms until the server's next
+		// slam at packet-build time — so the client's pound animation lands in step
+		// with the server's repel impulse (fresh for late joiners too).
+		if (config != null && config.hazards.thumper != null && hazard[1] == config.hazards.thumper.id) {
+			hazardList[hazard[0]].nextSlamAt = Date.now() + (hazard[4] || 0);
+			hazardList[hazard[0]].lastSlamAt = 0;
+		}
+	}
+}
+// Distance-attenuated level (0..1) for antlion-round one-shot SFX, from the
+// local player's kart to the event.
+function antlionSfxLevel(x, y) {
+	if (myPlayer == null) { return 0.7; }
+	var d = Math.sqrt((myPlayer.x - x) * (myPlayer.x - x) + (myPlayer.y - y) * (myPlayer.y - y));
+	var level = 1 - d / 900;
+	return level < 0.15 ? 0.15 : (level > 1 ? 1 : level);
+}
+// Server-pushed hazard despawns (antlion burrows). Entries are
+// [ownerId, x, y, reason] — lockstep with GameBoard.removeAntlions.
+function removeHazards(payload) {
+	if (payload == null) {
+		return;
+	}
+	payload = JSON.parse(payload);
+	for (var i = 0; i < payload.length; i++) {
+		var entry = payload[i];
+		delete hazardList[entry[0]];
+		if (entry[3] === "burrow" && typeof spawnAntlionBurrowFX === "function") {
+			spawnAntlionBurrowFX(entry[1], entry[2]);
+		}
 	}
 }
 function clearInfection() {

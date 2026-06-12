@@ -919,6 +919,9 @@ function registerConnectionHandlers(server) {
 		if (typeof heatwaveFX !== "undefined") { heatwaveFX = null; heatwaveScorch = []; heatwaveFlashes = []; }
 		if (typeof heatwaveWarnBanner !== "undefined") { heatwaveWarnBanner = null; }
 		if (typeof stopHeatwaveDrone === "function") { stopHeatwaveDrone(); }
+		// Antlion burrow/dust FX reset synchronously too (same microtask gotcha):
+		// a dig-down animating across the map swap would render on the new terrain.
+		if (typeof antlionBurrows !== "undefined") { antlionBurrows.length = 0; }
 		// A new round starts a fresh team scoring ledger (NOT cleared at overview —
 		// the overview is where the just-ended round's ledger is shown).
 		if (typeof teamRoundLedger !== "undefined") { teamRoundLedger = []; }
@@ -1535,6 +1538,10 @@ function registerStateHandlers(server) {
 	server.on("resetHazards", function () {
 		resetHazardList();
 	});
+	// Mid-round hazard despawns (antlion burrows): delete + dig-down FX.
+	server.on("removeHazards", function (payload) {
+		removeHazards(payload);
+	});
 	server.on("resetGame", function () {
 		fullReset();
 		// New match — the crowd starts tame again, and brawl tracking is cleared so
@@ -1573,6 +1580,12 @@ function registerCombatHandlers(server) {
 		}
 		if (punch.type == "bumper") {
 			playSoundVaried(bumperSound, 0.08);
+		}
+		if (punch.type == "antlion") {
+			// A mandible snap, attenuated by distance (synth — no clip asset).
+			if (typeof playAntlionBite === "function" && typeof antlionSfxLevel === "function") {
+				playAntlionBite(antlionSfxLevel(punch.x, punch.y));
+			}
 		}
 
 	});
