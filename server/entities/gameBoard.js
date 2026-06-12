@@ -2405,7 +2405,19 @@ class GameBoard {
 			return this.nextMap.id;
 		}
 		if (c.TESTSingleMap) {
-			this.nextMap = JSON.parse(JSON.stringify(this.maps[0]));
+			// Test knob (config / CHAO_PERF_OVERRIDE seam, never prod): `true` pins
+			// the first library map as before; a string pins the map whose name or
+			// id matches (falls back to maps[0] when nothing matches).
+			var pinned = this.maps[0];
+			if (typeof c.TESTSingleMap === "string") {
+				for (var mi = 0; mi < this.maps.length; mi++) {
+					if (this.maps[mi].name === c.TESTSingleMap || this.maps[mi].id === c.TESTSingleMap) {
+						pinned = this.maps[mi];
+						break;
+					}
+				}
+			}
+			this.nextMap = JSON.parse(JSON.stringify(pinned));
 			return this.nextMap.id;
 		}
 		// Wildcard playlist (e.g. "Default"): roll each round so the FREQUENCY of
