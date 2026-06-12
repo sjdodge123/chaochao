@@ -543,6 +543,14 @@ function drawTeamUnderglow(player, sx, sy) {
 }
 
 function drawKartAppearance(player, sx, sy, headingOverride) {
+    // Infected racers swap their kart body for the infection zombie (defined near
+    // drawPlayer), so every mirrored body path (e.g. the ice reflection) shows the
+    // same silhouette as the live kart. Infection is mid-race transient, so the
+    // static paths (overview/recap) never see this flag.
+    if (player.infected == true) {
+        drawZombieBody(player, sx, sy, headingOverride);
+        return;
+    }
     // Two INDEPENDENT body cosmetics: the BORDER (player.border) rings ANY cart from behind,
     // and the PATTERN (player.pattern) textures the plain sphere only. Both can be equipped at
     // once. Border FIRST — it rings from BEHIND so the cart body always sits on top (only the
@@ -6072,6 +6080,240 @@ function checkDrawPlayer(player, dt) {
         drawWaterDrip(player);
     }
 }
+// =========================== Infection zombie body ===========================
+// Ported from docs/spikes/zombie-prototype.html — the "Infected sprinter" variant
+// (PALETTES.infected + {bulk:0.95, pace:1.6, glowEyes:1}). While player.infected,
+// the kart body is REPLACED by this top-down zombie; the biohazard tag-radius ring
+// and the #7CFC00 punch ring are unchanged. The flag clears on round reset
+// (gameboard.js), so the kart reverts automatically.
+//
+// Perf: the prototype's drawZombie builds gradients every call and uses shadowBlur
+// for the eye glow — both banned in the frame path (docs/spikes/skin-render-perf.md).
+// The whole lurch cycle is baked ONCE into an offscreen sprite sheet: ZOMBIE_FRAMES
+// frames over one arm-swing period, with every sine rate snapped to an integer
+// multiple of the arm rate so the baked loop closes seamlessly (the prototype's
+// free-running sines never exactly repeat). Live cost per zombie = one ellipse fill
+// (ground shadow) + one rotated drawImage; the drunken stagger, lurch bob, and punch
+// lunge ride on cheap canvas transforms.
+var ZOMBIE_FRAMES = 16;
+var ZOMBIE_FRAME_PX = 128;          // baked at ~2.5x the on-screen size, so it stays crisp
+var ZOMBIE_SPAN = 122;              // design units per frame (~118-unit box + margin)
+var ZOMBIE_BODY_SCALE = 3.4;        // frame box spans radius*3.4 px on screen (~51px kart)
+var ZOMBIE_PACE = 1.6;              // sprinter preset: everything lurches faster
+var ZOMBIE_BULK = 0.95;
+var ZOMBIE_ARM_RATE = 2.2 * ZOMBIE_PACE; // rad/s; one baked cycle = 2PI/this seconds
+var ZOMBIE_PAL = {
+    skin: '#7ed957', skinHi: '#9cf07a', skinDark: '#48a23c',
+    shirt: '#2e6b3a', shirtDark: '#1d472a', pants: '#3f5a3a',
+    hair: '#1f3a22', wound: '#a33b3b', bone: '#e8e0cc',
+    eyeW: '#ffe0e0', pupil: '#3a0d0d', glow: '#ff4040'
+};
+var zombieSheet = null; // lazy-baked on the first infected render
+
+function zombieArmPose(s, ph) {
+    var ext = Math.sin(ph + (s > 0 ? 0 : 2.8));
+    return {
+        elbow: [s * 16 + s * ext * 0.5, -16 + ext * 1.5],
+        hand: [s * 9.5 - s * ext * 1.2, -26 - ext * 3.5]
+    };
+}
+
+function zombieFleshStroke(ctx, pts, w) {
+    var P = ZOMBIE_PAL;
+    var i;
+    ctx.strokeStyle = P.skinDark; ctx.lineWidth = w + 2.2;
+    ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+    for (i = 1; i < pts.length; i++) { ctx.lineTo(pts[i][0], pts[i][1]); }
+    ctx.stroke();
+    ctx.strokeStyle = P.skin; ctx.lineWidth = w;
+    ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+    for (i = 1; i < pts.length; i++) { ctx.lineTo(pts[i][0], pts[i][1]); }
+    ctx.stroke();
+}
+
+// One pose of the lurch cycle in design space (origin = kart centre, facing -y).
+// ph runs 0..2PI over the arm-swing period. Gradients/shadowBlur are fine HERE
+// because this only runs at bake time, never per frame.
+function bakeZombieFrame(ctx, ph) {
+    var S = Math.sin, C = Math.cos, PI = Math.PI;
+    var P = ZOMBIE_PAL;
+    var s, i, pose;
+    ctx.save();
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    // (the prototype's stagger rotation + lurch bob are applied LIVE at blit time)
+    // shuffling feet — the trailing foot drags, toes out (orig 5*pace ~= 2x arm rate)
+    for (i = 0; i < 2; i++) {
+        s = (i === 0) ? 1 : -1;
+        var stride = s > 0 ? S(2 * ph) * 4 : S(2 * ph + PI) * 2;
+        ctx.fillStyle = P.pants; ctx.strokeStyle = P.shirtDark; ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.ellipse(s * (6 + (s < 0 ? 1.5 : 0)), 14 - stride, 3.2, 5.2, s * (s < 0 ? 0.5 : 0.12), 0, PI * 2);
+        ctx.fill(); ctx.stroke();
+    }
+    // hips
+    ctx.fillStyle = P.pants; ctx.strokeStyle = P.shirtDark; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.ellipse(0, 12, 9, 5, 0, 0, PI * 2); ctx.fill(); ctx.stroke();
+
+    // upper body scales by bulk around the shoulder line
+    ctx.save();
+    ctx.translate(0, -4); ctx.scale(ZOMBIE_BULK, ZOMBIE_BULK); ctx.translate(0, 4);
+
+    // belly
+    var bg = ctx.createLinearGradient(0, -2, 0, 14);
+    bg.addColorStop(0, P.shirt); bg.addColorStop(1, P.shirtDark);
+    ctx.fillStyle = bg; ctx.strokeStyle = P.shirtDark; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.ellipse(0, 5, 11, 8, 0, 0, PI * 2); ctx.fill(); ctx.stroke();
+
+    // arms reach forward (roots tucked under the shoulders) + torn sleeve stubs
+    for (i = 0; i < 2; i++) {
+        s = (i === 0) ? 1 : -1;
+        pose = zombieArmPose(s, ph);
+        zombieFleshStroke(ctx, [[s * 13, -6], pose.elbow, pose.hand], 4);
+        ctx.strokeStyle = P.shirt; ctx.lineWidth = 5.4;
+        ctx.beginPath(); ctx.moveTo(s * 13, -6);
+        ctx.lineTo(s * 13 + (pose.elbow[0] - s * 13) * 0.45, -6 + (pose.elbow[1] + 6) * 0.45);
+        ctx.stroke();
+    }
+
+    // hunched shoulders (shirt)
+    var sg = ctx.createLinearGradient(0, -12, 0, 2);
+    sg.addColorStop(0, P.shirt); sg.addColorStop(1, P.shirtDark);
+    ctx.fillStyle = sg; ctx.strokeStyle = P.shirtDark; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.ellipse(0, -4, 15, 8, 0, 0, PI * 2); ctx.fill(); ctx.stroke();
+    // torn shoulder — skin showing through
+    ctx.fillStyle = P.skin; ctx.strokeStyle = P.skinDark; ctx.lineWidth = 0.8;
+    ctx.beginPath(); ctx.ellipse(9.5, -6, 3.2, 2.4, 0.5, 0, PI * 2); ctx.fill(); ctx.stroke();
+    // gore splotches
+    ctx.globalAlpha = 0.8; ctx.fillStyle = P.wound;
+    ctx.beginPath(); ctx.ellipse(-6, -2, 2.6, 1.8, -0.4, 0, PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(3, 1.5, 1.4, 0, PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // hands with grasping finger nubs (orig 6*pace ~= 3x arm rate)
+    for (i = 0; i < 2; i++) {
+        s = (i === 0) ? 1 : -1;
+        pose = zombieArmPose(s, ph);
+        var grasp = S(3 * ph + s) * 0.6;
+        ctx.fillStyle = P.skin; ctx.strokeStyle = P.skinDark; ctx.lineWidth = 0.9;
+        ctx.beginPath(); ctx.arc(pose.hand[0], pose.hand[1], 3, 0, PI * 2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = P.skinHi;
+        for (var f = -1; f <= 1; f++) {
+            var fa = -PI / 2 + f * (0.55 + grasp * 0.18) + s * 0.12;
+            ctx.beginPath();
+            ctx.arc(pose.hand[0] + C(fa) * 3.4, pose.hand[1] + S(fa) * 3.4, 1.15, 0, PI * 2);
+            ctx.fill();
+        }
+    }
+
+    // head — hunched forward, wobbling (orig 2.1/1.3*pace snapped to 1x arm rate,
+    // phase-shifted so the wobble doesn't run in lockstep with the arms)
+    ctx.save();
+    ctx.translate(0, -13 + S(ph + 1.3) * 0.6);
+    ctx.rotate(S(ph + 2.1) * 0.12);
+    var hg = ctx.createRadialGradient(-3, -3.5, 2, 0, 0, 9.5);
+    hg.addColorStop(0, P.skinHi); hg.addColorStop(1, P.skinDark);
+    ctx.fillStyle = hg; ctx.strokeStyle = P.skinDark; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(0, 0, 9, 0, PI * 2); ctx.fill(); ctx.stroke();
+    // matted hair patch over the back of the crown
+    ctx.fillStyle = P.hair;
+    ctx.beginPath();
+    ctx.moveTo(-7.8, -1);
+    ctx.quadraticCurveTo(-8.5, 6, -3.5, 8.2);
+    ctx.quadraticCurveTo(0, 9.3, 3.5, 8.2);
+    ctx.quadraticCurveTo(8.5, 6, 7.8, -1);
+    ctx.quadraticCurveTo(4, 2.5, 0, 1.8);
+    ctx.quadraticCurveTo(-4, 2.5, -7.8, -1);
+    ctx.closePath(); ctx.fill();
+    // stray strands
+    ctx.strokeStyle = P.hair; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(-6.5, 0.5); ctx.lineTo(-9.4, -2.2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(6.8, 1); ctx.lineTo(9.6, -0.8); ctx.stroke();
+    // exposed skull wound
+    ctx.fillStyle = P.bone; ctx.strokeStyle = P.wound; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.ellipse(4.3, -1.4, 2.5, 1.9, 0.5, 0, PI * 2); ctx.fill(); ctx.stroke();
+    // milky eyes near the front edge
+    for (i = 0; i < 2; i++) {
+        s = (i === 0) ? 1 : -1;
+        ctx.fillStyle = P.eyeW; ctx.strokeStyle = P.skinDark; ctx.lineWidth = 0.7;
+        ctx.beginPath(); ctx.arc(s * 3.4, -5.6, 1.6, 0, PI * 2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = P.pupil;
+        ctx.beginPath();
+        ctx.arc(s * 3.4 + S(ph + s) * 0.6, -5.9, 0.55, 0, PI * 2);
+        ctx.fill();
+    }
+    // glowing eyes (sprinter preset) — shadowBlur is OK at bake time only
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, 0.55 + 0.3 * S(2 * ph));
+    ctx.fillStyle = P.glow; ctx.shadowColor = P.glow; ctx.shadowBlur = 5;
+    for (i = 0; i < 2; i++) {
+        s = (i === 0) ? 1 : -1;
+        ctx.beginPath(); ctx.arc(s * 3.4, -5.7, 1.1, 0, PI * 2); ctx.fill();
+    }
+    ctx.restore();
+    // groaning mouth at the front rim
+    ctx.fillStyle = P.pupil;
+    ctx.beginPath();
+    ctx.ellipse(0, -8.2, 1.6, 0.9 + Math.max(0, S(ph)) * 0.7, 0, 0, PI * 2);
+    ctx.fill();
+    ctx.restore(); // head
+
+    ctx.restore(); // bulk group
+    ctx.restore(); // root
+}
+
+function buildZombieSheet() {
+    zombieSheet = document.createElement('canvas');
+    zombieSheet.width = ZOMBIE_FRAMES * ZOMBIE_FRAME_PX;
+    zombieSheet.height = ZOMBIE_FRAME_PX;
+    var ctx = zombieSheet.getContext('2d');
+    for (var i = 0; i < ZOMBIE_FRAMES; i++) {
+        ctx.save();
+        ctx.translate(i * ZOMBIE_FRAME_PX + ZOMBIE_FRAME_PX / 2, ZOMBIE_FRAME_PX / 2);
+        ctx.scale(ZOMBIE_FRAME_PX / ZOMBIE_SPAN, ZOMBIE_FRAME_PX / ZOMBIE_SPAN);
+        bakeZombieFrame(ctx, (i / ZOMBIE_FRAMES) * Math.PI * 2);
+        ctx.restore();
+    }
+}
+
+// Blit the zombie body at screen (sx,sy), rotated to the kart heading. Called from
+// the same body-draw scopes as the sprite/skin (drawPlayer + drawKartAppearance),
+// so camera offset, dim/immune alpha, and drift-lean transforms are all inherited.
+// headingOverride pins a static pose (mirrors drawCartSkin's pinned contract).
+function drawZombieBody(player, sx, sy, headingOverride) {
+    if (zombieSheet == null) { buildZombieSheet(); }
+    var ctx = gameContext;
+    var pinned = (typeof headingOverride === "number");
+    var heading = pinned ? headingOverride : getCartHeading(player);
+    var t = pinned ? 0 : cartSkinAnimTime;
+    var span = player.radius * ZOMBIE_BODY_SCALE;
+    var frame = Math.floor((t * ZOMBIE_ARM_RATE / (2 * Math.PI)) * ZOMBIE_FRAMES) % ZOMBIE_FRAMES;
+    if (frame < 0) { frame += ZOMBIE_FRAMES; }
+    ctx.save();
+    // soft ground shadow — unrotated ambient blob, like the prototype's
+    ctx.fillStyle = "rgba(0,0,0,0.25)";
+    ctx.beginPath();
+    ctx.ellipse(sx, sy + span * 0.02, span * 0.17, span * 0.085, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.translate(sx, sy);
+    ctx.rotate(heading + Math.PI / 2); // sheet faces -y; heading 0 = due east
+    if (!pinned) {
+        ctx.rotate(Math.sin(t * 2.5 * ZOMBIE_PACE) * 0.05); // drunken stagger
+        ctx.translate(0, Math.sin(t * 10 * ZOMBIE_PACE) * 0.5 * (span / ZOMBIE_SPAN)); // lurch bob
+    }
+    // punch lunge — same impact cue as drawCartSkin; forward is local -y here
+    if (player.punchAnimAt != null) {
+        var pe = (Date.now() - player.punchAnimAt) / 220;
+        if (pe >= 0 && pe < 1) {
+            var pk = (pe < 0.3) ? (pe / 0.3) : (1 - (pe - 0.3) / 0.7);
+            ctx.translate(0, -pk * span * 0.12);
+            ctx.scale(1 + pk * 0.14, 1 + pk * 0.14);
+        }
+    }
+    ctx.drawImage(zombieSheet, frame * ZOMBIE_FRAME_PX, 0, ZOMBIE_FRAME_PX, ZOMBIE_FRAME_PX,
+        -span / 2, -span / 2, span, span);
+    ctx.restore();
+}
+
 function drawPlayer(player, dt) {
 
     if (player.infected == true) {
@@ -6198,6 +6440,12 @@ function drawPlayer(player, dt) {
     // try/finally so a thrown drawImage (e.g. an undecoded sprite -> InvalidStateError)
     // can't skip the restore() and leak the dimmed/flash alpha onto the rest of the frame.
     try {
+        // Infected racers shamble as the zombie INSTEAD of their kart body: skip every
+        // body cosmetic (border/sprite/avatar/pattern/skin) so the silhouette reads as
+        // pure horde. Same screen anchor + alpha/lean scopes as the body draws below.
+        if (player.infected == true) {
+            drawZombieBody(player, player.x + camera.getCameraX(), player.y + camera.getCameraY());
+        } else {
         // Border FIRST — it rings the kart from BEHIND, so the cart body / sprite always sits
         // on top (only the rim beyond the body shows). Independent 4th slot (player.border),
         // renders over ANY cart.
@@ -6236,10 +6484,12 @@ function drawPlayer(player, dt) {
         if (bodyPainter != null) {
             drawCartSkin(player, player.x + camera.getCameraX(), player.y + camera.getCameraY(), player.radius, bodyPainter);
         }
+        } // end non-infected body draws
         // The base sprite (skipped for skinned karts) is where the "you're being
-        // targeted" red rim lives, so re-draw that tell around the skin when this kart
-        // is in an aimer's target list (swap/explosive).
-        if (hasCartSkin && playerStrokeColor === "red") {
+        // targeted" red rim lives, so re-draw that tell around the skin (or the zombie,
+        // which also skips the sprite) when this kart is in an aimer's target list
+        // (swap/explosive).
+        if ((hasCartSkin || player.infected == true) && playerStrokeColor === "red") {
             gameContext.save();
             gameContext.beginPath();
             gameContext.lineWidth = 3;
