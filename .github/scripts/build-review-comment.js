@@ -91,6 +91,22 @@ for (const m of result.maps) {
     }
     if (facts.length) { lines.push(''); lines.push('_' + facts.join(' · ') + '_'); }
 
+    // Difficulty-ramp measurement: estimated tier + the ready-to-paste entry for
+    // server/mapDifficulty.json. Submission PRs may only touch client/maps/**, so
+    // the data update is a (trivial) follow-up for a maintainer — until then the
+    // map plays via the classifier's geometry-heuristic tier.
+    if (m.difficulty) {
+        lines.push('');
+        lines.push('**Measured difficulty (estimate):** `' + m.difficulty.tier + '` — ' +
+            m.difficulty.perRoundFrac + ' of bots finished per round over ' + m.difficulty.rounds +
+            ' simulated rounds. To tier it in the difficulty ramp, add to `perRoundFrac` in ' +
+            '`server/mapDifficulty.json` (separate PR — submission PRs only carry the map):');
+        lines.push('');
+        lines.push('```json');
+        lines.push('"' + m.difficulty.key + '": ' + m.difficulty.perRoundFrac);
+        lines.push('```');
+    }
+
     // Image 1 — the authoritative map render.
     const server = imgUrl(m.serverImage);
     lines.push('');
