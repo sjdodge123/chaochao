@@ -525,6 +525,12 @@ function cartSkinPainter(name) {
 // only — one arc fill + stroke, no shadow/filter surfaces (the GPU killers; see
 // cosmetic-perf notes).
 function drawTeamUnderglow(player, sx, sy) {
+    // Zombies play for the horde, not a team (server/game.js denies them team
+    // points and bypasses the friendly-fire gate) — so an infected kart sheds its
+    // Crimson/Jade underglow too. Also avoids stacking a jade ring under the
+    // lime infection tag ring (two concentric greens read as mud). Returns with
+    // the rest of the kart visuals when the round reset clears the flag.
+    if (player.infected == true) { return; }
     if (player.teamId == null || typeof teamInfo === "undefined" || teamInfo == null) { return; }
     var tdef = (typeof teamDefFor === "function") ? teamDefFor(player.teamId) : null;
     if (tdef == null) { return; }
