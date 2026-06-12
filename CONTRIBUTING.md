@@ -24,6 +24,8 @@ Every PR still cuts its own `vX.Y.Z` release, but the landing-page banner shows 
 
 The most recent `[headline]` bullet in the week wins; if none is flagged, the week's first bullet is used. The marker is stripped wherever the line is shown (banner, per-PR release notes, and the weekly digest), so it only affects which line gets promoted.
 
+Headlines must be **at most 180 characters** (after stripping markdown) — the landing banner clamps to three lines, so anything longer is cut off mid-sentence. The `Game mechanic changes need release notes` CI job rejects longer ones. Write a one-line hook and put the detail in the regular bullets below it; the weekly digest shows those in full.
+
 ### Cutting a release
 
 1. Move the `## Unreleased` block under a new `## vX.Y.Z — YYYY-MM-DD` heading in `CHANGELOG.md`. Leave a fresh empty `## Unreleased` at the top.

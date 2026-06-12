@@ -117,3 +117,35 @@ jobs:
             exit 1
           fi
           echo "Release notes check passed."
+
+      # The landing-page banner shows the [headline] bullet and clamps it to
+      # three lines, so a paragraph-sized headline just gets cut off. Gate new
+      # [headline] bullets to the same character cap the banner enforces
+      # (MAX_HEADLINE_CHARS in index.js) — the detail belongs in the ordinary
+      # bullets below it, which the weekly digest shows in full. Runs on every
+      # CHANGELOG edit, not just mechanic PRs.
+      - name: Keep [headline] bullets banner-sized
+        run: |
+          export LC_ALL=C.UTF-8
+          base='${{ steps.range.outputs.base }}'
+          head='${{ steps.range.outputs.head }}'
+          max=180  # keep in lockstep with MAX_HEADLINE_CHARS in index.js
+          fail=0
+          while IFS= read -r line; do
+            # Measure what players actually see on the banner: marker stripped,
+            # [text](url) collapsed to text, emphasis/code markers removed.
+            text=$(printf '%s' "$line" \
+              | sed -E 's/^\+[[:space:]]*-[[:space:]]+\[[Hh][Ee][Aa][Dd][Ll][Ii][Nn][Ee]\][[:space:]]*//' \
+              | sed -E 's/\[([^]]+)\]\([^)]*\)/\1/g' \
+              | sed -E 's/[*`_]//g' \
+              | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+            len=${#text}
+            if [ "$len" -gt "$max" ]; then
+              echo "::error::New [headline] bullet is ${len} chars; the landing banner caps headlines at ${max}. Write a one-line hook and move the detail into regular bullets."
+              echo "::error::Offending bullet: ${text}"
+              fail=1
+            else
+              echo "headline ok (${len}/${max} chars): ${text}"
+            fi
+          done < <(git diff "$base" "$head" -- CHANGELOG.md | grep -iE '^\+[[:space:]]*-[[:space:]]+\[headline\]' || true)
+          exit "$fail"

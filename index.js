@@ -93,6 +93,23 @@ function adsConfigTag() {
 // Runs in both dev and prod; read once at startup so we don't hit disk on
 // every request.
 const APP_VERSION = require('./package.json').version;
+
+// The banner must never take more vertical room than three of the landing
+// menu buttons, so the headline is capped to this many characters (CSS also
+// line-clamps it to 3 lines as the hard geometry guarantee). Keep in lockstep
+// with the same constant enforced on new [headline] bullets by
+// .github/workflows/release-notes-check.yml.
+const MAX_HEADLINE_CHARS = 180;
+
+// Truncate at a word boundary with an ellipsis; short text passes through.
+// Trailing punctuation is trimmed so we never render "score:…".
+function truncateHeadline(text) {
+    if (text.length <= MAX_HEADLINE_CHARS) return text;
+    return text.slice(0, MAX_HEADLINE_CHARS - 1)
+        .replace(/\s+\S*$/, '')
+        .replace(/[\s.,:;!?—–-]+$/, '') + '…';
+}
+
 const APP_NEWS = loadWeeklyNews();
 const RELEASES_REPO = 'sjdodge123/chaochao';
 
@@ -150,7 +167,7 @@ function loadWeeklyNews() {
         }
         var text = headline || firstBullet;
         if (!text || !weekMonday) return null;
-        return { headline: text, weekTag: 'week-' + weekMonday };
+        return { headline: truncateHeadline(text), weekTag: 'week-' + weekMonday };
     } catch (e) {
         console.log('Could not read CHANGELOG.md for news banner:', e.message);
         return null;
