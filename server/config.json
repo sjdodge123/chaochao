@@ -420,6 +420,29 @@
                 "maxDelay": 25,
                 "warnMs": 3000
             }
+        },
+        "antlion": {
+            "id": 1014,
+            "active": true,
+            "title": "Antlions",
+            "_doc": "Sand is dangerous: linger on it and antlions erupt nearby and give chase. Thumpers pound the ground and keep antlions out of their radius (sanctuaries). Mutually exclusive with heatwave (it deletes the sand habitat).",
+            "sandDwellSeconds": 2,
+            "chaseSpeed": 72,
+            "hitCooldown": 0.7,
+            "punchBonus": 12,
+            "maxAntlions": 10,
+            "maxAntlionsCeiling": 14,
+            "offSandDespawnSeconds": 3,
+            "minSpawnDist": 60,
+            "maxSpawnDist": 120,
+            "separationRadius": 38,
+            "thumperCount": 2,
+            "thumperPerSandTiles": 30,
+            "thumperMaxCount": 3,
+            "thumperPeriod": 1.9,
+            "repelRadius": 110,
+            "slamImpulse": 260,
+            "minSandTiles": 10
         }
     },
     "hazards": {
@@ -477,6 +500,17 @@
             "attackRadius": 95,
             "punchBonus": 26,
             "fuseMs": 1300
+        },
+        "antlion": {
+            "id": 906,
+            "color": "#cfc29a",
+            "attackRadius": 22,
+            "radius": 15
+        },
+        "thumper": {
+            "id": 907,
+            "color": "#6b6e72",
+            "radius": 26
         }
     },
     "lobbyWaitTime": 5,

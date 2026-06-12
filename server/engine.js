@@ -51,6 +51,12 @@ exports.checkFlipAroundWorld = function (proj, world) {
 exports.explosion = function (player, location, distance) {
 	explosion(player, location, distance);
 }
+// Whether (x,y) sits on a cell of tile id `id` (live cell ids, shared spatial
+// index). Used by the antlion round for the creatures' own sand-leash check —
+// antlions are hazards, not players, so they never get a handleMapCellHit stamp.
+exports.isOnCellOfType = function (x, y, map, id) {
+	return cellOfTypeAt(x, y, map, id) != null;
+}
 
 class Engine {
 	constructor(playerList, projectileList, hazardList) {
