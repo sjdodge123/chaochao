@@ -129,6 +129,10 @@ const d2 = (x, y, px, py) => (x - px) * (x - px) + (y - py) * (y - py);
 
 // Zone classifier — priority order matters.
 function classifyProposed(x, y, rnd) {
+  // West dock: a grass channel through the rim at spawn latitude, so walkable
+  // ground touches the left edge — CI's goal-reachability check samples its
+  // start points along x=40 and rejects a fully void-ringed left edge.
+  if (x < 58 && Math.abs(y - 384) < 55) return 2;
   if (x < 58 || x > W - 58 || y < 55 || y > H - 55) return 10;          // void rim
   { const ex = (x - 1160) / 85, ey = (y - 290) / 48;
     if (ex * ex + ey * ey < 1) return 3; }                               // melt pocket: lava–ice edge
@@ -158,10 +162,15 @@ function buildProposedMap() {
   const sites = P_SPECIALS.map(s => ({ x: s.x, y: s.y, id: s.id }));
   // solid void ring (the jittered fill grid alone leaves the rim patchy)
   for (let gx = 10; gx < W; gx += 50) {
-    sites.push({ x: gx, y: 24, id: 10 }, { x: gx + 25, y: H - 24, id: 10 });
+    sites.push({ x: gx, y: 24, id: 10 });
+    // the staggered bottom row must stay inside the world (CI validator
+    // rejects sites past the bbox +5px margin)
+    if (gx + 25 <= W - 6) sites.push({ x: gx + 25, y: H - 24, id: 10 });
   }
   for (let gy = 60; gy < H - 50; gy += 50) {
-    sites.push({ x: 24, y: gy, id: 10 }, { x: W - 24, y: gy + 25, id: 10 });
+    // leave the west-dock band open (see classifyProposed)
+    if (Math.abs(gy - 384) > 78) sites.push({ x: 24, y: gy, id: 10 });
+    sites.push({ x: W - 24, y: gy + 25, id: 10 });
   }
   for (let gy = 18; gy < H - 10; gy += 42) {
     for (let gx = 18; gx < W - 10; gx += 42) {
