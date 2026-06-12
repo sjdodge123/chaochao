@@ -156,6 +156,41 @@ for (const { file, map } of parsedMaps) {
     }
 }
 
+// Difficulty-ramp data hygiene (server/mapDifficulty.json, keyed by map name
+// with whitespace removed). Two failure modes:
+//   - A key matching no map on disk is an ERROR: renaming or deleting a map
+//     silently orphans its entry and drops the map to the geometry heuristic,
+//     so force the rename/cleanup to travel with the map change.
+//   - A racing map with no measured entry is a WARNING: it plays fine via the
+//     heuristic, but the map-submission CI prints a measured value ready to
+//     paste, so nudge until the data catches up.
+{
+    const mapDifficulty = require(path.join(repoRoot, 'server', 'mapDifficulty.json'));
+    const squash = (n) => String(n || '').replace(/\s+/g, '');
+    const diskKeys = new Set(
+        parsedMaps.filter(({ map }) => map && !map.lobbyOnly).map(({ map }) => squash(map.name))
+    );
+    for (const key of Object.keys(mapDifficulty.perRoundFrac || {})) {
+        if (!diskKeys.has(key)) {
+            fail('server/mapDifficulty.json: perRoundFrac key "' + key + '" matches no map in client/maps — ' +
+                'if the map was renamed or removed, rename or delete this entry in the same PR ' +
+                '(keys are the map name with whitespace removed).');
+        }
+    }
+    for (const key of (mapDifficulty.aiArtifacts || [])) {
+        if (!diskKeys.has(key)) {
+            fail('server/mapDifficulty.json: aiArtifacts entry "' + key + '" matches no map in client/maps — ' +
+                'rename or delete it alongside the map change.');
+        }
+    }
+    const unmeasured = [...diskKeys].filter((k) => (mapDifficulty.perRoundFrac || {})[k] == null);
+    if (unmeasured.length > 0) {
+        warn('server/mapDifficulty.json: ' + unmeasured.length + ' map(s) have no measured perRoundFrac and use ' +
+            'the geometry-heuristic difficulty tier: ' + unmeasured.join(', ') + '. Add the measured value from ' +
+            'the map-submission PR review comment (or re-run the balance sweep — see mapDifficulty.json _doc).');
+    }
+}
+
 for (const { file, map } of parsedMaps) {
     // Maps are stored sites-only; rebuild full geometry (cells) so validateMap can
     // check it, exactly as loadMaps does at boot.
