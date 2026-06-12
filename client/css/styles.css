@@ -863,6 +863,15 @@ div.desc {
 .news-headline {
     font-size: 0.9rem;
     line-height: 1.3;
+    /* Hard geometry cap: the banner must never take more vertical room than
+       three of the menu buttons above it (~130px). Clamping to three lines
+       keeps the whole banner under ~80px no matter how long the bullet is;
+       the server also truncates (MAX_HEADLINE_CHARS in index.js), but this
+       is the guarantee at narrow widths where even a capped bullet wraps. */
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    overflow: hidden;
 }
 
 
