@@ -408,4 +408,68 @@ registerHazardKind("mine", {
 	}
 });
 
-module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, Mine, HAZARD_KINDS, hazardKindById, registerHazardKind };
+// Antlion (brutal round 1014): a sand-dwelling chaser. It is NOT moveable in the
+// engine's sense — engine.updateHazards is rail-only and zeroes velocity for
+// rail-less moveables — so GameBoard.updateAntlionRound steers it directly each
+// tick (writes newX/newY; the base Hazard.update() commits them). Contact shoves
+// the kart via the same mapOwned-Punch machinery as Bumper, gated by a per-antlion
+// hit cooldown so it shoves rather than vibrates.
+class Antlion extends Hazard {
+	constructor(x, y, ownerId, roomSig) {
+		super(x, y, c.hazards.antlion.radius, c.hazards.antlion.color, ownerId, roomSig, null);
+		this.id = c.hazards.antlion.id;
+		this.isAntlion = true;
+		this.punch = null;
+		this.nextHitTime = 0;
+		// Slam knockback from a thumper: an impulse velocity that decays each tick,
+		// layered on top of the steady chase steering.
+		this.impVX = 0;
+		this.impVY = 0;
+		// Continuous time spent off sand (ms). At offSandDespawnSeconds it burrows
+		// away (GameBoard despawns it with a removeHazards broadcast).
+		this.offSandMs = 0;
+	}
+	handleHit(object) {
+		if (!object.isPlayer || object.alive === false) {
+			return;
+		}
+		if (Date.now() < this.nextHitTime) {
+			return;
+		}
+		if (this.punch == null) {
+			this.nextHitTime = Date.now() + c.brutalRounds.antlion.hitCooldown * 1000;
+			this.punch = new Punch(this.x, this.y, c.hazards.antlion.attackRadius, c.hazards.antlion.color, this.ownerId, this.roomSig, c.brutalRounds.antlion.punchBonus, false, null);
+			this.punch.mapOwned = true;
+			this.punch.type = "antlion";
+		}
+	}
+}
+
+// Thumper (Antlions round): a static ground-pounder that repels antlions inside
+// repelRadius. The server slams on a fixed period (GameBoard.updateAntlionRound
+// applies the impulse); the CLIENT animates its own pound cycle anchored by the
+// `angle` slot of the applyHazards packet — exposed here as a getter returning
+// "ms until the next slam" so any packet build (round load or late joiner) carries
+// a fresh anchor. Karts are unaffected: it never spawns a punch.
+class Thumper extends Hazard {
+	constructor(x, y, ownerId, roomSig) {
+		super(x, y, c.hazards.thumper.radius, c.hazards.thumper.color, ownerId, roomSig, null);
+		this.id = c.hazards.thumper.id;
+		this.isThumper = true;
+		this.nextSlamTime = Date.now() + c.brutalRounds.antlion.thumperPeriod * 1000;
+		// Replace the base data property with the cycle-anchor getter (compressor
+		// newHazards reads hazard.angle).
+		Object.defineProperty(this, "angle", {
+			get: function () {
+				return Math.max(0, Math.round(this.nextSlamTime - Date.now()));
+			},
+			configurable: true
+		});
+	}
+	handleHit(object) {
+
+	}
+}
+
+
+module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, Mine, Antlion, Thumper, HAZARD_KINDS, hazardKindById, registerHazardKind };

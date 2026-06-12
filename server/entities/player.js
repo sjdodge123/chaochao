@@ -190,6 +190,10 @@ class Player extends Circle {
 		// Current footing is water (stamped every tick like onIce): gates the swim
 		// impulse in throwChargedPunch and the fire-extinguish in handleMapCellHit.
 		this.onWater = false;
+		// Current footing is sand (the slow tile) + continuous dwell time on it (ms).
+		// Only the antlion brutal round reads these (GameBoard.updateAntlionRound).
+		this.onSand = false;
+		this.sandDwellMs = 0;
 		// "Dripping wet" exit slow: when a player leaves water this is set to
 		// now + water.dripMs; while active, handleMapCellHit scales their drive by
 		// water.dripMoveFactor so they trudge for a beat after climbing out.
@@ -909,6 +913,7 @@ class Player extends Circle {
 		this.burnedBy = null;
 		// Off every cell = not on ice either (mirrors the per-tick onIce stamp).
 		this.onIce = false;
+		this.onSand = false;
 		// Off every cell = not on water either; leaving water this way still triggers
 		// the dripping-wet slow (mirrors handleMapCellHit's leave transition).
 		if (this.onWater) {
@@ -1029,6 +1034,9 @@ class Player extends Circle {
 		// Same per-tick footing stamp for ice: gates the drift-traction blend below and
 		// the keepMomentumOnRelease toggle in throwChargedPunch.
 		this.onIce = (object.id == c.tileMap.ice.id);
+		// Sand footing (the slow tile): feeds the antlion-round dwell timer in
+		// GameBoard.updateAntlionRound.
+		this.onSand = (object.id == c.tileMap.slow.id);
 		// Water footing (gates the swim stroke in throwChargedPunch). Climbing OUT of
 		// water — was on water last tick, isn't now — starts the "dripping wet" slow
 		// (engine.updatePlayers reads dripUntil). The same transition is mirrored in
@@ -1430,6 +1438,8 @@ class Player extends Circle {
 		this.driftPunchPending = 0;
 		this.onIce = false;
 		this.onWater = false;
+		this.onSand = false;
+		this.sandDwellMs = 0;
 		this.dripUntil = 0;
 		this.punch = null;
 		this.punchedBy = null;

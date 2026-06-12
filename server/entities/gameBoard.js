@@ -13,7 +13,7 @@ var aiController = require('../aiController.js');
 var { Gate } = require('./shapes.js');
 var { LobbyStartButton, LobbyStation } = require('./player.js');
 var { ExplosionAimer, SwapAimer } = require('./aimers.js');
-var { hazardKindById } = require('./hazards.js');
+var { hazardKindById, Antlion, Thumper } = require('./hazards.js');
 var { CloudProj, SnowFlakeProj, BombProj, Puck } = require('./projectiles.js');
 var { Blindfold, Swap, IceCannon, Bomb, SpeedBuff, SpeedDebuff, TileSwap, Cut, StarPower, BombTrigger, OrbitalBeam } = require('./abilities.js');
 
@@ -135,6 +135,9 @@ class GameBoard {
 		// clean() so pre-first-race code can never index an undefined.
 		this.heatwaveScorchedIds = null;
 		this.pendingHeatwaveWave = null;
+		// Antlion round: monotonically increasing per-room spawn counter, feeds the
+		// per-antlion hash so every spawn is unique for the room's lifetime.
+		this.antlionSeq = 0;
 		this.soloMode = false;
 		this.soloCollapseSpeed = c.lastPlayerCollapseSpeed;
 		this.soloStartDistance = this.world.height + 400;
@@ -163,6 +166,10 @@ class GameBoard {
 		this.updateProjectiles(currentState);
 		this.checkAbilities(currentState);
 		this.updateAimers(currentState);
+		// Antlion round: dwell timers, spawns, chase steering and thumper slams.
+		// Runs BEFORE updateHazards so the steering's newX/newY commit this tick
+		// (hazard.update() -> move()). Early-outs unless the round is active.
+		this.updateAntlionRound(currentState, dt);
 		this.updateHazards(currentState, dt);
 		if (currentState == c.stateMap.lobby) {
 			this.checkLobbyMapReset();
@@ -598,6 +605,239 @@ class GameBoard {
 				hazard.punch = null;
 			}
 		}
+	}
+
+	// --- Antlions (brutal id 1014) ---
+	// Sand (the slow tile) is dangerous: any racer who lingers on it for
+	// sandDwellSeconds triggers an antlion eruption from a nearby sand cell, and
+	// the dwell timer restarts so camping keeps spawning more. Antlions chase the
+	// nearest living racer anywhere, but burrow away after offSandDespawnSeconds
+	// continuously off sand. Thumpers (placed at round load) pound on a fixed
+	// period; each slam hurls antlions inside repelRadius outward, and a milder
+	// continuous push keeps them skirting the radius — karts are unaffected.
+	countSandTiles() {
+		var cells = (this.currentMap != null) ? this.currentMap.cells : null;
+		if (cells == null) { return 0; }
+		var n = 0;
+		for (var i = 0; i < cells.length; i++) {
+			if (cells[i].id == c.tileMap.slow.id) { n++; }
+		}
+		return n;
+	}
+	// Global live cap: the config base, plus one per racer above four, clamped to
+	// the hard ceiling — mild scaling so a packed grid feels the same pressure.
+	antlionCap() {
+		var cfg = c.brutalRounds.antlion;
+		return Math.min(cfg.maxAntlionsCeiling, cfg.maxAntlions + Math.max(0, this.alivePlayerCount - 4));
+	}
+	// Round-load setup: place the thumpers on well-separated random sand cells.
+	// Runs inside loadNextMap AFTER random tiles resolve (a random-rolled sand
+	// tile is eligible) and BEFORE newMapPayload is built, so the thumpers ride
+	// to clients inside the payload's hazards list like the map's bumpers do.
+	applyBrutalAntlionRound() {
+		if (!this.checkForActiveBrutal(c.brutalRounds.antlion.id)) { return; }
+		var cfg = c.brutalRounds.antlion;
+		var cells = (this.currentMap != null) ? this.currentMap.cells : null;
+		if (cells == null) { return; }
+		var sandSites = [];
+		for (var i = 0; i < cells.length; i++) {
+			if (cells[i].id == c.tileMap.slow.id) { sandSites.push(cells[i].site); }
+		}
+		// Zero-sand maps only reach here via the brutalTypesForce dev seam (the
+		// selection gate pulls the mode below minSandTiles): no habitat, no thumpers.
+		if (sandSites.length == 0) { return; }
+		var count = Math.min(cfg.thumperMaxCount, cfg.thumperCount + Math.floor(sandSites.length / cfg.thumperPerSandTiles));
+		if (count > sandSites.length) { count = sandSites.length; }
+		// Greedy max-min placement: first pick random, each later pick is the
+		// candidate farthest from every already-chosen thumper (well-separated
+		// sanctuaries instead of one clumped safe zone).
+		var pool = utils.shuffleArray(sandSites.slice());
+		var chosen = [pool[0]];
+		while (chosen.length < count) {
+			var best = null, bestScore = -1;
+			for (var p = 0; p < pool.length; p++) {
+				var minD = Infinity;
+				for (var q = 0; q < chosen.length; q++) {
+					var dx = pool[p].x - chosen[q].x, dy = pool[p].y - chosen[q].y;
+					var d = dx * dx + dy * dy;
+					if (d < minD) { minD = d; }
+				}
+				if (minD > bestScore) { bestScore = minD; best = pool[p]; }
+			}
+			if (best == null || bestScore <= 0) { break; }
+			chosen.push(best);
+		}
+		for (var t = 0; t < chosen.length; t++) {
+			var hash = utils.generateHash(this.roomSig, "thumper" + t + "_" + chosen[t].x + "_" + chosen[t].y);
+			this.hazardList[hash] = new Thumper(chosen[t].x, chosen[t].y, hash, this.roomSig);
+		}
+	}
+	// Per-tick driver. dt is in seconds (the engine's clock).
+	updateAntlionRound(currentState, dt) {
+		if (!this.checkForActiveBrutal(c.brutalRounds.antlion.id)) { return; }
+		var cfg = c.brutalRounds.antlion;
+		var antlions = [], thumpers = [];
+		for (var hid in this.hazardList) {
+			var h = this.hazardList[hid];
+			if (h.isAntlion) { antlions.push(h); }
+			else if (h.isThumper) { thumpers.push(h); }
+		}
+		if (currentState != c.stateMap.racing && currentState != c.stateMap.collapsing) {
+			// Round isn't live (gated/overview): nothing accrues, and any leftovers
+			// from the just-ended round burrow away.
+			if (antlions.length > 0) { this.removeAntlions(antlions, "burrow"); }
+			return;
+		}
+		var now = Date.now();
+		// 1. Thumper slams: a strong outward impulse to every antlion in the radius.
+		for (var t = 0; t < thumpers.length; t++) {
+			var th = thumpers[t];
+			if (now < th.nextSlamTime) { continue; }
+			th.nextSlamTime = now + cfg.thumperPeriod * 1000;
+			for (var a = 0; a < antlions.length; a++) {
+				var an = antlions[a];
+				var sdx = an.x - th.x, sdy = an.y - th.y;
+				var sd = Math.sqrt(sdx * sdx + sdy * sdy);
+				if (sd >= cfg.repelRadius) { continue; }
+				if (sd < 0.0001) { sdx = 1; sdy = 0; sd = 1; }
+				an.impVX += (sdx / sd) * cfg.slamImpulse;
+				an.impVY += (sdy / sd) * cfg.slamImpulse;
+			}
+		}
+		// 2. Sand dwell -> eruptions. Any living, unfinished racer counts (bots and
+		// zombies included); the timer resets on the spawn so camping keeps feeding.
+		var targets = [];
+		for (var pid in this.playerList) {
+			var player = this.playerList[pid];
+			if (!player.alive || player.reachedGoal || player.awake == false) {
+				player.sandDwellMs = 0;
+				continue;
+			}
+			targets.push(player);
+			if (player.onSand) {
+				player.sandDwellMs += dt * 1000;
+				if (player.sandDwellMs >= cfg.sandDwellSeconds * 1000) {
+					player.sandDwellMs = 0;
+					if (antlions.length < this.antlionCap()) {
+						var spawned = this.spawnAntlion(player);
+						if (spawned != null) { antlions.push(spawned); }
+					}
+				}
+			} else {
+				player.sandDwellMs = 0;
+			}
+		}
+		if (antlions.length == 0) { return; }
+		if (targets.length == 0) {
+			// Everyone's finished or down — the hunt is over, the swarm digs out.
+			this.removeAntlions(antlions, "burrow");
+			return;
+		}
+		// 3. Steering: seek nearest racer + separation + mild thumper avoidance,
+		// plus the decaying slam impulse. Off-sand time is the leash.
+		var burrowed = [];
+		for (var ai = 0; ai < antlions.length; ai++) {
+			var ant = antlions[ai];
+			var onSand = (this.currentMap != null && this.currentMap.cells != null)
+				&& _engine.isOnCellOfType(ant.x, ant.y, this.currentMap, c.tileMap.slow.id);
+			if (onSand) {
+				ant.offSandMs = 0;
+			} else {
+				ant.offSandMs += dt * 1000;
+				if (ant.offSandMs >= cfg.offSandDespawnSeconds * 1000) {
+					burrowed.push(ant);
+					continue;
+				}
+			}
+			var best = null, bestD = Infinity;
+			for (var ti = 0; ti < targets.length; ti++) {
+				var tdx = targets[ti].x - ant.x, tdy = targets[ti].y - ant.y;
+				var d2 = tdx * tdx + tdy * tdy;
+				if (d2 < bestD) { bestD = d2; best = targets[ti]; }
+			}
+			var vx = 0, vy = 0;
+			if (best != null) {
+				var dd = Math.sqrt(bestD) || 1;
+				vx = ((best.x - ant.x) / dd) * cfg.chaseSpeed;
+				vy = ((best.y - ant.y) / dd) * cfg.chaseSpeed;
+			}
+			for (var oi = 0; oi < antlions.length; oi++) {
+				if (oi == ai) { continue; }
+				var ox = ant.x - antlions[oi].x, oy = ant.y - antlions[oi].y;
+				var od = Math.sqrt(ox * ox + oy * oy);
+				if (od > 0.0001 && od < cfg.separationRadius) {
+					var ow = (cfg.separationRadius - od) / cfg.separationRadius;
+					vx += (ox / od) * ow * cfg.chaseSpeed;
+					vy += (oy / od) * ow * cfg.chaseSpeed;
+				}
+			}
+			for (var ri = 0; ri < thumpers.length; ri++) {
+				var rx = ant.x - thumpers[ri].x, ry = ant.y - thumpers[ri].y;
+				var rd = Math.sqrt(rx * rx + ry * ry);
+				if (rd > 0.0001 && rd < cfg.repelRadius) {
+					var rw = (cfg.repelRadius - rd) / cfg.repelRadius;
+					vx += (rx / rd) * rw * cfg.chaseSpeed * 1.5;
+					vy += (ry / rd) * rw * cfg.chaseSpeed * 1.5;
+				}
+			}
+			// Slam impulse decays over ~1/3s; while live it dominates the seek.
+			var decay = Math.min(1, 3 * dt);
+			ant.impVX -= ant.impVX * decay;
+			ant.impVY -= ant.impVY * decay;
+			ant.newX = ant.x + (vx + ant.impVX) * dt;
+			ant.newY = ant.y + (vy + ant.impVY) * dt;
+			// Never leave the world (slams near the boundary would otherwise eject them).
+			if (ant.newX < this.world.x) { ant.newX = this.world.x; }
+			if (ant.newX > this.world.x + this.world.width) { ant.newX = this.world.x + this.world.width; }
+			if (ant.newY < this.world.y) { ant.newY = this.world.y; }
+			if (ant.newY > this.world.y + this.world.height) { ant.newY = this.world.y + this.world.height; }
+		}
+		if (burrowed.length > 0) { this.removeAntlions(burrowed, "burrow"); }
+	}
+	// Erupt a new antlion from a sand cell near (but never under) the triggering
+	// racer: prefer sites minSpawnDist..maxSpawnDist away, widen to 2x, else the
+	// nearest sand site beyond the minimum. Broadcast rides the same applyHazards
+	// path the lobby bumpers use, so the client creates it mid-round.
+	spawnAntlion(player) {
+		var cfg = c.brutalRounds.antlion;
+		var cells = (this.currentMap != null) ? this.currentMap.cells : null;
+		if (cells == null) { return null; }
+		var inner = [], outer = [], nearest = null, nearestD = Infinity;
+		for (var i = 0; i < cells.length; i++) {
+			if (cells[i].id != c.tileMap.slow.id) { continue; }
+			var site = cells[i].site;
+			var dx = site.x - player.x, dy = site.y - player.y;
+			var d = Math.sqrt(dx * dx + dy * dy);
+			if (d < cfg.minSpawnDist) { continue; }
+			if (d <= cfg.maxSpawnDist) { inner.push(site); }
+			else if (d <= cfg.maxSpawnDist * 2) { outer.push(site); }
+			if (d < nearestD) { nearestD = d; nearest = site; }
+		}
+		var pick = null;
+		if (inner.length > 0) { pick = inner[utils.getRandomInt(0, inner.length - 1)]; }
+		else if (outer.length > 0) { pick = outer[utils.getRandomInt(0, outer.length - 1)]; }
+		else { pick = nearest; }
+		if (pick == null) { return null; }
+		this.antlionSeq++;
+		var hash = utils.generateHash(this.roomSig, "antlion" + this.antlionSeq);
+		var ant = new Antlion(pick.x, pick.y, hash, this.roomSig);
+		this.hazardList[hash] = ant;
+		var single = {};
+		single[hash] = ant;
+		messenger.messageRoomBySig(this.roomSig, "applyHazards", compressor.newHazards(single));
+		return ant;
+	}
+	// Despawn + tell the room. Packet entries are [ownerId, x, y, reason] — the
+	// client deletes the hazard and, for reason "burrow", plays the dig-down FX at
+	// the exact server position. Decoded in client/scripts/gameboard.js
+	// removeHazards (lockstep rule).
+	removeAntlions(list, reason) {
+		var packet = [];
+		for (var i = 0; i < list.length; i++) {
+			packet.push([list[i].ownerId, list[i].x, list[i].y, reason]);
+			delete this.hazardList[list[i].ownerId];
+		}
+		messenger.messageRoomBySig(this.roomSig, "removeHazards", JSON.stringify(packet));
 	}
 
 	gatherAbilities() {
@@ -2384,6 +2624,9 @@ class GameBoard {
 		// are a bonus on top, never subject to the chanceToSpawnAbility roll). Riding
 		// in the newMap payload means joiners always get the scorch list with the map.
 		var heatwaveGen = this.applyBrutalHeatwaveRound();
+		// Antlion thumpers join hazardList here so the payload below carries them
+		// (same delivery as map bumpers). Antlions themselves only spawn mid-race.
+		this.applyBrutalAntlionRound();
 		// Bonus orbs are placed LAST so they read final tile state — never landing on
 		// a cell that random tiles / abilities / heatwave just turned to lava. Empty
 		// in FFA modes (generateBonusOrbs guards on isTeamsMode).
@@ -2779,6 +3022,14 @@ class GameBoard {
 			activeBrutalTypes.splice(activeBrutalTypes.indexOf(hw.id), 1);
 		}
 
+		// Antlions need a sand habitat to erupt from: on maps with too few sand
+		// tiles the round would never spawn anything, so pull it from the pool.
+		var al = c.brutalRounds.antlion;
+		if (al != null && activeBrutalTypes.indexOf(al.id) != -1 &&
+			this.countSandTiles() < al.minSandTiles) {
+			activeBrutalTypes.splice(activeBrutalTypes.indexOf(al.id), 1);
+		}
+
 		if (activeBrutalTypes.length == 0) {
 			//console.log("Brutal round was engaged, however no brutal types are active in the config file");
 			this.brutalRound = false;
@@ -2804,6 +3055,12 @@ class GameBoard {
 			}
 			// Bunker only ever runs as a solo primary, never bolted onto another mode.
 			if (activeBrutalTypes[i] == c.brutalRounds.bunker.id) { continue; }
+			// Heatwave converts sand->lava and deletes the antlions' habitat, so the
+			// two never stack — whichever was picked first locks the other out.
+			if (activeBrutalTypes[i] == c.brutalRounds.antlion.id &&
+				brutalRoundConfig.brutalTypes.indexOf(c.brutalRounds.heatwave.id) != -1) { continue; }
+			if (activeBrutalTypes[i] == c.brutalRounds.heatwave.id &&
+				brutalRoundConfig.brutalTypes.indexOf(c.brutalRounds.antlion.id) != -1) { continue; }
 			//Roll for next Brutal
 			var nextBrutalChance = utils.getRandomInt(1, 100);
 			//console.log("Roll for additional brutal: " + nextBrutalChance);
