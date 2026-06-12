@@ -668,7 +668,11 @@ class GameBoard {
 			chosen.push(best);
 		}
 		for (var t = 0; t < chosen.length; t++) {
-			var hash = utils.generateHash(this.roomSig, "thumper" + t + "_" + chosen[t].x + "_" + chosen[t].y);
+			// generateHash's seed is folded in with bitwise ops, so it must be
+			// NUMERIC — a non-numeric string coerces to NaN->0 and every call
+			// returns the same hash. 7e6+ keeps thumpers clear of the bumper
+			// (coordinate-sum) and cloud (density) seed ranges.
+			var hash = utils.generateHash(this.roomSig, 7000000 + t);
 			this.hazardList[hash] = new Thumper(chosen[t].x, chosen[t].y, hash, this.roomSig);
 		}
 	}
@@ -819,7 +823,8 @@ class GameBoard {
 		else { pick = nearest; }
 		if (pick == null) { return null; }
 		this.antlionSeq++;
-		var hash = utils.generateHash(this.roomSig, "antlion" + this.antlionSeq);
+		// Numeric seed only (see the thumper note): 8e6+ is the antlion range.
+		var hash = utils.generateHash(this.roomSig, 8000000 + this.antlionSeq);
 		var ant = new Antlion(pick.x, pick.y, hash, this.roomSig);
 		this.hazardList[hash] = ant;
 		var single = {};
