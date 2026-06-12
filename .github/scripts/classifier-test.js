@@ -24,7 +24,9 @@ function fail(msg) { failures++; console.log('::error::' + msg); }
 const maps = utils.loadMaps().filter(function (m) { return !m.lobbyOnly; });
 if (maps.length === 0) { fail('no race maps loaded'); }
 
-const TRAITS = ['ice', 'lava', 'bumper', 'ability', 'standard'];
+// Keep in lockstep with mapClassifier deriveTraits / config.balance.traitThresholds
+// (water arrived with the water tile; The Flow is the first water-dominant map).
+const TRAITS = ['ice', 'lava', 'water', 'bumper', 'ability', 'standard'];
 const LENGTHS = ['sprint', 'standard', 'marathon'];
 const TIERS = ['featured', 'community'];
 
