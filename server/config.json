@@ -476,7 +476,7 @@
             "bodyRadius": 11,
             "attackRadius": 95,
             "punchBonus": 26,
-            "fuseMs": 650
+            "fuseMs": 1300
         }
     },
     "lobbyWaitTime": 5,

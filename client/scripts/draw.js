@@ -9294,8 +9294,9 @@ function drawMine(x, y, state) {
     gameContext.arc(x, y, r, 0, 2 * Math.PI);
     gameContext.fillStyle = "#2b2b2b";
     gameContext.fill();
-    // Light: steady amber when armed, fast red blink while the fuse burns.
-    var lit = (state === 1) ? ((Date.now() % 200) < 110) : true;
+    // Light: steady amber when armed, a slower red countdown blink while the fuse
+    // burns (paced to read as "you've got a moment to get clear").
+    var lit = (state === 1) ? ((Date.now() % 360) < 200) : true;
     if (lit) {
         gameContext.beginPath();
         gameContext.arc(x, y, r * 0.4, 0, 2 * Math.PI);
