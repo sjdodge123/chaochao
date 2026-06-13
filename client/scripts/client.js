@@ -929,6 +929,9 @@ function registerConnectionHandlers(server) {
 		// Antlion burrow/dust FX reset synchronously too (same microtask gotcha):
 		// a dig-down animating across the map swap would render on the new terrain.
 		if (typeof antlionBurrows !== "undefined") { antlionBurrows.length = 0; }
+		// Slow-boil water warnings reset synchronously too (same microtask gotcha): a
+		// prior round's boiling overlay must never bleed onto the fresh map.
+		if (typeof clearBoilingWater === "function") { clearBoilingWater(); }
 		// A new round starts a fresh team scoring ledger (NOT cleared at overview —
 		// the overview is where the just-ended round's ledger is shown).
 		if (typeof teamRoundLedger !== "undefined") { teamRoundLedger = []; }
@@ -1716,6 +1719,12 @@ function registerCombatHandlers(server) {
 			collapseCells(cells);
 		});
 		if (typeof recapMarkMapDirty === "function") { recapMarkMapDirty(); } // map changed -> recap re-snapshots
+	});
+	// Water the collapse has reached but that's slow-boiling toward lava: tier bumps
+	// (simmer->boil->rolling) for the warning overlay. The cell stays water until a
+	// later collapsedCells flips it; setWaterBoiling just drives the animation stage.
+	server.on('waterBoiling', function (updates) {
+		if (typeof setWaterBoiling === "function") { setWaterBoiling(updates); }
 	});
 	// Bunker (battle royale): the goal sinks below a silo door at round start and
 	// rises again for the lone survivor. The tile flips (goal<->ice/normal) arrive

@@ -10,7 +10,11 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- **Water doesn't flash to lava when the world collapses anymore — it slow-boils.** When the closing lava front reaches a patch of water it now spends about three seconds heating up — a tiered simmer → boil → rolling-boil warning with bubbles and rising steam — before it finally turns to lava. That's a few extra seconds to scramble across (or off) the water while it's still safe.
+- **A killstreak fire shield now lets you walk on water.** Carry a flame into water and instead of getting doused on the spot, your shield lets you *stride straight across* — no swimming, with steam hissing off you the whole way. The flame burns down while you cross (just like it does on lava), so a big pond can still snuff it mid-crossing and drop you into the swim. Fire is now a real shortcut across water.
+- **Flames burn out instead of blinking off.** A fire shield running out — on lava or boiling away on water — now fades out with a last steam puff rather than vanishing in a single frame, and burning karts kick up matching effects underfoot: embers on lava, steam on water.
 
 ## v0.37.0 — 2026-06-14
 

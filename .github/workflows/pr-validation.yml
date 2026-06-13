@@ -148,6 +148,9 @@ jobs:
       - name: "Headless Heatwave brutal-round test (tile delta / path guarantee / second wave / Firewalker)"
         run: node .github/scripts/heatwave-test.js
 
+      - name: "Headless water slow-boil + fire-walk test (boil delay before lava / shield strides across water)"
+        run: node .github/scripts/water-boil-flame-test.js
+
       - name: "Game-mode matrix test (every ACTIVE config.gameModes mode: plumbing, full match to gameOver, every-map sweep)"
         run: node .github/scripts/mode-smoke-test.js
 

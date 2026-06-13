@@ -3888,6 +3888,9 @@ function drawObjects(dt) {
         }
         drawPingCircles();
         drawCollapseShockwaves();
+        // Slow-boil water: tiered simmer->boil->rolling warning over cells the collapse
+        // front has reached but that haven't flipped to lava yet.
+        if (typeof drawBoilingWater === "function") { drawBoilingWater(); }
     }
     if (currentState == config.stateMap.gated ||
         currentState == config.stateMap.racing) {
@@ -6050,6 +6053,8 @@ function drawPlayers(dt) {
     drawDriftSpray(dt);
     // Per-frame drift skid audio (synthesized loop per drifting kart, distance-faded).
     updateDriftAudio();
+    // Per-frame fire-walk sizzle (local kart striding over lava/water on the shield).
+    updateFireWalkAudio();
     // Draw remote players first, then ALL local players (the primary plus any
     // couch co-op slots) on top — so your own karts always read clearly over
     // other players' floating emojis and name labels.
@@ -6085,8 +6090,11 @@ function checkDrawPlayer(player, dt) {
     updateWaterDrip(player);
     if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
         drawTrail(player);
-        // Swim ripples ride ON TOP of the normal trail while the kart is in water.
-        drawSwimRipple(player);
+        // Swim ripples ride ON TOP of the normal trail while the kart is in water — but
+        // a fire-walker strides across (no swimming), so its shield steams instead.
+        if (!(player.onFire > 0)) {
+            drawSwimRipple(player);
+        }
     }
     if (player.alive == false) {
         drawDeathMessage(player);
@@ -6096,6 +6104,8 @@ function checkDrawPlayer(player, dt) {
         drawPlayer(player, dt);
         // Wet sheen + droplets on top of the kart while it dries off after swimming.
         drawWaterDrip(player);
+        // Flame-walking FX: steam off the shield on water, embers on lava (unified).
+        drawFireWalkFX(player);
     }
 }
 // =========================== Infection zombie body ===========================
@@ -7073,8 +7083,15 @@ function drawDeathMessage(player) {
         gameContext.restore();
     }
 }
+// The shield doesn't snap off — it fades over its final FLAME_FADE_MS as onFire (the
+// live remaining ms) runs down, so a flame burning out on lava OR boiling away on water
+// dies away gracefully instead of vanishing in one frame.
+var FLAME_FADE_MS = 600;
 function drawFire(player) {
     gameContext.save();
+    if (player.onFire < FLAME_FADE_MS) {
+        gameContext.globalAlpha = Math.max(0, player.onFire / FLAME_FADE_MS);
+    }
     // Offset the flame to the player's trailing edge based on facing. Computed
     // continuously from the angle so it works for ANY heading — the old 8-way
     // switch left the flame unplaced (invisible) for the AI racers and for
@@ -7086,6 +7103,80 @@ function drawFire(player) {
     gameContext.beginPath();
     drawFlameColor(player, 55);
     gameContext.restore();
+}
+// Flame-walking FX: while a kart carries the killstreak shield over lava OR water it
+// kicks up a unified plume — pale steam off boiling water, hot embers off lava — that
+// loft and fade as it moves. Purely cosmetic and procedural (seeded by id+time, no
+// stored particle state), drawn in the camera-translated gameplay pass (raw world
+// coords, like drawWaterDrip). The looping sizzle SFX is driven separately, local-only,
+// by updateFireWalkAudio so remote karts don't each spin up a voice.
+function drawFireWalkFX(player) {
+    if (!(player.onFire > 0)) { return; }
+    if (config == null || config.tileMap == null) { return; }
+    var cid = nearestCellIdCached(player);
+    var waterTile = config.tileMap.water;
+    var onWater = (waterTile != null && cid === waterTile.id);
+    var onLava = (cid === config.tileMap.lava.id);
+    if (!onWater && !onLava) { return; }
+    var now = Date.now();
+    var ctx = gameContext;
+    var sx = player.x, sy = player.y, r = player.radius || 7.5;
+    var dim = isLocalId(player.id) ? 1 : NONLOCAL_TRAIL_ALPHA;
+    var idSeed = (player.id && player.id.charCodeAt) ? (player.id.charCodeAt(0) || 0) + (player.id.charCodeAt(1) || 0) : 0;
+    ctx.save();
+    if (onWater) {
+        // Steam plumes lofting straight up as the shield boils the water beneath.
+        var puffs = 6;
+        for (var i = 0; i < puffs; i++) {
+            var seed = i * 53 + idSeed;
+            var ph = ((now * 0.0011) + (i / puffs)) % 1;          // 0 just off the kart -> 1 dissipated
+            var px = sx + Math.sin(seed + now * 0.002) * (r * 0.9);
+            var py = sy - ph * (r * 3.2);
+            ctx.globalAlpha = 0.22 * (1 - ph) * dim;
+            ctx.fillStyle = "rgba(232,240,248,1)";
+            ctx.beginPath();
+            ctx.arc(px, py, 2.5 + ph * 5.5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    } else {
+        // Lava embers: hot sparks flung up that cool from gold to ember as they rise.
+        var sparks = 5;
+        for (var j = 0; j < sparks; j++) {
+            var s2 = j * 37 + idSeed;
+            var ph2 = ((now * 0.0016) + (j / sparks)) % 1;
+            var ang = s2 * 1.3 + now * 0.003;
+            var ex = sx + Math.cos(ang) * (r * 0.8);
+            var ey = sy - ph2 * (r * 2.6);
+            ctx.globalAlpha = 0.5 * (1 - ph2) * dim;
+            ctx.fillStyle = ph2 < 0.5 ? "rgba(255,210,120,1)" : "rgba(255,120,40,1)";
+            ctx.beginPath();
+            ctx.arc(ex, ey, 1.6 * (1 - ph2) + 0.5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+    ctx.restore();
+}
+// Once-per-frame, local-kart-only: keep the looping fire-walk sizzle in sync with the
+// local player's footing. A single voice (like the drift skid) that washes in while the
+// shield rides over lava/water and fades out the moment it isn't — unified across both.
+function updateFireWalkAudio() {
+    if (typeof setFireWalkSound !== "function") { return; }
+    var me = (typeof myPlayer !== "undefined") ? myPlayer : null;
+    var active = false;
+    if (me != null && me.alive && me.onFire > 0 && config != null && config.tileMap != null &&
+        (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing)) {
+        var cid = nearestCellIdCached(me);
+        var waterTile = config.tileMap.water;
+        if ((waterTile != null && cid === waterTile.id) || cid === config.tileMap.lava.id) {
+            active = true;
+            var sp = Math.sqrt((me.velX || 0) * (me.velX || 0) + (me.velY || 0) * (me.velY || 0));
+            var inten = Math.max(0.2, Math.min(1, sp / 90));
+            setFireWalkSound(me.id, inten, 1);
+        }
+    }
+    if (!active && typeof stopFireWalkSound === "function") {
+        stopFireWalkSound((me != null) ? me.id : null);
+    }
 }
 
 function drawFlameColor(player, size) {
@@ -8002,6 +8093,72 @@ function drawCollapseShockwaves() {
         gameContext.stroke();
     }
     gameContext.restore();
+}
+// Slow-boil warning overlay: water cells the collapse front has reached but that are
+// still aging toward lava (server gameBoard.advanceBoilingWater, mirrored client-side in
+// boilingCells). Three tiers escalate the warning — stage 0 simmer (faint bubbles),
+// stage 1 boil (bubbles + steam wisps + warm tint), stage 2 rolling (violent churn +
+// strong steam + orange glow pulse, "this is about to be lava"). Procedural + seeded by
+// vid so the churn is stable per cell. Drawn in the camera-translated pass (raw world
+// coords); centered at each cell site (no polygon clip needed — reads clearly as the
+// tile heating up). Self-clears if we somehow draw outside a collapse.
+function drawBoilingWater() {
+    if (currentState != config.stateMap.collapsing) { clearBoilingWater(); return; }
+    if (currentMap == null || currentMap.cells == null) { return; }
+    var now = Date.now();
+    var t = now * 0.001;
+    var ctx = gameContext;
+    for (var i = 0; i < currentMap.cells.length; i++) {
+        var cell = currentMap.cells[i];
+        var b = boilingCells[cell.site.voronoiId];
+        if (b == null) { continue; }
+        var stage = b.stage | 0;                  // 0..2
+        var cx = cell.site.x, cy = cell.site.y;
+        var intensity = (stage + 1) / 3;          // 0.33, 0.66, 1.0
+        var pulse = 0.5 + 0.5 * Math.sin(t * (4 + stage * 3));
+        ctx.save();
+        // Warm radial glow — pale at a simmer, angry orange at a rolling boil.
+        var R = 22 + stage * 4;
+        var warm = stage >= 2 ? "255,90,30" : (stage >= 1 ? "255,150,60" : "255,205,130");
+        var glowA = 0.08 + 0.13 * stage + 0.05 * pulse;
+        var grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
+        grad.addColorStop(0, "rgba(" + warm + "," + glowA.toFixed(3) + ")");
+        grad.addColorStop(1, "rgba(" + warm + ",0)");
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(cx, cy, R, 0, Math.PI * 2);
+        ctx.fill();
+        // Bubbles: rising dots that pop at the surface, more + faster with each tier.
+        var bubbles = 3 + stage * 3;
+        for (var k = 0; k < bubbles; k++) {
+            var seed = (cell.site.voronoiId * 13 + k * 7);
+            var phase = ((t * (0.6 + 0.5 * stage)) + (seed % 100) / 100) % 1;
+            var bx = cx + Math.sin(seed * 1.7 + k) * (R * 0.5);
+            var by = cy + (R * 0.45) - phase * (R * 0.9);     // rise upward, pop near the top
+            var br = (1.0 + stage * 0.7) * (0.4 + 0.6 * (1 - phase));
+            ctx.globalAlpha = 0.5 * (1 - phase) * (0.6 + 0.4 * intensity);
+            ctx.fillStyle = stage >= 2 ? "rgba(255,215,175,1)" : "rgba(222,240,255,1)";
+            ctx.beginPath();
+            ctx.arc(bx, by, Math.max(0.5, br), 0, Math.PI * 2);
+            ctx.fill();
+        }
+        // Steam wisps from a boil on up — pale plumes lofting off the surface.
+        if (stage >= 1) {
+            var wisps = stage * 2;
+            for (var w = 0; w < wisps; w++) {
+                var seed2 = cell.site.voronoiId * 5 + w * 31;
+                var ph = ((t * 0.4) + (seed2 % 100) / 100) % 1;
+                var wx = cx + Math.sin(seed2 + t * 0.6) * (R * 0.4);
+                var wy = cy - ph * (R * 1.3);
+                ctx.globalAlpha = 0.22 * (1 - ph) * intensity;
+                ctx.fillStyle = "rgba(230,238,245,1)";
+                ctx.beginPath();
+                ctx.arc(wx, wy, 3 + ph * 5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        ctx.restore();
+    }
 }
 // Lobby-only "practice room" floor treatment: a dashed inset frame over the
 // arena. Races never draw this, so a returning player instantly reads the lobby

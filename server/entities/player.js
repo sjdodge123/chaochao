@@ -1118,6 +1118,30 @@ class Player extends Circle {
 			return;
 		}
 		if (c.tileMap.water != null && object.id == c.tileMap.water.id) {
+			// Fire-walk: a killstreak fire shield lets you STRIDE across water instead of
+			// swimming. The shield rides DOWN on water exactly like it does on lava (set
+			// fireTimer, then checkFireTimer bleeds it) — steam rises while it burns — and
+			// only when it finally expires do you drop into the deep-water swim below.
+			// Non-zombie only (zombies can't be on fire and can't enter water anyway).
+			if (this.onFire > 0 && this.isZombie != true) {
+				if (this.fireTimer == null) {
+					this.fireTimer = Date.now();
+				}
+				this.checkFireTimer(); // may zero onFire + broadcast onFire:0
+				if (this.onFire > 0) {
+					// Still shielded: walk with solid grip, NOT deep-water swim physics, and
+					// clear onWater so throwChargedPunch fires a normal punch (no swim stroke).
+					var ground = c.tileMap.normal;
+					this.acel = ground.acel;
+					this.dragCoeff = ground.dragCoeff;
+					this.brakeCoeff = ground.brakeCoeff;
+					this.onWater = false;
+					return;
+				}
+				// Shield just burned out over water — final douse cue, then fall through to
+				// the swim physics so this same tick starts treating it as deep water.
+				messenger.messageRoomBySig(this.roomSig, "flameExtinguished", { owner: this.id, x: this.x, y: this.y });
+			}
 			// Deep water. Low acel + high drag (config) make passive drive almost nil —
 			// you barely move unless you PUNCH to swim (throwChargedPunch reads onWater,
 			// set above). Zombies get their infection-modded grip like any other tile.
@@ -1127,15 +1151,6 @@ class Player extends Circle {
 				this.acel = object.acel;
 				this.dragCoeff = object.dragCoeff;
 				this.brakeCoeff = object.brakeCoeff;
-			}
-			// Water douses a killstreak fire shield: drop onFire and tell the room so the
-			// client can stop the flame and play the hiss/steam cue. Does NOT touch the
-			// burn attributor (burnedBy was already cleared above for any non-lava cell).
-			if (this.onFire > 0) {
-				this.onFire = 0;
-				this.fireTimer = null;
-				messenger.messageRoomBySig(this.roomSig, "onFire", { owner: this.id, value: 0 });
-				messenger.messageRoomBySig(this.roomSig, "flameExtinguished", { owner: this.id, x: this.x, y: this.y });
 			}
 			return;
 		}

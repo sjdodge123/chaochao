@@ -73,7 +73,7 @@
                 {
                     id: "collapse", name: "The Collapse", icon: tex("lava.png"), anim: "collapse",
                     blurb: "The floor turns to lava and squeezes everyone inward.",
-                    detail: "Once the front-runners are home, the arena turns to lava from the edges inward, shrinking the safe ground and herding everyone toward the middle. It's the round's clock — but when one racer is left, the lava eases up to give them a fair shot at the goal."
+                    detail: "Once the front-runners are home, the arena turns to lava from the edges inward, shrinking the safe ground and herding everyone toward the middle. It's the round's clock — but when one racer is left, the lava eases up to give them a fair shot at the goal. Water is the one exception: when the front reaches it, it slow-boils for a few seconds — bubbling and steaming through a tiered warning — before it finally turns to lava, so a flooded shortcut stays open a little longer than the dry ground around it."
                 },
                 {
                     id: "punching", name: "Punching", icon: emoji("👊"), anim: "punch",
@@ -125,7 +125,7 @@
                   detail: "Ice barely bites — you keep gliding long after you ease off, steering only suggests where you'd like to go, and any shove sends you skating helplessly. There is one trick: hold your punch charge while on ice to DRIFT — you slow slightly and your edge digs in, giving back real steering control (your charge ring frosts over icy blue and you hear the skid hiss while it's working). Drift far enough without your punch landing on anyone — and without burning up in lava — and you're in the running for the Smooth Operator medal." },
                 { id: "tile-water", name: "Water", icon: swatch("#2f6fb0"), anim: "terrainWater",
                   blurb: "Punch to swim — slow but crossable.",
-                  detail: "Deep water barely lets you drift on your own — to really move, PUNCH to swim: each stroke shoves you the way you're steering. It's slow going and strokes spend stamina, so only dive in when the shortcut genuinely pays. Climbing out leaves you dripping wet and sluggish for a moment, water snuffs out a burning kart with a hiss, and where water meets lava the edge hardens into stone you can't cross. In infection rounds zombies can't swim at all, so water is a true escape from the horde." },
+                  detail: "Deep water barely lets you drift on your own — to really move, PUNCH to swim: each stroke shoves you the way you're steering. It's slow going and strokes spend stamina, so only dive in when the shortcut genuinely pays. Climbing out leaves you dripping wet and sluggish for a moment, and where water meets lava the edge hardens into stone you can't cross. Carry a killstreak fire shield in, though, and you don't swim at all — the flame lets you stride straight across with steam hissing off you, burning down as you go just like it would on lava (a wide pond can snuff it mid-crossing and drop you into the swim). In infection rounds zombies can't swim at all, so water is a true escape from the horde." },
                 { id: "tile-lava", name: "Lava", icon: tex("lava.png"), anim: "lavaBurn",
                   blurb: "Touch it and you burn out of the round.",
                   detail: "A fiery dunk and you're done — burned out and respawned, out of the round. The collapse turns the whole arena into this, and a well-aimed punch can post a rival straight into it." },

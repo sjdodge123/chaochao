@@ -1088,7 +1088,34 @@ function collapseCells(cells) {
 			}
 		}
 	}
+	// A converted cell is no longer boiling — drop its warning overlay so it doesn't
+	// linger over the fresh lava.
+	for (var k = 0; k < cells.length; k++) {
+		if (boilingCells[cells[k]] != null) { delete boilingCells[cells[k]]; }
+	}
 	invalidateMapCache();
+}
+
+// Water cells the collapse front has reached but that are still slow-boiling toward
+// lava (server gameBoard.advanceBoilingWater). vid -> { stage, since, stageSince }.
+// Drives the tiered simmer->boil->rolling warning overlay (drawBoilingWater). Cleared
+// as each cell converts (collapseCells) and on every fresh map load (clearBoilingWater).
+var boilingCells = {};
+function setWaterBoiling(updates) {
+	if (updates == null) { return; }
+	for (var k = 0; k < updates.length; k++) {
+		var u = updates[k];
+		if (u == null || u.vid == null) { continue; }
+		var prev = boilingCells[u.vid];
+		boilingCells[u.vid] = {
+			stage: u.stage,
+			since: prev ? prev.since : Date.now(),       // when this cell first started boiling
+			stageSince: Date.now()                       // when it entered the CURRENT tier
+		};
+	}
+}
+function clearBoilingWater() {
+	for (var vid in boilingCells) { delete boilingCells[vid]; }
 }
 function explodedCells(cells) {
 	for (var i = 0; i < currentMap.cells.length; i++) {
