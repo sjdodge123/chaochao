@@ -14,7 +14,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 - **New hazard: the Rotor.** A bumper mounted on a spinning arm that sweeps a full circle around its pivot like a clock hand — touch the head and you're flung off just like a regular bumper, but the safe gap comes around and around, so you have to time your dash through its ring. Map authors can place and aim them in the editor (Hazards palette). Rival AI racers dart across the ring between passes rather than treating it as a wall.
 - **New hazard: the Geyser.** A vent that sits quiet, bubbles up a warning, then erupts and launches anyone standing on or near it — harmless between bursts, so the telegraph is your cue to step off (and a chance to time a rival onto it). Map authors place them from the editor's Hazards palette.
-- **New hazard: the Proximity Mine.** Sits armed and quiet until a kart strays too close, then blinks down a short fuse and blows up, flinging everyone nearby — so the leader who trips it can catch the chasing pack in the blast. One use each. Map authors place them from the editor's Hazards palette.
+- **New hazard: the Proximity Mine.** Sits armed and quiet until a kart strays too close, then blinks down a fuse — just long enough to scramble clear if you're quick — before blowing up and flinging everyone still nearby, so the leader who trips it can catch the chasing pack in the blast. One use each. Map authors place them from the editor's Hazards palette.
 
 ## v0.35.3 — 2026-06-13
 
