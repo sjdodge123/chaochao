@@ -522,6 +522,13 @@
     "playerMaxSpeed_prod": 50,
     "playerMaxSpeed_test": 350,
     "playerBaseAcel": 375,
+    "momentumRamp": {
+        "_doc": "Momentum ramp: top speed builds while you hold a steady heading and resets when you cut hard or stop. The drive force is scaled by floor..1 — a freshly-started (or just-turned) kart drives at `floor` of its normal acceleration (so it cruises at `floor` of its usual top speed) and climbs to full over `rampTime` seconds of committed movement. resetDot = the cos() of the heading change that resets the ramp (0.4 ≈ 66°, so small steering nudges keep your momentum but a hard turn/reverse dumps it). resetSpeedMin = the hard-turn reset only fires when you're already carrying this much speed; a near-stationary kart (just starting, maneuvering, or shoved into a wall) keeps building so it can get going instead of being pinned at the floor. Full ramp is identical to the old physics, so this only ever slows you down — commit to a line to go fast.",
+        "floor": 0.7,
+        "rampTime": 2.5,
+        "resetDot": 0.4,
+        "resetSpeedMin": 15
+    },
     "lobbyRespawnInvulnMs": 8000,
     "lobbyAbilityTileRespawnMs": 4000,
     "lobbyIdleResetMs": 15000

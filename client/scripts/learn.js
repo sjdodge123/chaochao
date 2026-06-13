@@ -66,6 +66,11 @@
                     detail: "Every round is a dash to the glowing goal zone — cross into it and you bank a notch toward the match win. The more racers in the room, the fewer notches it takes, and leading is dangerous: fall just short and rivals gun for you, eager to knock the leader down."
                 },
                 {
+                    id: "momentum", name: "Building Speed", icon: swatch("#5ad1ff"), anim: "goalRun",
+                    blurb: "Hold a line to wind up to top speed.",
+                    detail: "Your kart doesn't snap to full pace the instant you push a direction — it starts a touch slower and winds up to its top speed over a couple of seconds of holding a steady heading. Small steering corrections keep that momentum, but cut a hard turn or stomp the brakes and you dump it and have to wind back up. Your top speed itself hasn't changed; you just have to earn it, so committing to a clean racing line beats constantly jinking around. (Surface still rules: this rides on top of each tile's own grip.)"
+                },
+                {
                     id: "collapse", name: "The Collapse", icon: tex("lava.png"), anim: "collapse",
                     blurb: "The floor turns to lava and squeezes everyone inward.",
                     detail: "Once the front-runners are home, the arena turns to lava from the edges inward, shrinking the safe ground and herding everyone toward the middle. It's the round's clock — but when one racer is left, the lava eases up to give them a fair shot at the goal."

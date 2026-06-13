@@ -134,9 +134,50 @@ class Engine {
 				driveMult *= c.tileMap.water.dripMoveFactor;
 			}
 
+			// Momentum ramp (human players only): hold a steady heading and your drive
+			// force climbs from `floor` to full over rampTime seconds; cut hard the other
+			// way (or stop) and it dumps back to the floor. Makes starts and hard turns a
+			// touch slower and rewards committing to a line — at full ramp it's a no-op,
+			// so the old top speed stays the cap.
+			//
+			// Bots are exempt: they steer with a continuously-jittering pathfinding
+			// heading and were tuned around full thrust, so the floor traps them on slow
+			// terrain and the hard-turn reset pins them at the floor — they freeze against
+			// walls instead of powering out (measured via ai-fitness). A bot keeps the old
+			// physics (momentum stays 1 → factor 1).
+			var ramp = c.momentumRamp;
+			if (ramp != null && !player.isAI) {
+				if (braking) {
+					player.momentum = 0;
+					player.lastMoveDirX = 0;
+					player.lastMoveDirY = 0;
+				}
+				else {
+					var moveMag = utils.getMag(dirX, dirY);
+					var ndx = moveMag > 0 ? dirX / moveMag : 0;
+					var ndy = moveMag > 0 ? dirY / moveMag : 0;
+					var hadHeading = player.lastMoveDirX !== 0 || player.lastMoveDirY !== 0;
+					var dot = ndx * player.lastMoveDirX + ndy * player.lastMoveDirY;
+					// Only dump momentum on a hard turn if you're actually carrying speed —
+					// a near-stationary kart (starting up, or pinned/wiggling against a wall)
+					// keeps building so it can power out instead of stalling at the floor.
+					var carryingSpeed = utils.getMag(player.velX, player.velY) > ramp.resetSpeedMin;
+					if (hadHeading && dot < ramp.resetDot && carryingSpeed) {
+						// turned hard enough at speed to break momentum
+						player.momentum = 0;
+					}
+					else {
+						player.momentum = Math.min(1, player.momentum + this.dt / ramp.rampTime);
+					}
+					player.lastMoveDirX = ndx;
+					player.lastMoveDirY = ndy;
+				}
+			}
+			var momentumFactor = (ramp != null && !player.isAI) ? player.getMomentumFactor() : 1;
+
 			var newVelX, newVelY, newVel, newDirX, newDirY;
-			newVelX = player.velX + (player.acel + player.getSpeedBonus()) * driveMult * dirX * this.dt;
-			newVelY = player.velY + (player.acel + player.getSpeedBonus()) * driveMult * dirY * this.dt;
+			newVelX = player.velX + (player.acel + player.getSpeedBonus()) * driveMult * momentumFactor * dirX * this.dt;
+			newVelY = player.velY + (player.acel + player.getSpeedBonus()) * driveMult * momentumFactor * dirY * this.dt;
 
 			if (braking) {
 				newVelX -= player.brakeCoeff * player.velX;

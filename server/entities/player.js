@@ -252,6 +252,14 @@ class Player extends Circle {
 		this.maxVelocity = c.playerMaxSpeed;
 		this.acel = c.playerBaseAcel;
 
+		// Momentum ramp: drive force scales up from `floor` to 1 the longer you hold a
+		// steady heading; a hard turn or a stop dumps it back to the floor (see engine
+		// updatePlayers + config.momentumRamp). momentum is the current 0..1 progress;
+		// lastMoveDirX/Y is last tick's NORMALIZED input heading (0,0 = not moving).
+		this.momentum = 0;
+		this.lastMoveDirX = 0;
+		this.lastMoveDirY = 0;
+
 		this.currentSpeedBonus = 0;
 
 		//AI (set on bot players by world.createNewBot; humans leave these untouched)
@@ -795,6 +803,15 @@ class Player extends Circle {
 	}
 	getSpeedBonus() {
 		return this.currentSpeedBonus;
+	}
+	// 0..1 → floor..1 multiplier applied to the drive force this tick. Full ramp
+	// returns 1 (old behavior); a fresh start/hard turn returns `floor`.
+	getMomentumFactor() {
+		if (c.momentumRamp == null) {
+			return 1;
+		}
+		var floor = c.momentumRamp.floor;
+		return floor + (1 - floor) * this.momentum;
 	}
 	increaseDragMultiplier(newValue) {
 		this.dragMultiplier *= newValue;
