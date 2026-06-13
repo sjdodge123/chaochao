@@ -10204,29 +10204,70 @@ function drawDashArrows(x, y, angle) {
     gameContext.restore();
 }
 
-// Recharge Spring — a green "pit stop" pad. A faint footprint, a gently pulsing ring
-// (the recharge beat), and a green cross (the universal "restore" mark). No shadowBlur
-// or filter (kept off the per-frame GPU-killer list); the pulse is a cheap sin scale.
+// True when a boon at (x,y) is sitting on a water tile, so its drawer can switch to
+// the foam "water variant" that reads against blue water. Cheap nearest-cell lookup
+// (gameboard.tileIdAt); recomputed per frame so it stays correct if the terrain under
+// the boon mutates mid-round (tileSwap / heatwave / orbital beam).
+function boonOnWater(x, y) {
+    return typeof tileIdAt === "function" && config.tileMap != null && config.tileMap.water != null
+        && tileIdAt(x, y) === config.tileMap.water.id;
+}
+
+// Recharge Spring — a "pit stop" pad. On land: a faint green footprint, a gently
+// pulsing ring (the recharge beat), and a green restore cross. On water: a bubbling
+// spring — a white footprint, an expanding foam ripple, rising bubbles, and the green
+// cross kept for identity, so it pops against blue water. No shadowBlur/filter (kept
+// off the per-frame GPU-killer list); animation is cheap sin/phase math.
 function drawRechargeSpring(x, y) {
     var cfg = config.boons.rechargeSpring;
     var r = cfg.radius;
-    var pulse = 0.5 + 0.5 * Math.sin(Date.now() / 320);
+    var onWater = boonOnWater(x, y);
     gameContext.save();
     gameContext.translate(x, y);
-    // Faint footprint that blends into the terrain (matches the boon visual language).
-    gameContext.beginPath();
-    gameContext.arc(0, 0, r, 0, 2 * Math.PI);
-    gameContext.fillStyle = "rgba(91,227,160,0.08)";
-    gameContext.fill();
-    // Pulsing recharge ring.
-    gameContext.beginPath();
-    gameContext.arc(0, 0, r * (0.62 + 0.28 * pulse), 0, 2 * Math.PI);
-    gameContext.strokeStyle = cfg.color;
-    gameContext.globalAlpha = 0.35 + 0.45 * (1 - pulse);
-    gameContext.lineWidth = 3;
-    gameContext.stroke();
-    gameContext.globalAlpha = 1;
-    // Green restore cross in the middle.
+    if (onWater) {
+        var foam = cfg.colorWater;
+        var t = (Date.now() / 900) % 1; // ripple phase 0..1
+        // White footprint.
+        gameContext.beginPath();
+        gameContext.arc(0, 0, r, 0, 2 * Math.PI);
+        gameContext.fillStyle = "rgba(234,251,255,0.10)";
+        gameContext.fill();
+        // Expanding foam ripple ring.
+        gameContext.beginPath();
+        gameContext.arc(0, 0, r * (0.35 + 0.6 * t), 0, 2 * Math.PI);
+        gameContext.strokeStyle = foam;
+        gameContext.globalAlpha = 0.6 * (1 - t);
+        gameContext.lineWidth = 2.5;
+        gameContext.stroke();
+        // Rising bubbles.
+        gameContext.fillStyle = foam;
+        for (var bi = 0; bi < 3; bi++) {
+            var bph = ((Date.now() / 700) + bi * 0.33) % 1;
+            var bx = (bi - 1) * r * 0.28;
+            var by = r * 0.5 - bph * r;
+            gameContext.globalAlpha = 0.7 * (1 - bph);
+            gameContext.beginPath();
+            gameContext.arc(bx, by, 2.2, 0, 2 * Math.PI);
+            gameContext.fill();
+        }
+        gameContext.globalAlpha = 1;
+    } else {
+        var pulse = 0.5 + 0.5 * Math.sin(Date.now() / 320);
+        // Faint footprint that blends into the terrain.
+        gameContext.beginPath();
+        gameContext.arc(0, 0, r, 0, 2 * Math.PI);
+        gameContext.fillStyle = "rgba(91,227,160,0.08)";
+        gameContext.fill();
+        // Pulsing recharge ring.
+        gameContext.beginPath();
+        gameContext.arc(0, 0, r * (0.62 + 0.28 * pulse), 0, 2 * Math.PI);
+        gameContext.strokeStyle = cfg.color;
+        gameContext.globalAlpha = 0.35 + 0.45 * (1 - pulse);
+        gameContext.lineWidth = 3;
+        gameContext.stroke();
+        gameContext.globalAlpha = 1;
+    }
+    // Green restore cross in the middle (the shared identity on land + water).
     var arm = r * 0.42;
     gameContext.strokeStyle = cfg.color;
     gameContext.lineWidth = 5;
@@ -10240,14 +10281,16 @@ function drawRechargeSpring(x, y) {
     gameContext.restore();
 }
 
-// Slipstream — a wind-current corridor. A faint rounded footprint plus flowing
-// streamlines that scroll along the push axis (the dash offset animates), so the pad
-// reads as a moving current pointing the way it carries you. Cheap: stroked dashes,
-// no shadowBlur/filter.
+// Slipstream — a current corridor. On land it's a wind tunnel: faint footprint plus
+// straight light-blue streamlines that scroll along the push axis. On water it's a
+// river current: the streamlines become flowing foam-white waves (same scroll + leading
+// arrowheads), so it reads as water moving against blue water. Cheap: stroked
+// dashes/short segments, no shadowBlur/filter.
 function drawSlipstream(x, y, angle) {
     var cfg = config.boons.slipstream;
     var rad = (angle || 0) * (Math.PI / 180);
     var w = cfg.width, hgt = cfg.height;
+    var onWater = boonOnWater(x, y);
     var flow = (Date.now() / 14) % 28; // scroll the dashes toward +x
     gameContext.save();
     gameContext.translate(x, y);
@@ -10255,26 +10298,38 @@ function drawSlipstream(x, y, angle) {
     // Faint footprint.
     gameContext.beginPath();
     gameContext.rect(-w / 2, -hgt / 2, w, hgt);
-    gameContext.fillStyle = "rgba(127,216,255,0.06)";
+    gameContext.fillStyle = onWater ? "rgba(234,248,255,0.07)" : "rgba(127,216,255,0.06)";
     gameContext.fill();
-    gameContext.strokeStyle = "rgba(127,216,255,0.12)";
+    gameContext.strokeStyle = onWater ? "rgba(234,248,255,0.14)" : "rgba(127,216,255,0.12)";
     gameContext.lineWidth = 1;
     gameContext.stroke();
-    // Three flowing streamlines down the corridor, each ending in a soft arrowhead.
-    gameContext.strokeStyle = cfg.color;
+    var stroke = onWater ? cfg.colorWater : cfg.color;
+    gameContext.strokeStyle = stroke;
     gameContext.lineWidth = 3;
     gameContext.lineCap = "round";
     gameContext.lineJoin = "round";
     var rows = [-hgt * 0.28, 0, hgt * 0.28];
+    var x0 = -w / 2 + 8, x1 = w / 2 - 16;
     for (var i = 0; i < rows.length; i++) {
         var ly = rows[i];
-        gameContext.setLineDash([18, 10]);
-        gameContext.lineDashOffset = -flow;
-        gameContext.beginPath();
-        gameContext.moveTo(-w / 2 + 8, ly);
-        gameContext.lineTo(w / 2 - 16, ly);
-        gameContext.stroke();
-        gameContext.setLineDash([]);
+        if (onWater) {
+            // Wavy foam streamline (a river ripple) scrolling toward +x.
+            gameContext.beginPath();
+            for (var sx = x0; sx <= x1; sx += 8) {
+                var wy = ly + Math.sin((sx + flow * 2) / 18 + i) * 4;
+                if (sx === x0) { gameContext.moveTo(sx, wy); } else { gameContext.lineTo(sx, wy); }
+            }
+            gameContext.stroke();
+        } else {
+            // Straight scrolling dash (a wind streak).
+            gameContext.setLineDash([18, 10]);
+            gameContext.lineDashOffset = -flow;
+            gameContext.beginPath();
+            gameContext.moveTo(x0, ly);
+            gameContext.lineTo(x1, ly);
+            gameContext.stroke();
+            gameContext.setLineDash([]);
+        }
         // arrowhead at the leading (+x) end
         gameContext.beginPath();
         gameContext.moveTo(w / 2 - 22, ly - 7);

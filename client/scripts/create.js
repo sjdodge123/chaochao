@@ -1372,25 +1372,59 @@ function paintDashArrowsShape(ctx, kind, x, y, angle, ringColor) {
     }
     ctx.restore();
 }
+// True when a boon placed at (x,y) sits on a water cell in the map being edited, so
+// the painter can preview the foam "water variant" exactly as it renders in-game.
+// renderCells() (which rebuilds tileIdByVid) runs before renderHazards() each frame.
+function editorBoonOnWater(x, y) {
+    if (config == null || config.tileMap == null || config.tileMap.water == null) { return false; }
+    if (typeof cellIdFromPoint !== "function" || tileIdByVid == null) { return false; }
+    var vid = cellIdFromPoint(x, y);
+    return vid != null && tileIdByVid[vid] === config.tileMap.water.id;
+}
 // Recharge Spring painter (the rechargeSpring `paint` hook) — mirrors the in-game
-// look (draw.js drawRechargeSpring): a faint green footprint, a ring, and the green
-// restore cross. Static in the editor (no pulse animation).
+// look (draw.js drawRechargeSpring). On land: faint green footprint + ring + green
+// restore cross. On water: the bubbling-spring variant (white footprint, foam ripple
+// rings, static bubbles) + the cross. Static in the editor (no animation).
 function paintRechargeSpringShape(ctx, kind, x, y, angle, ringColor) {
     var cfg = objCfgByKey(kind.key);
     if (cfg == null) { return; }
     var r = cfg.radius;
+    var onWater = editorBoonOnWater(x, y);
     ctx.save();
     ctx.translate(x, y);
-    ctx.beginPath();
-    ctx.arc(0, 0, r, 0, 2 * Math.PI);
-    ctx.fillStyle = "rgba(91,227,160,0.08)";
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(0, 0, r * 0.78, 0, 2 * Math.PI);
-    ctx.strokeStyle = cfg.color;
-    ctx.lineWidth = 3;
-    ctx.stroke();
+    if (onWater) {
+        var foam = cfg.colorWater;
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, 2 * Math.PI);
+        ctx.fillStyle = "rgba(234,251,255,0.12)";
+        ctx.fill();
+        ctx.strokeStyle = foam;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(0, 0, r * 0.5, 0, 2 * Math.PI);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(0, 0, r * 0.85, 0, 2 * Math.PI);
+        ctx.stroke();
+        ctx.fillStyle = foam;
+        for (var bi = 0; bi < 3; bi++) {
+            ctx.beginPath();
+            ctx.arc((bi - 1) * r * 0.28, -r * 0.2 - bi * 3, 2.4, 0, 2 * Math.PI);
+            ctx.fill();
+        }
+    } else {
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, 2 * Math.PI);
+        ctx.fillStyle = "rgba(91,227,160,0.08)";
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(0, 0, r * 0.78, 0, 2 * Math.PI);
+        ctx.strokeStyle = cfg.color;
+        ctx.lineWidth = 3;
+        ctx.stroke();
+    }
     var arm = r * 0.42;
+    ctx.strokeStyle = cfg.color;
     ctx.lineCap = "round";
     ctx.lineWidth = 5;
     ctx.beginPath();
@@ -1402,36 +1436,48 @@ function paintRechargeSpringShape(ctx, kind, x, y, angle, ringColor) {
     ctx.restore();
 }
 // Slipstream painter (the slipstream `paint` hook) — mirrors the in-game look
-// (draw.js drawSlipstream): a faint corridor footprint with three streamlines + a
-// leading arrowhead along `angle`, the push direction. Static (no flow animation).
+// (draw.js drawSlipstream). On land: straight light-blue streamlines + leading
+// arrowheads along `angle`. On water: foam-white wavy streamlines (a river current).
+// Static (no flow animation).
 function paintSlipstreamShape(ctx, kind, x, y, angle, ringColor) {
     var cfg = objCfgByKey(kind.key);
     if (cfg == null) { return; }
     var rad = (angle || 0) * (Math.PI / 180);
     var w = cfg.width, hgt = cfg.height;
+    var onWater = editorBoonOnWater(x, y);
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(rad);
     ctx.beginPath();
     ctx.rect(-w / 2, -hgt / 2, w, hgt);
-    ctx.fillStyle = "rgba(127,216,255,0.06)";
+    ctx.fillStyle = onWater ? "rgba(234,248,255,0.08)" : "rgba(127,216,255,0.06)";
     ctx.fill();
-    ctx.strokeStyle = "rgba(127,216,255,0.12)";
+    ctx.strokeStyle = onWater ? "rgba(234,248,255,0.14)" : "rgba(127,216,255,0.12)";
     ctx.lineWidth = 1;
     ctx.stroke();
-    ctx.strokeStyle = cfg.color;
+    ctx.strokeStyle = onWater ? cfg.colorWater : cfg.color;
     ctx.lineWidth = 3;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     var rows = [-hgt * 0.28, 0, hgt * 0.28];
+    var x0 = -w / 2 + 8, x1 = w / 2 - 16;
     for (var i = 0; i < rows.length; i++) {
         var ly = rows[i];
-        ctx.setLineDash([18, 10]);
-        ctx.beginPath();
-        ctx.moveTo(-w / 2 + 8, ly);
-        ctx.lineTo(w / 2 - 16, ly);
-        ctx.stroke();
-        ctx.setLineDash([]);
+        if (onWater) {
+            ctx.beginPath();
+            for (var sx = x0; sx <= x1; sx += 8) {
+                var wy = ly + Math.sin(sx / 18 + i) * 4;
+                if (sx === x0) { ctx.moveTo(sx, wy); } else { ctx.lineTo(sx, wy); }
+            }
+            ctx.stroke();
+        } else {
+            ctx.setLineDash([18, 10]);
+            ctx.beginPath();
+            ctx.moveTo(x0, ly);
+            ctx.lineTo(x1, ly);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
         ctx.beginPath();
         ctx.moveTo(w / 2 - 22, ly - 7);
         ctx.lineTo(w / 2 - 10, ly);
