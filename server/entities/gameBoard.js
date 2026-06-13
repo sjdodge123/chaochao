@@ -163,7 +163,7 @@ class GameBoard {
 		this.updateProjectiles(currentState);
 		this.checkAbilities(currentState);
 		this.updateAimers(currentState);
-		this.updateHazards(currentState);
+		this.updateHazards(currentState, dt);
 		if (currentState == c.stateMap.lobby) {
 			this.checkLobbyMapReset();
 			// SPIKE (lobby hub): runs AFTER checkCollisions so touchingStation reflects
@@ -585,10 +585,12 @@ class GameBoard {
 
 		}
 	}
-	updateHazards(currentState) {
+	updateHazards(currentState, dt) {
 		for (var id in this.hazardList) {
 			var hazard = this.hazardList[id];
-			hazard.update();
+			// dt lets stationary stateful kinds (geyser/mine/fence) run their phase
+			// timer; moving kinds ignore it (base Hazard.update just commits move()).
+			hazard.update(dt);
 			if (hazard.punch != null && this.punchList[hazard.ownerId] == null) {
 				this.punchList[hazard.ownerId] = hazard.punch;
 				messenger.messageRoomBySig(this.roomSig, "punch", compressor.sendPunch(hazard.punch));

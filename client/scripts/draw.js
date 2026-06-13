@@ -9026,6 +9026,9 @@ function buildHazardDrawers() {
     hazardDrawers[config.hazards.rotor.id] = function (h) {
         drawRotor(h.x, h.y, h.angle);
     };
+    hazardDrawers[config.hazards.geyser.id] = function (h) {
+        drawGeyser(h.x, h.y, h.state);
+    };
 }
 function drawHazard(hazard) {
     if (hazardDrawers == null) {
@@ -9197,6 +9200,62 @@ function drawRotor(x, y, angle) {
     gameContext.arc(x, y, config.hazards.rotor.radius, 0, 2 * Math.PI);
     gameContext.fillStyle = config.hazards.rotor.color;
     gameContext.fill();
+    gameContext.restore();
+}
+
+// A geyser vent. `state` is the server phase (netState): 0 dormant, 1 charging
+// (telegraph — a pulsing warning ring + bubbles so you clear off), 2 erupting (an
+// orange burst out to the eruption reach). Always draws the stone vent itself.
+function drawGeyser(x, y, state) {
+    var cfg = config.hazards.geyser;
+    var r = cfg.radius;
+    gameContext.save();
+    // Vent rim + dark throat (always).
+    gameContext.beginPath();
+    gameContext.arc(x, y, r, 0, 2 * Math.PI);
+    gameContext.fillStyle = "#3a2f2a";
+    gameContext.fill();
+    gameContext.lineWidth = 3;
+    gameContext.strokeStyle = "#6b5546";
+    gameContext.stroke();
+    gameContext.beginPath();
+    gameContext.arc(x, y, r * 0.6, 0, 2 * Math.PI);
+    gameContext.fillStyle = "#241c18";
+    gameContext.fill();
+
+    if (state === 2) {
+        // Erupting: a filled orange burst with radial spikes out to the reach.
+        gameContext.globalAlpha = 0.85;
+        gameContext.fillStyle = cfg.color;
+        gameContext.beginPath();
+        gameContext.arc(x, y, cfg.attackRadius, 0, 2 * Math.PI);
+        gameContext.fill();
+        gameContext.globalAlpha = 1;
+        gameContext.fillStyle = "#FFD27B";
+        for (var s = 0; s < 8; s++) {
+            var a = (s / 8) * 2 * Math.PI;
+            gameContext.beginPath();
+            gameContext.arc(x + Math.cos(a) * cfg.attackRadius, y + Math.sin(a) * cfg.attackRadius, 5, 0, 2 * Math.PI);
+            gameContext.fill();
+        }
+    } else if (state === 1) {
+        // Charging: a pulsing warning ring (grows toward the eruption reach) + a
+        // couple of rising bubbles. Date.now drives the pulse; no game state needed.
+        var t = (Date.now() % 700) / 700;          // 0..1 sawtooth
+        var ringR = r + t * (cfg.attackRadius - r);
+        gameContext.globalAlpha = 0.7 * (1 - t);
+        gameContext.lineWidth = 4;
+        gameContext.strokeStyle = cfg.color;
+        gameContext.beginPath();
+        gameContext.arc(x, y, ringR, 0, 2 * Math.PI);
+        gameContext.stroke();
+        gameContext.globalAlpha = 0.9;
+        gameContext.fillStyle = "#FFD27B";
+        gameContext.beginPath();
+        gameContext.arc(x + (t - 0.5) * 6, y - t * r, 2.5, 0, 2 * Math.PI);
+        gameContext.fill();
+        gameContext.globalAlpha = 1;
+    }
     gameContext.restore();
 }
 
