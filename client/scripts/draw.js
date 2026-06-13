@@ -9023,6 +9023,9 @@ function buildHazardDrawers() {
     hazardDrawers[config.hazards.bumperWall.id] = function (h) {
         drawBumperWall(h.x, h.y, h.angle);
     };
+    hazardDrawers[config.hazards.rotor.id] = function (h) {
+        drawRotor(h.x, h.y, h.angle);
+    };
 }
 function drawHazard(hazard) {
     if (hazardDrawers == null) {
@@ -9160,6 +9163,41 @@ function drawBonusOrbs() {
         gameContext.fillText("+1", orb.x, cy);
         gameContext.restore();
     }
+}
+
+// A rotor: a bumper head sweeping a circle around a fixed pivot. The pivot is
+// derived from the head (x,y) and the streamed sweep `angle` (head = pivot +
+// orbitRadius along angle), so the streamAngle wire drives where the arm points.
+// Drawn as a dark hub + arm to a bumper-orange head with the red attack ring.
+function drawRotor(x, y, angle) {
+    var rad = (angle || 0) * (Math.PI / 180);
+    var px = x - Math.cos(rad) * config.hazards.rotor.orbitRadius;
+    var py = y - Math.sin(rad) * config.hazards.rotor.orbitRadius;
+    gameContext.save();
+    gameContext.lineCap = "round";
+    // Arm.
+    gameContext.beginPath();
+    gameContext.moveTo(px, py);
+    gameContext.lineTo(x, y);
+    gameContext.strokeStyle = "#222";
+    gameContext.lineWidth = config.hazards.rotor.armWidth;
+    gameContext.stroke();
+    // Hub.
+    gameContext.beginPath();
+    gameContext.arc(px, py, config.hazards.rotor.armWidth, 0, 2 * Math.PI);
+    gameContext.fillStyle = "#222";
+    gameContext.fill();
+    // Head — same disc + ring look as a round bumper, sized from rotor config.
+    gameContext.beginPath();
+    gameContext.strokeStyle = bumperRingColor;
+    gameContext.lineWidth = 3;
+    gameContext.arc(x, y, config.hazards.rotor.attackRadius, 0, 2 * Math.PI);
+    gameContext.stroke();
+    gameContext.beginPath();
+    gameContext.arc(x, y, config.hazards.rotor.radius, 0, 2 * Math.PI);
+    gameContext.fillStyle = config.hazards.rotor.color;
+    gameContext.fill();
+    gameContext.restore();
 }
 
 function locateColor(id) {

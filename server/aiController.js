@@ -1940,6 +1940,23 @@ function update(gameBoard, currentState, dt) {
             }
             continue;
         }
+        // A rotor sweeps a RING (its head orbits the pivot), not a point — penalize
+        // cells near the orbit circle, at the mild TIMEABLE price like a rail: the
+        // head is only at any point briefly each revolution, so a bot can dart
+        // across the ring between passes rather than treat it as a wall.
+        if (hz.isRotor) {
+            var ringMargin = RAIL_PENALTY_MARGIN;
+            for (var oi = 0; oi < map.cells.length; oi++) {
+                var oc = map.cells[oi];
+                if (!oc || !oc.site) { continue; }
+                var od = Math.hypot(oc.site.x - hz.px, oc.site.y - hz.py);
+                if (Math.abs(od - hz.orbitRadius) < ringMargin) {
+                    if (railCells == null) { railCells = new Set(); }
+                    railCells.add(oc.site.voronoiId);
+                }
+            }
+            continue;
+        }
         // A bumper wall covers its whole centerline, not a point — penalize every
         // cell near the segment, like a rail, but at the harsh STATIC price: there
         // is no gap to time, the entire line knocks back whenever it's touched.

@@ -315,6 +315,21 @@ function smoothPos(o, tau, dt) {
 	o.x += dx * a;
 	o.y += dy * a;
 }
+// Ease o.angle (degrees) toward o.ta the short way around the circle, so a
+// streamed sweep angle (rotor) rotates smoothly instead of stepping at 30Hz and
+// never spins the long way at the 360→0 wrap. Same exp-ease shape as smoothPos.
+function smoothAngle(o, tau, dt) {
+	if (o == null || o.ta == null) {
+		return;
+	}
+	if (o.angle == null) {               // first sight: snap onto the target
+		o.angle = o.ta;
+		return;
+	}
+	var diff = ((o.ta - o.angle + 540) % 360) - 180;   // shortest signed delta in (-180,180]
+	var a = 1 - Math.exp(-dt / tau);
+	o.angle += diff * a;
+}
 // Ease every moving entity toward its latest server target. Called once per
 // render frame, BEFORE drawing (and before the camera reads the local kart).
 function smoothEntities(dt) {
@@ -332,6 +347,7 @@ function smoothEntities(dt) {
 	if (typeof hazardList !== "undefined" && hazardList) {
 		for (id in hazardList) {
 			smoothPos(hazardList[id], SMOOTH_TAU_REMOTE, dt);
+			smoothAngle(hazardList[id], SMOOTH_TAU_REMOTE, dt);
 		}
 	}
 }
@@ -532,8 +548,10 @@ function updateHazardList(packet) {
 			// Optional per-kind slots (encoder: compressor.sendHazardUpdates):
 			// [3] angle for kinds that stream facing, [4] small phase/state int.
 			// Bumpers send neither — rows stay 3 long and nothing changes.
+			// Angle is a SMOOTHING TARGET (ta), eased in smoothEntities, so a
+			// rotor sweeps cleanly instead of stepping at the 30Hz tick rate.
 			if (hazard.length > 3 && hazard[3] != null) {
-				hazardList[hazard[0]].angle = hazard[3];
+				hazardList[hazard[0]].ta = hazard[3];
 			}
 			if (hazard.length > 4 && hazard[4] != null) {
 				hazardList[hazard[0]].state = hazard[4];
@@ -769,6 +787,7 @@ function applyHazards(payload) {
 		hazardList[hazard[0]].tx = hazard[2];   // seed render-smoothing target (see smoothEntities)
 		hazardList[hazard[0]].ty = hazard[3];
 		hazardList[hazard[0]].angle = hazard[4];
+		hazardList[hazard[0]].ta = hazard[4];   // seed angle-smoothing target (see smoothEntities)
 
 		// Rail origin/angle come from the payload (compressor.newHazards sends the
 		// rail's own geometry) so a late-join spectator draws the rail from its true
