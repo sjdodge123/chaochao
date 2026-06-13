@@ -448,6 +448,16 @@
             "attackRadius": 15,
             "radius": 12,
             "punchBonus": 10
+        },
+        "rotor": {
+            "id": 903,
+            "color": "#F07B36",
+            "attackRadius": 15,
+            "radius": 10,
+            "punchBonus": 10,
+            "orbitRadius": 70,
+            "angularSpeed": 90,
+            "armWidth": 6
         }
     },
     "lobbyWaitTime": 5,

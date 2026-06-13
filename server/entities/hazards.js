@@ -155,6 +155,58 @@ class BumperWall extends Rect {
 	}
 }
 
+// A rotor: a bumper head that orbits a fixed pivot at a constant angular speed,
+// sweeping a circle like a clock hand. Flings karts/pucks off the head via the
+// same map-owned punch the round bumpers use. The map entry's (x,y) is the
+// PIVOT and `angle` is the starting sweep angle; the head rides `orbitRadius`
+// out along the current angle. Motion lives in advance(dt) (the engine's
+// per-tick hook — it has dt; the hazard's own update()/move() just commits the
+// computed newX/newY). streamAngle ships the live sweep angle each tick so the
+// client can draw the arm + head and smooth the rotation. First consumer of the
+// framework's streamAngle wire slot.
+class Rotor extends Hazard {
+	constructor(x, y, radius, color, ownerId, roomSig, angle) {
+		super(x, y, radius, color, ownerId, roomSig);
+		this.id = c.hazards.rotor.id;
+		this.moveable = true;       // engine.updateHazards drives advance(dt)
+		this.streamAngle = true;    // ship .angle per tick (compressor.sendHazardUpdates)
+		this.isRotor = true;        // AI classifies the swept ring (aiController)
+		this.px = x;                // pivot (the map anchor) — fixed for the round
+		this.py = y;
+		this.orbitRadius = c.hazards.rotor.orbitRadius;
+		this.angularSpeed = c.hazards.rotor.angularSpeed; // degrees/second
+		this.angle = angle || 0;    // current sweep angle (degrees)
+		this.punch = null;
+		// Seed the head onto the orbit so creation (newHazards) and the first tick
+		// agree — no one-frame jump from pivot to head.
+		var rad = this.angle * (Math.PI / 180);
+		this.x = this.newX = this.px + Math.cos(rad) * this.orbitRadius;
+		this.y = this.newY = this.py + Math.sin(rad) * this.orbitRadius;
+	}
+	// Per-tick motion hook (engine.updateHazards). Advance the sweep angle and
+	// place the head on the orbit; move() (called later in gameBoard.updateHazards)
+	// commits newX/newY, mirroring how rail bumpers separate compute from commit.
+	advance(dt) {
+		this.angle += this.angularSpeed * dt;
+		if (this.angle >= 360) { this.angle -= 360; } else if (this.angle < 0) { this.angle += 360; }
+		var rad = this.angle * (Math.PI / 180);
+		this.newX = this.px + Math.cos(rad) * this.orbitRadius;
+		this.newY = this.py + Math.sin(rad) * this.orbitRadius;
+		this.velX = this.newX - this.x;
+		this.velY = this.newY - this.y;
+	}
+	handleHit(object) {
+		if (!object.isPlayer && !object.isPuck) {
+			return;
+		}
+		if (this.punch == null) {
+			this.punch = new Punch(this.x, this.y, c.hazards.rotor.attackRadius, c.hazards.rotor.color, this.ownerId, this.roomSig, c.hazards.rotor.punchBonus, false, null);
+			this.punch.mapOwned = true;
+			this.punch.type = "bumper";
+		}
+	}
+}
+
 // --- hazard-kind registry ------------------------------------------------------
 // Single source of truth for the map-authorable hazard kinds. Everything with
 // per-kind behavior keys off this: gameBoard.generateHazards builds via
@@ -174,6 +226,11 @@ class BumperWall extends Rect {
 //            the bumper wall.
 //   build(entry, mapID, roomSig) — construct the live hazard from its map JSON
 //            entry ({id, x, y, [angle]}). Must return a Hazard/Rect subclass.
+//
+// Per-tick motion: a moveable hazard either rides a `rail` (engine.updateHazards
+// steps it along the rail) or defines `advance(dt)` (engine.updateHazards calls
+// it with the tick dt so the kind owns its own motion — e.g. the rotor's orbit).
+// Static kinds set moveable=false and are skipped.
 var HAZARD_KINDS = {};
 var _kindById = {};
 function registerHazardKind(key, def) {
@@ -208,5 +265,12 @@ registerHazardKind("bumperWall", {
 		return new BumperWall(entry.x, entry.y, c.hazards.bumperWall.width, c.hazards.bumperWall.height, entry.angle, c.hazards.bumperWall.color, mapID, roomSig);
 	}
 });
+registerHazardKind("rotor", {
+	railed: false,
+	directional: false, // `angle` is the OPTIONAL starting sweep angle (defaults to 0)
+	build: function (entry, mapID, roomSig) {
+		return new Rotor(entry.x, entry.y, c.hazards.rotor.radius, c.hazards.rotor.color, mapID, roomSig, entry.angle || 0);
+	}
+});
 
-module.exports = { HazardRail, Hazard, Bumper, BumperWall, HAZARD_KINDS, hazardKindById, registerHazardKind };
+module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, HAZARD_KINDS, hazardKindById, registerHazardKind };

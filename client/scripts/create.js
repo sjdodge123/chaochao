@@ -1331,6 +1331,41 @@ function paintBumperWallShape(ctx, kind, x, y, angle, ringColor) {
     ctx.stroke();
     ctx.restore();
 }
+// Rotor painter (rotor's `paint` hook). In the editor (x,y) is the PIVOT and
+// `angle` the starting sweep; the head sits orbitRadius out along it. Mirrors
+// the in-game look (draw.js drawRotor): dark hub + arm to a bumper-orange head
+// with the red attack ring. (In-game the server tracks the head as the hazard
+// position; here the static map entry stores the pivot.)
+function paintRotorShape(ctx, kind, x, y, angle, ringColor) {
+    var cfg = config.hazards[kind.key];
+    if (cfg == null) { return; }
+    var rad = (angle || 0) * (Math.PI / 180);
+    var hx = x + Math.cos(rad) * cfg.orbitRadius;
+    var hy = y + Math.sin(rad) * cfg.orbitRadius;
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(hx, hy);
+    ctx.strokeStyle = "#222";
+    ctx.lineWidth = cfg.armWidth;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x, y, cfg.armWidth, 0, 2 * Math.PI);
+    ctx.fillStyle = "#222";
+    ctx.fill();
+    // Head.
+    ctx.beginPath();
+    ctx.strokeStyle = ringColor;
+    ctx.lineWidth = 3;
+    ctx.arc(hx, hy, cfg.attackRadius, 0, 2 * Math.PI);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(hx, hy, cfg.radius, 0, 2 * Math.PI);
+    ctx.fillStyle = cfg.color;
+    ctx.fill();
+    ctx.restore();
+}
 // Shared per-kind hazard painter for the editor canvas (placement preview +
 // placed hazards) and the load-list thumbnails — the default `paint` hook.
 // Railed kinds draw their rail bar from (x,y) along `angle`; every kind draws
@@ -1631,6 +1666,35 @@ var EDITOR_HAZARD_KINDS = [
             ctx.moveTo(16, cy);
             ctx.lineTo(size - 16, cy);
             ctx.stroke();
+        }
+    },
+    {
+        key: "rotor", label: "Rotor", shortcut: "o", railed: false, directional: false,
+        paint: paintRotorShape,
+        swatchPaint: function (ctx, size) {
+            // Hub + arm to an orange head with red ring — the rotor at swatch scale.
+            var cx = size / 2, cy = size / 2;
+            var hx = size - 22, hy = size - 22;
+            ctx.lineCap = "round";
+            ctx.beginPath();
+            ctx.moveTo(cx - 14, cy - 14);
+            ctx.lineTo(hx, hy);
+            ctx.strokeStyle = "#222";
+            ctx.lineWidth = 9;
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(cx - 14, cy - 14, 9, 0, 2 * Math.PI);
+            ctx.fillStyle = "#222";
+            ctx.fill();
+            ctx.beginPath();
+            ctx.strokeStyle = "#E5392B";
+            ctx.lineWidth = 5;
+            ctx.arc(hx, hy, 17, 0, 2 * Math.PI);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(hx, hy, 12, 0, 2 * Math.PI);
+            ctx.fillStyle = "orange";
+            ctx.fill();
         }
     }
 ];

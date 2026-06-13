@@ -227,6 +227,13 @@ class Engine {
 			if (!hazard.moveable) {
 				continue;
 			}
+			// Self-propelled kinds own their motion (e.g. the rotor's orbit). They
+			// get the tick dt here — the hazard's own update()/move() (called later
+			// in gameBoard.updateHazards) commits the newX/newY they set.
+			if (typeof hazard.advance === "function") {
+				hazard.advance(this.dt);
+				continue;
+			}
 			if (hazard.rail == null) {
 				hazard.velX = 0;
 				hazard.velY = 0;
