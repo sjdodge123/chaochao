@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.35.4 — 2026-06-13
+
 ### General
 
 - **New hazard: the Rotor.** A bumper mounted on a spinning arm that sweeps a full circle around its pivot like a clock hand — touch the head and you're flung off just like a regular bumper, but the safe gap comes around and around, so you have to time your dash through its ring. Map authors can place and aim them in the editor (Hazards palette). Rival AI racers dart across the ring between passes rather than treating it as a wall.
