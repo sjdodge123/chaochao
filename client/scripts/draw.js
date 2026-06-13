@@ -10160,7 +10160,7 @@ function drawBrutalBadges() {
 // Sits below the race timer + brutal badges, screen-space (drawn inside drawHUD).
 var combatLog = []; // newest first
 var COMBAT_LOG_MAX = 6;
-var COMBAT_LOG_LIFE_MS = { kill: 6500, death: 6500, ability: 4500, score: 7500 };
+var COMBAT_LOG_LIFE_MS = { kill: 6500, death: 6500, ability: 4500, score: 7500, orb: 6500 };
 var _combatAbilityLabels = null;
 var _combatAbilityIcons = null;
 
@@ -10267,6 +10267,12 @@ function combatLogAbility(ownerId, abilityId) {
     pushCombatEntry({ type: "ability", ownerId: ownerId, ownerName: combatNameOf(ownerId), abilityId: abilityId });
 }
 
+// Teams modes: a racer drove over a bonus orb and banked points for their team.
+function combatLogOrb(ownerId, points) {
+    if (ownerId == null) { return; }
+    pushCombatEntry({ type: "orb", ownerId: ownerId, ownerName: combatNameOf(ownerId), points: (points != null) ? points : 1 });
+}
+
 // Scoring finishes. firstPlaceWinner / secondPlaceWinner / playerConcluded all
 // fire for a podium finisher, and teams modes add a teamPointsDelta — so this
 // upgrades an existing recent row (better rank / +points) instead of stacking
@@ -10301,6 +10307,24 @@ function combatScoreEmoji(rankLabel) {
     if (rankLabel === "1st") { return "🥇"; }
     if (rankLabel === "2nd") { return "🥈"; }
     return "🏁";
+}
+
+// Bonus-orb marker — the same gold sphere the player sees on the map (radial
+// sheen + config orb colour), shrunk to a row token so the feed reads true to
+// the in-game pickup.
+function drawCombatOrbToken(cx, cy, r) {
+    var color = (typeof config !== "undefined" && config && config.bonusOrb && config.bonusOrb.color) ? config.bonusOrb.color : "#FFD54A";
+    var grad = gameContext.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.1, cx, cy, r);
+    grad.addColorStop(0, "#FFFDF0");
+    grad.addColorStop(0.45, color);
+    grad.addColorStop(1, "#C9962E");
+    gameContext.beginPath();
+    gameContext.arc(cx, cy, r, 0, Math.PI * 2);
+    gameContext.fillStyle = grad;
+    gameContext.fill();
+    gameContext.lineWidth = 1.3;
+    gameContext.strokeStyle = "rgba(255,255,255,0.85)";
+    gameContext.stroke();
 }
 
 // Cart-cosmetic thumbnail for a live player, with a team-coloured ring in teams
@@ -10353,6 +10377,12 @@ function combatRowSegments(entry) {
             segs.push({ k: "text", text: entry.ownerName, color: combatColorOf(entry.ownerId, "#ffffff"), bold: false });
             segs.push({ k: "text", text: abilityLabelFor(entry.abilityId), color: "#5fe0ee", bold: true });
         }
+    } else if (entry.type === "orb") {
+        // Bonus orb collected — the gold-sphere marker + the team points it banked.
+        segs.push({ k: "orb" });
+        segs.push({ k: "thumb", id: entry.ownerId });
+        segs.push({ k: "text", text: entry.ownerName, color: combatColorOf(entry.ownerId, "#ffffff"), bold: false });
+        segs.push({ k: "text", text: "+" + entry.points, color: "#ffd54a", bold: true });
     } else { // score — 🥇/🥈/🏁 marker conveys the placement
         segs.push({ k: "glyph", emoji: combatScoreEmoji(entry.rankLabel) });
         segs.push({ k: "thumb", id: entry.playerId });
@@ -10400,6 +10430,7 @@ function drawCombatLog() {
             if (seg.k === "glyph") { gameContext.font = "15px Arial"; seg.w = gameContext.measureText(seg.emoji).width; }
             else if (seg.k === "thumb") { seg.w = thumbR * 2; }
             else if (seg.k === "abilityicon") { seg.w = badgeR * 2; }
+            else if (seg.k === "orb") { seg.w = badgeR * 2; }
             else { // text
                 gameContext.font = (seg.bold ? "bold " : "") + (seg.small ? "11px" : "13px") + " Arial";
                 seg.w = gameContext.measureText(seg.text).width;
@@ -10442,6 +10473,8 @@ function drawCombatLog() {
                 gameContext.globalAlpha = alpha; // drawOverviewKart resets alpha via save/restore — re-assert
             } else if (sg.k === "abilityicon") {
                 drawAbilityIconToken(sg.img, cx + badgeR, cy, badgeR);
+            } else if (sg.k === "orb") {
+                drawCombatOrbToken(cx + badgeR, cy, badgeR);
             } else {
                 gameContext.font = (sg.bold ? "bold " : "") + (sg.small ? "11px" : "13px") + " Arial";
                 gameContext.textAlign = "left";
