@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- **Karts now build up to speed.** Instead of hitting full pace the instant you press a direction, your kart starts a little slower and winds up to its top speed over a couple of seconds of holding a steady line. Cut a hard turn or stomp the brakes and you dump that momentum and have to wind back up — so committing to a clean racing line is now faster than constantly jinking around. Top speed itself is unchanged; you just have to earn it.
 
 ## v0.35.1 — 2026-06-13
 
