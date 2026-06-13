@@ -10293,68 +10293,14 @@ function combatLogScore(playerId, rankLabel, points) {
     });
 }
 
-// A small circular type badge with a simple white vector glyph (kept sprite-free
-// and emoji-free to match the in-game HUD iconography).
-function drawCombatBadge(type, cause, cx, cy, r) {
-    var color;
-    if (type === "kill") { color = "#e8473f"; }
-    else if (type === "death") { color = (cause === "lava") ? "#ff7a26" : "#7d8794"; }
-    else if (type === "ability") { color = "#36c5d6"; }
-    else { color = "#ffcc3a"; } // score
-    gameContext.beginPath();
-    gameContext.arc(cx, cy, r, 0, Math.PI * 2);
-    gameContext.fillStyle = color;
-    gameContext.fill();
-    gameContext.lineWidth = 1.4;
-    gameContext.strokeStyle = "rgba(0,0,0,0.35)";
-    gameContext.stroke();
-    gameContext.save();
-    gameContext.strokeStyle = "#ffffff";
-    gameContext.fillStyle = "#ffffff";
-    gameContext.lineCap = "round";
-    gameContext.lineJoin = "round";
-    if (type === "kill") {
-        // Crossed swords (two short blades).
-        gameContext.lineWidth = 1.6;
-        var s = r * 0.62;
-        gameContext.beginPath();
-        gameContext.moveTo(cx - s, cy - s); gameContext.lineTo(cx + s, cy + s);
-        gameContext.moveTo(cx + s, cy - s); gameContext.lineTo(cx - s, cy + s);
-        gameContext.stroke();
-    } else if (type === "death") {
-        // Skull: rounded head with two eye sockets.
-        var hr = r * 0.55;
-        gameContext.beginPath();
-        gameContext.arc(cx, cy - r * 0.12, hr, 0, Math.PI * 2);
-        gameContext.fill();
-        gameContext.fillStyle = (cause === "lava") ? "#ff7a26" : "#7d8794";
-        gameContext.beginPath(); gameContext.arc(cx - hr * 0.45, cy - r * 0.16, hr * 0.32, 0, Math.PI * 2); gameContext.fill();
-        gameContext.beginPath(); gameContext.arc(cx + hr * 0.45, cy - r * 0.16, hr * 0.32, 0, Math.PI * 2); gameContext.fill();
-        gameContext.fillStyle = "#ffffff";
-        gameContext.fillRect(cx - r * 0.28, cy + r * 0.42, r * 0.56, r * 0.26);
-    } else if (type === "ability") {
-        // Plus sign (a pickup / power gained).
-        gameContext.lineWidth = 1.8;
-        var p = r * 0.55;
-        gameContext.beginPath();
-        gameContext.moveTo(cx - p, cy); gameContext.lineTo(cx + p, cy);
-        gameContext.moveTo(cx, cy - p); gameContext.lineTo(cx, cy + p);
-        gameContext.stroke();
-    } else {
-        // Finish flag: pole + pennant.
-        gameContext.lineWidth = 1.5;
-        var px = cx - r * 0.32;
-        gameContext.beginPath();
-        gameContext.moveTo(px, cy - r * 0.62); gameContext.lineTo(px, cy + r * 0.62);
-        gameContext.stroke();
-        gameContext.beginPath();
-        gameContext.moveTo(px, cy - r * 0.58);
-        gameContext.lineTo(px + r * 0.72, cy - r * 0.3);
-        gameContext.lineTo(px, cy - r * 0.02);
-        gameContext.closePath();
-        gameContext.fill();
-    }
-    gameContext.restore();
+// Action markers reuse the game's established emoji iconography (the same glyphs
+// the standings board stamps over karts and the gameOver medals card uses):
+// 💥 a kill, 💀 a death, 🥇/🥈 first/second place, 🏁 any other finish. Ability
+// pickups lead with the ability's own sprite token (drawAbilityIconToken).
+function combatScoreEmoji(rankLabel) {
+    if (rankLabel === "1st") { return "🥇"; }
+    if (rankLabel === "2nd") { return "🥈"; }
+    return "🏁";
 }
 
 // Cart-cosmetic thumbnail for a live player, with a team-coloured ring in teams
@@ -10379,33 +10325,39 @@ function drawCombatThumb(id, cx, cy, r) {
     }
 }
 
-// Build the ordered segment list for one row. Segments: badge / thumb / text / gap.
+// Build the ordered segment list for one row. Segments: glyph (emoji marker) /
+// abilityicon (ability sprite token) / thumb (cart cosmetic) / text.
 function combatRowSegments(entry) {
-    var segs = [{ k: "badge", type: entry.type, cause: entry.cause }];
+    var segs = [];
     if (entry.type === "kill") {
+        segs.push({ k: "glyph", emoji: "💥" });
         segs.push({ k: "thumb", id: entry.attackerId });
         segs.push({ k: "text", text: entry.attackerName, color: combatColorOf(entry.attackerId, "#ffffff"), bold: true });
         segs.push({ k: "thumb", id: entry.victimId });
         segs.push({ k: "text", text: entry.victimName, color: combatColorOf(entry.victimId, "#ffffff"), bold: false });
     } else if (entry.type === "death") {
+        segs.push({ k: "glyph", emoji: "💀" });
         segs.push({ k: "thumb", id: entry.victimId });
         segs.push({ k: "text", text: entry.victimName, color: combatColorOf(entry.victimId, "#ffffff"), bold: false });
-        segs.push({ k: "text", text: (entry.cause === "lava") ? "melted" : "out", color: "#9aa3ad", bold: false, small: true });
+        if (entry.cause === "lava") { segs.push({ k: "text", text: "melted", color: "#9aa3ad", bold: false, small: true }); }
     } else if (entry.type === "ability") {
-        segs.push({ k: "thumb", id: entry.ownerId });
-        segs.push({ k: "text", text: entry.ownerName, color: combatColorOf(entry.ownerId, "#ffffff"), bold: false });
+        // Lead with the ability's own icon as the action marker (operator request),
+        // falling back to the name only if the sprite isn't decoded yet.
         var aimg = abilityIconFor(entry.abilityId);
         if (aimg != null && aimg.complete !== false && (aimg.naturalWidth == null || aimg.naturalWidth > 0)) {
             segs.push({ k: "abilityicon", img: aimg });
+            segs.push({ k: "thumb", id: entry.ownerId });
+            segs.push({ k: "text", text: entry.ownerName, color: combatColorOf(entry.ownerId, "#ffffff"), bold: false });
         } else {
-            // Icon not ready — keep the name so the row never reads blank.
+            segs.push({ k: "thumb", id: entry.ownerId });
+            segs.push({ k: "text", text: entry.ownerName, color: combatColorOf(entry.ownerId, "#ffffff"), bold: false });
             segs.push({ k: "text", text: abilityLabelFor(entry.abilityId), color: "#5fe0ee", bold: true });
         }
-    } else { // score
+    } else { // score — 🥇/🥈/🏁 marker conveys the placement
+        segs.push({ k: "glyph", emoji: combatScoreEmoji(entry.rankLabel) });
         segs.push({ k: "thumb", id: entry.playerId });
         segs.push({ k: "text", text: entry.playerName, color: combatColorOf(entry.playerId, "#ffffff"), bold: false });
-        var label = entry.rankLabel + (entry.points != null ? ("  +" + entry.points) : "");
-        segs.push({ k: "text", text: label, color: "#ffd54a", bold: true });
+        if (entry.points != null) { segs.push({ k: "text", text: "+" + entry.points, color: "#ffd54a", bold: true }); }
     }
     return segs;
 }
@@ -10445,7 +10397,7 @@ function drawCombatLog() {
         var contentW = 0;
         for (var s = 0; s < segs.length; s++) {
             var seg = segs[s];
-            if (seg.k === "badge") { seg.w = badgeR * 2; }
+            if (seg.k === "glyph") { gameContext.font = "15px Arial"; seg.w = gameContext.measureText(seg.emoji).width; }
             else if (seg.k === "thumb") { seg.w = thumbR * 2; }
             else if (seg.k === "abilityicon") { seg.w = badgeR * 2; }
             else { // text
@@ -10481,8 +10433,10 @@ function drawCombatLog() {
         gameContext.globalAlpha = alpha;
         for (var d = 0; d < segs.length; d++) {
             var sg = segs[d];
-            if (sg.k === "badge") {
-                drawCombatBadge(sg.type, sg.cause, cx + badgeR, cy, badgeR);
+            if (sg.k === "glyph") {
+                gameContext.font = "15px Arial";
+                gameContext.textAlign = "left";
+                gameContext.fillText(sg.emoji, cx, cy + 0.5);
             } else if (sg.k === "thumb") {
                 drawCombatThumb(sg.id, cx + thumbR, cy, thumbR);
                 gameContext.globalAlpha = alpha; // drawOverviewKart resets alpha via save/restore — re-assert
