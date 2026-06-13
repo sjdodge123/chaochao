@@ -728,8 +728,14 @@
           <div class="ed-section">
             <div class="ed-section-title">Hazards</div>
 <!-- Buttons are generated from EDITOR_HAZARD_KINDS (create.js) once the
-                 config arrives — one button per registered hazard kind. -->
+                 config arrives — hazard kinds (group != "boon") land here. -->
             <div class="ed-swatch-grid" id="hazardButtonGrid"></div>
+          </div>
+          <div class="ed-section">
+            <div class="ed-section-title">Boons</div>
+<!-- Helpful placeables (EDITOR_HAZARD_KINDS group:"boon", config.boons) —
+                 generated alongside the hazard buttons by buildHazardButtons. -->
+            <div class="ed-swatch-grid" id="boonButtonGrid"></div>
           </div>
           <div id="startEdgePalette" class="ed-section">
             <div class="ed-section-title">Start edge</div>

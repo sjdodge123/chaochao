@@ -364,6 +364,10 @@ function hazardRepulsion(bot, ctx, desiredX, desiredY, dt) {
     for (var id in hazardList) {
         var h = hazardList[id];
         if (h.alive === false) { continue; }
+        // Boons (helpful placeables) share hazardList but must NOT be dodged — a bot
+        // should drive THROUGH a speed pad, not around it. Seeking them is a later
+        // polish pass; for now they're simply transparent to the avoidance field.
+        if (h.helpful) { continue; }
         var hx = h.x, hy = h.y;
         // A bumper wall is a static segment: repel from the nearest point on its
         // centerline (the generic radial field below does the rest). No gap to
@@ -1925,6 +1929,9 @@ function update(gameBoard, currentState, dt) {
     for (var hkey in hazardList) {
         var hz = hazardList[hkey];
         if (!hz || hz.alive === false) { continue; }
+        // Boons aid the player — don't price their cells into the route (no reason
+        // to path AROUND a boost). Keeps A* from treating a speed pad as an obstacle.
+        if (hz.helpful) { continue; }
         if (hz.moveable && hz.rail != null) {
             var seg = bumperSegment(hz);
             var marginSq = RAIL_PENALTY_MARGIN * RAIL_PENALTY_MARGIN;

@@ -145,6 +145,29 @@ if (config.hazards == null || config.hazards.bumperWall == null ||
     fail('config.json: hazards.bumperWall.id must be a number');
 }
 
+// Hazards (config.hazards, 900s) and boons (config.boons, 950+) register into one
+// shared kind registry keyed by id (server/entities/hazards.js _kindById), so a
+// duplicate id across the two namespaces would silently overwrite one kind with
+// the other at boot. The id ranges are a convention; enforce global uniqueness
+// here so a stray collision fails the build instead of corrupting placement.
+{
+    const seenKindIds = {};
+    const kindGroups = [['hazards', config.hazards], ['boons', config.boons]];
+    for (const [nsName, group] of kindGroups) {
+        for (const key in (group || {})) {
+            const entry = group[key];
+            if (entry == null || typeof entry.id !== 'number') { continue; } // skips _doc etc.
+            if (seenKindIds[entry.id] != null) {
+                fail('config.json: ' + nsName + '.' + key + ' id ' + entry.id +
+                    ' collides with ' + seenKindIds[entry.id] +
+                    ' — hazard/boon ids must be globally unique (they share one kind registry)');
+            } else {
+                seenKindIds[entry.id] = nsName + '.' + key;
+            }
+        }
+    }
+}
+
 // Naming convention: every map's display name should already be in the house
 // "Title Case With Spaces" form (server/mapNaming.js — the same normalizer the
 // submit path applies, so an editor submission is auto-fixed on the way in). A

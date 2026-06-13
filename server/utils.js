@@ -710,10 +710,18 @@ function getKnownIdSets(config) {
     if (_knownIdSetsConfig === config && _knownIdSetsCache != null) {
         return _knownIdSetsCache;
     }
+    // Valid placeable ids = hazards ∪ boons. Both live in the map's hazards[] array
+    // and resolve through the same kind registry, so a boon id (config.boons, 950+)
+    // is just as valid an entry as a hazard id (config.hazards, 900s).
     var hazard = {};
     for (var hk in config.hazards) {
         if (config.hazards[hk] && typeof config.hazards[hk].id === "number") {
             hazard[config.hazards[hk].id] = true;
+        }
+    }
+    for (var bk in config.boons) {
+        if (config.boons[bk] && typeof config.boons[bk].id === "number") {
+            hazard[config.boons[bk].id] = true;
         }
     }
     _knownIdSetsCache = { hazard: hazard };
