@@ -262,6 +262,56 @@ class Geyser extends Hazard {
 	handleHit(object) { }
 }
 
+// A proximity mine: armed and quiet until a kart strays within its trigger radius
+// (the collision radius), then it lights a short fuse and detonates with a strong
+// radial map-owned punch that flings the whole nearby pack — the leader trips it,
+// the chasers eat it. One-shot: spent after it blows (the first anti-draft trap).
+// The phase rides the netState wire (armed -> fuse -> spent) so the client can
+// draw the idle light, the blinking countdown, and the spent crater.
+//
+// Phases (also the netState values): 0 armed, 1 fuse, 2 spent.
+var MINE_ARMED = 0, MINE_FUSE = 1, MINE_SPENT = 2;
+class Mine extends Hazard {
+	constructor(x, y, radius, color, ownerId, roomSig) {
+		super(x, y, radius, color, ownerId, roomSig);
+		this.id = c.hazards.mine.id;
+		this.moveable = false;
+		this.punch = null;
+		this.phase = MINE_ARMED;
+		this.netState = MINE_ARMED;
+		this.timer = 0;
+	}
+	// Proximity trip: a kart entering the trigger radius (this hazard's collision
+	// circle) lights the fuse. Only the first trip matters — fuse/spent ignore it.
+	handleHit(object) {
+		if (this.phase !== MINE_ARMED || !object.isPlayer) {
+			return;
+		}
+		this.phase = MINE_FUSE;
+		this.netState = MINE_FUSE;
+		this.timer = 0;
+	}
+	// Fuse timer (per tick from gameBoard.updateHazards). When it burns down the
+	// mine spawns one strong map-owned punch at its center and goes spent (alive
+	// false) — gameBoard.updateHazards still emits the punch that same tick.
+	update(dt) {
+		if (this.phase !== MINE_FUSE) {
+			return;
+		}
+		this.timer += (dt || 0);
+		if (this.timer >= c.hazards.mine.fuseMs / 1000) {
+			if (this.punch == null) {
+				this.punch = new Punch(this.x, this.y, c.hazards.mine.attackRadius, c.hazards.mine.color, this.ownerId, this.roomSig, c.hazards.mine.punchBonus, false, null);
+				this.punch.mapOwned = true;
+				this.punch.type = "bumper";
+			}
+			this.phase = MINE_SPENT;
+			this.netState = MINE_SPENT;
+			this.alive = false; // one-shot — inert crater for the rest of the round
+		}
+	}
+}
+
 // --- hazard-kind registry ------------------------------------------------------
 // Single source of truth for the map-authorable hazard kinds. Everything with
 // per-kind behavior keys off this: gameBoard.generateHazards builds via
@@ -334,5 +384,12 @@ registerHazardKind("geyser", {
 		return new Geyser(entry.x, entry.y, c.hazards.geyser.radius, c.hazards.geyser.color, mapID, roomSig);
 	}
 });
+registerHazardKind("mine", {
+	railed: false,
+	directional: false,
+	build: function (entry, mapID, roomSig) {
+		return new Mine(entry.x, entry.y, c.hazards.mine.radius, c.hazards.mine.color, mapID, roomSig);
+	}
+});
 
-module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, HAZARD_KINDS, hazardKindById, registerHazardKind };
+module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, Mine, HAZARD_KINDS, hazardKindById, registerHazardKind };

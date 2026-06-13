@@ -468,6 +468,15 @@
             "dormantMs": 2600,
             "chargeMs": 1100,
             "eruptMs": 300
+        },
+        "mine": {
+            "id": 905,
+            "color": "#F07B36",
+            "radius": 40,
+            "bodyRadius": 11,
+            "attackRadius": 95,
+            "punchBonus": 26,
+            "fuseMs": 650
         }
     },
     "lobbyWaitTime": 5,
