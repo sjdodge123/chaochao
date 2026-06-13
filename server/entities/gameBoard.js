@@ -667,13 +667,20 @@ class GameBoard {
 			if (best == null || bestScore <= 0) { break; }
 			chosen.push(best);
 		}
+		var period = cfg.thumperPeriod * 1000;
 		for (var t = 0; t < chosen.length; t++) {
 			// generateHash's seed is folded in with bitwise ops, so it must be
 			// NUMERIC — a non-numeric string coerces to NaN->0 and every call
 			// returns the same hash. 7e6+ keeps thumpers clear of the bumper
 			// (coordinate-sum) and cloud (density) seed ranges.
 			var hash = utils.generateHash(this.roomSig, 7000000 + t);
-			this.hazardList[hash] = new Thumper(chosen[t].x, chosen[t].y, hash, this.roomSig);
+			var thumper = new Thumper(chosen[t].x, chosen[t].y, hash, this.roomSig);
+			// Stagger each thumper's first slam evenly across the period so the
+			// sanctuaries pound out of phase instead of all booming in unison (they
+			// share the same period, so the offset persists). The `angle` cycle
+			// anchor reads nextSlamTime, so clients animate the stagger for free.
+			thumper.nextSlamTime = Date.now() + Math.round((t + 1) / chosen.length * period);
+			this.hazardList[hash] = thumper;
 		}
 	}
 	// Per-tick driver. dt is in seconds (the engine's clock).
@@ -829,7 +836,11 @@ class GameBoard {
 		this.hazardList[hash] = ant;
 		var single = {};
 		single[hash] = ant;
-		messenger.messageRoomBySig(this.roomSig, "applyHazards", compressor.newHazards(single));
+		// Dedicated eruption event (NOT generic applyHazards): only a genuinely-new
+		// live spawn plays the dig-out animation + chitter SFX. The join/newMap
+		// hazard SNAPSHOT goes through applyHazards, which now creates existing
+		// antlions silently — so a mid-round joiner doesn't re-erupt the whole swarm.
+		messenger.messageRoomBySig(this.roomSig, "antlionErupt", compressor.newHazards(single));
 		return ant;
 	}
 	// Despawn + tell the room. Packet entries are [ownerId, x, y, reason] — the

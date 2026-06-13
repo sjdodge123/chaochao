@@ -1542,6 +1542,11 @@ function registerStateHandlers(server) {
 	server.on("removeHazards", function (payload) {
 		removeHazards(payload);
 	});
+	// Live antlion eruption (single new spawn): create + dig-out FX + chitter SFX.
+	// Snapshots (newMap / late-join) use applyHazards instead, which is silent.
+	server.on("antlionErupt", function (payload) {
+		eruptAntlions(payload);
+	});
 	server.on("resetGame", function () {
 		fullReset();
 		// New match — the crowd starts tame again, and brawl tracking is cleared so

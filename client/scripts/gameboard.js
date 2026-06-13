@@ -797,23 +797,41 @@ function applyHazards(payload) {
 		hazardList[hazard[0]].railY = hazard[6] != null ? hazard[6] : hazard[3];
 		hazardList[hazard[0]].state = hazard.length > 7 ? hazard[7] : null;
 
-		// Antlion (mid-round eruption): stamp the spawn time so drawAntlionHazard
-		// plays the dig-out emergence, and cue the sandy burst. Antlions never ride
-		// the newMap payload, so anything with this id arriving here erupted live.
-		if (config != null && config.hazards.antlion != null && hazard[1] == config.hazards.antlion.id) {
-			hazardList[hazard[0]].spawnAt = Date.now();
-			if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
-				if (typeof playAntlionEruption === "function") {
-					playAntlionEruption(antlionSfxLevel(hazard[2], hazard[3]));
-				}
-			}
-		}
+		// NOTE: antlions arriving HERE come from a snapshot (newMap payload or a
+		// late-join sync), so they're created silently — no emergence animation or
+		// SFX. A genuinely-new live eruption arrives on the dedicated `antlionErupt`
+		// event (eruptAntlions below), which is the only place the dig-out FX fire.
 		// Thumper: the angle slot is the cycle anchor — ms until the server's next
 		// slam at packet-build time — so the client's pound animation lands in step
 		// with the server's repel impulse (fresh for late joiners too).
 		if (config != null && config.hazards.thumper != null && hazard[1] == config.hazards.thumper.id) {
 			hazardList[hazard[0]].nextSlamAt = Date.now() + (hazard[4] || 0);
 			hazardList[hazard[0]].lastSlamAt = 0;
+		}
+	}
+}
+// Live antlion eruption (dedicated `antlionErupt` event, NOT the snapshot path):
+// create the hazard(s) via applyHazards, then stamp spawnAt for the dig-out
+// emergence and cue the chitter SFX. Only genuinely-new spawns reach here, so a
+// mid-round joiner — whose hazards arrive through the silent applyHazards
+// snapshot — never gets a burst of eruption sounds/animations.
+function eruptAntlions(payload) {
+	if (payload == null) {
+		return;
+	}
+	applyHazards(payload);
+	var arr = JSON.parse(payload);
+	for (var i = 0; i < arr.length; i++) {
+		var h = arr[i];
+		if (config != null && config.hazards.antlion != null && h[1] == config.hazards.antlion.id) {
+			var hz = hazardList[h[0]];
+			if (hz == null) { continue; }
+			hz.spawnAt = Date.now();
+			if (currentState == config.stateMap.racing || currentState == config.stateMap.collapsing) {
+				if (typeof playAntlionEruption === "function") {
+					playAntlionEruption(antlionSfxLevel(h[2], h[3]));
+				}
+			}
 		}
 	}
 }
