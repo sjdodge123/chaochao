@@ -432,7 +432,7 @@
             "punchBonus": 12,
             "maxAntlions": 10,
             "maxAntlionsCeiling": 14,
-            "offSandDespawnSeconds": 3,
+            "offSandDespawnSeconds": 1.5,
             "minSpawnDist": 60,
             "maxSpawnDist": 120,
             "separationRadius": 38,
