@@ -21,6 +21,19 @@ var { Blindfold, Swap, IceCannon, Bomb, SpeedBuff, SpeedDebuff, TileSwap, Cut, S
 // editor's gate strip width so the previewed gate lines up with the server's.
 var GATE_DEPTH = 75;
 
+// Squared distance from point (px,py) to segment (ax,ay)-(bx,by). Squared to skip
+// the sqrt — callers only ever compare/sort. Used by the bonus-orb off-path bias to
+// score how far a cell sits from the racing-line polyline.
+function segDistSq(px, py, ax, ay, bx, by) {
+	var dx = bx - ax, dy = by - ay;
+	var len2 = dx * dx + dy * dy;
+	var t = (len2 > 0) ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+	if (t < 0) { t = 0; } else if (t > 1) { t = 1; }
+	var cx = ax + t * dx, cy = ay + t * dy;
+	var ex = px - cx, ey = py - cy;
+	return ex * ex + ey * ey;
+}
+
 class GameBoard {
 	constructor(world, playerList, projectileList, aimerList, hazardList, engine, roomSig) {
 		this.world = world;
@@ -54,6 +67,11 @@ class GameBoard {
 		this.firstBlood = false;
 		this.brutalRound = false;
 		this.brutalConfig = null;
+		// Team-modes only: floating bonus orbs placed on the map each round. The first
+		// member of either team to drive over one banks +1 team point (one-time per
+		// round — `collected` latches). Rebuilt fresh in loadNextMap; the Game reads
+		// this list each racing tick (checkBonusOrbPickups).
+		this.bonusOrbs = [];
 
 		this.lobbyStartButton;
 		this.alivePlayerCount = 0;
@@ -2364,8 +2382,137 @@ class GameBoard {
 		// are a bonus on top, never subject to the chanceToSpawnAbility roll). Riding
 		// in the newMap payload means joiners always get the scorch list with the map.
 		var heatwaveGen = this.applyBrutalHeatwaveRound();
-		this.newMapPayload = { id: this.currentMap.id, abilities: abilityGen, round: this.round, randomTiles: randomGen, brutalRoundConfig: this.brutalConfig, hazards: compressor.newHazards(this.hazardList), heatwave: heatwaveGen, currentState: currentState };
+		// Bonus orbs are placed LAST so they read final tile state — never landing on
+		// a cell that random tiles / abilities / heatwave just turned to lava. Empty
+		// in FFA modes (generateBonusOrbs guards on isTeamsMode).
+		this.bonusOrbs = this.generateBonusOrbs();
+		this.newMapPayload = { id: this.currentMap.id, abilities: abilityGen, round: this.round, randomTiles: randomGen, brutalRoundConfig: this.brutalConfig, hazards: compressor.newHazards(this.hazardList), heatwave: heatwaveGen, bonusOrbs: this.bonusOrbs, currentState: currentState };
 		messenger.messageRoomBySig(this.roomSig, "newMap", this.newMapPayload);
+	}
+	// Team-modes only: choose 1-2 floating bonus-orb spawn points on the current map.
+	// Count scales with the number of walkable cells (cellsPerOrb), clamped to
+	// [minCount, maxCount]. Orbs sit at cell sites on safe ground (not lava/water/
+	// goal/bumper/ability/empty/background) and a second orb is kept minSeparation
+	// away from the first so a team can't sweep both in one pass. Returns
+	// [{ x, y, collected:false }, ...] (the array index is the orb id over the wire).
+	generateBonusOrbs() {
+		var cfg = c.bonusOrb;
+		if (cfg == null || cfg.enabled === false || !this.isTeamsMode()) { return []; }
+		if (this.currentMap == null || this.currentMap.cells == null) { return []; }
+		// Walkable ground only: slow/normal/fast/ice. Everything else is deadly,
+		// non-traversable, or already a pickup/objective.
+		var walkableIds = {};
+		walkableIds[c.tileMap.slow.id] = true;
+		walkableIds[c.tileMap.normal.id] = true;
+		walkableIds[c.tileMap.fast.id] = true;
+		walkableIds[c.tileMap.ice.id] = true;
+		var safeCells = [];
+		for (var i = 0; i < this.currentMap.cells.length; i++) {
+			var cell = this.currentMap.cells[i];
+			if (cell != null && cell.site != null && walkableIds[cell.id] === true) {
+				safeCells.push(cell);
+			}
+		}
+		if (safeCells.length === 0) { return []; }
+		var minCount = cfg.minCount != null ? cfg.minCount : 1;
+		var maxCount = cfg.maxCount != null ? cfg.maxCount : 2;
+		var perOrb = cfg.cellsPerOrb != null ? cfg.cellsPerOrb : 140;
+		var count = Math.round(safeCells.length / perOrb);
+		if (count < minCount) { count = minCount; }
+		if (count > maxCount) { count = maxCount; }
+		var minSep = cfg.minSeparation != null ? cfg.minSeparation : 400;
+
+		// Off-path bias: prefer cells FAR from the direct start->goal racing line, so
+		// orbs reward leaving the main route rather than sitting where everyone drives
+		// anyway. We score every safe cell by its distance to the racing-line polyline,
+		// then draw from the farthest fraction (still random within it, so placement
+		// varies round to round). Falls back to the full safe set when no route can be
+		// computed (e.g. no reachable goal).
+		var pool = safeCells;
+		if (cfg.offPathBias !== false) {
+			var lines = this.racingLinePolylines();
+			if (lines.length > 0) {
+				var scored = [];
+				for (var s = 0; s < safeCells.length; s++) {
+					var sc = safeCells[s];
+					scored.push({ cell: sc, d: this.minDistSqToPolylines(sc.site.x, sc.site.y, lines) });
+				}
+				scored.sort(function (a, b) { return b.d - a.d; }); // farthest from the line first
+				var frac = (cfg.offPathTopFraction != null) ? cfg.offPathTopFraction : 0.4;
+				var poolN = Math.ceil(scored.length * frac);
+				if (poolN < count * 4) { poolN = count * 4; }   // keep room for separated picks
+				if (poolN > scored.length) { poolN = scored.length; }
+				pool = [];
+				for (var k = 0; k < poolN; k++) { pool.push(scored[k].cell); }
+			}
+		}
+
+		// Place from the (off-path) pool first; if minSeparation starves it on a small
+		// pool, top up from the full safe set so we still hit the target count.
+		var orbs = [];
+		this.placeOrbsFrom(pool, orbs, count, minSep);
+		if (orbs.length < count) { this.placeOrbsFrom(safeCells, orbs, count, minSep); }
+		return orbs;
+	}
+	// Draw cells at random from `cells`, appending {x,y,collected} to `orbs` until it
+	// reaches `count`, skipping any pick within `minSep` of an already-placed orb.
+	placeOrbsFrom(cells, orbs, count, minSep) {
+		if (cells.length === 0) { return; }
+		var minSepSq = minSep * minSep;
+		var attempts = 0;
+		while (orbs.length < count && attempts < 80) {
+			attempts++;
+			var pick = cells[utils.getRandomInt(0, cells.length - 1)];
+			var px = pick.site.x, py = pick.site.y;
+			var tooClose = false;
+			for (var o = 0; o < orbs.length; o++) {
+				var dx = orbs[o].x - px, dy = orbs[o].y - py;
+				if (dx * dx + dy * dy < minSepSq) { tooClose = true; break; }
+			}
+			if (tooClose) { continue; }
+			orbs.push({ x: px, y: py, collected: false });
+		}
+	}
+	// The direct start->goal route(s) as polylines of cell-site points. A few origins
+	// spread across each start edge are pathed (cellGraph Dijkstra over the live,
+	// lava-blocked graph) and unioned, so the result approximates the whole traffic
+	// corridor rather than one hairline. Empty when no goal is reachable.
+	racingLinePolylines() {
+		var map = this.currentMap;
+		var lines = [];
+		if (map == null || !Array.isArray(map.cells)) { return lines; }
+		var edges = this.resolveStartEdges();
+		var maxSamples = (c.bonusOrb && c.bonusOrb.offPathSamples != null) ? c.bonusOrb.offPathSamples : 4;
+		var idToCell = {};
+		for (var i = 0; i < map.cells.length; i++) { idToCell[map.cells[i].site.voronoiId] = map.cells[i]; }
+		for (var e = 0; e < edges.length; e++) {
+			var origins = cellGraph.edgeSampleOrigins(edges[e]);
+			if (origins.length === 0) { continue; }
+			var stepO = Math.max(1, Math.floor(origins.length / maxSamples));
+			for (var o = 0; o < origins.length; o += stepO) {
+				var route = cellGraph.findPathToNearestGoal(map, origins[o]);
+				if (route == null || !Array.isArray(route.path) || route.path.length < 2) { continue; }
+				var poly = [];
+				for (var p = 0; p < route.path.length; p++) {
+					var cell = idToCell[route.path[p]];
+					if (cell != null) { poly.push({ x: cell.site.x, y: cell.site.y }); }
+				}
+				if (poly.length >= 2) { lines.push(poly); }
+			}
+		}
+		return lines;
+	}
+	// Smallest squared distance from a point to any racing-line polyline segment.
+	minDistSqToPolylines(px, py, lines) {
+		var best = Infinity;
+		for (var l = 0; l < lines.length; l++) {
+			var poly = lines[l];
+			for (var i = 0; i < poly.length - 1; i++) {
+				var d = segDistSq(px, py, poly[i].x, poly[i].y, poly[i + 1].x, poly[i + 1].y);
+				if (d < best) { best = d; }
+			}
+		}
+		return best;
 	}
 	checkApplyBrutalConfig() {
 		if (this.brutalRound == false || this.brutalConfig == null) {

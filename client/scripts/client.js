@@ -922,6 +922,9 @@ function registerConnectionHandlers(server) {
 		// A new round starts a fresh team scoring ledger (NOT cleared at overview —
 		// the overview is where the just-ended round's ledger is shown).
 		if (typeof teamRoundLedger !== "undefined") { teamRoundLedger = []; }
+		// Bonus orbs (team modes) ride in the map payload — set synchronously so a
+		// late frame before the .then() resolves can't render a stale prior-round set.
+		if (typeof setBonusOrbs === "function") { setBonusOrbs(payload.bonusOrbs); }
 		$.when.apply($, promises).then(function () {
 			currentState = payload.currentState;
 			loadNewMap(payload.id);
@@ -1851,6 +1854,18 @@ function registerAbilityHandlers(server) {
 	server.on("abilityAcquired", function (payload) {
 		playerPickedUpAbility(payload);
 		playSoundVaried(collectItem, 0.06);
+	});
+	// Bonus orb banked (team modes): latch the orb collected + stamp the pop burst,
+	// and ring a brighter collect chime. The floating +1 over the collector rides
+	// the existing teamPointsDelta path (reason 'bonus_orb').
+	server.on("bonusOrbCollected", function (payload) {
+		if (payload == null || typeof bonusOrbList === "undefined") { return; }
+		var orb = bonusOrbList[payload.index];
+		if (orb != null && !orb.collected) {
+			orb.collected = true;
+			orb.popAt = Date.now();
+		}
+		playSoundVaried(collectItem, 0.14);
 	});
 	// Late-join seed of invuln state so already-protected players flash on this client.
 	server.on("lobbyInvulnStates", function (states) {

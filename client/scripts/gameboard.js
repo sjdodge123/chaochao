@@ -1141,6 +1141,20 @@ var heatwaveFX = null;
 var heatwaveScorch = [];  // [{vid, water}] — water conversions get the wet-stone rim
 var heatwaveFlashes = []; // transient per-tile burn-in flashes [{vid, at}]
 
+// Team-modes bonus orbs for the CURRENT map (server-authoritative spawn points from
+// the newMap payload). Each: {x, y, collected, popAt} — popAt stamps the moment of
+// pickup so draw.js can play a brief collect burst before the orb disappears.
+var bonusOrbList = [];
+function setBonusOrbs(orbs) {
+	bonusOrbList = [];
+	if (orbs == null) { return; }
+	for (var i = 0; i < orbs.length; i++) {
+		// Honor the server's collected flag so a mid-round joiner (newMapPayload is
+		// re-sent on join) doesn't render an already-banked orb as still live.
+		bonusOrbList.push({ x: orbs[i].x, y: orbs[i].y, collected: orbs[i].collected === true, popAt: 0 });
+	}
+}
+
 function armHeatwave(payload, state) {
 	heatwaveScorch = [];
 	heatwaveFlashes = [];

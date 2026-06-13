@@ -124,6 +124,19 @@
             "maxRounds": 12
         }
     },
+    "bonusOrb": {
+        "enabled": true,
+        "pointsValue": 1,
+        "radius": 22,
+        "minCount": 1,
+        "maxCount": 2,
+        "cellsPerOrb": 140,
+        "minSeparation": 400,
+        "offPathBias": true,
+        "offPathTopFraction": 0.4,
+        "offPathSamples": 4,
+        "color": "#FFD54A"
+    },
     "music": {
         "calm": ["slowstride", "slow-pipes", "8bit-action-1"],
         "exciting": ["mind_in_motion", "the-rush", "beastv2", "bumpinbits1", "bumpinbits2", "bumpinbits3", "bumpinbits4", "bumpinbits5", "8bit-action-3", "8bit-action-6"],

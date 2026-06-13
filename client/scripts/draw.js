@@ -3891,6 +3891,8 @@ function drawObjects(dt) {
         drawTerrainFX(dt);
     }
     drawOrbitalBeamTelegraph();
+    // Bonus orbs sit on the ground under the karts (so a kart visibly rolls over one).
+    if (typeof drawBonusOrbs === "function") { drawBonusOrbs(); }
     drawPlayers(dt);
     drawProjectiles(dt);
     drawRecordFloats();
@@ -9095,6 +9097,71 @@ function drawBumperWall(x, y, angle) {
     gameContext.restore();
 }
 
+// Bonus orbs (team modes): a floating golden sphere a team banks for +1 by driving
+// over it. Drawn in the WORLD PASS (raw world coords, like karts/hazards) so it
+// aligns with the server collider. Pulses + bobs while live; on pickup it plays a
+// brief expanding ring burst (popAt, set by the bonusOrbCollected handler) then is
+// gone for the rest of the round.
+var BONUS_ORB_POP_MS = 500;
+function drawBonusOrbs() {
+    if (typeof bonusOrbList === "undefined" || bonusOrbList.length === 0) { return; }
+    if (currentState !== config.stateMap.gated &&
+        currentState !== config.stateMap.racing &&
+        currentState !== config.stateMap.collapsing) { return; }
+    var now = Date.now();
+    var baseR = (config.bonusOrb && config.bonusOrb.radius) ? config.bonusOrb.radius : 22;
+    var color = (config.bonusOrb && config.bonusOrb.color) ? config.bonusOrb.color : "#FFD54A";
+    for (var i = 0; i < bonusOrbList.length; i++) {
+        var orb = bonusOrbList[i];
+        if (orb.collected) {
+            var pe = now - orb.popAt;
+            if (pe > BONUS_ORB_POP_MS) { continue; }
+            var t = pe / BONUS_ORB_POP_MS;                  // 0..1
+            gameContext.save();
+            gameContext.globalAlpha = 1 - t;
+            gameContext.strokeStyle = color;
+            gameContext.lineWidth = 3 * (1 - t) + 1;
+            gameContext.beginPath();
+            gameContext.arc(orb.x, orb.y, baseR + t * baseR * 2.2, 0, 2 * Math.PI);
+            gameContext.stroke();
+            gameContext.restore();
+            continue;
+        }
+        var pulse = 0.5 + 0.5 * Math.sin(now / 280 + i * 1.7);   // 0..1
+        var cy = orb.y + Math.sin(now / 520 + i * 2.1) * 3;      // gentle float
+        var r = baseR * (0.78 + pulse * 0.10);
+        gameContext.save();
+        // outer halo
+        gameContext.globalAlpha = 0.28 + pulse * 0.18;
+        gameContext.fillStyle = color;
+        gameContext.beginPath();
+        gameContext.arc(orb.x, cy, baseR * 1.5, 0, 2 * Math.PI);
+        gameContext.fill();
+        gameContext.restore();
+        // core sphere with a radial sheen
+        gameContext.save();
+        var grad = gameContext.createRadialGradient(orb.x - r * 0.3, cy - r * 0.3, r * 0.1, orb.x, cy, r);
+        grad.addColorStop(0, "#FFFDF0");
+        grad.addColorStop(0.45, color);
+        grad.addColorStop(1, "#C9962E");
+        gameContext.fillStyle = grad;
+        gameContext.beginPath();
+        gameContext.arc(orb.x, cy, r, 0, 2 * Math.PI);
+        gameContext.fill();
+        gameContext.lineWidth = 2;
+        gameContext.strokeStyle = "rgba(255,255,255," + (0.5 + pulse * 0.4) + ")";
+        gameContext.stroke();
+        // "+1" so the objective reads at a glance
+        gameContext.globalAlpha = 0.75 + pulse * 0.25;
+        gameContext.fillStyle = "#5A3B00";
+        gameContext.font = "bold 12px sans-serif";
+        gameContext.textAlign = "center";
+        gameContext.textBaseline = "middle";
+        gameContext.fillText("+1", orb.x, cy);
+        gameContext.restore();
+    }
+}
+
 function locateColor(id) {
     if (id == null) {
         return "purple";
@@ -10400,7 +10467,7 @@ function computeStandingsRowGeom(page) {
 // roll up); finishes and deaths aggregate into one line each.
 function teamLedgerLines(teamId) {
     var lines = [];
-    var kills = [], finishes = 0, finishPts = 0, deaths = 0, deathPts = 0;
+    var kills = [], finishes = 0, finishPts = 0, deaths = 0, deathPts = 0, orbs = 0, orbPts = 0;
     for (var i = 0; i < teamRoundLedger.length; i++) {
         var e = teamRoundLedger[i];
         if (e.teamId !== teamId) { continue; }
@@ -10409,6 +10476,7 @@ function teamLedgerLines(teamId) {
         else if (e.reason === "kill") { kills.push(e); }
         else if (e.reason === "finish") { finishes++; finishPts += e.amount; }
         else if (e.reason === "death") { deaths++; deathPts += e.amount; }
+        else if (e.reason === "bonus_orb") { orbs++; orbPts += e.amount; }
         else { lines.push({ icon: "•", text: e.label, pts: e.amount }); }
     }
     for (var k = 0; k < kills.length && k < 3; k++) {
@@ -10420,6 +10488,7 @@ function teamLedgerLines(teamId) {
         lines.push({ icon: "⚔️", text: "KOs ×" + (kills.length - 3) + " more", pts: extra });
     }
     if (finishes > 0) { lines.push({ icon: "🏳️", text: "Finished ×" + finishes, pts: finishPts }); }
+    if (orbs > 0) { lines.push({ icon: "🔆", text: "Bonus orbs ×" + orbs, pts: orbPts }); }
     if (deaths > 0) { lines.push({ icon: "💀", text: "Deaths ×" + deaths, pts: deathPts }); }
     return lines;
 }
