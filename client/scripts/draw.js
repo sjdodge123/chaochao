@@ -9029,6 +9029,9 @@ function buildHazardDrawers() {
     hazardDrawers[config.hazards.geyser.id] = function (h) {
         drawGeyser(h.x, h.y, h.state);
     };
+    hazardDrawers[config.hazards.mine.id] = function (h) {
+        drawMine(h.x, h.y, h.state);
+    };
 }
 function drawHazard(hazard) {
     if (hazardDrawers == null) {
@@ -9255,6 +9258,49 @@ function drawGeyser(x, y, state) {
         gameContext.arc(x + (t - 0.5) * 6, y - t * r, 2.5, 0, 2 * Math.PI);
         gameContext.fill();
         gameContext.globalAlpha = 1;
+    }
+    gameContext.restore();
+}
+
+// A proximity mine. `state` is the server phase (netState): 0 armed (spiked body
+// + a steady amber light), 1 fuse (the light blinks red fast — clear off!), 2
+// spent (a dark scorched crater). The trigger radius is left invisible in play;
+// the editor shows it.
+function drawMine(x, y, state) {
+    var cfg = config.hazards.mine;
+    var r = cfg.bodyRadius;
+    gameContext.save();
+    if (state === 2) {
+        // Spent crater.
+        gameContext.beginPath();
+        gameContext.arc(x, y, r * 1.4, 0, 2 * Math.PI);
+        gameContext.fillStyle = "rgba(20,16,14,0.55)";
+        gameContext.fill();
+        gameContext.restore();
+        return;
+    }
+    // Spikes.
+    gameContext.strokeStyle = "#222";
+    gameContext.lineWidth = 3;
+    for (var s = 0; s < 8; s++) {
+        var a = (s / 8) * 2 * Math.PI;
+        gameContext.beginPath();
+        gameContext.moveTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
+        gameContext.lineTo(x + Math.cos(a) * (r + 5), y + Math.sin(a) * (r + 5));
+        gameContext.stroke();
+    }
+    // Body.
+    gameContext.beginPath();
+    gameContext.arc(x, y, r, 0, 2 * Math.PI);
+    gameContext.fillStyle = "#2b2b2b";
+    gameContext.fill();
+    // Light: steady amber when armed, fast red blink while the fuse burns.
+    var lit = (state === 1) ? ((Date.now() % 200) < 110) : true;
+    if (lit) {
+        gameContext.beginPath();
+        gameContext.arc(x, y, r * 0.4, 0, 2 * Math.PI);
+        gameContext.fillStyle = (state === 1) ? "#ff2e2e" : "#ffc24b";
+        gameContext.fill();
     }
     gameContext.restore();
 }

@@ -210,6 +210,9 @@ jobs:
       - name: "Headless geyser test (phase machine, netState wire, erupt + launch)"
         run: node .github/scripts/geyser-test.js
 
+      - name: "Headless mine test (proximity trip, fuse, one-shot blast)"
+        run: node .github/scripts/mine-test.js
+
   perf-tick-budget:
     # Server-side worst-case load: a full 25-kart grid in a stacked brutal round.
     # Proves one room still ticks well within the 30 Hz interval. Zero new deps —

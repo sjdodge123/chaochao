@@ -1392,6 +1392,39 @@ function paintGeyserShape(ctx, kind, x, y, angle, ringColor) {
     ctx.fill();
     ctx.restore();
 }
+// Mine painter (mine's `paint` hook). Shows the spiked body + a dashed trigger
+// ring (the proximity radius) so authors can see how close is too close.
+function paintMineShape(ctx, kind, x, y, angle, ringColor) {
+    var cfg = config.hazards[kind.key];
+    if (cfg == null) { return; }
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, cfg.radius, 0, 2 * Math.PI);
+    ctx.strokeStyle = ringColor;
+    ctx.setLineDash([5, 5]);
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.setLineDash([]);
+    var r = cfg.bodyRadius;
+    ctx.strokeStyle = "#222";
+    ctx.lineWidth = 3;
+    for (var s = 0; s < 8; s++) {
+        var a = (s / 8) * 2 * Math.PI;
+        ctx.beginPath();
+        ctx.moveTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
+        ctx.lineTo(x + Math.cos(a) * (r + 5), y + Math.sin(a) * (r + 5));
+        ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, 2 * Math.PI);
+    ctx.fillStyle = "#2b2b2b";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.4, 0, 2 * Math.PI);
+    ctx.fillStyle = "#ffc24b";
+    ctx.fill();
+    ctx.restore();
+}
 // Shared per-kind hazard painter for the editor canvas (placement preview +
 // placed hazards) and the load-list thumbnails — the default `paint` hook.
 // Railed kinds draw their rail bar from (x,y) along `angle`; every kind draws
@@ -1746,6 +1779,38 @@ var EDITOR_HAZARD_KINDS = [
             ctx.beginPath();
             ctx.arc(cx, cy, size * 0.16, 0, 2 * Math.PI);
             ctx.fillStyle = "#241c18";
+            ctx.fill();
+        }
+    },
+    {
+        key: "mine", label: "Mine", shortcut: "i", railed: false, directional: false,
+        paint: paintMineShape,
+        swatchPaint: function (ctx, size) {
+            // Spiked body + amber light + dashed trigger ring.
+            var cx = size / 2, cy = size / 2, r = size * 0.22;
+            ctx.beginPath();
+            ctx.arc(cx, cy, size * 0.42, 0, 2 * Math.PI);
+            ctx.strokeStyle = "#E5392B";
+            ctx.setLineDash([5, 5]);
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.strokeStyle = "#222";
+            ctx.lineWidth = 4;
+            for (var s = 0; s < 8; s++) {
+                var a = (s / 8) * 2 * Math.PI;
+                ctx.beginPath();
+                ctx.moveTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+                ctx.lineTo(cx + Math.cos(a) * (r + 8), cy + Math.sin(a) * (r + 8));
+                ctx.stroke();
+            }
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, 2 * Math.PI);
+            ctx.fillStyle = "#2b2b2b";
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(cx, cy, r * 0.4, 0, 2 * Math.PI);
+            ctx.fillStyle = "#ffc24b";
             ctx.fill();
         }
     }
