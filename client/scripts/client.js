@@ -379,6 +379,13 @@ function registerLobbyHubHandlers(server) {
 		if (typeof pushTeamPointFloat === "function") {
 			pushTeamPointFloat(payload);
 		}
+		// Combat log: fold the points a finish earned into that player's scoring row.
+		// Kill/death points are already represented by their own kill/death rows.
+		if (payload != null && typeof combatLogScore === "function") {
+			var rankByReason = { first: "1st", second: "2nd", finish: "Finished" };
+			var rank = rankByReason[payload.reason];
+			if (rank != null) { combatLogScore(payload.id, rank, payload.amount); }
+		}
 	});
 	server.on("stationEnter", function (payload) {
 		if (payload != null && typeof setSlotNearStation === "function") {
@@ -982,9 +989,11 @@ function registerConnectionHandlers(server) {
 function registerScoreHandlers(server) {
 	server.on("firstPlaceWinner", function (id) {
 		createFirstRankSymbol(id);
+		if (typeof combatLogScore === "function") { combatLogScore(id, "1st", null); }
 	});
 	server.on("secondPlaceWinner", function (id) {
 		createSecondRankSymbol(id);
+		if (typeof combatLogScore === "function") { combatLogScore(id, "2nd", null); }
 	});
 	server.on("playerConcluded", function (packet) {
 		var id = (packet != null && packet.id != null) ? packet.id : packet;
@@ -1001,6 +1010,10 @@ function registerScoreHandlers(server) {
 			playerList[id].recapState = RECAP_SCORED; // recap: vanish with a goal poof, not hover the goal
 		}
 		recapMarkHighlight('goal', [id]); // flag a scoring moment for the recap
+		// Combat log: every goal-cross is a scoring moment. firstPlaceWinner /
+		// secondPlaceWinner (and teamPointsDelta) later upgrade this same row's
+		// rank/points rather than stacking a duplicate.
+		if (typeof combatLogScore === "function") { combatLogScore(id, "Finished", null); }
 		// A buzzy celebratory pop on the finishing local player's own pad.
 		if (typeof padPulseForId === "function" && isLocalId(id)) {
 			padPulseForId(id, 0.5, 0.65, 320);
@@ -1057,6 +1070,11 @@ function registerScoreHandlers(server) {
 			}
 		}
 		recapMarkHighlight('death', [id]); // flag an elimination moment for the recap
+		// Combat log: a real attacker (packet.by) → a kill row; otherwise an
+		// environmental/self death row (with the lava/other cause for the icon tint).
+		if (typeof combatLogDeath === "function") {
+			combatLogDeath(id, (packet != null ? packet.by : null), (packet != null ? packet.cause : null));
+		}
 		createDownRankSymbol(id);
 		// Solo preview pops back to the editor the instant the creator dies. In a co-op
 		// preview (2+ local players) one death shouldn't yank everyone out — let the round
@@ -1244,6 +1262,7 @@ function registerStateHandlers(server) {
 		oldNotches = {};
 		resetTrails();
 		resetPlayerRanks();
+		if (typeof combatLogReset === "function") { combatLogReset(); } // fresh feed each round
 		recapReset(); // start a fresh recap buffer for this round's map
 		// Anchor the HUD timer to the CLIENT's Date.now() at receipt — mixing
 		// server's Date.now() with the browser's local Date.now() would drift
@@ -1872,6 +1891,9 @@ function registerAbilityHandlers(server) {
 	server.on("abilityAcquired", function (payload) {
 		playerPickedUpAbility(payload);
 		playSoundVaried(collectItem, 0.06);
+		if (payload != null && typeof combatLogAbility === "function") {
+			combatLogAbility(payload.owner, payload.ability);
+		}
 	});
 	// Bonus orb banked (team modes): latch the orb collected + stamp the pop burst,
 	// and ring a brighter collect chime. The floating +1 over the collector rides

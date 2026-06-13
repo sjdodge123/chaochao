@@ -1363,6 +1363,11 @@ class Player extends Circle {
 		messenger.messageRoomBySig(packet.roomSig, "playerDied", {
 			id: packet.id,
 			killed: packet.murderedBy != null,
+			// Attacker id for the client combat log. murderedBy is still set here at
+			// death time (checkForWinners clears it only AFTER crediting the kill on a
+			// later line), so it's the authoritative "who got the kill" — null for an
+			// environmental/self death (drove into the lava, gate, infection timer, AFK).
+			by: packet.murderedBy != null ? packet.murderedBy : null,
 			cause: cause || null,
 			x: packet.x,
 			y: packet.y
