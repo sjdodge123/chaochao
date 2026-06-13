@@ -802,6 +802,13 @@ class GameBoard {
 			ant.impVY -= ant.impVY * decay;
 			ant.newX = ant.x + (vx + ant.impVX) * dt;
 			ant.newY = ant.y + (vy + ant.impVY) * dt;
+			// Antlions can't walk on water (a moat/island is a hard barrier, like
+			// water is for zombies): deflect the projected step along the shore. Reads
+			// ant.x/y (last committed, on land) + newX/newY (projected) and slides the
+			// step along the water edge. No-op on maps without water.
+			if (this.currentMap != null && this.currentMap.cells != null) {
+				_engine.bounceEntityOffWater(ant, this.currentMap);
+			}
 			// Never leave the world (slams near the boundary would otherwise eject them).
 			if (ant.newX < this.world.x) { ant.newX = this.world.x; }
 			if (ant.newX > this.world.x + this.world.width) { ant.newX = this.world.x + this.world.width; }
