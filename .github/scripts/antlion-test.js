@@ -270,7 +270,8 @@ function sessionSpawnChaseShove() {
         'an antlion spawned before the ' + AL.sandDwellSeconds + 's dwell threshold');
 
     // (2b) Past the threshold: one erupts, 60..120u away (never under the kart),
-    // and the spawn was broadcast on applyHazards with the antlion hazard id.
+    // and the spawn was broadcast on the dedicated antlionErupt event (NOT the
+    // generic applyHazards snapshot path) with the antlion hazard id.
     const mark = events.length;
     const moreTicks = Math.floor((AL.sandDwellSeconds * 1000 * 0.5) / config.serverTickSpeed);
     for (let f = 0; f < moreTicks && antlionsOf(room).length === 0; f++) { tick(room, holds); }
@@ -283,11 +284,18 @@ function sessionSpawnChaseShove() {
         'antlion erupted under the kart (' + Math.round(spawnDist) + 'u away, min ' + AL.minSpawnDist + ')');
     assert(spawnDist <= AL.maxSpawnDist * 2 + 1,
         'antlion erupted implausibly far (' + Math.round(spawnDist) + 'u away)');
-    const spawnsOnWire = eventsSince(mark, 'applyHazards').filter(p => {
+    const spawnsOnWire = eventsSince(mark, 'antlionErupt').filter(p => {
         const arr = JSON.parse(p);
         return arr.some(h => h[1] === ANTLION_HAZARD_ID);
     });
-    assert(spawnsOnWire.length >= 1, 'antlion spawn was not broadcast via applyHazards');
+    assert(spawnsOnWire.length >= 1, 'antlion spawn was not broadcast via antlionErupt');
+    // And the SNAPSHOT path must NOT carry a live eruption (no double-fire / no
+    // late-joiner re-erupt): applyHazards events since the mark carry no antlion.
+    const antlionsOnSnapshot = eventsSince(mark, 'applyHazards').filter(p => {
+        const arr = JSON.parse(p);
+        return arr.some(h => h[1] === ANTLION_HAZARD_ID);
+    });
+    assert(antlionsOnSnapshot.length === 0, 'a live antlion spawn leaked onto the applyHazards snapshot path');
 
     // (3) Chase: over the next second it must close on the camper.
     const d0 = dist(first.x, first.y, camper.x, camper.y);
