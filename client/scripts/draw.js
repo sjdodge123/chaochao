@@ -9963,6 +9963,7 @@ function drawHUD() {
     drawRaceTimer();
     drawTeamScoreHud();
     drawBrutalBadges();
+    drawCombatLog();
     drawSpectatorLeaderboard();
     drawWorldRecordBanner();
     drawHeatwaveWarnBanner();
@@ -10138,6 +10139,301 @@ function drawBrutalBadges() {
                 if (ih > bh - 6) { ih = bh - 6; iw = ih / ratio; }
                 gameContext.drawImage(ic, bx + (bw - iw) / 2, topY + (bh - ih) / 2, iw, ih);
             } catch (e) { /* icon not decoded — badge tile still flags it */ }
+        }
+    }
+    gameContext.restore();
+}
+
+// ---------------------------------------------------------------------------
+// Combat log — a small right-edge feed of recent moments (kills, environmental
+// deaths, ability pickups, scoring finishes). Each row carries the cart cosmetic
+// thumbnail(s) + player name(s); in teams modes the name uses the team colour and
+// the thumbnail gets a team-coloured ring (the "team cosmetic"). Entries are
+// pushed by the matching socket handlers in client.js and self-expire here.
+// Sits below the race timer + brutal badges, screen-space (drawn inside drawHUD).
+var combatLog = []; // newest first
+var COMBAT_LOG_MAX = 6;
+var COMBAT_LOG_LIFE_MS = { kill: 6500, death: 6500, ability: 4500, score: 7500 };
+var _combatAbilityLabels = null;
+
+function combatLogReset() { combatLog.length = 0; }
+
+// Resolve a player's display name at event time (cached on the entry so a player
+// who later leaves the room still reads correctly in the feed).
+function combatNameOf(id) {
+    var p = (typeof playerList !== "undefined" && playerList) ? playerList[id] : null;
+    return (p != null && p.name) ? p.name : "Someone";
+}
+
+// Live colour for a name/ring: team colour in teams modes, else the kart colour.
+function combatColorOf(id, fallback) {
+    var p = (typeof playerList !== "undefined" && playerList) ? playerList[id] : null;
+    if (p != null && p.teamId != null && typeof teamInfo !== "undefined" && teamInfo != null && Array.isArray(teamInfo.defs)) {
+        for (var i = 0; i < teamInfo.defs.length; i++) {
+            if (teamInfo.defs[i] != null && teamInfo.defs[i].id === p.teamId) { return teamInfo.defs[i].color; }
+        }
+    }
+    if (p != null && p.color) { return p.color; }
+    return fallback || "#dfe6ee";
+}
+
+function abilityLabelFor(id) {
+    if (_combatAbilityLabels == null && typeof config !== "undefined" && config != null &&
+        config.tileMap != null && config.tileMap.abilities != null) {
+        var ab = config.tileMap.abilities, m = {};
+        function put(entry, label) { if (entry != null && entry.id != null) { m[entry.id] = label; } }
+        put(ab.blindfold, "Blindfold"); put(ab.swap, "Swap"); put(ab.bomb, "Bomb");
+        put(ab.bombTrigger, "Bomb"); put(ab.speedBuff, "Speed Burst"); put(ab.speedDebuff, "Slowdown");
+        put(ab.tileSwap, "Tile Swap"); put(ab.iceCannon, "Ice Cannon"); put(ab.cut, "Cut");
+        put(ab.starPower, "Star Power"); put(ab.orbitalBeam, "Orbital Beam");
+        _combatAbilityLabels = m;
+    }
+    return (_combatAbilityLabels != null && _combatAbilityLabels[id]) ? _combatAbilityLabels[id] : "Ability";
+}
+
+function pushCombatEntry(entry) {
+    entry.bornAt = Date.now();
+    combatLog.unshift(entry);
+    if (combatLog.length > COMBAT_LOG_MAX) { combatLog.length = COMBAT_LOG_MAX; }
+}
+
+// playerDied → either a kill (a real attacker) or an environmental/self death.
+function combatLogDeath(victimId, attackerId, cause) {
+    if (victimId == null) { return; }
+    if (attackerId != null && attackerId !== victimId) {
+        pushCombatEntry({
+            type: "kill", attackerId: attackerId, victimId: victimId,
+            attackerName: combatNameOf(attackerId), victimName: combatNameOf(victimId)
+        });
+    } else {
+        pushCombatEntry({ type: "death", victimId: victimId, victimName: combatNameOf(victimId), cause: cause || null });
+    }
+}
+
+function combatLogAbility(ownerId, abilityId) {
+    if (ownerId == null) { return; }
+    pushCombatEntry({ type: "ability", ownerId: ownerId, ownerName: combatNameOf(ownerId), abilityId: abilityId });
+}
+
+// Scoring finishes. firstPlaceWinner / secondPlaceWinner / playerConcluded all
+// fire for a podium finisher, and teams modes add a teamPointsDelta — so this
+// upgrades an existing recent row (better rank / +points) instead of stacking
+// duplicates for the same player.
+var _combatRankRank = { "Finished": 1, "2nd": 2, "1st": 3 };
+function combatLogScore(playerId, rankLabel, points) {
+    if (playerId == null) { return; }
+    for (var i = 0; i < combatLog.length; i++) {
+        var e = combatLog[i];
+        if (e.type === "score" && e.playerId === playerId) {
+            if (rankLabel != null && (_combatRankRank[rankLabel] || 0) > (_combatRankRank[e.rankLabel] || 0)) {
+                e.rankLabel = rankLabel;
+            }
+            if (points != null) { e.points = points; }
+            e.bornAt = Date.now();
+            return;
+        }
+    }
+    pushCombatEntry({
+        type: "score", playerId: playerId,
+        playerName: combatNameOf(playerId),
+        rankLabel: rankLabel || "Finished",
+        points: (points != null) ? points : null
+    });
+}
+
+// A small circular type badge with a simple white vector glyph (kept sprite-free
+// and emoji-free to match the in-game HUD iconography).
+function drawCombatBadge(type, cause, cx, cy, r) {
+    var color;
+    if (type === "kill") { color = "#e8473f"; }
+    else if (type === "death") { color = (cause === "lava") ? "#ff7a26" : "#7d8794"; }
+    else if (type === "ability") { color = "#36c5d6"; }
+    else { color = "#ffcc3a"; } // score
+    gameContext.beginPath();
+    gameContext.arc(cx, cy, r, 0, Math.PI * 2);
+    gameContext.fillStyle = color;
+    gameContext.fill();
+    gameContext.lineWidth = 1.4;
+    gameContext.strokeStyle = "rgba(0,0,0,0.35)";
+    gameContext.stroke();
+    gameContext.save();
+    gameContext.strokeStyle = "#ffffff";
+    gameContext.fillStyle = "#ffffff";
+    gameContext.lineCap = "round";
+    gameContext.lineJoin = "round";
+    if (type === "kill") {
+        // Crossed swords (two short blades).
+        gameContext.lineWidth = 1.6;
+        var s = r * 0.62;
+        gameContext.beginPath();
+        gameContext.moveTo(cx - s, cy - s); gameContext.lineTo(cx + s, cy + s);
+        gameContext.moveTo(cx + s, cy - s); gameContext.lineTo(cx - s, cy + s);
+        gameContext.stroke();
+    } else if (type === "death") {
+        // Skull: rounded head with two eye sockets.
+        var hr = r * 0.55;
+        gameContext.beginPath();
+        gameContext.arc(cx, cy - r * 0.12, hr, 0, Math.PI * 2);
+        gameContext.fill();
+        gameContext.fillStyle = (cause === "lava") ? "#ff7a26" : "#7d8794";
+        gameContext.beginPath(); gameContext.arc(cx - hr * 0.45, cy - r * 0.16, hr * 0.32, 0, Math.PI * 2); gameContext.fill();
+        gameContext.beginPath(); gameContext.arc(cx + hr * 0.45, cy - r * 0.16, hr * 0.32, 0, Math.PI * 2); gameContext.fill();
+        gameContext.fillStyle = "#ffffff";
+        gameContext.fillRect(cx - r * 0.28, cy + r * 0.42, r * 0.56, r * 0.26);
+    } else if (type === "ability") {
+        // Plus sign (a pickup / power gained).
+        gameContext.lineWidth = 1.8;
+        var p = r * 0.55;
+        gameContext.beginPath();
+        gameContext.moveTo(cx - p, cy); gameContext.lineTo(cx + p, cy);
+        gameContext.moveTo(cx, cy - p); gameContext.lineTo(cx, cy + p);
+        gameContext.stroke();
+    } else {
+        // Finish flag: pole + pennant.
+        gameContext.lineWidth = 1.5;
+        var px = cx - r * 0.32;
+        gameContext.beginPath();
+        gameContext.moveTo(px, cy - r * 0.62); gameContext.lineTo(px, cy + r * 0.62);
+        gameContext.stroke();
+        gameContext.beginPath();
+        gameContext.moveTo(px, cy - r * 0.58);
+        gameContext.lineTo(px + r * 0.72, cy - r * 0.3);
+        gameContext.lineTo(px, cy - r * 0.02);
+        gameContext.closePath();
+        gameContext.fill();
+    }
+    gameContext.restore();
+}
+
+// Cart-cosmetic thumbnail for a live player, with a team-coloured ring in teams
+// modes. Falls back to a plain disc if the player object is gone (left the room).
+function drawCombatThumb(id, cx, cy, r) {
+    var p = (typeof playerList !== "undefined" && playerList) ? playerList[id] : null;
+    if (p != null && typeof drawOverviewKart === "function") {
+        drawOverviewKart(p, cx, cy, r);
+    } else {
+        gameContext.beginPath();
+        gameContext.arc(cx, cy, r, 0, Math.PI * 2);
+        gameContext.fillStyle = "rgba(120,130,140,0.85)";
+        gameContext.fill();
+    }
+    if (p != null && p.teamId != null && typeof teamInfo !== "undefined" && teamInfo != null && Array.isArray(teamInfo.defs)) {
+        var tc = combatColorOf(id, null);
+        gameContext.beginPath();
+        gameContext.arc(cx, cy, r + 1.6, 0, Math.PI * 2);
+        gameContext.lineWidth = 2;
+        gameContext.strokeStyle = tc;
+        gameContext.stroke();
+    }
+}
+
+// Build the ordered segment list for one row. Segments: badge / thumb / text / gap.
+function combatRowSegments(entry) {
+    var segs = [{ k: "badge", type: entry.type, cause: entry.cause }];
+    if (entry.type === "kill") {
+        segs.push({ k: "thumb", id: entry.attackerId });
+        segs.push({ k: "text", text: entry.attackerName, color: combatColorOf(entry.attackerId, "#ffffff"), bold: true });
+        segs.push({ k: "thumb", id: entry.victimId });
+        segs.push({ k: "text", text: entry.victimName, color: combatColorOf(entry.victimId, "#ffffff"), bold: false });
+    } else if (entry.type === "death") {
+        segs.push({ k: "thumb", id: entry.victimId });
+        segs.push({ k: "text", text: entry.victimName, color: combatColorOf(entry.victimId, "#ffffff"), bold: false });
+        segs.push({ k: "text", text: (entry.cause === "lava") ? "melted" : "out", color: "#9aa3ad", bold: false, small: true });
+    } else if (entry.type === "ability") {
+        segs.push({ k: "thumb", id: entry.ownerId });
+        segs.push({ k: "text", text: entry.ownerName, color: combatColorOf(entry.ownerId, "#ffffff"), bold: false });
+        segs.push({ k: "text", text: abilityLabelFor(entry.abilityId), color: "#5fe0ee", bold: true });
+    } else { // score
+        segs.push({ k: "thumb", id: entry.playerId });
+        segs.push({ k: "text", text: entry.playerName, color: combatColorOf(entry.playerId, "#ffffff"), bold: false });
+        var label = entry.rankLabel + (entry.points != null ? ("  +" + entry.points) : "");
+        segs.push({ k: "text", text: label, color: "#ffd54a", bold: true });
+    }
+    return segs;
+}
+
+function drawCombatLog() {
+    if (typeof config === "undefined" || config == null || config.stateMap == null) { return; }
+    if (currentState != config.stateMap.racing && currentState != config.stateMap.collapsing) { return; }
+    if (combatLog.length === 0) { return; }
+    var now = Date.now();
+    // Prune expired rows.
+    for (var i = combatLog.length - 1; i >= 0; i--) {
+        var life = COMBAT_LOG_LIFE_MS[combatLog[i].type] || 6000;
+        if (now - combatLog[i].bornAt > life) { combatLog.splice(i, 1); }
+    }
+    if (combatLog.length === 0) { return; }
+
+    var rightX = LOGICAL_WIDTH - 16;
+    var topY = 92;          // below the race timer + brutal-badge row
+    var rowH = 26, gapY = 5, padX = 8, thumbR = 9, badgeR = 8, segGap = 5;
+    var localId = (typeof myID !== "undefined") ? myID : null;
+
+    gameContext.save();
+    gameContext.textBaseline = "middle";
+    for (var j = 0; j < combatLog.length; j++) {
+        var entry = combatLog[j];
+        var life = COMBAT_LOG_LIFE_MS[entry.type] || 6000;
+        var age = now - entry.bornAt;
+        var fadeIn = Math.min(1, age / 130);
+        var fadeOut = (age > life - 500) ? Math.max(0, (life - age) / 500) : 1;
+        var alpha = Math.max(0, Math.min(1, fadeIn * fadeOut));
+        if (alpha <= 0) { continue; }
+        var rowY = topY + j * (rowH + gapY);
+        var cy = rowY + rowH / 2;
+
+        // Measure.
+        var segs = combatRowSegments(entry);
+        var contentW = 0;
+        for (var s = 0; s < segs.length; s++) {
+            var seg = segs[s];
+            if (seg.k === "badge") { seg.w = badgeR * 2; }
+            else if (seg.k === "thumb") { seg.w = thumbR * 2; }
+            else { // text
+                gameContext.font = (seg.bold ? "bold " : "") + (seg.small ? "11px" : "13px") + " Arial";
+                seg.w = gameContext.measureText(seg.text).width;
+            }
+            contentW += seg.w;
+            if (s < segs.length - 1) { contentW += segGap; }
+        }
+        var pillW = contentW + padX * 2;
+        var pillX = rightX - pillW;
+
+        gameContext.globalAlpha = alpha;
+        // Highlight rows the local player is involved in.
+        var mine = (localId != null) && (entry.attackerId === localId || entry.victimId === localId ||
+            entry.ownerId === localId || entry.playerId === localId);
+        if (typeof drawHudPanel === "function") {
+            drawHudPanel(pillX, rowY, pillW, rowH, {
+                fill: mine ? "rgba(28,34,44,0.86)" : "rgba(10,12,16,0.74)",
+                alpha: alpha,
+                borderAlpha: alpha,
+                radius: 7,
+                border: mine ? "rgba(255,255,255,0.55)" : "rgba(255,255,255,0.22)"
+            });
+        } else {
+            gameContext.fillStyle = "rgba(10,12,16,0.74)";
+            roundRectPath(gameContext, pillX, rowY, pillW, rowH, 7);
+            gameContext.fill();
+        }
+
+        // Draw left → right.
+        var cx = pillX + padX;
+        gameContext.globalAlpha = alpha;
+        for (var d = 0; d < segs.length; d++) {
+            var sg = segs[d];
+            if (sg.k === "badge") {
+                drawCombatBadge(sg.type, sg.cause, cx + badgeR, cy, badgeR);
+            } else if (sg.k === "thumb") {
+                drawCombatThumb(sg.id, cx + thumbR, cy, thumbR);
+                gameContext.globalAlpha = alpha; // drawOverviewKart resets alpha via save/restore — re-assert
+            } else {
+                gameContext.font = (sg.bold ? "bold " : "") + (sg.small ? "11px" : "13px") + " Arial";
+                gameContext.textAlign = "left";
+                gameContext.fillStyle = sg.color;
+                gameContext.fillText(sg.text, cx, cy + 0.5);
+            }
+            cx += sg.w + segGap;
         }
     }
     gameContext.restore();

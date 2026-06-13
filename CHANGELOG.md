@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- **There's a combat log now.** A small feed in the top-right corner flashes the moments as they happen — who knocked out whom, who melted into the lava, who grabbed an Ice Cannon, and who's crossing the finish line — each with the racer's kart and name. In team modes the names and kart rings show their team colors, and finishes show the points they banked. Rows fade after a few seconds, and the ones you're in stand out.
 
 ## v0.36.0 — 2026-06-13
 
