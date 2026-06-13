@@ -199,13 +199,11 @@ jobs:
       - name: "Headless bumper-wall test (slingshot wall geometry, bounce physics, bots route around)"
         run: node .github/scripts/bumper-wall-test.js
 
-<<<<<<< HEAD
       - name: "Headless momentum-ramp test (human slow-start/wind-up, hard-turn reset, bots exempt, no gate pre-charge)"
         run: node .github/scripts/momentum-ramp-test.js
-=======
+
       - name: "Headless rotor test (orbit geometry, streamAngle wire, sweep + bonk)"
         run: node .github/scripts/rotor-test.js
->>>>>>> ce3dfed (feat(hazards): Rotor — a bumper sweeping a circle on a spinning arm)
 
       - name: "Headless geyser test (phase machine, netState wire, erupt + launch)"
         run: node .github/scripts/geyser-test.js
