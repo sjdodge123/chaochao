@@ -170,6 +170,9 @@ class Player extends Circle {
 		// penalty until exhaustLockUntil (regen is paused, so staminaExhausted stays set).
 		this.overcharge = 0;
 		this.exhaustLockUntil = 0;
+		// Recharge Spring boon (server/entities/boons.js): per-player re-arm timestamp
+		// so the spring is a routing grab, not a camp-on-it stamina fountain.
+		this.rechargeSpringReadyAt = 0;
 
 		//On Fire
 		this.onFire = 0;
@@ -629,6 +632,28 @@ class Player extends Circle {
 		if (this.staminaExhausted && this.stamina >= s.exhaustRecover) {
 			this.staminaExhausted = false;
 		}
+	}
+	// Recharge Spring boon (server/entities/boons.js): a drive-over pit stop. Top the
+	// stamina bar back to full, drop the exhausted/overcharge latch, and reset the
+	// punch cooldown so the kart is immediately attack-ready. Gated by a per-player
+	// re-arm cooldown (config.boons.rechargeSpring.cooldownMs) so it can't be camped.
+	// Returns true if it actually fired (false while still on cooldown).
+	rechargeFromSpring() {
+		var now = Date.now();
+		if (now < this.rechargeSpringReadyAt) { return false; }
+		var spring = c.boons != null ? c.boons.rechargeSpring : null;
+		this.rechargeSpringReadyAt = now + ((spring != null && spring.cooldownMs) || 0);
+		this.stamina = c.punchStamina.max;
+		this.staminaExhausted = false;
+		this.overcharge = 0;
+		this.exhaustLockUntil = 0;
+		// Mid-charge top-up: updateCharge derives stamina from chargeStaminaAtStart, so
+		// rebase that too or it would overwrite the refill on the next tick.
+		if (this.charging) { this.chargeStaminaAtStart = this.stamina; }
+		// Punch off cooldown: clear the last-punch timer so the next swing can fire now.
+		this.punchedTimer = null;
+		this.punchTimeLeft = this.punchWaitTime;
+		return true;
 	}
 	// Lobby-only protection.
 	// isTimedInvuln(): inside the timed post-respawn grace window.

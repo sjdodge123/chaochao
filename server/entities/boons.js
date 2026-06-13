@@ -79,4 +79,74 @@ registerBoonKind("dashArrows", {
 	}
 });
 
-module.exports = { Boon, DashArrows };
+// Recharge Spring — a drive-over pit stop (the green spring pad). Touching it makes
+// a player instantly battle-ready: it tops the punch-stamina bar back to full, drops
+// the exhausted/overcharge latch, and resets the punch cooldown so the next swing can
+// fire immediately. The actual reset lives on the player (Player.rechargeFromSpring),
+// which also self-gates with a per-player re-arm cooldown so the spring is a routing
+// grab, not a camp-on-it stamina fountain. Non-directional (no angle).
+class RechargeSpring extends Boon {
+	constructor(x, y, ownerId, roomSig) {
+		super(x, y, c.boons.rechargeSpring.radius, c.boons.rechargeSpring.color, ownerId, roomSig);
+		this.id = c.boons.rechargeSpring.id;
+	}
+	handleHit(object) {
+		if (!object.isPlayer || typeof object.rechargeFromSpring !== "function") {
+			return;
+		}
+		object.rechargeFromSpring();
+	}
+}
+
+registerBoonKind("rechargeSpring", {
+	railed: false,
+	directional: false,
+	build: function (entry, mapID, roomSig) {
+		return new RechargeSpring(entry.x, entry.y, mapID, roomSig);
+	}
+});
+
+// Slipstream — a wind-current corridor (the streamline patch). While a player or puck
+// overlaps it, a gentle constant push along the author-set axis carries them up to
+// currentSpeed — a steady current, deliberately well below the engine max and below
+// Dash Arrows' launch cap, so it reads as a tailwind, not a slam. Same anti-overshoot
+// rule as Dash Arrows: add only the remaining gap to the cap each contact tick (never
+// overshoot — which could tunnel a thin wall in one tick — and never brake a player
+// already moving faster ALONG the axis). Because the push is purely axial, a kart
+// shoved or driven BACKWARDS through it has a negative `along`, so the full push fights
+// that backward motion and carries it forward again. The footprint is large; chain a
+// few to build a long tunnel.
+class Slipstream extends Boon {
+	constructor(x, y, angle, ownerId, roomSig) {
+		super(x, y, c.boons.slipstream.radius, c.boons.slipstream.color, ownerId, roomSig);
+		this.id = c.boons.slipstream.id;
+		this.angle = angle;
+		this.push = c.boons.slipstream.push;
+		this.currentSpeed = c.boons.slipstream.currentSpeed;
+	}
+	handleHit(object) {
+		if (!object.isPlayer && !object.isPuck) {
+			return;
+		}
+		var rad = (this.angle || 0) * (Math.PI / 180);
+		var dirX = Math.cos(rad), dirY = Math.sin(rad);
+		var cap = Math.min(this.currentSpeed, object.maxVelocity || c.playerMaxSpeed);
+		var along = object.velX * dirX + object.velY * dirY;
+		if (along >= cap) {
+			return;
+		}
+		var add = Math.min(this.push, cap - along);
+		object.velX += dirX * add;
+		object.velY += dirY * add;
+	}
+}
+
+registerBoonKind("slipstream", {
+	railed: false,
+	directional: true,
+	build: function (entry, mapID, roomSig) {
+		return new Slipstream(entry.x, entry.y, entry.angle, mapID, roomSig);
+	}
+});
+
+module.exports = { Boon, DashArrows, RechargeSpring, Slipstream };

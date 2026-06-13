@@ -1349,6 +1349,74 @@ function paintDashArrowsShape(ctx, kind, x, y, angle, ringColor) {
     }
     ctx.restore();
 }
+// Recharge Spring painter (the rechargeSpring `paint` hook) — mirrors the in-game
+// look (draw.js drawRechargeSpring): a faint green footprint, a ring, and the green
+// restore cross. Static in the editor (no pulse animation).
+function paintRechargeSpringShape(ctx, kind, x, y, angle, ringColor) {
+    var cfg = objCfgByKey(kind.key);
+    if (cfg == null) { return; }
+    var r = cfg.radius;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, 2 * Math.PI);
+    ctx.fillStyle = "rgba(91,227,160,0.08)";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.78, 0, 2 * Math.PI);
+    ctx.strokeStyle = cfg.color;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    var arm = r * 0.42;
+    ctx.lineCap = "round";
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(-arm, 0);
+    ctx.lineTo(arm, 0);
+    ctx.moveTo(0, -arm);
+    ctx.lineTo(0, arm);
+    ctx.stroke();
+    ctx.restore();
+}
+// Slipstream painter (the slipstream `paint` hook) — mirrors the in-game look
+// (draw.js drawSlipstream): a faint corridor footprint with three streamlines + a
+// leading arrowhead along `angle`, the push direction. Static (no flow animation).
+function paintSlipstreamShape(ctx, kind, x, y, angle, ringColor) {
+    var cfg = objCfgByKey(kind.key);
+    if (cfg == null) { return; }
+    var rad = (angle || 0) * (Math.PI / 180);
+    var w = cfg.width, hgt = cfg.height;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rad);
+    ctx.beginPath();
+    ctx.rect(-w / 2, -hgt / 2, w, hgt);
+    ctx.fillStyle = "rgba(127,216,255,0.06)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(127,216,255,0.12)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.strokeStyle = cfg.color;
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    var rows = [-hgt * 0.28, 0, hgt * 0.28];
+    for (var i = 0; i < rows.length; i++) {
+        var ly = rows[i];
+        ctx.setLineDash([18, 10]);
+        ctx.beginPath();
+        ctx.moveTo(-w / 2 + 8, ly);
+        ctx.lineTo(w / 2 - 16, ly);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(w / 2 - 22, ly - 7);
+        ctx.lineTo(w / 2 - 10, ly);
+        ctx.lineTo(w / 2 - 22, ly + 7);
+        ctx.stroke();
+    }
+    ctx.restore();
+}
 // Wall-band painter (bumperWall's `paint` hook). Mirrors the in-game look
 // (draw.js drawBumperWall): rim band over the bumper-orange core, anchored at
 // (x,y) and extending `width` along `angle`.
@@ -1875,6 +1943,52 @@ var EDITOR_HAZARD_KINDS = [
                 ctx.moveTo(bx - 12, cy - 18);
                 ctx.lineTo(bx + 12, cy);
                 ctx.lineTo(bx - 12, cy + 18);
+                ctx.stroke();
+            }
+        }
+    },
+    {
+        key: "rechargeSpring", label: "Recharge Spring", shortcut: "c", railed: false, directional: false,
+        group: "boon", paint: paintRechargeSpringShape,
+        swatchPaint: function (ctx, size) {
+            // Green ring + restore cross — "this tops you back up".
+            var cx = size / 2, cy = size / 2;
+            ctx.strokeStyle = "#5BE3A0";
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.arc(cx, cy, size * 0.32, 0, 2 * Math.PI);
+            ctx.stroke();
+            ctx.lineWidth = 8;
+            ctx.lineCap = "round";
+            var arm = size * 0.18;
+            ctx.beginPath();
+            ctx.moveTo(cx - arm, cy);
+            ctx.lineTo(cx + arm, cy);
+            ctx.moveTo(cx, cy - arm);
+            ctx.lineTo(cx, cy + arm);
+            ctx.stroke();
+        }
+    },
+    {
+        key: "slipstream", label: "Slipstream", shortcut: "t", railed: false, directional: true,
+        group: "boon", paint: paintSlipstreamShape,
+        swatchPaint: function (ctx, size) {
+            // Three blue streamlines pointing right — "a current carries you THIS way".
+            ctx.strokeStyle = "#7FD8FF";
+            ctx.lineWidth = 6;
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+            var rows = [size * 0.30, size * 0.5, size * 0.70];
+            for (var i = 0; i < rows.length; i++) {
+                var ly = rows[i];
+                ctx.beginPath();
+                ctx.moveTo(12, ly);
+                ctx.lineTo(size - 22, ly);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(size - 28, ly - 8);
+                ctx.lineTo(size - 14, ly);
+                ctx.lineTo(size - 28, ly + 8);
                 ctx.stroke();
             }
         }
