@@ -2837,8 +2837,12 @@ class GameBoard {
 			// -> 0, which would collapse every hazard to one id.
 			var mapID = utils.generateHash(this.roomSig + ":" + i + ":" + entry.id + ":" + entry.x + "," + entry.y, 0);
 			var hazard = kind.build(entry, mapID, this.roomSig);
-			if (kind.railed && this.checkForActiveBrutal(c.brutalRounds.lightning.id)) {
-				hazard.speed *= c.brutalRounds.lightning.movingHazardSpeedMod;
+			// Lightning brutal round speeds moving hazards up. Each moving kind
+			// scales itself via scaleSpeed (rail bumpers scale along-rail speed,
+			// rotors scale sweep rate); timed/static kinds don't define it and are
+			// left alone.
+			if (typeof hazard.scaleSpeed === "function" && this.checkForActiveBrutal(c.brutalRounds.lightning.id)) {
+				hazard.scaleSpeed(c.brutalRounds.lightning.movingHazardSpeedMod);
 			}
 			this.hazardList[mapID] = hazard;
 		}

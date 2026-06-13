@@ -63,6 +63,12 @@ class Bumper extends Hazard {
 		}
 		this.punch = null;
 	}
+	// Lightning brutal round speeds moving hazards up; for a (railed) bumper that
+	// means scaling its along-rail speed. Static bumpers have speed 0, so this is a
+	// harmless no-op for them. See gameBoard.generateHazards.
+	scaleSpeed(mod) {
+		this.speed *= mod;
+	}
 	handleHit(object) {
 		if (!object.isPlayer && !object.isPuck) {
 			return;
@@ -175,7 +181,10 @@ class Rotor extends Hazard {
 		this.py = y;
 		this.orbitRadius = c.hazards.rotor.orbitRadius;
 		this.angularSpeed = c.hazards.rotor.angularSpeed; // degrees/second
-		this.angle = angle || 0;    // current sweep angle (degrees)
+		// Sanitize the optional start angle: the kind is non-directional so
+		// validateMap doesn't enforce a finite angle, and `angle || 0` would let a
+		// crafted Infinity through (truthy) into Math.cos/sin -> NaN coordinates.
+		this.angle = Number.isFinite(angle) ? angle : 0; // current sweep angle (degrees)
 		this.punch = null;
 		// Seed the head onto the orbit so creation (newHazards) and the first tick
 		// agree — no one-frame jump from pivot to head.
@@ -186,6 +195,11 @@ class Rotor extends Hazard {
 	// Per-tick motion hook (engine.updateHazards). Advance the sweep angle and
 	// place the head on the orbit; move() (called later in gameBoard.updateHazards)
 	// commits newX/newY, mirroring how rail bumpers separate compute from commit.
+	// Lightning brutal round speeds moving hazards up; a rotor moves via its sweep
+	// rate, so scale that (it has no along-rail speed). See generateHazards.
+	scaleSpeed(mod) {
+		this.angularSpeed *= mod;
+	}
 	advance(dt) {
 		this.angle += this.angularSpeed * dt;
 		if (this.angle >= 360) { this.angle -= 360; } else if (this.angle < 0) { this.angle += 360; }
@@ -374,7 +388,9 @@ registerHazardKind("rotor", {
 	railed: false,
 	directional: false, // `angle` is the OPTIONAL starting sweep angle (defaults to 0)
 	build: function (entry, mapID, roomSig) {
-		return new Rotor(entry.x, entry.y, c.hazards.rotor.radius, c.hazards.rotor.color, mapID, roomSig, entry.angle || 0);
+		// Pass the raw angle — the Rotor constructor sanitizes a missing/non-finite
+		// value to 0 (the kind is non-directional, so validateMap doesn't gate it).
+		return new Rotor(entry.x, entry.y, c.hazards.rotor.radius, c.hazards.rotor.color, mapID, roomSig, entry.angle);
 	}
 });
 registerHazardKind("geyser", {
