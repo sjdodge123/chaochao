@@ -1906,6 +1906,10 @@ function registerAbilityHandlers(server) {
 			orb.popAt = Date.now();
 		}
 		playSoundVaried(collectItem, 0.14);
+		if (typeof combatLogOrb === "function") {
+			var orbPts = (typeof config !== "undefined" && config && config.bonusOrb && config.bonusOrb.pointsValue != null) ? config.bonusOrb.pointsValue : 1;
+			combatLogOrb(payload.by, orbPts);
+		}
 	});
 	// Late-join seed of invuln state so already-protected players flash on this client.
 	server.on("lobbyInvulnStates", function (states) {
