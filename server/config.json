@@ -527,16 +527,18 @@
             "boostCap": 300
         },
         "rechargeSpring": {
-            "_doc": "Drive-over pit stop: instantly tops the punch-stamina bar back to full, clears the exhausted/overcharge latch, and resets the punch cooldown so you're immediately attack-ready. cooldownMs is a per-player re-arm so it's a routing grab, not a camp-on-it stamina fountain.",
+            "_doc": "Drive-over pit stop: instantly tops the punch-stamina bar back to full, clears the exhausted/overcharge latch, and resets the punch cooldown so you're immediately attack-ready. cooldownMs is a per-player re-arm so it's a routing grab, not a camp-on-it stamina fountain. colorWater is the foam palette used by the on-water render variant (a bubbling spring) so the pad reads against blue water.",
             "id": 951,
             "color": "#5BE3A0",
+            "colorWater": "#EAFBFF",
             "radius": 28,
             "cooldownMs": 6000
         },
         "slipstream": {
-            "_doc": "A wind-current corridor: while overlapping, a gentle constant push along the author-set axis carries you up to currentSpeed (well below dashArrows' launch cap). Purely axial, so being shoved/driven backwards through it means the current fights you and carries you forward again. Chain several to build a long tunnel.",
+            "_doc": "A wind-current corridor: while overlapping, a gentle constant push along the author-set axis carries you up to currentSpeed (well below dashArrows' launch cap). Purely axial, so being shoved/driven backwards through it means the current fights you and carries you forward again. Chain several to build a long tunnel. colorWater is the foam palette used by the on-water render variant (a river current with wavy streamlines) so it reads against blue water.",
             "id": 952,
             "color": "#7FD8FF",
+            "colorWater": "#EAF8FF",
             "radius": 46,
             "width": 200,
             "height": 76,
