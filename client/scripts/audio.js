@@ -615,6 +615,7 @@ function stopAllSounds() {
     currentBackgroundMusic = null;
     fadingBackgroundVoice = null;
     stopAllDriftSounds();
+    stopFireWalkSound();
     stopHeatwaveDrone();
 }
 
@@ -957,6 +958,56 @@ function stopDriftSound(id) {
 
 function stopAllDriftSounds() {
     for (var id in driftVoices) { stopDriftSound(id); }
+}
+
+// --- Fire-walk sizzle (synthesized, no MP3) ---
+// One looping voice for the LOCAL kart while its killstreak shield strides over lava or
+// water (unified): white noise through a bandpass that brightens as you move faster, so
+// the shield "sizzles/hisses" against the ground. Modeled on the drift skid — same
+// out-of-activeVoices lifecycle, so it's driven straight from the per-frame loop
+// (updateFireWalkAudio) and rides its gain down to silence on mute rather than cutting.
+var FIREWALK_BASE_VOL = 0.13;
+var fireWalkVoice = null;       // single voice (local kart only) | null
+function setFireWalkSound(id, intensity, level) {
+    var ctx = getCtx();
+    if (!ctx || ctx.state !== "running") { return; }
+    var muted = gameMuted || masterVolume === 0;
+    if (!fireWalkVoice && muted) { return; }
+    var lvl = (level == null) ? 1 : level;
+    var inten = (intensity == null) ? 0.4 : Math.max(0, Math.min(1, intensity));
+    var vol = muted ? 0 : FIREWALK_BASE_VOL * inten * lvl * masterVolume * sfxVolumeScalar;
+    var now = ctx.currentTime;
+    if (!fireWalkVoice) {
+        var src = ctx.createBufferSource();
+        src.buffer = getDriftNoiseBuffer(ctx);   // reuse the shared white-noise bed
+        src.loop = true;
+        var filt = ctx.createBiquadFilter();
+        filt.type = "bandpass";
+        filt.Q.value = 0.8;                       // airy hiss, not a tone
+        var g = ctx.createGain();
+        g.gain.value = 0.0001;                    // wash in from silence
+        src.connect(filt); filt.connect(g); g.connect(sfxBus);
+        try { src.start(); } catch (e) { try { src.disconnect(); } catch (e2) {} return; }
+        fireWalkVoice = { source: src, filter: filt, gain: g };
+    }
+    var freq = 1800 + 2400 * inten;               // brighter sizzle the faster you stride
+    try {
+        fireWalkVoice.filter.frequency.setTargetAtTime(freq, now, 0.06);
+        fireWalkVoice.gain.gain.setTargetAtTime(Math.max(0.0001, vol), now, 0.07);
+    } catch (e) {}
+}
+function stopFireWalkSound(id) {
+    var v = fireWalkVoice;
+    if (!v) { return; }
+    fireWalkVoice = null;
+    var ctx = getCtx();
+    if (!ctx) { try { v.source.stop(); } catch (e) {} return; }
+    var now = ctx.currentTime;
+    try {
+        holdParamNow(v.gain.gain, now);
+        v.gain.gain.linearRampToValueAtTime(0.0001, now + 0.16);
+        v.source.stop(now + 0.2);
+    } catch (e) { try { v.source.stop(); } catch (e2) {} }
 }
 
 // Flame extinguished by water — synthesized one-shot "steam quench" (no MP3 asset),

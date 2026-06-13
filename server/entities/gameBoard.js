@@ -43,6 +43,11 @@ class GameBoard {
 		this.abilityList = {};
 		this.tempSpectatorList = {};
 		this.tileChanges = {};
+		// Water cells the collapse front has reached but that haven't flipped to lava
+		// yet: they "slow-boil" for water.collapseBoilMs first. voronoiId -> { startedAt,
+		// stage } so collapseMap can advance the tiered warning and the client can render
+		// simmer->boil->rolling before the lava conversion. Cleared on round reset.
+		this.boilingWater = {};
 		this.punchList = {};
 		// Active Orbital Beam telegraphs (owner -> locked strike line), so the AI can
 		// steer out of the marked danger band during the fuse. Cleared on round reset
@@ -1783,18 +1788,71 @@ class GameBoard {
 
 		var collapsedCells = [];
 		var cells = this.currentMap.cells;
+		var waterId = c.tileMap.water != null ? c.tileMap.water.id : -999;
 		for (var i = 0; i < cells.length; i++) {
 			if (cells[i].id == c.tileMap.goal.id || cells[i].id == c.tileMap.lava.id || cells[i].id == c.tileMap.empty.id) {
 				continue;
 			}
 			var distance = utils.getMag(this.collapseLoc.x - cells[i].site.x, this.collapseLoc.y - cells[i].site.y);
 			if (this.collapseLine < distance) {
+				// Water doesn't flash to lava — it slow-boils first (a tiered warning),
+				// buying racers a few seconds to scramble off. Register it once; the
+				// advance pass below ages each boiling cell and flips it when it's done.
+				if (cells[i].id == waterId && c.tileMap.water != null) {
+					if (this.boilingWater[cells[i].site.voronoiId] == null) {
+						this.boilingWater[cells[i].site.voronoiId] = { startedAt: now, stage: -1 };
+					}
+					continue;
+				}
 				cells[i].id = c.tileMap.lava.id;
 				this.tileChanges[cells[i].site.voronoiId] = cells[i].id;
 				collapsedCells.push(cells[i].site.voronoiId);
 			}
 		}
+		// Advance any boiling water: emit tier bumps for the warning animation and flip a
+		// cell to lava once it has boiled for the full collapseBoilMs.
+		var boilUpdates = this.advanceBoilingWater(now, collapsedCells);
 		messenger.messageRoomBySig(this.roomSig, 'collapsedCells', collapsedCells);
+		if (boilUpdates.length > 0) {
+			messenger.messageRoomBySig(this.roomSig, 'waterBoiling', boilUpdates);
+		}
+	}
+	// Age the boiling-water registry one tick. Each cell climbs through collapseBoilTiers
+	// stages over collapseBoilMs; a stage bump is pushed to boilUpdates (client warning
+	// animation), and when the timer is up the cell converts to lava (appended to the
+	// shared collapsedCells list so it rides the same broadcast as instant conversions).
+	advanceBoilingWater(now, collapsedCells) {
+		var water = c.tileMap.water;
+		if (water == null) { return []; }
+		var boilMs = water.collapseBoilMs != null ? water.collapseBoilMs : 3000;
+		var tiers = water.collapseBoilTiers != null ? water.collapseBoilTiers : 3;
+		var lavaId = c.tileMap.lava.id;
+		var updates = [];
+		var cells = this.currentMap.cells;
+		for (var vid in this.boilingWater) {
+			var entry = this.boilingWater[vid];
+			var elapsed = now - entry.startedAt;
+			if (elapsed >= boilMs) {
+				// Boil's done: convert the underlying cell to lava.
+				for (var i = 0; i < cells.length; i++) {
+					if (cells[i].site.voronoiId == vid) {
+						cells[i].id = lavaId;
+						this.tileChanges[cells[i].site.voronoiId] = lavaId;
+						collapsedCells.push(cells[i].site.voronoiId);
+						break;
+					}
+				}
+				delete this.boilingWater[vid];
+				continue;
+			}
+			// 0..tiers-1, clamped so the final tier shows before the flip.
+			var stage = Math.min(tiers - 1, Math.floor((elapsed / boilMs) * tiers));
+			if (stage !== entry.stage) {
+				entry.stage = stage;
+				updates.push({ vid: Number(vid), stage: stage });
+			}
+		}
+		return updates;
 	}
 	findRandomGoalTile() {
 		var cells = this.currentMap.cells;
@@ -2383,6 +2441,7 @@ class GameBoard {
 		this.soloCollapseSpeed = c.lastPlayerCollapseSpeed;
 		this.soloStartDistance = this.world.height + 400;
 		this.tileChanges = {};
+		this.boilingWater = {}; // drop any half-boiled water from the previous round
 		this.pendingBeams = {}; // drop any telegraph whose strike timer this reset cancels
 		this.pendingAbilityTimers = []; // bound growth; lobby ones are canceled in clearLobbyAbilities
 		// AI vision-fairness state, reset each round.
