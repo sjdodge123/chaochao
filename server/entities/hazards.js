@@ -437,6 +437,10 @@ class Antlion extends Hazard {
 		this.isAntlion = true;
 		this.punch = null;
 		this.nextHitTime = 0;
+		// Read by engine.bounceEntityOffWater's stranded-inside eject. The antlion's
+		// velX/velY are vestigial (steering recomputes newX/newY from the seek each
+		// tick), but the water-bounce needs a finite maxVelocity for the eject math.
+		this.maxVelocity = c.brutalRounds.antlion.chaseSpeed;
 		// Slam knockback from a thumper: an impulse velocity that decays each tick,
 		// layered on top of the steady chase steering.
 		this.impVX = 0;

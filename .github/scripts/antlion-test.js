@@ -35,10 +35,14 @@ const utils = require(path.join(repoRoot, 'server', 'utils.js'));
 const config = require(path.join(repoRoot, 'server', 'config.json'));
 const mapFormat = require(path.join(repoRoot, 'server', 'mapFormat.js'));
 
+const _engine = require(path.join(repoRoot, 'server', 'engine.js'));
+const { Antlion } = require(path.join(repoRoot, 'server', 'entities', 'hazards.js'));
+
 const DT = config.serverTickSpeed / 1000;
 const AL = config.brutalRounds.antlion;
 const ANTLION_HAZARD_ID = config.hazards.antlion.id;
 const SAND_ID = config.tileMap.slow.id;
+const WATER_ID = (config.tileMap.water != null) ? config.tileMap.water.id : -1;
 
 let failures = 0;
 function fail(msg) {
@@ -449,6 +453,62 @@ function sessionCap() {
     }
 }
 
+// -----------------------------------------------------------------------------
+// 8. Water is a hard barrier: antlions can't walk on water (like zombies). Uses a
+// water+sand map (The Flow) since SandsOfTime has none.
+// -----------------------------------------------------------------------------
+function sessionWaterBlock() {
+    if (WATER_ID < 0) { fail('water-block: config has no water tile'); return; }
+    config.brutalTypesForce = [AL.id];
+    const map = loadMap('TheFlow.json');
+    const room = buildRoom(map);
+    const gb = room.game.gameBoard;
+    const cells = gb.currentMap.cells;
+    const waterCells = cells.filter(c => c.id === WATER_ID && c.site);
+    assert(waterCells.length > 0, 'water-block: The Flow has no water cells (test map changed?)');
+    if (failures > 0) { return; }
+
+    // A water cell center, and the nearest land (non-water) cell to it.
+    const w = waterCells[Math.floor(waterCells.length / 2)].site;
+    let land = null, bd = Infinity;
+    for (const c2 of cells) {
+        if (c2.id === WATER_ID || !c2.site) { continue; }
+        const d = (c2.site.x - w.x) ** 2 + (c2.site.y - w.y) ** 2;
+        if (d < bd) { bd = d; land = c2.site; }
+    }
+    assert(land != null, 'water-block: no land cell found');
+    if (failures > 0) { return; }
+
+    // (a) Engine-level: a step from land aimed straight into water is deflected out.
+    const ent = { x: land.x, y: land.y, newX: w.x, newY: w.y, velX: 0, velY: 0, maxVelocity: AL.chaseSpeed, bounced: false };
+    _engine.bounceEntityOffWater(ent, gb.currentMap);
+    assert(!_engine.isOnCellOfType(ent.newX, ent.newY, gb.currentMap, WATER_ID),
+        'water-block: a step aimed into water was not deflected (ended at ' + Math.round(ent.newX) + ',' + Math.round(ent.newY) + ')');
+
+    // (b) Integration: a live antlion lured straight at open water (both targets
+    // pinned on the water cell) must never occupy a water cell on any tick.
+    const ids = Object.keys(room.playerList);
+    const holds = ids.map(id => ({ player: room.playerList[id], x: w.x, y: w.y }));
+    for (const h of holds) { pinPlayer(h.player, w.x, w.y); }
+    const hash = 'water-ant';
+    room.hazardList[hash] = new Antlion(land.x, land.y, hash, gb.roomSig);
+    let everInWater = false, samples = 0;
+    for (let f = 0; f < 90; f++) {
+        tick(room, holds);
+        const a = room.hazardList[hash];
+        if (a == null) { break; } // burrowed off a non-sand shore — fine, held so far
+        samples++;
+        if (_engine.isOnCellOfType(a.x, a.y, gb.currentMap, WATER_ID)) { everInWater = true; break; }
+    }
+    assert(!everInWater, 'water-block: a live antlion entered a water cell while lured across water');
+    assert(samples > 0, 'water-block: integration antlion never ticked (setup error)');
+
+    config.brutalTypesForce = null;
+    if (failures === 0) {
+        console.log('Session 6 passed: antlions are blocked from entering water (' + samples + ' ticks clear).');
+    }
+}
+
 messenger.build(fakeIo);
 try {
     sessionSelectionGate();
@@ -456,6 +516,7 @@ try {
     if (failures === 0) sessionBurrow();
     if (failures === 0) sessionThumperSlam();
     if (failures === 0) sessionCap();
+    if (failures === 0) sessionWaterBlock();
 } catch (e) {
     fail('Unhandled exception during antlion test: ' + e.message + '\n' + e.stack);
 } finally {

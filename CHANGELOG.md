@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### Brutal rounds
+
+- **Antlions can't cross water now.** In an Antlions round, water is a hard wall to the swarm — they prowl the shoreline instead of walking across it, just like zombies can't. Put a pool, river, or moat between you and the antlions and you've shaken them; an island in the water is a safe haven.
 
 ## v0.38.0 — 2026-06-14
 

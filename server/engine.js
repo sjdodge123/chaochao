@@ -27,6 +27,16 @@ exports.rebuildStoneEdges = function (map) {
 exports.bounceZombieOffWater = function (player, map) {
 	bounceZombieOffWater(player, map);
 }
+// Block ANY entity (not just zombies) from entering water — used by the antlion
+// round so the creatures can't walk over water (a moat/island is a hard barrier,
+// the same way water is a no-go for zombies). Reuses the shared rim-slide so the
+// entity glides along the shore instead of dead-stopping. No-op on maps without
+// water. The entity needs x/y, newX/newY, velX/velY and maxVelocity (the stranded-
+// inside eject reads it).
+exports.bounceEntityOffWater = function (entity, map) {
+	if (c.tileMap.water == null) { return; }
+	bounceOffNoGoCells(entity, map, c.tileMap.water.id);
+}
 exports.bounceOffEmptyCells = function (player, map) {
 	bounceOffEmptyCells(player, map);
 }
