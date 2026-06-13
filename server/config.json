@@ -535,6 +535,23 @@
             "height": 46,
             "boost": 120,
             "boostCap": 300
+        },
+        "rechargeSpring": {
+            "_doc": "Drive-over pit stop: instantly tops the punch-stamina bar back to full, clears the exhausted/overcharge latch, and resets the punch cooldown so you're immediately attack-ready. cooldownMs is a per-player re-arm so it's a routing grab, not a camp-on-it stamina fountain.",
+            "id": 951,
+            "color": "#5BE3A0",
+            "radius": 28,
+            "cooldownMs": 6000
+        },
+        "slipstream": {
+            "_doc": "A wind-current corridor: while overlapping, a gentle constant push along the author-set axis carries you up to currentSpeed (well below dashArrows' launch cap). Purely axial, so being shoved/driven backwards through it means the current fights you and carries you forward again. Chain several to build a long tunnel.",
+            "id": 952,
+            "color": "#7FD8FF",
+            "radius": 46,
+            "width": 200,
+            "height": 76,
+            "push": 40,
+            "currentSpeed": 190
         }
     },
     "lobbyWaitTime": 5,

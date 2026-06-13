@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### Map editor
+
+- **Two new Boons: Recharge Spring & Slipstream.** The helpful-placeable family grows. Drive over a **Recharge Spring** and your punch bar instantly refills and your punch comes off cooldown — a pit stop that makes you immediately battle-ready (it needs a few seconds to re-arm, so it's a grab-on-the-way-through, not a campsite). A **Slipstream** is a wind-current corridor that steadily carries you along the way it points — get shoved or driven backwards through it and the current fights you and pushes you forward again. Authors place both from the **Boons** palette (rotate the Slipstream to aim it; chain a few to build a long tunnel). As with all boons, rival AI racers drive straight through them.
 
 ## v0.39.0 — 2026-06-14
 

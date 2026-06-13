@@ -9226,6 +9226,16 @@ function buildHazardDrawers() {
             drawDashArrows(h.x, h.y, h.angle);
         };
     }
+    if (config.boons != null && config.boons.rechargeSpring != null) {
+        hazardDrawers[config.boons.rechargeSpring.id] = function (h) {
+            drawRechargeSpring(h.x, h.y);
+        };
+    }
+    if (config.boons != null && config.boons.slipstream != null) {
+        hazardDrawers[config.boons.slipstream.id] = function (h) {
+            drawSlipstream(h.x, h.y, h.angle);
+        };
+    }
 }
 function drawHazard(hazard) {
     if (hazardDrawers == null) {
@@ -10189,6 +10199,87 @@ function drawDashArrows(x, y, angle) {
         gameContext.moveTo(cx - 8, -ch);
         gameContext.lineTo(cx + 8, 0);
         gameContext.lineTo(cx - 8, ch);
+        gameContext.stroke();
+    }
+    gameContext.restore();
+}
+
+// Recharge Spring — a green "pit stop" pad. A faint footprint, a gently pulsing ring
+// (the recharge beat), and a green cross (the universal "restore" mark). No shadowBlur
+// or filter (kept off the per-frame GPU-killer list); the pulse is a cheap sin scale.
+function drawRechargeSpring(x, y) {
+    var cfg = config.boons.rechargeSpring;
+    var r = cfg.radius;
+    var pulse = 0.5 + 0.5 * Math.sin(Date.now() / 320);
+    gameContext.save();
+    gameContext.translate(x, y);
+    // Faint footprint that blends into the terrain (matches the boon visual language).
+    gameContext.beginPath();
+    gameContext.arc(0, 0, r, 0, 2 * Math.PI);
+    gameContext.fillStyle = "rgba(91,227,160,0.08)";
+    gameContext.fill();
+    // Pulsing recharge ring.
+    gameContext.beginPath();
+    gameContext.arc(0, 0, r * (0.62 + 0.28 * pulse), 0, 2 * Math.PI);
+    gameContext.strokeStyle = cfg.color;
+    gameContext.globalAlpha = 0.35 + 0.45 * (1 - pulse);
+    gameContext.lineWidth = 3;
+    gameContext.stroke();
+    gameContext.globalAlpha = 1;
+    // Green restore cross in the middle.
+    var arm = r * 0.42;
+    gameContext.strokeStyle = cfg.color;
+    gameContext.lineWidth = 5;
+    gameContext.lineCap = "round";
+    gameContext.beginPath();
+    gameContext.moveTo(-arm, 0);
+    gameContext.lineTo(arm, 0);
+    gameContext.moveTo(0, -arm);
+    gameContext.lineTo(0, arm);
+    gameContext.stroke();
+    gameContext.restore();
+}
+
+// Slipstream — a wind-current corridor. A faint rounded footprint plus flowing
+// streamlines that scroll along the push axis (the dash offset animates), so the pad
+// reads as a moving current pointing the way it carries you. Cheap: stroked dashes,
+// no shadowBlur/filter.
+function drawSlipstream(x, y, angle) {
+    var cfg = config.boons.slipstream;
+    var rad = (angle || 0) * (Math.PI / 180);
+    var w = cfg.width, hgt = cfg.height;
+    var flow = (Date.now() / 14) % 28; // scroll the dashes toward +x
+    gameContext.save();
+    gameContext.translate(x, y);
+    gameContext.rotate(rad);
+    // Faint footprint.
+    gameContext.beginPath();
+    gameContext.rect(-w / 2, -hgt / 2, w, hgt);
+    gameContext.fillStyle = "rgba(127,216,255,0.06)";
+    gameContext.fill();
+    gameContext.strokeStyle = "rgba(127,216,255,0.12)";
+    gameContext.lineWidth = 1;
+    gameContext.stroke();
+    // Three flowing streamlines down the corridor, each ending in a soft arrowhead.
+    gameContext.strokeStyle = cfg.color;
+    gameContext.lineWidth = 3;
+    gameContext.lineCap = "round";
+    gameContext.lineJoin = "round";
+    var rows = [-hgt * 0.28, 0, hgt * 0.28];
+    for (var i = 0; i < rows.length; i++) {
+        var ly = rows[i];
+        gameContext.setLineDash([18, 10]);
+        gameContext.lineDashOffset = -flow;
+        gameContext.beginPath();
+        gameContext.moveTo(-w / 2 + 8, ly);
+        gameContext.lineTo(w / 2 - 16, ly);
+        gameContext.stroke();
+        gameContext.setLineDash([]);
+        // arrowhead at the leading (+x) end
+        gameContext.beginPath();
+        gameContext.moveTo(w / 2 - 22, ly - 7);
+        gameContext.lineTo(w / 2 - 10, ly);
+        gameContext.lineTo(w / 2 - 22, ly + 7);
         gameContext.stroke();
     }
     gameContext.restore();

@@ -17,6 +17,14 @@
 //   [C] AI is blind to boons. hazardRepulsion returns zero push for a boon but a
 //       real push for a bumper at the same spot, and a bot still finishes a
 //       corridor that has a pad sitting in its lane (a boon never traps).
+//   [D] Recharge Spring (config.boons.rechargeSpring). A drive-over pit stop:
+//       handleHit refills the punch-stamina bar, clears the exhausted/overcharge
+//       latch, and resets the punch cooldown — gated by a per-player re-arm so it
+//       can't be camped. Spawns + ships on the wire like any boon.
+//   [E] Slipstream (config.boons.slipstream). A directional wind corridor: a gentle
+//       constant push along its axis up to currentSpeed, capped (never overshoots,
+//       never brakes a faster kart), that fights a backward-driven kart. Players +
+//       pucks only; ships on the wire as [ownerId, id, x, y, angle].
 //
 // Harness mirrors bumper-wall-test.js: REAL server modules, room.update(dt) with
 // Date.now mocked to a per-tick clock, Math.random seeded, setTimeout queued.
@@ -221,6 +229,107 @@ try {
             if (room.game.currentState === config.stateMap.gameOver) { break; }
         }
         check(racer.reachedGoal === true, 'a bot drove through the in-lane pad and finished (tick ' + reachedAt + ')');
+    }
+
+    // ----------------------------------------------------------------------
+    console.log('\n[D] Recharge Spring refills stamina + clears the punch cooldown (per-player re-armed)');
+    {
+        const SPRING = config.boons.rechargeSpring; // id 951
+        const kind = hazardKindById(SPRING.id);
+        check(kind != null && kind.helpful === true, 'rechargeSpring resolves through the registry + is helpful (id ' + SPRING.id + ')');
+        check(kind != null && kind.directional === false && kind.railed === false, 'rechargeSpring is non-directional + not railed');
+
+        const map = buildMap('spring', [{ id: SPRING.id, x: PAD_X, y: ROWS[2] }], [2]);
+        const { room, bot } = bootRoom('boon-spring', map, { id: 'racer', name: 'Racer', title: '', skill: 0.85, aggression: 0.2, tempo: 0.5, risk: 0.3, focus: 'race' });
+        const spring = room.game.gameBoard.hazardList[Object.keys(room.game.gameBoard.hazardList)[0]];
+        check(spring != null && spring.id === SPRING.id && spring.helpful === true,
+            'the spring spawned from the map entry into hazardList (helpful=true)');
+        // It ships on the wire like any boon (angle defaults to 0 on the base Hazard).
+        const packet = JSON.parse(compressor.newHazards(room.game.gameBoard.hazardList));
+        check(packet.length === 1 && packet[0][1] === SPRING.id && packet[0][2] === PAD_X && packet[0][3] === ROWS[2],
+            'compressor.newHazards ships the spring as [ownerId, ' + SPRING.id + ', x, y, angle]');
+
+        // Drain the kart: empty stamina, latch exhausted + overcharge lock, put the
+        // punch on cooldown — then drive over the spring.
+        bot.stamina = 0;
+        bot.staminaExhausted = true;
+        bot.overcharge = 0.5;
+        bot.exhaustLockUntil = clock + 99999;
+        bot.punchedTimer = clock;
+        spring.handleHit(bot);
+        check(bot.stamina === config.punchStamina.max, 'stamina refilled to max');
+        check(bot.staminaExhausted === false, 'the exhausted latch is cleared');
+        check(bot.overcharge === 0 && bot.exhaustLockUntil === 0, 'the overcharge lock is cleared');
+        check(bot.punchedTimer === null, 'the punch cooldown is reset (punchedTimer cleared)');
+
+        // Re-arm: a second touch within cooldownMs does nothing (no camping).
+        bot.stamina = 0; bot.staminaExhausted = true;
+        spring.handleHit(bot);
+        check(bot.stamina === 0 && bot.staminaExhausted === true,
+            'a second touch within cooldownMs does nothing (still re-arming)');
+        // After cooldownMs it refills again.
+        clock += SPRING.cooldownMs + 100;
+        spring.handleHit(bot);
+        check(bot.stamina === config.punchStamina.max && bot.staminaExhausted === false,
+            'after cooldownMs the spring refills again');
+
+        // A non-player object is ignored.
+        const proj = { isProjectile: true, stamina: 0 };
+        spring.handleHit(proj);
+        check(proj.stamina === 0, 'a non-player object is ignored by the spring');
+    }
+
+    // ----------------------------------------------------------------------
+    console.log('\n[E] Slipstream pushes along its axis + fights backward motion');
+    {
+        const STREAM = config.boons.slipstream; // id 952
+        const kind = hazardKindById(STREAM.id);
+        check(kind != null && kind.helpful === true, 'slipstream resolves through the registry + is helpful (id ' + STREAM.id + ')');
+        check(kind != null && kind.directional === true && kind.railed === false, 'slipstream is directional + not railed');
+
+        const s = kind.build({ x: 300, y: 200, angle: 0 }, 'stream-a', 'sig-e');
+        check(s.id === STREAM.id && s.helpful === true && s.moveable === false,
+            'build() returns a live boon (helpful, static)');
+
+        // A still kart on a +x current gains +push along +x.
+        const k1 = { isPlayer: true, velX: 0, velY: 0, maxVelocity: config.playerMaxSpeed };
+        s.handleHit(k1);
+        check(Math.abs(k1.velX - STREAM.push) < 0.001 && Math.abs(k1.velY) < 0.001,
+            'a still kart gets +push along +x (+' + STREAM.push + ')');
+
+        // A backward-driven kart: the current fights it (still adds +push forward).
+        const k2 = { isPlayer: true, velX: -100, velY: 0, maxVelocity: config.playerMaxSpeed };
+        s.handleHit(k2);
+        check(Math.abs(k2.velX - (-100 + STREAM.push)) < 0.001,
+            'a backward-driven kart is pushed forward (the current fights it)');
+
+        // Already above currentSpeed along the axis: not braked, not boosted.
+        const k3 = { isPlayer: true, velX: STREAM.currentSpeed + 50, velY: 0, maxVelocity: config.playerMaxSpeed };
+        s.handleHit(k3);
+        check(Math.abs(k3.velX - (STREAM.currentSpeed + 50)) < 0.001,
+            'a kart already above currentSpeed is left alone (no brake)');
+
+        // Just below the cap: only the remaining gap is added (never overshoots).
+        const k4 = { isPlayer: true, velX: STREAM.currentSpeed - 10, velY: 0, maxVelocity: config.playerMaxSpeed };
+        s.handleHit(k4);
+        check(Math.abs(k4.velX - STREAM.currentSpeed) < 0.001,
+            'the push never overshoots currentSpeed (caps at the remaining gap)');
+
+        // A non-player/non-puck is ignored; a puck IS carried.
+        const proj = { isProjectile: true, velX: 0, velY: 0 };
+        s.handleHit(proj);
+        check(proj.velX === 0 && proj.velY === 0, 'a non-player/non-puck object is not pushed');
+        const puck = { isPuck: true, velX: 0, velY: 0, maxVelocity: config.playerMaxSpeed };
+        s.handleHit(puck);
+        check(Math.abs(puck.velX - STREAM.push) < 0.001, 'a puck IS carried by the current');
+
+        // Wire: a slipstream ships as [ownerId, id, x, y, angle].
+        const map = buildMap('stream', [{ id: STREAM.id, x: PAD_X, y: ROWS[2], angle: 0 }], [2]);
+        const { room } = bootRoom('boon-stream', map, { id: 'racer', name: 'Racer', title: '', skill: 0.85, aggression: 0.2, tempo: 0.5, risk: 0.3, focus: 'race' });
+        const packet = JSON.parse(compressor.newHazards(room.game.gameBoard.hazardList));
+        check(packet.length === 1 && packet[0][1] === STREAM.id && packet[0][2] === PAD_X &&
+            packet[0][3] === ROWS[2] && packet[0][4] === 0,
+            'compressor.newHazards ships the slipstream as [ownerId, ' + STREAM.id + ', x, y, angle]');
     }
 } finally {
     Date.now = realNow;
