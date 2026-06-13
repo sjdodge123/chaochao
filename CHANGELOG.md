@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.35.3 — 2026-06-13
+
 ### Team modes
 
 - **Bonus orbs are now scattered on the map in team modes.** Every round in a team mode drops one or two glowing golden orbs out on the course (more on bigger maps). The first racer from either team to drive over one banks **+1 point for their team** — a quick side objective to fight over while you race. Orbs favor the quieter corners off the direct line to the goal, so grabbing one means leaving the racing pack to detour for it. Each orb is a one-time grab: once it's collected it's gone until the next round, and the round summary now tallies how many bonus orbs each team snagged.
