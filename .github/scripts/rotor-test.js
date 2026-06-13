@@ -143,6 +143,18 @@ try {
         for (let i = 0; i < Math.round(1 / DT); i++) { wrapRotor.advance(DT); }
         check(wrapRotor.angle >= 0 && wrapRotor.angle < 360, 'angle stays in [0,360) after wrapping past 360');
 
+        // A non-finite start angle (crafted map: JSON 1e309 -> Infinity) is
+        // sanitized to 0, not fed into Math.cos/sin to make NaN coordinates.
+        const inf = new Rotor(PX, PY, ROT.radius, ROT.color, 'rot-inf', 'sig-a', Infinity);
+        check(Number.isFinite(inf.x) && Number.isFinite(inf.y) && inf.angle === 0,
+            'a non-finite start angle is sanitized to 0 (finite head coords)');
+
+        // Lightning scales the sweep rate (rotor has no along-rail speed).
+        const fast = new Rotor(PX, PY, ROT.radius, ROT.color, 'rot-fast', 'sig-a', 0);
+        const base = fast.angularSpeed;
+        fast.scaleSpeed(3);
+        check(Math.abs(fast.angularSpeed - base * 3) < 1e-6, 'scaleSpeed multiplies the angular sweep (Lightning hook)');
+
         // handleHit spawns a map-owned bumper punch at the head, for players/pucks only.
         rotor.punch = null;
         rotor.handleHit({ isPlayer: true, x: rotor.x, y: rotor.y });
