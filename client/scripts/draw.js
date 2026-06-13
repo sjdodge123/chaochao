@@ -9329,7 +9329,7 @@ function drawMine(x, y, state) {
 var ANTLION_FRAMES = 12;
 var ANTLION_FRAME_PX = 128;
 var ANTLION_SPAN = 122;        // design units per frame (~118 box + margin)
-var ANTLION_WORLD_SPAN = 76;   // world px the frame box spans on screen
+var ANTLION_WORLD_SPAN = 54;   // world px the frame box spans on screen
 var ANTLION_RATE = 9;          // rad/s skitter; one baked cycle = 2PI/9 s
 var ANTLION_PAL = {
     shell: '#cfc29a', shellDark: '#8e8560', belly: '#b7a87c',
