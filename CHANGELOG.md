@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.36.0 — 2026-06-13
+
 ### Map editor
 
 - **New placeable: Dash Arrows.** The first of a new family of *Boons* — helpful objects that aid racers, the flip side of hazards. Drive over a Dash Arrows pad and it gives you a quick burst of speed in the direction it points; hit it backwards and it fights you, so aim matters. Authors place and rotate them from the new **Boons** palette section in the editor. Rival AI racers treat boons as free help — they drive straight through instead of dodging.
