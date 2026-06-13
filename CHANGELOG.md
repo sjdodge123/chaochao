@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.35.5 — 2026-06-13
+
 ### Brutal rounds
 
 - **New brutal round: Antlions!** Sand is no longer just slow — linger on it for a couple of seconds and an antlion erupts from a nearby dune and comes after you (and staying put just keeps summoning more). Antlions can chase you anywhere, but they're a touch slower than your kart on good ground and they burrow back home a second or two after you lead them off the sand. They don't kill on contact — they shove, and a shove at the wrong moment is what puts you in the lava. Industrial thumpers pound the ground on a steady beat at a few spots in the sand: antlions can't stand the pounding, so inside a thumper's ring is sanctuary — every slam hurls them back out, while your kart rolls through untouched. Maps with barely any sand never roll the round, and it won't stack with Heatwave (the heat would cook the habitat).
