@@ -199,6 +199,9 @@ jobs:
       - name: "Headless bumper-wall test (slingshot wall geometry, bounce physics, bots route around)"
         run: node .github/scripts/bumper-wall-test.js
 
+      - name: "Headless momentum-ramp test (human slow-start/wind-up, hard-turn reset, bots exempt, no gate pre-charge)"
+        run: node .github/scripts/momentum-ramp-test.js
+
   perf-tick-budget:
     # Server-side worst-case load: a full 25-kart grid in a stacked brutal round.
     # Proves one room still ticks well within the 30 Hz interval. Zero new deps —

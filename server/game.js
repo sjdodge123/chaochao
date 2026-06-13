@@ -1171,6 +1171,13 @@ class Game {
 				// spectators join AFTER this loop, so they never get the flag — the
 				// rateMap handler uses it to reject ratings from non-participants.
 				this.playerList[rid].racedCurrentMap = true;
+				// Clear the momentum ramp at the gun: the engine keeps ticking through
+				// the gated countdown, so a player holding a direction would otherwise
+				// build to full momentum behind the gate and skip the slow start. Reset
+				// so everyone launches from the floor and has to wind up on the track.
+				this.playerList[rid].momentum = 0;
+				this.playerList[rid].lastMoveDirX = 0;
+				this.playerList[rid].lastMoveDirY = 0;
 			}
 		}
 

@@ -16,10 +16,17 @@
 //
 // Any failed assertion exits 1.
 
+const fs = require('fs');
 const path = require('path');
 const repoRoot = path.join(__dirname, '..', '..');
 const engineMod = require(path.join(repoRoot, 'server', 'engine.js'));
+const game = require(path.join(repoRoot, 'server', 'game.js'));
+const mapFormat = require(path.join(repoRoot, 'server', 'mapFormat.js'));
+const messenger = require(path.join(repoRoot, 'server', 'messenger.js'));
 const c = require(path.join(repoRoot, 'server', 'config.json'));
+
+// io stand-in so room/world emits (worldResize, startRace, …) don't throw.
+messenger.build({ to() { return { emit() { } }; }, sockets: { emit() { } } });
 
 const DT = c.serverTickSpeed / 1000;
 const ramp = c.momentumRamp;
@@ -103,6 +110,40 @@ const humanFirst = speed(human3);
 
 check(bot.momentum === 0, 'bot momentum field stays untouched (engine forces factor 1 for AI)');
 check(botFirst > humanFirst, 'bot accelerates at full thrust while a human starts at the floor');
+
+// --- Integration: the gated countdown must NOT pre-charge momentum ---
+// The engine ticks through every state, so a human holding a direction behind
+// the start gate would build momentum to full before the race opens and skip
+// the slow start. startRace() resets it; this drives a real room to prove it.
+(function gatedStartGuard() {
+    const mapsDir = path.join(repoRoot, 'client', 'maps');
+    const file = fs.readdirSync(mapsDir).find(f => f.endsWith('.json'));
+    let map = JSON.parse(fs.readFileSync(path.join(mapsDir, file), 'utf8'));
+    if (mapFormat.isSitesOnly(map)) { map = mapFormat.reconstruct(map); }
+
+    const room = game.getRoom('momentum-gate-test', 4);
+    room.game.gameBoard.isPreview = true;
+    room.game.gameBoard.previewMap = map;
+
+    const id = 'momentum-gate-test-p0';
+    const player = room.world.createNewPlayer(id);
+    room.playerList[id] = player;
+    room.game.determineGameState(player);
+
+    room.game.startLobby();
+    room.game.startGated();
+
+    // Hold a steady heading through the countdown (engine keeps integrating).
+    player.moveForward = true;
+    for (let f = 0; f < 120; f++) { room.update(DT); }
+    const gatedMomentum = player.momentum;
+
+    room.game.startRace();
+    const startMomentum = player.momentum;
+
+    check(gatedMomentum > 0.5, 'momentum does build while ticking behind the gate (proves the risk is real)');
+    check(startMomentum === 0, 'startRace resets momentum to the floor — no pre-charge through the gate');
+})();
 
 console.log(fails === 0
     ? 'Momentum ramp test passed.'
