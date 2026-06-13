@@ -9038,6 +9038,14 @@ function buildHazardDrawers() {
     hazardDrawers[config.hazards.mine.id] = function (h) {
         drawMine(h.x, h.y, h.state);
     };
+    // Boons share the hazard drawer registry (they live in the same client
+    // hazardList). Their visual language is teal/helpful, the inverse of the
+    // bumper-orange "this flings you" rule.
+    if (config.boons != null && config.boons.dashArrows != null) {
+        hazardDrawers[config.boons.dashArrows.id] = function (h) {
+            drawDashArrows(h.x, h.y, h.angle);
+        };
+    }
 }
 function drawHazard(hazard) {
     if (hazardDrawers == null) {
@@ -9864,6 +9872,43 @@ function drawThumperHazard(hz) {
     } finally {
         ctx.restore();
     }
+}
+
+// Dash Arrows — a teal directional speed pad: a translucent pill footprint with
+// two chevrons pointing along `angle` (the boost direction). Teal (not bumper
+// orange) so "this helps you" reads as the opposite of the hazard palette.
+function drawDashArrows(x, y, angle) {
+    var cfg = config.boons.dashArrows;
+    var rad = (angle || 0) * (Math.PI / 180);
+    var w = cfg.width, hgt = cfg.height;
+    gameContext.save();
+    gameContext.translate(x, y);
+    gameContext.rotate(rad);
+    // Faint footprint that blends into the terrain — a barely-there tint + a soft,
+    // very transparent rim, so the pad reads as "ground", not a hard-edged decal.
+    // The chevrons carry the signal.
+    gameContext.beginPath();
+    gameContext.rect(-w / 2, -hgt / 2, w, hgt);
+    gameContext.fillStyle = "rgba(63,193,201,0.06)";
+    gameContext.fill();
+    gameContext.strokeStyle = "rgba(63,193,201,0.12)";
+    gameContext.lineWidth = 1;
+    gameContext.stroke();
+    // two chevrons pointing +x (the boost direction)
+    gameContext.strokeStyle = cfg.color;
+    gameContext.lineWidth = 5;
+    gameContext.lineCap = "round";
+    gameContext.lineJoin = "round";
+    var ch = hgt * 0.32;
+    for (var i = 0; i < 2; i++) {
+        var cx = -w * 0.16 + i * (w * 0.30);
+        gameContext.beginPath();
+        gameContext.moveTo(cx - 8, -ch);
+        gameContext.lineTo(cx + 8, 0);
+        gameContext.lineTo(cx - 8, ch);
+        gameContext.stroke();
+    }
+    gameContext.restore();
 }
 
 function locateColor(id) {

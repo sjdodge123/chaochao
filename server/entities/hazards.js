@@ -351,11 +351,27 @@ class Mine extends Hazard {
 // it with the tick dt so the kind owns its own motion — e.g. the rotor's orbit).
 // Static kinds set moveable=false and are skipped.
 var HAZARD_KINDS = {};
+var BOON_KINDS = {};
 var _kindById = {};
 function registerHazardKind(key, def) {
 	def.key = key;
 	def.id = c.hazards[key].id;
+	def.helpful = false;
 	HAZARD_KINDS[key] = def;
+	_kindById[def.id] = def;
+}
+// Boons (server/entities/boons.js) are the helpful counterpart to hazards. They
+// register into the SAME id-resolver (_kindById) so generateHazards, validateMap,
+// the wire, and the client drawer treat them uniformly — the only difference is
+// def.helpful, which gates the lightning speed-up, the AI's repulsion/cell-penalty
+// (bots must not dodge a boost), and the map classifier's difficulty count. Their
+// by-key map is kept separate (BOON_KINDS) so hazard-only iteration stays clean.
+// id comes from config.boons (ids 950+), not config.hazards.
+function registerBoonKind(key, def) {
+	def.key = key;
+	def.id = c.boons[key].id;
+	def.helpful = true;
+	BOON_KINDS[key] = def;
 	_kindById[def.id] = def;
 }
 function hazardKindById(id) {
@@ -472,4 +488,11 @@ class Thumper extends Hazard {
 }
 
 
-module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, Mine, Antlion, Thumper, HAZARD_KINDS, hazardKindById, registerHazardKind };
+module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, Mine, Antlion, Thumper, HAZARD_KINDS, BOON_KINDS, hazardKindById, registerHazardKind, registerBoonKind };
+
+// Load the boon kinds AFTER module.exports is assigned: boons.js requires this
+// module for the Hazard base class + registerBoonKind, so it must see the fully
+// built exports. Requiring it here (rather than from gameBoard) guarantees the
+// boon kinds are in _kindById for EVERY consumer of hazardKindById — including
+// utils.validateMap, which can run in CI contexts that never load gameBoard.
+require('./boons.js');

@@ -513,6 +513,18 @@
             "radius": 26
         }
     },
+    "boons": {
+        "_doc": "Boons are the helpful counterpart to hazards: map-authorable placeables that AID a player. They share the hazard-kind registry (server/entities/boons.js registers them with helpful:true), live in the same runtime hazardList, and ride the same wire/drawer/editor pipeline — the helpful flag is what gates the three places hazard behavior diverges (lightning speed-up, AI repulsion, AI cell-penalty) and what the map classifier skips so a boon never reads as added difficulty. Ids start at 950 to stay clear of hazards (900s).",
+        "dashArrows": {
+            "id": 950,
+            "color": "#3FC1C9",
+            "radius": 24,
+            "width": 70,
+            "height": 46,
+            "boost": 120,
+            "boostCap": 300
+        }
+    },
     "lobbyWaitTime": 5,
     "gatedWaitTime": 9,
     "newRaceWaitTime": 10,

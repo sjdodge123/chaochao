@@ -553,7 +553,7 @@ function buildHazardSwatchDataURL(kind) {
         ctx.lineTo(size - 16, cy);
         ctx.stroke();
     }
-    var hzCfg = config.hazards[kind.key];
+    var hzCfg = objCfgByKey(kind.key);
     ctx.strokeStyle = "red";
     ctx.lineWidth = 5;
     ctx.beginPath();
@@ -587,7 +587,7 @@ function applyTileSwatches() {
     for (var h = 0; h < EDITOR_HAZARD_KINDS.length; h++) {
         var kind = EDITOR_HAZARD_KINDS[h];
         var hb = document.getElementById(kind.key + "Button");
-        if (hb == null || config.hazards[kind.key] == null) { continue; }
+        if (hb == null || objCfgByKey(kind.key) == null) { continue; }
         hb.classList.add("swatch");
         hb.style.backgroundImage = "url(" + buildHazardSwatchDataURL(kind) + ")";
     }
@@ -1306,11 +1306,54 @@ function drawMyObject(x, y, myObject, angle) {
         (kind.paint || paintHazardShape)(createContext, kind, x, y, angle, "red");
     }
 }
+// A placed object's config lives in config.hazards OR config.boons — boons reuse
+// the hazard editor pipeline (same placement/select/rotate/undo path) but tune
+// from their own namespace. Resolve from whichever defines the key.
+function objCfgByKey(key) {
+    if (config == null) { return null; }
+    if (config.hazards != null && config.hazards[key] != null) { return config.hazards[key]; }
+    if (config.boons != null && config.boons[key] != null) { return config.boons[key]; }
+    return null;
+}
+// Dash Arrows painter (the dashArrows `paint` hook) — mirrors the in-game look
+// (draw.js drawDashArrows): a translucent teal pad with two chevrons pointing
+// along `angle`, the boost direction.
+function paintDashArrowsShape(ctx, kind, x, y, angle, ringColor) {
+    var cfg = objCfgByKey(kind.key);
+    if (cfg == null) { return; }
+    var rad = (angle || 0) * (Math.PI / 180);
+    var w = cfg.width, hgt = cfg.height;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rad);
+    // Faint footprint that blends into the terrain (matches draw.js drawDashArrows).
+    ctx.beginPath();
+    ctx.rect(-w / 2, -hgt / 2, w, hgt);
+    ctx.fillStyle = "rgba(63,193,201,0.06)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(63,193,201,0.12)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.strokeStyle = cfg.color;
+    ctx.lineWidth = 5;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    var ch = hgt * 0.32;
+    for (var i = 0; i < 2; i++) {
+        var bx = -w * 0.16 + i * (w * 0.30);
+        ctx.beginPath();
+        ctx.moveTo(bx - 8, -ch);
+        ctx.lineTo(bx + 8, 0);
+        ctx.lineTo(bx - 8, ch);
+        ctx.stroke();
+    }
+    ctx.restore();
+}
 // Wall-band painter (bumperWall's `paint` hook). Mirrors the in-game look
 // (draw.js drawBumperWall): rim band over the bumper-orange core, anchored at
 // (x,y) and extending `width` along `angle`.
 function paintBumperWallShape(ctx, kind, x, y, angle, ringColor) {
-    var cfg = config.hazards[kind.key];
+    var cfg = objCfgByKey(kind.key);
     if (cfg == null) { return; }
     var rad = (angle || 0) * (Math.PI / 180);
     var bx = x + Math.cos(rad) * cfg.width;
@@ -1431,7 +1474,7 @@ function paintMineShape(ctx, kind, x, y, angle, ringColor) {
 // the attack ring + disc from its config entry. Kinds with a different look
 // (e.g. the bumper wall's band) set their own `paint` on EDITOR_HAZARD_KINDS.
 function paintHazardShape(ctx, kind, x, y, angle, ringColor) {
-    var cfg = config.hazards[kind.key];
+    var cfg = objCfgByKey(kind.key);
     if (cfg == null) { return; }
     if (kind.railed) {
         ctx.save();
@@ -1604,7 +1647,7 @@ function editorSelectTile(typeName) {
 }
 function editorSelectHazard(typeName) {
     if (config == null) { return; }
-    var h = config.hazards[typeName];
+    var h = objCfgByKey(typeName); // hazard OR boon — both use the "hazard" tool path
     if (h == null) { return; }
     setTool({ kind: "hazard", id: h.id, name: typeName });
 }
@@ -1703,6 +1746,8 @@ function commitStroke() {
 //   swatchPaint(ctx, size) — custom palette-swatch overlay
 //   segmentSelect — hit-test against the centerline segment, not the anchor disc
 //   directional — map entry needs a finite angle (railed kinds are directional)
+//   group — "boon" routes the palette button to the Boons section (helpful kinds,
+//           config.boons); absent/"hazard" routes to the Hazards section.
 var EDITOR_HAZARD_KINDS = [
     { key: "bumper", label: "Bumper", shortcut: "b", railed: false, directional: false },
     { key: "movingBumper", label: "Moving Bumper", shortcut: "m", railed: true, directional: true },
@@ -1813,25 +1858,48 @@ var EDITOR_HAZARD_KINDS = [
             ctx.fillStyle = "#ffc24b";
             ctx.fill();
         }
+    },
+    {
+        key: "dashArrows", label: "Dash Arrows", shortcut: "d", railed: false, directional: true,
+        group: "boon", paint: paintDashArrowsShape,
+        swatchPaint: function (ctx, size) {
+            // Two teal chevrons pointing right — "this flings you THIS way".
+            var cy = size / 2;
+            ctx.strokeStyle = "#3FC1C9";
+            ctx.lineWidth = 9;
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+            for (var i = 0; i < 2; i++) {
+                var bx = 30 + i * 26;
+                ctx.beginPath();
+                ctx.moveTo(bx - 12, cy - 18);
+                ctx.lineTo(bx + 12, cy);
+                ctx.lineTo(bx - 12, cy + 18);
+                ctx.stroke();
+            }
+        }
     }
 ];
 function editorHazardKindById(id) {
     for (var i = 0; i < EDITOR_HAZARD_KINDS.length; i++) {
-        var cfg = config != null && config.hazards != null ? config.hazards[EDITOR_HAZARD_KINDS[i].key] : null;
+        var cfg = objCfgByKey(EDITOR_HAZARD_KINDS[i].key);
         if (cfg != null && cfg.id === id) { return EDITOR_HAZARD_KINDS[i]; }
     }
     return null;
 }
-// Generate one palette button per kind into #hazardButtonGrid (the HTML ships
-// an empty grid — buttons can't be static because labels/shortcuts live here).
-// Runs on the config socket message; idempotent for reconnects.
+// Generate one palette button per kind into the Hazards (#hazardButtonGrid) or
+// Boons (#boonButtonGrid) section by kind.group (the HTML ships both empty —
+// buttons can't be static because labels/shortcuts live here). Runs on the config
+// socket message; idempotent for reconnects.
 function buildHazardButtons() {
-    var grid = document.getElementById("hazardButtonGrid");
-    if (grid == null || config == null || config.hazards == null) { return; }
-    if (grid.childElementCount > 0) { return; }
+    var hazardGrid = document.getElementById("hazardButtonGrid");
+    var boonGrid = document.getElementById("boonButtonGrid");
+    if (hazardGrid == null || config == null) { return; }
+    if (hazardGrid.childElementCount > 0 || (boonGrid != null && boonGrid.childElementCount > 0)) { return; }
     for (var i = 0; i < EDITOR_HAZARD_KINDS.length; i++) {
         (function (kind) {
-            if (config.hazards[kind.key] == null) { return; }
+            if (objCfgByKey(kind.key) == null) { return; }
+            var grid = (kind.group === "boon" && boonGrid != null) ? boonGrid : hazardGrid;
             var btn = document.createElement("button");
             btn.id = kind.key + "Button";
             btn.className = "mapEditorTile";
@@ -1858,9 +1926,20 @@ function buildHazardButtons() {
 var hazardById = null;
 function buildHazardById() {
     hazardById = {};
-    if (config == null || config.hazards == null) { return; }
-    for (var type in config.hazards) {
-        hazardById[config.hazards[type].id] = config.hazards[type];
+    if (config == null) { return; }
+    // Index BOTH hazards and boons by id — they share the editor's placed-object
+    // list (vMap.hazards), so hit-testing/painting must resolve either.
+    if (config.hazards != null) {
+        for (var type in config.hazards) {
+            hazardById[config.hazards[type].id] = config.hazards[type];
+        }
+    }
+    if (config.boons != null) {
+        for (var btype in config.boons) {
+            if (config.boons[btype] && typeof config.boons[btype].id === "number") {
+                hazardById[config.boons[btype].id] = config.boons[btype];
+            }
+        }
     }
 }
 function hazardConfigById(id) {
@@ -1869,6 +1948,9 @@ function hazardConfigById(id) {
     }
     for (var type in config.hazards) {
         if (config.hazards[type].id == id) { return config.hazards[type]; }
+    }
+    for (var btype in (config.boons || {})) {
+        if (config.boons[btype] && config.boons[btype].id == id) { return config.boons[btype]; }
     }
     return null;
 }

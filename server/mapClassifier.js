@@ -25,6 +25,31 @@ function tileId(config, name) {
     return (t && typeof t.id === 'number') ? t.id : -1;
 }
 
+// Boons share the map's hazards[] array (they unify with hazards at runtime), but
+// they're HELPFUL — they must never count as difficulty or be routed around in
+// pathing. Set of config.boons ids so the difficulty/avoidance passes can skip
+// them. Returns {} when no boons are configured. Memoized by config object (the
+// production caller always passes the same `config`, and classify() resolves the
+// set in two places per call) — cf. utils.getKnownIdSets.
+var _boonIdSetCache = null;
+var _boonIdSetConfig = null;
+function boonIdSet(config) {
+    if (_boonIdSetConfig === config && _boonIdSetCache != null) {
+        return _boonIdSetCache;
+    }
+    var set = {};
+    if (config && config.boons) {
+        for (var k in config.boons) {
+            if (config.boons[k] && typeof config.boons[k].id === 'number') {
+                set[config.boons[k].id] = true;
+            }
+        }
+    }
+    _boonIdSetCache = set;
+    _boonIdSetConfig = config;
+    return set;
+}
+
 function bal(config, key, dflt) {
     var b = config && config.balance;
     return (b && b[key] != null) ? b[key] : dflt;
@@ -198,7 +223,10 @@ var HAZARD_CLEARANCE = 40;    // px a drawn racing line keeps from a bumper poin
 // bumper can stand ON a cell border, so each point penalizes a ring of cells
 // around it (centre + 8 samples at HAZARD_CLEARANCE), not just its own cell.
 function hazardAvoidance(map, config) {
-    var hazards = Array.isArray(map.hazards) ? map.hazards : [];
+    var boons = boonIdSet(config);
+    var hazards = (Array.isArray(map.hazards) ? map.hazards : []).filter(function (hz) {
+        return hz != null && !boons[hz.id]; // boons aid the player — never route around them
+    });
     if (hazards.length === 0) { return { penalty: null, points: [] }; }
     var cells = map.cells;
     function nearestVid(x, y) {
@@ -565,7 +593,11 @@ function classify(map, config) {
     var r = comp.ratios;
     var par = (map.parTime != null) ? map.parTime : cellGraph.computeMapParTime(map);
     var edges = startEdgesOf(map);
-    var hazardCount = Array.isArray(map.hazards) ? map.hazards.length : 0;
+    // Boons live in hazards[] but aid the player, so they don't count as difficulty.
+    var boonIds = boonIdSet(config);
+    var hazardCount = Array.isArray(map.hazards)
+        ? map.hazards.filter(function (hz) { return hz != null && !boonIds[hz.id]; }).length
+        : 0;
     var hazardDensity = hazardCount / Math.max(1, comp.drivable);
 
     // --- hard gates: any failure => never Featured (but still playable) ---

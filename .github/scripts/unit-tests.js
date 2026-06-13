@@ -154,6 +154,12 @@ group('validateMap', function () {
     eq(utils.validateMap({ cells: [goalCell()], hazards: [{ id: c.hazards.movingBumper.id, x: 0, y: 0 }] }, c).valid, false, 'moving bumper without angle rejected');
     eq(utils.validateMap({ cells: [goalCell()], hazards: [{ id: c.hazards.movingBumper.id, x: 0, y: 0, angle: 45 }] }, c).valid, true, 'moving bumper WITH a finite angle is accepted');
 
+    // boon branches: boons share the hazards[] array and the kind registry, so they
+    // validate the same way. dashArrows is directional => needs a finite angle, and
+    // its id (config.boons, 950+) must register as a known placeable id.
+    eq(utils.validateMap({ cells: [goalCell()], hazards: [{ id: c.boons.dashArrows.id, x: 0, y: 0 }] }, c).valid, false, 'dash arrows without an angle rejected');
+    eq(utils.validateMap({ cells: [goalCell()], hazards: [{ id: c.boons.dashArrows.id, x: 50, y: 50, angle: 0 }] }, c).valid, true, 'dash arrows WITH a finite angle is accepted');
+
     // bad startEdges short-circuits before reachability
     eq(utils.validateMap({ cells: [goalCell()], startEdges: ['nope'] }, c).valid, false, 'invalid startEdges rejected');
 

@@ -3124,8 +3124,8 @@ class GameBoard {
 			var hazard = kind.build(entry, mapID, this.roomSig);
 			// Lightning brutal round speeds moving hazards up. Each moving kind
 			// scales itself via scaleSpeed (rail bumpers scale along-rail speed,
-			// rotors scale sweep rate); timed/static kinds don't define it and are
-			// left alone.
+			// rotors scale sweep rate); timed/static kinds — and boons, which never
+			// define scaleSpeed — are left alone.
 			if (typeof hazard.scaleSpeed === "function" && this.checkForActiveBrutal(c.brutalRounds.lightning.id)) {
 				hazard.scaleSpeed(c.brutalRounds.lightning.movingHazardSpeedMod);
 			}
