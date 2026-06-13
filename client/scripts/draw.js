@@ -178,6 +178,13 @@ var windIcon = new Image(576, 512);
 windIcon.src = "../assets/img/wind-solid.svg";
 var hourglassIcon = new Image(576, 512);
 hourglassIcon.src = "../assets/img/hourglass-start-solid.svg";
+// Ability icons used by the combat log (the others above double as its icons too).
+var cutIcon = new Image(576, 512);
+cutIcon.src = "../assets/img/scissors-solid.svg";
+var starIcon = new Image(576, 512);
+starIcon.src = "../assets/img/star-solid.svg";
+var orbitalBeamIcon = new Image(576, 512);
+orbitalBeamIcon.src = "../assets/img/orbital-beam-solid.svg";
 
 var lightningIcon = new Image(576, 512);
 lightningIcon.src = "../assets/img/bolt-solid.svg";
@@ -10155,6 +10162,7 @@ var combatLog = []; // newest first
 var COMBAT_LOG_MAX = 6;
 var COMBAT_LOG_LIFE_MS = { kill: 6500, death: 6500, ability: 4500, score: 7500 };
 var _combatAbilityLabels = null;
+var _combatAbilityIcons = null;
 
 function combatLogReset() { combatLog.length = 0; }
 
@@ -10189,6 +10197,50 @@ function abilityLabelFor(id) {
         _combatAbilityLabels = m;
     }
     return (_combatAbilityLabels != null && _combatAbilityLabels[id]) ? _combatAbilityLabels[id] : "Ability";
+}
+
+// Ability id → icon Image (reusing the HUD ability sprites). Used in place of the
+// ability name in the combat log; falls back to the name text if the icon for an
+// ability is missing or not yet decoded.
+function abilityIconFor(id) {
+    if (_combatAbilityIcons == null && typeof config !== "undefined" && config != null &&
+        config.tileMap != null && config.tileMap.abilities != null) {
+        var ab = config.tileMap.abilities, m = {};
+        function put(entry, img) { if (entry != null && entry.id != null && img != null) { m[entry.id] = img; } }
+        put(ab.blindfold, typeof blindfoldIcon !== "undefined" ? blindfoldIcon : null);
+        put(ab.swap, typeof transferIcon !== "undefined" ? transferIcon : null);
+        put(ab.bomb, typeof bombIcon !== "undefined" ? bombIcon : null);
+        put(ab.bombTrigger, typeof bombIcon !== "undefined" ? bombIcon : null);
+        put(ab.speedBuff, typeof windIcon !== "undefined" ? windIcon : null);
+        put(ab.speedDebuff, typeof hourglassIcon !== "undefined" ? hourglassIcon : null);
+        put(ab.tileSwap, typeof copyIcon !== "undefined" ? copyIcon : null);
+        put(ab.iceCannon, typeof snowFlakeIcon !== "undefined" ? snowFlakeIcon : null);
+        put(ab.cut, typeof cutIcon !== "undefined" ? cutIcon : null);
+        put(ab.starPower, typeof starIcon !== "undefined" ? starIcon : null);
+        put(ab.orbitalBeam, typeof orbitalBeamIcon !== "undefined" ? orbitalBeamIcon : null);
+        _combatAbilityIcons = m;
+    }
+    return (_combatAbilityIcons != null && _combatAbilityIcons[id]) ? _combatAbilityIcons[id] : null;
+}
+
+// A white circular token carrying a dark ability glyph (the ability SVGs are dark
+// silhouettes, so they need a light backing to read — same trick as drawBrutalBadges).
+function drawAbilityIconToken(img, cx, cy, r) {
+    gameContext.beginPath();
+    gameContext.arc(cx, cy, r, 0, Math.PI * 2);
+    gameContext.fillStyle = "rgba(255,255,255,0.92)";
+    gameContext.fill();
+    gameContext.lineWidth = 1.2;
+    gameContext.strokeStyle = "rgba(0,0,0,0.35)";
+    gameContext.stroke();
+    if (img != null && img.complete !== false && (img.naturalWidth == null || img.naturalWidth > 0)) {
+        try {
+            var ratio = (img.width && img.height) ? (img.height / img.width) : 0.88;
+            var iw = r * 1.5, ih = iw * ratio;
+            if (ih > r * 1.6) { ih = r * 1.6; iw = ih / ratio; }
+            gameContext.drawImage(img, cx - iw / 2, cy - ih / 2, iw, ih);
+        } catch (e) { /* not decoded yet — the token still marks the pickup */ }
+    }
 }
 
 function pushCombatEntry(entry) {
@@ -10342,7 +10394,13 @@ function combatRowSegments(entry) {
     } else if (entry.type === "ability") {
         segs.push({ k: "thumb", id: entry.ownerId });
         segs.push({ k: "text", text: entry.ownerName, color: combatColorOf(entry.ownerId, "#ffffff"), bold: false });
-        segs.push({ k: "text", text: abilityLabelFor(entry.abilityId), color: "#5fe0ee", bold: true });
+        var aimg = abilityIconFor(entry.abilityId);
+        if (aimg != null && aimg.complete !== false && (aimg.naturalWidth == null || aimg.naturalWidth > 0)) {
+            segs.push({ k: "abilityicon", img: aimg });
+        } else {
+            // Icon not ready — keep the name so the row never reads blank.
+            segs.push({ k: "text", text: abilityLabelFor(entry.abilityId), color: "#5fe0ee", bold: true });
+        }
     } else { // score
         segs.push({ k: "thumb", id: entry.playerId });
         segs.push({ k: "text", text: entry.playerName, color: combatColorOf(entry.playerId, "#ffffff"), bold: false });
@@ -10389,6 +10447,7 @@ function drawCombatLog() {
             var seg = segs[s];
             if (seg.k === "badge") { seg.w = badgeR * 2; }
             else if (seg.k === "thumb") { seg.w = thumbR * 2; }
+            else if (seg.k === "abilityicon") { seg.w = badgeR * 2; }
             else { // text
                 gameContext.font = (seg.bold ? "bold " : "") + (seg.small ? "11px" : "13px") + " Arial";
                 seg.w = gameContext.measureText(seg.text).width;
@@ -10427,6 +10486,8 @@ function drawCombatLog() {
             } else if (sg.k === "thumb") {
                 drawCombatThumb(sg.id, cx + thumbR, cy, thumbR);
                 gameContext.globalAlpha = alpha; // drawOverviewKart resets alpha via save/restore — re-assert
+            } else if (sg.k === "abilityicon") {
+                drawAbilityIconToken(sg.img, cx + badgeR, cy, badgeR);
             } else {
                 gameContext.font = (sg.bold ? "bold " : "") + (sg.small ? "11px" : "13px") + " Arial";
                 gameContext.textAlign = "left";
