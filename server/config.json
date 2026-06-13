@@ -458,6 +458,16 @@
             "orbitRadius": 70,
             "angularSpeed": 90,
             "armWidth": 6
+        },
+        "geyser": {
+            "id": 904,
+            "color": "#F07B36",
+            "radius": 22,
+            "attackRadius": 40,
+            "punchBonus": 22,
+            "dormantMs": 2600,
+            "chargeMs": 1100,
+            "eruptMs": 300
         }
     },
     "lobbyWaitTime": 5,

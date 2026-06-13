@@ -1366,6 +1366,32 @@ function paintRotorShape(ctx, kind, x, y, angle, ringColor) {
     ctx.fill();
     ctx.restore();
 }
+// Geyser painter (geyser's `paint` hook). The editor shows the dormant vent —
+// stone rim + dark throat + a faint reach ring so authors see the eruption area.
+function paintGeyserShape(ctx, kind, x, y, angle, ringColor) {
+    var cfg = config.hazards[kind.key];
+    if (cfg == null) { return; }
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, cfg.attackRadius, 0, 2 * Math.PI);
+    ctx.strokeStyle = ringColor;
+    ctx.setLineDash([5, 5]);
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(x, y, cfg.radius, 0, 2 * Math.PI);
+    ctx.fillStyle = "#3a2f2a";
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "#6b5546";
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x, y, cfg.radius * 0.6, 0, 2 * Math.PI);
+    ctx.fillStyle = "#241c18";
+    ctx.fill();
+    ctx.restore();
+}
 // Shared per-kind hazard painter for the editor canvas (placement preview +
 // placed hazards) and the load-list thumbnails — the default `paint` hook.
 // Railed kinds draw their rail bar from (x,y) along `angle`; every kind draws
@@ -1694,6 +1720,32 @@ var EDITOR_HAZARD_KINDS = [
             ctx.beginPath();
             ctx.arc(hx, hy, 12, 0, 2 * Math.PI);
             ctx.fillStyle = "orange";
+            ctx.fill();
+        }
+    },
+    {
+        key: "geyser", label: "Geyser", shortcut: "g", railed: false, directional: false,
+        paint: paintGeyserShape,
+        swatchPaint: function (ctx, size) {
+            // Stone vent + dark throat + dashed eruption-reach ring.
+            var cx = size / 2, cy = size / 2;
+            ctx.beginPath();
+            ctx.arc(cx, cy, size * 0.42, 0, 2 * Math.PI);
+            ctx.strokeStyle = "#E5392B";
+            ctx.setLineDash([5, 5]);
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            ctx.arc(cx, cy, size * 0.26, 0, 2 * Math.PI);
+            ctx.fillStyle = "#3a2f2a";
+            ctx.fill();
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = "#6b5546";
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(cx, cy, size * 0.16, 0, 2 * Math.PI);
+            ctx.fillStyle = "#241c18";
             ctx.fill();
         }
     }

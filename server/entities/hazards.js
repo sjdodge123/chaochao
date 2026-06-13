@@ -207,6 +207,61 @@ class Rotor extends Hazard {
 	}
 }
 
+// A geyser: a stationary vent that cycles dormant -> charging (a telegraph) ->
+// erupt, launching anyone on or near it with a strong radial punch, then back to
+// dormant. Harmless to touch between eruptions — the only damage is the timed
+// burst, so the telegraph is your cue to clear off. The cycle runs on a phase
+// timer in update(dt) (stationary, so it has no motion hook); the phase is shipped
+// to the client via the framework's netState wire slot so it can draw the calm /
+// bubbling / erupting states. First consumer of netState.
+//
+// Phases (also the netState values): 0 dormant, 1 charging, 2 erupting.
+var GEYSER_DORMANT = 0, GEYSER_CHARGING = 1, GEYSER_ERUPTING = 2;
+class Geyser extends Hazard {
+	constructor(x, y, radius, color, ownerId, roomSig) {
+		super(x, y, radius, color, ownerId, roomSig);
+		this.id = c.hazards.geyser.id;
+		this.moveable = false;      // stationary — no engine motion hook
+		this.punch = null;
+		this.phase = GEYSER_DORMANT;
+		this.netState = GEYSER_DORMANT; // shipped each tick (compressor.sendHazardUpdates)
+		this.timer = 0;             // seconds elapsed in the current phase
+	}
+	// Phase timer (called per tick from gameBoard.updateHazards with dt). On the
+	// charging->erupting edge it spawns one strong map-owned punch at the vent;
+	// gameBoard.updateHazards picks it up, so anyone within attackRadius is flung.
+	update(dt) {
+		if (this.alive === false) {
+			return;
+		}
+		this.timer += (dt || 0);
+		if (this.phase === GEYSER_DORMANT) {
+			if (this.timer >= c.hazards.geyser.dormantMs / 1000) {
+				this.phase = GEYSER_CHARGING;
+				this.timer = 0;
+			}
+		} else if (this.phase === GEYSER_CHARGING) {
+			if (this.timer >= c.hazards.geyser.chargeMs / 1000) {
+				this.phase = GEYSER_ERUPTING;
+				this.timer = 0;
+				if (this.punch == null) {
+					this.punch = new Punch(this.x, this.y, c.hazards.geyser.attackRadius, c.hazards.geyser.color, this.ownerId, this.roomSig, c.hazards.geyser.punchBonus, false, null);
+					this.punch.mapOwned = true;
+					this.punch.type = "bumper";
+				}
+			}
+		} else { // GEYSER_ERUPTING
+			if (this.timer >= c.hazards.geyser.eruptMs / 1000) {
+				this.phase = GEYSER_DORMANT;
+				this.timer = 0;
+			}
+		}
+		this.netState = this.phase;
+	}
+	// Touch is harmless — the eruption is the timed punch, not contact.
+	handleHit(object) { }
+}
+
 // --- hazard-kind registry ------------------------------------------------------
 // Single source of truth for the map-authorable hazard kinds. Everything with
 // per-kind behavior keys off this: gameBoard.generateHazards builds via
@@ -272,5 +327,12 @@ registerHazardKind("rotor", {
 		return new Rotor(entry.x, entry.y, c.hazards.rotor.radius, c.hazards.rotor.color, mapID, roomSig, entry.angle || 0);
 	}
 });
+registerHazardKind("geyser", {
+	railed: false,
+	directional: false,
+	build: function (entry, mapID, roomSig) {
+		return new Geyser(entry.x, entry.y, c.hazards.geyser.radius, c.hazards.geyser.color, mapID, roomSig);
+	}
+});
 
-module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, HAZARD_KINDS, hazardKindById, registerHazardKind };
+module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, HAZARD_KINDS, hazardKindById, registerHazardKind };
