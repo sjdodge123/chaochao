@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.35.1 — 2026-06-13
+
 ### General
 
 - **New hazard: the Bumper Wall.** A pinball-style slingshot line that flings your kart straight off its face the instant you touch it — same springy sting as a round bumper, stretched into a whole wall. Map authors can place and rotate them in the editor (look in the Hazards palette) to fence off shortcuts or bank karts around corners. Rival AI racers steer wide of them rather than ride them.
