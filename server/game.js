@@ -217,6 +217,7 @@ class Game {
 		//In Racing State or Collapse State
 		if (this.currentState == this.stateMap.racing || this.currentState == this.stateMap.collapsing) {
 			this.checkForWinners();
+			this.checkBonusOrbPickups(); // team-modes bonus orbs (credits before the flush)
 			this.flushTeamBroadcast(); // coalesced teamUpdate (score changes this tick)
 			//Mood changes are deferred to startOverview — flipping the music the
 			//instant someone gains/loses near-victory mid-race felt jarring. The
@@ -406,6 +407,49 @@ class Game {
 		if (this._teamsDirty) {
 			this._teamsDirty = false;
 			this.broadcastTeams();
+		}
+	}
+	// Team-modes only: each racing tick, the first live racer to drive over an
+	// uncollected bonus orb banks +1 for their team. Orbs are static (placed by
+	// gameBoard.generateBonusOrbs and shipped in the newMap payload), so this is a
+	// cheap O(orbs x players) distance pass — at most 2 orbs against a handful of
+	// karts. `collected` latches the orb for the rest of the round (one-time pickup);
+	// a `bonusOrbCollected` event drives the client pop/SFX. Zombies, spectators,
+	// finishers, and the dead can't collect (no team credit for the infected).
+	checkBonusOrbPickups() {
+		if (!this.isTeamsMode()) { return; }
+		// checkForWinners (called just before this) can flip the room to overview/
+		// gameOver on a clinch tick — the racing/collapsing guard at the call site was
+		// evaluated BEFORE that flip. Re-check here so a racer already sitting on an orb
+		// can't bank a post-match point into the final score/ledger.
+		if (this.currentState != this.stateMap.racing && this.currentState != this.stateMap.collapsing) { return; }
+		var orbs = this.gameBoard.bonusOrbs;
+		if (orbs == null || orbs.length === 0) { return; }
+		var cfg = c.bonusOrb;
+		var orbRadius = (cfg != null && cfg.radius != null) ? cfg.radius : 22;
+		var pts = (cfg != null && cfg.pointsValue != null) ? cfg.pointsValue : 1;
+		for (var i = 0; i < orbs.length; i++) {
+			var orb = orbs[i];
+			if (orb.collected) { continue; }
+			for (var id in this.playerList) {
+				var p = this.playerList[id];
+				// A sleeping/AFK kart is already treated as out of the round by
+				// checkForWinners/aliveTeamCount — it must not bank a point by resting on an orb.
+				if (p == null || !p.alive || !p.awake || p.isSpectator || p.isZombie || p.reachedGoal || p.teamId == null) {
+					continue;
+				}
+				var dx = p.x - orb.x;
+				var dy = p.y - orb.y;
+				var reach = orbRadius + (p.radius || 0);
+				if (dx * dx + dy * dy <= reach * reach) {
+					orb.collected = true;
+					this.creditTeamPoints(p, pts, 'bonus_orb');
+					messenger.messageRoomBySig(this.roomSig, "bonusOrbCollected", {
+						index: i, by: p.id, teamId: p.teamId
+					});
+					break;
+				}
+			}
 		}
 	}
 	// Round-cap BACKSTOP only (called when every racer has concluded, before the
