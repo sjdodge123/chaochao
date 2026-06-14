@@ -10104,6 +10104,12 @@ function boonOnWater(x, y) {
     return typeof tileIdAt === "function" && config.tileMap != null && config.tileMap.water != null
         && tileIdAt(x, y) === config.tileMap.water.id;
 }
+// True when a boon at (x,y) is sitting on an ice tile. Ice is near-white cyan, so a
+// boon's light-blue art blends in — the drawer adds a dark contrast halo on ice.
+function boonOnIce(x, y) {
+    return typeof tileIdAt === "function" && config.tileMap != null && config.tileMap.ice != null
+        && tileIdAt(x, y) === config.tileMap.ice.id;
+}
 
 // Recharge Spring — a SHARED "pit stop" pad with a global charge (server netState,
 // arriving as `state`: 0 = just drained .. 100 = ready). Ready: a gently pulsing ring
@@ -10191,14 +10197,16 @@ function drawRechargeSpring(x, y, state) {
 
 // Slipstream — a current corridor. On land it's a wind tunnel: faint footprint plus
 // straight light-blue streamlines that scroll along the push axis. On water it's a
-// river current: the streamlines become flowing foam-white waves (same scroll + leading
-// arrowheads), so it reads as water moving against blue water. Cheap: stroked
-// dashes/short segments, no shadowBlur/filter.
+// river current: foam-white waves. On ICE (near-white cyan terrain that the light-blue
+// art would vanish into) the streamlines keep their cyan but gain a dark contrast halo
+// so they stay legible. Cheap: stroked dashes/short segments, no shadowBlur/filter.
 function drawSlipstream(x, y, angle) {
     var cfg = config.boons.slipstream;
     var rad = (angle || 0) * (Math.PI / 180);
     var w = cfg.width, hgt = cfg.height;
     var onWater = boonOnWater(x, y);
+    var onIce = !onWater && boonOnIce(x, y); // foam-on-water already contrasts; ice needs the halo
+    var halo = "rgba(10,40,55,0.6)";
     var flow = (Date.now() / 14) % 28; // scroll the dashes toward +x
     gameContext.save();
     gameContext.translate(x, y);
@@ -10212,8 +10220,6 @@ function drawSlipstream(x, y, angle) {
     gameContext.lineWidth = 1;
     gameContext.stroke();
     var stroke = onWater ? cfg.colorWater : cfg.color;
-    gameContext.strokeStyle = stroke;
-    gameContext.lineWidth = 3;
     gameContext.lineCap = "round";
     gameContext.lineJoin = "round";
     var rows = [-hgt * 0.28, 0, hgt * 0.28];
@@ -10227,7 +10233,6 @@ function drawSlipstream(x, y, angle) {
                 var wy = ly + Math.sin((sx + flow * 2) / 18 + i) * 4;
                 if (sx === x0) { gameContext.moveTo(sx, wy); } else { gameContext.lineTo(sx, wy); }
             }
-            gameContext.stroke();
         } else {
             // Straight scrolling dash (a wind streak).
             gameContext.setLineDash([18, 10]);
@@ -10235,15 +10240,17 @@ function drawSlipstream(x, y, angle) {
             gameContext.beginPath();
             gameContext.moveTo(x0, ly);
             gameContext.lineTo(x1, ly);
-            gameContext.stroke();
-            gameContext.setLineDash([]);
         }
+        if (onIce) { gameContext.strokeStyle = halo; gameContext.lineWidth = 6; gameContext.stroke(); }
+        gameContext.strokeStyle = stroke; gameContext.lineWidth = 3; gameContext.stroke();
+        gameContext.setLineDash([]);
         // arrowhead at the leading (+x) end
         gameContext.beginPath();
         gameContext.moveTo(w / 2 - 22, ly - 7);
         gameContext.lineTo(w / 2 - 10, ly);
         gameContext.lineTo(w / 2 - 22, ly + 7);
-        gameContext.stroke();
+        if (onIce) { gameContext.strokeStyle = halo; gameContext.lineWidth = 6; gameContext.stroke(); }
+        gameContext.strokeStyle = stroke; gameContext.lineWidth = 3; gameContext.stroke();
     }
     gameContext.restore();
 }
