@@ -1,7 +1,56 @@
 "use strict";
 var utils = require('./utils.js');
+var geometry = require('./geometry.js');
 var c = utils.loadConfig();
 var forceConstant = c.forceConstant;
+// Shared segment geometry (also used by cellGraph for bot pathing).
+var sideOf = geometry.sideOf;
+var segmentsCross = geometry.segmentsCross;
+// Tile ids the stone-seam wall depends on (constant) — hoisted so the seam-active
+// test is a stable function, not a per-call closure.
+var STONE_WATER_ID = (c.tileMap.water != null) ? c.tileMap.water.id : -999;
+var STONE_LAVA_ID = c.tileMap.lava.id;
+function stoneEdgeActive(e) {
+	// The seam is only a wall while it's still water beside lava; a terrain change
+	// (collapse, ice-cannon freeze, lava explosion) drops it.
+	return e.waterCell.id === STONE_WATER_ID && e.lavaCell.id === STONE_LAVA_ID;
+}
+// Slide a player along the first segment in `edges` their step this tick crosses:
+// keep only the component ALONG the segment (drop the perpendicular), the same
+// deflection the hole-rim slide gives. A corner guard refuses to commit a slid
+// position that would cross another (still-active) segment, holding at the pre-step
+// position so a corner can't tunnel through. `isActive` (optional) filters edges
+// that are currently walls (stone seams re-validate live cell ids; barriers are
+// always active). Shared by bounceOffStoneEdges + bounceOffBarriers.
+function slideAlongSegmentWalls(player, edges, isActive) {
+	for (var i = 0; i < edges.length; i++) {
+		var e = edges[i];
+		if (isActive && !isActive(e)) { continue; }
+		if (!segmentsCross(player.x, player.y, player.newX, player.newY, e.ax, e.ay, e.bx, e.by)) { continue; }
+		var sx = player.newX - player.x, sy = player.newY - player.y;
+		var sProj = sx * e.tanX + sy * e.tanY;
+		var vProj = player.velX * e.tanX + player.velY * e.tanY;
+		var slidX = player.x + sProj * e.tanX;
+		var slidY = player.y + sProj * e.tanY;
+		player.velX = vProj * e.tanX;
+		player.velY = vProj * e.tanY;
+		var crossesAgain = false;
+		for (var j = 0; j < edges.length; j++) {
+			var f = edges[j];
+			if (isActive && !isActive(f)) { continue; }
+			if (segmentsCross(player.x, player.y, slidX, slidY, f.ax, f.ay, f.bx, f.by)) { crossesAgain = true; break; }
+		}
+		if (!crossesAgain) {
+			player.newX = slidX;
+			player.newY = slidY;
+		} else {
+			player.newX = player.x;
+			player.newY = player.y;
+		}
+		player.bounced = true;
+		return;
+	}
+}
 
 exports.getEngine = function (playerList, projectileList, hazardList) {
 	return new Engine(playerList, projectileList, hazardList);
@@ -997,18 +1046,6 @@ function rebuildStoneEdges(map) {
 	map._hasCellOfType = undefined;
 	ensureStoneEdges(map);
 }
-// Orientation sign of point (px,py) relative to directed segment a->b (cross product).
-function sideOf(ax, ay, bx, by, px, py) {
-	return (bx - ax) * (py - ay) - (by - ay) * (px - ax);
-}
-// Whether segments p0->p1 and p2->p3 properly intersect (standard cross-product test).
-function segmentsCross(p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y) {
-	var d1 = sideOf(p2x, p2y, p3x, p3y, p0x, p0y);
-	var d2 = sideOf(p2x, p2y, p3x, p3y, p1x, p1y);
-	var d3 = sideOf(p0x, p0y, p1x, p1y, p2x, p2y);
-	var d4 = sideOf(p0x, p0y, p1x, p1y, p3x, p3y);
-	return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
-}
 // Solid stone wall on the water/lava boundary: a player whose move this tick would
 // cross a stone edge is slid along it (the perpendicular component is dropped), the
 // same deflection bounceOffEmptyCells gives a hole rim — so water is fully walkable
@@ -1019,48 +1056,9 @@ function bounceOffStoneEdges(player, map) {
 	if (!mapHasStoneEdges(map)) {
 		return; // no water/lava seams on this map — skip the per-tick test entirely
 	}
-	var edges = map._stoneEdges;
-	var waterId = c.tileMap.water != null ? c.tileMap.water.id : -999, lavaId = c.tileMap.lava.id;
-	for (var i = 0; i < edges.length; i++) {
-		var e = edges[i];
-		// Re-validate against LIVE cell ids: the seam is only a wall while it's still a
-		// water cell beside a lava cell. Once a terrain change (collapse, ice cannon
-		// freezing the water, a lava explosion) flips either side, drop the wall — otherwise
-		// it lingers as an invisible barrier where the water no longer exists, blocking
-		// lava-crossers (star power / zombies / burning) and walkers on the new ice.
-		if (e.waterCell.id !== waterId || e.lavaCell.id !== lavaId) {
-			continue;
-		}
-		if (!segmentsCross(player.x, player.y, player.newX, player.newY, e.ax, e.ay, e.bx, e.by)) {
-			continue;
-		}
-		// Crossing this seam: keep only the component of the step/velocity ALONG the
-		// wall, exactly as the hole-rim slide does. Don't commit a slid position that
-		// would cross a (possibly different) seam — hold at the pre-step position so a
-		// corner can't tunnel through.
-		var sx = player.newX - player.x, sy = player.newY - player.y;
-		var sProj = sx * e.tanX + sy * e.tanY;
-		var vProj = player.velX * e.tanX + player.velY * e.tanY;
-		var slidX = player.x + sProj * e.tanX;
-		var slidY = player.y + sProj * e.tanY;
-		player.velX = vProj * e.tanX;
-		player.velY = vProj * e.tanY;
-		var crossesAgain = false;
-		for (var j = 0; j < edges.length; j++) {
-			var f = edges[j];
-			if (f.waterCell.id !== waterId || f.lavaCell.id !== lavaId) { continue; } // stale seam
-			if (segmentsCross(player.x, player.y, slidX, slidY, f.ax, f.ay, f.bx, f.by)) { crossesAgain = true; break; }
-		}
-		if (!crossesAgain) {
-			player.newX = slidX;
-			player.newY = slidY;
-		} else {
-			player.newX = player.x;
-			player.newY = player.y;
-		}
-		player.bounced = true;
-		return;
-	}
+	// Only the still-live water|lava seams are walls (stoneEdgeActive re-validates
+	// against current cell ids each tick).
+	slideAlongSegmentWalls(player, map._stoneEdges, stoneEdgeActive);
 }
 // Author-placed solid barriers (the editor's fence/wall 2-point tool): each map
 // barrier is a {x1,y1,x2,y2} line segment a player can't pass through but slides
@@ -1095,39 +1093,9 @@ function bounceOffBarriers(player, map) {
 	if (!mapHasBarriers(map)) {
 		return; // no barriers on this map — skip the per-tick test entirely
 	}
-	var edges = map._barrierEdges;
-	for (var i = 0; i < edges.length; i++) {
-		var e = edges[i];
-		if (!segmentsCross(player.x, player.y, player.newX, player.newY, e.ax, e.ay, e.bx, e.by)) {
-			continue;
-		}
-		// Crossing this barrier: keep only the component of the step/velocity ALONG
-		// it (drop the perpendicular), the same deflection the stone seam gives — so
-		// the player slides along the fence instead of stopping dead. Don't commit a
-		// slid position that would cross another barrier (corner guard against
-		// tunneling); hold at the pre-step position instead.
-		var sx = player.newX - player.x, sy = player.newY - player.y;
-		var sProj = sx * e.tanX + sy * e.tanY;
-		var vProj = player.velX * e.tanX + player.velY * e.tanY;
-		var slidX = player.x + sProj * e.tanX;
-		var slidY = player.y + sProj * e.tanY;
-		player.velX = vProj * e.tanX;
-		player.velY = vProj * e.tanY;
-		var crossesAgain = false;
-		for (var j = 0; j < edges.length; j++) {
-			var f = edges[j];
-			if (segmentsCross(player.x, player.y, slidX, slidY, f.ax, f.ay, f.bx, f.by)) { crossesAgain = true; break; }
-		}
-		if (!crossesAgain) {
-			player.newX = slidX;
-			player.newY = slidY;
-		} else {
-			player.newX = player.x;
-			player.newY = player.y;
-		}
-		player.bounced = true;
-		return;
-	}
+	// Barriers are static, always-active walls (no live re-validation) — slide the
+	// same way the water/lava seam does, blocking crossing from either side.
+	slideAlongSegmentWalls(player, map._barrierEdges, null);
 }
 function pointIntersection(x, y, cell) {
 	{

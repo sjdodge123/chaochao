@@ -62,6 +62,11 @@ function afterHistoryChange() {
     if (typeof setSelectedObject === "function") {
         setSelectedObject(null);
     }
+    // A barrier undo/redo may splice the barriers array, shifting indices — drop any
+    // stale barrier selection (mirrors the hazard setSelectedObject(null) above) so a
+    // later endpoint-drag can't edit the wrong barrier. (create.js owns these.)
+    if (typeof selectedBarrierIndex !== "undefined") { selectedBarrierIndex = -1; }
+    if (typeof barrierDragEnd !== "undefined") { barrierDragEnd = null; }
     if (typeof dirty !== "undefined") {
         dirty = true;
     }

@@ -215,6 +215,37 @@ console.log('[D] AI cell-graph routes around barriers');
     check('no-barrier map yields null blocked set', cellGraph.getBarrierBlockedEdges(plainMap) == null);
 }
 
+// --- [E] validation rejects a barrier that seals off the goal -----------------
+// reachableFromEdge hard-blocks barrier edges, so a wall that fully separates the
+// start edge from the goal makes validateMap reject the map (not just the offline
+// playability sim).
+console.log('[E] validateMap rejects a goal sealed off by a barrier');
+{
+    const W = config.worldWidth, H = config.worldHeight;
+    const cols = 8, rows = 6;
+    const sites = [];
+    for (let r = 0; r < rows; r++) {
+        for (let cc = 0; cc < cols; cc++) {
+            const isGoal = (cc === cols - 1 && r === (rows >> 1));
+            sites.push({
+                x: 60 + cc * ((W - 120) / (cols - 1)),
+                y: 60 + r * ((H - 120) / (rows - 1)),
+                id: isGoal ? config.tileMap.goal.id : config.tileMap.fast.id
+            });
+        }
+    }
+    const bbox = { xl: 0, xr: W, yt: 0, yb: H };
+    function build(barriers) {
+        const m = mapFormat.reconstruct({ bbox: bbox, sites: sites.map(s => ({ x: s.x, y: s.y, id: s.id })) });
+        m.startEdges = ['left'];
+        if (barriers) { m.barriers = barriers; }
+        return m;
+    }
+    check('open map is valid (goal reachable from left)', utils.validateMap(build(null), config).valid === true);
+    var wall = [{ x1: W / 2, y1: 0, x2: W / 2, y2: H, style: 'wall' }];
+    check('full-height mid wall makes the goal unreachable -> rejected', utils.validateMap(build(wall), config).valid === false);
+}
+
 if (failures > 0) {
     console.error('\nbarriers-test FAILED (' + failures + ' assertion(s)).');
     process.exit(1);

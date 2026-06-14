@@ -802,12 +802,12 @@ exports.validateMap = function (vMap, config) {
         }
     }
     // barriers: optional solid fence/wall segments from the editor's 2-point tool.
-    // Structural-only check (engine.bounceOffBarriers blocks crossing either side):
-    // finite endpoints, in-bounds, non-zero/non-absurd length, count cap. A barrier
-    // that walls the goal off is caught downstream by the same playability sim that
-    // covers holes/lava (the offline submit validator runs the real engine), so this
-    // boundary only rejects malformed/oversized geometry. (Editor mirror: create.js
-    // validateMap.)
+    // Structural check (engine.bounceOffBarriers blocks crossing either side):
+    // finite endpoints, in-bounds, non-zero/non-absurd length, count cap, known
+    // style. A barrier that walls the goal off is caught by the start-edge
+    // reachability check below — cellGraph.reachableFromEdge hard-blocks barrier
+    // edges, so a sealed goal reads as unreachable here, not just in the offline
+    // playability sim. (Editor mirror: create.js validateMap.)
     if (vMap.barriers != null) {
         if (!Array.isArray(vMap.barriers)) {
             return { valid: false, reason: "Map has malformed barriers." };
@@ -818,7 +818,7 @@ exports.validateMap = function (vMap, config) {
         if (vMap.barriers.length > maxBarriers) {
             return { valid: false, reason: "Map has too many barriers (max " + maxBarriers + ")." };
         }
-        var validStyles = (barrierCfg.styles != null) ? barrierCfg.styles : null;
+        var validStyles = Array.isArray(barrierCfg.styles) ? barrierCfg.styles : null;
         for (var bi = 0; bi < vMap.barriers.length; bi++) {
             var bar = vMap.barriers[bi];
             if (bar == null || !Number.isFinite(bar.x1) || !Number.isFinite(bar.y1) ||
@@ -834,7 +834,7 @@ exports.validateMap = function (vMap, config) {
             if (blen < 1 || blen > maxBarrierLen) {
                 return { valid: false, reason: "Map has a barrier of invalid length." };
             }
-            if (bar.style != null && validStyles != null && validStyles[bar.style] == null) {
+            if (bar.style != null && validStyles != null && validStyles.indexOf(bar.style) < 0) {
                 return { valid: false, reason: "Map has a barrier with an unknown style." };
             }
         }
