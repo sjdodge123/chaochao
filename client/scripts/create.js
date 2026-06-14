@@ -47,11 +47,13 @@ var rotateStartAngle = 0;
 var resizingHandle = false;
 var resizeStartRadius = 0;
 // On-canvas MOVE/grab handle (every selected object): while dragging it the object's
-// (x,y) tracks the cursor; moveStartX/Y keep the pre-drag position to record one undo
-// command on release.
+// (x,y) tracks the cursor; moveStartX/Y keep the pre-drag position, and moveStartIndex
+// the dragged hazard's array index, so the undo command can be recorded on release even
+// if the selection was cleared mid-drag (e.g. a keyboard shortcut fired).
 var movingHandle = false;
 var moveStartX = 0;
 var moveStartY = 0;
+var moveStartIndex = -1;
 var touchActive = false;
 var touchId = null; // identifier of the finger currently driving a touch stroke
 // Accumulates the cell changes of the in-progress paint/erase stroke so the whole
@@ -1840,6 +1842,7 @@ function handleClick(event) {
                     movingHandle = true;
                     moveStartX = selectedObject.x;
                     moveStartY = selectedObject.y;
+                    moveStartIndex = selectedHazardIndex();
                     break;
                 }
                 // Resizable kinds expose a resize handle in place of the rotate knob.
@@ -1889,9 +1892,14 @@ function handleUnClick(event) {
         case 1: {
             if (movingHandle) {
                 movingHandle = false;
-                if (selectedObject != null) {
-                    pushMoveCommand(selectedHazardIndex(), moveStartX, moveStartY, selectedObject.x, selectedObject.y);
+                // Record off the captured index + the hazard's committed position, not
+                // selectedObject — so a deselect mid-drag (a keyboard shortcut) can't
+                // swallow the undo step.
+                var movedHz = (moveStartIndex >= 0 && vMap.hazards) ? vMap.hazards[moveStartIndex] : null;
+                if (movedHz != null) {
+                    pushMoveCommand(moveStartIndex, moveStartX, moveStartY, movedHz.x, movedHz.y);
                 }
+                moveStartIndex = -1;
                 break;
             }
             if (rotatingHandle) {
