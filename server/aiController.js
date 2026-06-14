@@ -577,6 +577,11 @@ var LIGHTNING_FEELER_MULT = 1.45; // see farther ahead when everyone's sped up
 // penalty exists to prevent.
 var HAZARD_PATH_PENALTY = 12;
 var RAIL_PATH_PENALTY = 4;
+// Solid author barriers are worse than a bumper (you can't pass at all, only slide),
+// so routing around them is almost always worth it — a heavier soft penalty than a
+// static hazard, but still soft so a barrier in the sole chokepoint never nulls the
+// path (the bot threads it and slides, as it does physically).
+var BARRIER_PATH_PENALTY = 45;
 
 var AB = c.tileMap.abilities;
 
@@ -1423,7 +1428,9 @@ function steerBot(bot, ctx, dt) {
             penaltySet: ctx.staticHazardCells, // route AROUND static bumpers (harsh soft penalty)
             penaltyMult: HAZARD_PATH_PENALTY,
             penaltySet2: ctx.railCells, // moving rails are timeable — mild penalty
-            penaltyMult2: RAIL_PATH_PENALTY
+            penaltyMult2: RAIL_PATH_PENALTY,
+            barrierEdges: ctx.barrierEdges, // solid barriers cut these edges — route around
+            barrierMult: BARRIER_PATH_PENALTY
         };
         // Bunker round: the goal is buried (no goal tiles), so home the A* on the
         // safe bunker island instead — otherwise findPathToNearestGoal returns null
@@ -1434,7 +1441,7 @@ function steerBot(bot, ctx, dt) {
         // goal (better a tight line than freezing in front of the lava). Keep the
         // hazard penalty on the retry — it's soft, so it never nulls the path.
         if (route == null && blocked != null) {
-            route = cellGraph.findPathToNearestGoal(ctx.map, { x: bot.x, y: bot.y }, { noiseSeed: ai.pathSeed, noiseAmount: pathOpts.noiseAmount, penaltySet: ctx.staticHazardCells, penaltyMult: HAZARD_PATH_PENALTY, penaltySet2: ctx.railCells, penaltyMult2: RAIL_PATH_PENALTY, goalSet: pathOpts.goalSet });
+            route = cellGraph.findPathToNearestGoal(ctx.map, { x: bot.x, y: bot.y }, { noiseSeed: ai.pathSeed, noiseAmount: pathOpts.noiseAmount, penaltySet: ctx.staticHazardCells, penaltyMult: HAZARD_PATH_PENALTY, penaltySet2: ctx.railCells, penaltyMult2: RAIL_PATH_PENALTY, barrierEdges: ctx.barrierEdges, barrierMult: BARRIER_PATH_PENALTY, goalSet: pathOpts.goalSet });
         }
         if (route != null) {
             var pts = [];
@@ -2096,6 +2103,7 @@ function update(gameBoard, currentState, dt) {
         bunkerSafeIds: bunkerSafeIds, // Bunker round: A* homes on these cells (buried goal)
         staticHazardCells: staticHazardCells, // static bumper cells (harsh path penalty)
         railCells: railCells, // moving-rail swept cells (mild path penalty — timeable)
+        barrierEdges: cellGraph.getBarrierBlockedEdges(map), // adjacency edges a solid barrier cuts (route around)
         players: playerList,
         projectileList: gameBoard.projectileList,
         hazardList: gameBoard.hazardList,

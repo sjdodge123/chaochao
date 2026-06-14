@@ -146,6 +146,75 @@ console.log('[C] validateMap barrier rules');
     check('over-max-count barriers rejected', overCount.valid === false);
 }
 
+// --- [D] AI routing awareness ----------------------------------------------
+// Bots route AROUND barriers: a barrier walling the direct line forces the cell-
+// graph path to detour, instead of plowing through it (engine collision then just
+// slides them). cellGraph.getBarrierBlockedEdges marks the cut adjacency edges and
+// findPathToNearestGoal applies a heavy soft penalty to them.
+console.log('[D] AI cell-graph routes around barriers');
+{
+    const cellGraph = require(path.join(repoRoot, 'server', 'cellGraph.js'));
+    const W = config.worldWidth, H = config.worldHeight;
+    const cols = 9, rows = 7;
+    const sites = [];
+    for (let r = 0; r < rows; r++) {
+        for (let cc = 0; cc < cols; cc++) {
+            const isGoal = (cc === cols - 1 && r === (rows >> 1));
+            sites.push({
+                x: 60 + cc * ((W - 120) / (cols - 1)),
+                y: 60 + r * ((H - 120) / (rows - 1)),
+                id: isGoal ? config.tileMap.goal.id : config.tileMap.fast.id
+            });
+        }
+    }
+    const bbox = { xl: 0, xr: W, yt: 0, yb: H };
+    // Vertical wall across the middle band at x=W/2, gaps top + bottom.
+    const wallX = W / 2;
+    const wall = { x1: wallX, y1: H * 0.25, x2: wallX, y2: H * 0.75, style: 'wall' };
+
+    function freshMap(withBarrier) {
+        const m = cellGraph; // no-op; keep lints calm
+        const map = mapFormat.reconstruct({ bbox: bbox, sites: sites.map(s => ({ x: s.x, y: s.y, id: s.id })) });
+        if (withBarrier) { map.barriers = [wall]; }
+        return map;
+    }
+    function siteOf(map, vid) {
+        for (let i = 0; i < map.cells.length; i++) { if (map.cells[i].site.voronoiId === vid) { return map.cells[i].site; } }
+        return null;
+    }
+    function side(ax, ay, bx, by, px, py) { return (bx - ax) * (py - ay) - (by - ay) * (px - ax); }
+    function cross(p0x, p0y, p1x, p1y, q0x, q0y, q1x, q1y) {
+        const d1 = side(q0x, q0y, q1x, q1y, p0x, p0y), d2 = side(q0x, q0y, q1x, q1y, p1x, p1y);
+        const d3 = side(p0x, p0y, p1x, p1y, q0x, q0y), d4 = side(p0x, p0y, p1x, p1y, q1x, q1y);
+        return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
+    }
+    function pathCrossesWall(map, route) {
+        for (let i = 0; i < route.path.length - 1; i++) {
+            const a = siteOf(map, route.path[i]), b = siteOf(map, route.path[i + 1]);
+            if (a && b && cross(a.x, a.y, b.x, b.y, wall.x1, wall.y1, wall.x2, wall.y2)) { return true; }
+        }
+        return false;
+    }
+
+    const start = { x: 60, y: H / 2 };
+    const plainMap = freshMap(false);
+    const plain = cellGraph.findPathToNearestGoal(plainMap, start);
+    check('baseline path to goal exists', plain != null);
+    check('baseline (no barrier) path runs straight through the wall line', plain != null && pathCrossesWall(plainMap, plain));
+
+    const walledMap = freshMap(true);
+    const edges = cellGraph.getBarrierBlockedEdges(walledMap);
+    check('getBarrierBlockedEdges finds cut edges', edges != null && edges.size > 0);
+    const aware = cellGraph.findPathToNearestGoal(walledMap, start, { barrierEdges: edges, barrierMult: 45 });
+    check('barrier-aware path still reaches the goal', aware != null);
+    check('barrier-aware path detours AROUND the wall (no crossing)', aware != null && !pathCrossesWall(walledMap, aware));
+
+    // Caching returns the same set instance for the same barriers.
+    check('blocked-edge set is cached', cellGraph.getBarrierBlockedEdges(walledMap) === edges);
+    // No barriers => null (nothing to penalize).
+    check('no-barrier map yields null blocked set', cellGraph.getBarrierBlockedEdges(plainMap) == null);
+}
+
 if (failures > 0) {
     console.error('\nbarriers-test FAILED (' + failures + ' assertion(s)).');
     process.exit(1);
