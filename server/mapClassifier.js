@@ -253,9 +253,18 @@ function hazardAvoidance(map, config) {
     var railLen = (config.hazards && config.hazards.movingBumper && config.hazards.movingBumper.width) || 100;
     var wallId = (config.hazards && config.hazards.bumperWall) ? config.hazards.bumperWall.id : null;
     var wallLen = (config.hazards && config.hazards.bumperWall && config.hazards.bumperWall.width) || 120;
+    // Force zones: keep the overlay/par estimate in lockstep with the live AI
+    // (aiController). A GUST FAN is a traversable wind zone the bots drive THROUGH
+    // (not priced into A*, not dodged) — so it's never an avoidance obstacle here
+    // either. A VORTEX WELL is routed around at its strong-pull core (radius*0.6,
+    // matching aiController's classifier), not just a 40px ring at the anchor.
+    var gustId = (config.hazards && config.hazards.gustFan) ? config.hazards.gustFan.id : null;
+    var vortexId = (config.hazards && config.hazards.vortexWell) ? config.hazards.vortexWell.id : null;
+    var vortexR = (config.hazards && config.hazards.vortexWell && config.hazards.vortexWell.radius) || 150;
     for (var h = 0; h < hazards.length; h++) {
         var hz = hazards[h];
         if (hz == null || typeof hz.x !== "number" || typeof hz.y !== "number") { continue; }
+        if (hz.id === gustId) { continue; } // traversable wind zone — drive through, don't route around
         addAround(hz.x, hz.y);
         if (hz.id === movingId || hz.id === wallId) {
             // A railed bumper sweeps from its anchor along `angle` for the rail
@@ -265,6 +274,15 @@ function hazardAvoidance(map, config) {
             var rad = (hz.angle || 0) * Math.PI / 180;
             for (var t = 25; t <= len; t += 25) {
                 addAround(hz.x + Math.cos(rad) * t, hz.y + Math.sin(rad) * t);
+            }
+        } else if (hz.id === vortexId) {
+            // The well drags karts toward its core across a wide radius — penalize a
+            // ring out to the strong-pull core so the routed line bends around the
+            // centre, not just the single anchor cell.
+            var core = vortexR * 0.6;
+            for (var ringA = 0; ringA < 8; ringA++) {
+                var rr = ringA * Math.PI / 4;
+                addAround(hz.x + Math.cos(rr) * core, hz.y + Math.sin(rr) * core);
             }
         }
     }

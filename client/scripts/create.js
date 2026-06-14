@@ -2269,7 +2269,10 @@ function paintTile(targetId) {
 
 function addObjectToMap(x, y, obj) {
     var cfg = hazardConfigById(obj);
-    var radius = (cfg != null) ? cfg.attackRadius : 0;
+    // Placement clearance pad: the strike/footprint reach. Most kinds expose
+    // attackRadius; force zones (gust/vortex) have no attack — fall back to their
+    // selection radius so a big zone can't be dropped half off the map edge.
+    var radius = (cfg != null) ? (cfg.attackRadius != null ? cfg.attackRadius : (cfg.radius || 0)) : 0;
     if (outsideMapBounds(x, y, radius)) {
         return;
     }
