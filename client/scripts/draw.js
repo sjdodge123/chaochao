@@ -10187,9 +10187,7 @@ function drawDashArrows(x, y, angle) {
     gameContext.strokeStyle = "rgba(63,193,201,0.12)";
     gameContext.lineWidth = 1;
     gameContext.stroke();
-    // two chevrons pointing +x (the boost direction)
-    gameContext.strokeStyle = cfg.color;
-    gameContext.lineWidth = 5;
+    // two chevrons pointing +x (the boost direction), each over a dark contrast halo
     gameContext.lineCap = "round";
     gameContext.lineJoin = "round";
     var ch = hgt * 0.32;
@@ -10199,10 +10197,17 @@ function drawDashArrows(x, y, angle) {
         gameContext.moveTo(cx - 8, -ch);
         gameContext.lineTo(cx + 8, 0);
         gameContext.lineTo(cx - 8, ch);
-        gameContext.stroke();
+        gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 8; gameContext.stroke();
+        gameContext.strokeStyle = cfg.color; gameContext.lineWidth = 5; gameContext.stroke();
     }
     gameContext.restore();
 }
+
+// Dark contrast halo stroked UNDER every boon's signal art (chevrons, cross, rings,
+// streamlines) so the light-blue/green palette stays legible on any terrain — light
+// cyan ice in particular would otherwise swallow it. Drawers stroke each path twice:
+// this wider dark stroke first, the colored stroke on top.
+var BOON_HALO = "rgba(10,40,55,0.6)";
 
 // True when a boon at (x,y) is sitting on a water tile, so its drawer can switch to
 // the foam "water variant" that reads against blue water. Cheap nearest-cell lookup
@@ -10246,7 +10251,8 @@ function drawRechargeSpring(x, y, state) {
         gameContext.arc(0, 0, r * 0.78, -Math.PI / 2, -Math.PI / 2 + frac * 2 * Math.PI);
         gameContext.globalAlpha = 0.9;
         gameContext.lineCap = "round";
-        gameContext.stroke();
+        gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 5; gameContext.stroke();
+        gameContext.strokeStyle = accent; gameContext.lineWidth = 3; gameContext.stroke();
         gameContext.globalAlpha = 1;
     } else if (onWater) {
         var t = (Date.now() / 900) % 1; // ripple phase 0..1
@@ -10280,19 +10286,19 @@ function drawRechargeSpring(x, y, state) {
         gameContext.stroke();
         gameContext.globalAlpha = 1;
     }
-    // Green restore cross in the middle (the shared identity on land + water) — dimmed
-    // while refilling so the spent state reads at a glance.
+    // Green restore cross in the middle (the shared identity on land + water), over a
+    // dark contrast halo so it reads on any terrain — dimmed while refilling so the
+    // spent state reads at a glance.
     var arm = r * 0.42;
-    gameContext.strokeStyle = cfg.color;
     gameContext.globalAlpha = ready ? 1 : 0.3;
-    gameContext.lineWidth = 5;
     gameContext.lineCap = "round";
     gameContext.beginPath();
     gameContext.moveTo(-arm, 0);
     gameContext.lineTo(arm, 0);
     gameContext.moveTo(0, -arm);
     gameContext.lineTo(0, arm);
-    gameContext.stroke();
+    gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 8; gameContext.stroke();
+    gameContext.strokeStyle = cfg.color; gameContext.lineWidth = 5; gameContext.stroke();
     gameContext.globalAlpha = 1;
     gameContext.restore();
 }
@@ -10308,7 +10314,7 @@ function drawSlipstream(x, y, angle) {
     var rad = (angle || 0) * (Math.PI / 180);
     var w = cfg.width, hgt = cfg.height;
     var onWater = boonOnWater(x, y);
-    var halo = "rgba(10,40,55,0.6)";
+    var halo = BOON_HALO;
     var flow = (Date.now() / 14) % 28; // scroll the dashes toward +x
     gameContext.save();
     gameContext.translate(x, y);
