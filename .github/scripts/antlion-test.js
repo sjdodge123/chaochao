@@ -541,52 +541,69 @@ function sessionWaterBlock() {
 }
 
 // -----------------------------------------------------------------------------
-// 9. A Vortex Well drags an antlion toward its core (A/B vs no-well control).
-// The antlion sits inside a well; the only target sits FAR on the opposite side,
-// so chase steering alone pulls it AWAY from the core. With the well present the
-// pull must leave it measurably closer to the core than the well-less control.
+// 9. A Vortex Well drags an antlion toward its core. SAME-room A/B: run the chase
+// once WITHOUT the well, reset the antlion to the same start, run again WITH it.
+// Thumpers are removed (no repel noise) and the round has no time-randomness left,
+// so the chase is identical between phases — the end-position delta is purely the
+// well's inward pull. The lone target sits far on the opposite side, so chase
+// alone drifts the antlion AWAY from the core; the well must claw it back.
 // -----------------------------------------------------------------------------
 function sessionVortexPull() {
     config.brutalTypesForce = [AL.id];
     const VW = config.hazards.vortexWell;
+    const map = loadMap('SandsOfTime.json');
+    const room = buildRoom(map);
+    const gb = room.game.gameBoard;
 
-    function run(withWell) {
-        const map = loadMap('SandsOfTime.json');
-        const room = buildRoom(map);
-        const gb = room.game.gameBoard;
-        const site = pickParkingSandSite(gb.currentMap);
-        const ids = Object.keys(room.playerList);
-        // Core of the well; antlion 60u to its RIGHT; the lone live target far to
-        // the right (chase = +x, away from the core at the antlion's left).
-        const core = { x: site.x, y: site.y };
-        const antX = core.x + 60, antY = core.y;
-        const targetX = Math.min(core.x + 320, config.worldWidth - 120), targetY = core.y;
-        // Park BOTH players together at the far target so the target list is the
-        // far point (a second parked player elsewhere could become the nearest).
-        const holds = ids.map(id => ({ player: room.playerList[id], x: targetX, y: targetY }));
-        for (const h of holds) { pinPlayer(h.player, targetX, targetY); }
+    // Core on safe sand; target = the sand site farthest from it (walkable, no lava
+    // death) so the chase has a clear far goal on one side.
+    const core = pickParkingSandSite(gb.currentMap);
+    const sand = cellsOfId(gb.currentMap, SAND_ID).map(c => c.site);
+    let target = null, far = -1;
+    for (const s of sand) {
+        const d = dist(s.x, s.y, core.x, core.y);
+        if (d > far) { far = d; target = s; }
+    }
+    assert(core != null && target != null && far > 120, 'vortex-pull: no usable core/target sand sites');
+    if (failures > 0) { config.brutalTypesForce = null; return; }
 
-        const ant = gb.spawnAntlion(room.playerList[ids[0]]);
-        if (ant == null) { return null; }
-        ant.x = antX; ant.y = antY; ant.newX = antX; ant.newY = antY;
-        ant.offSandMs = 0;
+    // Remove thumpers so their repel can't perturb the chase between phases.
+    for (const th of thumpersOf(room)) { delete room.hazardList[th.ownerId]; }
+
+    // Antlion start: 75u from the core (mid-ring, peak pull) along core->target, so
+    // the chase pulls it further out and the well has the most leverage to claw back.
+    const ux = (target.x - core.x) / far, uy = (target.y - core.y) / far;
+    const startX = core.x + ux * 75, startY = core.y + uy * 75;
+
+    const ids = Object.keys(room.playerList);
+    const holds = ids.map(id => ({ player: room.playerList[id], x: target.x, y: target.y }));
+    for (const h of holds) { pinPlayer(h.player, target.x, target.y); }
+
+    const hash = 'vw-ant';
+    function runPhase(withWell) {
+        // Fresh antlion at the same start each phase.
+        delete room.hazardList[hash];
+        const ant = new Antlion(startX, startY, hash, gb.roomSig);
+        ant.offSandMs = 0; ant.impVX = 0; ant.impVY = 0;
+        room.hazardList[hash] = ant;
+        const wkey = 'vw-well';
         if (withWell) {
-            const well = new VortexWell(core.x, core.y, VW.radius, VW.color, 'vw-pull', room.game.gameBoard.roomSig);
-            gb.hazardList[well.ownerId] = well;
+            room.hazardList[wkey] = new VortexWell(core.x, core.y, VW.radius, VW.color, wkey, gb.roomSig);
+        } else {
+            delete room.hazardList[wkey];
         }
-        // A handful of ticks — long enough for the steering delta to register,
-        // short enough the antlion can't burrow (offSandDespawnSeconds is seconds).
         for (let f = 0; f < 12; f++) { tick(room, holds); }
-        return dist(ant.x, ant.y, core.x, core.y);
+        const a = room.hazardList[hash];
+        return a != null ? dist(a.x, a.y, core.x, core.y) : null;
     }
 
-    const withoutWell = run(false);
-    const withWell = run(true);
-    assert(withoutWell != null && withWell != null, 'vortex-pull: spawnAntlion returned null');
+    const withoutWell = runPhase(false);
+    const withWell = runPhase(true);
+    assert(withoutWell != null && withWell != null, 'vortex-pull: antlion burrowed mid-phase');
     if (failures > 0) { config.brutalTypesForce = null; return; }
-    // The well must pull the antlion meaningfully closer to the core than the
-    // chase-only control (which drifts it the other way toward the far target).
-    assert(withWell < withoutWell - 15,
+    // Identical chase both phases → the well must leave the antlion measurably
+    // closer to the core than the chase-only control.
+    assert(withWell < withoutWell - 10,
         'vortex did not pull the antlion toward its core (with well ' + Math.round(withWell) +
         'u from core vs ' + Math.round(withoutWell) + 'u without)');
 
