@@ -342,7 +342,7 @@ function recapCaptureHazards() {
 		if (h == null || h.x == null) {
 			continue;
 		}
-		var claim = (h._fb != null && h._fb.claim != null) ? h._fb.claim : null;
+		var claim = (h._claimColor != null) ? h._claimColor : null;
 		out.push([h.id, h.x, h.y, (h.angle != null ? h.angle : 0),
 			(h.railX != null ? h.railX : h.x), (h.railY != null ? h.railY : h.y),
 			(h.state != null ? h.state : null), (h.radius != null ? h.radius : null), claim]);

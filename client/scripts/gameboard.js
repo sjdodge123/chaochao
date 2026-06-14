@@ -1160,6 +1160,7 @@ function resetPlayers() {
 	for (var id in playerList) {
 		var player = playerList[id];
 		player.alive = true;
+		player.secondWindDown = false; // clear any interrupted Second Wind death-beat
 		player.deathMessage = null;
 		player.deathX = null;
 		player.deathY = null;
