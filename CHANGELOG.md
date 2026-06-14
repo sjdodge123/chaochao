@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.40.2 — 2026-06-14
+
 ### General
 
 - **Double-tap punch to lunge — now on dry land, not just water.** Tap punch twice quickly while holding a direction and your kart hops forward, the land version of the swim stroke you use to cross water. It's a quick repositioning move to dodge a hazard, scoot off sand, or duck a burn — *not* a way to go faster: the hop is short, it empties your whole stamina bar, and you're left slow and winded for a moment afterward, so a racer who didn't lunge will pull ahead. Like the swim stroke it's still a punch, so it shoves anyone you barge into. Speed-streaks and a whoosh sell the burst.
