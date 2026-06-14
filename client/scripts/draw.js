@@ -9272,6 +9272,16 @@ function buildHazardDrawers() {
             drawVortexWell(h.x, h.y, h.radius);
         };
     }
+    if (config.hazards.blinkFence != null) {
+        hazardDrawers[config.hazards.blinkFence.id] = function (h) {
+            drawBlinkFence(h.x, h.y, h.angle, h.state);
+        };
+    }
+    if (config.hazards.crusher != null) {
+        hazardDrawers[config.hazards.crusher.id] = function (h) {
+            drawCrusher(h.x, h.y, h.railX, h.railY, h.angle);
+        };
+    }
     // Boons share the hazard drawer registry (they live in the same client
     // hazardList). Their visual language is teal/helpful, the inverse of the
     // bumper-orange "this flings you" rule.
@@ -9720,6 +9730,138 @@ function drawVortexWell(x, y, radius) {
     gameContext.strokeStyle = cfg.color;
     gameContext.lineWidth = 2;
     gameContext.stroke();
+    gameContext.restore();
+}
+
+// A blink fence: an energy barrier strung between two pylons that blinks on a timed
+// cycle. `angle` (fixed, from the creation row) runs the beam from its anchor along
+// the pylon axis; `state` is the live netState — 0 open (beam off, faint dotted
+// guide), 1 warn (a flickering shimmer telegraph), 2 solid (a bright, blocking beam).
+// Cyan = the energy-barrier palette (distinct from bumper-orange and vortex-violet).
+function drawBlinkFence(x, y, angle, state) {
+    var cfg = config.hazards.blinkFence;
+    var rad = (angle || 0) * (Math.PI / 180);
+    var bx = x + Math.cos(rad) * cfg.width;
+    var by = y + Math.sin(rad) * cfg.width;
+    gameContext.save();
+    gameContext.lineCap = "round";
+    // Pylons (the emitters at each end) — always drawn.
+    for (var p = 0; p < 2; p++) {
+        var px = p === 0 ? x : bx, py = p === 0 ? y : by;
+        gameContext.beginPath();
+        gameContext.arc(px, py, 7, 0, 2 * Math.PI);
+        gameContext.fillStyle = "#1d3a44";
+        gameContext.fill();
+        gameContext.lineWidth = 2.5;
+        gameContext.strokeStyle = cfg.color;
+        gameContext.stroke();
+    }
+    if (state === 2) {
+        // Solid: a bright glowing beam (outer halo + core) — this blocks.
+        gameContext.globalAlpha = 0.35;
+        gameContext.strokeStyle = cfg.color;
+        gameContext.lineWidth = cfg.height + 8;
+        gameContext.beginPath(); gameContext.moveTo(x, y); gameContext.lineTo(bx, by); gameContext.stroke();
+        gameContext.globalAlpha = 1;
+        gameContext.strokeStyle = "#EAFBFF";
+        gameContext.lineWidth = cfg.height;
+        gameContext.beginPath(); gameContext.moveTo(x, y); gameContext.lineTo(bx, by); gameContext.stroke();
+    } else if (state === 1) {
+        // Warn: a flickering shimmer telegraph — still passable, your cue to commit or
+        // wait. Date.now drives the flicker; no game state needed.
+        var flick = 0.3 + 0.45 * (0.5 + 0.5 * Math.sin(Date.now() / 60));
+        gameContext.globalAlpha = flick;
+        gameContext.setLineDash([10, 8]);
+        gameContext.lineDashOffset = -(Date.now() / 40) % 18;
+        gameContext.strokeStyle = cfg.color;
+        gameContext.lineWidth = cfg.height;
+        gameContext.beginPath(); gameContext.moveTo(x, y); gameContext.lineTo(bx, by); gameContext.stroke();
+        gameContext.setLineDash([]);
+        gameContext.globalAlpha = 1;
+    } else {
+        // Open: a faint dotted guide so authors/players see where the beam will be.
+        gameContext.globalAlpha = 0.22;
+        gameContext.setLineDash([3, 11]);
+        gameContext.strokeStyle = cfg.color;
+        gameContext.lineWidth = 2;
+        gameContext.beginPath(); gameContext.moveTo(x, y); gameContext.lineTo(bx, by); gameContext.stroke();
+        gameContext.setLineDash([]);
+        gameContext.globalAlpha = 1;
+    }
+    gameContext.restore();
+}
+
+// A crusher: a heavy bolted steel BLOCK that slides along a rail (Thwomp). Drawn
+// deliberately chunky — a riveted metal body with a 3D bevel and a row of crushing
+// TEETH on its two slam faces — so it reads as a piston block, NOT a barrier/fence.
+// `railX/railY` is the rail origin and `angle` (fixed, from the creation row) the
+// slide direction (a recessed channel + a motor base plate mark the rail). `x,y` is
+// the live slab CENTER (smoothed); the block is broadside to the rail, so its slam
+// faces point along the slide axis.
+function drawCrusher(x, y, railX, railY, angle) {
+    var cfg = config.hazards.crusher;
+    var rad = (angle || 0) * (Math.PI / 180);
+    var dirX = Math.cos(rad), dirY = Math.sin(rad);            // along the rail
+    var hw = cfg.width / 2, hh = cfg.height / 2;
+    // Rail: a recessed steel channel from the anchor, with a motor base plate at the
+    // origin — mechanical hardware, not a dotted line.
+    gameContext.save();
+    gameContext.lineCap = "butt";
+    gameContext.strokeStyle = "rgba(58,61,64,0.55)";
+    gameContext.lineWidth = 7;
+    gameContext.beginPath();
+    gameContext.moveTo(railX, railY);
+    gameContext.lineTo(railX + dirX * cfg.railLength, railY + dirY * cfg.railLength);
+    gameContext.stroke();
+    gameContext.strokeStyle = "rgba(120,126,132,0.5)";
+    gameContext.lineWidth = 1.5;
+    gameContext.beginPath();
+    gameContext.moveTo(railX, railY);
+    gameContext.lineTo(railX + dirX * cfg.railLength, railY + dirY * cfg.railLength);
+    gameContext.stroke();
+    gameContext.translate(railX, railY);
+    gameContext.rotate(rad + Math.PI / 2);
+    gameContext.fillStyle = "#33363a";
+    gameContext.fillRect(-hw - 4, -8, cfg.width + 8, 16);      // base plate / motor housing
+    gameContext.restore();
+    // The block — centered on (x,y), broadside to the rail.
+    gameContext.save();
+    gameContext.translate(x, y);
+    gameContext.rotate(rad + Math.PI / 2);                     // long axis = perpendicular to rail; slam faces at y = +/-hh
+    // Crushing teeth on both slam faces (triangles pointing OUT along the slide axis).
+    gameContext.fillStyle = "#6c7176";
+    var teeth = 7, tw = cfg.width / teeth, tooth = 6;
+    for (var ti = 0; ti < teeth; ti++) {
+        var tx0 = -hw + ti * tw;
+        gameContext.beginPath();
+        gameContext.moveTo(tx0, -hh); gameContext.lineTo(tx0 + tw, -hh); gameContext.lineTo(tx0 + tw / 2, -hh - tooth);
+        gameContext.closePath(); gameContext.fill();
+        gameContext.beginPath();
+        gameContext.moveTo(tx0, hh); gameContext.lineTo(tx0 + tw, hh); gameContext.lineTo(tx0 + tw / 2, hh + tooth);
+        gameContext.closePath(); gameContext.fill();
+    }
+    // Beveled steel body (light top edge -> dark bottom along the thickness = 3D heft).
+    var grad = gameContext.createLinearGradient(0, -hh, 0, hh);
+    grad.addColorStop(0, "#c4c9ce");
+    grad.addColorStop(0.45, cfg.color);
+    grad.addColorStop(1, "#54585d");
+    gameContext.fillStyle = grad;
+    gameContext.fillRect(-hw, -hh, cfg.width, cfg.height);
+    gameContext.strokeStyle = "#303336";
+    gameContext.lineWidth = 2;
+    gameContext.strokeRect(-hw, -hh, cfg.width, cfg.height);
+    // Inset seam + corner rivets.
+    gameContext.strokeStyle = "rgba(48,51,54,0.6)";
+    gameContext.lineWidth = 1;
+    gameContext.strokeRect(-hw + 4, -hh + 4, cfg.width - 8, cfg.height - 8);
+    gameContext.fillStyle = "#3c4044";
+    var rvx = hw - 6, rvy = hh - 5;
+    var corners = [[-rvx, -rvy], [rvx, -rvy], [rvx, rvy], [-rvx, rvy]];
+    for (var ci = 0; ci < 4; ci++) {
+        gameContext.beginPath();
+        gameContext.arc(corners[ci][0], corners[ci][1], 2.2, 0, 2 * Math.PI);
+        gameContext.fill();
+    }
     gameContext.restore();
 }
 
@@ -10913,6 +11055,7 @@ function combatRowSegments(entry) {
         segs.push({ k: "thumb", id: entry.victimId });
         segs.push({ k: "text", text: entry.victimName, color: combatColorOf(entry.victimId, "#ffffff"), bold: false });
         if (entry.cause === "lava") { segs.push({ k: "text", text: "melted", color: "#9aa3ad", bold: false, small: true }); }
+        else if (entry.cause === "crush") { segs.push({ k: "text", text: "crushed", color: "#9aa3ad", bold: false, small: true }); }
     } else if (entry.type === "ability") {
         // Lead with the ability's own icon as the action marker (operator request),
         // falling back to the name only if the sprite isn't decoded yet.

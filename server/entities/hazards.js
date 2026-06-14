@@ -393,6 +393,235 @@ function vortexWellRadius(entry) {
 	return r;
 }
 
+// A blink fence: a laser barrier strung between two pylons that cycles on a
+// published rhythm — OPEN (passable) -> WARN (a shimmer telegraph, still passable)
+// -> SOLID (a wall you can't cross) -> back to OPEN. The framework's first TIMED
+// PASSABILITY GATE: collision turns on and off, so a kart only physically interacts
+// with it while it's solid. SOLID = a non-lethal BOUNCE (engine.bounceOffFence, the
+// rotated-segment cousin of bounceOffBoundry) rather than a lava-style burn: the
+// stated primitive is a passability gate, a bounce is recoverable, and a hidden-timing
+// DEATH from being shoved into a lit beam reads unfair — so the fence blocks, it
+// doesn't kill (place it over/near lava if you want the danger). Directional (the
+// barrier runs along the pylon axis). A thin rotated Rect like the bumper wall (so the
+// kart collides with the BEAM, not a disc); the phase runs on a timer in update(dt)
+// and ships on the framework's netState wire slot (like the geyser). `blocking`
+// (warn|solid) is the AI's cue to hold off crossing; only SOLID actually collides.
+//
+// Phases (also the netState values): 0 open, 1 warn, 2 solid.
+var FENCE_OPEN = 0, FENCE_WARN = 1, FENCE_SOLID = 2;
+class BlinkFence extends Rect {
+	constructor(x, y, angle, ownerId, roomSig) {
+		super(x, y, c.hazards.blinkFence.width, c.hazards.blinkFence.height, angle, c.hazards.blinkFence.color);
+		this.alive = true;
+		this.ownerId = ownerId;
+		this.roomSig = roomSig;
+		this.moveable = false;      // stationary — no engine motion hook
+		this.isFence = true;        // AI classifies the beam line (aiController)
+		this.id = c.hazards.blinkFence.id;
+		this.speed = 0;
+		this.phase = FENCE_OPEN;
+		this.netState = FENCE_OPEN; // shipped each tick (compressor.sendHazardUpdates)
+		this.blocking = false;      // warn|solid — AI steers clear (set in update)
+		this.timer = 0;             // seconds elapsed in the current phase
+		// Beam endpoints (anchor -> anchor + width along angle), consumed by handleHit
+		// (the bounce line) and the AI's repulsion field / path penalties — the same
+		// centerline contract the bumper wall exposes.
+		var rad = (this.angle || 0) * (Math.PI / 180);
+		this.ax = this.x;
+		this.ay = this.y;
+		this.bx = this.x + Math.cos(rad) * this.width;
+		this.by = this.y + Math.sin(rad) * this.width;
+	}
+	// Rotated-rect corners + true AABB — identical contract to the bumper wall (the
+	// base Rect treats width/height as far-corner coords, which only works for an
+	// axis-aligned, origin-anchored rect; and base getExtents drops the last vertex).
+	getVertices() {
+		var rad = (this.angle || 0) * (Math.PI / 180);
+		var dx = Math.cos(rad), dy = Math.sin(rad);
+		var nx = -dy * (this.height / 2), ny = dx * (this.height / 2);
+		var bx = this.x + dx * this.width, by = this.y + dy * this.width;
+		return [
+			{ x: this.x + nx, y: this.y + ny },
+			{ x: bx + nx, y: by + ny },
+			{ x: bx - nx, y: by - ny },
+			{ x: this.x - nx, y: this.y - ny }
+		];
+	}
+	getExtents() {
+		var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+		for (var i = 0; i < this.vertices.length; i++) {
+			var v = this.vertices[i];
+			if (v.x < minX) { minX = v.x; }
+			if (v.x > maxX) { maxX = v.x; }
+			if (v.y < minY) { minY = v.y; }
+			if (v.y > maxY) { maxY = v.y; }
+		}
+		return { minX, maxX, minY, maxY };
+	}
+	// Phase timer (per tick from gameBoard.updateHazards with dt). Walks the cycle and
+	// publishes the phase as netState; `blocking` flags warn+solid for the AI.
+	update(dt) {
+		if (this.alive === false) { return; }
+		this.timer += (dt || 0);
+		if (this.phase === FENCE_OPEN) {
+			if (this.timer >= c.hazards.blinkFence.openMs / 1000) { this.phase = FENCE_WARN; this.timer = 0; }
+		} else if (this.phase === FENCE_WARN) {
+			if (this.timer >= c.hazards.blinkFence.warnMs / 1000) { this.phase = FENCE_SOLID; this.timer = 0; }
+		} else { // FENCE_SOLID
+			if (this.timer >= c.hazards.blinkFence.solidMs / 1000) { this.phase = FENCE_OPEN; this.timer = 0; }
+		}
+		this.netState = this.phase;
+		this.blocking = (this.phase !== FENCE_OPEN);
+	}
+	// Solid beam = a bounce; open/warn are passable (no-op). Racers only (pucks,
+	// antlions and other hazards pass through). The bounce reverts the crossing and
+	// reflects the kart off the beam line (engine.bounceOffFence).
+	handleHit(object) {
+		if (this.phase !== FENCE_SOLID || !object.isPlayer || object.alive === false) { return; }
+		require('../engine.js').bounceOffFence(object, this, c.hazards.blinkFence.restitution);
+	}
+}
+
+// A crusher: a heavy slab that slides back and forth across a corridor on a rail —
+// a Thwomp. It rides the SAME parametric rail the moving bumper does, but owns its
+// motion via advance(dt) (so the slab keeps its fixed broadside orientation instead
+// of the rail code flipping `angle` to track direction). The slab is a rotated rect
+// CENTERED on the rail position, broadside to the rail (its flat face plows along the
+// slide axis) — collided against with the bumper wall's rotated-rect machinery.
+// Contact mid-rail is a hard directional SHOVE (a map-owned punch, like the bumper
+// wall); but the slab slamming home in the outer pinch zone — caught between the
+// crusher face and the boundary the author parks the far rail end against — is a
+// lethal PINCH. The map entry's (x,y) is the rail anchor (the slab's retracted rest)
+// and `angle` the slide direction. Static slab orientation, so it streams only its
+// rail position (3-field rows) — no streamAngle; the client derives the broadside
+// from the rail angle in the creation row. AI times the gap for free: it's railed
+// (h.moveable && h.rail), so aiController's moving-bumper rail-crossing logic and the
+// railCells (mild/timeable) path penalty already apply.
+class Crusher extends Rect {
+	constructor(x, y, rail, ownerId, roomSig) {
+		// Slab broadside to the rail: its long axis (width) is perpendicular to the
+		// slide. Base Rect builds vertices from x/y/width/height/angle, but we override
+		// getVertices to center the slab on (x,y) — so seed x/y as the rail anchor.
+		super(x, y, c.hazards.crusher.width, c.hazards.crusher.height, (rail.angle + 90), c.hazards.crusher.color);
+		this.alive = true;
+		this.ownerId = ownerId;
+		this.roomSig = roomSig;
+		this.moveable = true;       // advance(dt) drives it (engine.updateHazards)
+		this.isCrusher = true;
+		this.id = c.hazards.crusher.id;
+		this.rail = rail;           // slide path (railed kind: ships rail origin/angle)
+		this.railLength = rail.width;
+		this.speed = c.hazards.crusher.speed;
+		this.dir = 1;               // +1 toward the far (boundary) end, -1 retracting
+		this.t = 0;                 // distance along the rail (0 = anchor/rest)
+		this.punch = null;
+		// Slab orientation (perpendicular to the rail) is fixed for the round; cache the
+		// unit vectors and seed the centerline at the rest position.
+		var rad = this.angle * (Math.PI / 180);
+		this.slabDirX = Math.cos(rad); this.slabDirY = Math.sin(rad); // along the slab length
+		this.railDirX = Math.cos(rail.angle * (Math.PI / 180));
+		this.railDirY = Math.sin(rail.angle * (Math.PI / 180));
+		this.x = this.newX = rail.x; this.y = this.newY = rail.y;
+		this.refreshGeometry();
+	}
+	// Centered rotated-rect corners (the slab straddles its center; the base Rect /
+	// bumper wall anchor at one END). Built from newX/newY — the position the slab is
+	// MOVING TO this tick — so the collision pass (engine.broadBase runs after
+	// advance() but before move() commits x/y) tests the slab where it will be, exactly
+	// like players (Circle.testRect reads newX/newY). At construction newX==x.
+	getVertices() {
+		var hw = this.width / 2, hh = this.height / 2;
+		var dx = this.slabDirX, dy = this.slabDirY;   // along length
+		var nx = -dy, ny = dx;                          // across thickness
+		var cx = (this.newX != null) ? this.newX : this.x, cy = (this.newY != null) ? this.newY : this.y;
+		return [
+			{ x: cx - dx * hw - nx * hh, y: cy - dy * hw - ny * hh },
+			{ x: cx + dx * hw - nx * hh, y: cy + dy * hw - ny * hh },
+			{ x: cx + dx * hw + nx * hh, y: cy + dy * hw + ny * hh },
+			{ x: cx - dx * hw + nx * hh, y: cy - dy * hw + ny * hh }
+		];
+	}
+	getExtents() {
+		var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+		for (var i = 0; i < this.vertices.length; i++) {
+			var v = this.vertices[i];
+			if (v.x < minX) { minX = v.x; }
+			if (v.x > maxX) { maxX = v.x; }
+			if (v.y < minY) { minY = v.y; }
+			if (v.y > maxY) { maxY = v.y; }
+		}
+		return { minX, maxX, minY, maxY };
+	}
+	// Slab centerline (the long axis through the center) — the shove pushes a kart
+	// perpendicular off the nearest point on it, i.e. along the slide axis. Built from
+	// newX/newY to match getVertices (the slab's about-to-commit position).
+	refreshGeometry() {
+		var hw = this.width / 2;
+		var cx = (this.newX != null) ? this.newX : this.x, cy = (this.newY != null) ? this.newY : this.y;
+		this.ax = cx - this.slabDirX * hw; this.ay = cy - this.slabDirY * hw;
+		this.bx = cx + this.slabDirX * hw; this.by = cy + this.slabDirY * hw;
+		this.vertices = this.getVertices();
+	}
+	closestOnLine(px, py) {
+		var abx = this.bx - this.ax, aby = this.by - this.ay;
+		var len2 = abx * abx + aby * aby;
+		if (len2 < 1e-6) { return { x: this.ax, y: this.ay }; }
+		var t = ((px - this.ax) * abx + (py - this.ay) * aby) / len2;
+		if (t < 0) { t = 0; } else if (t > 1) { t = 1; }
+		return { x: this.ax + abx * t, y: this.ay + aby * t };
+	}
+	// Lightning speeds moving hazards up — scale the along-rail speed (like the rail
+	// bumper). See gameBoard.generateHazards.
+	scaleSpeed(mod) { this.speed *= mod; }
+	// Per-tick motion (engine.updateHazards). Step the rail param parametrically and
+	// reflect at the ends — the same overshoot-proof scheme the rail bumper uses
+	// (clamp the scalar t, not a 2-D position), so a long tick can't fling the slab
+	// off its rail. move() (gameBoard.updateHazards) commits newX/newY afterward.
+	advance(dt) {
+		this.t += this.dir * this.speed * dt * dt;
+		if (this.t >= this.railLength) { this.t = this.railLength; this.dir = -1; }
+		else if (this.t <= 0) { this.t = 0; this.dir = 1; }
+		this.newX = this.rail.x + this.railDirX * this.t;
+		this.newY = this.rail.y + this.railDirY * this.t;
+		this.velX = this.newX - this.x;
+		this.velY = this.newY - this.y;
+		// Refresh the collider to the new position NOW — engine.broadBase (checkCollisions)
+		// runs after this and before move() commits x/y, so the slab must already present
+		// its swept position or it would collide one tick behind.
+		this.refreshGeometry();
+	}
+	// Commit the rail step and re-derive the slab geometry (base Hazard.move only sets
+	// x/y; the rotated-rect collider also needs fresh vertices/centerline each tick).
+	move() {
+		this.x = this.newX; this.y = this.newY;
+		this.refreshGeometry();
+	}
+	update() {
+		if (this.alive === false) { return; }
+		this.move();
+	}
+	// Contact. Star-power / freshly-spawned-invuln karts are untouchable (the universal
+	// applyExplosionForce policy the vortex follows). Slamming home in the outer pinch
+	// zone (moving outward) CRUSHES; anywhere else it's a hard shove that flings the
+	// kart along the slide axis (escapable). Idempotent under the engine's up-to-twice
+	// handleHit-per-pair: killSelf no-ops once dead, the punch is guarded by punch==null.
+	handleHit(object) {
+		if (!object.isPlayer || object.alive === false) { return; }
+		if (object.isProtected && object.isProtected()) { return; }
+		if (object.hasStarPower && object.hasStarPower()) { return; }
+		if (this.dir > 0 && this.t >= this.railLength * c.hazards.crusher.pinchFraction) {
+			object.killSelf("crush");
+			return;
+		}
+		if (this.punch == null) {
+			var hit = this.closestOnLine(object.newX != null ? object.newX : object.x, object.newY != null ? object.newY : object.y);
+			this.punch = new Punch(hit.x, hit.y, c.hazards.crusher.attackRadius, c.hazards.crusher.color, this.ownerId, this.roomSig, c.hazards.crusher.punchBonus, false, null);
+			this.punch.mapOwned = true;
+			this.punch.type = "bumper";
+		}
+	}
+}
+
 // --- hazard-kind registry ------------------------------------------------------
 // Single source of truth for the map-authorable hazard kinds. Everything with
 // per-kind behavior keys off this: gameBoard.generateHazards builds via
@@ -497,6 +726,21 @@ registerHazardKind("vortexWell", {
 		return new VortexWell(entry.x, entry.y, vortexWellRadius(entry), c.hazards.vortexWell.color, mapID, roomSig);
 	}
 });
+registerHazardKind("blinkFence", {
+	railed: false,
+	directional: true, // the barrier runs along the pylon axis — needs a finite angle
+	build: function (entry, mapID, roomSig) {
+		return new BlinkFence(entry.x, entry.y, entry.angle, mapID, roomSig);
+	}
+});
+registerHazardKind("crusher", {
+	railed: true, // rides a HazardRail; ships the rail origin/angle on the wire
+	directional: true,
+	build: function (entry, mapID, roomSig) {
+		var rail = new HazardRail(entry.x, entry.y, c.hazards.crusher.railLength, c.hazards.crusher.height, entry.angle, c.hazards.crusher.color, mapID, roomSig);
+		return new Crusher(entry.x, entry.y, rail, mapID, roomSig);
+	}
+});
 
 // Antlion (brutal round 1014): a sand-dwelling chaser. It is NOT moveable in the
 // engine's sense — engine.updateHazards is rail-only and zeroes velocity for
@@ -566,7 +810,7 @@ class Thumper extends Hazard {
 }
 
 
-module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, Mine, VortexWell, vortexWellRadius, Antlion, Thumper, HAZARD_KINDS, BOON_KINDS, hazardKindById, registerHazardKind, registerBoonKind };
+module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, Mine, VortexWell, vortexWellRadius, BlinkFence, Crusher, Antlion, Thumper, HAZARD_KINDS, BOON_KINDS, hazardKindById, registerHazardKind, registerBoonKind };
 
 // Load the boon kinds AFTER module.exports is assigned: boons.js requires this
 // module for the Hazard base class + registerBoonKind, so it must see the fully
