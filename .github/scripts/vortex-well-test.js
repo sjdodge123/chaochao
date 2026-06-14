@@ -148,6 +148,19 @@ try {
         check(v.applyForce(star) === false && star.velX === 0, 'a Star Power kart is not pulled');
         const done = { isPlayer: true, alive: true, reachedGoal: true, x: 550, y: 400, velX: 0, velY: 0 };
         check(v.applyForce(done) === false && done.velX === 0, 'a finished kart is not pulled');
+
+        // Brutal-round entity interactions:
+        // - A ZOMBIE (infection round) is still an alive kart in playerList, so it is
+        //   pulled like any kart — consistent with gameBoard.applyExplosionForce, which
+        //   also knocks zombies around (it only skips protected/star-power).
+        const zombie = { isPlayer: true, alive: true, reachedGoal: false, isZombie: true, infected: true, x: 550, y: 400, velX: 0, velY: 0 };
+        check(v.applyForce(zombie) === true && zombie.velX < 0, 'a zombie (infection round) is pulled like any kart');
+        // - An ANTLION (antlion round) is a HAZARD, not a player, and is steered by
+        //   GameBoard.updateAntlionRound writing newX/newY directly (it never reads
+        //   velX/velY). The force zone only ever iterates playerList, but the !isPlayer
+        //   guard makes it robust even if one were passed: it is not pulled.
+        const antlion = { isAntlion: true, alive: true, x: 540, y: 400, velX: 0, velY: 0 };
+        check(v.applyForce(antlion) === false && antlion.velX === 0 && antlion.velY === 0, 'an antlion (a hazard, not a player) is not pulled by the well');
     }
 
     // ----------------------------------------------------------------------
