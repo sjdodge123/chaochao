@@ -149,6 +149,76 @@ function getAdjacency(map) {
     return adj;
 }
 
+// Author-placed barriers (engine.bounceOffBarriers) are solid segments the cell
+// graph doesn't otherwise know about — they block travel ACROSS a cell boundary,
+// not occupancy of a cell, so they're modelled as blocked adjacency EDGES, not
+// penalized cells. An edge u<->v is "barrier-crossed" when the straight line
+// between the two cell sites (the move the router prices and the bot drives) is
+// cut by a barrier segment. Routes apply a heavy SOFT penalty to those edges so
+// bots steer around the barrier's open ends, while a barrier sitting in the only
+// chokepoint never nulls the path (the bot still threads it and slides, as it does
+// physically). Cached per map id + cell count + barrier signature.
+function sideOf(ax, ay, bx, by, px, py) {
+    return (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+}
+function segsCross(p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y) {
+    var d1 = sideOf(p2x, p2y, p3x, p3y, p0x, p0y);
+    var d2 = sideOf(p2x, p2y, p3x, p3y, p1x, p1y);
+    var d3 = sideOf(p0x, p0y, p1x, p1y, p2x, p2y);
+    var d4 = sideOf(p0x, p0y, p1x, p1y, p3x, p3y);
+    return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
+}
+var barrierEdgeCache = new Map();
+function barrierSignature(map) {
+    var b = map.barriers;
+    if (!Array.isArray(b) || b.length === 0) { return "none"; }
+    var s = b.length + ":";
+    for (var i = 0; i < b.length; i++) {
+        var e = b[i];
+        if (e == null) { continue; }
+        s += (e.x1 | 0) + "," + (e.y1 | 0) + "," + (e.x2 | 0) + "," + (e.y2 | 0) + ";";
+    }
+    return s;
+}
+// Returns a Set of "u|v" cell-index pairs (both directions) whose site-to-site
+// crossing is cut by a barrier, or null if the map has no barriers.
+function getBarrierBlockedEdges(map) {
+    if (!map || !Array.isArray(map.cells) || !Array.isArray(map.barriers) || map.barriers.length === 0) {
+        return null;
+    }
+    var key = (map.id != null ? map.id : "anon") + ":" + map.cells.length + ":" + barrierSignature(map);
+    var cached = barrierEdgeCache.get(key);
+    if (cached !== undefined) { return cached; }
+    var adj = getAdjacency(map);
+    var neighbors = adj.neighbors;
+    var cells = map.cells;
+    var bars = map.barriers;
+    var blocked = new Set();
+    for (var u = 0; u < neighbors.length; u++) {
+        var su = cells[u] && cells[u].site;
+        if (su == null) { continue; }
+        var nb = neighbors[u];
+        for (var k = 0; k < nb.length; k++) {
+            var v = nb[k];
+            if (v < u) { continue; } // each undirected pair once
+            var sv = cells[v] && cells[v].site;
+            if (sv == null) { continue; }
+            for (var bi = 0; bi < bars.length; bi++) {
+                var bar = bars[bi];
+                if (bar == null) { continue; }
+                if (segsCross(su.x, su.y, sv.x, sv.y, bar.x1, bar.y1, bar.x2, bar.y2)) {
+                    blocked.add(u + "|" + v);
+                    blocked.add(v + "|" + u);
+                    break;
+                }
+            }
+        }
+    }
+    if (blocked.size === 0) { blocked = null; } // nothing crossed — treat as no barriers
+    barrierEdgeCache.set(key, blocked);
+    return blocked;
+}
+
 // Minimal binary min-heap of { node, cost }. A* / Dijkstra over ~250 cells is
 // cheap, but bots re-path repeatedly so a heap keeps it linearithmic.
 function Heap() {
@@ -280,6 +350,12 @@ function findPathToNearestGoal(map, point, options) {
     addPenalties(options.penaltySet, options.penaltyMult || 1);
     addPenalties(options.penaltySet2, options.penaltyMult2 || 1);
 
+    // Solid author barriers cut specific ADJACENCY EDGES (not cells): see
+    // getBarrierBlockedEdges. options.barrierEdges is that Set of "u|v" pairs and
+    // options.barrierMult the heavy soft penalty applied to crossing one.
+    var barrierEdges = options.barrierEdges || null;
+    var barrierMult = (options.barrierMult > 1) ? options.barrierMult : 1;
+
     // Optional explicit goal cells (voronoiId set/array). When given, the search
     // homes on THESE cells instead of GOAL-id tiles — used by the Bunker round,
     // where the goal is buried (no goal tiles exist) but bots must still path to
@@ -359,7 +435,10 @@ function findPathToNearestGoal(map, point, options) {
             var pen = (penalty && penalty[cells[v].site.voronoiId]) || 1;
             // Kart fits but it's a squeeze: take it only when no wider lane exists.
             var tight = (doors[k] < MIN_DOORWAY) ? TIGHT_DOORWAY_PENALTY : 1;
-            var nc = cost[u] + step * tileWeight(cells[v].id) * cellJitter(cells[v].site.voronoiId) * pen * tight;
+            // Crossing a solid barrier between these two cells: heavy soft penalty so
+            // the route prefers going around the barrier's ends.
+            var barr = (barrierMult > 1 && barrierEdges != null && barrierEdges.has(u + "|" + v)) ? barrierMult : 1;
+            var nc = cost[u] + step * tileWeight(cells[v].id) * cellJitter(cells[v].site.voronoiId) * pen * tight * barr;
             if (nc < cost[v]) {
                 cost[v] = nc;
                 geo[v] = geo[u] + step;
@@ -524,6 +603,7 @@ function computeMapParTime(map) {
 module.exports = {
     getAdjacency: getAdjacency,
     buildAdjacency: buildAdjacency,
+    getBarrierBlockedEdges: getBarrierBlockedEdges,
     edgeSampleOrigins: edgeSampleOrigins,
     KART_WIDTH: KART_WIDTH,
     MIN_DOORWAY: MIN_DOORWAY,
