@@ -445,6 +445,14 @@ class Player extends Circle {
 			|| currentState == c.stateMap.lobby || currentState == c.stateMap.gated);
 		if (!playState || this.onWater || this.isZombie || !this.canSpendStamina()) { this.lungePending = false; return; }
 		var dir = this.getMoveDir();
+		if (dir == null && this.isAI) {
+			// Bots have no move keys (getMoveDir reads them), so lunge along the steer
+			// carrot (targetDirX/Y) — the same fallback the water swim stroke uses. The
+			// AI's avoidance fields have already bent that vector away from threats, so a
+			// tactical dodge-lunge naturally pushes off the puck/zombie/antlion.
+			var tdm = Math.sqrt(this.targetDirX * this.targetDirX + this.targetDirY * this.targetDirY);
+			if (tdm > 0.0001) { dir = { x: this.targetDirX / tdm, y: this.targetDirY / tdm }; }
+		}
 		if (dir == null) { return; } // no held direction yet — wait within the freshness window
 		this.lungePending = false;
 		// A fast tap-tap can fire the lunge while tap-1's charge is still live (it runs

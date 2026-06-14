@@ -178,6 +178,8 @@ function newBotState(profile) {
         escapeStage: 0,    // 1 = gentle (relax+wander-kill), 2 = committed (thread-or-die)
         heldAbilityId: null,// which ability the bot is currently holding
         abilityHeldSince: 0,// ms: when it picked up the held ability (hold-timeout)
+        lastLungeAt: 0,     // ms: last tactical land-lunge (rate-limit + telemetry)
+        lastLungeWhy: null, // last lunge trigger tag (debug/telemetry)
         pathSeed: 1 + Math.floor(Math.random() * 1e9), // per-bot route-diversity seed
         // Personality knobs (0..1 unless noted).
         skill: clamp01(pick('skill', 0.7) + jitter), // speed + precision + reaction
@@ -560,6 +562,25 @@ var ZOMBIE_AVOID_RADIUS = 95;   // px: non-zombies steer away from zombies (cont
 var ZOMBIE_AVOID_STRENGTH = 2.1;
 var PUCK_AVOID_RADIUS = 115;    // px: the hockey puck hits hard — give it room
 var PUCK_AVOID_STRENGTH = 2.6;
+// --- Tactical land lunge (double-tap dash, c.landLunge) ---
+// A lunge is a short, expensive burst: it brakes then throws the kart along its steer
+// vector, empties the stamina bar, and locks regen (a NET slowdown afterward). So bots
+// only fire it when the instant displacement is worth the cost: bursting out of slow
+// sand, an emergency redirect off an ice slide into lava, shoving clear of a contact
+// threat (puck/zombie/antlion), or a final pounce across the finish. Stamina + the
+// post-lunge regen lock self-rate-limit it to ~once per few seconds; LUNGE_MIN_SKILL
+// keeps the clumsiest bots from using it so the field still varies.
+var LUNGE_MIN_SKILL = 0.4;       // bots below this skill don't lunge tactically
+var LUNGE_SAFE_PROBE = 58;       // px: a dodge-lunge is suppressed if lava OR ice lies within this along its line
+var LUNGE_PUCK_RANGE = 135;      // px: dodge the puck when it's this close and inbound
+var LUNGE_ZOMBIE_RANGE = 92;     // px: shove clear of a zombie about to make contact
+var LUNGE_ANTLION_RANGE = 88;    // px: hop off an antlion bearing down
+// NOTE: bots lunge ONLY to dodge contact threats (above). ai-fitness A/B retired every
+// "use it to travel" trigger — sand-escape, ice-redirect, goal-dash all made bots finish
+// WORSE (Crossroads/IcyLake regressed, FastAndSlow flat-with-freezes). The lunge is a NET
+// slowdown (empties the bar + 1.2s regen lock), so spending it for speed always loses; only
+// a survival dodge (death/infection avoided) is worth the cost, and that never fires on a
+// plain race so it can't regress normal racing.
 // Telegraphed strike zones (Orbital Beam line, lava-explosion aimer): these mark
 // ground that is ABOUT to become deadly (lava/burn), so a bot steers out of the
 // marked area during the warn-up the same way it avoids live lava.
@@ -1367,6 +1388,84 @@ function decideAttack(bot, ctx, nav) {
     decidePunch(bot, ctx);
 }
 
+// Nearest living antlion to the bot (hazardList entries flagged isAntlion), {hazard,dist}.
+function nearestAliveAntlion(bot, ctx) {
+    var best = null, bd = Infinity;
+    var hl = ctx.hazardList;
+    for (var id in hl) {
+        var h = hl[id];
+        if (h == null || h.alive === false || !h.isAntlion) { continue; }
+        var d = mag(h.x - bot.x, h.y - bot.y);
+        if (d < bd) { bd = d; best = h; }
+    }
+    return best == null ? null : { hazard: best, dist: bd };
+}
+
+// Tactical land lunge: arm a double-tap dash (bot.lungePending) when the instant burst is
+// worth blowing the whole stamina bar. tryLandLunge (player.update, same tick) consumes the
+// arm and lunges along the bot's steer vector. A lunge brakes, throws a short burst, empties
+// the bar and locks regen (a NET slowdown after) — so a bot spends it ONLY to shove clear of
+// a contact threat (zombie/antlion/puck), where avoiding a death/infection is worth the lost
+// beat of speed. (ai-fitness A/B retired the sand-escape/ice/goal-dash uses: all made bots
+// finish WORSE — the net-slowdown cost outweighs the burst. See the constants note.)
+// Self-rate-limited by the stamina gate + post-lunge regen lock; LUNGE_MIN_SKILL keeps the
+// clumsiest bots from using it so the field still varies.
+// True if a lunge along (dx,dy) from the bot lands on GRIPPY ground out to
+// LUNGE_SAFE_PROBE — no lava/empty (would burst into the fire) and no ice (would skid the
+// bot off its line at speed). This is the gate that keeps a sand-escape on an ice/lava-
+// fringed map (the IcyLake case) from flinging a bot into the lava or onto an unsteerable
+// ice sheet. The lunge runs along the steer carrot, already bent away from lava, so a
+// genuine escape onto solid ground passes while a burst toward danger is suppressed.
+function lungeLandsSafe(bot, ctx, dx, dy) {
+    for (var d = 18; d <= LUNGE_SAFE_PROBE; d += 12) {
+        var px = bot.x + dx * d, py = bot.y + dy * d;
+        if (isLavaAt(ctx, px, py)) { return false; }
+        if (nearestTileId(ctx, px, py) === ctx.iceId) { return false; }
+    }
+    return true;
+}
+
+function decideLunge(bot, ctx) {
+    var L = c.landLunge;
+    if (L == null || bot.isZombie || bot.onWater || bot.onIce) { return; }
+    if (bot.ai.skill < LUNGE_MIN_SKILL) { return; }
+    if (bot.stamina < c.punchStamina.max * L.minStaminaFrac) { return; } // mirror the human rested gate
+    var steer = mag(bot.targetDirX, bot.targetDirY);
+    if (steer < 0.05) { return; } // no steer vector to lunge along
+    var now = Date.now();
+    if (now - (bot.ai.lastLungeAt || 0) < L.recoverMs) { return; } // floor (the empty bar already gates)
+    var ndx = bot.targetDirX / steer, ndy = bot.targetDirY / steer; // unit lunge direction
+    var why = null;
+
+    // Dodge a contact threat closing in: zombie (contact infects) > antlion > puck. The steer
+    // is already repulsion-bent away from the threat, so lunging along it shoves clear — a
+    // survival move where the burst is worth the net-slowdown cost (a lost beat of speed beats
+    // a death/infection). These are the ONLY bot lunge triggers: ai-fitness showed using it to
+    // escape sand or dash to the goal makes bots finish WORSE (the net-slowdown cost outweighs
+    // the burst), so bots keep the lunge for survival, not travel.
+    if (ctx.infection && !bot.isZombie && !bot.infected) {
+        var z = nearestMatch(bot, ctx.players, isZombieP);
+        if (z != null && z.dist < LUNGE_ZOMBIE_RANGE) { why = 'zombie'; }
+    }
+    if (why == null) {
+        var al = nearestAliveAntlion(bot, ctx);
+        if (al != null && al.dist < LUNGE_ANTLION_RANGE) { why = 'antlion'; }
+    }
+    if (why == null && ctx.hockey && ctx.puck != null) {
+        var pd = mag(ctx.puck.x - bot.x, ctx.puck.y - bot.y);
+        // closing = the puck's velocity points toward the bot
+        var closing = ((ctx.puck.velX || 0) * (bot.x - ctx.puck.x) + (ctx.puck.velY || 0) * (bot.y - ctx.puck.y)) > 0;
+        if (pd < LUNGE_PUCK_RANGE && closing) { why = 'puck'; }
+    }
+
+    if (why == null) { return; }
+    if (!lungeLandsSafe(bot, ctx, ndx, ndy)) { return; } // only lunge onto solid, grippy ground
+    bot.lungePending = true;
+    bot.lungePendingAt = now;
+    bot.ai.lastLungeAt = now;
+    bot.ai.lastLungeWhy = why;
+}
+
 function steerBot(bot, ctx, dt) {
     var ai = bot.ai || (bot.ai = newBotState(bot.profile));
 
@@ -1743,7 +1842,10 @@ function steerBot(bot, ctx, dt) {
     bot.braking = braking;
 
     // Combat & abilities (may override bot.angle to an 8-way aim and set bot.attack).
-    decideAttack(bot, ctx, { sharpTurn: sharpTurn, lavaAhead: fl.brake, braking: braking, waterAhead: waterAhead });
+    var nav = { sharpTurn: sharpTurn, lavaAhead: fl.brake, braking: braking, waterAhead: waterAhead };
+    decideAttack(bot, ctx, nav);
+    // Tactical land lunge: may arm bot.lungePending for tryLandLunge to consume this tick.
+    decideLunge(bot, ctx);
 }
 
 // Per-gate launch geometry, agnostic to which edge the gate hugs. A gate is thin
@@ -2150,5 +2252,7 @@ module.exports._test = {
     raceLeader: raceLeader,
     rivalsAhead: rivalsAhead,
     lavaNear: lavaNear,
-    blindfoldWorthIt: blindfoldWorthIt
+    blindfoldWorthIt: blindfoldWorthIt,
+    decideLunge: decideLunge,
+    lungeLandsSafe: lungeLandsSafe
 };
