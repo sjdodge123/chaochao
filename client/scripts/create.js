@@ -1381,14 +1381,6 @@ function editorBoonOnWater(x, y) {
     var vid = cellIdFromPoint(x, y);
     return vid != null && tileIdByVid[vid] === config.tileMap.water.id;
 }
-// As editorBoonOnWater, for ice cells — the painter adds the dark contrast halo so a
-// slipstream stays legible on near-white ice (matches draw.js boonOnIce).
-function editorBoonOnIce(x, y) {
-    if (config == null || config.tileMap == null || config.tileMap.ice == null) { return false; }
-    if (typeof cellIdFromPoint !== "function" || tileIdByVid == null) { return false; }
-    var vid = cellIdFromPoint(x, y);
-    return vid != null && tileIdByVid[vid] === config.tileMap.ice.id;
-}
 // Recharge Spring painter (the rechargeSpring `paint` hook) — mirrors the in-game
 // look (draw.js drawRechargeSpring). On land: faint green footprint + ring + green
 // restore cross. On water: the bubbling-spring variant (white footprint, foam ripple
@@ -1453,7 +1445,6 @@ function paintSlipstreamShape(ctx, kind, x, y, angle, ringColor) {
     var rad = (angle || 0) * (Math.PI / 180);
     var w = cfg.width, hgt = cfg.height;
     var onWater = editorBoonOnWater(x, y);
-    var onIce = !onWater && editorBoonOnIce(x, y);
     var halo = "rgba(10,40,55,0.6)";
     ctx.save();
     ctx.translate(x, y);
@@ -1484,14 +1475,14 @@ function paintSlipstreamShape(ctx, kind, x, y, angle, ringColor) {
             ctx.moveTo(x0, ly);
             ctx.lineTo(x1, ly);
         }
-        if (onIce) { ctx.strokeStyle = halo; ctx.lineWidth = 6; ctx.stroke(); }
+        ctx.strokeStyle = halo; ctx.lineWidth = 6; ctx.stroke();
         ctx.strokeStyle = stroke; ctx.lineWidth = 3; ctx.stroke();
         ctx.setLineDash([]);
         ctx.beginPath();
         ctx.moveTo(w / 2 - 22, ly - 7);
         ctx.lineTo(w / 2 - 10, ly);
         ctx.lineTo(w / 2 - 22, ly + 7);
-        if (onIce) { ctx.strokeStyle = halo; ctx.lineWidth = 6; ctx.stroke(); }
+        ctx.strokeStyle = halo; ctx.lineWidth = 6; ctx.stroke();
         ctx.strokeStyle = stroke; ctx.lineWidth = 3; ctx.stroke();
     }
     ctx.restore();
