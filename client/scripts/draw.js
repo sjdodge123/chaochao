@@ -7280,7 +7280,17 @@ function drawAbilityIndicator(x, y, player) {
         case config.tileMap.abilities.swap.id:
         case config.tileMap.abilities.bombTrigger.id:
         default:
-            drawArmedRing(x, y, player.color, player.radius);
+            // Size the armed ring off the SAME skin-scaled radius the team underglow
+            // uses (drawTeamUnderglow: radius * CART_SKIN_VISUAL_SCALE + 5), not the
+            // raw radius — otherwise on skinned/large karts the solid team-colour ring
+            // grows but the dashed ability ring doesn't, the two concentric rings cross,
+            // and "this kart holds an ability" becomes unreadable against the team ring.
+            // When the player is on a team, push the ring out enough to leave a clear
+            // annular gap OUTSIDE the team underglow so the two never read as one band.
+            var skinScale = (cartSkinPainter(player.cart) != null) ? CART_SKIN_VISUAL_SCALE : 1;
+            var onTeam = (player.teamId != null && typeof teamInfo !== "undefined" && teamInfo != null && !player.infected);
+            var armedRadius = player.radius * skinScale + (onTeam ? 4 : 0);
+            drawArmedRing(x, y, player.color, armedRadius);
             break;
     }
 }
@@ -7393,11 +7403,12 @@ function drawCutAimer(x, y, angle, color) {
 }
 
 // "Ability armed" indicator for swap / bomb-trigger / anything else held: a
-// slowly rotating dashed ring that pulses, in the player's colour. Sized off the
-// kart radius so it orbits OUTSIDE the local-player halo (which sits at
-// radius+5 and glows past it) — otherwise the two same-coloured rings merged
-// into one smear when you held an ability. A thin dark backing keeps the dashes
-// legible where they cross the halo's glow.
+// slowly rotating dashed ring that pulses, in the player's colour. The caller
+// passes an already skin-scaled (and, in team modes, outward-nudged) radius; the
+// internal +9 keeps it orbiting OUTSIDE the local-player halo (which sits at
+// radius+5 and glows past it) and outside the team underglow — otherwise the
+// rings merged into one smear when you held an ability. A thin dark backing keeps
+// the dashes legible where they cross the halo's glow.
 function drawArmedRing(x, y, color, radius) {
     var now = Date.now();
     var r = (radius != null ? radius : 6) + 9;
