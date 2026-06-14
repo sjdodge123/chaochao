@@ -307,6 +307,7 @@ class GameBoard {
 				_engine.checkCollideCells(this.playerList[player], this.currentMap);
 				_engine.bounceOffEmptyCells(this.playerList[player], this.currentMap);
 				_engine.bounceOffStoneEdges(this.playerList[player], this.currentMap);
+				_engine.bounceOffBarriers(this.playerList[player], this.currentMap);
 				_engine.bounceZombieOffWater(this.playerList[player], this.currentMap);
 			}
 			// The spawn pad is a safe zone (force-shield against bomb/ice/cut knockback).
@@ -383,6 +384,7 @@ class GameBoard {
 			_engine.checkCollideCells(this.playerList[player], this.currentMap);
 			_engine.bounceOffEmptyCells(this.playerList[player], this.currentMap);
 			_engine.bounceOffStoneEdges(this.playerList[player], this.currentMap);
+			_engine.bounceOffBarriers(this.playerList[player], this.currentMap);
 			_engine.bounceZombieOffWater(this.playerList[player], this.currentMap);
 			objectArray.push(this.playerList[player]);
 		}
@@ -2771,7 +2773,7 @@ class GameBoard {
 		// a cell that random tiles / abilities / heatwave just turned to lava. Empty
 		// in FFA modes (generateBonusOrbs guards on isTeamsMode).
 		this.bonusOrbs = this.generateBonusOrbs();
-		this.newMapPayload = { id: this.currentMap.id, abilities: abilityGen, round: this.round, randomTiles: randomGen, brutalRoundConfig: this.brutalConfig, hazards: compressor.newHazards(this.hazardList), heatwave: heatwaveGen, bonusOrbs: this.bonusOrbs, currentState: currentState };
+		this.newMapPayload = { id: this.currentMap.id, abilities: abilityGen, round: this.round, randomTiles: randomGen, brutalRoundConfig: this.brutalConfig, hazards: compressor.newHazards(this.hazardList), heatwave: heatwaveGen, bonusOrbs: this.bonusOrbs, barriers: (this.currentMap.barriers || null), currentState: currentState };
 		messenger.messageRoomBySig(this.roomSig, "newMap", this.newMapPayload);
 	}
 	// Team-modes only: choose 1-2 floating bonus-orb spawn points on the current map.

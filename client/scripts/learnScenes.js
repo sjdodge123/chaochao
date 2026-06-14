@@ -455,6 +455,61 @@ var LearnAnim = (function () {
         kart(ctx, p.x, p.y, p.radius, BLUE);
     };
 
+    SCENES["barrier"] = function (s) {
+        // A solid map barrier: a kart drives into a wall, can't pass, and slides
+        // down along its face — the block + slide the editor's fence/wall tool adds.
+        var ctx = s.ctx;
+        floor(ctx, "dirt.png", 60);
+        var p = s.p; p.radius = 12; p.alive = true; p.surface = "normal";
+        var wallX = W * 0.64;
+        if (p.x == null) { p.x = -20; p.y = H * 0.28; }
+        var step = 70 * (s.dt / 1000) * 1.7;
+        if (p.x < wallX - p.radius) {
+            p.x += step;
+            if (p.x > wallX - p.radius) { p.x = wallX - p.radius; }
+        } else {
+            p.x = wallX - p.radius;       // blocked: can't cross
+            p.y += step;                  // slides along the face
+            if (p.y > H + 22) { p.x = -20; p.y = H * 0.28; }
+        }
+        // A concrete Jersey barrier (the "wall" style): grey slab, hazard-striped
+        // crown, modular seams and a crack or two.
+        var top = 6, bot = H - 6, halfW = 9, cx = wallX;
+        ctx.save();
+        ctx.fillStyle = "#bcc0c6";
+        ctx.fillRect(cx - halfW, top, halfW * 2, bot - top);
+        ctx.save();
+        ctx.beginPath(); ctx.rect(cx - halfW, top, halfW * 2, bot - top); ctx.clip();
+        // sloped-profile lips (left/right edges in shadow, since it runs vertically)
+        ctx.fillStyle = "#8e939a";
+        ctx.fillRect(cx - halfW, top, 2.5, bot - top);
+        ctx.fillRect(cx + halfW - 3, top, 3, bot - top);
+        // hazard stripe band down the crown
+        ctx.save();
+        ctx.beginPath(); ctx.rect(cx - 4.5, top, 9, bot - top); ctx.clip();
+        ctx.fillStyle = "#26262a"; ctx.fillRect(cx - 4.5, top, 9, bot - top);
+        ctx.fillStyle = "#e8b800";
+        for (var yy = top - 18; yy < bot + 18; yy += 18) {
+            ctx.beginPath();
+            ctx.moveTo(cx - 4.5, yy);
+            ctx.lineTo(cx - 4.5, yy + 9);
+            ctx.lineTo(cx + 4.5, yy + 9 + 9);
+            ctx.lineTo(cx + 4.5, yy + 9);
+            ctx.closePath(); ctx.fill();
+        }
+        ctx.restore();
+        // a seam + a crack
+        ctx.strokeStyle = "rgba(70,72,78,0.45)"; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(cx - halfW, (top + bot) / 2); ctx.lineTo(cx + halfW, (top + bot) / 2); ctx.stroke();
+        ctx.strokeStyle = "rgba(45,47,52,0.62)"; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(cx - halfW + 1, top + 8); ctx.lineTo(cx - 2, top + 16); ctx.lineTo(cx + 4, top + 22); ctx.stroke();
+        ctx.restore();
+        ctx.strokeStyle = "rgba(60,62,68,0.55)"; ctx.lineWidth = 1;
+        ctx.strokeRect(cx - halfW, top, halfW * 2, bot - top);
+        ctx.restore();
+        kart(ctx, p.x, p.y, p.radius, BLUE);
+    };
+
     SCENES["lavaBurn"] = function (s) {
         floor(s.ctx, "lava.png", 80);
         var p = s.p; p.radius = 12; p.alive = true; p.surface = "normal";

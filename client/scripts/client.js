@@ -938,6 +938,10 @@ function registerConnectionHandlers(server) {
 		// Bonus orbs (team modes) ride in the map payload — set synchronously so a
 		// late frame before the .then() resolves can't render a stale prior-round set.
 		if (typeof setBonusOrbs === "function") { setBonusOrbs(payload.bonusOrbs); }
+		// Author-placed barriers (fence/wall) ride the payload as static segments —
+		// set synchronously (same microtask gotcha as bonus orbs) so a frame before
+		// the .then() resolves can't draw a prior round's fences on the new terrain.
+		if (typeof setBarriers === "function") { setBarriers(payload.barriers); }
 		$.when.apply($, promises).then(function () {
 			currentState = payload.currentState;
 			loadNewMap(payload.id);

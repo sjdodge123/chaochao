@@ -1318,6 +1318,19 @@ function setBonusOrbs(orbs) {
 		bonusOrbList.push({ x: orbs[i].x, y: orbs[i].y, collected: orbs[i].collected === true, popAt: 0 });
 	}
 }
+// Author-placed barriers (fence/wall segments) ride the newMap payload as static
+// geometry — purely rendered client-side (collision is server-authoritative). The
+// list is replaced each round (cleared when the payload carries none).
+var mapBarriers = [];
+function setBarriers(barriers) {
+	mapBarriers = [];
+	if (barriers == null) { return; }
+	for (var i = 0; i < barriers.length; i++) {
+		var b = barriers[i];
+		if (b == null) { continue; }
+		mapBarriers.push({ x1: b.x1, y1: b.y1, x2: b.x2, y2: b.y2, style: b.style || "wall" });
+	}
+}
 
 function armHeatwave(payload, state) {
 	heatwaveScorch = [];

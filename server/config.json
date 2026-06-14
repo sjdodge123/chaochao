@@ -556,6 +556,23 @@
             "currentSpeed": 190
         }
     },
+    "barriers": {
+        "_doc": "Author-placed solid obstacles from the editor's 2-point tool. A barrier is a {x1,y1,x2,y2,style} line segment players can't pass through but slide along — the SAME deflection as the water/lava stone seam (engine.js bounceOffBarriers). Unlike hazards/boons these are NOT entities: they live in the map's own top-level `barriers` array (sibling of `hazards`), are precomputed into a segment list for collision, and ride the newMap payload raw. `style` only chooses the renderer (client draw.js / editor create.js); collision is identical for every style. maxCount/maxLength bound abuse at the validation boundary.",
+        "maxCount": 60,
+        "maxLength": 900,
+        "styles": {
+            "fence": {
+                "color": "#b07a3c",
+                "postColor": "#8a5a28",
+                "thickness": 6
+            },
+            "wall": {
+                "color": "#9aa0a8",
+                "edgeColor": "#5b616b",
+                "thickness": 12
+            }
+        }
+    },
     "lobbyWaitTime": 5,
     "gatedWaitTime": 9,
     "newRaceWaitTime": 10,
