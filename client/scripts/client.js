@@ -1620,6 +1620,23 @@ function registerCombatHandlers(server) {
 		}
 
 	});
+	server.on("landLunge", function (payload) {
+		// Double-tap punch dash on solid ground. The lunge also fires a normal "punch"
+		// event (knockback + melee thwack + the cart's forward-lunge swing), so here we
+		// only add the dash-specific cues: speed-streak lines + an airy whoosh, plus a
+		// firmer rumble pulse for the local luncher so the burst is felt, not just heard.
+		if (payload == null) { return; }
+		var ownerId = payload.id;
+		var owner = playerList[ownerId];
+		if (owner == null) { return; }
+		if (typeof spawnLungeEffect === "function") { spawnLungeEffect(owner, payload.dx, payload.dy); }
+		if (typeof playLungeWhoosh === "function" && typeof antlionSfxLevel === "function") {
+			playLungeWhoosh(antlionSfxLevel(owner.x, owner.y));
+		}
+		if (typeof padPulseForId === "function" && typeof isLocalId === "function" && isLocalId(ownerId)) {
+			padPulseForId(ownerId, 0.6, 0.4, 200);
+		}
+	});
 	server.on("punchClash", function (payload) {
 		// Two players countered each other — both got flung back, neither landed the
 		// hit. A bright parry flash at the midpoint sells the "clang". The two swing

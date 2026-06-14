@@ -5315,6 +5315,58 @@ function spawnPunchEffect(punch) {
     }
 }
 
+// Land-lunge dash streak: a few tapered speed lines trailing BEHIND the kart along
+// its burst direction, fading fast. Seeded by the server "landLunge" event; the
+// lunge's own punch already pops a shockwave, so this only adds the "whoosh" sense
+// of motion. Direction comes from the kart's velocity (the impulse just snapped it
+// to top speed in the held direction); falls back to facing if barely moving.
+function spawnLungeEffect(owner, dirX, dirY) {
+    if (owner == null) { return; }
+    var dx, dy;
+    var dm = (dirX != null && dirY != null) ? Math.sqrt(dirX * dirX + dirY * dirY) : 0;
+    if (dm > 0.001) {
+        dx = dirX / dm; dy = dirY / dm; // server-sent lunge direction (most accurate)
+    } else {
+        var vx = owner.velX || 0, vy = owner.velY || 0;
+        var m = Math.sqrt(vx * vx + vy * vy);
+        if (m > 1) { dx = vx / m; dy = vy / m; }
+        else { var a = (owner.angle || 0) * Math.PI / 180; dx = Math.cos(a); dy = Math.sin(a); }
+    }
+    var ox = owner.x, oy = owner.y;
+    var color = owner.color || "white";
+    var len = 46;
+    addEffect({
+        x: ox,
+        y: oy,
+        maxAge: 240,
+        draw: function (ctx, t) {
+            var fade = 1 - t;
+            ctx.save();
+            ctx.lineCap = "round";
+            // three offset streak lines fanned slightly across the dash axis
+            var perpX = -dy, perpY = dx;
+            for (var i = -1; i <= 1; i++) {
+                var sx = ox + perpX * i * 7;
+                var sy = oy + perpY * i * 7;
+                var headX = sx + dx * len * (0.25 + 0.75 * t);   // lines streak outward as they fade
+                var headY = sy + dy * len * (0.25 + 0.75 * t);
+                var tailX = headX - dx * len * 0.7;
+                var tailY = headY - dy * len * 0.7;
+                ctx.globalAlpha = fade * (i === 0 ? 0.7 : 0.4);
+                ctx.strokeStyle = color;
+                ctx.lineWidth = (i === 0 ? 5 : 3) * fade + 1;
+                ctx.shadowColor = color;
+                ctx.shadowBlur = glowBlur(10 * fade);
+                ctx.beginPath();
+                ctx.moveTo(tailX, tailY);
+                ctx.lineTo(headX, headY);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+    });
+}
+
 // Parry "clang" when two punches clash — a bright gold star-burst plus a double
 // shockwave at the midpoint, so a successful counter reads distinctly from a
 // normal landed hit (which is a single white ring via spawnHitEffect).

@@ -22,7 +22,8 @@
 //     "Resourceful"). Tuning lives in server/config.json.
 //   • PUNCH entry: omnidirectional radial hit (hitbox at the puncher's position;
 //     no aim). Momentum-scaled bonus + hold-to-charge ring + stamina + overcharge
-//     + facing-based clashes. Reconcile here if player.js / config punch* changes.
+//     + facing-based clashes + the full-bar double-tap land lunge (config.landLunge).
+//     Reconcile here if player.js / config punch*/landLunge changes.
 //   • Each entry has `anim`: a scene name registered in learnScenes.js. Add a
 //     card → add a SCENES[name] there too. Scenes reuse the REAL game art (kart
 //     disc, fire sprites, bumper disc+ring, terrain PNGs, gold goal).
@@ -78,7 +79,7 @@
                 {
                     id: "punching", name: "Punching", icon: emoji("👊"), anim: "punch",
                     blurb: "Timing and positioning, not mashing.",
-                    detail: "Punching is about commitment, not how fast you tap. A swing pops out around your kart and shoves anyone touching it — no aim, just position — and lands as hard as the speed you carry into the hit, which a glowing halo previews. Hold the button to wind up a heavier, telegraphed haymaker, but overcharge and it fizzles, leaving you winded. Every swing drains a stamina ring, so mashing runs you dry, and punches clash: charge into a rival who's swinging back and an even match sends both flying, while a clearly stronger punch bowls straight through a weak one."
+                    detail: "Punching is about commitment, not how fast you tap. A swing pops out around your kart and shoves anyone touching it — no aim, just position — and lands as hard as the speed you carry into the hit, which a glowing halo previews. Hold the button to wind up a heavier, telegraphed haymaker, but overcharge and it fizzles, leaving you winded. Every swing drains a stamina ring, so mashing runs you dry, and punches clash: charge into a rival who's swinging back and an even match sends both flying, while a clearly stronger punch bowls straight through a weak one. There's one burst move: with a full stamina bar, double-tap punch while holding a direction to LUNGE — a forward dash, the same stroke you use to swim, but on dry land. It empties the whole bar and leaves you winded, so it's a one-shot escape or closer, not something you spam."
                 },
                 {
                     id: "fire", name: "Fire & Killstreaks", icon: tex("redFire.png"), anim: "fire",

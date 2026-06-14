@@ -903,6 +903,48 @@ function playAntlionBite(level) {
     catch (e) { try { src.disconnect(); osc.disconnect(); } catch (e2) {} }
 }
 
+// Land-lunge dash: a quick airy "fwoosh" — a bandpassed noise sweep that rises then
+// settles, with a short rising thrust tone under it. level (0..1) attenuates by
+// distance like the other positional synth SFX. Distinct from the melee thwack the
+// lunge's own punch plays, so a dash reads as a dash.
+function playLungeWhoosh(level) {
+    var ctx = getCtx();
+    if (!ctx || ctx.state !== "running") { return; }
+    if (gameMuted || masterVolume === 0) { return; }
+    var lvl = (level == null) ? 1 : Math.max(0, Math.min(1, level));
+    if (lvl <= 0.02) { return; }
+    var now = ctx.currentTime;
+    // airy fwoosh
+    var src = ctx.createBufferSource();
+    src.buffer = getDriftNoiseBuffer(ctx);
+    src.loop = true;
+    var filt = ctx.createBiquadFilter();
+    filt.type = "bandpass";
+    filt.Q.value = 1.1;
+    filt.frequency.setValueAtTime(520, now);
+    filt.frequency.exponentialRampToValueAtTime(2600, now + 0.09); // burst up...
+    filt.frequency.exponentialRampToValueAtTime(900, now + 0.32);  // ...trailing off
+    var g = ctx.createGain();
+    var peak = Math.max(0.0002, 0.14 * lvl * masterVolume * sfxVolumeScalar);
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(peak, now + 0.04);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
+    src.connect(filt); filt.connect(g); g.connect(sfxBus);
+    // rising thrust tone under it
+    var osc = ctx.createOscillator();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(180, now);
+    osc.frequency.exponentialRampToValueAtTime(420, now + 0.12);
+    var og = ctx.createGain();
+    var oPeak = Math.max(0.0002, 0.06 * lvl * masterVolume * sfxVolumeScalar);
+    og.gain.setValueAtTime(0.0001, now);
+    og.gain.exponentialRampToValueAtTime(oPeak, now + 0.02);
+    og.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+    osc.connect(og); og.connect(sfxBus);
+    try { src.start(now); src.stop(now + 0.36); osc.start(now); osc.stop(now + 0.18); }
+    catch (e) { try { src.disconnect(); osc.disconnect(); } catch (e2) {} }
+}
+
 // Start (first call) or update (later calls) the drift loop for a player.
 //   intensity 0..1 — how hard they're carving; rides gain + filter brightness so
 //                    a faster slide hisses higher.
