@@ -117,6 +117,7 @@ function resetRound() {
 function updateGameboard(dt) {
 	if (currentState == config.stateMap.racing || currentState == config.stateMap.overview || currentState == config.stateMap.collapsing) {
 		updateTrails();
+		updateVortexTrailPull(dt); // suck older trail vertices into any vortex well (per frame)
 	}
 	updatePingCircles(dt);
 	updateCollapseShockwaves(dt);
@@ -204,6 +205,60 @@ function updateTrails() {
 			continue;
 		}
 		player.trail.update({ x: player.x, y: player.y }, player);
+	}
+}
+
+// Vortex pull on trails (visual only): each frame, drag every kart's older trail
+// vertices that sit inside a Vortex Well toward its core — radially inward plus a
+// tangential swirl — so the tail visibly spirals in and is "sucked down". The same
+// pass SLOWS those vertices' aging (nudging their timestamp toward `now`) so the
+// trail LINGERS in the well instead of fading at the usual rate. Both effects reuse
+// the existing age->alpha->trim machinery untouched (drawTrail/trailEffects need no
+// change) — a swirled, persistent vertex is just an old vertex that moved and aged
+// slowly. Pull/hold scale with depth (0 at the rim -> 1 at the core), so the rim is
+// barely touched and the centre nearly freezes. Runs per FRAME (dt is ms).
+var VORTEX_TRAIL_PULL = 100;   // px/s inward at the core (tapers to 0 at the rim)
+var VORTEX_TRAIL_SWIRL = 120;  // px/s tangential at the core — winds the tail into a spiral
+var VORTEX_TRAIL_HOLD = 0.70;  // fraction of aging suppressed at the core (~3.3x life)
+function updateVortexTrailPull(dt) {
+	if (config == null || config.hazards == null || config.hazards.vortexWell == null) { return; }
+	if (typeof hazardList === "undefined" || hazardList == null) { return; }
+	var vid = config.hazards.vortexWell.id;
+	var maxR = config.hazards.vortexWell.radius;
+	var wells = null;
+	for (var hid in hazardList) {
+		var h = hazardList[hid];
+		if (h == null || h.id !== vid) { continue; }
+		if (wells == null) { wells = []; }
+		wells.push({ x: h.x, y: h.y, r: (h.radius != null && h.radius > 0) ? h.radius : maxR });
+	}
+	if (wells == null) { return; }
+	var now = Date.now();
+	var dtSec = dt / 1000;
+	for (var pid in playerList) {
+		var tr = playerList[pid].trail;
+		if (tr == null || tr.vertices == null || tr.vertices.length < 2) { continue; }
+		var vs = tr.vertices;
+		// Skip the newest vertex (it's pinned at the kart); warp everything behind it.
+		for (var i = 0; i < vs.length - 1; i++) {
+			var v = vs[i];
+			for (var w = 0; w < wells.length; w++) {
+				var dx = wells[w].x - v.x, dy = wells[w].y - v.y;
+				var d = Math.sqrt(dx * dx + dy * dy);
+				if (d >= wells[w].r || d < 0.5) { continue; }
+				var depth = 1 - d / wells[w].r;               // 0 at rim -> 1 at core
+				var ux = dx / d, uy = dy / d;                 // inward unit
+				var inward = VORTEX_TRAIL_PULL * depth * dtSec;
+				if (inward > d) { inward = d; }               // never cross the centre
+				var swirl = VORTEX_TRAIL_SWIRL * depth * dtSec;
+				v.x += ux * inward - uy * swirl;              // inward + tangential (CCW)
+				v.y += uy * inward + ux * swirl;
+				v._overWater = undefined;                     // moved — recompute water membership lazily
+				// Linger: age this vertex slower while it's caught in the well.
+				v.t += dt * VORTEX_TRAIL_HOLD * depth;
+				if (v.t > now) { v.t = now; }
+			}
+		}
 	}
 }
 
