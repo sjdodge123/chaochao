@@ -518,6 +518,7 @@
             "id": 908,
             "color": "#A77BFF",
             "radius": 150,
+            "minRadius": 70,
             "coreRadius": 18,
             "force": 7
         }

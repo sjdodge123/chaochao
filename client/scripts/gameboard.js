@@ -796,6 +796,9 @@ function applyHazards(payload) {
 		hazardList[hazard[0]].railX = hazard[5] != null ? hazard[5] : hazard[2];
 		hazardList[hazard[0]].railY = hazard[6] != null ? hazard[6] : hazard[3];
 		hazardList[hazard[0]].state = hazard.length > 7 ? hazard[7] : null;
+		// [8] per-instance radius (sizable kinds — the vortex well's authored size).
+		// Only kinds whose drawer reads it use it; null for everything else.
+		hazardList[hazard[0]].radius = hazard.length > 8 && hazard[8] != null ? hazard[8] : null;
 
 		// NOTE: antlions arriving HERE come from a snapshot (newMap payload or a
 		// late-join sync), so they're created silently — no emergence animation or

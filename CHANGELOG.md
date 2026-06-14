@@ -12,7 +12,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ### Map editor
 
-- **New placeable: Vortex Well.** A whole new flavour of hazard — a force field that pulls your kart around instead of bonking it. It drags everything inside its ring toward the centre: carry speed and you slingshot past, but crawl in and you're drawn down into the swirl. The very middle is calm, so if you get caught you can build up speed in the centre and power back out through the ring — annoying and slow, never a dead end (unless someone parked it over lava). Authors place it from the editor's Hazards palette; rival AI racers steer around the core.
+- **New placeable: Vortex Well.** A whole new flavour of hazard — a force field that pulls your kart around instead of bonking it. It drags everything inside its ring toward the centre: carry speed and you slingshot past, but crawl in and you're drawn down into the swirl. The very middle is calm, so if you get caught you can build up speed in the centre and power back out through the ring — annoying and slow, never a dead end (unless someone parked it over lava). Authors place it from the editor's Hazards palette and drag a handle to size it from a small eddy up to a wide whirlpool; rival AI racers steer around the core.
 
 ## v0.38.2 — 2026-06-14
 

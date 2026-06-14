@@ -41,6 +41,11 @@ var erasing = false;
 // command on release. touchActive guards the window-level touch move/end handlers.
 var rotatingHandle = false;
 var rotateStartAngle = 0;
+// On-canvas RESIZE handle (resizable kinds, e.g. the vortex well): while dragging
+// it the selected hazard's radius tracks the cursor distance from its centre;
+// resizeStartRadius keeps the pre-drag value to record one undo command on release.
+var resizingHandle = false;
+var resizeStartRadius = 0;
 var touchActive = false;
 var touchId = null; // identifier of the finger currently driving a touch stroke
 // Accumulates the cell changes of the in-progress paint/erase stroke so the whole
@@ -869,6 +874,16 @@ function animloop() {
         updateSelectedObject();
         dirty = true;
     }
+    if (resizingHandle && selectedObject != null) {
+        // Dragging the on-canvas resize handle: radius tracks the cursor distance
+        // from the hazard centre, clamped to the kind's [min, max] size.
+        var b = resizeBounds();
+        var d = Math.sqrt(getMagSq(mousex, mousey, selectedObject.x, selectedObject.y));
+        if (d < b.min) { d = b.min; } else if (d > b.max) { d = b.max; }
+        selectedObject.radius = Math.round(d);
+        updateSelectedRadius();
+        dirty = true;
+    }
     if (drawBrushAimer || erasing) {
         var prev = currentCell;
         currentCell = cellIdFromPoint(mousex, mousey);
@@ -910,8 +925,16 @@ function drawEditor(dt) {
     drawBalanceOverlay();
     drawPointerCircle();
     if (drawObject != null) {
-        drawMyObject(mousex, mousey, drawObject);
+        drawMyObject(mousex, mousey, drawObject, null, placedDefaultRadius(drawObject));
     }
+}
+// Default radius to preview a not-yet-placed resizable kind at (undefined for
+// fixed-size kinds, which ignore the paint radius arg).
+function placedDefaultRadius(id) {
+    var kind = editorHazardKindById(id);
+    var cfg = hazardConfigById(id);
+    if (kind != null && kind.resizable && cfg != null) { return defaultResizableRadius(cfg); }
+    return undefined;
 }
 function drawBackground() {
     createContext.clearRect(0, 0, createCanvas.width, createCanvas.height);
@@ -1297,13 +1320,13 @@ function drawBalanceOverlay() {
     ctx.restore();
 }
 
-function drawMyObject(x, y, myObject, angle) {
+function drawMyObject(x, y, myObject, angle, radius) {
     if (angle == null) {
         angle = 0;
     }
     var kind = editorHazardKindById(myObject);
     if (kind != null) {
-        (kind.paint || paintHazardShape)(createContext, kind, x, y, angle, "red");
+        (kind.paint || paintHazardShape)(createContext, kind, x, y, angle, "red", radius);
     }
 }
 // A placed object's config lives in config.hazards OR config.boons — boons reuse
@@ -1470,13 +1493,17 @@ function paintMineShape(ctx, kind, x, y, angle, ringColor) {
 }
 // Vortex-well painter (vortexWell's `paint` hook). Inward spiral arms to a dark
 // core + a faint reach rim so authors see the pull radius. Mirrors the in-game
-// look (draw.js drawVortexWell).
-function paintVortexWellShape(ctx, kind, x, y, angle, ringColor) {
+// look (draw.js drawVortexWell). `radius` is the per-instance authored size (the
+// well is resizable via the on-canvas handle); the dashed reach ring grows/shrinks
+// with it, and the dark core scales with it.
+function paintVortexWellShape(ctx, kind, x, y, angle, ringColor, radius) {
     var cfg = config.hazards[kind.key];
     if (cfg == null) { return; }
+    var R = (radius != null && radius > 0) ? radius : cfg.radius;
+    var coreR = cfg.coreRadius * (R / cfg.radius);
     ctx.save();
     ctx.beginPath();
-    ctx.arc(x, y, cfg.radius, 0, 2 * Math.PI);
+    ctx.arc(x, y, R, 0, 2 * Math.PI);
     ctx.strokeStyle = ringColor;
     ctx.setLineDash([5, 5]);
     ctx.lineWidth = 2;
@@ -1491,7 +1518,7 @@ function paintVortexWellShape(ctx, kind, x, y, angle, ringColor) {
         ctx.beginPath();
         var first = true;
         for (var t = 0; t <= 1.001; t += 0.06) {
-            var rr = cfg.radius * (1 - t) + cfg.coreRadius * t;
+            var rr = R * (1 - t) + coreR * t;
             var ang = base + t * Math.PI * 1.6;
             var px = x + Math.cos(ang) * rr, py = y + Math.sin(ang) * rr;
             if (first) { ctx.moveTo(px, py); first = false; } else { ctx.lineTo(px, py); }
@@ -1499,7 +1526,7 @@ function paintVortexWellShape(ctx, kind, x, y, angle, ringColor) {
         ctx.stroke();
     }
     ctx.beginPath();
-    ctx.arc(x, y, cfg.coreRadius, 0, 2 * Math.PI);
+    ctx.arc(x, y, coreR, 0, 2 * Math.PI);
     ctx.fillStyle = "#2a1f44";
     ctx.fill();
     ctx.strokeStyle = cfg.color;
@@ -1548,7 +1575,14 @@ function handleClick(event) {
             // On-canvas hazard handles take priority over painting/selecting.
             if (selectedObject != null) {
                 if (overDeleteHandle(mousex, mousey)) { removeSelectedObject(); break; }
-                if (overRotateHandle(mousex, mousey)) {
+                // Resizable kinds expose a resize handle in place of the rotate knob.
+                if (selectedResizable()) {
+                    if (overResizeHandle(mousex, mousey)) {
+                        resizingHandle = true;
+                        resizeStartRadius = selectedObject.radius || 0;
+                        break;
+                    }
+                } else if (overRotateHandle(mousex, mousey)) {
                     rotatingHandle = true;
                     rotateStartAngle = selectedObject.angle || 0;
                     break;
@@ -1560,7 +1594,7 @@ function handleClick(event) {
             break;
         }
         case 3: {
-            if (brushing || rotatingHandle) { break; } // don't erase while painting/rotating
+            if (brushing || rotatingHandle || resizingHandle) { break; } // don't erase while painting/rotating/resizing
             // Right button: delete a hazard under the cursor, else erase to dirt
             // (right-drag keeps erasing). Backlog UX item.
             if (hazardUnderPoint(mousex, mousey)) {
@@ -1580,6 +1614,13 @@ function handleUnClick(event) {
                 rotatingHandle = false;
                 if (selectedObject != null) {
                     pushRotateCommand(selectedHazardIndex(), rotateStartAngle, selectedObject.angle || 0);
+                }
+                break;
+            }
+            if (resizingHandle) {
+                resizingHandle = false;
+                if (selectedObject != null) {
+                    pushResizeCommand(selectedHazardIndex(), resizeStartRadius, selectedObject.radius || 0);
                 }
                 break;
             }
@@ -1784,6 +1825,9 @@ function commitStroke() {
 //   paint(ctx, kind, x, y, angle, ringColor) — custom canvas/thumbnail painter
 //   swatchPaint(ctx, size) — custom palette-swatch overlay
 //   segmentSelect — hit-test against the centerline segment, not the anchor disc
+//   resizable — the on-canvas handle drags a per-instance `radius` (stored on the
+//                map entry) within config [minRadius, radius] instead of rotating;
+//                fresh placements default to the midpoint of that range
 //   directional — map entry needs a finite angle (railed kinds are directional)
 //   group — "boon" routes the palette button to the Boons section (helpful kinds,
 //           config.boons); absent/"hazard" routes to the Hazards section.
@@ -1900,6 +1944,7 @@ var EDITOR_HAZARD_KINDS = [
     },
     {
         key: "vortexWell", label: "Vortex Well", shortcut: "v", railed: false, directional: false,
+        resizable: true, // on-canvas handle drags the pull radius in [minRadius, radius]
         paint: paintVortexWellShape,
         swatchPaint: function (ctx, size) {
             // Violet inward spiral to a dark core — "this sucks you in".
@@ -2040,7 +2085,9 @@ function hazardIndexUnderPoint(x, y) {
             if (getMagSq(x, y, p.x, p.y) < Math.pow(cfg.radius, 2)) { return i; }
             continue;
         }
-        if (getMagSq(x, y, hazards[i].x, hazards[i].y) < Math.pow(cfg.radius, 2)) { return i; }
+        // Resizable kinds select within their authored radius (not the config max).
+        var selR = (hitKind != null && hitKind.resizable) ? hazardSelectRadius(hazards[i]) : cfg.radius;
+        if (getMagSq(x, y, hazards[i].x, hazards[i].y) < Math.pow(selR, 2)) { return i; }
     }
     return -1;
 }
@@ -2084,11 +2131,53 @@ function pushRotateCommand(index, from, to) {
         redo: function () { hz.angle = to; }
     });
 }
+function pushResizeCommand(index, from, to) {
+    if (from === to) { return; }
+    var hz = (index >= 0 && vMap.hazards[index]) ? vMap.hazards[index] : null;
+    if (hz == null) { return; }
+    pushCommand({
+        undo: function () { hz.radius = from; },
+        redo: function () { hz.radius = to; }
+    });
+}
+// Write the selection's live radius back to its hazard entry (resize drag).
+function updateSelectedRadius() {
+    var i = selectedHazardIndex();
+    if (i < 0 || vMap.hazards[i] == null) { return; }
+    vMap.hazards[i].radius = selectedObject.radius;
+}
+// Is the current selection a resizable kind (vortex well)? Drives the resize-vs-
+// rotate handle.
+function selectedResizable() {
+    if (selectedObject == null) { return false; }
+    var k = editorHazardKindById(selectedObject.id);
+    return k != null && k.resizable === true;
+}
+// Drag-resize bounds for the current selection, from config ([minRadius, radius]).
+function resizeBounds() {
+    var cfg = hazardConfigById(selectedObject.id);
+    var max = (cfg != null) ? cfg.radius : 150;
+    var min = (cfg != null && cfg.minRadius != null) ? cfg.minRadius : Math.round(max * 0.5);
+    return { min: min, max: max };
+}
 
 // --- on-canvas hazard handles -------------------------------------------------
 function rotateHandlePos() {
     var r = selectedObject.radius + 50;
     return pos({ x: selectedObject.x, y: selectedObject.y }, r, selectedObject.angle || 0);
+}
+// Resize handle: sits on the rim to the RIGHT of the centre, so dragging it
+// outward/inward grows/shrinks the radius. Clamped inside the canvas like delete.
+function resizeHandlePos() {
+    var m = 16;
+    var x = Math.max(m, Math.min(createCanvas.width - m, selectedObject.x + selectedObject.radius));
+    var y = Math.max(m, Math.min(createCanvas.height - m, selectedObject.y));
+    return { x: x, y: y };
+}
+function overResizeHandle(x, y) {
+    if (selectedObject == null) { return false; }
+    var p = resizeHandlePos();
+    return getMagSq(x, y, p.x, p.y) < 18 * 18;
 }
 function deleteHandlePos() {
     var d = selectedObject.radius + 28;
@@ -2110,16 +2199,41 @@ function overDeleteHandle(x, y) {
     return getMagSq(x, y, p.x, p.y) < 18 * 18;
 }
 function drawHazardHandles() {
-    var rp = rotateHandlePos();
-    createContext.save();
-    createContext.beginPath();
-    createContext.arc(rp.x, rp.y, 12, 0, 2 * Math.PI);
-    createContext.fillStyle = "#1e90ff";
-    createContext.strokeStyle = "white";
-    createContext.lineWidth = 3;
-    createContext.fill();
-    createContext.stroke();
-    createContext.restore();
+    if (selectedResizable()) {
+        // Resize handle: a knob on the rim with a ↔ glyph, instead of the rotate knob.
+        var sp = resizeHandlePos();
+        createContext.save();
+        createContext.beginPath();
+        createContext.arc(sp.x, sp.y, 12, 0, 2 * Math.PI);
+        createContext.fillStyle = "#A77BFF";
+        createContext.strokeStyle = "white";
+        createContext.lineWidth = 3;
+        createContext.fill();
+        createContext.stroke();
+        // double-headed horizontal arrow
+        createContext.strokeStyle = "white";
+        createContext.lineWidth = 2;
+        createContext.lineCap = "round";
+        createContext.beginPath();
+        createContext.moveTo(sp.x - 6, sp.y); createContext.lineTo(sp.x + 6, sp.y);
+        createContext.moveTo(sp.x - 6, sp.y); createContext.lineTo(sp.x - 3, sp.y - 3);
+        createContext.moveTo(sp.x - 6, sp.y); createContext.lineTo(sp.x - 3, sp.y + 3);
+        createContext.moveTo(sp.x + 6, sp.y); createContext.lineTo(sp.x + 3, sp.y - 3);
+        createContext.moveTo(sp.x + 6, sp.y); createContext.lineTo(sp.x + 3, sp.y + 3);
+        createContext.stroke();
+        createContext.restore();
+    } else {
+        var rp = rotateHandlePos();
+        createContext.save();
+        createContext.beginPath();
+        createContext.arc(rp.x, rp.y, 12, 0, 2 * Math.PI);
+        createContext.fillStyle = "#1e90ff";
+        createContext.strokeStyle = "white";
+        createContext.lineWidth = 3;
+        createContext.fill();
+        createContext.stroke();
+        createContext.restore();
+    }
 
     var dp = deleteHandlePos();
     createContext.save();
@@ -2219,9 +2333,33 @@ function addObjectToMap(x, y, obj) {
         vMap.hazards = [];
     }
     var hazard = { id: obj, x: x, y: y, angle: 0 };
+    // Resizable kinds (the vortex well) carry a per-instance radius; place a fresh
+    // one at the DEFAULT — the midpoint between the configured min and max size.
+    var kind = editorHazardKindById(obj);
+    if (kind != null && kind.resizable && cfg != null) {
+        hazard.radius = defaultResizableRadius(cfg);
+    }
     vMap.hazards.push(hazard);
     pushHazardAddCommand(hazard);
     dirty = true;
+}
+// Default placed size for a resizable kind: midpoint of [minRadius, radius] (max).
+function defaultResizableRadius(cfg) {
+    var max = cfg.radius;
+    var min = (cfg.minRadius != null) ? cfg.minRadius : Math.round(max * 0.5);
+    return Math.round((min + max) / 2);
+}
+// The selection's effective radius for rings/handles/hit-test: a resizable kind
+// uses its authored per-instance radius (default if unset); everything else uses
+// the fixed config radius.
+function hazardSelectRadius(hz) {
+    var cfg = hazardConfigById(hz.id);
+    if (cfg == null) { return 0; }
+    var kind = editorHazardKindById(hz.id);
+    if (kind != null && kind.resizable) {
+        return Number.isFinite(hz.radius) ? hz.radius : defaultResizableRadius(cfg);
+    }
+    return cfg.radius;
 }
 
 function locateObject(x, y) {
@@ -2231,8 +2369,7 @@ function locateObject(x, y) {
         return;
     }
     var hz = vMap.hazards[i];
-    var cfg = hazardConfigById(hz.id);
-    setSelectedObject({ index: i, id: hz.id, x: hz.x, y: hz.y, angle: hz.angle, radius: cfg.radius });
+    setSelectedObject({ index: i, id: hz.id, x: hz.x, y: hz.y, angle: hz.angle, radius: hazardSelectRadius(hz) });
 }
 
 // Write the selection's live angle back to its hazard (selection tracks the array
@@ -2392,7 +2529,7 @@ function renderHazards() {
     var hazards = vMap.hazards;
     for (var i = 0; i < hazards.length; i++) {
         var hazard = hazards[i];
-        drawMyObject(hazard.x, hazard.y, hazard.id, hazard.angle);
+        drawMyObject(hazard.x, hazard.y, hazard.id, hazard.angle, hazard.radius);
     }
 }
 
@@ -2443,7 +2580,7 @@ function renderMapThumbnail(map) {
             if (hz == null) { continue; }
             var hzKind = editorHazardKindById(hz.id);
             if (hzKind == null) { continue; }
-            (hzKind.paint || paintHazardShape)(ctx, hzKind, hz.x, hz.y, hz.angle || 0, "#E5392B");
+            (hzKind.paint || paintHazardShape)(ctx, hzKind, hz.x, hz.y, hz.angle || 0, "#E5392B", hz.radius);
         }
     }
     var url = cv.toDataURL("image/jpeg", 0.7);
@@ -2904,7 +3041,7 @@ function drawSelectedObject() {
         createContext.strokeStyle = "black";
         createContext.stroke();
         createContext.restore();
-        drawRotationRing();
+        if (!selectedResizable()) { drawRotationRing(); } // rotation affordance is N/A for resizable kinds
         drawHazardHandles();
     }
 }
