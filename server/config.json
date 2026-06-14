@@ -513,6 +513,21 @@
             "id": 907,
             "color": "#6b6e72",
             "radius": 26
+        },
+        "gustFan": {
+            "id": 908,
+            "color": "#8FC7FF",
+            "width": 240,
+            "height": 130,
+            "radius": 80,
+            "force": 12
+        },
+        "vortexWell": {
+            "id": 909,
+            "color": "#A77BFF",
+            "radius": 150,
+            "coreRadius": 18,
+            "force": 24
         }
     },
     "boons": {

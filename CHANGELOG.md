@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### Map editor
+
+- **Two new placeables: Gust Fan and Vortex Well.** A whole new flavour of hazard — force fields that push your kart around instead of bonking it. A **Gust Fan** blows a steady wind across a rectangular patch: set it as a crosswind over a lava bridge and it's a nerve-wracking steering test, as a tailwind and it's a committal speed lane, as a headwind and it's a toll on a shortcut. A **Vortex Well** drags everything inside its ring toward the centre — carry speed and you slingshot past, but crawl in and it sucks you down, so authors love parking one over lava or just off the racing line. Place and rotate both from the editor's Hazards palette. Rival AI racers fight the wind to hold their line and steer around the well's core.
 
 ## v0.38.2 — 2026-06-14
 
