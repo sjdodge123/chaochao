@@ -2155,10 +2155,7 @@ function selectedResizable() {
 }
 // Drag-resize bounds for the current selection, from config ([minRadius, radius]).
 function resizeBounds() {
-    var cfg = hazardConfigById(selectedObject.id);
-    var max = (cfg != null) ? cfg.radius : 150;
-    var min = (cfg != null && cfg.minRadius != null) ? cfg.minRadius : Math.round(max * 0.5);
-    return { min: min, max: max };
+    return sizeBoundsFor(hazardConfigById(selectedObject.id));
 }
 
 // --- on-canvas hazard handles -------------------------------------------------
@@ -2198,19 +2195,24 @@ function overDeleteHandle(x, y) {
     var p = deleteHandlePos();
     return getMagSq(x, y, p.x, p.y) < 18 * 18;
 }
+// Shared knob: a filled disc with a white rim, used by all on-canvas handles.
+function drawHandleKnob(p, r, fill) {
+    createContext.save();
+    createContext.beginPath();
+    createContext.arc(p.x, p.y, r, 0, 2 * Math.PI);
+    createContext.fillStyle = fill;
+    createContext.strokeStyle = "white";
+    createContext.lineWidth = 3;
+    createContext.fill();
+    createContext.stroke();
+    createContext.restore();
+}
 function drawHazardHandles() {
     if (selectedResizable()) {
         // Resize handle: a knob on the rim with a ↔ glyph, instead of the rotate knob.
         var sp = resizeHandlePos();
+        drawHandleKnob(sp, 12, "#A77BFF");
         createContext.save();
-        createContext.beginPath();
-        createContext.arc(sp.x, sp.y, 12, 0, 2 * Math.PI);
-        createContext.fillStyle = "#A77BFF";
-        createContext.strokeStyle = "white";
-        createContext.lineWidth = 3;
-        createContext.fill();
-        createContext.stroke();
-        // double-headed horizontal arrow
         createContext.strokeStyle = "white";
         createContext.lineWidth = 2;
         createContext.lineCap = "round";
@@ -2223,27 +2225,12 @@ function drawHazardHandles() {
         createContext.stroke();
         createContext.restore();
     } else {
-        var rp = rotateHandlePos();
-        createContext.save();
-        createContext.beginPath();
-        createContext.arc(rp.x, rp.y, 12, 0, 2 * Math.PI);
-        createContext.fillStyle = "#1e90ff";
-        createContext.strokeStyle = "white";
-        createContext.lineWidth = 3;
-        createContext.fill();
-        createContext.stroke();
-        createContext.restore();
+        drawHandleKnob(rotateHandlePos(), 12, "#1e90ff");
     }
 
     var dp = deleteHandlePos();
+    drawHandleKnob(dp, 13, "#cf1020");
     createContext.save();
-    createContext.beginPath();
-    createContext.arc(dp.x, dp.y, 13, 0, 2 * Math.PI);
-    createContext.fillStyle = "#cf1020";
-    createContext.strokeStyle = "white";
-    createContext.lineWidth = 3;
-    createContext.fill();
-    createContext.stroke();
     createContext.beginPath();
     createContext.moveTo(dp.x - 5, dp.y - 5); createContext.lineTo(dp.x + 5, dp.y + 5);
     createContext.moveTo(dp.x + 5, dp.y - 5); createContext.lineTo(dp.x - 5, dp.y + 5);
@@ -2343,11 +2330,19 @@ function addObjectToMap(x, y, obj) {
     pushHazardAddCommand(hazard);
     dirty = true;
 }
-// Default placed size for a resizable kind: midpoint of [minRadius, radius] (max).
+// Drag-resize bounds for a kind's config: [minRadius, radius(max)], with a
+// defensive min fallback. Single source for the editor's resize clamp, the
+// placement default, and the selection radius.
+function sizeBoundsFor(cfg) {
+    var max = (cfg != null && cfg.radius != null) ? cfg.radius : 150;
+    var min = (cfg != null && cfg.minRadius != null) ? cfg.minRadius : Math.round(max * 0.5);
+    return { min: min, max: max };
+}
+// Default placed size for a resizable kind: midpoint of [min, max] (matches the
+// server's vortexWellRadius default for a sizeless entry).
 function defaultResizableRadius(cfg) {
-    var max = cfg.radius;
-    var min = (cfg.minRadius != null) ? cfg.minRadius : Math.round(max * 0.5);
-    return Math.round((min + max) / 2);
+    var b = sizeBoundsFor(cfg);
+    return Math.round((b.min + b.max) / 2);
 }
 // The selection's effective radius for rings/handles/hit-test: a resizable kind
 // uses its authored per-instance radius (default if unset); everything else uses

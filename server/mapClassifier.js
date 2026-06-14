@@ -254,10 +254,12 @@ function hazardAvoidance(map, config) {
     var wallId = (config.hazards && config.hazards.bumperWall) ? config.hazards.bumperWall.id : null;
     var wallLen = (config.hazards && config.hazards.bumperWall && config.hazards.bumperWall.width) || 120;
     // Vortex well: keep the overlay/par estimate in lockstep with the live AI
-    // (aiController) — routed around at its strong-pull core (radius*0.6), not just
-    // a 40px ring at the anchor.
+    // (aiController) — routed around at its strong-pull core (radius * coreFraction),
+    // not just a 40px ring at the anchor. coreFraction is shared via config so the
+    // two never drift.
     var vortexId = (config.hazards && config.hazards.vortexWell) ? config.hazards.vortexWell.id : null;
     var vortexR = (config.hazards && config.hazards.vortexWell && config.hazards.vortexWell.radius) || 150;
+    var vortexCoreFrac = (config.hazards && config.hazards.vortexWell && config.hazards.vortexWell.coreFraction) || 0.6;
     for (var h = 0; h < hazards.length; h++) {
         var hz = hazards[h];
         if (hz == null || typeof hz.x !== "number" || typeof hz.y !== "number") { continue; }
@@ -276,7 +278,7 @@ function hazardAvoidance(map, config) {
             // ring out to the strong-pull core so the routed line bends around the
             // centre, not just the single anchor cell. Use the well's authored
             // (per-instance) radius, falling back to the config max.
-            var core = (Number.isFinite(hz.radius) ? hz.radius : vortexR) * 0.6;
+            var core = (Number.isFinite(hz.radius) ? hz.radius : vortexR) * vortexCoreFrac;
             for (var ringA = 0; ringA < 8; ringA++) {
                 var rr = ringA * Math.PI / 4;
                 addAround(hz.x + Math.cos(rr) * core, hz.y + Math.sin(rr) * core);

@@ -202,14 +202,12 @@ try {
         // Single-application guarantee: one tick applies exactly the calm-eye pull,
         // not 2x. Pin a stopped kart at the mid-ring for one tick and compare velX to
         // the pure applyForce value at the same spot.
-        const probe = { isPlayer: true, alive: true, reachedGoal: false, x: VX + VW.radius * 0.5, y: VY, velX: 0, velY: 0 };
         const expectPull = (function () { const o = { isPlayer: true, alive: true, reachedGoal: false, x: VX + VW.radius * 0.5, y: VY, velX: 0, velY: 0 }; vhz.applyForce(o); return Math.abs(o.velX); })();
         vBot.isAI = false;
         vBot.x = vBot.newX = VX + VW.radius * 0.5; vBot.y = vBot.newY = VY; vBot.velX = 0; vBot.velY = 0;
         vBot.moveForward = vBot.moveBackward = vBot.turnLeft = vBot.turnRight = false;
         vRoom.update(DT); clock += config.serverTickSpeed; fireDueTimers();
         check(Math.abs(Math.abs(vBot.velX) - expectPull) < 0.5, 'exactly one pull per tick (velX ' + Math.abs(vBot.velX).toFixed(2) + ' ~= one applyForce ' + expectPull.toFixed(2) + ', not doubled)');
-        void probe;
 
         // Parked kart in the mid-ring, no input — drawn toward the core.
         vBot.x = vBot.newX = VX + VW.radius * 0.5; vBot.y = vBot.newY = VY; vBot.velX = 0; vBot.velY = 0;
