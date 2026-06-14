@@ -147,6 +147,13 @@ try {
         const puck = { isPuck: true, x: 500, y: 400, velX: 0, velY: 0 };
         g.handleHit(puck);
         check(Math.abs(puck.velY - GF.force) < 1e-9, 'a puck is carried by the wind');
+
+        // Regression (review #1): a non-finite angle is sanitized BEFORE the Rect
+        // builds its corners, so the zone still has finite vertices (collision-live)
+        // rather than NaN corners that silently never overlap.
+        const bad = new GustFan(500, 400, GF.width, GF.height, NaN, GF.color, 'g-nan', 'sig-a');
+        check(bad.angle === 0 && bad.vertices.every(v => Number.isFinite(v.x) && Number.isFinite(v.y)),
+            'a non-finite wind angle falls back to 0 with finite rotated corners');
     }
 
     // ----------------------------------------------------------------------
@@ -177,6 +184,14 @@ try {
         const prot = { isPlayer: true, alive: true, reachedGoal: false, x: 550, y: 400, velX: 0, velY: 0, isProtected: () => true };
         v.handleHit(prot);
         check(prot.velX === 0, 'a protected kart is not pulled');
+
+        // Regression (review #2): the pull PLATEAUS inside the (drawn) core radius —
+        // a kart at half the core distance gets the same force as one at the core
+        // edge, not an ever-spiking one as dist->0 (matches the art, no jitter trap).
+        const atCore = { isPlayer: true, alive: true, reachedGoal: false, x: 500 + VW.coreRadius, y: 400, velX: 0, velY: 0 };
+        const inCore = { isPlayer: true, alive: true, reachedGoal: false, x: 500 + VW.coreRadius / 2, y: 400, velX: 0, velY: 0 };
+        v.handleHit(atCore); v.handleHit(inCore);
+        check(Math.abs(Math.abs(inCore.velX) - Math.abs(atCore.velX)) < 1e-9, 'the pull is flat (plateaued) inside the core radius');
     }
 
     // ----------------------------------------------------------------------

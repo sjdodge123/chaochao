@@ -341,7 +341,13 @@ class Mine extends Hazard {
 // coords.
 class GustFan extends Rect {
 	constructor(x, y, width, height, angle, color, ownerId, roomSig) {
-		super(x, y, width, height, angle, color);
+		// Sanitize the wind direction BEFORE super(): the base Rect constructor calls
+		// getVertices() with this.angle, so a non-finite angle would bake NaN corners
+		// (collision-dead) that resetting this.angle afterward wouldn't fix.
+		// Directional kinds are validated to a finite angle by validateMap, but a
+		// preview/built-in path could still pass junk.
+		var safeAngle = Number.isFinite(angle) ? angle : 0;
+		super(x, y, width, height, safeAngle, color);
 		this.alive = true;
 		this.ownerId = ownerId;
 		this.roomSig = roomSig;
@@ -349,10 +355,6 @@ class GustFan extends Rect {
 		this.isGust = true;        // AI biases steering against the wind inside the zone
 		this.id = c.hazards.gustFan.id;
 		this.speed = 0;
-		// Sanitize the wind direction: directional kinds are validated to a finite
-		// angle by validateMap, but a preview/built-in path could still pass junk
-		// (a non-finite angle NaNs the wind vector and the rotated corners).
-		this.angle = Number.isFinite(angle) ? angle : 0;
 		var rad = this.angle * (Math.PI / 180);
 		this.windX = Math.cos(rad); // unit wind vector (the force direction)
 		this.windY = Math.sin(rad);
@@ -443,7 +445,11 @@ class VortexWell extends Hazard {
 		var dist = Math.sqrt(dx * dx + dy * dy);
 		if (dist > this.radius) { return; }          // overlap fringe past the rim: no pull
 		if (dist < 0.0001) { return; }               // dead centre: nothing to pull toward
-		var w = (this.radius - dist) / this.radius;  // 0 at rim -> 1 at core
+		// Ramp strength rim->core, then PLATEAU inside the (drawn) core radius so the
+		// physics core matches the art and a kart oscillating at the centre gets a
+		// steady pull instead of a spiking one as dist->0.
+		var rampDist = dist < this.coreRadius ? this.coreRadius : dist;
+		var w = (this.radius - rampDist) / this.radius;  // 0 at rim -> max at the core
 		var pull = this.force * w;
 		object.velX += (dx / dist) * pull;
 		object.velY += (dy / dist) * pull;
