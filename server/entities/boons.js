@@ -28,9 +28,34 @@ class Boon extends Hazard {
 		super(x, y, radius, color, ownerId, roomSig, null);
 		this.helpful = true;
 		this.moveable = false;
+		// Engine double-dispatch bookkeeping (see claimTickContact).
+		this._contactTick = -1;
+		this._contactIds = null;
 	}
 	update() { }
 	handleHit(object) { }
+	// Engine.broadBase resolves a colliding pair from BOTH object orderings
+	// (obj1.handleHit(obj2); obj2.handleHit(obj1)) and walks every object as obj1,
+	// so a boon's handleHit runs TWICE for one overlap in a single tick. A boon that
+	// applies a velocity impulse per call would therefore impart ~2x its configured
+	// push. claimTickContact returns true only the FIRST time it sees a given object
+	// in a tick — keyed on Date.now(), which is constant across one synchronous
+	// collision pass — so the caller applies its effect exactly once per tick. (The
+	// Recharge Spring doesn't need this: its global cooldown already no-ops the second
+	// call.) Returns false for the duplicate call.
+	claimTickContact(object) {
+		var now = Date.now();
+		if (this._contactTick !== now) {
+			this._contactTick = now;
+			this._contactIds = {};
+		}
+		var key = object.id != null ? object.id : (object.ownerId != null ? object.ownerId : "anon");
+		if (this._contactIds[key]) {
+			return false;
+		}
+		this._contactIds[key] = true;
+		return true;
+	}
 }
 
 // Dash Arrows — a directional speed pad (the chevron strip). While a player or
@@ -51,6 +76,9 @@ class DashArrows extends Boon {
 	handleHit(object) {
 		if (!object.isPlayer && !object.isPuck) {
 			return;
+		}
+		if (!this.claimTickContact(object)) {
+			return; // engine double-dispatch: only boost once per overlap tick
 		}
 		var rad = (this.angle || 0) * (Math.PI / 180);
 		var dirX = Math.cos(rad), dirY = Math.sin(rad);
@@ -151,6 +179,9 @@ class Slipstream extends Boon {
 	handleHit(object) {
 		if (!object.isPlayer && !object.isPuck) {
 			return;
+		}
+		if (!this.claimTickContact(object)) {
+			return; // engine double-dispatch: only push once per overlap tick
 		}
 		var rad = (this.angle || 0) * (Math.PI / 180);
 		var dirX = Math.cos(rad), dirY = Math.sin(rad);
