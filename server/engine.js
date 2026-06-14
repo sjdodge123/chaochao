@@ -4,7 +4,6 @@ var geometry = require('./geometry.js');
 var c = utils.loadConfig();
 var forceConstant = c.forceConstant;
 // Shared segment geometry (also used by cellGraph for bot pathing).
-var sideOf = geometry.sideOf;
 var segmentsCross = geometry.segmentsCross;
 // Tile ids the stone-seam wall depends on (constant) — hoisted so the seam-active
 // test is a stable function, not a per-call closure.

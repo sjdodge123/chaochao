@@ -173,7 +173,6 @@ console.log('[D] AI cell-graph routes around barriers');
     const wall = { x1: wallX, y1: H * 0.25, x2: wallX, y2: H * 0.75, style: 'wall' };
 
     function freshMap(withBarrier) {
-        const m = cellGraph; // no-op; keep lints calm
         const map = mapFormat.reconstruct({ bbox: bbox, sites: sites.map(s => ({ x: s.x, y: s.y, id: s.id })) });
         if (withBarrier) { map.barriers = [wall]; }
         return map;
