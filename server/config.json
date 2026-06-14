@@ -521,7 +521,8 @@
             "minRadius": 70,
             "coreRadius": 18,
             "coreFraction": 0.6,
-            "force": 7
+            "force": 7,
+            "antlionPull": 0.7
         }
     },
     "boons": {

@@ -761,8 +761,23 @@ class GameBoard {
 			this.removeAntlions(antlions, "burrow");
 			return;
 		}
-		// 3. Steering: seek nearest racer + separation + mild thumper avoidance,
-		// plus the decaying slam impulse. Off-sand time is the leash.
+		// Vortex wells drag antlions toward their core too (not just karts) — a
+		// continuous inward tug layered onto the chase steering below. Collected once
+		// here (id/flag check) rather than per-antlion. Thumpers are NOT pulled — they
+		// are fixed sanctuaries.
+		var vortexCfg = c.hazards.vortexWell;
+		var vWells = null;
+		if (vortexCfg != null) {
+			for (var vhid in this.hazardList) {
+				var vh = this.hazardList[vhid];
+				if (vh != null && vh.isVortex && vh.alive !== false) {
+					if (vWells == null) { vWells = []; }
+					vWells.push(vh);
+				}
+			}
+		}
+		// 3. Steering: seek nearest racer + separation + mild thumper avoidance + any
+		// vortex pull, plus the decaying slam impulse. Off-sand time is the leash.
 		var burrowed = [];
 		for (var ai = 0; ai < antlions.length; ai++) {
 			var ant = antlions[ai];
@@ -806,6 +821,25 @@ class GameBoard {
 					var rw = (cfg.repelRadius - rd) / cfg.repelRadius;
 					vx += (rx / rd) * rw * cfg.chaseSpeed * 1.5;
 					vy += (ry / rd) * rw * cfg.chaseSpeed * 1.5;
+				}
+			}
+			// Vortex pull: drag the antlion toward each well's core with the same
+			// calm-eye profile the kart pull uses (0 at the dead centre AND rim, peak
+			// at the mid-ring), as a fraction of chaseSpeed (antlionPull). Capped below
+			// chaseSpeed so the chase always wins on the far side — the antlion gets
+			// visibly dragged/curved but never permanently trapped, and a well over
+			// non-sand just leashes it off its habitat (it burrows out, see above).
+			if (vWells != null) {
+				for (var wi = 0; wi < vWells.length; wi++) {
+					var wdx = vWells[wi].x - ant.x, wdy = vWells[wi].y - ant.y;
+					var wd = Math.sqrt(wdx * wdx + wdy * wdy);
+					if (wd > 0.0001 && wd < vWells[wi].radius) {
+						var wr = wd / vWells[wi].radius;          // 0 core -> 1 rim
+						var prof = 4 * wr * (1 - wr);             // calm eye, peak at mid-ring
+						var wmag = prof * cfg.chaseSpeed * (vortexCfg.antlionPull || 0.7);
+						vx += (wdx / wd) * wmag;
+						vy += (wdy / wd) * wmag;
+					}
 				}
 			}
 			// Slam impulse decays over ~1/3s; while live it dominates the seek.

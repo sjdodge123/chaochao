@@ -36,7 +36,7 @@ const config = require(path.join(repoRoot, 'server', 'config.json'));
 const mapFormat = require(path.join(repoRoot, 'server', 'mapFormat.js'));
 
 const _engine = require(path.join(repoRoot, 'server', 'engine.js'));
-const { Antlion } = require(path.join(repoRoot, 'server', 'entities', 'hazards.js'));
+const { Antlion, VortexWell } = require(path.join(repoRoot, 'server', 'entities', 'hazards.js'));
 
 const DT = config.serverTickSpeed / 1000;
 const AL = config.brutalRounds.antlion;
@@ -540,6 +540,63 @@ function sessionWaterBlock() {
     }
 }
 
+// -----------------------------------------------------------------------------
+// 9. A Vortex Well drags an antlion toward its core (A/B vs no-well control).
+// The antlion sits inside a well; the only target sits FAR on the opposite side,
+// so chase steering alone pulls it AWAY from the core. With the well present the
+// pull must leave it measurably closer to the core than the well-less control.
+// -----------------------------------------------------------------------------
+function sessionVortexPull() {
+    config.brutalTypesForce = [AL.id];
+    const VW = config.hazards.vortexWell;
+
+    function run(withWell) {
+        const map = loadMap('SandsOfTime.json');
+        const room = buildRoom(map);
+        const gb = room.game.gameBoard;
+        const site = pickParkingSandSite(gb.currentMap);
+        const ids = Object.keys(room.playerList);
+        // Core of the well; antlion 60u to its RIGHT; the lone live target far to
+        // the right (chase = +x, away from the core at the antlion's left).
+        const core = { x: site.x, y: site.y };
+        const antX = core.x + 60, antY = core.y;
+        const targetX = Math.min(core.x + 320, config.worldWidth - 120), targetY = core.y;
+        // Park BOTH players together at the far target so the target list is the
+        // far point (a second parked player elsewhere could become the nearest).
+        const holds = ids.map(id => ({ player: room.playerList[id], x: targetX, y: targetY }));
+        for (const h of holds) { pinPlayer(h.player, targetX, targetY); }
+
+        const ant = gb.spawnAntlion(room.playerList[ids[0]]);
+        if (ant == null) { return null; }
+        ant.x = antX; ant.y = antY; ant.newX = antX; ant.newY = antY;
+        ant.offSandMs = 0;
+        if (withWell) {
+            const well = new VortexWell(core.x, core.y, VW.radius, VW.color, 'vw-pull', room.game.gameBoard.roomSig);
+            gb.hazardList[well.ownerId] = well;
+        }
+        // A handful of ticks — long enough for the steering delta to register,
+        // short enough the antlion can't burrow (offSandDespawnSeconds is seconds).
+        for (let f = 0; f < 12; f++) { tick(room, holds); }
+        return dist(ant.x, ant.y, core.x, core.y);
+    }
+
+    const withoutWell = run(false);
+    const withWell = run(true);
+    assert(withoutWell != null && withWell != null, 'vortex-pull: spawnAntlion returned null');
+    if (failures > 0) { config.brutalTypesForce = null; return; }
+    // The well must pull the antlion meaningfully closer to the core than the
+    // chase-only control (which drifts it the other way toward the far target).
+    assert(withWell < withoutWell - 15,
+        'vortex did not pull the antlion toward its core (with well ' + Math.round(withWell) +
+        'u from core vs ' + Math.round(withoutWell) + 'u without)');
+
+    config.brutalTypesForce = null;
+    if (failures === 0) {
+        console.log('Session 7 passed: a vortex well drags antlions toward its core (' +
+            Math.round(withWell) + 'u with vs ' + Math.round(withoutWell) + 'u without).');
+    }
+}
+
 messenger.build(fakeIo);
 try {
     sessionSelectionGate();
@@ -548,6 +605,7 @@ try {
     if (failures === 0) sessionThumperSlam();
     if (failures === 0) sessionCap();
     if (failures === 0) sessionWaterBlock();
+    if (failures === 0) sessionVortexPull();
 } catch (e) {
     fail('Unhandled exception during antlion test: ' + e.message + '\n' + e.stack);
 } finally {
