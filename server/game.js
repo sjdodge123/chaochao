@@ -218,6 +218,7 @@ class Game {
 		if (this.currentState == this.stateMap.racing || this.currentState == this.stateMap.collapsing) {
 			this.checkForWinners();
 			this.checkBonusOrbPickups(); // team-modes bonus orbs (credits before the flush)
+			this.checkLockedDoors(); // locked-door keys: pickup/carry/drop/unlock/lava
 			this.flushTeamBroadcast(); // coalesced teamUpdate (score changes this tick)
 			//Mood changes are deferred to startOverview — flipping the music the
 			//instant someone gains/loses near-victory mid-race felt jarring. The
@@ -446,6 +447,80 @@ class Game {
 					this.creditTeamPoints(p, pts, 'bonus_orb');
 					messenger.messageRoomBySig(this.roomSig, "bonusOrbCollected", {
 						index: i, by: p.id, teamId: p.teamId
+					});
+					break;
+				}
+			}
+		}
+	}
+	// Locked-door keys (any mode): each racing/collapsing tick, resolve every key's
+	// pickup / carry / drop / unlock against the live player list. Mirrors the bonus-orb
+	// pass (cheap O(keys x players)). Static objective placed by gameBoard.initLockedDoors;
+	// events drive the client (keyPickedUp / keyDropped / keyConsumed / doorUnlocked).
+	checkLockedDoors() {
+		var gb = this.gameBoard;
+		if (gb == null || !gb.hasLockedDoors) { return; }
+		if (this.currentState != this.stateMap.racing && this.currentState != this.stateMap.collapsing) { return; }
+		var cfg = c.lockedDoor || {};
+		var pickupR = cfg.pickupRadius != null ? cfg.pickupRadius : 30;
+		var unlockR = cfg.unlockRadius != null ? cfg.unlockRadius : 48;
+		var keys = gb.lockedKeys, doors = gb.lockedDoors;
+		for (var i = 0; i < keys.length; i++) {
+			var key = keys[i];
+			if (key.used || key.consumed) { continue; }
+			if (key.carriedBy != null) {
+				var carrier = this.playerList[key.carriedBy];
+				// Same eligibility as a bonus-orb collector: a dead / infected / finished /
+				// AFK / departed carrier can't keep the key — it drops.
+				var ok = carrier != null && carrier.alive && carrier.awake && !carrier.isSpectator && !carrier.isZombie && !carrier.reachedGoal;
+				if (ok) {
+					key.x = carrier.x; // key rides the carrier (client renders it around the kart)
+					key.y = carrier.y;
+					var door = doors[key.doorIndex];
+					if (door != null && !door.unlocked) {
+						var ddx = carrier.x - door.x, ddy = carrier.y - door.y;
+						var dreach = unlockR + (carrier.radius || 0);
+						if (ddx * ddx + ddy * ddy <= dreach * dreach) {
+							gb.unlockDoorCell(door); // barrier cell -> passable terrain for everyone
+							key.used = true;
+							carrier.heldKey = null;
+							messenger.messageRoomBySig(this.roomSig, "doorUnlocked", {
+								by: carrier.id, doorIndex: door.index, x: door.x, y: door.y, shape: door.shape
+							});
+						}
+					}
+				} else {
+					var from = carrier != null ? carrier : key;
+					var spot = gb.findKeyDropSpot(from.x, from.y);
+					if (carrier != null) { carrier.heldKey = null; }
+					key.carriedBy = null;
+					key.x = spot.x;
+					key.y = spot.y;
+					messenger.messageRoomBySig(this.roomSig, "keyDropped", {
+						by: carrier != null ? carrier.id : null, keyIndex: key.index, doorIndex: key.doorIndex, x: key.x, y: key.y, shape: key.shape
+					});
+				}
+				continue;
+			}
+			// Loose key: the advancing collapse lava swallows it (gone for the round).
+			if (this.currentState == this.stateMap.collapsing && gb.keyOnLava(key)) {
+				key.consumed = true;
+				messenger.messageRoomBySig(this.roomSig, "keyConsumed", { keyIndex: key.index, doorIndex: key.doorIndex });
+				continue;
+			}
+			// Loose key: first eligible empty-handed racer to touch it carries it.
+			for (var id in this.playerList) {
+				var p = this.playerList[id];
+				if (p == null || !p.alive || !p.awake || p.isSpectator || p.isZombie || p.reachedGoal || p.heldKey != null) { continue; }
+				var dx = p.x - key.x, dy = p.y - key.y;
+				var reach = pickupR + (p.radius || 0);
+				if (dx * dx + dy * dy <= reach * reach) {
+					key.carriedBy = p.id;
+					p.heldKey = { keyIndex: key.index, doorIndex: key.doorIndex, shape: key.shape };
+					var door2 = doors[key.doorIndex];
+					messenger.messageRoomBySig(this.roomSig, "keyPickedUp", {
+						by: p.id, keyIndex: key.index, doorIndex: key.doorIndex, shape: key.shape,
+						doorX: door2 != null ? door2.x : key.x, doorY: door2 != null ? door2.y : key.y
 					});
 					break;
 				}

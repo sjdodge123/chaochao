@@ -94,6 +94,24 @@ exports.bounceEntityOffWater = function (entity, map) {
 exports.bounceOffEmptyCells = function (player, map) {
 	bounceOffEmptyCells(player, map);
 }
+// Locked-door barrier: a door's home cell carries tileMap.door.id until its key
+// unlocks it, and behaves as a no-go wall for ALL players (same rim slide/bounce as
+// an empty hole). Once unlocked the cell flips to normal and this no longer matches.
+exports.bounceOffLockedDoors = function (player, map) {
+	bounceOffNoGoCells(player, map, c.tileMap.door.id);
+}
+// The live cell whose polygon contains (x,y), regardless of tile id (shared spatial
+// index). Used at map-init to find a door/key entity's home cell, and per-tick to
+// decide whether a loose key is sitting on lava. Null if the point is off the map.
+exports.cellAtPoint = function (x, y, map) {
+	var candidates = ensureCellIndex(map).candidates(x, y);
+	for (var i = 0; i < candidates.length; i++) {
+		if (pointIntersection(x, y, candidates[i]) > 0) {
+			return candidates[i];
+		}
+	}
+	return null;
+}
 exports.punchPlayer = function (player, punch) {
 	punchPlayer(player, punch);
 }

@@ -1335,6 +1335,62 @@ function setBarriers(barriers) {
 	}
 }
 
+// Locked doors + keys for the CURRENT map (server-authoritative from the newMap payload;
+// shapes + pairing are assigned server-side each round). Doors render as a dark shape
+// SILHOUETTE over their cell until unlocked; keys render as that shape bobbing on the
+// ground (loose) or riding their carrier (carriedBy != null). Live state (unlocked /
+// carriedBy / consumed) is driven by events (doorUnlocked / keyPickedUp / keyDropped /
+// keyConsumed). The barrier itself is server-authoritative — the client only draws it.
+var lockedDoorList = [];
+var lockedKeyList = [];
+function setLockedDoors(doors) {
+	lockedDoorList = [];
+	if (doors == null) { return; }
+	for (var i = 0; i < doors.length; i++) {
+		// Honor live `unlocked` from the payload so a mid-round joiner doesn't render an
+		// already-opened door as still locked (the server re-sends newMapPayload on join).
+		lockedDoorList.push({ index: doors[i].index, x: doors[i].x, y: doors[i].y, shape: doors[i].shape, unlocked: doors[i].unlocked === true });
+	}
+}
+function setLockedKeys(keys) {
+	lockedKeyList = [];
+	if (keys == null) { return; }
+	for (var i = 0; i < keys.length; i++) {
+		var k = keys[i];
+		// Honor live carriedBy/consumed (a used key — its door already unlocked — counts as
+		// gone). For a CARRIED key, also seed the carrier's held-key marker so a late joiner
+		// renders it orbiting the carrier instead of as a phantom on the ground.
+		var carriedBy = (k.carriedBy != null) ? k.carriedBy : null;
+		lockedKeyList.push({ index: k.index, doorIndex: k.doorIndex, x: k.x, y: k.y, shape: k.shape, carriedBy: carriedBy, consumed: (k.consumed === true || k.used === true), dropAt: 0 });
+		if (carriedBy != null && typeof playerList !== "undefined" && playerList[carriedBy] != null) {
+			playerList[carriedBy].heldKey = { shape: k.shape, doorIndex: k.doorIndex };
+		}
+	}
+}
+function lockedKeyByIndex(idx) {
+	for (var i = 0; i < lockedKeyList.length; i++) { if (lockedKeyList[i].index === idx) { return lockedKeyList[i]; } }
+	return null;
+}
+function lockedDoorByIndex(idx) {
+	for (var i = 0; i < lockedDoorList.length; i++) { if (lockedDoorList[i].index === idx) { return lockedDoorList[i]; } }
+	return null;
+}
+// Clear any player's held-key marker that targets this door (used on drop/unlock when we
+// don't separately track which kart held it on this client).
+function clearHeldKeyForDoor(doorIndex) {
+	for (var id in playerList) {
+		if (playerList[id] != null && playerList[id].heldKey != null && playerList[id].heldKey.doorIndex === doorIndex) {
+			playerList[id].heldKey = null;
+		}
+	}
+}
+// Clear the held-key marker for a key that just left a carrier (drop/unlock): target the
+// known carrier when the event names them, else fall back to clearing by door.
+function clearCarrierKey(carrierId, doorIndex) {
+	if (carrierId != null && playerList[carrierId] != null) { playerList[carrierId].heldKey = null; }
+	else { clearHeldKeyForDoor(doorIndex); }
+}
+
 function armHeatwave(payload, state) {
 	heatwaveScorch = [];
 	heatwaveFlashes = [];

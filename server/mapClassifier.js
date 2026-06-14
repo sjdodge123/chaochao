@@ -103,7 +103,10 @@ function composition(map, config) {
 // fairness score. Returns [{ name, id, missing: ['composition'|'routing'] }].
 function unbalancedTiles(config) {
     var tm = (config && config.tileMap) || {};
-    var skip = { background: true, empty: true };
+    // background/empty/door are the non-drivable void/walls — never painted as terrain
+    // (a door is placed as an entity and stamped at runtime), so they're outside the
+    // composition + routing fairness model by design.
+    var skip = { background: true, empty: true, door: true };
     var comp = {}; COMPOSITION_TILES.forEach(function (n) { comp[n] = true; });
     var weighted = {};
     (cellGraph.BALANCE_WEIGHTED_TILES || []).forEach(function (n) { weighted[n] = true; });

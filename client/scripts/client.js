@@ -942,6 +942,15 @@ function registerConnectionHandlers(server) {
 		// set synchronously (same microtask gotcha as bonus orbs) so a frame before
 		// the .then() resolves can't draw a prior round's fences on the new terrain.
 		if (typeof setBarriers === "function") { setBarriers(payload.barriers); }
+		// Locked doors + keys ride the map payload too — set synchronously (same stale-frame
+		// reasoning as bonus orbs) and clear any door cinematic from the previous round.
+		if (typeof doorFX !== "undefined") { doorFX = null; }
+		// Clear any stale held-key marker from the previous round FIRST, then set the door/
+		// key lists — setLockedKeys re-seeds heldKey for keys carried at join time, so this
+		// clear must run before it (not after) or it would wipe that fresh marker.
+		for (var pkid in playerList) { if (playerList[pkid] != null) { playerList[pkid].heldKey = null; } }
+		if (typeof setLockedDoors === "function") { setLockedDoors(payload.lockedDoors); }
+		if (typeof setLockedKeys === "function") { setLockedKeys(payload.lockedKeys); }
 		$.when.apply($, promises).then(function () {
 			currentState = payload.currentState;
 			loadNewMap(payload.id);
@@ -1941,6 +1950,62 @@ function registerAbilityHandlers(server) {
 			combatLogOrb(payload.by, orbPts);
 		}
 	});
+		// Locked-door key picked up: latch the carrier, show the key around their kart, ZOOM
+		// OUT + ping the matching door for everyone, and log it. The held-key marker rides
+		// the carrier's live position (rendered like the armed-ability ring, abilities/punch
+		// unaffected).
+		server.on("keyPickedUp", function (payload) {
+			if (payload == null) { return; }
+			if (typeof lockedKeyByIndex === "function") {
+				var key = lockedKeyByIndex(payload.keyIndex);
+				if (key != null) { key.carriedBy = payload.by; }
+			}
+			if (playerList[payload.by] != null) {
+				playerList[payload.by].heldKey = { shape: payload.shape, doorIndex: payload.doorIndex };
+			}
+			if (typeof triggerDoorPing === "function") { triggerDoorPing(payload.doorX, payload.doorY, payload.shape); }
+			playSoundVaried(collectItem, 0.12);
+			if (typeof combatLogKeyPickup === "function") { combatLogKeyPickup(payload.by, payload.shape); }
+		});
+		// Key dropped (carrier died / infected / finished / left): drop it to loose ground,
+		// clear the carrier's held-key marker, and log who lost it.
+		server.on("keyDropped", function (payload) {
+			if (payload == null) { return; }
+			if (typeof lockedKeyByIndex === "function") {
+				var dk = lockedKeyByIndex(payload.keyIndex);
+				if (dk != null) { dk.carriedBy = null; dk.x = payload.x; dk.y = payload.y; dk.dropAt = Date.now(); }
+			}
+			if (typeof clearCarrierKey === "function") { clearCarrierKey(payload.by, payload.doorIndex); }
+			playSoundVaried(collectItem, 0.05);
+			if (typeof combatLogKeyDrop === "function") { combatLogKeyDrop(payload.by, payload.shape); }
+		});
+		// Key consumed by the collapse lava: it's gone for the round (the door stays shut).
+		server.on("keyConsumed", function (payload) {
+			if (payload == null) { return; }
+			if (typeof lockedKeyByIndex === "function") {
+				var ck = lockedKeyByIndex(payload.keyIndex);
+				if (ck != null) { ck.consumed = true; }
+			}
+		});
+		// Door unlocked: open the barrier for everyone (stop drawing the silhouette), clear
+		// the carrier's held key, ZOOM OUT with the unlock animation timed to the camera peak,
+		// and log it.
+		server.on("doorUnlocked", function (payload) {
+			if (payload == null) { return; }
+			if (typeof lockedDoorByIndex === "function") {
+				var door = lockedDoorByIndex(payload.doorIndex);
+				if (door != null) { door.unlocked = true; }
+			}
+			if (typeof clearCarrierKey === "function") { clearCarrierKey(payload.by, payload.doorIndex); }
+			if (typeof lockedKeyList !== "undefined") {
+				for (var ki = 0; ki < lockedKeyList.length; ki++) {
+					if (lockedKeyList[ki].doorIndex === payload.doorIndex) { lockedKeyList[ki].consumed = true; }
+				}
+			}
+			if (typeof triggerDoorUnlock === "function") { triggerDoorUnlock(payload.x, payload.y, payload.shape); }
+			playSoundVaried(collectItem, 0.18);
+			if (typeof combatLogDoorUnlock === "function") { combatLogDoorUnlock(payload.by, payload.shape); }
+		});
 	// Late-join seed of invuln state so already-protected players flash on this client.
 	server.on("lobbyInvulnStates", function (states) {
 		if (states == null) {

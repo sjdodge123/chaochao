@@ -10,7 +10,13 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- **Locked doors and keys.** Some maps now have a locked door sealing off the way through — a dark barrier stamped with a shape (a circle, triangle, diamond…). Somewhere on the map sits a matching shaped key. Grab the key and you carry it like an ability (it orbits your kart, and you can still punch and use abilities normally); the camera pulls back so everyone sees which door it opens. Carry it into that door and it swings open for *all* players, with a zoom-out and a little unlock flourish. Get knocked out or infected while holding a key and you drop it on the ground for someone else to grab — and if the collapse lava reaches a dropped key, it's gone for the round, so the door stays shut. Every grab, drop, and unlock shows up in the combat log. Which key opens which door (and the shapes) is shuffled every round.
+
+### Map editor
+
+- **Place a locked door + key.** New "Door" tool in the editor: click to drop a door, then click again to place its key — doors and keys are always paired one-to-one. Right-click a door or key to remove the pair. The shapes and pairing are assigned in-game each round, so you just decide where they go.
 
 ## v0.41.0 — 2026-06-14
 

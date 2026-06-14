@@ -233,7 +233,7 @@ function recapCaptureFrame() {
 	// replay them — not just the karts.
 	recapFrames.push({
 		t: now, players: players, projs: recapCaptureProjs(), hazards: recapCaptureHazards(),
-		aimers: recapCaptureAimers(),
+		aimers: recapCaptureAimers(), objectives: recapCaptureObjectives(),
 		trauma: (typeof shakeTrauma !== "undefined" && shakeTrauma > 0) ? shakeTrauma : 0,
 		fx: fx
 	});
@@ -343,6 +343,31 @@ function recapCaptureHazards() {
 			(h.railX != null ? h.railX : h.x), (h.railY != null ? h.railY : h.y)]);
 	}
 	return out;
+}
+
+// Snapshot locked doors + keys for the replay. Doors: [x, y, shape, unlocked]. Keys:
+// [x, y, shape] — only non-consumed; a CARRIED key rides its carrier, so we capture the
+// carrier's live position so it tracks the kart through the clip.
+function recapCaptureObjectives() {
+	var doors = [], keys = [];
+	if (typeof lockedDoorList !== "undefined" && lockedDoorList != null) {
+		for (var d = 0; d < lockedDoorList.length; d++) {
+			var dr = lockedDoorList[d];
+			doors.push([dr.x, dr.y, dr.shape, dr.unlocked ? 1 : 0]);
+		}
+	}
+	if (typeof lockedKeyList !== "undefined" && lockedKeyList != null) {
+		for (var k = 0; k < lockedKeyList.length; k++) {
+			var ky = lockedKeyList[k];
+			if (ky.consumed) { continue; }
+			var kx = ky.x, kyy = ky.y;
+			if (ky.carriedBy != null && typeof playerList !== "undefined" && playerList[ky.carriedBy] != null) {
+				kx = playerList[ky.carriedBy].x; kyy = playerList[ky.carriedBy].y;
+			}
+			keys.push([kx, kyy, ky.shape]);
+		}
+	}
+	return { doors: doors, keys: keys };
 }
 
 // Snapshot active targeting aimers that are mid-countdown (swap / explosion warn
@@ -975,6 +1000,10 @@ function recapRenderClip(item, winX, winY, winW, winH) {
 			gameContext.drawImage(map.image, w.x - map.pad, w.y - map.pad, fullW, fullH);
 		}
 
+		// Locked-door barriers sit on the terrain (under everything), like the live render.
+		if (frame.objectives != null && frame.objectives.doors != null) {
+			for (var od = 0; od < frame.objectives.doors.length; od++) { recapDrawObjectiveDoor(frame.objectives.doors[od]); }
+		}
 		// Match the live draw order: hazards, then trails, then karts, then projectiles.
 		if (frame.hazards != null) {
 			for (var h = 0; h < frame.hazards.length; h++) { recapDrawHazard(frame.hazards[h]); }
@@ -986,6 +1015,10 @@ function recapRenderClip(item, winX, winY, winW, winH) {
 		recapDrawIceReflections(map, frame);
 		for (var i = 0; i < frame.players.length; i++) {
 			recapDrawCar(frame.players[i], item.exits, frameT);
+		}
+		// Keys over the karts (a carried key rides its carrier; loose keys sit on the map).
+		if (frame.objectives != null && frame.objectives.keys != null) {
+			for (var ok = 0; ok < frame.objectives.keys.length; ok++) { recapDrawObjectiveKey(frame.objectives.keys[ok]); }
 		}
 		if (frame.projs != null) {
 			for (var pj = 0; pj < frame.projs.length; pj++) { recapDrawProjectile(frame.projs[pj]); }
@@ -1597,6 +1630,59 @@ function recapDrawProjectile(pr) {
 			gameContext.restore();
 		}
 	} catch (e) { /* undecoded image — skip this prop, keep the montage alive */ }
+}
+
+// Door cell + inscribed radius, memoized per map so the replay doesn't rescan all cells
+// (a full _findCellNear + _cellInnerRadius) for every door on every replay frame. Doors
+// don't move; the cache resets whenever currentMap changes (new round / map swap).
+var _recapDoorCellCache = { map: null, byKey: {} };
+function recapDoorCell(x, y) {
+	var cm = (typeof currentMap !== "undefined") ? currentMap : null;
+	if (_recapDoorCellCache.map !== cm) { _recapDoorCellCache.map = cm; _recapDoorCellCache.byKey = {}; }
+	var key = x + "," + y;
+	var hit = _recapDoorCellCache.byKey[key];
+	if (hit === undefined) {
+		var cell = (typeof _findCellNear === "function") ? _findCellNear(x, y) : null;
+		var ri = (cell != null && typeof _cellInnerRadius === "function") ? _cellInnerRadius(cell) : null;
+		hit = { cell: cell, ri: ri };
+		_recapDoorCellCache.byKey[key] = hit;
+	}
+	return hit;
+}
+// Replay a locked door [x, y, shape, unlocked]: fill its tile dark with the shape
+// silhouette in its colour (skipped once unlocked). Reuses the live draw helpers.
+function recapDrawObjectiveDoor(d) {
+	if (d == null || d[0] == null || d[3]) { return; } // skip unlocked
+	var ctx = gameContext, x = d[0], y = d[1], shape = d[2];
+	var col = (typeof keyShapeColor === "function") ? keyShapeColor(shape) : "#cbb6ff";
+	var resolved = recapDoorCell(x, y), cell = resolved.cell;
+	ctx.save();
+	if (cell != null && typeof traceCellPath === "function" && traceCellPath(ctx, cell)) {
+		ctx.fillStyle = "#2b2438"; ctx.fill();
+		// Glowing key-colour border (door footprint + identity), matching the live render.
+		ctx.lineWidth = 5; ctx.strokeStyle = col; ctx.stroke();
+		ctx.lineWidth = 1.5; ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.stroke();
+	} else {
+		ctx.fillStyle = "#2b2438"; ctx.beginPath(); ctx.arc(x, y, 20, 0, 2 * Math.PI); ctx.fill();
+		ctx.lineWidth = 4; ctx.strokeStyle = col; ctx.stroke();
+	}
+	if (typeof traceShapePath === "function") {
+		// Opaque shape emblem + keyhole, sized by the (cached) inscribed radius (matches live).
+		var sr = (resolved.ri != null) ? Math.max(5, resolved.ri * 0.78) : 13;
+		traceShapePath(ctx, shape, x, y, sr);
+		ctx.fillStyle = col; ctx.fill();
+		ctx.lineWidth = 2.5; ctx.strokeStyle = "rgba(255,255,255,0.95)"; ctx.stroke();
+		var kr = Math.max(2, sr * 0.30);
+		ctx.fillStyle = "rgba(18,14,28,0.92)";
+		ctx.beginPath(); ctx.arc(x, y - kr * 0.2, kr, 0, 2 * Math.PI); ctx.fill();
+		ctx.fillRect(x - kr * 0.42, y - kr * 0.2, kr * 0.84, kr * 1.9);
+	}
+	ctx.restore();
+}
+// Replay a key [x, y, shape] via the live high-contrast glyph.
+function recapDrawObjectiveKey(k) {
+	if (k == null || k[0] == null) { return; }
+	if (typeof drawKeyGlyph === "function") { drawKeyGlyph(gameContext, k[2], k[0], k[1], 12); }
 }
 
 // Replay one buffered hazard (static / moving bumper) via the live draw helpers.

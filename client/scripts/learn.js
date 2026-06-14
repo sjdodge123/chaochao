@@ -144,7 +144,10 @@
                   detail: "Some maps wall off part of the track with fences and walls — solid lines you simply can't cross. Run into one and you don't stop dead; you slide along its face, exactly like the hardened stone where water meets lava. They don't hurt you, they just block the way, so map makers use them to carve corridors, pen off shortcuts, and bend the route into chicanes. They're finite, though — every fence has ends, so look for the way around — and rival AI racers know that too, routing around a barrier toward its open ends." },
                 { id: "tile-random", name: "Random Ground", icon: swatch("#7c3aed"), anim: "randomTile",
                   blurb: "A wildcard disguised as another surface.",
-                  detail: "A trickster tile. It masquerades as one of the ordinary surfaces, so you won't know whether you're about to hit speedy grass or draggy sand until you're already committed to it." }
+                  detail: "A trickster tile. It masquerades as one of the ordinary surfaces, so you won't know whether you're about to hit speedy grass or draggy sand until you're already committed to it." },
+                { id: "tile-door", name: "Locked Doors", icon: emoji("🔒"), anim: "lockedDoor",
+                  blurb: "A shaped barrier — find its key to open it.",
+                  detail: "Some maps seal the way through with a locked door — a dark barrier stamped with a shape (a circle, triangle, diamond…). Somewhere on the map is a key wearing that same shape. Drive over the key to carry it: it orbits your kart like a held ability, and you can still punch and use powers normally. Picking it up pulls the camera back so everyone sees which door it fits. Carry it into that matching door and it swings open for ALL players. Get knocked out or infected while holding a key and you drop it on the ground for anyone to grab — and if the collapse lava reaches a dropped key, it's gone for the round and that door stays shut. The shapes and which key opens which door are shuffled every round." }
             ]
         },
         {
