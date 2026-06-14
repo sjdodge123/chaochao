@@ -34,6 +34,14 @@ class Boon extends Hazard {
 	}
 	update() { }
 	handleHit(object) { }
+	// Who a boon acts on: a live RACER, never a zombie. Boons are racer aids, so they
+	// deliberately skip the infection side — a boon must not speed a zombie's chase,
+	// reset its bite cooldown, or let it drain a shared Recharge Spring away from the
+	// survivors. Every other colliding entity (pucks, projectiles, antlions and other
+	// hazards, aimers, punches, gates) is not isPlayer, so this also excludes them all.
+	isEligiblePlayer(object) {
+		return object != null && object.isPlayer === true && object.isZombie !== true;
+	}
 	// Engine.broadBase resolves a colliding pair from BOTH object orderings
 	// (obj1.handleHit(obj2); obj2.handleHit(obj1)) and walks every object as obj1,
 	// so a boon's handleHit runs TWICE for one overlap in a single tick. A boon that
@@ -58,13 +66,13 @@ class Boon extends Hazard {
 	}
 }
 
-// Dash Arrows — a directional speed pad (the chevron strip). While a player or
-// puck overlaps it, it adds a velocity impulse along the pad's facing each contact
-// tick; the engine's maxVelocity clamp (engine.js) turns a couple of contact ticks
-// into a snap to top speed in the arrow's direction. Self-limiting: the pad is
-// small, so a boosted player is flung clear within a few ticks. Unlike the
-// omnidirectional `fast` tile, the boost is purely along the author-set angle, so
-// hitting it backwards fights it — placement and rotation are the authoring lever.
+// Dash Arrows — a directional speed pad (the chevron strip). While a racer overlaps
+// it, it adds a velocity impulse along the pad's facing each contact tick; the engine's
+// maxVelocity clamp (engine.js) turns a couple of contact ticks into a snap to top
+// speed in the arrow's direction. Self-limiting: the pad is small, so a boosted racer
+// is flung clear within a few ticks. Unlike the omnidirectional `fast` tile, the boost
+// is purely along the author-set angle, so hitting it backwards fights it — placement
+// and rotation are the authoring lever. (Racers only — see Boon.isEligiblePlayer.)
 class DashArrows extends Boon {
 	constructor(x, y, angle, ownerId, roomSig) {
 		super(x, y, c.boons.dashArrows.radius, c.boons.dashArrows.color, ownerId, roomSig);
@@ -74,7 +82,7 @@ class DashArrows extends Boon {
 		this.boostCap = c.boons.dashArrows.boostCap;
 	}
 	handleHit(object) {
-		if (!object.isPlayer && !object.isPuck) {
+		if (!this.isEligiblePlayer(object)) {
 			return;
 		}
 		if (!this.claimTickContact(object)) {
@@ -134,7 +142,7 @@ class RechargeSpring extends Boon {
 		this.netState = Math.max(0, Math.min(99, Math.round((1 - remaining / this.cooldownMs) * 100)));
 	}
 	handleHit(object) {
-		if (!object.isPlayer || typeof object.rechargeFromSpring !== "function") {
+		if (!this.isEligiblePlayer(object) || typeof object.rechargeFromSpring !== "function") {
 			return;
 		}
 		if (Date.now() < this.rechargeReadyAt) {
@@ -158,16 +166,17 @@ registerBoonKind("rechargeSpring", {
 	}
 });
 
-// Slipstream — a wind-current corridor (the streamline patch). While a player or puck
-// overlaps it, a gentle constant push along the author-set axis carries them up to
-// currentSpeed — a steady current, deliberately well below the engine max and below
-// Dash Arrows' launch cap, so it reads as a tailwind, not a slam. Same anti-overshoot
-// rule as Dash Arrows: add only the remaining gap to the cap each contact tick (never
-// overshoot — which could tunnel a thin wall in one tick — and never brake a player
-// already moving faster ALONG the axis). Because the push is purely axial, a kart
-// shoved or driven BACKWARDS through it has a negative `along`, so the full push fights
-// that backward motion and carries it forward again. The footprint is large; chain a
-// few to build a long tunnel.
+// Slipstream — a wind-current corridor (the streamline patch). While a racer overlaps
+// it, a gentle constant push along the author-set axis carries them up to currentSpeed
+// — a steady current, deliberately well below the engine max and below Dash Arrows'
+// launch cap, so it reads as a tailwind, not a slam. Same anti-overshoot rule as Dash
+// Arrows: add only the remaining gap to the cap each contact tick (never overshoot —
+// which could tunnel a thin wall in one tick — and never brake a racer already moving
+// faster ALONG the axis). Because the push is purely axial, a kart shoved or driven
+// BACKWARDS through it has a negative `along`, so the full push fights that backward
+// motion and carries it forward again. The footprint is large; chain a few to build a
+// long tunnel. (Racers only — see Boon.isEligiblePlayer; pucks use projectile physics
+// that wouldn't carry a raw velocity impulse, so they're deliberately excluded.)
 class Slipstream extends Boon {
 	constructor(x, y, angle, ownerId, roomSig) {
 		super(x, y, c.boons.slipstream.radius, c.boons.slipstream.color, ownerId, roomSig);
@@ -177,7 +186,7 @@ class Slipstream extends Boon {
 		this.currentSpeed = c.boons.slipstream.currentSpeed;
 	}
 	handleHit(object) {
-		if (!object.isPlayer && !object.isPuck) {
+		if (!this.isEligiblePlayer(object)) {
 			return;
 		}
 		if (!this.claimTickContact(object)) {
