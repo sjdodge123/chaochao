@@ -44,22 +44,6 @@ if (process.env.NODE_ENV === 'production') {
     c.forceAbilitySpawn = null;
 }
 
-// Test-only seam: force EVERY round to a given brutal type (or set of types) by id,
-// bypassing the random roll + selection gate — so a brutal-round interaction can be
-// playtested on demand (e.g. the editor preview: FORCE_BRUTAL_TYPES=1014 forces the
-// Antlion round to test the vortex-well pull). Sibling to FORCE_ABILITY_SPAWN; reads
-// config.brutalTypesForce (committed default: absent) and is consumed by
-// gameBoard's brutal selection. Comma-separated ids -> array. HARD-disabled in
-// production so a forced round can never reach the live game even if the env leaks.
-if (process.env.NODE_ENV === 'production') {
-    c.brutalTypesForce = null;
-} else if (process.env.FORCE_BRUTAL_TYPES != null && process.env.FORCE_BRUTAL_TYPES !== '') {
-    var __forcedBrutals = String(process.env.FORCE_BRUTAL_TYPES).split(',')
-        .map(function (s) { return parseInt(s, 10); })
-        .filter(function (n) { return !isNaN(n); });
-    c.brutalTypesForce = __forcedBrutals.length > 0 ? __forcedBrutals : null;
-}
-
 // Test-only config override seam (CI perf harness). When CHAO_PERF_OVERRIDE is a
 // JSON object, deep-merge it over the loaded config so a separate-process server
 // can boot into a deterministic worst-case load scenario (e.g. forced grid size +
