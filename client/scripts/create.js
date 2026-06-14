@@ -46,6 +46,12 @@ var rotateStartAngle = 0;
 // resizeStartRadius keeps the pre-drag value to record one undo command on release.
 var resizingHandle = false;
 var resizeStartRadius = 0;
+// On-canvas MOVE/grab handle (every selected object): while dragging it the object's
+// (x,y) tracks the cursor; moveStartX/Y keep the pre-drag position to record one undo
+// command on release.
+var movingHandle = false;
+var moveStartX = 0;
+var moveStartY = 0;
 var touchActive = false;
 var touchId = null; // identifier of the finger currently driving a touch stroke
 // Accumulates the cell changes of the in-progress paint/erase stroke so the whole
@@ -883,6 +889,14 @@ function animloop() {
         // Dragging the on-canvas rotate knob: angle tracks the cursor.
         selectedObject.angle = Math.atan2(mousey - selectedObject.y, mousex - selectedObject.x) * (180 / Math.PI);
         updateSelectedObject();
+        dirty = true;
+    }
+    if (movingHandle && selectedObject != null) {
+        // Dragging the grab handle: the object's centre follows the cursor, clamped
+        // to the canvas so it can't be dragged off-screen.
+        selectedObject.x = Math.round(Math.max(0, Math.min(createCanvas.width, mousex)));
+        selectedObject.y = Math.round(Math.max(0, Math.min(createCanvas.height, mousey)));
+        updateSelectedPosition();
         dirty = true;
     }
     if (resizingHandle && selectedObject != null) {
@@ -1798,6 +1812,18 @@ function handleClick(event) {
     // listeners, so a click on the modal's buttons reaches here too and would
     // paint/erase/place straight through the dialog.
     if (wipeConfirmOpen()) { return; }
+    // This is a WINDOW mousedown listener, so a click on a toolbar/palette button
+    // (rotate, delete, tiles, …) lands here too — and acting on it with the stale
+    // last-canvas cursor position would locateObject(off-canvas) and CLEAR the
+    // selection a beat before the button's own click handler runs (so the rotate /
+    // delete buttons appeared to do nothing). Only drive editor mouse actions from the
+    // canvas itself; a synthetic touch call carries no target and still passes.
+    if (event.target && typeof createCanvas !== "undefined" && createCanvas != null && event.target !== createCanvas) { return; }
+    // Sync the cursor position from THIS event (not the last mousemove) so a press
+    // acts on where it actually landed — handle hit-tests (grab/rotate/resize/delete)
+    // and locateObject all read mousex/mousey. Without this a mousedown not preceded
+    // by a mousemove (touch tap, a cursor jump) uses stale coords and misses the handle.
+    if (event.pageX != null && event.pageY != null) { cellUnderMouse(event); }
     switch (event.which) {
         case 1: {
             if (erasing) { break; } // don't start a paint while a right-erase is in progress
@@ -1809,6 +1835,13 @@ function handleClick(event) {
             // On-canvas hazard handles take priority over painting/selecting.
             if (selectedObject != null) {
                 if (overDeleteHandle(mousex, mousey)) { removeSelectedObject(); break; }
+                // Grab handle (centre knob): drag to reposition the selected object.
+                if (overMoveHandle(mousex, mousey)) {
+                    movingHandle = true;
+                    moveStartX = selectedObject.x;
+                    moveStartY = selectedObject.y;
+                    break;
+                }
                 // Resizable kinds expose a resize handle in place of the rotate knob.
                 if (selectedResizable()) {
                     if (overResizeHandle(mousex, mousey)) {
@@ -1854,6 +1887,13 @@ function handleClick(event) {
 function handleUnClick(event) {
     switch (event.which) {
         case 1: {
+            if (movingHandle) {
+                movingHandle = false;
+                if (selectedObject != null) {
+                    pushMoveCommand(selectedHazardIndex(), moveStartX, moveStartY, selectedObject.x, selectedObject.y);
+                }
+                break;
+            }
             if (rotatingHandle) {
                 rotatingHandle = false;
                 if (selectedObject != null) {
@@ -2832,6 +2872,15 @@ function pushResizeCommand(index, from, to) {
         redo: function () { hz.radius = to; }
     });
 }
+function pushMoveCommand(index, fromX, fromY, toX, toY) {
+    if (fromX === toX && fromY === toY) { return; }
+    var hz = (index >= 0 && vMap.hazards[index]) ? vMap.hazards[index] : null;
+    if (hz == null) { return; }
+    pushCommand({
+        undo: function () { hz.x = fromX; hz.y = fromY; },
+        redo: function () { hz.x = toX; hz.y = toY; }
+    });
+}
 // Write the selection's live radius back to its hazard entry (resize drag).
 function updateSelectedRadius() {
     var i = selectedHazardIndex();
@@ -2887,6 +2936,15 @@ function overDeleteHandle(x, y) {
     var p = deleteHandlePos();
     return getMagSq(x, y, p.x, p.y) < 18 * 18;
 }
+// Move/grab handle: a knob at the object's centre — drag it to reposition the object.
+function moveHandlePos() {
+    return { x: selectedObject.x, y: selectedObject.y };
+}
+function overMoveHandle(x, y) {
+    if (selectedObject == null) { return false; }
+    var p = moveHandlePos();
+    return getMagSq(x, y, p.x, p.y) < 16 * 16;
+}
 // Shared knob: a filled disc with a white rim, used by all on-canvas handles.
 function drawHandleKnob(p, r, fill) {
     createContext.save();
@@ -2929,6 +2987,30 @@ function drawHazardHandles() {
     createContext.lineWidth = 2.5;
     createContext.strokeStyle = "white";
     createContext.stroke();
+    createContext.restore();
+
+    // Grab/move knob at the centre — a green disc with a 4-way arrow glyph.
+    var gp = moveHandlePos();
+    drawHandleKnob(gp, 11, "#2e8b57");
+    createContext.save();
+    createContext.strokeStyle = "white";
+    createContext.fillStyle = "white";
+    createContext.lineWidth = 2;
+    createContext.lineCap = "round";
+    createContext.lineJoin = "round";
+    var a = 7;   // arm length
+    createContext.beginPath();
+    createContext.moveTo(gp.x - a, gp.y); createContext.lineTo(gp.x + a, gp.y);
+    createContext.moveTo(gp.x, gp.y - a); createContext.lineTo(gp.x, gp.y + a);
+    createContext.stroke();
+    // arrowheads
+    var h = 3;
+    createContext.beginPath();
+    createContext.moveTo(gp.x - a, gp.y); createContext.lineTo(gp.x - a + h, gp.y - h); createContext.lineTo(gp.x - a + h, gp.y + h); createContext.closePath();
+    createContext.moveTo(gp.x + a, gp.y); createContext.lineTo(gp.x + a - h, gp.y - h); createContext.lineTo(gp.x + a - h, gp.y + h); createContext.closePath();
+    createContext.moveTo(gp.x, gp.y - a); createContext.lineTo(gp.x - h, gp.y - a + h); createContext.lineTo(gp.x + h, gp.y - a + h); createContext.closePath();
+    createContext.moveTo(gp.x, gp.y + a); createContext.lineTo(gp.x - h, gp.y + a - h); createContext.lineTo(gp.x + h, gp.y + a - h); createContext.closePath();
+    createContext.fill();
     createContext.restore();
 }
 
@@ -3066,6 +3148,13 @@ function updateSelectedObject() {
     var i = selectedHazardIndex();
     if (i < 0 || vMap.hazards[i] == null) { return; }
     vMap.hazards[i].angle = selectedObject.angle;
+}
+// Write the selection's live position back to its hazard entry (grab-handle drag).
+function updateSelectedPosition() {
+    var i = selectedHazardIndex();
+    if (i < 0 || vMap.hazards[i] == null) { return; }
+    vMap.hazards[i].x = selectedObject.x;
+    vMap.hazards[i].y = selectedObject.y;
 }
 
 function removeSelectedObject() {
