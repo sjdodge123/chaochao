@@ -4,6 +4,48 @@ var c = utils.loadConfig();
 var { Rect, Circle } = require('./shapes.js');
 var { Punch } = require('./punch.js');
 
+// --- shared rotated-rect + segment geometry -----------------------------------
+// One home for the math the rotated-rect hazards (bumper wall, blink fence, crusher)
+// would otherwise each re-implement.
+// Corners of a thin rect ANCHORED at (x,y), extending `width` along `angle` with
+// `height` thickness (the bumper-wall / blink-fence shape). The base Rect treats
+// width/height as far-corner coords, which only works for an axis-aligned,
+// origin-anchored rect — hence the override.
+function anchoredRectVertices(x, y, width, height, angle) {
+	var rad = (angle || 0) * (Math.PI / 180);
+	var dx = Math.cos(rad), dy = Math.sin(rad);
+	var nx = -dy * (height / 2), ny = dx * (height / 2);
+	var bx = x + dx * width, by = y + dy * width;
+	return [
+		{ x: x + nx, y: y + ny },
+		{ x: bx + nx, y: by + ny },
+		{ x: bx - nx, y: by - ny },
+		{ x: x - nx, y: y - ny }
+	];
+}
+// AABB covering EVERY vertex (base Rect.getExtents skips the last one — a length-1
+// loop — which drops a corner from the quadtree box for a rotated rect).
+function aabbFromVertices(vertices) {
+	var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+	for (var i = 0; i < vertices.length; i++) {
+		var v = vertices[i];
+		if (v.x < minX) { minX = v.x; }
+		if (v.x > maxX) { maxX = v.x; }
+		if (v.y < minY) { minY = v.y; }
+		if (v.y > maxY) { maxY = v.y; }
+	}
+	return { minX: minX, maxX: maxX, minY: minY, maxY: maxY };
+}
+// Nearest point on segment (ax,ay)->(bx,by) to (px,py).
+function closestPointOnSegment(px, py, ax, ay, bx, by) {
+	var abx = bx - ax, aby = by - ay;
+	var len2 = abx * abx + aby * aby;
+	if (len2 < 1e-6) { return { x: ax, y: ay }; }
+	var t = ((px - ax) * abx + (py - ay) * aby) / len2;
+	if (t < 0) { t = 0; } else if (t > 1) { t = 1; }
+	return { x: ax + abx * t, y: ay + aby * t };
+}
+
 class HazardRail extends Rect {
 	constructor(x, y, width, height, angle, color, ownerId, roomSig) {
 		super(x, y, width, height, angle, color);
@@ -107,41 +149,16 @@ class BumperWall extends Rect {
 		this.bx = this.x + Math.cos(rad) * this.width;
 		this.by = this.y + Math.sin(rad) * this.width;
 	}
-	// True rotated corners (base Rect treats width/height as far-corner coords,
-	// which only works for axis-aligned, origin-anchored rects). Called by the
-	// Rect constructor, so it must only read x/y/width/height/angle.
+	// Anchored rotated rect (called by the Rect constructor, so it reads only
+	// x/y/width/height/angle). getExtents covers all 4 corners (base Rect drops one).
 	getVertices() {
-		var rad = (this.angle || 0) * (Math.PI / 180);
-		var dx = Math.cos(rad), dy = Math.sin(rad);
-		var nx = -dy * (this.height / 2), ny = dx * (this.height / 2);
-		var bx = this.x + dx * this.width, by = this.y + dy * this.width;
-		return [
-			{ x: this.x + nx, y: this.y + ny },
-			{ x: bx + nx, y: by + ny },
-			{ x: bx - nx, y: by - ny },
-			{ x: this.x - nx, y: this.y - ny }
-		];
+		return anchoredRectVertices(this.x, this.y, this.width, this.height, this.angle);
 	}
-	// Base Rect.getExtents skips the last vertex (length - 1 loop); for a rotated
-	// wall that drops a whole corner from the quadtree AABB, so cover all four.
 	getExtents() {
-		var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-		for (var i = 0; i < this.vertices.length; i++) {
-			var v = this.vertices[i];
-			if (v.x < minX) { minX = v.x; }
-			if (v.x > maxX) { maxX = v.x; }
-			if (v.y < minY) { minY = v.y; }
-			if (v.y > maxY) { maxY = v.y; }
-		}
-		return { minX, maxX, minY, maxY };
+		return aabbFromVertices(this.vertices);
 	}
 	closestOnLine(px, py) {
-		var abx = this.bx - this.ax, aby = this.by - this.ay;
-		var len2 = abx * abx + aby * aby;
-		if (len2 < 1e-6) { return { x: this.ax, y: this.ay }; }
-		var t = ((px - this.ax) * abx + (py - this.ay) * aby) / len2;
-		if (t < 0) { t = 0; } else if (t > 1) { t = 1; }
-		return { x: this.ax + abx * t, y: this.ay + aby * t };
+		return closestPointOnSegment(px, py, this.ax, this.ay, this.bx, this.by);
 	}
 	update() {
 		if (this.alive == false) {
@@ -432,31 +449,12 @@ class BlinkFence extends Rect {
 		this.bx = this.x + Math.cos(rad) * this.width;
 		this.by = this.y + Math.sin(rad) * this.width;
 	}
-	// Rotated-rect corners + true AABB — identical contract to the bumper wall (the
-	// base Rect treats width/height as far-corner coords, which only works for an
-	// axis-aligned, origin-anchored rect; and base getExtents drops the last vertex).
+	// Anchored rotated rect — same shape as the bumper wall (shared helpers).
 	getVertices() {
-		var rad = (this.angle || 0) * (Math.PI / 180);
-		var dx = Math.cos(rad), dy = Math.sin(rad);
-		var nx = -dy * (this.height / 2), ny = dx * (this.height / 2);
-		var bx = this.x + dx * this.width, by = this.y + dy * this.width;
-		return [
-			{ x: this.x + nx, y: this.y + ny },
-			{ x: bx + nx, y: by + ny },
-			{ x: bx - nx, y: by - ny },
-			{ x: this.x - nx, y: this.y - ny }
-		];
+		return anchoredRectVertices(this.x, this.y, this.width, this.height, this.angle);
 	}
 	getExtents() {
-		var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-		for (var i = 0; i < this.vertices.length; i++) {
-			var v = this.vertices[i];
-			if (v.x < minX) { minX = v.x; }
-			if (v.x > maxX) { maxX = v.x; }
-			if (v.y < minY) { minY = v.y; }
-			if (v.y > maxY) { maxY = v.y; }
-		}
-		return { minX, maxX, minY, maxY };
+		return aabbFromVertices(this.vertices);
 	}
 	// Phase timer (per tick from gameBoard.updateHazards with dt). Walks the cycle and
 	// publishes the phase as netState; `blocking` flags warn+solid for the AI.
@@ -547,15 +545,7 @@ class Crusher extends Rect {
 		];
 	}
 	getExtents() {
-		var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-		for (var i = 0; i < this.vertices.length; i++) {
-			var v = this.vertices[i];
-			if (v.x < minX) { minX = v.x; }
-			if (v.x > maxX) { maxX = v.x; }
-			if (v.y < minY) { minY = v.y; }
-			if (v.y > maxY) { maxY = v.y; }
-		}
-		return { minX, maxX, minY, maxY };
+		return aabbFromVertices(this.vertices);
 	}
 	// Slab centerline (the long axis through the center) — the shove pushes a kart
 	// perpendicular off the nearest point on it, i.e. along the slide axis. Built from
@@ -568,12 +558,7 @@ class Crusher extends Rect {
 		this.vertices = this.getVertices();
 	}
 	closestOnLine(px, py) {
-		var abx = this.bx - this.ax, aby = this.by - this.ay;
-		var len2 = abx * abx + aby * aby;
-		if (len2 < 1e-6) { return { x: this.ax, y: this.ay }; }
-		var t = ((px - this.ax) * abx + (py - this.ay) * aby) / len2;
-		if (t < 0) { t = 0; } else if (t > 1) { t = 1; }
-		return { x: this.ax + abx * t, y: this.ay + aby * t };
+		return closestPointOnSegment(px, py, this.ax, this.ay, this.bx, this.by);
 	}
 	// Lightning speeds moving hazards up — scale the along-rail speed (like the rail
 	// bumper). See gameBoard.generateHazards.
@@ -624,11 +609,10 @@ class Crusher extends Rect {
 		// its swept position or it would collide one tick behind.
 		this.refreshGeometry();
 	}
-	// Commit the rail step and re-derive the slab geometry (base Hazard.move only sets
-	// x/y; the rotated-rect collider also needs fresh vertices/centerline each tick).
+	// Commit the rail step. advance() already refreshed the collider to newX/newY
+	// (which now equal x/y), so no second refreshGeometry is needed here.
 	move() {
 		this.x = this.newX; this.y = this.newY;
-		this.refreshGeometry();
 	}
 	update() {
 		if (this.alive === false) { return; }
