@@ -160,11 +160,12 @@ class Player extends Circle {
 		this.stamina = c.punchStamina.max;
 		this.staminaExhausted = false;
 		// Land lunge (double-tap punch on solid ground): registerAttackEdge stamps each
-		// press edge so two presses within doubleTapMs arm a lunge on the second punch.
-		// lungeArmedAt times the arm so a swallowed/stale second tap can't fire a lunge
-		// on some much-later punch; staminaAtLastEdge gates it to a rested bar.
-		this.lungeArmed = false;
-		this.lungeArmedAt = 0;
+		// press edge so two presses within doubleTapMs request a lunge (lungePending),
+		// which tryLandLunge consumes on the next tick — decoupled from the punch throw
+		// so the 200ms punch cooldown can't swallow the second tap. lungePendingAt times
+		// it out; staminaAtLastEdge gates it to a bar that was at least minStaminaFrac full.
+		this.lungePending = false;
+		this.lungePendingAt = 0;
 		this.lastAttackEdgeAt = null;
 		this.staminaAtLastEdge = c.punchStamina.max;
 		// Hold-to-charge punch state. charging spans press->release; chargeFrac (0..1)
@@ -314,6 +315,7 @@ class Player extends Circle {
 		this.dt = dt;
 		this.move();
 		this.checkDriftEscrow();
+		this.tryLandLunge(currentState);
 		this.checkAttack(currentState);
 		this.checkChatCoolDownTimer();
 		this.checkFireTimer();
@@ -411,21 +413,53 @@ class Player extends Circle {
 		this.attack = false;
 	}
 	// Stamp a punch press edge (false->true on the attack button, latched in messenger).
-	// Two edges within landLunge.doubleTapMs arm a land lunge on the second punch — but
-	// only if the bar was at least minStaminaFrac of max when the double-tap STARTED
-	// (the first edge), so the lunge fires from a rested bar and not in the middle of
-	// sustained punch-trading. Direction + off-water are checked at throw time.
+	// Two edges within landLunge.doubleTapMs REQUEST a land lunge — but only if the bar
+	// was at least minStaminaFrac of max when the double-tap STARTED (the first edge).
+	// tryLandLunge() consumes the request on the next tick; direction + off-water are
+	// checked there. Decoupled from the punch throw so the punch cooldown can't eat it.
 	registerAttackEdge() {
 		var L = c.landLunge;
 		var now = Date.now();
 		if (L != null && this.lastAttackEdgeAt != null
 			&& (now - this.lastAttackEdgeAt) <= L.doubleTapMs
 			&& this.staminaAtLastEdge >= c.punchStamina.max * L.minStaminaFrac) {
-			this.lungeArmed = true;
-			this.lungeArmedAt = now;
+			this.lungePending = true;
+			this.lungePendingAt = now;
 		}
 		this.lastAttackEdgeAt = now;
 		this.staminaAtLastEdge = this.stamina;
+	}
+	// Fire a requested land lunge: a short forward burst that COSTS you net speed — it
+	// brakes your velocity (the same slow every swing applies), adds a modest impulse
+	// along the held direction, then empties the bar and pauses regen for recoverMs so
+	// you're stuck at the exhausted move penalty (slow, can't re-lunge or punch) while a
+	// racer who didn't lunge pulls ahead. A utility hop (dodge a hazard, escape sand /
+	// burn), not travel. Off-water only — a punch on water already swims. Kept pending
+	// across ticks (until it fires or times out) so a direction held a beat late still
+	// lunges; that forgiveness is what makes it reliable to trigger off ice.
+	tryLandLunge(currentState) {
+		if (!this.lungePending) { return; }
+		var L = c.landLunge;
+		if (L == null || (Date.now() - this.lungePendingAt) > L.doubleTapMs) { this.lungePending = false; return; }
+		var playState = (currentState == c.stateMap.racing || currentState == c.stateMap.collapsing
+			|| currentState == c.stateMap.lobby || currentState == c.stateMap.gated);
+		if (!playState || this.onWater || this.isZombie || !this.canSpendStamina()) { this.lungePending = false; return; }
+		var dir = this.getMoveDir();
+		if (dir == null) { return; } // no held direction yet — wait within the freshness window
+		this.lungePending = false;
+		this.velX *= c.punchThrowBrake;
+		this.velY *= c.punchThrowBrake;
+		this.velX += dir.x * L.impulse;
+		this.velY += dir.y * L.impulse;
+		this.stamina = 0;
+		this.staminaExhausted = true;
+		// Pause regen for recoverMs (mirrors the overcharge lock): keeps staminaExhausted
+		// latched so the exhausted move penalty — and the no-punch / no-re-lunge cost —
+		// holds for the whole window, making the lunge a NET loss of ground.
+		if (L.recoverMs) { this.exhaustLockUntil = Date.now() + L.recoverMs; }
+		// Send the dash direction so the client streak points along the lunge even if it
+		// arrives a tick before the velocity update does.
+		messenger.messageRoomBySig(this.roomSig, "landLunge", { id: this.id, dx: dir.x, dy: dir.y });
 	}
 	startCharge() {
 		this.charging = true;
@@ -600,29 +634,6 @@ class Player extends Circle {
 				: c.punchThrowBrake;
 			this.velX *= releaseBrake;
 			this.velY *= releaseBrake;
-		}
-		// Land lunge: a double-tap punch on solid ground fires a forward burst — the land
-		// cousin of the water swim stroke. The release brake above already applied (the
-		// "slowing debuff of swinging" the lunge shares with every punch); now add the
-		// lunge impulse along the held direction (engine playerMaxSpeed caps the peak).
-		// It costs the ENTIRE bar and latches exhaustion, so it's a rationed escape/closer
-		// rather than a spammable dash. Off-water only (a punch on water already swims),
-		// and the arm must be fresh (lungeArmedAt within doubleTapMs) so a swallowed second
-		// tap can't fire a stale lunge on a much-later punch.
-		if (this.lungeArmed) {
-			var L = c.landLunge;
-			var ldir = this.getMoveDir();
-			if (L != null && ldir != null && !this.onWater && !this.isZombie
-				&& (Date.now() - this.lungeArmedAt) <= L.doubleTapMs) {
-				this.velX += ldir.x * L.impulse;
-				this.velY += ldir.y * L.impulse;
-				this.stamina = 0;
-				this.staminaExhausted = true;
-				// Send the dash direction so the client streak points along the lunge even
-				// if it arrives a tick before the velocity update does.
-				messenger.messageRoomBySig(this.roomSig, "landLunge", { id: this.id, dx: ldir.x, dy: ldir.y });
-			}
-			this.lungeArmed = false;
 		}
 		// No scoring in the lobby (the bully stat isn't gated by checkForWinners).
 		if (currentState != c.stateMap.lobby) {
