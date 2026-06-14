@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.38.0 — 2026-06-14
+
 ### General
 
 - **Water doesn't flash to lava when the world collapses anymore — it slow-boils.** When the closing lava front reaches a patch of water it now spends about three seconds heating up — a tiered simmer → boil → rolling-boil warning with bubbles and rising steam — before it finally turns to lava. That's a few extra seconds to scramble across (or off) the water while it's still safe.
