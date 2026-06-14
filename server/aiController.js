@@ -1987,7 +1987,10 @@ function update(gameBoard, currentState, dt) {
         // no gap to time; the pull is constant). Bots still skirt the outer pull, and
         // a strong/fast kart can punch through — this only bends the planned route.
         if (hz.isVortex) {
-            var pullR = hz.radius * 0.6;
+            // coreFraction (config) defines the strong-pull core as a fraction of the
+            // pull radius — shared with mapClassifier so the overlay/par estimate
+            // routes around the same ring the bots do.
+            var pullR = hz.radius * (c.hazards.vortexWell.coreFraction || 0.6);
             var pr2 = pullR * pullR;
             for (var vi = 0; vi < map.cells.length; vi++) {
                 var vc = map.cells[vi];

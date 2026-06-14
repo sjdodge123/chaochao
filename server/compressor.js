@@ -273,10 +273,10 @@ exports.newHazards = function (hazardList) {
 			rail != null ? rail.x : hazard.x,
 			rail != null ? rail.y : hazard.y,
 			hazard.netState != null ? hazard.netState : null,
-			// [8] per-instance radius for sizable kinds (the vortex well — authored
-			// size). Other circle hazards ship their (fixed) collision radius here
-			// harmlessly; the client only reads it for the kinds whose drawer uses it.
-			hazard.radius != null ? hazard.radius : null
+			// [8] per-instance radius — opt-in for `sizable` kinds (the vortex well's
+			// authored size), like streamAngle/netState. null for every other kind so
+			// the slot's payload matches its contract.
+			hazard.sizable ? hazard.radius : null
 		];
 		packet.push(listItem);
 	}

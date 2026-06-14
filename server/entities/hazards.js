@@ -351,6 +351,7 @@ class VortexWell extends Hazard {
 		this.moveable = false;      // stationary — no engine motion hook
 		this.forceZone = true;      // gameBoard.updateHazards applies applyForce once/tick
 		this.isVortex = true;       // AI routes around the core (aiController classifier)
+		this.sizable = true;        // ship per-instance radius on the wire (compressor.newHazards [8])
 		this.coreRadius = c.hazards.vortexWell.coreRadius * (radius / c.hazards.vortexWell.radius);
 		this.force = c.hazards.vortexWell.force;
 	}
