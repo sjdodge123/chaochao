@@ -986,6 +986,12 @@ function mapHasStoneEdges(map) {
 function rebuildStoneEdges(map) {
 	if (map == null) { return; }
 	map._stoneEdges = undefined;
+	// Terrain types just changed (water/lava created — Orbital Beam, Heatwave). The
+	// per-id "does this map have any cell of type X" cache (mapHasCellOfType) is
+	// otherwise never invalidated, so a no-go barrier that early-outs on "no water
+	// here" (the zombie/antlion water block) would stay disabled after water is made
+	// mid-round. Reset it so the next query rebuilds from the live cell ids.
+	map._hasCellOfType = undefined;
 	ensureStoneEdges(map);
 }
 // Orientation sign of point (px,py) relative to directed segment a->b (cross product).

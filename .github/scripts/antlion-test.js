@@ -503,9 +503,40 @@ function sessionWaterBlock() {
     assert(!everInWater, 'water-block: a live antlion entered a water cell while lured across water');
     assert(samples > 0, 'water-block: integration antlion never ticked (setup error)');
 
+    // (c) Dynamic water (Orbital Beam / Heatwave turn ice->water mid-round): the
+    // mapHasCellOfType cache is otherwise never invalidated, so a map that STARTED
+    // with no water would keep the block disabled after water appears. Verify the
+    // block re-engages once rebuildStoneEdges (called wherever water is made) runs.
+    const dryMap = loadMap('SandsOfTime.json'); // no water tiles
+    assert(dryMap.cells.filter(c => c.id === WATER_ID).length === 0, 'dynamic-water: SandsOfTime unexpectedly has water');
+    // Prime the cache to "no water" the way a live antlion tick would.
+    const dryEnt = { x: 700, y: 400, newX: 700, newY: 400, velX: 0, velY: 0, maxVelocity: AL.chaseSpeed, bounced: false };
+    _engine.bounceEntityOffWater(dryEnt, dryMap);
+    // Convert one interior cell to water (mid-round mutation) + the terrain-change hook.
+    let conv = null;
+    for (const c2 of dryMap.cells) {
+        if (c2.site && c2.site.x > 300 && c2.site.x < 1000 && c2.site.y > 250 && c2.site.y < 550) { conv = c2; break; }
+    }
+    assert(conv != null, 'dynamic-water: no interior cell to convert');
+    if (failures === 0) {
+        conv.id = WATER_ID;
+        _engine.rebuildStoneEdges(dryMap); // the cache-invalidation choke point
+        // A land entity stepping into the freshly-made water cell must now deflect.
+        let lx = null, bnd = Infinity;
+        for (const c2 of dryMap.cells) {
+            if (c2.id === WATER_ID || !c2.site) { continue; }
+            const d = (c2.site.x - conv.site.x) ** 2 + (c2.site.y - conv.site.y) ** 2;
+            if (d < bnd) { bnd = d; lx = c2.site; }
+        }
+        const dynEnt = { x: lx.x, y: lx.y, newX: conv.site.x, newY: conv.site.y, velX: 0, velY: 0, maxVelocity: AL.chaseSpeed, bounced: false };
+        _engine.bounceEntityOffWater(dynEnt, dryMap);
+        assert(!_engine.isOnCellOfType(dynEnt.newX, dynEnt.newY, dryMap, WATER_ID),
+            'dynamic-water: block did NOT re-engage after water was created mid-round (stale mapHasCellOfType cache)');
+    }
+
     config.brutalTypesForce = null;
     if (failures === 0) {
-        console.log('Session 6 passed: antlions are blocked from entering water (' + samples + ' ticks clear).');
+        console.log('Session 6 passed: antlions blocked from water (' + samples + ' ticks clear) + dynamic-water cache invalidation.');
     }
 }
 
