@@ -230,6 +230,15 @@ class Player extends Circle {
 		// death returns you here — until the totem is consumed by the collapsing lava
 		// (totem.safe goes false). Re-attuning to a different flag overwrites it.
 		this.secondWind = null;
+		// Death-beat (delayed revive): while > 0 the racer has gone down on an attuned
+		// flag and is frozen/invuln until this timestamp, when Player.update finishes the
+		// revive (or, if the flag burned in the meantime, dies for real). The death loc +
+		// cause are held so the real-death fallback reads correctly and the client can
+		// slow-pan the camera from the death spot to the flag.
+		this.secondWindPendingUntil = 0;
+		this.secondWindDeathX = 0;
+		this.secondWindDeathY = 0;
+		this.secondWindDeathCause = null;
 
 		//Achievements
 		this.savior = 0;
@@ -329,6 +338,15 @@ class Player extends Circle {
 			this.checkForSleep(currentState);
 		}
 		if (this.alive == false) {
+			return;
+		}
+		// Second Wind death-beat: frozen + invuln at the death spot until the delay
+		// elapses, then finish (revive at the flag, or die for real if it burned). No
+		// movement/collision/attack runs during the beat (see also handleHit's guard).
+		if (this.secondWindPendingUntil) {
+			if (Date.now() >= this.secondWindPendingUntil) {
+				this.finishSecondWind(currentState);
+			}
 			return;
 		}
 		this.dt = dt;
@@ -807,6 +825,58 @@ class Player extends Circle {
 		this.secondWind = totem;
 		return true;
 	}
+	// Second Wind Totem (boon): start the death-beat instead of dying. The racer freezes
+	// in place (no movement/collision/attack — see Player.update + handleHit) and is made
+	// invuln for the delay, and the client is told to slow-pan the camera from the death
+	// spot to the flag. Player.update calls finishSecondWind when the timer elapses. No
+	// death bookkeeping happens here (no notch loss / playerDied / eliminatedAt), so a
+	// respawn never charges a team-points penalty or a kill — only a real death does.
+	beginSecondWind(cause) {
+		var delay = c.boons.secondWindTotem.respawnDelayMs;
+		this.secondWindDeathX = this.x;
+		this.secondWindDeathY = this.y;
+		this.secondWindDeathCause = cause || null;
+		this.secondWindPendingUntil = Date.now() + delay;
+		this.enabled = false;
+		this.velX = 0;
+		this.velY = 0;
+		this.newX = this.x;
+		this.newY = this.y;
+		this.cancelCharge();
+		this.attack = false;
+		this.attackQueued = false;
+		this.ability = null;
+		this.moveForward = false;
+		this.moveBackward = false;
+		this.turnLeft = false;
+		this.turnRight = false;
+		// Immune for the whole beat + a touch beyond (covers the teleport frame).
+		this.invulnUntil = Date.now() + delay + 200;
+		if (this.onFire > 0) {
+			this.onFire = 0;
+			this.fireTimer = null;
+			messenger.messageRoomBySig(this.roomSig, "onFire", { owner: this.id, value: 0 });
+		}
+		messenger.messageRoomBySig(this.roomSig, "secondWindPending", {
+			id: this.id,
+			fromX: this.secondWindDeathX, fromY: this.secondWindDeathY,
+			toX: this.secondWind.x, toY: this.secondWind.y,
+			ms: delay
+		});
+	}
+	// Death-beat over (called from Player.update): revive at the flag if it's still a
+	// valid, safe respawn; otherwise the flag burned (or the round left racing) during the
+	// beat, so fall through to a REAL death — which DOES charge the team penalty / kill.
+	finishSecondWind(currentState) {
+		this.secondWindPendingUntil = 0;
+		var live = (currentState == c.stateMap.racing || currentState == c.stateMap.collapsing);
+		if (live && this.secondWind != null && !this.infected && !this.isZombie
+			&& this.secondWind.safe !== false) {
+			this.reviveAtSecondWind();
+			return;
+		}
+		this.killPlayer(this, this.secondWindDeathCause);
+	}
 	// Second Wind Totem (boon): respawn at the totem instead of dying (called from
 	// killPlayer once the eligibility/safety gates pass). Keeps the racer alive + their
 	// notch, teleports them onto the totem, zeroes momentum, clears fire/charge and any
@@ -816,6 +886,8 @@ class Player extends Circle {
 	// death, for the whole round, until the collapse consumes the flag (safe=false).
 	reviveAtSecondWind() {
 		var totem = this.secondWind;
+		this.secondWindPendingUntil = 0;
+		this.enabled = true; // beginSecondWind froze them; bring them back into play
 		this.x = totem.x;
 		this.y = totem.y;
 		this.newX = this.x;
@@ -1148,6 +1220,12 @@ class Player extends Circle {
 		this.brakeCoeff = c.playerBrakeCoeff;
 	}
 	handleHit(object) {
+		// Second Wind death-beat: frozen + immune to everything (lava re-death, punches,
+		// goal, terrain) until the revive resolves. (Punch/puck/cut/explosion are also
+		// covered by the invuln set in beginSecondWind; this also skips map cells.)
+		if (this.secondWindPendingUntil) {
+			return;
+		}
 		if (object.isLobbyStart) {
 			this.hittingLobbyButton = true;
 			return;
@@ -1572,16 +1650,23 @@ class Player extends Circle {
 		if (packet.alive == false) {
 			return;
 		}
-		// Second Wind Totem (boon): a death respawns the racer AT their attuned totem
-		// instead of ending the run — every death, for the whole round, until the totem
-		// is consumed by the collapsing lava (safe=false), after which a respawn there
-		// would just re-kill them so it's skipped. Excludes the infection side (a
-		// bitten/zombified racer is not revived as a survivor). Returns BEFORE any of the
-		// death bookkeeping below, so no notch is lost and no playerDied fires — the
-		// client plays the revive cue off the secondWind event.
+		// Already in the death-beat delay — swallow any re-death during the frozen window.
+		if (packet.secondWindPendingUntil) {
+			return;
+		}
+		// Second Wind Totem (boon): a death does NOT end the run if the racer has an
+		// attuned, still-standing flag. Instead it starts the death-beat — the racer
+		// freezes for respawnDelayMs while the client pans to the flag, then revives there
+		// (Player.finishSecondWind). Returns BEFORE any death bookkeeping (no notch loss,
+		// no playerDied, and — crucially for team modes — no eliminatedAt stamp, so no
+		// team-points penalty and no kill credit are charged for a respawn). The penalty/
+		// kill only land on a REAL death: the flag was never attuned (this branch is
+		// skipped), or it has been consumed by lava by the time the delay elapses
+		// (finishSecondWind falls through to a real killPlayer). Excludes the infection
+		// side (a bitten/zombified racer is not revived as a survivor).
 		if (packet.secondWind != null && !packet.infected && !packet.isZombie
 			&& packet.secondWind.safe !== false) {
-			packet.reviveAtSecondWind();
+			packet.beginSecondWind(cause);
 			return;
 		}
 		if (packet.punchedBy != null) {
@@ -1739,6 +1824,8 @@ class Player extends Circle {
 			messenger.messageRoomBySig(this.roomSig, "guardShield", { id: this.id, active: false });
 		}
 		this.secondWind = null;
+		this.secondWindPendingUntil = 0;
+		this.secondWindDeathCause = null;
 		// Clear lobby-only state on every race (re)start so a lobby respawn's invuln
 		// grace / sanctuary flag / pending-respawn can never bleed into a real round.
 		this.invulnUntil = 0;

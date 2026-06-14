@@ -42,6 +42,11 @@ var server = null,
     // palette. Persisted in localStorage (see the #colorblindControl wiring).
     colorblindEnabled = false,
     worldViewFocusedElapsed = 0,  // ms accumulated in the focus phase (frame-dt based, not wall-clock)
+    // Second Wind death-beat camera pan: while set, computeWorldViewTarget slow-pans the
+    // local view from the death spot to the flag over the respawn delay, then releases.
+    // { fromX, fromY, toX, toY, ms, startedAt }. Set by the secondWindPending handler
+    // (local + solo only), cleared when the pan completes or on a new round.
+    secondWindCam = null,
     // Per-player smoothed look-ahead vectors keyed by player id (see
     // computeFocusedView). Smoothing the lead itself keeps steering wiggle,
     // punches and bounces from snapping the camera; cleared whenever the

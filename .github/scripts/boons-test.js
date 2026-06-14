@@ -30,11 +30,14 @@
 //       over cooldownMs with the netState telegraph; a shielded racer never wastes a
 //       ready halo. RACERS only (a non-player + a zombie are ignored).
 //   [G] Second Wind Totem (config.boons.secondWindTotem). Drive over to attune; EVERY
-//       death that round respawns you AT the flag (keeping your notch, no playerDied)
-//       instead of ending the run — indefinitely, until the collapse consumes the flag
-//       (safe=false → netState 0), after which it revives no one. Excludes the infection
-//       side; re-anchors to a different flag on contact. The board keeps the per-tick
-//       safe/netState fresh via tracksTileSafety.
+//       death that round plays a respawnDelayMs DEATH-BEAT (frozen + invuln at the death
+//       spot, client slow-pans to the flag) then respawns you AT the flag (keeping your
+//       notch, no playerDied) — indefinitely. CRUCIALLY a respawn is never a death: no
+//       eliminatedAt stamp, so no team-points penalty and no kill credit. Those only land
+//       on a REAL death — flag never attuned, already consumed at death, or burned DURING
+//       the beat (finishSecondWind falls through to a real killPlayer). Excludes the
+//       infection side; re-anchors to a different flag on contact; board keeps the
+//       per-tick safe/netState fresh via tracksTileSafety.
 //   [E] Slipstream (config.boons.slipstream). A directional wind corridor: a gentle
 //       constant push along its axis up to currentSpeed, capped (never overshoots,
 //       never brakes a faster kart), that fights a backward-driven kart. RACERS only —
@@ -512,20 +515,45 @@ try {
         check(bot.secondWind === totem, 'the racer is attuned to the flag');
         check(bot.attuneSecondWind(totem) === false, 're-driving over the SAME flag is a no-op');
 
-        // INDEFINITE: each death respawns AT the flag (notch kept, no playerDied), and
-        // the attunement is NOT spent — it does it again and again.
+        // INDEFINITE + DEATH-BEAT: each death starts a respawnDelayMs beat (frozen, invuln,
+        // NOT yet teleported, NO death bookkeeping), then Player.update revives at the flag
+        // when the delay elapses. The attunement is NOT spent — it repeats every death.
+        const DELAY = TOTEM.respawnDelayMs;
         bot.notches = 2;
         for (let d = 1; d <= 3; d++) {
             bot.x = PAD_X - 300; bot.y = ROWS[1]; bot.velX = 200; bot.velY = -50;
-            const since = events.length;
+            const deathX = bot.x, deathY = bot.y;
+            let since = events.length;
             bot.killSelf('lava');
-            check(bot.alive === true, 'death #' + d + ' revives the racer (indefinite) instead of ending the run');
-            check(bot.x === totem.x && bot.y === totem.y, 'death #' + d + ': respawned AT the flag with momentum zeroed');
-            check(bot.secondWind === totem, 'death #' + d + ': the attunement is NOT spent (still armed)');
+            // The beat: alive + pending + frozen at the death spot, no revive/death yet.
+            check(bot.alive === true && bot.secondWindPendingUntil > clock,
+                'death #' + d + ': enters the death-beat (still alive, pending)');
+            check(bot.x === deathX && bot.y === deathY && bot.enabled === false,
+                'death #' + d + ': frozen at the death spot (not yet teleported)');
+            check(bot.eliminatedAt == null,
+                'death #' + d + ': eliminatedAt NOT stamped during the beat (no team penalty / kill)');
+            check(emittedSince('secondWindPending', since) && !emittedSince('secondWind', since)
+                && !emittedSince('playerDied', since),
+                'death #' + d + ': a secondWindPending fired; no revive/death cue yet');
+            // The beat is invuln: a punch during the freeze is swallowed (handleHit guard).
+            const beforeX = bot.x;
+            bot.handleHit({ x: bot.x + 5, y: bot.y, ownerId: 'atk', mapOwned: true, getBonus: () => 900, isPunch: true });
+            check(bot.x === beforeX && bot.velX === 0, 'death #' + d + ': frozen racer is immune mid-beat');
+            // Advance past the delay -> the next update finishes the revive at the flag.
+            clock += DELAY + 50; fireDueTimers();
+            since = events.length;
+            bot.update(config.stateMap.racing, DT);
+            check(bot.alive === true && bot.secondWindPendingUntil === 0,
+                'death #' + d + ': the beat completes and the racer is alive');
+            check(bot.x === totem.x && bot.y === totem.y && bot.velX === 0 && bot.velY === 0,
+                'death #' + d + ': respawned AT the flag with momentum zeroed');
+            check(bot.enabled === true && bot.secondWind === totem,
+                'death #' + d + ': back in play, attunement NOT spent (still armed)');
             check(emittedSince('secondWind', since) && !emittedSince('playerDied', since),
                 'death #' + d + ': a secondWind event fired and NO playerDied was emitted');
         }
-        check(bot.notches === 2, 'the racer kept their notch across every revive (no removeNotch)');
+        check(bot.notches === 2, 'kept the notch across every revive (no removeNotch — and no team-points death)');
+        check(bot.eliminatedAt == null, 'eliminatedAt still null after repeated respawns (a respawn is never a death)');
         check(bot.invulnUntil > clock, 'the latest respawn granted a brief invuln grace');
 
         // Re-anchor: driving over a DIFFERENT flag overwrites the attunement.
@@ -534,20 +562,39 @@ try {
             'driving over a different flag re-anchors the racer to it');
         bot.attuneSecondWind(totem); // restore for the remaining checks
 
-        // Infection side excluded: an attuned racer who is infected is NOT revived.
+        // Infection side excluded: an attuned racer who is infected dies for REAL (no beat).
         bot.reset(config.stateMap.racing); bot.currentState = config.stateMap.racing;
         bot.attuneSecondWind(totem);
         bot.infected = true;
         bot.killSelf(null);
-        check(bot.alive === false, 'an infected racer is not revived (boons skip the infection side)');
+        check(bot.alive === false && bot.secondWindPendingUntil === 0,
+            'an infected racer is not revived — real death, no beat (boons skip the infection side)');
 
-        // Consumed by lava: once the collapse turns the flag's tile to lava (safe=false)
-        // it revives no one — and the wire telegraphs it (netState 0).
+        // Already consumed at death: a flag the lava already ate (safe=false) revives no
+        // one — immediate REAL death (this DOES charge the team penalty / kill).
         bot.reset(config.stateMap.racing); bot.currentState = config.stateMap.racing;
         bot.attuneSecondWind(totem);
         totem.safe = false; totem.netState = 0;
+        let sinceReal = events.length;
         bot.killSelf('lava');
-        check(bot.alive === false, 'a consumed flag (lava, safe=false) revives no one');
+        check(bot.alive === false && bot.secondWindPendingUntil === 0,
+            'a flag already consumed at death (safe=false) -> immediate real death');
+        check(emittedSince('playerDied', sinceReal), 'the real death emits playerDied (charges the team penalty)');
+        totem.safe = true;
+
+        // Burned DURING the beat: safe at death, but the collapse reaches the flag before
+        // the delay elapses -> finishSecondWind falls through to a REAL death. This is the
+        // operator's "flag burned" case: the team penalty / kill land here, not on a revive.
+        bot.reset(config.stateMap.racing); bot.currentState = config.stateMap.racing;
+        bot.attuneSecondWind(totem); totem.safe = true; totem.netState = 100;
+        bot.killSelf('lava');
+        check(bot.alive === true && bot.secondWindPendingUntil > clock, 'beat begins (flag safe at death)');
+        totem.safe = false; // collapse eats the flag mid-beat
+        clock += DELAY + 50; fireDueTimers();
+        sinceReal = events.length;
+        bot.update(config.stateMap.racing, DT);
+        check(bot.alive === false, 'a flag burned DURING the beat -> real death (no revive)');
+        check(emittedSince('playerDied', sinceReal), 'the burned-mid-beat death emits playerDied (charges the penalty)');
         totem.safe = true;
 
         // The board keeps safe + netState fresh each tick (tracksTileSafety) — a flag on
