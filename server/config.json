@@ -607,10 +607,10 @@
             "cooldownMs": 8000
         },
         "secondWindTotem": {
-            "_doc": "Drive over to ATTUNE: the totem becomes your respawn anchor. The first death that round respawns you at the totem instead of ending your run (single-use per player per round). Excludes infection deaths (a bitten/zombified racer is not revived) and only fires during racing/collapsing. On respawn you keep your notch, your velocity is zeroed, fire/charge are cleared, and you get respawnInvulnMs of grace from other players' hits (lava still kills, so the respawn is skipped if the collapse has already turned the totem's tile to lava — tracked tick-by-tick via the safe flag). colorWater is the palette used by the on-water render variant so the totem reads against blue water.",
+            "_doc": "A respawn flag you drive over to ATTUNE. Once attuned, EVERY death that round respawns you at the flag instead of ending your run — repeatedly, for as long as the flag survives. The flag is 'consumed' the moment the collapsing lava reaches its tile (tracked tick-by-tick via the safe flag → netState 0); after that it revives no one. Excludes infection deaths (a bitten/zombified racer is not revived) and only fires during racing/collapsing. On respawn you keep your notch, your velocity is zeroed, fire/charge are cleared, and you get respawnInvulnMs of grace from other players' hits. Driving over a DIFFERENT flag re-anchors you to it. The flag draws in a neutral colour and only recolours to YOUR kart colour on your own screen when you touch it (client-only, so it reads as 'you activated this'). color is the neutral cloth; colorWater is the on-water palette.",
             "id": 954,
-            "color": "#C792EA",
-            "colorWater": "#EBD9FF",
+            "color": "#CBD2DC",
+            "colorWater": "#EAF1FA",
             "radius": 28,
             "respawnInvulnMs": 1500
         }

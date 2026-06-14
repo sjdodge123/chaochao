@@ -623,9 +623,12 @@ class GameBoard {
 			// timer; moving kinds ignore it (base Hazard.update just commits move()).
 			hazard.update(dt);
 			// Second Wind Totem (boon): keep its `safe` flag fresh so the death-path
-			// revive never drops a racer onto a tile the collapse has turned to lava.
+			// revive never drops a racer onto a tile the collapse has turned to lava, and
+			// mirror it onto netState (100 standing / 0 consumed) so the client hides a
+			// flag the lava has eaten.
 			if (hazard.tracksTileSafety) {
 				hazard.safe = this.isPointSafeGround(hazard.x, hazard.y);
+				hazard.netState = hazard.safe ? 100 : 0;
 			}
 			if (forceZonesLive && hazard.forceZone && hazard.alive !== false) {
 				for (var pid in this.playerList) {

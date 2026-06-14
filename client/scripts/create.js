@@ -1609,36 +1609,42 @@ function paintGuardHaloShape(ctx, kind, x, y, angle, ringColor) {
     ctx.restore();
 }
 // Second Wind Totem painter (the secondWindTotem `paint` hook) — mirrors the in-game
-// look (draw.js drawSecondWindTotem): a faint violet footprint + base ring with a
-// violet diamond crest. On water the palette is pale-violet. Static in the editor.
+// look (draw.js drawFlagShape): a neutral respawn FLAG, a pole + triangular pennant on
+// a small base. Neutral cloth in the editor (it only recolours to a kart's colour live).
 function paintSecondWindTotemShape(ctx, kind, x, y, angle, ringColor) {
     var cfg = objCfgByKey(kind.key);
     if (cfg == null) { return; }
-    var r = cfg.radius;
     var onWater = editorBoonOnWater(x, y);
-    var accent = onWater ? cfg.colorWater : cfg.color;
+    var cloth = onWater ? cfg.colorWater : cfg.color;
+    var poleTopY = -30;
     ctx.save();
     ctx.translate(x, y);
+    // Base mound.
     ctx.beginPath();
-    ctx.arc(0, 0, r, 0, 2 * Math.PI);
-    ctx.fillStyle = onWater ? "rgba(235,217,255,0.05)" : "rgba(199,146,234,0.05)";
+    ctx.ellipse(0, 4, 9, 4, 0, 0, 2 * Math.PI);
+    ctx.fillStyle = "rgba(18,28,42,0.30)";
     ctx.fill();
-    ctx.beginPath();
-    ctx.arc(0, 0, r * 0.7, 0, 2 * Math.PI);
-    ctx.strokeStyle = accent;
-    ctx.lineWidth = 3;
-    ctx.stroke();
-    var d = r * 0.46;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
+    // Pole.
+    ctx.strokeStyle = "rgba(28,34,46,0.92)";
+    ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(0, -d);
-    ctx.lineTo(d * 0.75, 0);
-    ctx.lineTo(0, d);
-    ctx.lineTo(-d * 0.75, 0);
+    ctx.moveTo(0, 4);
+    ctx.lineTo(0, poleTopY);
+    ctx.stroke();
+    // Pennant.
+    var len = 22, hgt = 13;
+    ctx.beginPath();
+    ctx.moveTo(0, poleTopY);
+    ctx.quadraticCurveTo(len * 0.5, poleTopY - 2, len, poleTopY + hgt * 0.5);
+    ctx.lineTo(0, poleTopY + hgt);
     ctx.closePath();
-    ctx.strokeStyle = EDITOR_BOON_HALO; ctx.lineWidth = 7; ctx.stroke();
-    ctx.strokeStyle = cfg.color; ctx.lineWidth = 4; ctx.stroke();
+    ctx.fillStyle = cloth;
+    ctx.fill();
+    ctx.strokeStyle = EDITOR_BOON_HALO;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
     ctx.restore();
 }
 // Wall-band painter (bumperWall's `paint` hook). Mirrors the in-game look
@@ -3122,23 +3128,25 @@ var EDITOR_HAZARD_KINDS = [
         key: "secondWindTotem", label: "Second Wind Totem", shortcut: "n", railed: false, directional: false,
         group: "boon", paint: paintSecondWindTotemShape,
         swatchPaint: function (ctx, size) {
-            // Violet ring + diamond crest — "respawn here on your first death".
-            var cx = size / 2, cy = size / 2;
-            ctx.strokeStyle = "#C792EA";
+            // A flag — "respawn here when you'd die, until lava eats it".
+            var px = size * 0.36;
+            ctx.strokeStyle = "#2A3340";
             ctx.lineWidth = 5;
-            ctx.beginPath();
-            ctx.arc(cx, cy, size * 0.32, 0, 2 * Math.PI);
-            ctx.stroke();
-            var d = size * 0.22;
-            ctx.lineWidth = 6;
             ctx.lineCap = "round";
             ctx.lineJoin = "round";
             ctx.beginPath();
-            ctx.moveTo(cx, cy - d);
-            ctx.lineTo(cx + d * 0.75, cy);
-            ctx.lineTo(cx, cy + d);
-            ctx.lineTo(cx - d * 0.75, cy);
+            ctx.moveTo(px, size * 0.82);
+            ctx.lineTo(px, size * 0.18);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(px, size * 0.18);
+            ctx.lineTo(px + size * 0.4, size * 0.32);
+            ctx.lineTo(px, size * 0.46);
             ctx.closePath();
+            ctx.fillStyle = "#CBD2DC";
+            ctx.fill();
+            ctx.strokeStyle = "rgba(10,40,55,0.6)";
+            ctx.lineWidth = 2;
             ctx.stroke();
         }
     }

@@ -226,10 +226,10 @@ class Player extends Circle {
 		// consumed at the same sites Star Power gates damage (tryConsumeGuardShield).
 		this.guardShield = false;
 		// Second Wind Totem: the attuned totem (a SecondWindTotem boon) this racer
-		// will respawn at on its first death this round, or null. Single-use per
-		// round; killPlayer reads it, secondWindUsed latches it spent.
+		// respawns at on death, or null. Revives INDEFINITELY for the round — every
+		// death returns you here — until the totem is consumed by the collapsing lava
+		// (totem.safe goes false). Re-attuning to a different flag overwrites it.
 		this.secondWind = null;
-		this.secondWindUsed = false;
 
 		//Achievements
 		this.savior = 0;
@@ -797,26 +797,25 @@ class Player extends Circle {
 		messenger.messageRoomBySig(this.roomSig, "guardShieldPopped", { id: this.id, x: this.x, y: this.y });
 		return true;
 	}
-	// Second Wind Totem (boon): attune to a totem so the first death this round
-	// respawns here instead of ending the run. Stores the totem ref (the death path
-	// reads its live `safe` flag). No-op once already spent this round, or when already
-	// attuned to this same totem (so re-overlapping doesn't re-fire the cue).
+	// Second Wind Totem (boon): attune to a totem so deaths this round respawn here
+	// instead of ending the run. Stores the totem ref (the death path reads its live
+	// `safe` flag). Re-overlapping the SAME flag is a no-op; driving over a different
+	// flag re-anchors. The flag-claim colour + bump are handled client-side off kart
+	// proximity (so it shows "YOU activated it"), so no server cue is emitted here.
 	attuneSecondWind(totem) {
-		if (this.secondWindUsed || this.secondWind === totem) { return false; }
+		if (this.secondWind === totem) { return false; }
 		this.secondWind = totem;
-		messenger.messageRoomBySig(this.roomSig, "secondWindAttuned", { id: this.id, x: totem.x, y: totem.y });
 		return true;
 	}
-	// Second Wind Totem (boon): spend the attunement to respawn at the totem instead
-	// of dying (called from killPlayer once the eligibility/safety gates pass). Keeps
-	// the racer alive + their notch, teleports them onto the totem, zeroes momentum,
-	// clears fire/charge and any pending kill attribution from the hit that "killed"
-	// them, and grants a brief invuln grace from other players' hits (lava still kills,
-	// but the safe gate already ruled out a lava tile). Single-use this round.
+	// Second Wind Totem (boon): respawn at the totem instead of dying (called from
+	// killPlayer once the eligibility/safety gates pass). Keeps the racer alive + their
+	// notch, teleports them onto the totem, zeroes momentum, clears fire/charge and any
+	// pending kill attribution from the hit that "killed" them, and grants a brief
+	// invuln grace from other players' hits (lava still kills, but the safe gate already
+	// ruled out a lava tile). The attunement is NOT spent — it revives again on the next
+	// death, for the whole round, until the collapse consumes the flag (safe=false).
 	reviveAtSecondWind() {
 		var totem = this.secondWind;
-		this.secondWind = null;
-		this.secondWindUsed = true;
 		this.x = totem.x;
 		this.y = totem.y;
 		this.newX = this.x;
@@ -1573,13 +1572,13 @@ class Player extends Circle {
 		if (packet.alive == false) {
 			return;
 		}
-		// Second Wind Totem (boon): the first death this round respawns the racer AT
-		// their attuned totem instead of ending the run. Excludes the infection side (a
-		// bitten/zombified racer is not revived as a survivor), and is skipped if the
-		// collapse has already turned the totem's tile to lava (safe=false) — a respawn
-		// there would just re-kill them. Single-use per round (secondWindUsed latches).
-		// Returns BEFORE any of the death bookkeeping below, so no notch is lost and no
-		// playerDied fires — the client plays the revive cue off the secondWind event.
+		// Second Wind Totem (boon): a death respawns the racer AT their attuned totem
+		// instead of ending the run — every death, for the whole round, until the totem
+		// is consumed by the collapsing lava (safe=false), after which a respawn there
+		// would just re-kill them so it's skipped. Excludes the infection side (a
+		// bitten/zombified racer is not revived as a survivor). Returns BEFORE any of the
+		// death bookkeeping below, so no notch is lost and no playerDied fires — the
+		// client plays the revive cue off the secondWind event.
 		if (packet.secondWind != null && !packet.infected && !packet.isZombie
 			&& packet.secondWind.safe !== false) {
 			packet.reviveAtSecondWind();
@@ -1740,7 +1739,6 @@ class Player extends Circle {
 			messenger.messageRoomBySig(this.roomSig, "guardShield", { id: this.id, active: false });
 		}
 		this.secondWind = null;
-		this.secondWindUsed = false;
 		// Clear lobby-only state on every race (re)start so a lobby respawn's invuln
 		// grace / sanctuary flag / pending-respawn can never bleed into a real round.
 		this.invulnUntil = 0;

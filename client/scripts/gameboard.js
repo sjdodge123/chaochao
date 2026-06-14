@@ -745,6 +745,81 @@ function thumbnailTileFill(id) {
 	if (typeof patterns !== 'undefined' && patterns[id] != null) { return patterns[id]; }
 	return locateColor(id) || '#888';
 }
+// Draw a boon's thumbnail glyph (next-map preview) at the hazard's spot: a filled disc
+// in the boon's palette plus a tiny white icon so each kind is recognizable and clearly
+// NOT a (red-ringed) bumper. Returns true if `hz` was a boon (so the caller skips the
+// generic bumper draw), false otherwise. Mirrors the in-game/editor boon language.
+function drawThumbnailBoonGlyph(ctx, hz) {
+	if (config.boons == null || hz == null) { return false; }
+	var B = config.boons;
+	var cfg = null, kind = null;
+	for (var key in B) {
+		if (B[key] != null && B[key].id === hz.id) { cfg = B[key]; kind = key; break; }
+	}
+	if (cfg == null) { return false; }
+	var r = cfg.radius || 24;
+	var x = hz.x, y = hz.y;
+	ctx.save();
+	ctx.translate(x, y);
+	// Disc footprint in the boon colour.
+	ctx.beginPath();
+	ctx.arc(0, 0, r, 0, 2 * Math.PI);
+	ctx.fillStyle = cfg.color;
+	ctx.globalAlpha = 0.85;
+	ctx.fill();
+	ctx.globalAlpha = 1;
+	ctx.strokeStyle = "rgba(10,40,55,0.6)";
+	ctx.lineWidth = 2;
+	ctx.stroke();
+	// White icon per kind.
+	ctx.strokeStyle = "#ffffff";
+	ctx.fillStyle = "#ffffff";
+	ctx.lineWidth = 4;
+	ctx.lineCap = "round";
+	ctx.lineJoin = "round";
+	var s = r * 0.5;
+	if (kind === "dashArrows" || kind === "slipstream") {
+		// Chevron(s) pointing along +x (these are directional, rotate to match).
+		ctx.rotate((hz.angle || 0) * Math.PI / 180);
+		ctx.beginPath();
+		ctx.moveTo(-s * 0.6, -s); ctx.lineTo(s * 0.5, 0); ctx.lineTo(-s * 0.6, s);
+		ctx.stroke();
+	} else if (kind === "rechargeSpring") {
+		// Plus / restore cross.
+		ctx.beginPath();
+		ctx.moveTo(-s, 0); ctx.lineTo(s, 0); ctx.moveTo(0, -s); ctx.lineTo(0, s);
+		ctx.stroke();
+	} else if (kind === "guardHalo") {
+		// Shield crest.
+		ctx.beginPath();
+		ctx.moveTo(0, -s);
+		ctx.lineTo(s * 0.8, -s * 0.45);
+		ctx.lineTo(s * 0.8, s * 0.2);
+		ctx.lineTo(0, s);
+		ctx.lineTo(-s * 0.8, s * 0.2);
+		ctx.lineTo(-s * 0.8, -s * 0.45);
+		ctx.closePath();
+		ctx.stroke();
+	} else if (kind === "secondWindTotem") {
+		// A little flag: pole + pennant.
+		ctx.beginPath();
+		ctx.moveTo(-s * 0.4, s); ctx.lineTo(-s * 0.4, -s);
+		ctx.stroke();
+		ctx.beginPath();
+		ctx.moveTo(-s * 0.4, -s);
+		ctx.lineTo(s * 0.7, -s * 0.55);
+		ctx.lineTo(-s * 0.4, -s * 0.1);
+		ctx.closePath();
+		ctx.fill();
+	} else {
+		// Generic boon dot.
+		ctx.beginPath();
+		ctx.arc(0, 0, s * 0.5, 0, 2 * Math.PI);
+		ctx.fill();
+	}
+	ctx.restore();
+	return true;
+}
 function buildMapThumbnailCanvas(map) {
 	var cv = document.createElement('canvas');
 	if (map == null || !Array.isArray(map.cells)) { return cv; }
@@ -781,6 +856,10 @@ function buildMapThumbnailCanvas(map) {
 		for (var hi = 0; hi < map.hazards.length; hi++) {
 			var hz = map.hazards[hi];
 			if (hz == null) { continue; }
+			// Boons are helpful — never draw them as a red-ringed bumper. Mark each with a
+			// simple coloured glyph in its own palette so the preview reads "this map has
+			// boons" at a glance.
+			if (drawThumbnailBoonGlyph(ctx, hz)) { continue; }
 			if (hz.id === config.hazards.movingBumper.id) {
 				ctx.save();
 				ctx.translate(hz.x, hz.y);

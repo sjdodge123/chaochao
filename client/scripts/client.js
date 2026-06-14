@@ -2319,14 +2319,14 @@ function registerEffectHandlers(server) {
 		var col = (config.boons != null && config.boons.guardHalo != null) ? config.boons.guardHalo.color : "#FFD166";
 		spawnTriggerPulse(payload.x, payload.y, col);
 	});
-	// Second Wind Totem (boon): a violet pulse on attune (a confirmation) and a brighter
-	// one on the actual revive. The respawn position itself arrives via gameUpdates.
-	server.on("secondWindAttuned", function (payload) {
-		var col = (config.boons != null && config.boons.secondWindTotem != null) ? config.boons.secondWindTotem.color : "#C792EA";
-		spawnTriggerPulse(payload.x, payload.y, col);
-	});
+	// Second Wind Totem (boon): a pulse at the flag on the actual revive (the flag
+	// recolour + bump are handled client-side off kart proximity in draw.js). The
+	// respawn position itself arrives via gameUpdates. Tint with the revived kart's
+	// colour so it reads as that player's save.
 	server.on("secondWind", function (payload) {
-		var col = (config.boons != null && config.boons.secondWindTotem != null) ? config.boons.secondWindTotem.color : "#C792EA";
+		var p = playerList[payload.id];
+		var col = (p != null && p.color != null) ? p.color
+			: ((config.boons != null && config.boons.secondWindTotem != null) ? config.boons.secondWindTotem.color : "#CBD2DC");
 		spawnTriggerPulse(payload.x, payload.y, col);
 	});
 	server.on("startLobbyTimer", function () {
