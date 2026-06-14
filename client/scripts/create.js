@@ -1373,7 +1373,7 @@ function paintRechargeSpringShape(ctx, kind, x, y, angle, ringColor) {
         var foam = cfg.colorWater;
         ctx.beginPath();
         ctx.arc(0, 0, r, 0, 2 * Math.PI);
-        ctx.fillStyle = "rgba(234,251,255,0.12)";
+        ctx.fillStyle = "rgba(234,251,255,0.06)";
         ctx.fill();
         ctx.strokeStyle = foam;
         ctx.lineWidth = 2.5;
@@ -1392,7 +1392,7 @@ function paintRechargeSpringShape(ctx, kind, x, y, angle, ringColor) {
     } else {
         ctx.beginPath();
         ctx.arc(0, 0, r, 0, 2 * Math.PI);
-        ctx.fillStyle = "rgba(91,227,160,0.08)";
+        ctx.fillStyle = "rgba(91,227,160,0.04)";
         ctx.fill();
         ctx.beginPath();
         ctx.arc(0, 0, r * 0.78, 0, 2 * Math.PI);
@@ -1427,9 +1427,9 @@ function paintSlipstreamShape(ctx, kind, x, y, angle, ringColor) {
     ctx.rotate(rad);
     ctx.beginPath();
     ctx.rect(-w / 2, -hgt / 2, w, hgt);
-    ctx.fillStyle = onWater ? "rgba(234,248,255,0.08)" : "rgba(127,216,255,0.06)";
+    ctx.fillStyle = onWater ? "rgba(234,248,255,0.035)" : "rgba(127,216,255,0.03)";
     ctx.fill();
-    ctx.strokeStyle = onWater ? "rgba(234,248,255,0.14)" : "rgba(127,216,255,0.12)";
+    ctx.strokeStyle = onWater ? "rgba(234,248,255,0.06)" : "rgba(127,216,255,0.05)";
     ctx.lineWidth = 1;
     ctx.stroke();
     ctx.strokeStyle = onWater ? cfg.colorWater : cfg.color;

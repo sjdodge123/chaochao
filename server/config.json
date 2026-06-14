@@ -535,13 +535,13 @@
             "cooldownMs": 6000
         },
         "slipstream": {
-            "_doc": "A wind-current corridor: while overlapping, a gentle constant push along the author-set axis carries you up to currentSpeed (well below dashArrows' launch cap). Purely axial, so being shoved/driven backwards through it means the current fights you and carries you forward again. Chain several to build a long tunnel. colorWater is the foam palette used by the on-water render variant (a river current with wavy streamlines) so it reads against blue water.",
+            "_doc": "A wind-current corridor: while overlapping, a gentle constant push along the author-set axis carries you up to currentSpeed (well below dashArrows' launch cap). Purely axial, so being shoved/driven backwards through it means the current fights you and carries you forward again. Chain several to build a long tunnel. radius is the circular hitbox (Hazard/Circle collision, +playerBaseRadius); width/height are the drawn footprint and are sized to sit INSIDE that hitbox so what you see is what's active (no dead zone at the corridor ends). colorWater is the foam palette used by the on-water render variant (a river current with wavy streamlines) so it reads against blue water.",
             "id": 952,
             "color": "#7FD8FF",
             "colorWater": "#EAF8FF",
-            "radius": 46,
-            "width": 200,
-            "height": 76,
+            "radius": 50,
+            "width": 110,
+            "height": 70,
             "push": 40,
             "currentSpeed": 190
         }
