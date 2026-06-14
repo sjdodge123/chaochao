@@ -152,13 +152,24 @@ try {
         cr.scaleSpeed(config.brutalRounds.lightning.movingHazardSpeedMod);
         check(cr.speed > before, 'scaleSpeed (lightning) speeds the slab up');
 
-        // Contact — pinch at the slammed (outer) end moving outward kills.
+        // Contact — pinch at the slammed (outer) end moving outward kills, but ONLY
+        // when the end is wall/lava-backed (lethalEnd). Default (open ground) is false.
+        check(cr.lethalEnd === false, 'a crusher defaults to NON-lethal (shove-only) until its end is resolved against terrain');
         cr.t = CR.railLength; cr.dir = 1;
         cr.x = cr.newX = cr.rail.x + cr.railDirX * cr.t; cr.y = cr.newY = cr.rail.y + cr.railDirY * cr.t;
         cr.refreshGeometry();
+        // Open-ground end: the slam only SHOVES, never crushes.
+        cr.punch = null;
+        const openEnd = fakeKart({ x: cr.x, y: cr.y, newX: cr.x, newY: cr.y });
+        cr.handleHit(openEnd);
+        check(openEnd.killed === null && openEnd.alive === true, 'an open-ground slam does NOT crush (only shoves)');
+        check(cr.punch != null, 'the open-ground slam shoves instead (map-owned punch)');
+        // Wall/lava-backed end (lethalEnd): the slam CRUSHES.
+        cr.lethalEnd = true; cr.punch = null;
         const crushed = fakeKart({ x: cr.x, y: cr.y, newX: cr.x, newY: cr.y });
         cr.handleHit(crushed);
-        check(crushed.killed === 'crush' && crushed.alive === false, 'slamming home in the outer pinch zone CRUSHES (killSelf "crush")');
+        check(crushed.killed === 'crush' && crushed.alive === false, 'a wall/lava-backed slam in the outer pinch zone CRUSHES (killSelf "crush")');
+        cr.lethalEnd = true; // keep lethal for the remaining pinch-zone assertions below
 
         // Mid-rail contact shoves (map-owned punch), does not kill.
         cr.t = 12; cr.dir = 1; cr.punch = null;
@@ -178,6 +189,21 @@ try {
         const starred = fakeKart({ x: cr.x, y: cr.y, hasStarPower() { return true; } });
         cr.handleHit(starred);
         check(starred.killed === null, 'a star-power kart is immune to the crush');
+
+        // resolveMapContext: the slam end is lethal ONLY when wall/lava-backed.
+        const world = { x: 0, y: 0, width: config.worldWidth, height: config.worldHeight };
+        const grassMap = buildMap('ctx', [], [0, 1, 2]); // all-grass, no holes/lava
+        const edgeCr = KIND.build({ id: CR.id, x: COLS[4], y: config.worldHeight - 30, angle: 90 }, 'cr-edge', 'sig-a');
+        edgeCr.resolveMapContext(grassMap, world);
+        check(edgeCr.lethalEnd === true, 'far rail end past the world edge => lethal');
+        const openCr = KIND.build({ id: CR.id, x: COLS[2], y: ROWS[1], angle: 0 }, 'cr-open', 'sig-a');
+        openCr.resolveMapContext(grassMap, world);
+        check(openCr.lethalEnd === false, 'far rail end in open ground => NOT lethal (shove-only)');
+        const lavaMap = buildMap('ctxlava', [], [0, 1, 2]);
+        for (let i = 0; i < lavaMap.cells.length; i++) { lavaMap.cells[i].id = config.tileMap.lava.id; }
+        const lavaCr = KIND.build({ id: CR.id, x: COLS[2], y: ROWS[1], angle: 0 }, 'cr-lava', 'sig-a');
+        lavaCr.resolveMapContext(lavaMap, world);
+        check(lavaCr.lethalEnd === true, 'far rail end against lava => lethal');
     }
 
     // ----------------------------------------------------------------------
@@ -208,20 +234,40 @@ try {
         const hz = room.game.gameBoard.hazardList[ids[0]];
         check(hz != null && hz.id === CR.id && hz.isCrusher === true, 'the spawned hazard is a railed Crusher');
 
-        // Pin the slab at the slammed end and park the kart there: it gets crushed.
+        // The crusher spawned in OPEN GROUND (lane grass), so resolveMapContext ran and
+        // left it non-lethal: a slam there shoves, it does not crush.
+        check(hz.lethalEnd === false, 'an open-ground crusher spawns NON-lethal (resolveMapContext)');
         const farX = hz.rail.x + hz.railDirX * hz.railLength, farY = hz.rail.y + hz.railDirY * hz.railLength;
         hz.advance = function () { this.t = this.railLength; this.dir = 1; this.newX = farX; this.newY = farY; this.velX = 0; this.velY = 0; this.refreshGeometry(); };
         bot.isAI = false;
         bot.x = bot.newX = farX; bot.y = bot.newY = farY; bot.velX = 0; bot.velY = 0;
+        events.length = 0;
+        let openSlamPunch = false, openSlamKilled = false;
+        for (let f = 0; f < 4; f++) {
+            bot.x = bot.newX = farX; bot.y = bot.newY = farY; bot.velX = 0; bot.velY = 0;
+            room.update(DT); clock += config.serverTickSpeed; fireDueTimers();
+            for (const e of events) { if (e.name === 'punch') { openSlamPunch = true; } }
+            if (bot.alive === false) { openSlamKilled = true; }
+        }
+        check(!openSlamKilled, 'an open-ground slam does NOT crush the kart');
+        check(openSlamPunch, 'an open-ground slam shoves the kart instead (punch)');
+
+        // Now make the end wall/lava-backed: the same slam crushes.
+        hz.lethalEnd = true;
+        bot.alive = true; bot.enabled = true; bot.reachedGoal = false;
         let crushedLive = false;
         for (let f = 0; f < 6 && !crushedLive; f++) {
             bot.x = bot.newX = farX; bot.y = bot.newY = farY;
             room.update(DT); clock += config.serverTickSpeed; fireDueTimers();
             if (bot.alive === false) { crushedLive = true; }
         }
-        check(crushedLive, 'a kart pinned at the slam point is crushed (died) in the live loop');
+        check(crushedLive, 'a wall/lava-backed slam crushes a pinned kart in the live loop');
 
         // Reset; pin the slab mid-rail and bump a kart against the face: shoved, alive.
+        // Clear any lingering shove-punch (the open-ground slam above leaves one in
+        // punchList for ~100ms, which would block a fresh punch from emitting).
+        for (const pid in room.game.gameBoard.punchList) { delete room.game.gameBoard.punchList[pid]; }
+        hz.punch = null;
         bot.alive = true; bot.enabled = true; bot.reachedGoal = false;
         const midT = 20, midX = hz.rail.x + hz.railDirX * midT, midY = hz.rail.y + hz.railDirY * midT;
         hz.advance = function () { this.t = midT; this.dir = 1; this.newX = midX; this.newY = midY; this.velX = 0; this.velY = 0; this.refreshGeometry(); };
@@ -229,8 +275,8 @@ try {
         bot.x = bot.newX = midX + 8; bot.y = bot.newY = midY; bot.velX = 0; bot.velY = 0;
         events.length = 0;
         let sawPunch = false;
-        // Hold the kart on the face for a couple ticks (so contact fires), then release.
-        for (let f = 0; f < 3; f++) {
+        // Hold the kart on the face for a few ticks (so contact fires past any cooldown).
+        for (let f = 0; f < 8 && !sawPunch; f++) {
             bot.x = bot.newX = midX + 8; bot.y = bot.newY = midY; bot.velX = 0; bot.velY = 0;
             room.update(DT); clock += config.serverTickSpeed; fireDueTimers();
             for (const e of events) { if (e.name === 'punch') { sawPunch = true; } }
