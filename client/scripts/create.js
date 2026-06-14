@@ -1692,10 +1692,10 @@ function paintVortexWellShape(ctx, kind, x, y, angle, ringColor, radius) {
     ctx.stroke();
     ctx.restore();
 }
-// Blink-fence painter (blinkFence's `paint` hook). Two pylons with a dotted beam
+// Laser-gate painter (laserGate's `paint` hook). Two pylons with a dotted beam
 // guide between them along `angle` for the beam length — the editor shows the OPEN
-// look (the live timed blink is in-game only). Mirrors draw.js drawBlinkFence.
-function paintBlinkFenceShape(ctx, kind, x, y, angle, ringColor) {
+// look (the live timed blink is in-game only). Mirrors draw.js drawLaserGate.
+function paintLaserGateShape(ctx, kind, x, y, angle, ringColor) {
     var cfg = config.hazards[kind.key];
     if (cfg == null) { return; }
     var rad = (angle || 0) * (Math.PI / 180);
@@ -2606,8 +2606,8 @@ var EDITOR_HAZARD_KINDS = [
         }
     },
     {
-        key: "blinkFence", label: "Blink Fence", shortcut: "f", railed: false, directional: true,
-        segmentSelect: true, paint: paintBlinkFenceShape,
+        key: "laserGate", label: "Laser Gate", shortcut: "l", railed: false, directional: true,
+        segmentSelect: true, paint: paintLaserGateShape,
         swatchPaint: function (ctx, size) {
             // Two pylons with a cyan beam between — "this blocks on a timer".
             var cy = size / 2;

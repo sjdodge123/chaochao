@@ -524,7 +524,7 @@
             "force": 7,
             "antlionPull": 0.7
         },
-        "blinkFence": {
+        "laserGate": {
             "id": 909,
             "color": "#42E0FF",
             "width": 150,

@@ -63,8 +63,8 @@ exports.preventEscape = function (obj, bound) {
 exports.bounceOffBoundry = function (obj, bound) {
 	bounceOffBoundry(obj, bound);
 }
-exports.bounceOffFence = function (obj, fence, restitution) {
-	bounceOffFence(obj, fence, restitution);
+exports.bounceOffSegment = function (obj, seg, restitution) {
+	bounceOffSegment(obj, seg, restitution);
 }
 exports.checkCollideCells = function (player, map) {
 	checkCollideCells(player, map);
@@ -584,23 +584,23 @@ function bounceOffBoundry(obj, bound) {
 	}
 }
 
-// Bounce a player off a solid Blink Fence — the rotated-segment counterpart to
-// bounceOffBoundry (which only reflects off the AXIS-ALIGNED world box). The fence
-// is a thin barrier on the segment (fence.ax,fence.ay)->(fence.bx,fence.by); when
+// Bounce a player off a solid Laser Gate — the rotated-segment counterpart to
+// bounceOffBoundry (which only reflects off the AXIS-ALIGNED world box). The seg
+// is a thin barrier on the segment (seg.ax,seg.ay)->(seg.bx,seg.by); when
 // it's solid a kart can't cross it. Like bounceOffBoundry we (1) cancel this tick's
 // move so the kart never tunnels through, (2) reflect the velocity component normal
-// to the fence (with restitution; tangential slip is kept so a kart slides ALONG the
+// to the seg (with restitution; tangential slip is kept so a kart slides ALONG the
 // barrier instead of sticking), and (3) eject the kart just clear of the beam so it
 // never rests inside a barrier that solidified on top of it. Non-lethal by design —
-// a timed passability gate, not a kill zone (see hazards.js BlinkFence).
-function bounceOffFence(obj, fence, restitution) {
-	var ex = fence.bx - fence.ax, ey = fence.by - fence.ay;
+// a timed passability gate, not a kill zone (see hazards.js LaserGate).
+function bounceOffSegment(obj, seg, restitution) {
+	var ex = seg.bx - seg.ax, ey = seg.by - seg.ay;
 	var len = Math.sqrt(ex * ex + ey * ey);
 	if (len < 1e-6) { return; }
-	var nx = -ey / len, ny = ex / len; // unit normal to the fence line
+	var nx = -ey / len, ny = ex / len; // unit normal to the seg line
 	// Which side of the line the kart sits on BEFORE this tick's move (pre-integration
 	// x/y) — the safe side to send it back to.
-	var side = (obj.x - fence.ax) * nx + (obj.y - fence.ay) * ny;
+	var side = (obj.x - seg.ax) * nx + (obj.y - seg.ay) * ny;
 	var sgn = side >= 0 ? 1 : -1;
 	// Cancel the crossing move (mirrors bounceOffBoundry's newX = x), then reflect the
 	// inward normal velocity so the kart rebounds; keep the tangential part (slide).
@@ -614,7 +614,7 @@ function bounceOffFence(obj, fence, restitution) {
 	}
 	// Eject to the safe side if the kart's body still overlaps the solid beam (it
 	// solidified while the kart straddled the line) so it can't sit pinned inside.
-	var clear = (fence.height || 0) / 2 + (obj.radius || 0) + 1;
+	var clear = (seg.height || 0) / 2 + (obj.radius || 0) + 1;
 	var need = clear - Math.abs(side);
 	if (need > 0) {
 		obj.newX = obj.x + sgn * nx * need;

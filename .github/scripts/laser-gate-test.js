@@ -1,10 +1,10 @@
 'use strict';
 
-// Real-engine headless test for the Blink Fence hazard (config.hazards.blinkFence):
+// Real-engine headless test for the Laser Gate hazard (config.hazards.laserGate):
 // a laser barrier strung between two pylons that cycles OPEN (passable) -> WARN (a
 // shimmer telegraph, still passable) -> SOLID (a wall you can't cross) -> back to
 // OPEN. The framework's first TIMED PASSABILITY GATE — collision turns on and off,
-// and SOLID is a non-lethal BOUNCE (engine.bounceOffFence), not a kill.
+// and SOLID is a non-lethal BOUNCE (engine.bounceOffSegment), not a kill.
 //
 //   [A] Phase machine + bounce (pure). update(dt) walks open -> warn -> solid ->
 //       open on the configured durations, publishing the phase as netState and the
@@ -25,14 +25,14 @@ const messenger = require(path.join(repoRoot, 'server', 'messenger.js'));
 const config = require(path.join(repoRoot, 'server', 'config.json'));
 const mapFormat = require(path.join(repoRoot, 'server', 'mapFormat.js'));
 const compressor = require(path.join(repoRoot, 'server', 'compressor.js'));
-const { BlinkFence } = require(path.join(repoRoot, 'server', 'entities', 'hazards.js'));
+const { LaserGate } = require(path.join(repoRoot, 'server', 'entities', 'hazards.js'));
 
 const T = config.tileMap;
 const GRASS = T.fast.id;
 const EMPTY = T.empty.id;
 const GOAL = T.goal.id;
 const DT = config.serverTickSpeed / 1000;
-const F = config.hazards.blinkFence; // id 909
+const F = config.hazards.laserGate; // id 909
 const OPEN = 0, WARN = 1, SOLID = 2;
 
 let failures = 0;
@@ -111,10 +111,10 @@ try {
     global.clearTimeout = function (handle) { timers = timers.filter(t => t !== handle); };
 
     // ----------------------------------------------------------------------
-    console.log('[A] Blink-fence phase machine + bounce');
+    console.log('[A] Laser-gate phase machine + bounce');
     {
         // Horizontal beam from (100,100) along +x.
-        const fn = new BlinkFence(100, 100, 0, 'bf-a', 'sig-a');
+        const fn = new LaserGate(100, 100, 0, 'bf-a', 'sig-a');
         check(fn.phase === OPEN && fn.netState === OPEN, 'starts open (phase/netState 0)');
         check(fn.moveable === false, 'is stationary (not moveable)');
         check(fn.blocking === false, 'open => not blocking');
@@ -156,7 +156,7 @@ try {
     // ----------------------------------------------------------------------
     console.log('\n[B] Wire: netState row + creation row (compressor)');
     {
-        const fn = new BlinkFence(120, 140, 30, 'bf-wire', 'sig-b');
+        const fn = new LaserGate(120, 140, 30, 'bf-wire', 'sig-b');
         fn.phase = SOLID; fn.netState = SOLID;
         const list = {}; list[fn.ownerId] = fn;
         const row = compressor.sendHazardUpdates(list)[0];
@@ -181,7 +181,7 @@ try {
         const ids = Object.keys(room.game.gameBoard.hazardList);
         check(ids.length === 1, 'the fence spawned from the map hazard entry');
         const hz = room.game.gameBoard.hazardList[ids[0]];
-        check(hz != null && hz.id === F.id && hz.isFence === true, 'the spawned hazard is a stationary BlinkFence');
+        check(hz != null && hz.id === F.id && hz.isLaserGate === true, 'the spawned hazard is a stationary LaserGate');
 
         // Drive the kart straight at the beam (non-AI so the steering doesn't fight us;
         // turnRight maps to dir +x in updatePlayers).
@@ -216,8 +216,8 @@ try {
 
 console.log('');
 if (failures > 0) {
-    console.log('Blink-fence test FAILED with ' + failures + ' error(s).');
+    console.log('Laser-gate test FAILED with ' + failures + ' error(s).');
     process.exit(1);
 }
-console.log('Blink-fence test passed.');
+console.log('Laser-gate test passed.');
 process.exit(0);

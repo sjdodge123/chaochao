@@ -9272,9 +9272,9 @@ function buildHazardDrawers() {
             drawVortexWell(h.x, h.y, h.radius);
         };
     }
-    if (config.hazards.blinkFence != null) {
-        hazardDrawers[config.hazards.blinkFence.id] = function (h) {
-            drawBlinkFence(h.x, h.y, h.angle, h.state);
+    if (config.hazards.laserGate != null) {
+        hazardDrawers[config.hazards.laserGate.id] = function (h) {
+            drawLaserGate(h.x, h.y, h.angle, h.state);
         };
     }
     if (config.hazards.crusher != null) {
@@ -9733,13 +9733,13 @@ function drawVortexWell(x, y, radius) {
     gameContext.restore();
 }
 
-// A blink fence: an energy barrier strung between two pylons that blinks on a timed
+// A laser gate: an energy barrier strung between two pylons that blinks on a timed
 // cycle. `angle` (fixed, from the creation row) runs the beam from its anchor along
 // the pylon axis; `state` is the live netState — 0 open (beam off, faint dotted
 // guide), 1 warn (a flickering shimmer telegraph), 2 solid (a bright, blocking beam).
 // Cyan = the energy-barrier palette (distinct from bumper-orange and vortex-violet).
-function drawBlinkFence(x, y, angle, state) {
-    var cfg = config.hazards.blinkFence;
+function drawLaserGate(x, y, angle, state) {
+    var cfg = config.hazards.laserGate;
     var rad = (angle || 0) * (Math.PI / 180);
     var bx = x + Math.cos(rad) * cfg.width;
     var by = y + Math.sin(rad) * cfg.width;
