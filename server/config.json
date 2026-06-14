@@ -614,10 +614,11 @@
         "exhaustedMoveFactor": 0.85
     },
     "landLunge": {
-        "_doc": "Double-tap punch on SOLID GROUND to LUNGE — the land cousin of the water swim stroke. When two punch presses land within doubleTapMs the second tap becomes a lunge: like any punch it still brakes your velocity (punchThrowBrake) and throws a knockback punch, but then adds `impulse` velocity along your held movement direction (the engine's playerMaxSpeed caps the peak, so it's a snap to top speed in your facing). Gated to be a rationed escape/closer, NOT a spammable dash: it requires a held direction (no move keys = no lunge), requires your bar to have been at least minStaminaFrac of max when you started the double-tap (so it only fires when you're rested, never in the middle of sustained punch-trading), and it costs your ENTIRE stamina meter — the lunge empties the bar and leaves you exhausted (must regen to exhaustRecover before you can punch again). On water a punch already swims, so the lunge only applies off water.",
-        "impulse": 380,
+        "_doc": "Double-tap punch on SOLID GROUND to LUNGE — a short repositioning burst, the land cousin of the water swim stroke. Two punch presses within doubleTapMs trigger it directly (decoupled from the punch throw so it fires regardless of the punch cooldown). It first brakes your velocity (punchThrowBrake, the same slow every swing applies) then adds `impulse` along your held movement direction. By design it is NOT a fast way to travel: `impulse` is only a few times cruise speed (a hop of a kart-length or two to clear a hazard, get off sand, or dodge a burn), and the cost makes it a NET slowdown — it empties your ENTIRE stamina bar and pauses regen for recoverMs, so you're stuck at the exhausted move penalty (no drive top-speed, no re-lunge, no punch) for that whole window while a racer who DIDN'T lunge keeps cruising and pulls ahead. Gated: requires a held direction (no move keys = no lunge) and at least minStaminaFrac of a full bar to start. On water a punch already swims, so the lunge only applies off water.",
+        "impulse": 200,
         "doubleTapMs": 300,
-        "minStaminaFrac": 0.85
+        "minStaminaFrac": 0.5,
+        "recoverMs": 1200
     },
     "punchCharge": {
         "_doc": "Hold-to-charge: holding punch for maxChargeMs reaches a full charge that multiplies the momentum-scaled knockback by maxChargeMult (final force = momentum bonus x charge). Charge is capped by the stamina you can afford. Overcharge: holding past overchargeAfterMs starts a danger phase whose dark-red meter fills over overchargeFillMs; if you don't release in time the charge is wasted and you're locked in the exhausted move-penalty for exhaustLockMs. chargedHitFrac = how full a charge counts as a 'fully charged' hit (drives the thwack SFX).",
