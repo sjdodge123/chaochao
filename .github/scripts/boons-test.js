@@ -19,8 +19,10 @@
 //       corridor that has a pad sitting in its lane (a boon never traps).
 //   [D] Recharge Spring (config.boons.rechargeSpring). A drive-over pit stop:
 //       handleHit refills the punch-stamina bar, clears the exhausted/overcharge
-//       latch, and resets the punch cooldown — gated by a per-player re-arm so it
-//       can't be camped. Spawns + ships on the wire like any boon.
+//       latch, and resets the punch cooldown. The spring is a GLOBAL shared charge —
+//       the first needy racer consumes it, then it re-arms over cooldownMs and
+//       telegraphs the refill via netState (0..100) on the wire; a full racer never
+//       wastes a ready spring.
 //   [E] Slipstream (config.boons.slipstream). A directional wind corridor: a gentle
 //       constant push along its axis up to currentSpeed, capped (never overshoots,
 //       never brakes a faster kart), that fights a backward-driven kart. Players +
@@ -232,7 +234,7 @@ try {
     }
 
     // ----------------------------------------------------------------------
-    console.log('\n[D] Recharge Spring refills stamina + clears the punch cooldown (per-player re-armed)');
+    console.log('\n[D] Recharge Spring refills a racer + has a global, telegraphed re-arm');
     {
         const SPRING = config.boons.rechargeSpring; // id 951
         const kind = hazardKindById(SPRING.id);
@@ -244,13 +246,15 @@ try {
         const spring = room.game.gameBoard.hazardList[Object.keys(room.game.gameBoard.hazardList)[0]];
         check(spring != null && spring.id === SPRING.id && spring.helpful === true,
             'the spring spawned from the map entry into hazardList (helpful=true)');
-        // It ships on the wire like any boon (angle defaults to 0 on the base Hazard).
+        check(spring.netState === 100, 'a fresh spring is ready (netState 100)');
+        // It ships on the wire WITH the netState telegraph slot ([7] in newHazards).
         const packet = JSON.parse(compressor.newHazards(room.game.gameBoard.hazardList));
-        check(packet.length === 1 && packet[0][1] === SPRING.id && packet[0][2] === PAD_X && packet[0][3] === ROWS[2],
-            'compressor.newHazards ships the spring as [ownerId, ' + SPRING.id + ', x, y, angle]');
+        check(packet.length === 1 && packet[0][1] === SPRING.id && packet[0][2] === PAD_X &&
+            packet[0][3] === ROWS[2] && packet[0][7] === 100,
+            'compressor.newHazards ships the spring with its ready netState (=100)');
 
         // Drain the kart: empty stamina, latch exhausted + overcharge lock, put the
-        // punch on cooldown — then drive over the spring.
+        // punch on cooldown — then drive over the ready spring.
         bot.stamina = 0;
         bot.staminaExhausted = true;
         bot.overcharge = 0.5;
@@ -261,17 +265,37 @@ try {
         check(bot.staminaExhausted === false, 'the exhausted latch is cleared');
         check(bot.overcharge === 0 && bot.exhaustLockUntil === 0, 'the overcharge lock is cleared');
         check(bot.punchedTimer === null, 'the punch cooldown is reset (punchedTimer cleared)');
+        // The spring is now globally spent + telegraphs it (netState drains to 0).
+        check(spring.rechargeReadyAt > clock, 'the spring went on its global re-arm cooldown');
+        spring.update();
+        check(spring.netState >= 0 && spring.netState < 100, 'a spent spring telegraphs refilling (netState < 100): ' + spring.netState);
 
-        // Re-arm: a second touch within cooldownMs does nothing (no camping).
+        // Global cooldown: a SECOND racer touching the spent spring gets nothing.
+        const bot2 = { isPlayer: true, stamina: 0, staminaExhausted: true, overcharge: 0, exhaustLockUntil: 0,
+            punchedTimer: null, punchWaitTime: config.playerPunchCooldown, charging: false,
+            rechargeFromSpring: bot.rechargeFromSpring };
+        spring.handleHit(bot2);
+        check(bot2.stamina === 0 && bot2.staminaExhausted === true,
+            'a different racer gets nothing from the still-refilling spring (global cooldown)');
+
+        // After cooldownMs the spring is ready again and refills.
+        clock += SPRING.cooldownMs + 100;
+        spring.update();
+        check(spring.netState === 100, 'after cooldownMs the spring reads ready again (netState 100)');
         bot.stamina = 0; bot.staminaExhausted = true;
         spring.handleHit(bot);
-        check(bot.stamina === 0 && bot.staminaExhausted === true,
-            'a second touch within cooldownMs does nothing (still re-arming)');
-        // After cooldownMs it refills again.
-        clock += SPRING.cooldownMs + 100;
-        spring.handleHit(bot);
         check(bot.stamina === config.punchStamina.max && bot.staminaExhausted === false,
-            'after cooldownMs the spring refills again');
+            'the re-armed spring refills again');
+
+        // A full racer driving over a ready spring does NOT waste its charge.
+        clock += SPRING.cooldownMs + 100; spring.update();
+        const ready = spring.rechargeReadyAt;
+        const fullBot = { isPlayer: true, stamina: config.punchStamina.max, staminaExhausted: false,
+            overcharge: 0, exhaustLockUntil: 0, punchedTimer: null, punchWaitTime: config.playerPunchCooldown,
+            charging: false, rechargeFromSpring: bot.rechargeFromSpring };
+        spring.handleHit(fullBot);
+        check(spring.rechargeReadyAt === ready && spring.netState === 100,
+            'a topped-up racer does not drain a ready spring');
 
         // A non-player object is ignored.
         const proj = { isProjectile: true, stamina: 0 };

@@ -9223,7 +9223,7 @@ function buildHazardDrawers() {
     }
     if (config.boons != null && config.boons.rechargeSpring != null) {
         hazardDrawers[config.boons.rechargeSpring.id] = function (h) {
-            drawRechargeSpring(h.x, h.y);
+            drawRechargeSpring(h.x, h.y, h.state);
         };
     }
     if (config.boons != null && config.boons.slipstream != null) {
@@ -10105,34 +10105,52 @@ function boonOnWater(x, y) {
         && tileIdAt(x, y) === config.tileMap.water.id;
 }
 
-// Recharge Spring — a "pit stop" pad. On land: a faint green footprint, a gently
-// pulsing ring (the recharge beat), and a green restore cross. On water: a bubbling
-// spring — a white footprint, an expanding foam ripple, rising bubbles, and the green
-// cross kept for identity, so it pops against blue water. No shadowBlur/filter (kept
-// off the per-frame GPU-killer list); animation is cheap sin/phase math.
-function drawRechargeSpring(x, y) {
+// Recharge Spring — a SHARED "pit stop" pad with a global charge (server netState,
+// arriving as `state`: 0 = just drained .. 100 = ready). Ready: a gently pulsing ring
+// (land) or expanding foam ripple + bubbles (water) with a bright restore cross — it's
+// available. Recharging (state < 100): the pulse/ripple stop, a fill ring sweeps
+// clockwise from the top to the refill percent, and the cross dims — a clear "wait, it's
+// refilling" tell. On water the palette is foam-white so it reads against blue. No
+// shadowBlur/filter; animation is cheap sin/phase math.
+function drawRechargeSpring(x, y, state) {
     var cfg = config.boons.rechargeSpring;
     var r = cfg.radius;
     var onWater = boonOnWater(x, y);
+    var ready = (state == null || state >= 100);
+    var accent = onWater ? cfg.colorWater : cfg.color;
     gameContext.save();
     gameContext.translate(x, y);
-    if (onWater) {
-        var foam = cfg.colorWater;
-        var t = (Date.now() / 900) % 1; // ripple phase 0..1
-        // White footprint.
+    // Faint footprint (matches the boon visual language; fainter per feedback).
+    gameContext.beginPath();
+    gameContext.arc(0, 0, r, 0, 2 * Math.PI);
+    gameContext.fillStyle = onWater ? "rgba(234,251,255,0.05)" : "rgba(91,227,160,0.04)";
+    gameContext.fill();
+    if (!ready) {
+        // Refilling: dim track + a bright arc filling clockwise from the top to `state`%.
+        var frac = Math.max(0, Math.min(1, state / 100));
+        gameContext.lineWidth = 3;
         gameContext.beginPath();
-        gameContext.arc(0, 0, r, 0, 2 * Math.PI);
-        gameContext.fillStyle = "rgba(234,251,255,0.05)";
-        gameContext.fill();
+        gameContext.arc(0, 0, r * 0.78, 0, 2 * Math.PI);
+        gameContext.strokeStyle = accent;
+        gameContext.globalAlpha = 0.18;
+        gameContext.stroke();
+        gameContext.beginPath();
+        gameContext.arc(0, 0, r * 0.78, -Math.PI / 2, -Math.PI / 2 + frac * 2 * Math.PI);
+        gameContext.globalAlpha = 0.9;
+        gameContext.lineCap = "round";
+        gameContext.stroke();
+        gameContext.globalAlpha = 1;
+    } else if (onWater) {
+        var t = (Date.now() / 900) % 1; // ripple phase 0..1
         // Expanding foam ripple ring.
         gameContext.beginPath();
         gameContext.arc(0, 0, r * (0.35 + 0.6 * t), 0, 2 * Math.PI);
-        gameContext.strokeStyle = foam;
+        gameContext.strokeStyle = accent;
         gameContext.globalAlpha = 0.6 * (1 - t);
         gameContext.lineWidth = 2.5;
         gameContext.stroke();
         // Rising bubbles.
-        gameContext.fillStyle = foam;
+        gameContext.fillStyle = accent;
         for (var bi = 0; bi < 3; bi++) {
             var bph = ((Date.now() / 700) + bi * 0.33) % 1;
             var bx = (bi - 1) * r * 0.28;
@@ -10145,23 +10163,20 @@ function drawRechargeSpring(x, y) {
         gameContext.globalAlpha = 1;
     } else {
         var pulse = 0.5 + 0.5 * Math.sin(Date.now() / 320);
-        // Faint footprint that blends into the terrain.
-        gameContext.beginPath();
-        gameContext.arc(0, 0, r, 0, 2 * Math.PI);
-        gameContext.fillStyle = "rgba(91,227,160,0.04)";
-        gameContext.fill();
         // Pulsing recharge ring.
         gameContext.beginPath();
         gameContext.arc(0, 0, r * (0.62 + 0.28 * pulse), 0, 2 * Math.PI);
-        gameContext.strokeStyle = cfg.color;
+        gameContext.strokeStyle = accent;
         gameContext.globalAlpha = 0.35 + 0.45 * (1 - pulse);
         gameContext.lineWidth = 3;
         gameContext.stroke();
         gameContext.globalAlpha = 1;
     }
-    // Green restore cross in the middle (the shared identity on land + water).
+    // Green restore cross in the middle (the shared identity on land + water) — dimmed
+    // while refilling so the spent state reads at a glance.
     var arm = r * 0.42;
     gameContext.strokeStyle = cfg.color;
+    gameContext.globalAlpha = ready ? 1 : 0.3;
     gameContext.lineWidth = 5;
     gameContext.lineCap = "round";
     gameContext.beginPath();
@@ -10170,6 +10185,7 @@ function drawRechargeSpring(x, y) {
     gameContext.moveTo(0, -arm);
     gameContext.lineTo(0, arm);
     gameContext.stroke();
+    gameContext.globalAlpha = 1;
     gameContext.restore();
 }
 
