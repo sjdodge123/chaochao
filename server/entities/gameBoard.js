@@ -3243,6 +3243,11 @@ class GameBoard {
 			if (typeof hazard.scaleSpeed === "function" && this.checkForActiveBrutal(c.brutalRounds.lightning.id)) {
 				hazard.scaleSpeed(c.brutalRounds.lightning.movingHazardSpeedMod);
 			}
+			// Optional terrain hook: kinds that need the live map/world to finish setup
+			// (the crusher decides whether its slam end is wall/lava-backed = lethal).
+			if (typeof hazard.resolveMapContext === "function") {
+				hazard.resolveMapContext(this.currentMap, this.world);
+			}
 			this.hazardList[mapID] = hazard;
 		}
 	}

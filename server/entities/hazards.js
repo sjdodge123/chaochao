@@ -515,6 +515,11 @@ class Crusher extends Rect {
 		this.dir = 1;               // +1 toward the far (boundary) end, -1 retracting
 		this.t = 0;                 // distance along the rail (0 = anchor/rest)
 		this.punch = null;
+		// Whether the slam end is a LETHAL pinch. Default false (shove-only): only a far
+		// rail end that actually abuts a wall (world edge / empty-hole cell) or lava
+		// crushes — so a kill always reads as "pinned against something", never an
+		// invisible insta-kill in open ground. Set by resolveMapContext at map load.
+		this.lethalEnd = false;
 		// Slab orientation (perpendicular to the rail) is fixed for the round; cache the
 		// unit vectors and seed the centerline at the rest position.
 		var rad = this.angle * (Math.PI / 180);
@@ -573,6 +578,35 @@ class Crusher extends Rect {
 	// Lightning speeds moving hazards up — scale the along-rail speed (like the rail
 	// bumper). See gameBoard.generateHazards.
 	scaleSpeed(mod) { this.speed *= mod; }
+	// Decide whether the slam end is a LETHAL pinch (called once at map load from
+	// gameBoard.generateHazards, which has the live map + world). The end crushes ONLY
+	// when something solid backs it: the world boundary, an empty/hole "wall" cell, or
+	// lava — probed just past the slab's leading face at the full-extension end, across
+	// the slab width. Otherwise the crusher only shoves (no arbitrary open-ground kill).
+	resolveMapContext(map, world) {
+		this.lethalEnd = false;
+		if (map == null) { return; }
+		var lavaId = c.tileMap.lava.id;
+		var emptyId = (c.tileMap.empty != null) ? c.tileMap.empty.id : -99999;
+		var wx = (world && world.x != null) ? world.x : 0;
+		var wy = (world && world.y != null) ? world.y : 0;
+		var ww = (world && world.width != null) ? world.width : c.worldWidth;
+		var wh = (world && world.height != null) ? world.height : c.worldHeight;
+		var endX = this.rail.x + this.railDirX * this.railLength;
+		var endY = this.rail.y + this.railDirY * this.railLength;
+		var perpX = -this.railDirY, perpY = this.railDirX;     // across the slab face
+		var ahead = this.height / 2 + 20;                       // just past the leading face
+		var halfW = this.width / 2;
+		var engine = require('../engine.js');
+		for (var s = -1; s <= 1; s++) {
+			var ox = endX + perpX * (s * halfW * 0.7);
+			var oy = endY + perpY * (s * halfW * 0.7);
+			var ax = ox + this.railDirX * ahead;
+			var ay = oy + this.railDirY * ahead;
+			if (ax < wx || ax > wx + ww || ay < wy || ay > wy + wh) { this.lethalEnd = true; return; }
+			if (engine.isOnCellOfType(ax, ay, map, lavaId) || engine.isOnCellOfType(ax, ay, map, emptyId)) { this.lethalEnd = true; return; }
+		}
+	}
 	// Per-tick motion (engine.updateHazards). Step the rail param parametrically and
 	// reflect at the ends — the same overshoot-proof scheme the rail bumper uses
 	// (clamp the scalar t, not a 2-D position), so a long tick can't fling the slab
@@ -602,14 +636,16 @@ class Crusher extends Rect {
 	}
 	// Contact. Star-power / freshly-spawned-invuln karts are untouchable (the universal
 	// applyExplosionForce policy the vortex follows). Slamming home in the outer pinch
-	// zone (moving outward) CRUSHES; anywhere else it's a hard shove that flings the
-	// kart along the slide axis (escapable). Idempotent under the engine's up-to-twice
-	// handleHit-per-pair: killSelf no-ops once dead, the punch is guarded by punch==null.
+	// zone (moving outward) CRUSHES — but only when the end is wall/lava-backed
+	// (lethalEnd, set at map load); otherwise, and anywhere else along the rail, it's a
+	// hard shove that flings the kart along the slide axis (escapable). Idempotent under
+	// the engine's up-to-twice handleHit-per-pair: killSelf no-ops once dead, the punch
+	// is guarded by punch==null.
 	handleHit(object) {
 		if (!object.isPlayer || object.alive === false) { return; }
 		if (object.isProtected && object.isProtected()) { return; }
 		if (object.hasStarPower && object.hasStarPower()) { return; }
-		if (this.dir > 0 && this.t >= this.railLength * c.hazards.crusher.pinchFraction) {
+		if (this.lethalEnd && this.dir > 0 && this.t >= this.railLength * c.hazards.crusher.pinchFraction) {
 			object.killSelf("crush");
 			return;
 		}
