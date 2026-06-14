@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.38.2 — 2026-06-14
+
 ### Bug fixes
 
 - **In team modes you can tell who's holding an ability again.** The dashed "ability armed" ring now always sits in a clear gap *outside* a kart's Crimson/Jade team glow instead of merging into it — on bigger or cosmetic-skinned karts the two rings used to overlap into one band, hiding whether a teammate or rival was loaded.
