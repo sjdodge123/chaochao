@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.40.1 — 2026-06-14
+
 ### Map editor
 
 - **Maps can have fences and walls now.** The editor has a new two-point Barriers tool: pick **Fence** (a top-down wooden plank fence with posts) or **Barrier** (a concrete highway barrier with hazard stripes), click a start point, then click an end point to drop a solid line across the map. With the Select tool you can click a placed barrier to grab and drag either end, and delete it with the ✕ handle, the Delete key, or a right-click. Press Escape mid-placement to cancel.
