@@ -4347,9 +4347,25 @@ function computeWorldViewTarget(dt) {
         var scale = 1 + (focusedView.scale - 1) * e;
         return clampViewToWorld(focusedView.cx, focusedView.cy, scale);
     }
+    var racingScale = focusedView.scale;
+    // Second Wind death-beat: when the LOCAL player has gone down on an attuned flag,
+    // slow-pan from the death spot to the flag over the respawn delay, then release back
+    // to the normal follow (the kart reappears at the flag as the pan lands). Takes
+    // priority over the other racing camera tweaks. Solo-local only (set in the handler)
+    // so it never yanks a shared co-op camera off a still-racing partner.
+    if (secondWindCam != null) {
+        var swT = (Date.now() - secondWindCam.startedAt) / Math.max(1, secondWindCam.ms);
+        if (swT >= 1) {
+            secondWindCam = null;
+        } else {
+            var swE = smoothstep(swT < 0 ? 0 : swT);
+            var swcx = secondWindCam.fromX + (secondWindCam.toX - secondWindCam.fromX) * swE;
+            var swcy = secondWindCam.fromY + (secondWindCam.toY - secondWindCam.fromY) * swE;
+            return clampViewToWorld(swcx, swcy, racingScale);
+        }
+    }
     // Back the camera off while aiming/throwing an aimed ability (bomb/ice) so
     // it's easier to aim and follow the shot; the smoothing eases it out and back.
-    var racingScale = focusedView.scale;
     if (localAimedAbilityActive()) {
         racingScale = Math.max(1, racingScale * AIM_ZOOM_OUT_FACTOR);
     }

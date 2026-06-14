@@ -921,6 +921,9 @@ function registerConnectionHandlers(server) {
 		// before this .then() microtask resolves — clearing it in there would wipe
 		// the door right after bunkerStart armed it (so the door never shows).
 		if (typeof bunkerFX !== "undefined") { bunkerFX = null; }
+		// Second Wind camera pan can't bleed across a map swap (a pending death-beat from
+		// the prior round must never hijack the new round's camera).
+		if (typeof secondWindCam !== "undefined") { secondWindCam = null; }
 		// Heatwave reveal state resets synchronously too (same microtask gotcha as
 		// bunkerFX) so a prior round's reveal can never bleed across the map swap.
 		if (typeof heatwaveFX !== "undefined") { heatwaveFX = null; heatwaveScorch = []; heatwaveFlashes = []; }
@@ -2318,6 +2321,23 @@ function registerEffectHandlers(server) {
 		}
 		var col = (config.boons != null && config.boons.guardHalo != null) ? config.boons.guardHalo.color : "#FFD166";
 		spawnTriggerPulse(payload.x, payload.y, col);
+	});
+	// Second Wind Totem (boon): the death-beat began for a racer — freeze + (for YOUR
+	// own death) a slow camera pan from the death spot to the flag over the respawn
+	// delay. A small pulse marks where you went down. The pan is solo-local only: on a
+	// couch co-op screen one player's death must not yank the shared camera off a
+	// partner who's still racing, so we only arm it when there's a single local player.
+	server.on("secondWindPending", function (payload) {
+		var col = (config.boons != null && config.boons.secondWindTotem != null) ? config.boons.secondWindTotem.color : "#CBD2DC";
+		spawnTriggerPulse(payload.fromX, payload.fromY, col);
+		if (typeof isLocalId === "function" && isLocalId(payload.id)
+			&& (typeof localPlayers === "undefined" || localPlayers == null || localPlayers.length <= 1)) {
+			secondWindCam = {
+				fromX: payload.fromX, fromY: payload.fromY,
+				toX: payload.toX, toY: payload.toY,
+				ms: payload.ms || 2000, startedAt: Date.now()
+			};
+		}
 	});
 	// Second Wind Totem (boon): a pulse at the flag on the actual revive (the flag
 	// recolour + bump are handled client-side off kart proximity in draw.js). The
