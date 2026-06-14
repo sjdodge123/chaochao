@@ -444,10 +444,17 @@ try {
         check(bot.velX === 0 && bot.velY === 0, 'the punch dealt no knockback (absorbed by the shield)');
         check(punch.landed === true, 'the absorbed punch is marked landed (kept out of clashes)');
         check(emittedSince('guardShieldPopped', since), 'a guardShieldPopped event fired for the client telegraph');
-        // Shield is spent: the next punch lands normally.
+        // Pop grants brief i-frames so a lingering bumper/wall/rotor punch (which re-overlaps
+        // across ticks) is absorbed as ONE hit, not popped-then-knocked the next tick.
+        check(bot.isInvuln(), 'popping the shield grants brief i-frames (popGraceMs)');
         bot.velX = 0; bot.velY = 0;
         bot.handlePunchHit({ x: bot.x + 5, y: bot.y, ownerId: 'attacker', mapOwned: true, getBonus: () => 800 });
-        check(Math.abs(bot.velX) + Math.abs(bot.velY) > 0.0001, 'with no shield the next punch knocks the racer back (sanity)');
+        check(bot.velX === 0 && bot.velY === 0, 'a re-hit DURING the pop grace is swallowed (no knockback slips through)');
+        // After the grace, a punch lands normally (shield spent).
+        clock += HALO.popGraceMs + 50; bot.invulnUntil = 0;
+        bot.velX = 0; bot.velY = 0;
+        bot.handlePunchHit({ x: bot.x + 5, y: bot.y, ownerId: 'attacker', mapOwned: true, getBonus: () => 800 });
+        check(Math.abs(bot.velX) + Math.abs(bot.velY) > 0.0001, 'with no shield + grace expired the next punch knocks the racer back (sanity)');
 
         // Re-arm + re-grant for the bomb test.
         clock += HALO.cooldownMs + 100; halo.update();

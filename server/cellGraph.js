@@ -603,6 +603,7 @@ module.exports = {
     getAdjacency: getAdjacency,
     buildAdjacency: buildAdjacency,
     getBarrierBlockedEdges: getBarrierBlockedEdges,
+    nearestCellIndex: nearestCellIndex,
     edgeSampleOrigins: edgeSampleOrigins,
     KART_WIDTH: KART_WIDTH,
     MIN_DOORWAY: MIN_DOORWAY,

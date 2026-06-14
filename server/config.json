@@ -604,7 +604,8 @@
             "color": "#FFD166",
             "colorWater": "#FFF3C4",
             "radius": 26,
-            "cooldownMs": 8000
+            "cooldownMs": 8000,
+            "popGraceMs": 250
         },
         "secondWindTotem": {
             "_doc": "A respawn flag you drive over to ATTUNE. Once attuned, EVERY death that round respawns you at the flag instead of ending your run — repeatedly, for as long as the flag survives. The death plays as a beat: you freeze at the death spot for respawnDelayMs (the local view slow-pans the camera from the death spot to the flag), then you reappear at the flag with respawnInvulnMs of grace. The flag is 'consumed' the moment the collapsing lava reaches its tile (tracked tick-by-tick via the safe flag → netState 0); after that it revives no one. IMPORTANT (team modes): a flag respawn is NOT a death — no team-points penalty and no kill credit are charged. Those only apply on a REAL death: the flag was never activated, or it has been burned/consumed by the time the delay elapses. Excludes infection deaths (a bitten/zombified racer is not revived) and only fires during racing/collapsing. On respawn you keep your notch and your velocity is zeroed. Driving over a DIFFERENT flag re-anchors you to it. The flag draws in a neutral colour and only recolours to YOUR kart colour on your own screen when you touch it (client-only, so it reads as 'you activated this'). color is the neutral cloth; colorWater is the on-water palette.",

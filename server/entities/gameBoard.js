@@ -174,6 +174,10 @@ class GameBoard {
 		aiController.update(this, currentState, dt);
 		this.engine.update(dt);
 		this.collapseMap(currentState);
+		// Refresh Second Wind flag safety RIGHT AFTER the collapse mutates cells and BEFORE
+		// updatePlayers (where finishSecondWind revives), so a revive reads this tick's lava
+		// state and never drops a racer onto a flag the collapse just burned.
+		this.updateBoonSafety(currentState);
 		this.bunkerRingTick(currentState);
 		this.checkCollisions(currentState);
 		this.updatePlayers(currentState, dt);
@@ -622,14 +626,6 @@ class GameBoard {
 			// dt lets stationary stateful kinds (geyser/mine/fence) run their phase
 			// timer; moving kinds ignore it (base Hazard.update just commits move()).
 			hazard.update(dt);
-			// Second Wind Totem (boon): keep its `safe` flag fresh so the death-path
-			// revive never drops a racer onto a tile the collapse has turned to lava, and
-			// mirror it onto netState (100 standing / 0 consumed) so the client hides a
-			// flag the lava has eaten.
-			if (hazard.tracksTileSafety) {
-				hazard.safe = this.isPointSafeGround(hazard.x, hazard.y);
-				hazard.netState = hazard.safe ? 100 : 0;
-			}
 			if (forceZonesLive && hazard.forceZone && hazard.alive !== false) {
 				for (var pid in this.playerList) {
 					hazard.applyForce(this.playerList[pid]);
@@ -644,23 +640,28 @@ class GameBoard {
 		}
 	}
 
+	// Keep every tile-safety-tracking boon's `safe`/netState fresh (called right after
+	// collapseMap so a same-tick revive reads current lava). Only runs in racing/
+	// collapsing (no lava spreads before that), and a flag is monotonic — once it's
+	// burned it stays burned — so a `safe === false` flag is skipped, capping the cost.
+	updateBoonSafety(currentState) {
+		if (currentState != c.stateMap.racing && currentState != c.stateMap.collapsing) { return; }
+		for (var id in this.hazardList) {
+			var hazard = this.hazardList[id];
+			if (!hazard.tracksTileSafety || hazard.safe === false) { continue; }
+			hazard.safe = this.isPointSafeGround(hazard.x, hazard.y);
+			hazard.netState = hazard.safe ? 100 : 0; // wire mirror: 100 standing / 0 consumed
+		}
+	}
 	// Is the terrain cell containing (x,y) safe to respawn onto right now? Used by the
 	// Second Wind Totem revive guard: a cell the collapse has flipped to lava (or an
-	// empty/background void) would just re-kill the respawned racer. Nearest-site lookup
-	// over the live cell array (the same idiom as countSandTiles / spawnAntlion), so it
-	// reflects this round's collapse mutations (collapseMap writes cell.id = lava).
+	// empty/background void) would just re-kill the respawned racer. Reuses the canonical
+	// nearest-site lookup (cellGraph.nearestCellIndex), so it reflects this round's
+	// collapse mutations (collapseMap writes cell.id = lava).
 	isPointSafeGround(x, y) {
 		var cells = (this.currentMap != null) ? this.currentMap.cells : null;
-		if (cells == null) { return true; }
-		var best = Infinity, bestId = null;
-		for (var i = 0; i < cells.length; i++) {
-			var s = cells[i].site;
-			if (s == null) { continue; }
-			var dx = s.x - x, dy = s.y - y;
-			var d = dx * dx + dy * dy;
-			if (d < best) { best = d; bestId = cells[i].id; }
-		}
-		if (bestId == null) { return true; }
+		if (cells == null || cells.length === 0) { return true; }
+		var bestId = cells[cellGraph.nearestCellIndex(cells, { x: x, y: y })].id;
 		return bestId != c.tileMap.lava.id
 			&& bestId != c.tileMap.empty.id
 			&& bestId != c.tileMap.background.id;
@@ -1224,7 +1225,9 @@ class GameBoard {
 		while (randomPlayer.id == packet.owner ||
 			randomPlayer.alive == false ||
 			randomPlayer.awake == false ||
-			randomPlayer.hasStarPower()) {
+			randomPlayer.hasStarPower() ||
+			randomPlayer.isInvuln() ||
+			randomPlayer.isReviving()) {
 			if (count > 100 || Object.keys(gameBoard.playerList).length == 1 || gameBoard.alivePlayerCount == 1 || gameBoard.alivePlayerCount - gameBoard.sleepingPlayerCount == 1 || gameBoard.playerList[packet.owner] == undefined) {
 				messenger.messageRoomBySig(gameBoard.roomSig, "fizzle", packet.owner);
 				return;

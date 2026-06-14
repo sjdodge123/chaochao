@@ -2251,7 +2251,8 @@ function update(gameBoard, currentState, dt) {
 
     for (var pid in playerList) {
         var bot = playerList[pid];
-        if (!bot.isAI || !bot.alive || bot.reachedGoal || bot.isSpectator) { continue; }
+        // A bot frozen in the Second Wind death-beat (alive but inert) must not be steered.
+        if (!bot.isAI || !bot.alive || bot.reachedGoal || bot.isSpectator || bot.isReviving()) { continue; }
         steerBot(bot, ctx, dt);
     }
 }

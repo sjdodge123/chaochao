@@ -123,13 +123,23 @@ registerBoonKind("dashArrows", {
 // drains and refills over cooldownMs before it can recharge anyone again. That refill
 // progress rides the wire's netState slot (0 = just drained .. 100 = ready) so the
 // client can draw the drained -> fill-ring -> ready-pulse telegraph. Non-directional.
-class RechargeSpring extends Boon {
-	constructor(x, y, ownerId, roomSig) {
-		super(x, y, c.boons.rechargeSpring.radius, c.boons.rechargeSpring.color, ownerId, roomSig);
-		this.id = c.boons.rechargeSpring.id;
-		this.cooldownMs = c.boons.rechargeSpring.cooldownMs;
-		this.rechargeReadyAt = 0;   // Date.now() the spring is ready again (<= now == ready)
+// A boon with a single GLOBAL shared charge that re-arms over cooldownMs and telegraphs
+// the refill on the wire's netState slot (0 = just spent .. 100 = ready). Subclasses
+// (Recharge Spring, Guard Halo) call isReady() to gate, then spend() once the charge is
+// actually consumed; update() drives the drained -> fill-ring -> ready-pulse animation.
+class CooldownBoon extends Boon {
+	constructor(x, y, radius, color, ownerId, roomSig, cooldownMs) {
+		super(x, y, radius, color, ownerId, roomSig);
+		this.cooldownMs = cooldownMs;
+		this.rechargeReadyAt = 0;   // Date.now() the charge is ready again (<= now == ready)
 		this.netState = 100;        // wire slot: refill percent, 100 = ready (drawn telegraph)
+	}
+	isReady() {
+		return Date.now() >= this.rechargeReadyAt;
+	}
+	spend() {
+		this.rechargeReadyAt = Date.now() + this.cooldownMs;
+		this.netState = 0;
 	}
 	// Per tick (gameBoard.updateHazards): refresh the refill percent the client draws.
 	update() {
@@ -141,19 +151,25 @@ class RechargeSpring extends Boon {
 		var remaining = this.rechargeReadyAt - now;
 		this.netState = Math.max(0, Math.min(99, Math.round((1 - remaining / this.cooldownMs) * 100)));
 	}
+}
+
+class RechargeSpring extends CooldownBoon {
+	constructor(x, y, ownerId, roomSig) {
+		super(x, y, c.boons.rechargeSpring.radius, c.boons.rechargeSpring.color, ownerId, roomSig, c.boons.rechargeSpring.cooldownMs);
+		this.id = c.boons.rechargeSpring.id;
+	}
 	handleHit(object) {
 		if (!this.isEligiblePlayer(object) || typeof object.rechargeFromSpring !== "function") {
 			return;
 		}
-		if (Date.now() < this.rechargeReadyAt) {
+		if (!this.isReady()) {
 			return; // still refilling — no charge to give
 		}
 		// Only spend the charge if the racer actually needed it (rechargeFromSpring
 		// returns false for an already-topped-up kart), so a full racer doesn't drain
 		// a ready spring for nothing.
 		if (object.rechargeFromSpring()) {
-			this.rechargeReadyAt = Date.now() + this.cooldownMs;
-			this.netState = 0;
+			this.spend();
 		}
 	}
 }
@@ -225,37 +241,23 @@ registerBoonKind("slipstream", {
 // halo drains and re-arms over cooldownMs, telegraphing the refill on the netState
 // wire slot (0 = just claimed .. 100 = ready). A racer who already holds a shield
 // never wastes a ready halo. Non-directional. (Racers only — see isEligiblePlayer.)
-class GuardHalo extends Boon {
+class GuardHalo extends CooldownBoon {
 	constructor(x, y, ownerId, roomSig) {
-		super(x, y, c.boons.guardHalo.radius, c.boons.guardHalo.color, ownerId, roomSig);
+		super(x, y, c.boons.guardHalo.radius, c.boons.guardHalo.color, ownerId, roomSig, c.boons.guardHalo.cooldownMs);
 		this.id = c.boons.guardHalo.id;
-		this.cooldownMs = c.boons.guardHalo.cooldownMs;
-		this.rechargeReadyAt = 0;   // Date.now() the halo is ready again (<= now == ready)
-		this.netState = 100;        // wire slot: refill percent, 100 = ready (drawn telegraph)
-	}
-	// Per tick (gameBoard.updateHazards): refresh the refill percent the client draws.
-	update() {
-		var now = Date.now();
-		if (now >= this.rechargeReadyAt) {
-			this.netState = 100;
-			return;
-		}
-		var remaining = this.rechargeReadyAt - now;
-		this.netState = Math.max(0, Math.min(99, Math.round((1 - remaining / this.cooldownMs) * 100)));
 	}
 	handleHit(object) {
 		if (!this.isEligiblePlayer(object) || typeof object.grantGuardShield !== "function") {
 			return;
 		}
-		if (Date.now() < this.rechargeReadyAt) {
+		if (!this.isReady()) {
 			return; // still re-arming — no shield to give
 		}
 		// Only spend the charge if the racer actually took the shield (grantGuardShield
 		// returns false for a racer who already holds one), so a shielded racer doesn't
 		// drain a ready halo for nothing.
 		if (object.grantGuardShield()) {
-			this.rechargeReadyAt = Date.now() + this.cooldownMs;
-			this.netState = 0;
+			this.spend();
 		}
 	}
 }
