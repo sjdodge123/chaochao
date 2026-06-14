@@ -2302,6 +2302,33 @@ function registerEffectHandlers(server) {
 		}
 		playerAbilityUsed(owner);
 	});
+	// Guard Halo (boon): a racer picked up / lost the one-hit shield. The flag drives
+	// drawGuardShieldFx (the ring around the kart). On pop, a quick gold pulse marks the
+	// absorbed hit.
+	server.on("guardShield", function (payload) {
+		var p = playerList[payload.id];
+		if (p != null) {
+			p.guardShield = payload.active === true;
+		}
+	});
+	server.on("guardShieldPopped", function (payload) {
+		var p = playerList[payload.id];
+		if (p != null) {
+			p.guardShield = false;
+		}
+		var col = (config.boons != null && config.boons.guardHalo != null) ? config.boons.guardHalo.color : "#FFD166";
+		spawnTriggerPulse(payload.x, payload.y, col);
+	});
+	// Second Wind Totem (boon): a violet pulse on attune (a confirmation) and a brighter
+	// one on the actual revive. The respawn position itself arrives via gameUpdates.
+	server.on("secondWindAttuned", function (payload) {
+		var col = (config.boons != null && config.boons.secondWindTotem != null) ? config.boons.secondWindTotem.color : "#C792EA";
+		spawnTriggerPulse(payload.x, payload.y, col);
+	});
+	server.on("secondWind", function (payload) {
+		var col = (config.boons != null && config.boons.secondWindTotem != null) ? config.boons.secondWindTotem.color : "#C792EA";
+		spawnTriggerPulse(payload.x, payload.y, col);
+	});
 	server.on("startLobbyTimer", function () {
 		if (lobbyStartButton != null) {
 			lobbyStartButton.startSpin = true;

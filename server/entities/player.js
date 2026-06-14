@@ -220,6 +220,17 @@ class Player extends Circle {
 		//abilities and punches (set by GameBoard.checkAbilities on use).
 		this.starPowerUntil = 0;
 
+		// Boons (server/entities/boons.js).
+		// Guard Halo: a one-hit shield picked up from a halo. While true the next
+		// incoming hit (punch/bumper/bomb/ice/cut/puck) is absorbed and pops it —
+		// consumed at the same sites Star Power gates damage (tryConsumeGuardShield).
+		this.guardShield = false;
+		// Second Wind Totem: the attuned totem (a SecondWindTotem boon) this racer
+		// will respawn at on its first death this round, or null. Single-use per
+		// round; killPlayer reads it, secondWindUsed latches it spent.
+		this.secondWind = null;
+		this.secondWindUsed = false;
+
 		//Achievements
 		this.savior = 0;
 		this.totalKills = 0;
@@ -766,6 +777,77 @@ class Player extends Circle {
 		this.punchTimeLeft = this.punchWaitTime;
 		return true;
 	}
+	// Guard Halo (boon): grant the one-hit shield. Returns false if the racer already
+	// holds one so the halo doesn't waste its charge re-granting; true (and emits the
+	// client telegraph) when a fresh shield is taken.
+	grantGuardShield() {
+		if (this.guardShield) { return false; }
+		this.guardShield = true;
+		messenger.messageRoomBySig(this.roomSig, "guardShield", { id: this.id, active: true });
+		return true;
+	}
+	// Consume the shield on an incoming hit. Returns true (and pops the shield, telling
+	// the client to clear the ring + play the pop FX) only when a shield was present —
+	// the caller then swallows the hit (no knockback/attribution/infection). False when
+	// unshielded, so the hit lands normally. Called at the same sites Star Power gates
+	// damage (handlePunchHit/handlePuckHit, GameBoard cutPlayers/applyExplosionForce).
+	tryConsumeGuardShield() {
+		if (!this.guardShield) { return false; }
+		this.guardShield = false;
+		messenger.messageRoomBySig(this.roomSig, "guardShieldPopped", { id: this.id, x: this.x, y: this.y });
+		return true;
+	}
+	// Second Wind Totem (boon): attune to a totem so the first death this round
+	// respawns here instead of ending the run. Stores the totem ref (the death path
+	// reads its live `safe` flag). No-op once already spent this round, or when already
+	// attuned to this same totem (so re-overlapping doesn't re-fire the cue).
+	attuneSecondWind(totem) {
+		if (this.secondWindUsed || this.secondWind === totem) { return false; }
+		this.secondWind = totem;
+		messenger.messageRoomBySig(this.roomSig, "secondWindAttuned", { id: this.id, x: totem.x, y: totem.y });
+		return true;
+	}
+	// Second Wind Totem (boon): spend the attunement to respawn at the totem instead
+	// of dying (called from killPlayer once the eligibility/safety gates pass). Keeps
+	// the racer alive + their notch, teleports them onto the totem, zeroes momentum,
+	// clears fire/charge and any pending kill attribution from the hit that "killed"
+	// them, and grants a brief invuln grace from other players' hits (lava still kills,
+	// but the safe gate already ruled out a lava tile). Single-use this round.
+	reviveAtSecondWind() {
+		var totem = this.secondWind;
+		this.secondWind = null;
+		this.secondWindUsed = true;
+		this.x = totem.x;
+		this.y = totem.y;
+		this.newX = this.x;
+		this.newY = this.y;
+		this.velX = 0;
+		this.velY = 0;
+		this.cancelCharge();
+		this.overcharge = 0;
+		this.exhaustLockUntil = 0;
+		this.staminaExhausted = false;
+		this.stamina = c.punchStamina.max;
+		this.attack = false;
+		this.attackQueued = false;
+		this.ability = null;
+		this.moveForward = false;
+		this.moveBackward = false;
+		this.turnLeft = false;
+		this.turnRight = false;
+		// Drop the burn/punch attribution from the blow that would have killed them — no
+		// kill is credited for a revived racer.
+		this.punchedBy = null;
+		this.burnedBy = null;
+		this.murderedBy = null;
+		if (this.onFire > 0) {
+			this.onFire = 0;
+			this.fireTimer = null;
+			messenger.messageRoomBySig(this.roomSig, "onFire", { owner: this.id, value: 0 });
+		}
+		this.invulnUntil = Date.now() + c.boons.secondWindTotem.respawnInvulnMs;
+		messenger.messageRoomBySig(this.roomSig, "secondWind", { id: this.id, x: this.x, y: this.y });
+	}
 	// Lobby-only protection.
 	// isTimedInvuln(): inside the timed post-respawn grace window.
 	// isInvuln(): timed grace OR "held" — parked in the start circle keeps it alive
@@ -1124,6 +1206,14 @@ class Player extends Circle {
 			&& !object.ownerInfected && !this.isZombie) {
 			return;
 		}
+		// Guard Halo (boon): a one-hit shield absorbs this punch (or bumper/rotor bonk)
+		// and pops. Placed after the friendly-fire no-op (a teammate's harmless punch
+		// must not waste the shield) but before infection/attribution/knockback, so a
+		// shielded hit is fully nullified — including a zombie bite (no infection).
+		if (this.tryConsumeGuardShield()) {
+			object.landed = true; // the punch connected (with the shield) — keep it out of clashes
+			return;
+		}
 		if (object.ownerInfected) {
 			this.infect();
 		}
@@ -1154,6 +1244,10 @@ class Player extends Circle {
 	}
 	handlePuckHit(object) {
 		if (this.isInvuln() || this.hasStarPower()) {
+			return;
+		}
+		// Guard Halo (boon): a one-hit shield absorbs the puck and pops.
+		if (this.tryConsumeGuardShield()) {
 			return;
 		}
 		_engine.puckPlayer(object, this);
@@ -1479,6 +1573,18 @@ class Player extends Circle {
 		if (packet.alive == false) {
 			return;
 		}
+		// Second Wind Totem (boon): the first death this round respawns the racer AT
+		// their attuned totem instead of ending the run. Excludes the infection side (a
+		// bitten/zombified racer is not revived as a survivor), and is skipped if the
+		// collapse has already turned the totem's tile to lava (safe=false) — a respawn
+		// there would just re-kill them. Single-use per round (secondWindUsed latches).
+		// Returns BEFORE any of the death bookkeeping below, so no notch is lost and no
+		// playerDied fires — the client plays the revive cue off the secondWind event.
+		if (packet.secondWind != null && !packet.infected && !packet.isZombie
+			&& packet.secondWind.safe !== false) {
+			packet.reviveAtSecondWind();
+			return;
+		}
 		if (packet.punchedBy != null) {
 			packet.murderedBy = packet.punchedBy;
 		}
@@ -1626,6 +1732,15 @@ class Player extends Circle {
 		this.multiKillCount = 0;
 		this.acquiredAbility = null;
 		this.angle = 315;
+		// Boons are per-round: a shield carried into a new round + a spent/armed Second
+		// Wind must not bleed across. The client player object persists across rounds, so
+		// clear a lingering shield ring there too (the totem cue is one-shot, no clear).
+		if (this.guardShield) {
+			this.guardShield = false;
+			messenger.messageRoomBySig(this.roomSig, "guardShield", { id: this.id, active: false });
+		}
+		this.secondWind = null;
+		this.secondWindUsed = false;
 		// Clear lobby-only state on every race (re)start so a lobby respawn's invuln
 		// grace / sanctuary flag / pending-respawn can never bleed into a real round.
 		this.invulnUntil = 0;

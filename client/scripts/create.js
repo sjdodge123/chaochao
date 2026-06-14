@@ -1573,6 +1573,74 @@ function paintSlipstreamShape(ctx, kind, x, y, angle, ringColor) {
     }
     ctx.restore();
 }
+// Guard Halo painter (the guardHalo `paint` hook) — mirrors the in-game look
+// (draw.js drawGuardHalo): a faint gold footprint + ring with a shield crest in the
+// middle. On water the palette is pale-gold. Static in the editor (no pulse/telegraph).
+function paintGuardHaloShape(ctx, kind, x, y, angle, ringColor) {
+    var cfg = objCfgByKey(kind.key);
+    if (cfg == null) { return; }
+    var r = cfg.radius;
+    var onWater = editorBoonOnWater(x, y);
+    var accent = onWater ? cfg.colorWater : cfg.color;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, 2 * Math.PI);
+    ctx.fillStyle = onWater ? "rgba(255,243,196,0.05)" : "rgba(255,209,102,0.05)";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.78, 0, 2 * Math.PI);
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    var s = r * 0.5;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(0, -s);
+    ctx.lineTo(s * 0.8, -s * 0.45);
+    ctx.lineTo(s * 0.8, s * 0.2);
+    ctx.lineTo(0, s);
+    ctx.lineTo(-s * 0.8, s * 0.2);
+    ctx.lineTo(-s * 0.8, -s * 0.45);
+    ctx.closePath();
+    ctx.strokeStyle = EDITOR_BOON_HALO; ctx.lineWidth = 7; ctx.stroke();
+    ctx.strokeStyle = cfg.color; ctx.lineWidth = 4; ctx.stroke();
+    ctx.restore();
+}
+// Second Wind Totem painter (the secondWindTotem `paint` hook) — mirrors the in-game
+// look (draw.js drawSecondWindTotem): a faint violet footprint + base ring with a
+// violet diamond crest. On water the palette is pale-violet. Static in the editor.
+function paintSecondWindTotemShape(ctx, kind, x, y, angle, ringColor) {
+    var cfg = objCfgByKey(kind.key);
+    if (cfg == null) { return; }
+    var r = cfg.radius;
+    var onWater = editorBoonOnWater(x, y);
+    var accent = onWater ? cfg.colorWater : cfg.color;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, 2 * Math.PI);
+    ctx.fillStyle = onWater ? "rgba(235,217,255,0.05)" : "rgba(199,146,234,0.05)";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.7, 0, 2 * Math.PI);
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    var d = r * 0.46;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(0, -d);
+    ctx.lineTo(d * 0.75, 0);
+    ctx.lineTo(0, d);
+    ctx.lineTo(-d * 0.75, 0);
+    ctx.closePath();
+    ctx.strokeStyle = EDITOR_BOON_HALO; ctx.lineWidth = 7; ctx.stroke();
+    ctx.strokeStyle = cfg.color; ctx.lineWidth = 4; ctx.stroke();
+    ctx.restore();
+}
 // Wall-band painter (bumperWall's `paint` hook). Mirrors the in-game look
 // (draw.js drawBumperWall): rim band over the bumper-orange core, anchored at
 // (x,y) and extending `width` along `angle`.
@@ -3022,6 +3090,56 @@ var EDITOR_HAZARD_KINDS = [
                 ctx.lineTo(size - 28, ly + 8);
                 ctx.stroke();
             }
+        }
+    },
+    {
+        key: "guardHalo", label: "Guard Halo", shortcut: "h", railed: false, directional: false,
+        group: "boon", paint: paintGuardHaloShape,
+        swatchPaint: function (ctx, size) {
+            // Gold ring + shield crest — "this gives you a one-hit shield".
+            var cx = size / 2, cy = size / 2;
+            ctx.strokeStyle = "#FFD166";
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.arc(cx, cy, size * 0.34, 0, 2 * Math.PI);
+            ctx.stroke();
+            var s = size * 0.22;
+            ctx.lineWidth = 6;
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+            ctx.beginPath();
+            ctx.moveTo(cx, cy - s);
+            ctx.lineTo(cx + s * 0.8, cy - s * 0.45);
+            ctx.lineTo(cx + s * 0.8, cy + s * 0.2);
+            ctx.lineTo(cx, cy + s);
+            ctx.lineTo(cx - s * 0.8, cy + s * 0.2);
+            ctx.lineTo(cx - s * 0.8, cy - s * 0.45);
+            ctx.closePath();
+            ctx.stroke();
+        }
+    },
+    {
+        key: "secondWindTotem", label: "Second Wind Totem", shortcut: "n", railed: false, directional: false,
+        group: "boon", paint: paintSecondWindTotemShape,
+        swatchPaint: function (ctx, size) {
+            // Violet ring + diamond crest — "respawn here on your first death".
+            var cx = size / 2, cy = size / 2;
+            ctx.strokeStyle = "#C792EA";
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.arc(cx, cy, size * 0.32, 0, 2 * Math.PI);
+            ctx.stroke();
+            var d = size * 0.22;
+            ctx.lineWidth = 6;
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+            ctx.beginPath();
+            ctx.moveTo(cx, cy - d);
+            ctx.lineTo(cx + d * 0.75, cy);
+            ctx.lineTo(cx, cy + d);
+            ctx.lineTo(cx - d * 0.75, cy);
+            ctx.closePath();
+            ctx.stroke();
         }
     }
 ];

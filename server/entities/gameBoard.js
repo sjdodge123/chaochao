@@ -622,6 +622,11 @@ class GameBoard {
 			// dt lets stationary stateful kinds (geyser/mine/fence) run their phase
 			// timer; moving kinds ignore it (base Hazard.update just commits move()).
 			hazard.update(dt);
+			// Second Wind Totem (boon): keep its `safe` flag fresh so the death-path
+			// revive never drops a racer onto a tile the collapse has turned to lava.
+			if (hazard.tracksTileSafety) {
+				hazard.safe = this.isPointSafeGround(hazard.x, hazard.y);
+			}
 			if (forceZonesLive && hazard.forceZone && hazard.alive !== false) {
 				for (var pid in this.playerList) {
 					hazard.applyForce(this.playerList[pid]);
@@ -634,6 +639,28 @@ class GameBoard {
 				hazard.punch = null;
 			}
 		}
+	}
+
+	// Is the terrain cell containing (x,y) safe to respawn onto right now? Used by the
+	// Second Wind Totem revive guard: a cell the collapse has flipped to lava (or an
+	// empty/background void) would just re-kill the respawned racer. Nearest-site lookup
+	// over the live cell array (the same idiom as countSandTiles / spawnAntlion), so it
+	// reflects this round's collapse mutations (collapseMap writes cell.id = lava).
+	isPointSafeGround(x, y) {
+		var cells = (this.currentMap != null) ? this.currentMap.cells : null;
+		if (cells == null) { return true; }
+		var best = Infinity, bestId = null;
+		for (var i = 0; i < cells.length; i++) {
+			var s = cells[i].site;
+			if (s == null) { continue; }
+			var dx = s.x - x, dy = s.y - y;
+			var d = dx * dx + dy * dy;
+			if (d < best) { best = d; bestId = cells[i].id; }
+		}
+		if (bestId == null) { return true; }
+		return bestId != c.tileMap.lava.id
+			&& bestId != c.tileMap.empty.id
+			&& bestId != c.tileMap.background.id;
 	}
 
 	// --- Antlions (brutal id 1014) ---
@@ -1155,6 +1182,12 @@ class GameBoard {
 			if (this.playerList[id].isProtected() || this.playerList[id].hasStarPower()) {
 				continue;
 			}
+			// Guard Halo (boon): a one-hit shield absorbs the cut and pops (no fling, no
+			// attribution). Checked after the immunity gates so an already-protected
+			// player doesn't waste the shield.
+			if (this.playerList[id].tryConsumeGuardShield()) {
+				continue;
+			}
 			_engine.cutPlayer(this.playerList[id], this.playerList[owner], this.playerList[owner].angle);
 			this.playerList[id].setPunchedBy(owner);
 		}
@@ -1333,6 +1366,11 @@ class GameBoard {
 			}
 			var distance = utils.getMag(loc.x - player.x, loc.y - player.y);
 			if (c.tileMap.abilities.bomb.explosionRadius > distance) {
+				// Guard Halo (boon): a one-hit shield absorbs the blast and pops. Checked
+				// INSIDE the radius test so a player outside the blast doesn't waste it.
+				if (player.tryConsumeGuardShield()) {
+					continue;
+				}
 				if (this.playerList[owner] != null) {
 					player.setPunchedBy(owner);
 				}

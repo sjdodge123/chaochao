@@ -6447,6 +6447,9 @@ function drawPlayer(player, dt) {
     // Star Power aura sits behind the kart body like the burn flame, so the
     // skin/colour stays readable on top of the rainbow glow.
     drawStarPowerFx(player);
+    // Guard Halo shield: a protective ring around the kart while a one-hit shield is
+    // held (set by the guardShield/guardShieldPopped events). Behind the body too.
+    drawGuardShieldFx(player);
     drawSpeedFx(player);
     // Ice drift cue state: eases the counter-steer lean applied to the kart body
     // below and feeds the shared ice-spray pool (drawn under all karts in drawPlayers).
@@ -6956,6 +6959,40 @@ function drawStarPowerFx(player) {
         gameContext.fill();
         gameContext.restore();
     }
+    gameContext.restore();
+}
+
+// Guard Halo shield: a gold hexagonal ring orbiting a kart that holds a one-hit
+// shield (player.guardShield, toggled by the guardShield/guardShieldPopped events).
+// Cheap stroked hexagon with a slow spin + gentle pulse; no gradient/shadowBlur.
+function drawGuardShieldFx(player) {
+    if (!player.guardShield) {
+        return;
+    }
+    var now = Date.now();
+    var r = player.radius;
+    var pulse = 1 + 0.06 * Math.sin(now / 160);
+    var ringR = (r + 6) * pulse;
+    var spin = now / 900;
+    var cfg = (config.boons != null && config.boons.guardHalo != null) ? config.boons.guardHalo : null;
+    var col = cfg != null ? cfg.color : "#FFD166";
+    gameContext.save();
+    gameContext.translate(player.x, player.y);
+    gameContext.rotate(spin);
+    gameContext.globalAlpha = 0.85;
+    gameContext.strokeStyle = col;
+    gameContext.lineWidth = 2.5;
+    gameContext.lineJoin = "round";
+    gameContext.beginPath();
+    for (var i = 0; i < 6; i++) {
+        var a = i * (Math.PI / 3);
+        var px = Math.cos(a) * ringR;
+        var py = Math.sin(a) * ringR;
+        if (i === 0) { gameContext.moveTo(px, py); } else { gameContext.lineTo(px, py); }
+    }
+    gameContext.closePath();
+    gameContext.stroke();
+    gameContext.globalAlpha = 1;
     gameContext.restore();
 }
 
@@ -9331,6 +9368,16 @@ function buildHazardDrawers() {
             drawSlipstream(h.x, h.y, h.angle);
         };
     }
+    if (config.boons != null && config.boons.guardHalo != null) {
+        hazardDrawers[config.boons.guardHalo.id] = function (h) {
+            drawGuardHalo(h.x, h.y, h.state);
+        };
+    }
+    if (config.boons != null && config.boons.secondWindTotem != null) {
+        hazardDrawers[config.boons.secondWindTotem.id] = function (h) {
+            drawSecondWindTotem(h.x, h.y);
+        };
+    }
 }
 function drawHazard(hazard) {
     if (hazardDrawers == null) {
@@ -10891,6 +10938,121 @@ function drawSlipstream(x, y, angle) {
         gameContext.strokeStyle = halo; gameContext.lineWidth = 6; gameContext.stroke();
         gameContext.strokeStyle = stroke; gameContext.lineWidth = 3; gameContext.stroke();
     }
+    gameContext.restore();
+}
+
+// Guard Halo — a floating shield ring you drive over for a one-hit shield. It carries
+// the same global-charge telegraph as the Recharge Spring (server netState arriving as
+// `state`: 0 = just claimed .. 100 = ready). Ready: a gently pulsing gold ring with a
+// bright shield crest in the middle — available. Recharging (state < 100): the pulse
+// stops, a fill arc sweeps clockwise to the refill percent, and the crest dims. On
+// water the palette is pale-gold so it reads against blue. Cheap sin/phase math, no
+// shadowBlur/filter.
+function drawGuardHalo(x, y, state) {
+    var cfg = config.boons.guardHalo;
+    var r = cfg.radius;
+    var onWater = boonOnWater(x, y);
+    var ready = (state == null || state >= 100);
+    var accent = onWater ? cfg.colorWater : cfg.color;
+    gameContext.save();
+    gameContext.translate(x, y);
+    // Faint footprint.
+    gameContext.beginPath();
+    gameContext.arc(0, 0, r, 0, 2 * Math.PI);
+    gameContext.fillStyle = onWater ? "rgba(255,243,196,0.05)" : "rgba(255,209,102,0.05)";
+    gameContext.fill();
+    if (!ready) {
+        // Refilling: dim track + a bright arc filling clockwise from the top to `state`%.
+        var frac = Math.max(0, Math.min(1, state / 100));
+        gameContext.beginPath();
+        gameContext.arc(0, 0, r * 0.78, 0, 2 * Math.PI);
+        gameContext.strokeStyle = accent;
+        gameContext.globalAlpha = 0.18;
+        gameContext.lineWidth = 3;
+        gameContext.stroke();
+        gameContext.beginPath();
+        gameContext.arc(0, 0, r * 0.78, -Math.PI / 2, -Math.PI / 2 + frac * 2 * Math.PI);
+        gameContext.globalAlpha = 0.9;
+        gameContext.lineCap = "round";
+        gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 5; gameContext.stroke();
+        gameContext.strokeStyle = accent; gameContext.lineWidth = 3; gameContext.stroke();
+        gameContext.globalAlpha = 1;
+    } else {
+        var pulse = 0.5 + 0.5 * Math.sin(Date.now() / 340);
+        gameContext.beginPath();
+        gameContext.arc(0, 0, r * (0.6 + 0.3 * pulse), 0, 2 * Math.PI);
+        gameContext.strokeStyle = accent;
+        gameContext.globalAlpha = 0.35 + 0.45 * (1 - pulse);
+        gameContext.lineWidth = 3;
+        gameContext.stroke();
+        gameContext.globalAlpha = 1;
+    }
+    // Shield crest in the middle (the identity), over a dark contrast halo so it reads
+    // on any terrain — dimmed while re-arming so the spent state reads at a glance.
+    var s = r * 0.5;
+    gameContext.globalAlpha = ready ? 1 : 0.3;
+    gameContext.lineCap = "round";
+    gameContext.lineJoin = "round";
+    gameContext.beginPath();
+    gameContext.moveTo(0, -s);
+    gameContext.lineTo(s * 0.8, -s * 0.45);
+    gameContext.lineTo(s * 0.8, s * 0.2);
+    gameContext.lineTo(0, s);
+    gameContext.lineTo(-s * 0.8, s * 0.2);
+    gameContext.lineTo(-s * 0.8, -s * 0.45);
+    gameContext.closePath();
+    gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 7; gameContext.stroke();
+    gameContext.strokeStyle = cfg.color; gameContext.lineWidth = 4; gameContext.stroke();
+    gameContext.globalAlpha = 1;
+    gameContext.restore();
+}
+
+// Second Wind Totem — a fixed respawn anchor you drive over to attune. Drawn as a
+// standing totem: a glowing violet diamond stacked on a base ring, with a slow upward
+// "ember" drifting from it (the second-wind motif). No charge telegraph (no cooldown);
+// it's always available. On water the palette is pale-violet so it reads against blue.
+// Cheap phase math, no shadowBlur/filter.
+function drawSecondWindTotem(x, y) {
+    var cfg = config.boons.secondWindTotem;
+    var r = cfg.radius;
+    var onWater = boonOnWater(x, y);
+    var accent = onWater ? cfg.colorWater : cfg.color;
+    gameContext.save();
+    gameContext.translate(x, y);
+    // Faint footprint.
+    gameContext.beginPath();
+    gameContext.arc(0, 0, r, 0, 2 * Math.PI);
+    gameContext.fillStyle = onWater ? "rgba(235,217,255,0.05)" : "rgba(199,146,234,0.05)";
+    gameContext.fill();
+    // Base ring (the "stand").
+    var basePulse = 0.5 + 0.5 * Math.sin(Date.now() / 380);
+    gameContext.beginPath();
+    gameContext.arc(0, 0, r * 0.7, 0, 2 * Math.PI);
+    gameContext.strokeStyle = accent;
+    gameContext.globalAlpha = 0.3 + 0.4 * basePulse;
+    gameContext.lineWidth = 3;
+    gameContext.stroke();
+    gameContext.globalAlpha = 1;
+    // Rising ember (the "second wind") drifting up from the totem.
+    var eph = (Date.now() / 1100) % 1;
+    gameContext.beginPath();
+    gameContext.arc(0, r * 0.2 - eph * r * 1.1, 2.6, 0, 2 * Math.PI);
+    gameContext.fillStyle = accent;
+    gameContext.globalAlpha = 0.7 * (1 - eph);
+    gameContext.fill();
+    gameContext.globalAlpha = 1;
+    // Violet diamond crest, over a dark contrast halo so it reads on any terrain.
+    var d = r * 0.46;
+    gameContext.lineCap = "round";
+    gameContext.lineJoin = "round";
+    gameContext.beginPath();
+    gameContext.moveTo(0, -d);
+    gameContext.lineTo(d * 0.75, 0);
+    gameContext.lineTo(0, d);
+    gameContext.lineTo(-d * 0.75, 0);
+    gameContext.closePath();
+    gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 7; gameContext.stroke();
+    gameContext.strokeStyle = cfg.color; gameContext.lineWidth = 4; gameContext.stroke();
     gameContext.restore();
 }
 
