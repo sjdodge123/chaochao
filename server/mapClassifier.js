@@ -253,18 +253,14 @@ function hazardAvoidance(map, config) {
     var railLen = (config.hazards && config.hazards.movingBumper && config.hazards.movingBumper.width) || 100;
     var wallId = (config.hazards && config.hazards.bumperWall) ? config.hazards.bumperWall.id : null;
     var wallLen = (config.hazards && config.hazards.bumperWall && config.hazards.bumperWall.width) || 120;
-    // Force zones: keep the overlay/par estimate in lockstep with the live AI
-    // (aiController). A GUST FAN is a traversable wind zone the bots drive THROUGH
-    // (not priced into A*, not dodged) — so it's never an avoidance obstacle here
-    // either. A VORTEX WELL is routed around at its strong-pull core (radius*0.6,
-    // matching aiController's classifier), not just a 40px ring at the anchor.
-    var gustId = (config.hazards && config.hazards.gustFan) ? config.hazards.gustFan.id : null;
+    // Vortex well: keep the overlay/par estimate in lockstep with the live AI
+    // (aiController) — routed around at its strong-pull core (radius*0.6), not just
+    // a 40px ring at the anchor.
     var vortexId = (config.hazards && config.hazards.vortexWell) ? config.hazards.vortexWell.id : null;
     var vortexR = (config.hazards && config.hazards.vortexWell && config.hazards.vortexWell.radius) || 150;
     for (var h = 0; h < hazards.length; h++) {
         var hz = hazards[h];
         if (hz == null || typeof hz.x !== "number" || typeof hz.y !== "number") { continue; }
-        if (hz.id === gustId) { continue; } // traversable wind zone — drive through, don't route around
         addAround(hz.x, hz.y);
         if (hz.id === movingId || hz.id === wallId) {
             // A railed bumper sweeps from its anchor along `angle` for the rail

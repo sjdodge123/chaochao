@@ -1468,42 +1468,6 @@ function paintMineShape(ctx, kind, x, y, angle, ringColor) {
     ctx.fill();
     ctx.restore();
 }
-// Gust-fan painter (gustFan's `paint` hook). Centre-anchored rotated zone with
-// wind streaks pointing along `angle` (the force direction). Mirrors the in-game
-// look (draw.js drawGustFan): faint blue footprint + chevroned streaks.
-function paintGustFanShape(ctx, kind, x, y, angle, ringColor) {
-    var cfg = config.hazards[kind.key];
-    if (cfg == null) { return; }
-    var rad = (angle || 0) * (Math.PI / 180);
-    var w = cfg.width, hgt = cfg.height;
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(rad);
-    ctx.beginPath();
-    ctx.rect(-w / 2, -hgt / 2, w, hgt);
-    ctx.fillStyle = "rgba(143,199,255,0.08)";
-    ctx.fill();
-    ctx.strokeStyle = "rgba(143,199,255,0.18)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.strokeStyle = cfg.color;
-    ctx.lineWidth = 3;
-    ctx.lineCap = "round";
-    var rows = 4, seg = w * 0.22;
-    for (var r = 0; r < rows; r++) {
-        var ly = -hgt / 2 + hgt * (r + 0.5) / rows;
-        for (var bx = -w / 2 + (r % 2) * (w * 0.16); bx < w / 2 - seg; bx += w * 0.34) {
-            var x1 = bx + seg;
-            ctx.beginPath();
-            ctx.moveTo(bx, ly); ctx.lineTo(x1, ly);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.moveTo(x1 - 5, ly - 4); ctx.lineTo(x1, ly); ctx.lineTo(x1 - 5, ly + 4);
-            ctx.stroke();
-        }
-    }
-    ctx.restore();
-}
 // Vortex-well painter (vortexWell's `paint` hook). Inward spiral arms to a dark
 // core + a faint reach rim so authors see the pull radius. Mirrors the in-game
 // look (draw.js drawVortexWell).
@@ -1932,31 +1896,6 @@ var EDITOR_HAZARD_KINDS = [
             ctx.arc(cx, cy, r * 0.4, 0, 2 * Math.PI);
             ctx.fillStyle = "#ffc24b";
             ctx.fill();
-        }
-    },
-    {
-        key: "gustFan", label: "Gust Fan", shortcut: "f", railed: false, directional: true,
-        paint: paintGustFanShape,
-        swatchPaint: function (ctx, size) {
-            // Blue wind streaks pointing right — "this blows you THIS way".
-            var cy = size / 2;
-            ctx.strokeStyle = "#8FC7FF";
-            ctx.lineWidth = 6;
-            ctx.lineCap = "round";
-            ctx.lineJoin = "round";
-            for (var r = 0; r < 3; r++) {
-                var ly = cy - 16 + r * 16;
-                var bx = 14 + (r % 2) * 8;
-                ctx.beginPath();
-                ctx.moveTo(bx, ly);
-                ctx.lineTo(bx + 26, ly);
-                ctx.stroke();
-                ctx.beginPath();
-                ctx.moveTo(bx + 20, ly - 6);
-                ctx.lineTo(bx + 26, ly);
-                ctx.lineTo(bx + 20, ly + 6);
-                ctx.stroke();
-            }
         }
     },
     {

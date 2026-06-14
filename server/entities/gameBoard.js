@@ -598,8 +598,8 @@ class GameBoard {
 		}
 	}
 	updateHazards(currentState, dt) {
-		// Force-zone kinds (gust fan, vortex well) apply a continuous force to karts
-		// INSIDE their region — only while racing/collapsing (karts are parked/penned
+		// Force-zone kinds (the vortex well) apply a continuous force to karts INSIDE
+		// their region — only while racing/collapsing (karts are parked/penned
 		// otherwise). Applied here, ONCE per hazard per tick over the player list, NOT
 		// in handleHit: engine.narrowBase calls handleHit up to twice per overlapping
 		// pair, which would double (and non-deterministically vary) the force. Each

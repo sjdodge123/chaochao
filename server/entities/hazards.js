@@ -326,101 +326,12 @@ class Mine extends Hazard {
 	}
 }
 
-// A gust fan: a rectangular WIND ZONE that applies a steady directional force to
-// any kart inside it — the framework's first "force field" hazard, a constant
-// per-tick push rather than the one-shot Punch the bumpers use. The force is
-// applied ONCE PER TICK by gameBoard.updateHazards (a dedicated force-zone pass
-// over the player list), NOT via handleHit — the collision system calls handleHit
-// up to twice per overlapping pair, which would double (and non-deterministically
-// vary) the push. The map entry's (x,y) is the CENTRE and `angle` the wind
-// direction; `width` runs ALONG the wind, `height` ACROSS it. Crosswind over a
-// lava bridge is a steering test, a tailwind a committal speed lane, a headwind a
-// shortcut toll. Composes with ice (lower drag => more drift). Modelled as a
-// rotated Rect (like the bumper wall) so the editor/AI can read its true rotated
-// footprint; getVertices/getExtents mirror BumperWall's overrides because the base
-// Rect treats width/height as far-corner coords.
-class GustFan extends Rect {
-	constructor(x, y, width, height, angle, color, ownerId, roomSig) {
-		// Sanitize the wind direction BEFORE super(): the base Rect constructor calls
-		// getVertices() with this.angle, so a non-finite angle would bake NaN corners
-		// (collision-dead) that resetting this.angle afterward wouldn't fix.
-		// Directional kinds are validated to a finite angle by validateMap, but a
-		// preview/built-in path could still pass junk.
-		var safeAngle = Number.isFinite(angle) ? angle : 0;
-		super(x, y, width, height, safeAngle, color);
-		this.alive = true;
-		this.ownerId = ownerId;
-		this.roomSig = roomSig;
-		this.moveable = false;
-		this.forceZone = true;     // gameBoard.updateHazards applies applyForce once/tick
-		this.isGust = true;        // AI biases steering against the wind inside the zone
-		this.id = c.hazards.gustFan.id;
-		this.speed = 0;
-		var rad = this.angle * (Math.PI / 180);
-		this.windX = Math.cos(rad); // unit wind vector (the force direction)
-		this.windY = Math.sin(rad);
-		this.hw = this.width / 2;   // half-extents (containment test)
-		this.hh = this.height / 2;
-		this.force = c.hazards.gustFan.force;
-	}
-	// Centre-anchored rotated rectangle: half-extents along the wind (width) and
-	// across it (height), rotated by angle. Called by the Rect constructor, so it
-	// may only read x/y/width/height/angle.
-	getVertices() {
-		var rad = (this.angle || 0) * (Math.PI / 180);
-		var dx = Math.cos(rad), dy = Math.sin(rad);   // along wind
-		var nx = -dy, ny = dx;                         // across wind
-		var hw = this.width / 2, hh = this.height / 2;
-		return [
-			{ x: this.x + dx * hw + nx * hh, y: this.y + dy * hw + ny * hh },
-			{ x: this.x - dx * hw + nx * hh, y: this.y - dy * hw + ny * hh },
-			{ x: this.x - dx * hw - nx * hh, y: this.y - dy * hw - ny * hh },
-			{ x: this.x + dx * hw - nx * hh, y: this.y + dy * hw - ny * hh }
-		];
-	}
-	// Base Rect.getExtents skips the last vertex (length-1 loop); for a rotated zone
-	// that drops a corner from the quadtree AABB, so cover all four.
-	getExtents() {
-		var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-		for (var i = 0; i < this.vertices.length; i++) {
-			var v = this.vertices[i];
-			if (v.x < minX) { minX = v.x; }
-			if (v.x > maxX) { maxX = v.x; }
-			if (v.y < minY) { minY = v.y; }
-			if (v.y > maxY) { maxY = v.y; }
-		}
-		return { minX, maxX, minY, maxY };
-	}
-	update() {
-		if (this.alive == false) { return; }
-	}
-	// Force zone (called once per tick from gameBoard.updateHazards for EVERY player;
-	// it self-filters by containment). While a kart is inside the rotated rect, nudge
-	// its velocity along the wind by a fixed increment (NOT dt-scaled — the tick rate
-	// is fixed, matching the Dash Arrows boon). Drag turns the steady push into a
-	// bounded drift; the engine's maxVelocity clamp caps absolute speed, so a tailwind
-	// can't launch anyone. Skips protected/star-power/finished/dead karts (same policy
-	// as gameBoard.applyExplosionForce) so a spawn-shielded player isn't shoved into
-	// lava. Returns true if the force was applied (for tests).
-	applyForce(object) {
-		if (!object.isPlayer || object.alive === false || object.reachedGoal) { return false; }
-		if ((object.isProtected && object.isProtected()) || (object.hasStarPower && object.hasStarPower())) { return false; }
-		var ox = object.newX != null ? object.newX : object.x;
-		var oy = object.newY != null ? object.newY : object.y;
-		var rx = ox - this.x, ry = oy - this.y;
-		var along = rx * this.windX + ry * this.windY;   // along the wind
-		var across = -rx * this.windY + ry * this.windX; // across the wind
-		if (Math.abs(along) > this.hw || Math.abs(across) > this.hh) { return false; } // outside the zone
-		object.velX += this.windX * this.force;
-		object.velY += this.windY * this.force;
-		return true;
-	}
-	handleHit(object) { } // force is applied in gameBoard.updateHazards, not on contact
-}
-
 // A vortex well: a circular PULL ZONE that drags karts toward the core — the
-// anti-bumper. A force field like the gust fan: a continuous inward pull applied
-// ONCE PER TICK by gameBoard.updateHazards (not handleHit — see GustFan). The pull
+// anti-bumper. The framework's first "force field" hazard: a continuous inward
+// pull applied ONCE PER TICK by gameBoard.updateHazards (a dedicated force-zone
+// pass over the player list), NOT via handleHit — the collision system calls
+// handleHit up to twice per overlapping pair, which would double (and
+// non-deterministically vary) the force. The pull
 // profile is a CALM EYE: zero at the dead centre, rising to a peak in a mid-ring,
 // falling back to zero at the rim (a parabola, peak `force` at half-radius). That
 // shape is what makes the well escapable instead of a roach motel — you build speed
@@ -563,13 +474,6 @@ registerHazardKind("mine", {
 		return new Mine(entry.x, entry.y, c.hazards.mine.radius, c.hazards.mine.color, mapID, roomSig);
 	}
 });
-registerHazardKind("gustFan", {
-	railed: false,
-	directional: true, // `angle` is the wind direction (validateMap enforces a finite angle)
-	build: function (entry, mapID, roomSig) {
-		return new GustFan(entry.x, entry.y, c.hazards.gustFan.width, c.hazards.gustFan.height, entry.angle, c.hazards.gustFan.color, mapID, roomSig);
-	}
-});
 registerHazardKind("vortexWell", {
 	railed: false,
 	directional: false,
@@ -646,7 +550,7 @@ class Thumper extends Hazard {
 }
 
 
-module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, Mine, GustFan, VortexWell, Antlion, Thumper, HAZARD_KINDS, BOON_KINDS, hazardKindById, registerHazardKind, registerBoonKind };
+module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, Mine, VortexWell, Antlion, Thumper, HAZARD_KINDS, BOON_KINDS, hazardKindById, registerHazardKind, registerBoonKind };
 
 // Load the boon kinds AFTER module.exports is assigned: boons.js requires this
 // module for the Hazard base class + registerBoonKind, so it must see the fully

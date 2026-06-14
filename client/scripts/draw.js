@@ -9213,11 +9213,6 @@ function buildHazardDrawers() {
     hazardDrawers[config.hazards.mine.id] = function (h) {
         drawMine(h.x, h.y, h.state);
     };
-    if (config.hazards.gustFan != null) {
-        hazardDrawers[config.hazards.gustFan.id] = function (h) {
-            drawGustFan(h.x, h.y, h.angle);
-        };
-    }
     if (config.hazards.vortexWell != null) {
         hazardDrawers[config.hazards.vortexWell.id] = function (h) {
             drawVortexWell(h.x, h.y);
@@ -9511,96 +9506,94 @@ function drawMine(x, y, state) {
     gameContext.restore();
 }
 
-// A gust fan: a rectangular wind zone. `angle` is the wind direction (force runs
-// ALONG it, +x in local space). Drawn as a faint airy footprint with animated
-// streaks blowing in the wind direction so the push reads at a glance — blue, the
-// "force field" palette (distinct from bumper-orange "this flings you" and boon-
-// teal "this helps you"). Centre-anchored to match the server's GustFan rect.
-function drawGustFan(x, y, angle) {
-    var cfg = config.hazards.gustFan;
-    var rad = (angle || 0) * (Math.PI / 180);
-    var w = cfg.width, hgt = cfg.height;
-    gameContext.save();
-    gameContext.translate(x, y);
-    gameContext.rotate(rad);
-    // Faint footprint (blends into terrain — the streaks carry the signal).
-    gameContext.beginPath();
-    gameContext.rect(-w / 2, -hgt / 2, w, hgt);
-    gameContext.fillStyle = "rgba(143,199,255,0.07)";
-    gameContext.fill();
-    gameContext.strokeStyle = "rgba(143,199,255,0.16)";
-    gameContext.lineWidth = 1;
-    gameContext.stroke();
-    // Wind streaks: short dashes scrolling toward +x (the wind/force direction).
-    gameContext.strokeStyle = cfg.color;
-    gameContext.lineCap = "round";
-    var rows = 4;
-    var scroll = (Date.now() % 900) / 900;       // 0..1 loop
-    var seg = w * 0.22;                            // streak length
-    var gap = w * 0.34;                            // spacing along the wind
-    for (var r = 0; r < rows; r++) {
-        var ly = -hgt / 2 + hgt * (r + 0.5) / rows;
-        gameContext.globalAlpha = 0.5 + 0.18 * Math.sin((Date.now() / 260) + r);
-        gameContext.lineWidth = 3;
-        // two streaks per row, scrolling along +x and wrapping
-        for (var s = 0; s < 2; s++) {
-            var sx = -w / 2 + ((s * gap + scroll * gap) % (gap)) + r * (gap * 0.12);
-            // tile a couple across the width
-            for (var bx = sx; bx < w / 2; bx += gap) {
-                var x0 = bx, x1 = Math.min(bx + seg, w / 2 - 4);
-                if (x1 <= x0) { continue; }
-                gameContext.beginPath();
-                gameContext.moveTo(x0, ly);
-                gameContext.lineTo(x1, ly);
-                gameContext.stroke();
-                // arrowhead at the leading edge
-                gameContext.beginPath();
-                gameContext.moveTo(x1 - 5, ly - 4);
-                gameContext.lineTo(x1, ly);
-                gameContext.lineTo(x1 - 5, ly + 4);
-                gameContext.stroke();
-            }
+// A vortex well: a circular pull zone. The interior reads as a BLURRED, hazy swirl
+// — the blur effect is a soft violet haze + a smeared spiral baked ONCE into an
+// offscreen sprite (the getBlackoutHoleSprite pattern: ctx.filter blur is applied
+// at BAKE time, never per frame — a per-frame canvas filter is a mobile GPU
+// killer). The sprite is rotated and blitted each frame (one cheap drawImage) so
+// the blur churns; a crisp rim, a couple of sharp swirl strokes, and the dark core
+// sit on top so the structure stays legible. Violet = the force-field palette.
+var vortexHazeSprite = null;
+function getVortexHazeSprite() {
+    if (vortexHazeSprite != null) { return vortexHazeSprite; }
+    var cfg = config.hazards.vortexWell;
+    var R = cfg.radius;
+    var blurPx = Math.max(6, Math.round(R * 0.14));
+    var pad = blurPx + 6;
+    var size = (R + pad) * 2;
+    var cv = document.createElement("canvas");
+    cv.width = size; cv.height = size;
+    var ctx = cv.getContext("2d");
+    var cx = size / 2, cy = size / 2;
+    ctx.filter = "blur(" + blurPx + "px)";   // BAKE-TIME blur (once), never per frame
+    // Smeared swirl arms (baked blurred -> reads as motion-blurred churn).
+    ctx.lineCap = "round";
+    ctx.strokeStyle = cfg.color;
+    ctx.globalAlpha = 0.5;
+    for (var a = 0; a < 3; a++) {
+        var base = (a / 3) * Math.PI * 2;
+        ctx.beginPath();
+        var first = true;
+        for (var t = 0; t <= 1.001; t += 0.05) {
+            var rr = R * (1 - t) + cfg.coreRadius * t;
+            var ang = base + t * Math.PI * 1.9;
+            var px = cx + Math.cos(ang) * rr, py = cy + Math.sin(ang) * rr;
+            if (first) { ctx.moveTo(px, py); first = false; } else { ctx.lineTo(px, py); }
         }
+        ctx.lineWidth = 16;
+        ctx.stroke();
     }
-    gameContext.restore();
+    // Frosted haze: denser toward the eye, fading to nothing at the rim.
+    ctx.globalAlpha = 1;
+    var g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
+    g.addColorStop(0, "rgba(167,123,255,0.42)");
+    g.addColorStop(0.55, "rgba(150,110,235,0.16)");
+    g.addColorStop(1, "rgba(167,123,255,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, 2 * Math.PI); ctx.fill();
+    vortexHazeSprite = cv;
+    return cv;
 }
-
-// A vortex well: a circular pull zone. Drawn as concentric spiral arcs winding
-// inward to a dark core, rotating over time so it reads as "this sucks you in" —
-// violet, the "force field" palette. The pull radius is shown as a faint rim so
-// players (and authors, via the editor preview) can read its reach.
 function drawVortexWell(x, y) {
     var cfg = config.hazards.vortexWell;
     var R = cfg.radius;
     var spin = (Date.now() / 1100) % (Math.PI * 2);
     gameContext.save();
-    // Faint reach rim.
+    // Blurred haze swirl (baked sprite), rotated so the blur churns. One cheap blit.
+    var sprite = getVortexHazeSprite();
+    if (sprite != null) {
+        gameContext.save();
+        gameContext.translate(x, y);
+        gameContext.rotate(spin);
+        gameContext.drawImage(sprite, -sprite.width / 2, -sprite.height / 2);
+        gameContext.restore();
+    }
+    // Faint crisp reach rim.
     gameContext.beginPath();
     gameContext.arc(x, y, R, 0, 2 * Math.PI);
-    gameContext.strokeStyle = "rgba(167,123,255,0.18)";
+    gameContext.strokeStyle = "rgba(167,123,255,0.22)";
     gameContext.lineWidth = 2;
     gameContext.stroke();
-    // Inward spiral arms (rotate together; thinner toward the core).
-    var arms = 3;
-    for (var a = 0; a < arms; a++) {
-        var base = spin + (a / arms) * Math.PI * 2;
+    // A couple of crisp swirl strokes on top so the structure stays legible.
+    gameContext.lineCap = "round";
+    gameContext.globalAlpha = 0.6;
+    gameContext.strokeStyle = cfg.color;
+    gameContext.lineWidth = 2.5;
+    for (var a = 0; a < 2; a++) {
+        var base = spin + (a / 2) * Math.PI * 2;
         gameContext.beginPath();
         var first = true;
-        for (var t = 0; t <= 1.001; t += 0.06) {
-            var rr = R * (1 - t) + cfg.coreRadius * t;     // R -> coreRadius
-            var ang = base + t * Math.PI * 1.6;            // wind inward
+        for (var t = 0; t <= 1.001; t += 0.08) {
+            var rr = R * (1 - t) + cfg.coreRadius * t;
+            var ang = base + t * Math.PI * 1.6;
             var px = x + Math.cos(ang) * rr, py = y + Math.sin(ang) * rr;
             if (first) { gameContext.moveTo(px, py); first = false; }
             else { gameContext.lineTo(px, py); }
         }
-        gameContext.strokeStyle = cfg.color;
-        gameContext.globalAlpha = 0.7;
-        gameContext.lineWidth = 3;
-        gameContext.lineCap = "round";
         gameContext.stroke();
     }
     gameContext.globalAlpha = 1;
-    // Dark core.
+    // Dark core (crisp).
     gameContext.beginPath();
     gameContext.arc(x, y, cfg.coreRadius, 0, 2 * Math.PI);
     gameContext.fillStyle = "#2a1f44";
