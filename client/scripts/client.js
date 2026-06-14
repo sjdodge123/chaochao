@@ -2352,9 +2352,12 @@ function registerEffectHandlers(server) {
 		}
 		playSound(playerDiedSound);
 		// Local + solo: slow-pan the camera from the death spot to the flag over the
-		// delay (never on a shared co-op screen — see the multi-local guard).
-		if (typeof isLocalId === "function" && isLocalId(payload.id)
-			&& (typeof localPlayers === "undefined" || localPlayers == null || localPlayers.length <= 1)) {
+		// delay (never on a shared co-op screen — see the multi-local guard). localPlayers
+		// is sparse/slot-indexed (holes from departed co-op slots), so count truthy seats
+		// rather than trusting .length.
+		var nLocalSeats = (typeof localPlayers !== "undefined" && localPlayers != null)
+			? localPlayers.filter(function (lp) { return lp; }).length : 1;
+		if (typeof isLocalId === "function" && isLocalId(payload.id) && nLocalSeats <= 1) {
 			secondWindCam = {
 				fromX: payload.fromX, fromY: payload.fromY,
 				toX: payload.toX, toY: payload.toY,

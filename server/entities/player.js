@@ -236,8 +236,6 @@ class Player extends Circle {
 		// cause are held so the real-death fallback reads correctly and the client can
 		// slow-pan the camera from the death spot to the flag.
 		this.secondWindPendingUntil = 0;
-		this.secondWindDeathX = 0;
-		this.secondWindDeathY = 0;
 		this.secondWindDeathCause = null;
 
 		//Achievements
@@ -343,7 +341,7 @@ class Player extends Circle {
 		// Second Wind death-beat: frozen + invuln at the death spot until the delay
 		// elapses, then finish (revive at the flag, or die for real if it burned). No
 		// movement/collision/attack runs during the beat (see also handleHit's guard).
-		if (this.secondWindPendingUntil) {
+		if (this.isReviving()) {
 			if (Date.now() >= this.secondWindPendingUntil) {
 				this.finishSecondWind(currentState);
 			}
@@ -812,6 +810,16 @@ class Player extends Circle {
 	tryConsumeGuardShield() {
 		if (!this.guardShield) { return false; }
 		this.guardShield = false;
+		// Brief i-frames on pop so a SUSTAINED-contact source counts as one absorbed hit:
+		// a bumper/wall/rotor punch lingers ~100ms and re-overlaps across ticks, so without
+		// a grace window the shield would pop on tick 1 and the same punch would land its
+		// knockback on tick 2. The grace is read by the isInvuln() gate at every damage
+		// site (handlePunchHit/handlePuckHit, cutPlayers/applyExplosionForce all check it
+		// first), so the lingering punch + any immediate re-contact are swallowed too.
+		var grace = (c.boons.guardHalo && c.boons.guardHalo.popGraceMs) || 0;
+		if (grace > 0) {
+			this.invulnUntil = Math.max(this.invulnUntil, Date.now() + grace);
+		}
 		messenger.messageRoomBySig(this.roomSig, "guardShieldPopped", { id: this.id, x: this.x, y: this.y });
 		return true;
 	}
@@ -833,8 +841,9 @@ class Player extends Circle {
 	// respawn never charges a team-points penalty or a kill — only a real death does.
 	beginSecondWind(cause) {
 		var delay = c.boons.secondWindTotem.respawnDelayMs;
-		this.secondWindDeathX = this.x;
-		this.secondWindDeathY = this.y;
+		// The kart is frozen at x/y for the whole beat (no move()), so x/y ARE the death
+		// spot — no need to snapshot separate death coords. Only the cause is held (it's
+		// read later in finishSecondWind's real-death fallback).
 		this.secondWindDeathCause = cause || null;
 		this.secondWindPendingUntil = Date.now() + delay;
 		this.enabled = false;
@@ -859,21 +868,36 @@ class Player extends Circle {
 		}
 		messenger.messageRoomBySig(this.roomSig, "secondWindPending", {
 			id: this.id,
-			fromX: this.secondWindDeathX, fromY: this.secondWindDeathY,
+			fromX: this.x, fromY: this.y,
 			toX: this.secondWind.x, toY: this.secondWind.y,
 			ms: delay,
 			cause: this.secondWindDeathCause // so the client plays the right death animation
 		});
 	}
+	// True while the racer is in the Second Wind death-beat (frozen + invuln, awaiting
+	// revive). The single predicate every "this player is in an untouchable limbo" check
+	// keys off (Player.update freeze, handleHit guard, killPlayer re-entry, the AI steer
+	// gate, the swap target filter) — so a new death/hit entry point only has to consult
+	// this one helper, not re-discover the flag.
+	isReviving() {
+		return this.secondWindPendingUntil > 0;
+	}
 	// Death-beat over (called from Player.update): revive at the flag if it's still a
-	// valid, safe respawn; otherwise the flag burned (or the round left racing) during the
-	// beat, so fall through to a REAL death — which DOES charge the team penalty / kill.
+	// valid, safe respawn; otherwise the flag burned during the beat → fall through to a
+	// REAL death (which DOES charge the team penalty / kill). If the ROUND ended mid-beat
+	// (no longer racing/collapsing), killPlayer would no-op on the state guard and strand
+	// the kart frozen-but-alive through the overview, so just un-freeze it — reset()
+	// normalizes everything at the next race start.
 	finishSecondWind(currentState) {
 		this.secondWindPendingUntil = 0;
 		var live = (currentState == c.stateMap.racing || currentState == c.stateMap.collapsing);
 		if (live && this.secondWind != null && !this.infected && !this.isZombie
 			&& this.secondWind.safe !== false) {
 			this.reviveAtSecondWind();
+			return;
+		}
+		if (!live) {
+			this.enabled = true; // un-freeze; the round is over, the death no longer matters
 			return;
 		}
 		this.killPlayer(this, this.secondWindDeathCause);
@@ -1224,7 +1248,7 @@ class Player extends Circle {
 		// Second Wind death-beat: frozen + immune to everything (lava re-death, punches,
 		// goal, terrain) until the revive resolves. (Punch/puck/cut/explosion are also
 		// covered by the invuln set in beginSecondWind; this also skips map cells.)
-		if (this.secondWindPendingUntil) {
+		if (this.isReviving()) {
 			return;
 		}
 		if (object.isLobbyStart) {
@@ -1652,7 +1676,7 @@ class Player extends Circle {
 			return;
 		}
 		// Already in the death-beat delay — swallow any re-death during the frozen window.
-		if (packet.secondWindPendingUntil) {
+		if (packet.isReviving()) {
 			return;
 		}
 		// Second Wind Totem (boon): a death does NOT end the run if the racer has an
