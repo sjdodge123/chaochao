@@ -537,7 +537,7 @@
             "boostCap": 300
         },
         "rechargeSpring": {
-            "_doc": "Drive-over pit stop: instantly tops the punch-stamina bar back to full, clears the exhausted/overcharge latch, and resets the punch cooldown so you're immediately attack-ready. cooldownMs is a per-player re-arm so it's a routing grab, not a camp-on-it stamina fountain. colorWater is the foam palette used by the on-water render variant (a bubbling spring) so the pad reads against blue water.",
+            "_doc": "Drive-over pit stop: instantly tops the punch-stamina bar back to full, clears the exhausted/overcharge latch, and resets the punch cooldown so you're immediately attack-ready. The spring is a GLOBAL shared charge — the first needy racer to reach a ready spring consumes it, then it drains and refills over cooldownMs before it can recharge anyone again (a full racer driving over a ready one doesn't waste it). That refill progress rides the wire netState slot (0=just drained .. 100=ready) so the client draws the drained->fill-ring->ready-pulse telegraph. colorWater is the foam palette used by the on-water render variant (a bubbling spring) so the pad reads against blue water.",
             "id": 951,
             "color": "#5BE3A0",
             "colorWater": "#EAFBFF",

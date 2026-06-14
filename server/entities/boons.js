@@ -79,22 +79,46 @@ registerBoonKind("dashArrows", {
 	}
 });
 
-// Recharge Spring — a drive-over pit stop (the green spring pad). Touching it makes
-// a player instantly battle-ready: it tops the punch-stamina bar back to full, drops
-// the exhausted/overcharge latch, and resets the punch cooldown so the next swing can
-// fire immediately. The actual reset lives on the player (Player.rechargeFromSpring),
-// which also self-gates with a per-player re-arm cooldown so the spring is a routing
-// grab, not a camp-on-it stamina fountain. Non-directional (no angle).
+// Recharge Spring — a drive-over pit stop (the green spring pad). Touching it makes a
+// player instantly battle-ready: it tops the punch-stamina bar back to full, drops the
+// exhausted/overcharge latch, and resets the punch cooldown (the reset itself lives on
+// Player.rechargeFromSpring). The spring is a SHARED, GLOBAL resource: it has one charge
+// that the first racer to reach a ready spring consumes, after which the spring visibly
+// drains and refills over cooldownMs before it can recharge anyone again. That refill
+// progress rides the wire's netState slot (0 = just drained .. 100 = ready) so the
+// client can draw the drained -> fill-ring -> ready-pulse telegraph. Non-directional.
 class RechargeSpring extends Boon {
 	constructor(x, y, ownerId, roomSig) {
 		super(x, y, c.boons.rechargeSpring.radius, c.boons.rechargeSpring.color, ownerId, roomSig);
 		this.id = c.boons.rechargeSpring.id;
+		this.cooldownMs = c.boons.rechargeSpring.cooldownMs;
+		this.rechargeReadyAt = 0;   // Date.now() the spring is ready again (<= now == ready)
+		this.netState = 100;        // wire slot: refill percent, 100 = ready (drawn telegraph)
+	}
+	// Per tick (gameBoard.updateHazards): refresh the refill percent the client draws.
+	update() {
+		var now = Date.now();
+		if (now >= this.rechargeReadyAt) {
+			this.netState = 100;
+			return;
+		}
+		var remaining = this.rechargeReadyAt - now;
+		this.netState = Math.max(0, Math.min(99, Math.round((1 - remaining / this.cooldownMs) * 100)));
 	}
 	handleHit(object) {
 		if (!object.isPlayer || typeof object.rechargeFromSpring !== "function") {
 			return;
 		}
-		object.rechargeFromSpring();
+		if (Date.now() < this.rechargeReadyAt) {
+			return; // still refilling — no charge to give
+		}
+		// Only spend the charge if the racer actually needed it (rechargeFromSpring
+		// returns false for an already-topped-up kart), so a full racer doesn't drain
+		// a ready spring for nothing.
+		if (object.rechargeFromSpring()) {
+			this.rechargeReadyAt = Date.now() + this.cooldownMs;
+			this.netState = 0;
+		}
 	}
 }
 
