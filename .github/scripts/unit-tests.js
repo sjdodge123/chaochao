@@ -325,15 +325,18 @@ group('compressor', function () {
     // late join); static kinds fall back to their own position/angle.
     const created = JSON.parse(compressor.newHazards({
         a: { ownerId: 'o', id: 901, x: 55, y: 66, angle: 180, rail: { x: 5, y: 6, angle: 0 } },
-        b: { ownerId: 'p', id: 900, x: 7, y: 8, angle: 0 }
+        b: { ownerId: 'p', id: 900, x: 7, y: 8, angle: 0 },
+        c: { ownerId: 'q', id: 908, x: 9, y: 10, angle: 0, sizable: true, radius: 95 }
     }));
-    eq(created[0].length, 8, 'created hazard row has 8 fields');
+    eq(created[0].length, 9, 'created hazard row has 9 fields');
     eq(created[0][4], 0, 'railed created[4] = rail angle, not the flipped hazard angle');
     eq(created[0][5], 5, 'railed created[5] = rail origin x');
     eq(created[0][6], 6, 'railed created[6] = rail origin y');
     eq(created[1][5], 7, 'static created[5] falls back to hazard x');
     eq(created[1][6], 8, 'static created[6] falls back to hazard y');
     eq(created[1][7], null, 'created[7] = netState (null when unset)');
+    eq(created[1][8], null, 'created[8] = radius (null for non-sizable kinds)');
+    eq(created[2][8], 95, 'created[8] = per-instance radius for a sizable kind (vortex well)');
 
     // spawn/append packet (static fields, sent once) — pin ALL 18 indices so any
     // reorder of the spawn layout trips the test, not just a length change.
