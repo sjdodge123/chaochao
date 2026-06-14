@@ -54,6 +54,7 @@ Copy an existing `<kind>-test.js` (rotor/geyser/mine are the cleanest templates)
 - **Known CI noise:** `client-perf` is advisory (not a blocker). `start-edges-test` (in the smoke-test job) is a `Date.now` flake — "only N/6 bots found a non-lava lane" = re-run, not a regression.
 - **Codex review** each batch (`/codex:review`) before PR; fix findings with regression coverage.
 - **Dev server:** host on a fresh free port; print `localhost:<port>` + `<LAN-IP>:<port>` for on-device playtest.
+- **Force a brutal round in playtest:** `FORCE_BRUTAL_TYPES=<id[,id...]> npm start` (or on the dev-server launch) forces every round to that brutal type, bypassing the roll + selection gate — so a brutal-round ↔ hazard interaction can be exercised from the editor preview (e.g. `FORCE_BRUTAL_TYPES=1014` = Antlion, to test the vortex-well pull on a sandy map). Sibling to `FORCE_ABILITY_SPAWN`; HARD-disabled in production (`utils.js`). Build the preview map with sand so antlions actually erupt.
 - **Codex scenes (deferred debt):** the batch-1 hazards reused the bumpers Codex card text rather than bespoke animated `learnScenes.js` scenes. A polish follow-up could add real scenes (CI only gates that `anim` refs resolve).
 
 ## 4. Roadmap & status
