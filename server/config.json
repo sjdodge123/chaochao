@@ -527,7 +527,7 @@
             "color": "#A77BFF",
             "radius": 150,
             "coreRadius": 18,
-            "force": 24
+            "force": 7
         }
     },
     "boons": {

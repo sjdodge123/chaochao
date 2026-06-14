@@ -598,11 +598,23 @@ class GameBoard {
 		}
 	}
 	updateHazards(currentState, dt) {
+		// Force-zone kinds (gust fan, vortex well) apply a continuous force to karts
+		// INSIDE their region — only while racing/collapsing (karts are parked/penned
+		// otherwise). Applied here, ONCE per hazard per tick over the player list, NOT
+		// in handleHit: engine.narrowBase calls handleHit up to twice per overlapping
+		// pair, which would double (and non-deterministically vary) the force. Each
+		// hazard's applyForce self-filters by containment and skips protected karts.
+		var forceZonesLive = (currentState == c.stateMap.racing || currentState == c.stateMap.collapsing);
 		for (var id in this.hazardList) {
 			var hazard = this.hazardList[id];
 			// dt lets stationary stateful kinds (geyser/mine/fence) run their phase
 			// timer; moving kinds ignore it (base Hazard.update just commits move()).
 			hazard.update(dt);
+			if (forceZonesLive && hazard.forceZone && hazard.alive !== false) {
+				for (var pid in this.playerList) {
+					hazard.applyForce(this.playerList[pid]);
+				}
+			}
 			if (hazard.punch != null && this.punchList[hazard.ownerId] == null) {
 				this.punchList[hazard.ownerId] = hazard.punch;
 				messenger.messageRoomBySig(this.roomSig, "punch", compressor.sendPunch(hazard.punch));
