@@ -791,6 +791,7 @@ function setSelectedObject(obj) {
 function mapHasContent() {
     if (vMap == null || !Array.isArray(vMap.cells)) { return false; }
     if (vMap.hazards && vMap.hazards.length > 0) { return true; }
+    if (vMap.barriers && vMap.barriers.length > 0) { return true; }
     if (config == null) { return false; } // can't compare tile ids until config arrives
     for (var i = 0; i < vMap.cells.length; i++) {
         if (vMap.cells[i].id != config.tileMap.normal.id) { return true; }
@@ -2221,212 +2222,8 @@ function drawEditorBarrier(b, preview) {
     ctx.restore();
 }
 
-// --- shared barrier art (kept VERBATIM in sync with client/scripts/draw.js) -----
-// Deterministic per-segment noise so a barrier always weathers the same way.
-function barrierSeed(b) {
-    var s = Math.floor(b.x1 * 73856093 ^ b.y1 * 19349663 ^ b.x2 * 83492791 ^ b.y2 * 2654435761) >>> 0;
-    return s || 1;
-}
-function makeBarrierRng(seed) {
-    var s = seed >>> 0;
-    return function () {
-        s = (s + 0x6D2B79F5) >>> 0;
-        var t = s;
-        t = Math.imul(t ^ (t >>> 15), t | 1);
-        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-}
-var FENCE_PLANKS = ["#cf9047", "#bd7c39", "#dca35a", "#ad6e30"];
-var FENCE_POST = "#46290f";
-var FENCE_POST_LIP = "#6b4322";
-var FENCE_RAIL = "#8a5e2e";
-var FENCE_SEAM = "rgba(28,16,5,0.6)";
-var FENCE_EDGE = "rgba(30,18,6,0.7)";
-var FENCE_GRAIN = "rgba(70,44,16,0.35)";
-// Top-down wooden fence: a CONTINUOUS rail (stringer) runs the full length and the
-// boards sit on top of it end-to-end (lengthwise grain + butt-joint seams), with
-// chunky square posts standing proud at intervals/ends and varied wear (mismatched
-// shades, the odd splintered/short board). The rail shows through any board gap so
-// the fence ALWAYS reads as solid — collision is continuous, so a gap must never
-// look squeeze-through-able. Looks DOWN onto the fence, not at its face (no cross-
-// ties, which read as railroad track). Brightened + dark-outlined to pop on dirt.
-function drawBarrierFenceArt(ctx, b, alpha) {
-    var dx = b.x2 - b.x1, dy = b.y2 - b.y1;
-    var len = Math.sqrt(dx * dx + dy * dy);
-    if (len < 1e-3) { return; }
-    var ang = Math.atan2(dy, dx);
-    var rng = makeBarrierRng(barrierSeed(b));
-    ctx.save();
-    ctx.globalAlpha = (alpha == null ? 1 : alpha);
-    ctx.translate(b.x1, b.y1);
-    ctx.rotate(ang);
-    var bandHalf = 7; // the rail is 14px wide seen from above
-    // Continuous rail first (dark outline + wood core), full length, so it shows
-    // through board gaps and the barrier never looks passable.
-    ctx.lineCap = "round";
-    ctx.strokeStyle = FENCE_EDGE;
-    ctx.lineWidth = 8;
-    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(len, 0); ctx.stroke();
-    ctx.strokeStyle = FENCE_RAIL;
-    ctx.lineWidth = 4.5;
-    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(len, 0); ctx.stroke();
-    ctx.lineCap = "butt";
-    ctx.lineJoin = "miter";
-    var x = 0;
-    while (x < len - 0.5) {
-        var plankLen = Math.min(len - x, 22 + rng() * 12);
-        var shade = FENCE_PLANKS[(rng() * FENCE_PLANKS.length) | 0];
-        var roll = rng();
-        if (roll < 0.12 && plankLen < len - 1) { x += plankLen; continue; } // gap (rail shows through)
-        var seam = 1.4;
-        var drawLen = plankLen - seam;
-        var broken = roll > 0.86;
-        ctx.fillStyle = shade;
-        if (broken) {
-            var bl = drawLen * (0.45 + rng() * 0.3);
-            ctx.beginPath();
-            ctx.moveTo(x, -bandHalf);
-            ctx.lineTo(x + bl, -bandHalf);
-            ctx.lineTo(x + bl - 2, 0);
-            ctx.lineTo(x + bl + 1, bandHalf);
-            ctx.lineTo(x, bandHalf);
-            ctx.closePath();
-            ctx.fill();
-            ctx.strokeStyle = FENCE_EDGE;
-            ctx.lineWidth = 1.2;
-            ctx.stroke();
-            drawLen = bl;
-        } else {
-            ctx.fillRect(x, -bandHalf, drawLen, bandHalf * 2);
-            // dark outline per board: separates the rail from terrain + defines planks
-            ctx.strokeStyle = FENCE_EDGE;
-            ctx.lineWidth = 1.2;
-            ctx.strokeRect(x + 0.6, -bandHalf + 0.6, drawLen - 1.2, bandHalf * 2 - 1.2);
-        }
-        // lengthwise grain (runs ALONG the board, not across)
-        ctx.strokeStyle = FENCE_GRAIN;
-        ctx.lineWidth = 0.7;
-        ctx.beginPath(); ctx.moveTo(x + 1.5, -bandHalf + 2.5); ctx.lineTo(x + drawLen - 1.5, -bandHalf + 2.5); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(x + 1.5, bandHalf - 2.5); ctx.lineTo(x + drawLen - 1.5, bandHalf - 2.5); ctx.stroke();
-        x += plankLen;
-    }
-    // posts: ends + every ~52px, square caps standing proud of the rail
-    var np = Math.max(1, Math.round(len / 52));
-    var pstep = len / np, postHalf = 9, postW = 10;
-    for (var i = 0; i <= np; i++) {
-        var px = i * pstep;
-        ctx.fillStyle = FENCE_EDGE;
-        ctx.fillRect(px - postW / 2 - 1, -postHalf - 1, postW + 2, postHalf * 2 + 2);
-        ctx.fillStyle = FENCE_POST;
-        ctx.fillRect(px - postW / 2, -postHalf, postW, postHalf * 2);
-        ctx.fillStyle = FENCE_POST_LIP;
-        ctx.fillRect(px - postW / 2 + 1.5, -postHalf + 1.5, postW - 3, postHalf * 2 - 3);
-        ctx.fillStyle = "rgba(255,225,180,0.22)";
-        ctx.fillRect(px - postW / 2 + 1.5, -postHalf + 1.5, postW - 3, 2);
-    }
-    ctx.restore();
-}
-var CONC_BODY = "#bcc0c6";
-var CONC_DARK = "#8e939a";
-var CONC_SEAM = "rgba(70,72,78,0.45)";
-var CONC_CRACK = "rgba(45,47,52,0.62)";
-var HAZARD_Y = "#e8b800";
-var HAZARD_K = "#26262a";
-function barrierConcSlabPath(ctx, x0, x1, half, r) {
-    r = Math.min(r, (x1 - x0) / 2, half);
-    ctx.beginPath();
-    ctx.moveTo(x0 + r, -half);
-    ctx.lineTo(x1 - r, -half);
-    ctx.arc(x1 - r, -half + r, r, -Math.PI / 2, 0);
-    ctx.lineTo(x1, half - r);
-    ctx.arc(x1 - r, half - r, r, 0, Math.PI / 2);
-    ctx.lineTo(x0 + r, half);
-    ctx.arc(x0 + r, half - r, r, Math.PI / 2, Math.PI);
-    ctx.lineTo(x0, -half + r);
-    ctx.arc(x0 + r, -half + r, r, Math.PI, Math.PI * 1.5);
-    ctx.closePath();
-}
-function drawBarrierConcreteArt(ctx, b, alpha) {
-    var dx = b.x2 - b.x1, dy = b.y2 - b.y1;
-    var len = Math.sqrt(dx * dx + dy * dy);
-    if (len < 1e-3) { return; }
-    var ang = Math.atan2(dy, dx);
-    var rng = makeBarrierRng(barrierSeed(b));
-    var half = 9;
-    ctx.save();
-    ctx.globalAlpha = (alpha == null ? 1 : alpha);
-    ctx.translate(b.x1, b.y1);
-    ctx.rotate(ang);
-    barrierConcSlabPath(ctx, 0, len, half, 4);
-    ctx.fillStyle = CONC_BODY;
-    ctx.fill();
-    ctx.save();
-    barrierConcSlabPath(ctx, 0, len, half, 4);
-    ctx.clip();
-    ctx.fillStyle = CONC_DARK;
-    ctx.fillRect(0, -half, len, 2.5);
-    ctx.fillRect(0, half - 3, len, 3);
-    ctx.save();
-    ctx.beginPath(); ctx.rect(0, -4.5, len, 9); ctx.clip();
-    ctx.fillStyle = HAZARD_K; ctx.fillRect(0, -4.5, len, 9);
-    ctx.fillStyle = HAZARD_Y;
-    for (var x = -18; x < len + 18; x += 18) {
-        ctx.beginPath();
-        ctx.moveTo(x, -4.5);
-        ctx.lineTo(x + 9, -4.5);
-        ctx.lineTo(x + 9 + 9, 4.5);
-        ctx.lineTo(x + 9, 4.5);
-        ctx.closePath();
-        ctx.fill();
-    }
-    ctx.restore();
-    var seg = 54, segs = Math.max(1, Math.round(len / seg)), sstep = len / segs;
-    ctx.strokeStyle = CONC_SEAM;
-    ctx.lineWidth = 1.5;
-    for (var s = 1; s < segs; s++) {
-        var sx = s * sstep;
-        ctx.beginPath(); ctx.moveTo(sx, -half); ctx.lineTo(sx, half); ctx.stroke();
-    }
-    for (var m = 0; m < segs; m++) {
-        var cx0 = m * sstep;
-        if (rng() < 0.5) { drawBarrierConcCrack(ctx, cx0 + sstep * (0.2 + rng() * 0.6), half, rng); }
-        if (rng() < 0.32) { drawBarrierConcChip(ctx, cx0 + sstep * (0.25 + rng() * 0.5), half, rng); }
-    }
-    ctx.restore();
-    barrierConcSlabPath(ctx, 0, len, half, 4);
-    ctx.strokeStyle = "rgba(60,62,68,0.55)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.restore();
-}
-function drawBarrierConcCrack(ctx, x0, half, rng) {
-    ctx.strokeStyle = CONC_CRACK;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    var x = x0, y = -half + 1;
-    ctx.moveTo(x, y);
-    var steps = 3 + ((rng() * 3) | 0);
-    for (var k = 0; k < steps; k++) {
-        x += (rng() - 0.5) * 9;
-        y += (half * 2 - 2) / steps;
-        ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-}
-function drawBarrierConcChip(ctx, x0, half, rng) {
-    var top = rng() < 0.5;
-    var yEdge = top ? -half : half;
-    var dir = top ? 1 : -1;
-    var w = 4 + rng() * 5;
-    ctx.fillStyle = CONC_DARK;
-    ctx.beginPath();
-    ctx.moveTo(x0, yEdge);
-    ctx.lineTo(x0 + w, yEdge);
-    ctx.lineTo(x0 + w * 0.5, yEdge + dir * (3 + rng() * 4));
-    ctx.closePath();
-    ctx.fill();
-}
+// Barrier art (drawBarrierFenceArt / drawBarrierConcreteArt + seed/rng helpers)
+// lives in the shared client/scripts/barrierArt.js (also used in-game by draw.js).
 function editorDeselect() {
     if (selectedObject != null) { setSelectedObject(null); }
 }
@@ -3595,15 +3392,27 @@ function validateMap(map) {
         if (map.barriers.length > maxBarriers) {
             return { valid: false, reason: "Too many barriers (max " + maxBarriers + ")." };
         }
+        // Mirror server/utils.js validateMap exactly (finite coords, in-bounds,
+        // length, known style) so a map that previews clean isn't rejected on submit.
+        var validBarrierStyles = (config != null && config.barriers != null && Array.isArray(config.barriers.styles)) ? config.barriers.styles : null;
+        var bW = (config != null) ? config.worldWidth : Infinity;
+        var bH = (config != null) ? config.worldHeight : Infinity;
         for (var bi = 0; bi < map.barriers.length; bi++) {
             var bar = map.barriers[bi];
-            if (bar == null || typeof bar.x1 !== "number" || typeof bar.y1 !== "number" ||
-                typeof bar.x2 !== "number" || typeof bar.y2 !== "number") {
+            if (bar == null || !isFinite(bar.x1) || !isFinite(bar.y1) ||
+                !isFinite(bar.x2) || !isFinite(bar.y2)) {
                 return { valid: false, reason: "Map has a malformed barrier." };
+            }
+            if (bar.x1 < 0 || bar.y1 < 0 || bar.x2 < 0 || bar.y2 < 0 ||
+                bar.x1 > bW || bar.x2 > bW || bar.y1 > bH || bar.y2 > bH) {
+                return { valid: false, reason: "A barrier is outside the world." };
             }
             var blen = Math.sqrt((bar.x2 - bar.x1) * (bar.x2 - bar.x1) + (bar.y2 - bar.y1) * (bar.y2 - bar.y1));
             if (blen < 1 || blen > maxBarrierLen) {
                 return { valid: false, reason: "A barrier has an invalid length." };
+            }
+            if (bar.style != null && validBarrierStyles != null && validBarrierStyles.indexOf(bar.style) < 0) {
+                return { valid: false, reason: "A barrier has an unknown style." };
             }
         }
     }

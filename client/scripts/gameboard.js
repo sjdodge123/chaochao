@@ -1324,6 +1324,9 @@ function setBonusOrbs(orbs) {
 var mapBarriers = [];
 function setBarriers(barriers) {
 	mapBarriers = [];
+	// New round/map: drop the offscreen barrier-render cache (draw.js owns it) so it
+	// doesn't accumulate across a session.
+	if (typeof barrierRenderReset === "function") { barrierRenderReset(); }
 	if (barriers == null) { return; }
 	for (var i = 0; i < barriers.length; i++) {
 		var b = barriers[i];

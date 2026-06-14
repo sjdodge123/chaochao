@@ -15,6 +15,10 @@
 // round start. Only the static adjacency (which cell borders which) is cached.
 
 var c = require('./config.json');
+// Shared segment geometry (same implementation the engine uses for collision).
+// Required lazily-safe: cellGraph only calls these at query time, so even under the
+// utils<->cellGraph circular require, geometry is fully loaded before first use.
+var segmentsCross = require('./geometry.js').segmentsCross;
 
 // Cache adjacency (arrays of neighbor cell indices) keyed by map id + cell count.
 // currentMap is a JSON deep-copy per round (server/game.js determineNextMap), so
@@ -154,69 +158,45 @@ function getAdjacency(map) {
 // not occupancy of a cell, so they're modelled as blocked adjacency EDGES, not
 // penalized cells. An edge u<->v is "barrier-crossed" when the straight line
 // between the two cell sites (the move the router prices and the bot drives) is
-// cut by a barrier segment. Routes apply a heavy SOFT penalty to those edges so
-// bots steer around the barrier's open ends, while a barrier sitting in the only
-// chokepoint never nulls the path (the bot still threads it and slides, as it does
-// physically). Cached per map id + cell count + barrier signature.
-function sideOf(ax, ay, bx, by, px, py) {
-    return (bx - ax) * (py - ay) - (by - ay) * (px - ax);
-}
-function segsCross(p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y) {
-    var d1 = sideOf(p2x, p2y, p3x, p3y, p0x, p0y);
-    var d2 = sideOf(p2x, p2y, p3x, p3y, p1x, p1y);
-    var d3 = sideOf(p0x, p0y, p1x, p1y, p2x, p2y);
-    var d4 = sideOf(p0x, p0y, p1x, p1y, p3x, p3y);
-    return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
-}
-var barrierEdgeCache = new Map();
-function barrierSignature(map) {
-    var b = map.barriers;
-    if (!Array.isArray(b) || b.length === 0) { return "none"; }
-    var s = b.length + ":";
-    for (var i = 0; i < b.length; i++) {
-        var e = b[i];
-        if (e == null) { continue; }
-        s += (e.x1 | 0) + "," + (e.y1 | 0) + "," + (e.x2 | 0) + "," + (e.y2 | 0) + ";";
-    }
-    return s;
-}
-// Returns a Set of "u|v" cell-index pairs (both directions) whose site-to-site
-// crossing is cut by a barrier, or null if the map has no barriers.
+// cut by a barrier segment. Bot routes apply a heavy SOFT penalty to those edges
+// (steer around the open ends); validation/reachability HARD-blocks them (a wall
+// that seals every route makes the goal unreachable). Computed once per map object
+// and cached on it (non-enumerable) — barriers never change within a loaded map,
+// and currentMap is a fresh per-round copy, so no signature/global cache is needed.
 function getBarrierBlockedEdges(map) {
-    if (!map || !Array.isArray(map.cells) || !Array.isArray(map.barriers) || map.barriers.length === 0) {
-        return null;
-    }
-    var key = (map.id != null ? map.id : "anon") + ":" + map.cells.length + ":" + barrierSignature(map);
-    var cached = barrierEdgeCache.get(key);
-    if (cached !== undefined) { return cached; }
-    var adj = getAdjacency(map);
-    var neighbors = adj.neighbors;
-    var cells = map.cells;
-    var bars = map.barriers;
-    var blocked = new Set();
-    for (var u = 0; u < neighbors.length; u++) {
-        var su = cells[u] && cells[u].site;
-        if (su == null) { continue; }
-        var nb = neighbors[u];
-        for (var k = 0; k < nb.length; k++) {
-            var v = nb[k];
-            if (v < u) { continue; } // each undirected pair once
-            var sv = cells[v] && cells[v].site;
-            if (sv == null) { continue; }
-            for (var bi = 0; bi < bars.length; bi++) {
-                var bar = bars[bi];
-                if (bar == null) { continue; }
-                if (segsCross(su.x, su.y, sv.x, sv.y, bar.x1, bar.y1, bar.x2, bar.y2)) {
-                    blocked.add(u + "|" + v);
-                    blocked.add(v + "|" + u);
-                    break;
+    if (!map || !Array.isArray(map.cells)) { return null; }
+    if (map._barrierBlockedEdges !== undefined) { return map._barrierBlockedEdges; }
+    var result = null;
+    if (Array.isArray(map.barriers) && map.barriers.length > 0) {
+        var adj = getAdjacency(map);
+        var neighbors = adj.neighbors;
+        var cells = map.cells;
+        var bars = map.barriers;
+        var blocked = new Set();
+        for (var u = 0; u < neighbors.length; u++) {
+            var su = cells[u] && cells[u].site;
+            if (su == null) { continue; }
+            var nb = neighbors[u];
+            for (var k = 0; k < nb.length; k++) {
+                var v = nb[k];
+                if (v < u) { continue; } // each undirected pair once
+                var sv = cells[v] && cells[v].site;
+                if (sv == null) { continue; }
+                for (var bi = 0; bi < bars.length; bi++) {
+                    var bar = bars[bi];
+                    if (bar == null) { continue; }
+                    if (segmentsCross(su.x, su.y, sv.x, sv.y, bar.x1, bar.y1, bar.x2, bar.y2)) {
+                        blocked.add(u + "|" + v);
+                        blocked.add(v + "|" + u);
+                        break;
+                    }
                 }
             }
         }
+        if (blocked.size > 0) { result = blocked; }
     }
-    if (blocked.size === 0) { blocked = null; } // nothing crossed — treat as no barriers
-    barrierEdgeCache.set(key, blocked);
-    return blocked;
+    Object.defineProperty(map, '_barrierBlockedEdges', { value: result, enumerable: false, writable: true, configurable: true });
+    return result;
 }
 
 // Minimal binary min-heap of { node, cost }. A* / Dijkstra over ~250 cells is
@@ -352,9 +332,13 @@ function findPathToNearestGoal(map, point, options) {
 
     // Solid author barriers cut specific ADJACENCY EDGES (not cells): see
     // getBarrierBlockedEdges. options.barrierEdges is that Set of "u|v" pairs and
-    // options.barrierMult the heavy soft penalty applied to crossing one.
+    // options.barrierMult the heavy soft penalty applied to crossing one (bot
+    // routing). options.barrierBlockEdges is the same Set treated as a HARD wall
+    // (impassable) — used by reachability/validation so a barrier that seals every
+    // route to the goal correctly reads as unreachable.
     var barrierEdges = options.barrierEdges || null;
     var barrierMult = (options.barrierMult > 1) ? options.barrierMult : 1;
+    var barrierBlock = options.barrierBlockEdges || null;
 
     // Optional explicit goal cells (voronoiId set/array). When given, the search
     // homes on THESE cells instead of GOAL-id tiles — used by the Bunker round,
@@ -429,6 +413,12 @@ function findPathToNearestGoal(map, point, options) {
                 continue;
             }
             if (blocked && blocked[cells[v].site.voronoiId]) {
+                continue;
+            }
+            // A solid barrier sealing this edge is a hard wall for reachability —
+            // skip it entirely so a barrier across the only route makes the goal
+            // unreachable (validation rejects such maps).
+            if (barrierBlock != null && barrierBlock.has(u + "|" + v)) {
                 continue;
             }
             var step = dist(cells[u].site, cells[v].site);
@@ -567,11 +557,14 @@ function edgeSampleOrigins(edge) {
 
 // True if at least one goal is reachable from somewhere along the given start
 // edge. validateMap uses this to reject a map whose goal is walled off from a
-// gate (which would leave that side's racers unable to finish).
+// gate (which would leave that side's racers unable to finish) — including a goal
+// sealed off by a solid barrier (barriers are hard-blocked here).
 function reachableFromEdge(map, edge) {
     var samples = edgeSampleOrigins(edge);
+    var barrierBlock = getBarrierBlockedEdges(map);
+    var opts = barrierBlock != null ? { barrierBlockEdges: barrierBlock } : undefined;
     for (var s = 0; s < samples.length; s++) {
-        if (findPathToNearestGoal(map, samples[s]) != null) { return true; }
+        if (findPathToNearestGoal(map, samples[s], opts) != null) { return true; }
     }
     return false;
 }
