@@ -824,6 +824,33 @@ function playThumperSlam(level) {
     catch (e) { try { osc.disconnect(); src.disconnect(); } catch (e2) {} }
 }
 
+// Shared building block for the noise-sweep SFX (antlion eruption/bite, lunge whoosh): a
+// looped white-noise source through a bandpass whose center frequency sweeps, with an
+// attack/release gain envelope, connected to sfxBus. Returns the (not-yet-started)
+// BufferSource so the caller can layer its own oscillator and own the start/stop timing.
+// opts: { q, freqs: [[hz, tSec], ...] (first is set at `now`, rest ramp), peakCoeff,
+// attackT, releaseT } — all times are seconds from `now`.
+function noiseSweepSource(ctx, now, lvl, opts) {
+    var src = ctx.createBufferSource();
+    src.buffer = getDriftNoiseBuffer(ctx);
+    src.loop = true;
+    var filt = ctx.createBiquadFilter();
+    filt.type = "bandpass";
+    filt.Q.value = opts.q;
+    var fr = opts.freqs;
+    filt.frequency.setValueAtTime(fr[0][0], now);
+    for (var i = 1; i < fr.length; i++) {
+        filt.frequency.exponentialRampToValueAtTime(fr[i][0], now + fr[i][1]);
+    }
+    var g = ctx.createGain();
+    var peak = Math.max(0.0002, opts.peakCoeff * lvl * masterVolume * sfxVolumeScalar);
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(peak, now + opts.attackT);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + opts.releaseT);
+    src.connect(filt); filt.connect(g); g.connect(sfxBus);
+    return src;
+}
+
 function playAntlionEruption(level) {
     var ctx = getCtx();
     if (!ctx || ctx.state !== "running") { return; }
@@ -831,22 +858,10 @@ function playAntlionEruption(level) {
     var lvl = (level == null) ? 1 : Math.max(0, Math.min(1, level));
     if (lvl <= 0.02) { return; }
     var now = ctx.currentTime;
-    // sandy whoosh
-    var src = ctx.createBufferSource();
-    src.buffer = getDriftNoiseBuffer(ctx);
-    src.loop = true;
-    var filt = ctx.createBiquadFilter();
-    filt.type = "bandpass";
-    filt.Q.value = 0.9;
-    filt.frequency.setValueAtTime(420, now);
-    filt.frequency.exponentialRampToValueAtTime(2400, now + 0.16); // burst up...
-    filt.frequency.exponentialRampToValueAtTime(600, now + 0.45);  // ...grains settling
-    var g = ctx.createGain();
-    var peak = Math.max(0.0002, 0.15 * lvl * masterVolume * sfxVolumeScalar);
-    g.gain.setValueAtTime(0.0001, now);
-    g.gain.exponentialRampToValueAtTime(peak, now + 0.05);
-    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
-    src.connect(filt); filt.connect(g); g.connect(sfxBus);
+    // sandy whoosh: burst up (0.16s) then grains settling (0.45s)
+    var src = noiseSweepSource(ctx, now, lvl, {
+        q: 0.9, freqs: [[420, 0], [2400, 0.16], [600, 0.45]], peakCoeff: 0.15, attackT: 0.05, releaseT: 0.5
+    });
     // chitter: two quick descending triangle chirps
     var cPeak = Math.max(0.0002, 0.07 * lvl * masterVolume * sfxVolumeScalar);
     for (var i = 0; i < 2; i++) {
@@ -874,20 +889,9 @@ function playAntlionBite(level) {
     if (lvl <= 0.02) { return; }
     var now = ctx.currentTime;
     // snap: a very short bright noise tick
-    var src = ctx.createBufferSource();
-    src.buffer = getDriftNoiseBuffer(ctx);
-    src.loop = true;
-    var filt = ctx.createBiquadFilter();
-    filt.type = "bandpass";
-    filt.Q.value = 2.4;
-    filt.frequency.setValueAtTime(3200, now);
-    filt.frequency.exponentialRampToValueAtTime(1400, now + 0.05);
-    var g = ctx.createGain();
-    var peak = Math.max(0.0002, 0.12 * lvl * masterVolume * sfxVolumeScalar);
-    g.gain.setValueAtTime(0.0001, now);
-    g.gain.exponentialRampToValueAtTime(peak, now + 0.006);
-    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.07);
-    src.connect(filt); filt.connect(g); g.connect(sfxBus);
+    var src = noiseSweepSource(ctx, now, lvl, {
+        q: 2.4, freqs: [[3200, 0], [1400, 0.05]], peakCoeff: 0.12, attackT: 0.006, releaseT: 0.07
+    });
     // knock under it
     var osc = ctx.createOscillator();
     osc.type = "sine";
@@ -914,22 +918,10 @@ function playLungeWhoosh(level) {
     var lvl = (level == null) ? 1 : Math.max(0, Math.min(1, level));
     if (lvl <= 0.02) { return; }
     var now = ctx.currentTime;
-    // airy fwoosh
-    var src = ctx.createBufferSource();
-    src.buffer = getDriftNoiseBuffer(ctx);
-    src.loop = true;
-    var filt = ctx.createBiquadFilter();
-    filt.type = "bandpass";
-    filt.Q.value = 1.1;
-    filt.frequency.setValueAtTime(520, now);
-    filt.frequency.exponentialRampToValueAtTime(2600, now + 0.09); // burst up...
-    filt.frequency.exponentialRampToValueAtTime(900, now + 0.32);  // ...trailing off
-    var g = ctx.createGain();
-    var peak = Math.max(0.0002, 0.14 * lvl * masterVolume * sfxVolumeScalar);
-    g.gain.setValueAtTime(0.0001, now);
-    g.gain.exponentialRampToValueAtTime(peak, now + 0.04);
-    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
-    src.connect(filt); filt.connect(g); g.connect(sfxBus);
+    // airy fwoosh: burst up (0.09s) then trailing off (0.32s)
+    var src = noiseSweepSource(ctx, now, lvl, {
+        q: 1.1, freqs: [[520, 0], [2600, 0.09], [900, 0.32]], peakCoeff: 0.14, attackT: 0.04, releaseT: 0.34
+    });
     // rising thrust tone under it
     var osc = ctx.createOscillator();
     osc.type = "sawtooth";

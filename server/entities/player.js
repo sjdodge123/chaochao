@@ -176,9 +176,13 @@ class Player extends Circle {
 		this.chargeFrac = 0;
 		// Overcharge: holding way too long fills a dark-red danger meter (overcharge
 		// 0..1) and, if you don't release in time, locks you in the exhausted move
-		// penalty until exhaustLockUntil (regen is paused, so staminaExhausted stays set).
+		// penalty until exhaustLockUntil. exhaustLockUntil ONLY marks an overcharge (it
+		// drives the dark-red danger meter); regenPauseUntil is the generic "regen is
+		// paused, stay exhausted" window that both an overcharge AND a land lunge set, so
+		// a lunge can keep you winded without falsely lighting the overcharge meter.
 		this.overcharge = 0;
 		this.exhaustLockUntil = 0;
+		this.regenPauseUntil = 0;
 
 		//On Fire
 		this.onFire = 0;
@@ -443,38 +447,59 @@ class Player extends Circle {
 		if (L == null || (Date.now() - this.lungePendingAt) > L.doubleTapMs) { this.lungePending = false; return; }
 		var playState = (currentState == c.stateMap.racing || currentState == c.stateMap.collapsing
 			|| currentState == c.stateMap.lobby || currentState == c.stateMap.gated);
-		if (!playState || this.onWater || this.isZombie || !this.canSpendStamina()) { this.lungePending = false; return; }
-		var dir = this.getMoveDir();
-		if (dir == null && this.isAI) {
-			// Bots have no move keys (getMoveDir reads them), so lunge along the steer
-			// carrot (targetDirX/Y) — the same fallback the water swim stroke uses. The
-			// AI's avoidance fields have already bent that vector away from threats, so a
-			// tactical dodge-lunge naturally pushes off the puck/zombie/antlion.
-			var tdm = Math.sqrt(this.targetDirX * this.targetDirX + this.targetDirY * this.targetDirY);
-			if (tdm > 0.0001) { dir = { x: this.targetDirX / tdm, y: this.targetDirY / tdm }; }
+		// Holding an ability fires it on a press (checkAttack), so a double-tap while armed
+		// is meant for the ability, not a lunge — bail so we don't also dump the whole bar.
+		// Off-water only (a punch on water already swims) and never as a zombie.
+		if (!playState || this.onWater || this.isZombie || this.ability != null || !this.canSpendStamina()) {
+			this.lungePending = false;
+			return;
 		}
-		if (dir == null) { return; } // no held direction yet — wait within the freshness window
+		var dir = this.getDriveDir();
+		if (dir == null) { return; } // no held/steer direction yet — wait within the freshness window
 		this.lungePending = false;
-		// A fast tap-tap can fire the lunge while tap-1's charge is still live (it runs
-		// before checkAttack). Drop that charge and consume the held button, otherwise
-		// the following checkAttack keeps charging — updateCharge would rewrite the bar we
-		// just emptied (back to chargeStaminaAtStart) and the release would throw a punch
-		// on top of the lunge, dodging the full-bar cost.
+		// Capture pre-brake momentum for the shove, exactly like a thrown punch.
+		var bonus = this.calcPunchBonus();
+		// The lunge IS a punch (the land cousin of the water swim stroke): throw one so it
+		// shoves like a stroke does — knockback + melee thwack + the cart's forward-lunge
+		// swing (all driven by the client "punch" event). Doing it here also consumes the
+		// input: cancelCharge() + attack/attackQueued=false stop checkAttack (which runs
+		// right after) from throwing a SECOND punch or letting updateCharge rewrite the bar
+		// we empty below. (A fast tap-tap can reach here with tap-1's charge still live.)
+		this.punchedTimer = Date.now();
+		this.punch = new Punch(this.x, this.y, c.punchRadius, this.color, this.id, this.roomSig, bonus, this.isZombie, this.teamId);
+		this.punch.angle = this.angle;
+		this.punch.ox = this.x;
+		this.punch.oy = this.y;
+		this.punch.chargeFrac = 0;
+		// Drift escrow: a charge the lunge interrupts rides its drift credit on this punch
+		// (voided if it connects), mirroring throwChargedPunch — so cancelCharge below banks
+		// nothing and a lunge can't launder a would-be-voided drift into clean credit.
+		if (this.pendingDriftDistance > 0) {
+			this.driftPunchRef = this.punch;
+			this.driftPunchPending = this.pendingDriftDistance;
+			this.driftPunchAt = Date.now();
+			this.pendingDriftDistance = 0;
+		}
 		this.cancelCharge();
 		this.attack = false;
 		this.attackQueued = false;
+		// Brake then burst along the held direction. The brake is the FULL punchThrowBrake
+		// even on ice — the lunge is a deliberate stop/redirect (its whole point on ice is to
+		// kill a slide), unlike a charge-RELEASE which eases the brake on ice to keep drift
+		// glide (iceDrift.releaseBrakeEase in throwChargedPunch). Different action, on purpose.
 		this.velX *= c.punchThrowBrake;
 		this.velY *= c.punchThrowBrake;
 		this.velX += dir.x * L.impulse;
 		this.velY += dir.y * L.impulse;
+		// Costs the ENTIRE bar: empty it and pause regen for recoverMs so the exhausted move
+		// penalty lingers (the NET slowdown). Use regenPauseUntil — NOT exhaustLockUntil — so
+		// the lunge does not falsely light the dark-red overcharge danger meter.
 		this.stamina = 0;
 		this.staminaExhausted = true;
-		// Pause regen for recoverMs (mirrors the overcharge lock): keeps staminaExhausted
-		// latched so the exhausted move penalty — and the no-punch / no-re-lunge cost —
-		// holds for the whole window, making the lunge a NET loss of ground.
-		if (L.recoverMs) { this.exhaustLockUntil = Date.now() + L.recoverMs; }
-		// Send the dash direction so the client streak points along the lunge even if it
-		// arrives a tick before the velocity update does.
+		if (L.recoverMs) { this.regenPauseUntil = Date.now() + L.recoverMs; }
+		messenger.messageRoomBySig(this.roomSig, "punch", compressor.sendPunch(this.punch));
+		// Dash-specific cue (streak + whoosh + rumble); dir lets the client streak point true
+		// even if it arrives a tick before the velocity update does.
 		messenger.messageRoomBySig(this.roomSig, "landLunge", { id: this.id, dx: dir.x, dy: dir.y });
 	}
 	startCharge() {
@@ -514,7 +539,8 @@ class Player extends Circle {
 		this.cancelCharge();
 		this.stamina = 0;
 		this.staminaExhausted = true;
-		this.exhaustLockUntil = Date.now() + c.punchCharge.exhaustLockMs;
+		this.exhaustLockUntil = Date.now() + c.punchCharge.exhaustLockMs; // drives the danger meter
+		this.regenPauseUntil = this.exhaustLockUntil;                      // and pauses regen
 		this.attack = false;
 	}
 	// Client-facing dark-red danger meter (0..1): fills while overcharging, then drains
@@ -587,6 +613,18 @@ class Player extends Circle {
 		var m = Math.sqrt(dx * dx + dy * dy);
 		return { x: dx / m, y: dy / m };
 	}
+	// The unit direction to propel along for a move-direction action (swim stroke / land
+	// lunge): a human's held move keys (getMoveDir), or — since bots have no keys — the
+	// bot's steer carrot (targetDirX/Y), normalized. Returns null if neither is available
+	// (no keys held, or a bot with no steer vector this tick).
+	getDriveDir() {
+		var dir = this.getMoveDir();
+		if (dir == null && this.isAI
+			&& (this.targetDirX * this.targetDirX + this.targetDirY * this.targetDirY) > 1e-8) {
+			dir = utils.normalizedVectorFromPoint({ x: this.targetDirX, y: this.targetDirY });
+		}
+		return dir;
+	}
 	throwChargedPunch(currentState) {
 		var frac = this.chargeFrac;
 		// Stamina was already drained while charging; latch exhaustion off what's left.
@@ -628,16 +666,9 @@ class Player extends Circle {
 			// (swimChargeBonus). The high water drag (config) bleeds the burst off so
 			// each stroke is a lunge-and-glide; the engine's maxVelocity caps the peak.
 			var w = c.tileMap.water;
-			var dir = this.getMoveDir();
-			// Bots have no move keys (getMoveDir reads them), so getMoveDir is always
-			// null for them — they steer via targetDirX/Y (the engine's isAI drive axis).
-			// Fall back to that steer vector so a bot's stroke propels it along the very
-			// direction it's already trying to swim (the path carrot). Guarded by isAI so
-			// a human's swim stays byte-for-byte unchanged (no keys held -> no stroke).
-			if (dir == null && this.isAI) {
-				var tdm = Math.sqrt(this.targetDirX * this.targetDirX + this.targetDirY * this.targetDirY);
-				if (tdm > 0.0001) { dir = { x: this.targetDirX / tdm, y: this.targetDirY / tdm }; }
-			}
+			// A human strokes along held keys; a bot has none and strokes along its steer
+			// carrot (targetDirX/Y) — getDriveDir resolves both (shared with the land lunge).
+			var dir = this.getDriveDir();
 			if (dir != null && w != null) {
 				var impulse = w.swimImpulse * (1 + (w.swimChargeBonus || 0) * frac);
 				this.velX += dir.x * impulse;
@@ -694,9 +725,9 @@ class Player extends Circle {
 		// Don't regenerate mid-charge — holding the button is actively spending the bar
 		// (updateCharge drains it), so regen here would fight that and inflate the meter.
 		if (this.charging) { return; }
-		// During an overcharge lock the penalty is forced: pause regen so staminaExhausted
-		// stays latched (and the move penalty holds) for the whole lock window.
-		if (Date.now() < this.exhaustLockUntil) { return; }
+		// During a forced lock (an overcharge OR a land lunge) the penalty is held: pause
+		// regen so staminaExhausted stays latched (and the move penalty holds) for the window.
+		if (Date.now() < this.regenPauseUntil) { return; }
 		var s = c.punchStamina;
 		if (this.stamina < s.max) {
 			this.stamina = Math.min(s.max, this.stamina + s.regenPerSec * dt);
@@ -1544,7 +1575,15 @@ class Player extends Circle {
 		this.chargeStaminaAtStart = 0;
 		this.overcharge = 0;
 		this.exhaustLockUntil = 0;
+		this.regenPauseUntil = 0;
 		this.attackQueued = false;
+		// Land-lunge edge/arm state: clear it like every other charge field so a stale
+		// press edge from the prior round can't mis-arm or mis-suppress a lunge on the
+		// first press of the next one.
+		this.lungePending = false;
+		this.lungePendingAt = 0;
+		this.lastAttackEdgeAt = null;
+		this.staminaAtLastEdge = c.punchStamina.max;
 		// A drift still live when the round ends (e.g. carried a charge across the goal
 		// line, or a punch still in its linger) never hit anyone — bank it before
 		// clearing the transient state, then judge any unresolved escrow optimistically.

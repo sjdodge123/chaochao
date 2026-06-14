@@ -178,8 +178,6 @@ function newBotState(profile) {
         escapeStage: 0,    // 1 = gentle (relax+wander-kill), 2 = committed (thread-or-die)
         heldAbilityId: null,// which ability the bot is currently holding
         abilityHeldSince: 0,// ms: when it picked up the held ability (hold-timeout)
-        lastLungeAt: 0,     // ms: last tactical land-lunge (rate-limit + telemetry)
-        lastLungeWhy: null, // last lunge trigger tag (debug/telemetry)
         pathSeed: 1 + Math.floor(Math.random() * 1e9), // per-bot route-diversity seed
         // Personality knobs (0..1 unless noted).
         skill: clamp01(pick('skill', 0.7) + jitter), // speed + precision + reaction
@@ -1388,18 +1386,9 @@ function decideAttack(bot, ctx, nav) {
     decidePunch(bot, ctx);
 }
 
-// Nearest living antlion to the bot (hazardList entries flagged isAntlion), {hazard,dist}.
-function nearestAliveAntlion(bot, ctx) {
-    var best = null, bd = Infinity;
-    var hl = ctx.hazardList;
-    for (var id in hl) {
-        var h = hl[id];
-        if (h == null || h.alive === false || !h.isAntlion) { continue; }
-        var d = mag(h.x - bot.x, h.y - bot.y);
-        if (d < bd) { bd = d; best = h; }
-    }
-    return best == null ? null : { hazard: best, dist: bd };
-}
+// Predicate for nearestMatch over ctx.hazardList: a living antlion (nearestMatch already
+// skips !alive, so this just selects the antlion kind).
+function isAntlionH(h) { return h.isAntlion === true; }
 
 // Tactical land lunge: arm a double-tap dash (bot.lungePending) when the instant burst is
 // worth blowing the whole stamina bar. tryLandLunge (player.update, same tick) consumes the
@@ -1432,8 +1421,9 @@ function decideLunge(bot, ctx) {
     if (bot.stamina < c.punchStamina.max * L.minStaminaFrac) { return; } // mirror the human rested gate
     var steer = mag(bot.targetDirX, bot.targetDirY);
     if (steer < 0.05) { return; } // no steer vector to lunge along
-    var now = Date.now();
-    if (now - (bot.ai.lastLungeAt || 0) < L.recoverMs) { return; } // floor (the empty bar already gates)
+    // No explicit cooldown: tryLandLunge empties the bar and pauses regen for recoverMs, so
+    // the stamina gate above can't pass again until the bar climbs back over minStaminaFrac —
+    // a strictly longer window than recoverMs. The empty bar is the rate limit.
     var ndx = bot.targetDirX / steer, ndy = bot.targetDirY / steer; // unit lunge direction
     var why = null;
 
@@ -1448,7 +1438,7 @@ function decideLunge(bot, ctx) {
         if (z != null && z.dist < LUNGE_ZOMBIE_RANGE) { why = 'zombie'; }
     }
     if (why == null) {
-        var al = nearestAliveAntlion(bot, ctx);
+        var al = nearestMatch(bot, ctx.hazardList, isAntlionH);
         if (al != null && al.dist < LUNGE_ANTLION_RANGE) { why = 'antlion'; }
     }
     if (why == null && ctx.hockey && ctx.puck != null) {
@@ -1461,9 +1451,7 @@ function decideLunge(bot, ctx) {
     if (why == null) { return; }
     if (!lungeLandsSafe(bot, ctx, ndx, ndy)) { return; } // only lunge onto solid, grippy ground
     bot.lungePending = true;
-    bot.lungePendingAt = now;
-    bot.ai.lastLungeAt = now;
-    bot.ai.lastLungeWhy = why;
+    bot.lungePendingAt = Date.now();
 }
 
 function steerBot(bot, ctx, dt) {
