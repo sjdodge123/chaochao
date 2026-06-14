@@ -447,6 +447,14 @@ class Player extends Circle {
 		var dir = this.getMoveDir();
 		if (dir == null) { return; } // no held direction yet — wait within the freshness window
 		this.lungePending = false;
+		// A fast tap-tap can fire the lunge while tap-1's charge is still live (it runs
+		// before checkAttack). Drop that charge and consume the held button, otherwise
+		// the following checkAttack keeps charging — updateCharge would rewrite the bar we
+		// just emptied (back to chargeStaminaAtStart) and the release would throw a punch
+		// on top of the lunge, dodging the full-bar cost.
+		this.cancelCharge();
+		this.attack = false;
+		this.attackQueued = false;
 		this.velX *= c.punchThrowBrake;
 		this.velY *= c.punchThrowBrake;
 		this.velX += dir.x * L.impulse;
