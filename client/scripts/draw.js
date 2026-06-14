@@ -10230,7 +10230,7 @@ function drawRechargeSpring(x, y) {
         // White footprint.
         gameContext.beginPath();
         gameContext.arc(0, 0, r, 0, 2 * Math.PI);
-        gameContext.fillStyle = "rgba(234,251,255,0.10)";
+        gameContext.fillStyle = "rgba(234,251,255,0.05)";
         gameContext.fill();
         // Expanding foam ripple ring.
         gameContext.beginPath();
@@ -10256,7 +10256,7 @@ function drawRechargeSpring(x, y) {
         // Faint footprint that blends into the terrain.
         gameContext.beginPath();
         gameContext.arc(0, 0, r, 0, 2 * Math.PI);
-        gameContext.fillStyle = "rgba(91,227,160,0.08)";
+        gameContext.fillStyle = "rgba(91,227,160,0.04)";
         gameContext.fill();
         // Pulsing recharge ring.
         gameContext.beginPath();
@@ -10298,9 +10298,9 @@ function drawSlipstream(x, y, angle) {
     // Faint footprint.
     gameContext.beginPath();
     gameContext.rect(-w / 2, -hgt / 2, w, hgt);
-    gameContext.fillStyle = onWater ? "rgba(234,248,255,0.07)" : "rgba(127,216,255,0.06)";
+    gameContext.fillStyle = onWater ? "rgba(234,248,255,0.035)" : "rgba(127,216,255,0.03)";
     gameContext.fill();
-    gameContext.strokeStyle = onWater ? "rgba(234,248,255,0.14)" : "rgba(127,216,255,0.12)";
+    gameContext.strokeStyle = onWater ? "rgba(234,248,255,0.06)" : "rgba(127,216,255,0.05)";
     gameContext.lineWidth = 1;
     gameContext.stroke();
     var stroke = onWater ? cfg.colorWater : cfg.color;
