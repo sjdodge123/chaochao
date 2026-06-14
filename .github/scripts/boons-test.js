@@ -315,35 +315,43 @@ try {
         check(s.id === STREAM.id && s.helpful === true && s.moveable === false,
             'build() returns a live boon (helpful, static)');
 
+        // (Synthetic karts carry distinct ids: the engine double-dispatch guard
+        // claimTickContact keys on id within a tick, so each must be unique here.)
         // A still kart on a +x current gains +push along +x.
-        const k1 = { isPlayer: true, velX: 0, velY: 0, maxVelocity: config.playerMaxSpeed };
+        const k1 = { id: 'k1', isPlayer: true, velX: 0, velY: 0, maxVelocity: config.playerMaxSpeed };
         s.handleHit(k1);
         check(Math.abs(k1.velX - STREAM.push) < 0.001 && Math.abs(k1.velY) < 0.001,
             'a still kart gets +push along +x (+' + STREAM.push + ')');
 
+        // Engine double-dispatch guard: a SECOND handleHit on the same kart in the
+        // same tick is a no-op (the push lands exactly once per tick, not 2x).
+        s.handleHit(k1);
+        check(Math.abs(k1.velX - STREAM.push) < 0.001,
+            'a repeat hit on the same kart in one tick does NOT push again (no 2x)');
+
         // A backward-driven kart: the current fights it (still adds +push forward).
-        const k2 = { isPlayer: true, velX: -100, velY: 0, maxVelocity: config.playerMaxSpeed };
+        const k2 = { id: 'k2', isPlayer: true, velX: -100, velY: 0, maxVelocity: config.playerMaxSpeed };
         s.handleHit(k2);
         check(Math.abs(k2.velX - (-100 + STREAM.push)) < 0.001,
             'a backward-driven kart is pushed forward (the current fights it)');
 
         // Already above currentSpeed along the axis: not braked, not boosted.
-        const k3 = { isPlayer: true, velX: STREAM.currentSpeed + 50, velY: 0, maxVelocity: config.playerMaxSpeed };
+        const k3 = { id: 'k3', isPlayer: true, velX: STREAM.currentSpeed + 50, velY: 0, maxVelocity: config.playerMaxSpeed };
         s.handleHit(k3);
         check(Math.abs(k3.velX - (STREAM.currentSpeed + 50)) < 0.001,
             'a kart already above currentSpeed is left alone (no brake)');
 
         // Just below the cap: only the remaining gap is added (never overshoots).
-        const k4 = { isPlayer: true, velX: STREAM.currentSpeed - 10, velY: 0, maxVelocity: config.playerMaxSpeed };
+        const k4 = { id: 'k4', isPlayer: true, velX: STREAM.currentSpeed - 10, velY: 0, maxVelocity: config.playerMaxSpeed };
         s.handleHit(k4);
         check(Math.abs(k4.velX - STREAM.currentSpeed) < 0.001,
             'the push never overshoots currentSpeed (caps at the remaining gap)');
 
         // A non-player/non-puck is ignored; a puck IS carried.
-        const proj = { isProjectile: true, velX: 0, velY: 0 };
+        const proj = { id: 'proj', isProjectile: true, velX: 0, velY: 0 };
         s.handleHit(proj);
         check(proj.velX === 0 && proj.velY === 0, 'a non-player/non-puck object is not pushed');
-        const puck = { isPuck: true, velX: 0, velY: 0, maxVelocity: config.playerMaxSpeed };
+        const puck = { id: 'puck', isPuck: true, velX: 0, velY: 0, maxVelocity: config.playerMaxSpeed };
         s.handleHit(puck);
         check(Math.abs(puck.velX - STREAM.push) < 0.001, 'a puck IS carried by the current');
 
