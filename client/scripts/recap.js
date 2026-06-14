@@ -66,7 +66,8 @@ var RF_ID = 0, RF_X = 1, RF_Y = 2, RF_ANGLE = 3, RF_VX = 4, RF_VY = 5, RF_STATE 
 var RFX_BLIND = 1;
 // projectile tuple: [type, x, y, color, radius]; hazard tuple: [id, x, y, angle, railX, railY]
 var RP_TYPE = 0, RP_X = 1, RP_Y = 2, RP_COLOR = 3, RP_RADIUS = 4;
-var RH_ID = 0, RH_X = 1, RH_Y = 2, RH_ANGLE = 3, RH_RAILX = 4, RH_RAILY = 5;
+var RH_ID = 0, RH_X = 1, RH_Y = 2, RH_ANGLE = 3, RH_RAILX = 4, RH_RAILY = 5,
+	RH_STATE = 6, RH_RADIUS = 7, RH_CLAIM = 8;
 // player.recapState values (also the RF_STATE values captured per frame)
 var RECAP_ALIVE = 0, RECAP_DIED = 1, RECAP_SCORED = 2;
 
@@ -327,8 +328,10 @@ function recapCaptureProjs() {
 	return out;
 }
 
-// Snapshot live hazards (static + moving bumpers). railX/railY are static (the
-// bumper's rail anchor); angle animates, so it's captured per frame.
+// Snapshot live hazards AND boons (they share hazardList). railX/railY are static (a
+// bumper's rail anchor); angle animates, so it's captured per frame. state = phase/netState
+// (geyser/mine/spring/halo/flag), radius = sizable kinds (vortex well), claim = the
+// Second Wind flag's client-claimed colour (so recap replays it in the colour you saw).
 function recapCaptureHazards() {
 	var out = [];
 	if (typeof hazardList === "undefined" || hazardList == null) {
@@ -339,8 +342,10 @@ function recapCaptureHazards() {
 		if (h == null || h.x == null) {
 			continue;
 		}
+		var claim = (h._fb != null && h._fb.claim != null) ? h._fb.claim : null;
 		out.push([h.id, h.x, h.y, (h.angle != null ? h.angle : 0),
-			(h.railX != null ? h.railX : h.x), (h.railY != null ? h.railY : h.y)]);
+			(h.railX != null ? h.railX : h.x), (h.railY != null ? h.railY : h.y),
+			(h.state != null ? h.state : null), (h.radius != null ? h.radius : null), claim]);
 	}
 	return out;
 }
@@ -1685,16 +1690,41 @@ function recapDrawObjectiveKey(k) {
 	if (typeof drawKeyGlyph === "function") { drawKeyGlyph(gameContext, k[2], k[0], k[1], 12); }
 }
 
-// Replay one buffered hazard (static / moving bumper) via the live draw helpers.
+// Replay one buffered hazard OR boon via the live draw helpers. Bumpers keep their
+// bespoke calls; the Second Wind flag is drawn statically (no live overlap/spring) in
+// the colour it was claimed in; every other kind (bumper wall, rotor, geyser, mine,
+// vortex well, and all boons) dispatches through the live hazardDrawers registry with a
+// synthetic hazard carrying the captured x/y/angle/state/radius. Without this, anything
+// that wasn't a bumper was simply invisible in the recap.
 function recapDrawHazard(h) {
 	if (typeof config === "undefined" || config == null || config.hazards == null || h[RH_X] == null) {
 		return;
 	}
 	try {
-		if (config.hazards.bumper != null && h[RH_ID] === config.hazards.bumper.id && typeof drawBumper === "function") {
+		var id = h[RH_ID];
+		if (config.hazards.bumper != null && id === config.hazards.bumper.id && typeof drawBumper === "function") {
 			drawBumper(h[RH_X], h[RH_Y]);
-		} else if (config.hazards.movingBumper != null && h[RH_ID] === config.hazards.movingBumper.id && typeof drawMovingBumper === "function") {
+			return;
+		}
+		if (config.hazards.movingBumper != null && id === config.hazards.movingBumper.id && typeof drawMovingBumper === "function") {
 			drawMovingBumper(h[RH_X], h[RH_Y], h[RH_RAILX], h[RH_RAILY], h[RH_ANGLE]);
+			return;
+		}
+		if (config.boons != null && config.boons.secondWindTotem != null
+			&& id === config.boons.secondWindTotem.id && typeof drawFlagShape === "function") {
+			var consumed = (h[RH_STATE] === 0);
+			var cloth = consumed ? "#000"
+				: (h[RH_CLAIM] != null ? h[RH_CLAIM] : config.boons.secondWindTotem.color);
+			drawFlagShape(h[RH_X], h[RH_Y], cloth, 0, consumed);
+			return;
+		}
+		// Generic kinds: dispatch through the live drawer registry.
+		if (typeof hazardDrawers !== "undefined") {
+			if (hazardDrawers == null && typeof buildHazardDrawers === "function") { buildHazardDrawers(); }
+			var drawer = (hazardDrawers != null) ? hazardDrawers[id] : null;
+			if (drawer != null) {
+				drawer({ id: id, x: h[RH_X], y: h[RH_Y], angle: h[RH_ANGLE], state: h[RH_STATE], radius: h[RH_RADIUS] });
+			}
 		}
 	} catch (e) { /* defensive — never let a prop break gameOver */ }
 }

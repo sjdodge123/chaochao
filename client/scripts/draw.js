@@ -9375,7 +9375,7 @@ function buildHazardDrawers() {
     }
     if (config.boons != null && config.boons.secondWindTotem != null) {
         hazardDrawers[config.boons.secondWindTotem.id] = function (h) {
-            drawSecondWindTotem(h.x, h.y);
+            drawSecondWindTotem(h);
         };
     }
 }
@@ -11007,53 +11007,101 @@ function drawGuardHalo(x, y, state) {
     gameContext.restore();
 }
 
-// Second Wind Totem — a fixed respawn anchor you drive over to attune. Drawn as a
-// standing totem: a glowing violet diamond stacked on a base ring, with a slow upward
-// "ember" drifting from it (the second-wind motif). No charge telegraph (no cooldown);
-// it's always available. On water the palette is pale-violet so it reads against blue.
-// Cheap phase math, no shadowBlur/filter.
-function drawSecondWindTotem(x, y) {
-    var cfg = config.boons.secondWindTotem;
-    var r = cfg.radius;
-    var onWater = boonOnWater(x, y);
-    var accent = onWater ? cfg.colorWater : cfg.color;
+// Second Wind Totem — a respawn FLAG (Mario-Odyssey-checkpoint style). Drawn as a thin
+// pole with a triangular pennant near the top, on a small base. The cloth is a NEUTRAL
+// colour by default and recolours to YOUR kart colour (client-only) the moment a local
+// kart touches it, so it reads as "you activated this". Any kart driving over it bumps
+// the pennant, which springs back on a little rubber-band (a critically-ish-damped
+// spring on the pennant's lean). Once the collapse consumes the flag (wire netState 0)
+// it's drawn as a charred stub. All anim state lives on the hazard object (h._fb), so
+// it's per-instance and survives across frames; the static recap/preview path calls
+// drawFlagShape directly. Cheap: a couple of strokes/fills + scalar spring, no filter.
+function drawFlagShape(x, y, clothColor, bend, consumed) {
+    var poleTopY = -30;
     gameContext.save();
     gameContext.translate(x, y);
-    // Faint footprint.
+    // Shadowy base mound.
     gameContext.beginPath();
-    gameContext.arc(0, 0, r, 0, 2 * Math.PI);
-    gameContext.fillStyle = onWater ? "rgba(235,217,255,0.05)" : "rgba(199,146,234,0.05)";
+    gameContext.ellipse(0, 4, 9, 4, 0, 0, 2 * Math.PI);
+    gameContext.fillStyle = "rgba(18,28,42,0.30)";
     gameContext.fill();
-    // Base ring (the "stand").
-    var basePulse = 0.5 + 0.5 * Math.sin(Date.now() / 380);
-    gameContext.beginPath();
-    gameContext.arc(0, 0, r * 0.7, 0, 2 * Math.PI);
-    gameContext.strokeStyle = accent;
-    gameContext.globalAlpha = 0.3 + 0.4 * basePulse;
-    gameContext.lineWidth = 3;
-    gameContext.stroke();
-    gameContext.globalAlpha = 1;
-    // Rising ember (the "second wind") drifting up from the totem.
-    var eph = (Date.now() / 1100) % 1;
-    gameContext.beginPath();
-    gameContext.arc(0, r * 0.2 - eph * r * 1.1, 2.6, 0, 2 * Math.PI);
-    gameContext.fillStyle = accent;
-    gameContext.globalAlpha = 0.7 * (1 - eph);
-    gameContext.fill();
-    gameContext.globalAlpha = 1;
-    // Violet diamond crest, over a dark contrast halo so it reads on any terrain.
-    var d = r * 0.46;
     gameContext.lineCap = "round";
     gameContext.lineJoin = "round";
+    if (consumed) {
+        // Charred stub — the lava ate the flag.
+        gameContext.strokeStyle = "rgba(45,32,30,0.75)";
+        gameContext.lineWidth = 3;
+        gameContext.beginPath();
+        gameContext.moveTo(0, 4);
+        gameContext.lineTo(0, -11);
+        gameContext.stroke();
+        gameContext.restore();
+        return;
+    }
+    // Pole.
+    gameContext.strokeStyle = "rgba(28,34,46,0.92)";
+    gameContext.lineWidth = 3;
     gameContext.beginPath();
-    gameContext.moveTo(0, -d);
-    gameContext.lineTo(d * 0.75, 0);
-    gameContext.lineTo(0, d);
-    gameContext.lineTo(-d * 0.75, 0);
+    gameContext.moveTo(0, 4);
+    gameContext.lineTo(0, poleTopY);
+    gameContext.stroke();
+    // Triangular pennant from the top, free end bent by `bend` (the rubber-band lean).
+    var len = 22, hgt = 13;
+    var tipX = len + bend, tipY = poleTopY + hgt * 0.5;
+    gameContext.beginPath();
+    gameContext.moveTo(0, poleTopY);
+    gameContext.quadraticCurveTo(len * 0.5 + bend * 0.6, poleTopY - 2, tipX, tipY);
+    gameContext.lineTo(0, poleTopY + hgt);
     gameContext.closePath();
-    gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 7; gameContext.stroke();
-    gameContext.strokeStyle = cfg.color; gameContext.lineWidth = 4; gameContext.stroke();
+    gameContext.fillStyle = clothColor;
+    gameContext.fill();
+    gameContext.strokeStyle = BOON_HALO;
+    gameContext.lineWidth = 1.5;
+    gameContext.stroke();
     gameContext.restore();
+}
+function secondWindClothColor(onWater) {
+    var cfg = config.boons.secondWindTotem;
+    return onWater ? cfg.colorWater : cfg.color;
+}
+function drawSecondWindTotem(h) {
+    if (h == null || h.x == null) { return; }
+    var consumed = (h.state === 0); // wire netState mirror: 0 = lava-consumed
+    if (consumed) { drawFlagShape(h.x, h.y, "#000", 0, true); return; }
+    var onWater = boonOnWater(h.x, h.y);
+    if (h._fb == null) { h._fb = { bend: 0, vel: 0, t: 0, overlap: {}, claim: null }; }
+    var fb = h._fb;
+    var now = Date.now();
+    var dt = fb.t ? Math.min(0.05, (now - fb.t) / 1000) : 0;
+    fb.t = now;
+    // Proximity: any kart entering the flag bumps the pennant; a LOCAL kart also claims
+    // the colour (last local toucher wins, the co-op case). Same reach as the server
+    // hitbox (radius + a kart radius) so the bump fires when you visibly touch it.
+    if (typeof playerList !== "undefined" && playerList != null) {
+        var reach = config.boons.secondWindTotem.radius + (config.playerBaseRadius || 7.5);
+        for (var pid in playerList) {
+            var p = playerList[pid];
+            if (p == null || p.x == null) { continue; }
+            var dx = p.x - h.x, dy = p.y - h.y;
+            var over = (dx * dx + dy * dy) <= reach * reach;
+            if (over && fb.overlap[pid] !== true) {
+                var vx = p.velX || 0;
+                var spd = Math.min(1, Math.abs(vx) / 250);
+                fb.vel += (vx >= 0 ? 1 : -1) * (120 + spd * 120); // kick the pennant
+            }
+            if (over && typeof isLocalId === "function" && isLocalId(pid) && p.color != null) {
+                fb.claim = p.color;
+            }
+            fb.overlap[pid] = over;
+        }
+    }
+    // Rubber-band: a lightly-damped spring eases the lean back to rest (with overshoot).
+    fb.vel += (-320 * fb.bend - 14 * fb.vel) * dt;
+    fb.bend += fb.vel * dt;
+    if (Math.abs(fb.bend) < 0.04 && Math.abs(fb.vel) < 0.04) { fb.bend = 0; fb.vel = 0; }
+    var wave = Math.sin(now / 420) * 1.4; // idle flutter
+    var cloth = fb.claim != null ? fb.claim : secondWindClothColor(onWater);
+    drawFlagShape(h.x, h.y, cloth, fb.bend + wave, false);
 }
 
 function locateColor(id) {

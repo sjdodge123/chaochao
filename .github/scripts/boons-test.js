@@ -29,11 +29,12 @@
 //       then pops (guardShieldPopped). Global shared charge like the spring: re-arms
 //       over cooldownMs with the netState telegraph; a shielded racer never wastes a
 //       ready halo. RACERS only (a non-player + a zombie are ignored).
-//   [G] Second Wind Totem (config.boons.secondWindTotem). Drive over to attune; the
-//       first death that round respawns you AT the totem (keeping your notch, no
-//       playerDied) instead of ending the run. Single-use per round, excludes the
-//       infection side, and is skipped when the collapse has turned the totem's tile to
-//       lava (the board keeps a per-tick `safe` flag via tracksTileSafety).
+//   [G] Second Wind Totem (config.boons.secondWindTotem). Drive over to attune; EVERY
+//       death that round respawns you AT the flag (keeping your notch, no playerDied)
+//       instead of ending the run — indefinitely, until the collapse consumes the flag
+//       (safe=false → netState 0), after which it revives no one. Excludes the infection
+//       side; re-anchors to a different flag on contact. The board keeps the per-tick
+//       safe/netState fresh via tracksTileSafety.
 //   [E] Slipstream (config.boons.slipstream). A directional wind corridor: a gentle
 //       constant push along its axis up to currentSpeed, capped (never overshoots,
 //       never brakes a faster kart), that fights a backward-driven kart. RACERS only —
@@ -482,7 +483,7 @@ try {
     }
 
     // ----------------------------------------------------------------------
-    console.log('\n[G] Second Wind Totem respawns a racer at the totem on first death');
+    console.log('\n[G] Second Wind Totem respawns a racer at the flag INDEFINITELY until lava eats it');
     {
         const TOTEM = config.boons.secondWindTotem; // id 954
         const kind = hazardKindById(TOTEM.id);
@@ -494,42 +495,44 @@ try {
         const totem = room.game.gameBoard.hazardList[Object.keys(room.game.gameBoard.hazardList)[0]];
         check(totem != null && totem.id === TOTEM.id && totem.helpful === true,
             'the totem spawned from the map entry into hazardList (helpful=true)');
-        check(totem.safe === true && totem.tracksTileSafety === true,
-            'the totem starts safe + opts into per-tick tile-safety tracking');
+        check(totem.safe === true && totem.tracksTileSafety === true && totem.netState === 100,
+            'the totem starts safe + standing (netState 100) + opts into per-tick tile-safety tracking');
+        // Ships on the wire WITH the netState telegraph slot ([7] in newHazards).
         const packet = JSON.parse(compressor.newHazards(room.game.gameBoard.hazardList));
-        check(packet.length === 1 && packet[0][1] === TOTEM.id && packet[0][2] === PAD_X && packet[0][3] === ROWS[2],
-            'compressor.newHazards ships the totem as [ownerId, ' + TOTEM.id + ', x, y, ...]');
+        check(packet.length === 1 && packet[0][1] === TOTEM.id && packet[0][2] === PAD_X &&
+            packet[0][3] === ROWS[2] && packet[0][7] === 100,
+            'compressor.newHazards ships the totem with its standing netState (=100)');
 
         bot.currentState = config.stateMap.racing;
 
-        // Attune (drive over). The death path now knows to revive here.
+        // Attune (drive over). No server cue (the flag recolour/bump is client-side off
+        // proximity); the death path now knows to revive here.
         bot.reset(config.stateMap.racing); bot.currentState = config.stateMap.racing;
-        let since = events.length;
-        check(bot.attuneSecondWind(totem) === true, 'driving over the totem attunes the racer');
-        check(bot.secondWind === totem, 'the racer is attuned to the totem');
-        check(emittedSince('secondWindAttuned', since), 'a secondWindAttuned event fired for the client cue');
-        check(bot.attuneSecondWind(totem) === false, 're-driving over the same totem does not re-fire');
+        check(bot.attuneSecondWind(totem) === true, 'driving over the flag attunes the racer');
+        check(bot.secondWind === totem, 'the racer is attuned to the flag');
+        check(bot.attuneSecondWind(totem) === false, 're-driving over the SAME flag is a no-op');
 
-        // First death -> revive AT the totem (keep the notch, no playerDied).
-        bot.x = PAD_X - 300; bot.y = ROWS[1]; bot.velX = 200; bot.velY = -50;
+        // INDEFINITE: each death respawns AT the flag (notch kept, no playerDied), and
+        // the attunement is NOT spent — it does it again and again.
         bot.notches = 2;
-        since = events.length;
-        bot.killSelf('lava');
-        check(bot.alive === true, 'the first death revives the racer instead of ending the run');
-        check(bot.x === totem.x && bot.y === totem.y, 'the racer respawned AT the totem');
-        check(bot.velX === 0 && bot.velY === 0, 'respawn zeroes momentum');
-        check(bot.notches === 2, 'the racer kept their notch (no removeNotch on a revive)');
-        check(bot.invulnUntil > clock, 'the respawn grants a brief invuln grace');
-        check(bot.secondWind === null && bot.secondWindUsed === true, 'the second wind is spent (single-use this round)');
-        check(emittedSince('secondWind', since) && !emittedSince('playerDied', since),
-            'a secondWind event fired and NO playerDied was emitted');
+        for (let d = 1; d <= 3; d++) {
+            bot.x = PAD_X - 300; bot.y = ROWS[1]; bot.velX = 200; bot.velY = -50;
+            const since = events.length;
+            bot.killSelf('lava');
+            check(bot.alive === true, 'death #' + d + ' revives the racer (indefinite) instead of ending the run');
+            check(bot.x === totem.x && bot.y === totem.y, 'death #' + d + ': respawned AT the flag with momentum zeroed');
+            check(bot.secondWind === totem, 'death #' + d + ': the attunement is NOT spent (still armed)');
+            check(emittedSince('secondWind', since) && !emittedSince('playerDied', since),
+                'death #' + d + ': a secondWind event fired and NO playerDied was emitted');
+        }
+        check(bot.notches === 2, 'the racer kept their notch across every revive (no removeNotch)');
+        check(bot.invulnUntil > clock, 'the latest respawn granted a brief invuln grace');
 
-        // Single-use: a SECOND death this round ends the run normally.
-        check(bot.attuneSecondWind(totem) === false, 'a spent racer cannot re-attune this round');
-        since = events.length;
-        bot.killSelf('lava');
-        check(bot.alive === false, 'the second death this round ends the run');
-        check(emittedSince('playerDied', since), 'the second death emits playerDied as normal');
+        // Re-anchor: driving over a DIFFERENT flag overwrites the attunement.
+        const totem2 = kind.build({ x: PAD_X + 200, y: ROWS[3] }, 'm2', room.roomSig);
+        check(bot.attuneSecondWind(totem2) === true && bot.secondWind === totem2,
+            'driving over a different flag re-anchors the racer to it');
+        bot.attuneSecondWind(totem); // restore for the remaining checks
 
         // Infection side excluded: an attuned racer who is infected is NOT revived.
         bot.reset(config.stateMap.racing); bot.currentState = config.stateMap.racing;
@@ -538,18 +541,20 @@ try {
         bot.killSelf(null);
         check(bot.alive === false, 'an infected racer is not revived (boons skip the infection side)');
 
-        // Unsafe totem (collapse turned its tile to lava): the revive is skipped.
+        // Consumed by lava: once the collapse turns the flag's tile to lava (safe=false)
+        // it revives no one — and the wire telegraphs it (netState 0).
         bot.reset(config.stateMap.racing); bot.currentState = config.stateMap.racing;
         bot.attuneSecondWind(totem);
-        totem.safe = false;
+        totem.safe = false; totem.netState = 0;
         bot.killSelf('lava');
-        check(bot.alive === false, 'a racer is not revived onto a totem the collapse turned to lava (safe=false)');
+        check(bot.alive === false, 'a consumed flag (lava, safe=false) revives no one');
         totem.safe = true;
 
-        // The board keeps the safe flag fresh each tick (tracksTileSafety) — a totem on
-        // solid ground reads safe after a live update pass.
+        // The board keeps safe + netState fresh each tick (tracksTileSafety) — a flag on
+        // solid ground reads safe/standing after a live update pass.
         room.update(DT); clock += config.serverTickSpeed; fireDueTimers();
-        check(totem.safe === true, 'updateHazards keeps a solid-ground totem flagged safe');
+        check(totem.safe === true && totem.netState === 100,
+            'updateHazards keeps a solid-ground flag flagged safe + standing (netState 100)');
     }
 } finally {
     Date.now = realNow;

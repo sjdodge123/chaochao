@@ -286,6 +286,9 @@ class SecondWindTotem extends Boon {
 		this.respawnInvulnMs = c.boons.secondWindTotem.respawnInvulnMs;
 		this.tracksTileSafety = true; // updateHazards keeps `safe` fresh for the revive guard
 		this.safe = true;             // false once the collapse turns this tile to lava
+		// Wire slot: 100 = flag standing (revives), 0 = consumed by lava (dead). Mirrors
+		// `safe`; the client hides the flag once it reads consumed. (updateHazards sets it.)
+		this.netState = 100;
 	}
 	handleHit(object) {
 		if (!this.isEligiblePlayer(object) || typeof object.attuneSecondWind !== "function") {
