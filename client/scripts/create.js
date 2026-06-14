@@ -1315,9 +1315,12 @@ function objCfgByKey(key) {
     if (config.boons != null && config.boons[key] != null) { return config.boons[key]; }
     return null;
 }
+// Dark contrast halo stroked under every boon's signal art so the light-blue/green
+// palette reads on any terrain (matches draw.js BOON_HALO).
+var EDITOR_BOON_HALO = "rgba(10,40,55,0.6)";
 // Dash Arrows painter (the dashArrows `paint` hook) — mirrors the in-game look
 // (draw.js drawDashArrows): a translucent teal pad with two chevrons pointing
-// along `angle`, the boost direction.
+// along `angle`, the boost direction, over a dark contrast halo.
 function paintDashArrowsShape(ctx, kind, x, y, angle, ringColor) {
     var cfg = objCfgByKey(kind.key);
     if (cfg == null) { return; }
@@ -1334,8 +1337,6 @@ function paintDashArrowsShape(ctx, kind, x, y, angle, ringColor) {
     ctx.strokeStyle = "rgba(63,193,201,0.12)";
     ctx.lineWidth = 1;
     ctx.stroke();
-    ctx.strokeStyle = cfg.color;
-    ctx.lineWidth = 5;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     var ch = hgt * 0.32;
@@ -1345,7 +1346,8 @@ function paintDashArrowsShape(ctx, kind, x, y, angle, ringColor) {
         ctx.moveTo(bx - 8, -ch);
         ctx.lineTo(bx + 8, 0);
         ctx.lineTo(bx - 8, ch);
-        ctx.stroke();
+        ctx.strokeStyle = EDITOR_BOON_HALO; ctx.lineWidth = 8; ctx.stroke();
+        ctx.strokeStyle = cfg.color; ctx.lineWidth = 5; ctx.stroke();
     }
     ctx.restore();
 }
@@ -1401,15 +1403,14 @@ function paintRechargeSpringShape(ctx, kind, x, y, angle, ringColor) {
         ctx.stroke();
     }
     var arm = r * 0.42;
-    ctx.strokeStyle = cfg.color;
     ctx.lineCap = "round";
-    ctx.lineWidth = 5;
     ctx.beginPath();
     ctx.moveTo(-arm, 0);
     ctx.lineTo(arm, 0);
     ctx.moveTo(0, -arm);
     ctx.lineTo(0, arm);
-    ctx.stroke();
+    ctx.strokeStyle = EDITOR_BOON_HALO; ctx.lineWidth = 8; ctx.stroke();
+    ctx.strokeStyle = cfg.color; ctx.lineWidth = 5; ctx.stroke();
     ctx.restore();
 }
 // Slipstream painter (the slipstream `paint` hook) — mirrors the in-game look
@@ -1422,7 +1423,7 @@ function paintSlipstreamShape(ctx, kind, x, y, angle, ringColor) {
     var rad = (angle || 0) * (Math.PI / 180);
     var w = cfg.width, hgt = cfg.height;
     var onWater = editorBoonOnWater(x, y);
-    var halo = "rgba(10,40,55,0.6)";
+    var halo = EDITOR_BOON_HALO;
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(rad);
