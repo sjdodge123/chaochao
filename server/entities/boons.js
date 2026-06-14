@@ -213,4 +213,94 @@ registerBoonKind("slipstream", {
 	}
 });
 
-module.exports = { Boon, DashArrows, RechargeSpring, Slipstream };
+// Guard Halo — a floating ring (the gold halo) you drive over to pick up a ONE-HIT
+// SHIELD. The shield is per-player state (Player.guardShield): it absorbs the next
+// incoming hit from ANY source — punch, bumper, bumper-wall, rotor, bomb, ice shot,
+// cut, puck — and pops, applying no knockback, no attribution, and (for a zombie
+// punch) no infection for that one hit. The absorb itself lives where each hit is
+// already gated for Star Power (Player.handlePunchHit/handlePuckHit + GameBoard's
+// cutPlayers/applyExplosionForce), via Player.tryConsumeGuardShield(); the halo's
+// only job is to GRANT the shield. Like the Recharge Spring it's a global shared
+// charge: the first unshielded racer to reach a ready halo claims it, after which the
+// halo drains and re-arms over cooldownMs, telegraphing the refill on the netState
+// wire slot (0 = just claimed .. 100 = ready). A racer who already holds a shield
+// never wastes a ready halo. Non-directional. (Racers only — see isEligiblePlayer.)
+class GuardHalo extends Boon {
+	constructor(x, y, ownerId, roomSig) {
+		super(x, y, c.boons.guardHalo.radius, c.boons.guardHalo.color, ownerId, roomSig);
+		this.id = c.boons.guardHalo.id;
+		this.cooldownMs = c.boons.guardHalo.cooldownMs;
+		this.rechargeReadyAt = 0;   // Date.now() the halo is ready again (<= now == ready)
+		this.netState = 100;        // wire slot: refill percent, 100 = ready (drawn telegraph)
+	}
+	// Per tick (gameBoard.updateHazards): refresh the refill percent the client draws.
+	update() {
+		var now = Date.now();
+		if (now >= this.rechargeReadyAt) {
+			this.netState = 100;
+			return;
+		}
+		var remaining = this.rechargeReadyAt - now;
+		this.netState = Math.max(0, Math.min(99, Math.round((1 - remaining / this.cooldownMs) * 100)));
+	}
+	handleHit(object) {
+		if (!this.isEligiblePlayer(object) || typeof object.grantGuardShield !== "function") {
+			return;
+		}
+		if (Date.now() < this.rechargeReadyAt) {
+			return; // still re-arming — no shield to give
+		}
+		// Only spend the charge if the racer actually took the shield (grantGuardShield
+		// returns false for a racer who already holds one), so a shielded racer doesn't
+		// drain a ready halo for nothing.
+		if (object.grantGuardShield()) {
+			this.rechargeReadyAt = Date.now() + this.cooldownMs;
+			this.netState = 0;
+		}
+	}
+}
+
+registerBoonKind("guardHalo", {
+	railed: false,
+	directional: false,
+	build: function (entry, mapID, roomSig) {
+		return new GuardHalo(entry.x, entry.y, mapID, roomSig);
+	}
+});
+
+// Second Wind Totem — drive over to ATTUNE (the totem becomes your respawn anchor).
+// The first death that round respawns you AT the totem instead of ending your run;
+// single-use per player per round. The revive itself lives on the death path
+// (Player.killPlayer reads Player.secondWind, repositions, and returns before marking
+// you dead) — the totem's only job is to attune a racer (Player.attuneSecondWind),
+// handing it a reference to this totem so the death path can read the live `safe`
+// flag. That flag is recomputed each tick by GameBoard.updateHazards (the totem opts
+// in via tracksTileSafety): once the collapse turns the totem's tile to lava, `safe`
+// goes false and the revive is skipped (lava would just re-kill the respawned racer).
+// The totem has no cooldown — it's a fixed anchor any number of racers can attune to.
+// Non-directional. (Racers only — see isEligiblePlayer; a zombie can't attune.)
+class SecondWindTotem extends Boon {
+	constructor(x, y, ownerId, roomSig) {
+		super(x, y, c.boons.secondWindTotem.radius, c.boons.secondWindTotem.color, ownerId, roomSig);
+		this.id = c.boons.secondWindTotem.id;
+		this.respawnInvulnMs = c.boons.secondWindTotem.respawnInvulnMs;
+		this.tracksTileSafety = true; // updateHazards keeps `safe` fresh for the revive guard
+		this.safe = true;             // false once the collapse turns this tile to lava
+	}
+	handleHit(object) {
+		if (!this.isEligiblePlayer(object) || typeof object.attuneSecondWind !== "function") {
+			return;
+		}
+		object.attuneSecondWind(this);
+	}
+}
+
+registerBoonKind("secondWindTotem", {
+	railed: false,
+	directional: false,
+	build: function (entry, mapID, roomSig) {
+		return new SecondWindTotem(entry.x, entry.y, mapID, roomSig);
+	}
+});
+
+module.exports = { Boon, DashArrows, RechargeSpring, Slipstream, GuardHalo, SecondWindTotem };

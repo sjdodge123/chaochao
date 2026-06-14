@@ -597,6 +597,22 @@
             "height": 70,
             "push": 40,
             "currentSpeed": 190
+        },
+        "guardHalo": {
+            "_doc": "A floating ring you drive over to pick up a ONE-HIT SHIELD: the shield is per-player state that absorbs the next incoming hit (punch / bumper / bumper-wall / rotor / bomb / ice shot / cut / puck) and then pops, with no knockback, attribution, or infection applied for that hit. One shield per player at a time — driving over a halo while already shielded is a no-op (a topped-up racer never wastes a ready halo). The halo itself is a GLOBAL shared charge: the first unshielded racer to reach a ready halo claims the shield, then the halo drains and re-arms over cooldownMs before it can grant again. That refill progress rides the wire netState slot (0=just claimed .. 100=ready) so the client draws the drained->fill-ring->ready-pulse telegraph (mirrors Recharge Spring). colorWater is the palette used by the on-water render variant so the ring reads against blue water.",
+            "id": 953,
+            "color": "#FFD166",
+            "colorWater": "#FFF3C4",
+            "radius": 26,
+            "cooldownMs": 8000
+        },
+        "secondWindTotem": {
+            "_doc": "Drive over to ATTUNE: the totem becomes your respawn anchor. The first death that round respawns you at the totem instead of ending your run (single-use per player per round). Excludes infection deaths (a bitten/zombified racer is not revived) and only fires during racing/collapsing. On respawn you keep your notch, your velocity is zeroed, fire/charge are cleared, and you get respawnInvulnMs of grace from other players' hits (lava still kills, so the respawn is skipped if the collapse has already turned the totem's tile to lava — tracked tick-by-tick via the safe flag). colorWater is the palette used by the on-water render variant so the totem reads against blue water.",
+            "id": 954,
+            "color": "#C792EA",
+            "colorWater": "#EBD9FF",
+            "radius": 28,
+            "respawnInvulnMs": 1500
         }
     },
     "barriers": {

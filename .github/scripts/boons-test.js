@@ -23,6 +23,17 @@
 //       the first needy racer consumes it, then it re-arms over cooldownMs and
 //       telegraphs the refill via netState (0..100) on the wire; a full racer never
 //       wastes a ready spring.
+//   [F] Guard Halo (config.boons.guardHalo). A drive-over ring that grants a ONE-HIT
+//       shield (Player.guardShield): it absorbs the next incoming hit from ANY source
+//       — punch, bomb/ice (applyExplosionForce), cut (cutPlayers) — with no knockback,
+//       then pops (guardShieldPopped). Global shared charge like the spring: re-arms
+//       over cooldownMs with the netState telegraph; a shielded racer never wastes a
+//       ready halo. RACERS only (a non-player + a zombie are ignored).
+//   [G] Second Wind Totem (config.boons.secondWindTotem). Drive over to attune; the
+//       first death that round respawns you AT the totem (keeping your notch, no
+//       playerDied) instead of ending the run. Single-use per round, excludes the
+//       infection side, and is skipped when the collapse has turned the totem's tile to
+//       lava (the board keeps a per-tick `safe` flag via tracksTileSafety).
 //   [E] Slipstream (config.boons.slipstream). A directional wind corridor: a gentle
 //       constant push along its axis up to currentSpeed, capped (never overshoots,
 //       never brakes a faster kart), that fights a backward-driven kart. RACERS only —
@@ -380,6 +391,165 @@ try {
         check(packet.length === 1 && packet[0][1] === STREAM.id && packet[0][2] === PAD_X &&
             packet[0][3] === ROWS[2] && packet[0][4] === 0,
             'compressor.newHazards ships the slipstream as [ownerId, ' + STREAM.id + ', x, y, angle]');
+    }
+
+    const RACER = { id: 'racer', name: 'Racer', title: '', skill: 0.85, aggression: 0.2, tempo: 0.5, risk: 0.3, focus: 'race' };
+    function emittedSince(name, since) {
+        for (let i = since; i < events.length; i++) { if (events[i].name === name) { return true; } }
+        return false;
+    }
+
+    // ----------------------------------------------------------------------
+    console.log('\n[F] Guard Halo grants a one-hit shield that absorbs across every hit source');
+    {
+        const HALO = config.boons.guardHalo; // id 953
+        const kind = hazardKindById(HALO.id);
+        check(kind != null && kind.helpful === true, 'guardHalo resolves through the registry + is helpful (id ' + HALO.id + ')');
+        check(kind != null && kind.directional === false && kind.railed === false, 'guardHalo is non-directional + not railed');
+
+        const map = buildMap('halo', [{ id: HALO.id, x: PAD_X, y: ROWS[2] }], [2]);
+        const { room, bot } = bootRoom('boon-halo', map, RACER);
+        const halo = room.game.gameBoard.hazardList[Object.keys(room.game.gameBoard.hazardList)[0]];
+        check(halo != null && halo.id === HALO.id && halo.helpful === true,
+            'the halo spawned from the map entry into hazardList (helpful=true)');
+        check(halo.netState === 100, 'a fresh halo is ready (netState 100)');
+        // Ships on the wire WITH the netState telegraph slot ([7] in newHazards).
+        const packet = JSON.parse(compressor.newHazards(room.game.gameBoard.hazardList));
+        check(packet.length === 1 && packet[0][1] === HALO.id && packet[0][7] === 100,
+            'compressor.newHazards ships the halo with its ready netState (=100)');
+
+        // Neutralize any spawn-grace so the absorb assertions below test the shield, not invuln.
+        bot.invulnUntil = 0; bot.invulnHeldInCircle = false; bot.onSanctuary = false;
+        bot.starPowerUntil = 0; bot.teamId = null;
+        bot.currentState = config.stateMap.racing;
+
+        // Drive over a ready halo -> the racer takes the shield; the halo goes on its
+        // global re-arm and telegraphs it.
+        bot.guardShield = false;
+        halo.handleHit(bot);
+        check(bot.guardShield === true, 'driving over a ready halo grants the one-hit shield');
+        check(halo.rechargeReadyAt > clock && halo.netState === 0, 'the halo went on its global re-arm (netState 0)');
+        check(bot.grantGuardShield() === false, 'a racer who already holds a shield does not re-grant (no waste)');
+
+        // Absorb a PUNCH (also covers bumper/bumper-wall/rotor — all reach handlePunchHit).
+        bot.velX = 0; bot.velY = 0;
+        let since = events.length;
+        const punch = { x: bot.x + 5, y: bot.y, ownerId: 'attacker', mapOwned: true, getBonus: () => 800 };
+        bot.handlePunchHit(punch);
+        check(bot.guardShield === false, 'an incoming punch popped the shield');
+        check(bot.velX === 0 && bot.velY === 0, 'the punch dealt no knockback (absorbed by the shield)');
+        check(punch.landed === true, 'the absorbed punch is marked landed (kept out of clashes)');
+        check(emittedSince('guardShieldPopped', since), 'a guardShieldPopped event fired for the client telegraph');
+        // Shield is spent: the next punch lands normally.
+        bot.velX = 0; bot.velY = 0;
+        bot.handlePunchHit({ x: bot.x + 5, y: bot.y, ownerId: 'attacker', mapOwned: true, getBonus: () => 800 });
+        check(Math.abs(bot.velX) + Math.abs(bot.velY) > 0.0001, 'with no shield the next punch knocks the racer back (sanity)');
+
+        // Re-arm + re-grant for the bomb test.
+        clock += HALO.cooldownMs + 100; halo.update();
+        check(halo.netState === 100, 'after cooldownMs the halo reads ready again (netState 100)');
+        halo.handleHit(bot);
+        check(bot.guardShield === true, 'the re-armed halo grants again');
+
+        // Absorb a BOMB blast (and the ice shot — both route through applyExplosionForce).
+        bot.velX = 0; bot.velY = 0;
+        room.game.gameBoard.applyExplosionForce({ x: bot.x, y: bot.y }, null);
+        check(bot.guardShield === false, 'a bomb/ice blast popped the shield');
+        check(bot.velX === 0 && bot.velY === 0, 'the blast dealt no knockback (absorbed by the shield)');
+
+        // Re-arm + re-grant for the cut test (needs a second racer as the cutter).
+        clock += HALO.cooldownMs + 100; halo.update(); halo.handleHit(bot);
+        check(bot.guardShield === true, 're-armed halo grants again for the cut test');
+        const cutterId = 'boon-halo-cutter';
+        const cutter = room.world.createNewBot(cutterId, Object.assign({}, RACER, { id: 'cutter', name: 'Cutter' }));
+        cutter.x = bot.x - 20; cutter.y = bot.y; cutter.angle = 0; cutter.currentState = config.stateMap.racing;
+        room.playerList[cutterId] = cutter;
+        bot.velX = 0; bot.velY = 0;
+        room.game.gameBoard.cutPlayers(cutterId);
+        check(bot.guardShield === false, 'a cut popped the shield');
+        check(bot.velX === 0 && bot.velY === 0, 'the cut dealt no fling (absorbed by the shield)');
+        delete room.playerList[cutterId];
+
+        // Racers only: a ready halo ignores a non-player and a zombie (no grant, not spent).
+        clock += HALO.cooldownMs + 100; halo.update();
+        const proj = { isProjectile: true };
+        halo.handleHit(proj);
+        check(halo.netState === 100 && halo.rechargeReadyAt <= clock, 'a non-player does not claim the halo');
+        const zombie = { isPlayer: true, isZombie: true };
+        halo.handleHit(zombie);
+        check(zombie.guardShield == null && halo.netState === 100,
+            'a zombie does not claim the halo (boons skip the infection side)');
+    }
+
+    // ----------------------------------------------------------------------
+    console.log('\n[G] Second Wind Totem respawns a racer at the totem on first death');
+    {
+        const TOTEM = config.boons.secondWindTotem; // id 954
+        const kind = hazardKindById(TOTEM.id);
+        check(kind != null && kind.helpful === true, 'secondWindTotem resolves through the registry + is helpful (id ' + TOTEM.id + ')');
+        check(kind != null && kind.directional === false && kind.railed === false, 'secondWindTotem is non-directional + not railed');
+
+        const map = buildMap('totem', [{ id: TOTEM.id, x: PAD_X, y: ROWS[2] }], [2]);
+        const { room, bot } = bootRoom('boon-totem', map, RACER);
+        const totem = room.game.gameBoard.hazardList[Object.keys(room.game.gameBoard.hazardList)[0]];
+        check(totem != null && totem.id === TOTEM.id && totem.helpful === true,
+            'the totem spawned from the map entry into hazardList (helpful=true)');
+        check(totem.safe === true && totem.tracksTileSafety === true,
+            'the totem starts safe + opts into per-tick tile-safety tracking');
+        const packet = JSON.parse(compressor.newHazards(room.game.gameBoard.hazardList));
+        check(packet.length === 1 && packet[0][1] === TOTEM.id && packet[0][2] === PAD_X && packet[0][3] === ROWS[2],
+            'compressor.newHazards ships the totem as [ownerId, ' + TOTEM.id + ', x, y, ...]');
+
+        bot.currentState = config.stateMap.racing;
+
+        // Attune (drive over). The death path now knows to revive here.
+        bot.reset(config.stateMap.racing); bot.currentState = config.stateMap.racing;
+        let since = events.length;
+        check(bot.attuneSecondWind(totem) === true, 'driving over the totem attunes the racer');
+        check(bot.secondWind === totem, 'the racer is attuned to the totem');
+        check(emittedSince('secondWindAttuned', since), 'a secondWindAttuned event fired for the client cue');
+        check(bot.attuneSecondWind(totem) === false, 're-driving over the same totem does not re-fire');
+
+        // First death -> revive AT the totem (keep the notch, no playerDied).
+        bot.x = PAD_X - 300; bot.y = ROWS[1]; bot.velX = 200; bot.velY = -50;
+        bot.notches = 2;
+        since = events.length;
+        bot.killSelf('lava');
+        check(bot.alive === true, 'the first death revives the racer instead of ending the run');
+        check(bot.x === totem.x && bot.y === totem.y, 'the racer respawned AT the totem');
+        check(bot.velX === 0 && bot.velY === 0, 'respawn zeroes momentum');
+        check(bot.notches === 2, 'the racer kept their notch (no removeNotch on a revive)');
+        check(bot.invulnUntil > clock, 'the respawn grants a brief invuln grace');
+        check(bot.secondWind === null && bot.secondWindUsed === true, 'the second wind is spent (single-use this round)');
+        check(emittedSince('secondWind', since) && !emittedSince('playerDied', since),
+            'a secondWind event fired and NO playerDied was emitted');
+
+        // Single-use: a SECOND death this round ends the run normally.
+        check(bot.attuneSecondWind(totem) === false, 'a spent racer cannot re-attune this round');
+        since = events.length;
+        bot.killSelf('lava');
+        check(bot.alive === false, 'the second death this round ends the run');
+        check(emittedSince('playerDied', since), 'the second death emits playerDied as normal');
+
+        // Infection side excluded: an attuned racer who is infected is NOT revived.
+        bot.reset(config.stateMap.racing); bot.currentState = config.stateMap.racing;
+        bot.attuneSecondWind(totem);
+        bot.infected = true;
+        bot.killSelf(null);
+        check(bot.alive === false, 'an infected racer is not revived (boons skip the infection side)');
+
+        // Unsafe totem (collapse turned its tile to lava): the revive is skipped.
+        bot.reset(config.stateMap.racing); bot.currentState = config.stateMap.racing;
+        bot.attuneSecondWind(totem);
+        totem.safe = false;
+        bot.killSelf('lava');
+        check(bot.alive === false, 'a racer is not revived onto a totem the collapse turned to lava (safe=false)');
+        totem.safe = true;
+
+        // The board keeps the safe flag fresh each tick (tracksTileSafety) — a totem on
+        // solid ground reads safe after a live update pass.
+        room.update(DT); clock += config.serverTickSpeed; fireDueTimers();
+        check(totem.safe === true, 'updateHazards keeps a solid-ground totem flagged safe');
     }
 } finally {
     Date.now = realNow;

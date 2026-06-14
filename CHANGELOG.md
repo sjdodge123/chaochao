@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### Map editor
+
+- **Two new Boons: Guard Halo & Second Wind Totem.** Two helpful placeables that change how a fight or a fall plays out. Drive through a **Guard Halo** to pick up a **one-hit shield** — the next hit that would knock you around (a punch, a bumper, a bomb, an ice shot, a slice) is absorbed and the shield pops, leaving you put. You can only hold one at a time, and each halo recharges for a few seconds after someone grabs it (a filling ring shows when it's ready again), so racing a rival to it matters. A **Second Wind Totem** is a respawn anchor: drive over it to attune, and the **first time you'd die that round you respawn at the totem** instead of being knocked out — a one-time save that rewards a smart detour. (It won't save you from being turned into a zombie, and if the collapsing lava has already swallowed the totem there's nowhere safe to send you back to.) Authors place both from the **Boons** palette, and as with every boon, rival AI racers drive straight through them. Place either on **water** and it switches to a watery look so it still reads against the blue.
 
 ## v0.41.1 — 2026-06-14
 
