@@ -8,8 +8,8 @@
 //
 //   [A] Registry + handleHit (pure). The dashArrows kind resolves by id, is
 //       directional + helpful, builds a live boon (helpful flag set), and its
-//       handleHit imparts a velocity impulse along the pad's angle for a
-//       player/puck only.
+//       handleHit imparts a velocity impulse along the pad's angle for a RACER only
+//       — a non-player and a zombie are both ignored (boons skip the infection side).
 //   [B] Boost (full live tick loop). A kart coasting across a Dash Arrows pad is
 //       flung to top speed along the arrow (a no-pad control stays slow); the boon
 //       spawns into hazardList with helpful=true and ships on the wire as
@@ -25,8 +25,9 @@
 //       wastes a ready spring.
 //   [E] Slipstream (config.boons.slipstream). A directional wind corridor: a gentle
 //       constant push along its axis up to currentSpeed, capped (never overshoots,
-//       never brakes a faster kart), that fights a backward-driven kart. Players +
-//       pucks only; ships on the wire as [ownerId, id, x, y, angle].
+//       never brakes a faster kart), that fights a backward-driven kart. RACERS only —
+//       a puck (projectile physics wouldn't carry the impulse) and a zombie are both
+//       ignored; ships on the wire as [ownerId, id, x, y, angle].
 //
 // Harness mirrors bumper-wall-test.js: REAL server modules, room.update(dt) with
 // Date.now mocked to a per-tick clock, Math.random seeded, setTimeout queued.
@@ -141,7 +142,7 @@ try {
         check(Math.abs(kart.velX - DASH.boost) < 0.001 && Math.abs(kart.velY) < 0.001,
             'handleHit pushes a player along the arrow (+' + DASH.boost + 'x)');
 
-        // A 90deg pad pushes +y; a non-player/non-puck is ignored.
+        // A 90deg pad pushes +y; a non-player object is ignored.
         const up = kind.build({ x: 0, y: 0, angle: 90 }, 'boon-a2', 'sig-a');
         const kart2 = { isPlayer: true, velX: 0, velY: 0 };
         up.handleHit(kart2);
@@ -150,7 +151,11 @@ try {
         const before = { x: 0, y: 0 };
         const proj = { isProjectile: true, velX: 0, velY: 0 };
         boon.handleHit(proj);
-        check(proj.velX === 0 && proj.velY === 0, 'a non-player/non-puck object is not boosted');
+        check(proj.velX === 0 && proj.velY === 0, 'a non-player object is not boosted');
+        // A zombie is a player (isPlayer) but boons skip the infection side.
+        const zombie = { id: 'z-a', isPlayer: true, isZombie: true, velX: 0, velY: 0 };
+        boon.handleHit(zombie);
+        check(zombie.velX === 0 && zombie.velY === 0, 'a zombie is not boosted (boons skip the infection side)');
         void before;
     }
 
@@ -297,6 +302,15 @@ try {
         check(spring.rechargeReadyAt === ready && spring.netState === 100,
             'a topped-up racer does not drain a ready spring');
 
+        // A drained ZOMBIE gets nothing and does NOT drain the ready spring (boons skip
+        // the infection side — no reset bite cooldown, no denying survivors the charge).
+        const zspring = { isPlayer: true, isZombie: true, stamina: 0, staminaExhausted: true,
+            overcharge: 0, exhaustLockUntil: 0, punchedTimer: null, punchWaitTime: config.playerPunchCooldown,
+            charging: false, rechargeFromSpring: bot.rechargeFromSpring };
+        spring.handleHit(zspring);
+        check(zspring.stamina === 0 && zspring.staminaExhausted === true && spring.rechargeReadyAt === ready,
+            'a zombie gets nothing and does not drain the spring');
+
         // A non-player object is ignored.
         const proj = { isProjectile: true, stamina: 0 };
         spring.handleHit(proj);
@@ -347,13 +361,17 @@ try {
         check(Math.abs(k4.velX - STREAM.currentSpeed) < 0.001,
             'the push never overshoots currentSpeed (caps at the remaining gap)');
 
-        // A non-player/non-puck is ignored; a puck IS carried.
+        // Racers only: a non-player, a puck (projectile physics wouldn't carry a raw
+        // velocity impulse), and a zombie are all ignored.
         const proj = { id: 'proj', isProjectile: true, velX: 0, velY: 0 };
         s.handleHit(proj);
-        check(proj.velX === 0 && proj.velY === 0, 'a non-player/non-puck object is not pushed');
+        check(proj.velX === 0 && proj.velY === 0, 'a non-player object is not pushed');
         const puck = { id: 'puck', isPuck: true, velX: 0, velY: 0, maxVelocity: config.playerMaxSpeed };
         s.handleHit(puck);
-        check(Math.abs(puck.velX - STREAM.push) < 0.001, 'a puck IS carried by the current');
+        check(puck.velX === 0 && puck.velY === 0, 'a puck is NOT pushed (projectile physics would not carry it)');
+        const zstream = { id: 'z-e', isPlayer: true, isZombie: true, velX: 0, velY: 0, maxVelocity: config.playerMaxSpeed };
+        s.handleHit(zstream);
+        check(zstream.velX === 0 && zstream.velY === 0, 'a zombie is not pushed (boons skip the infection side)');
 
         // Wire: a slipstream ships as [ownerId, id, x, y, angle].
         const map = buildMap('stream', [{ id: STREAM.id, x: PAD_X, y: ROWS[2], angle: 0 }], [2]);
