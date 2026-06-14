@@ -4354,11 +4354,15 @@ function computeWorldViewTarget(dt) {
     // priority over the other racing camera tweaks. Solo-local only (set in the handler)
     // so it never yanks a shared co-op camera off a still-racing partner.
     if (secondWindCam != null) {
-        var swT = (Date.now() - secondWindCam.startedAt) / Math.max(1, secondWindCam.ms);
-        if (swT >= 1) {
+        var swElapsed = Date.now() - secondWindCam.startedAt;
+        // Safety release: the revive event normally clears this; if it's lost, don't
+        // strand the camera. Hold a beat past the pan so it doesn't snap before respawn.
+        if (swElapsed > secondWindCam.ms + 2500) {
             secondWindCam = null;
         } else {
-            var swE = smoothstep(swT < 0 ? 0 : swT);
+            // Ease to the flag over the delay, then HOLD there (clamped) until the
+            // revive event releases — so the camera is already on the flag as you pop in.
+            var swE = smoothstep(Math.max(0, Math.min(1, swElapsed / Math.max(1, secondWindCam.ms))));
             var swcx = secondWindCam.fromX + (secondWindCam.toX - secondWindCam.fromX) * swE;
             var swcy = secondWindCam.fromY + (secondWindCam.toY - secondWindCam.fromY) * swE;
             return clampViewToWorld(swcx, swcy, racingScale);
@@ -6192,7 +6196,9 @@ function checkDrawPlayer(player, dt) {
             drawSwimRipple(player);
         }
     }
-    if (player.alive == false) {
+    // Dead — or in the Second Wind death-beat (frozen, playing the standard death
+    // animation before the respawn): don't draw the live kart, just the death skull.
+    if (player.alive == false || player.secondWindDown) {
         drawDeathMessage(player);
         return;
     }
@@ -11083,16 +11089,18 @@ function secondWindClothColor(onWater) {
 function drawSecondWindTotem(h) {
     if (h == null || h.x == null) { return; }
     var consumed = (h.state === 0); // wire netState mirror: 0 = lava-consumed
-    if (consumed) { drawFlagShape(h.x, h.y, "#000", 0, true); return; }
+    if (consumed) { h._claimColor = null; drawFlagShape(h.x, h.y, "#000", 0, true); return; }
     var onWater = boonOnWater(h.x, h.y);
-    if (h._fb == null) { h._fb = { bend: 0, vel: 0, t: 0, overlap: {}, claim: null }; }
+    if (h._fb == null) { h._fb = { bend: 0, vel: 0, t: 0, overlap: {} }; }
     var fb = h._fb;
     var now = Date.now();
     var dt = fb.t ? Math.min(0.05, (now - fb.t) / 1000) : 0;
     fb.t = now;
-    // Proximity: any kart entering the flag bumps the pennant; a LOCAL kart also claims
-    // the colour (last local toucher wins, the co-op case). Same reach as the server
-    // hitbox (radius + a kart radius) so the bump fires when you visibly touch it.
+    // Proximity: any kart entering the flag bumps the pennant; a LOCAL kart re-anchors
+    // here (secondWindClaimByPlayer[id] = this flag), which is what tints the cloth below.
+    // Same reach as the server hitbox (radius + a kart radius) so it fires on visible
+    // contact. The claim is per-flag-INSTANCE (h.ownerId), so driving to a new flag
+    // automatically drops the colour from the old one (it no longer matches any claim).
     if (typeof playerList !== "undefined" && playerList != null) {
         var reach = config.boons.secondWindTotem.radius + (config.playerBaseRadius || 7.5);
         for (var pid in playerList) {
@@ -11105,18 +11113,32 @@ function drawSecondWindTotem(h) {
                 var spd = Math.min(1, Math.abs(vx) / 250);
                 fb.vel += (vx >= 0 ? 1 : -1) * (120 + spd * 120); // kick the pennant
             }
-            if (over && typeof isLocalId === "function" && isLocalId(pid) && p.color != null) {
-                fb.claim = p.color;
+            if (over && typeof isLocalId === "function" && isLocalId(pid) && p.color != null
+                && typeof secondWindClaimByPlayer !== "undefined") {
+                secondWindClaimByPlayer[pid] = h.ownerId;
             }
             fb.overlap[pid] = over;
         }
     }
+    // Cloth colour: a LOCAL player whose active anchor is THIS flag → their colour;
+    // otherwise neutral. (Only your active flag wears your colour — re-anchoring repaints
+    // the old one neutral.) Cached on the hazard for the recap snapshot.
+    var claimColor = null;
+    if (typeof secondWindClaimByPlayer !== "undefined") {
+        for (var lpid in secondWindClaimByPlayer) {
+            if (secondWindClaimByPlayer[lpid] === h.ownerId
+                && playerList[lpid] != null && playerList[lpid].color != null) {
+                claimColor = playerList[lpid].color; // co-op: last local match wins
+            }
+        }
+    }
+    h._claimColor = claimColor;
     // Rubber-band: a lightly-damped spring eases the lean back to rest (with overshoot).
     fb.vel += (-320 * fb.bend - 14 * fb.vel) * dt;
     fb.bend += fb.vel * dt;
     if (Math.abs(fb.bend) < 0.04 && Math.abs(fb.vel) < 0.04) { fb.bend = 0; fb.vel = 0; }
     var wave = Math.sin(now / 420) * 1.4; // idle flutter
-    var cloth = fb.claim != null ? fb.claim : secondWindClothColor(onWater);
+    var cloth = claimColor != null ? claimColor : secondWindClothColor(onWater);
     drawFlagShape(h.x, h.y, cloth, fb.bend + wave, false);
 }
 

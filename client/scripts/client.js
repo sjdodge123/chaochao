@@ -922,8 +922,10 @@ function registerConnectionHandlers(server) {
 		// the door right after bunkerStart armed it (so the door never shows).
 		if (typeof bunkerFX !== "undefined") { bunkerFX = null; }
 		// Second Wind camera pan can't bleed across a map swap (a pending death-beat from
-		// the prior round must never hijack the new round's camera).
+		// the prior round must never hijack the new round's camera). Flag claims reset too
+		// (you've attuned to nothing on the new map yet).
 		if (typeof secondWindCam !== "undefined") { secondWindCam = null; }
+		if (typeof secondWindClaimByPlayer !== "undefined") { secondWindClaimByPlayer = {}; }
 		// Heatwave reveal state resets synchronously too (same microtask gotcha as
 		// bunkerFX) so a prior round's reveal can never bleed across the map swap.
 		if (typeof heatwaveFX !== "undefined") { heatwaveFX = null; heatwaveScorch = []; heatwaveFlashes = []; }
@@ -2328,8 +2330,29 @@ function registerEffectHandlers(server) {
 	// couch co-op screen one player's death must not yank the shared camera off a
 	// partner who's still racing, so we only arm it when there's a single local player.
 	server.on("secondWindPending", function (payload) {
-		var col = (config.boons != null && config.boons.secondWindTotem != null) ? config.boons.secondWindTotem.color : "#CBD2DC";
-		spawnTriggerPulse(payload.fromX, payload.fromY, col);
+		// Play the STANDARD death animation at the spot you fell (kart vanishes into the
+		// sinking corpse on lava, the skull marker for any death), then the revive lands
+		// later. The kart is server-side still alive (frozen) for the beat, so we drive
+		// the visual with a client-only `secondWindDown` flag (checkDrawPlayer skips the
+		// live kart while it's set) — NOT player.alive, so nothing treats it as a real
+		// elimination. Cleared on the secondWind (revive) event.
+		var p = playerList[payload.id];
+		if (p != null) {
+			p.secondWindDown = true;
+			p.recapState = RECAP_DIED;
+			p.onFire = 0;
+			p.deathMessage = '💀';
+			p.deathX = payload.fromX;
+			p.deathY = payload.fromY;
+			p.deathAt = Date.now();
+			var byLava = (payload.cause === "lava");
+			if (byLava && typeof spawnSinkingCorpse === "function") {
+				spawnSinkingCorpse(p);
+			}
+		}
+		playSound(playerDiedSound);
+		// Local + solo: slow-pan the camera from the death spot to the flag over the
+		// delay (never on a shared co-op screen — see the multi-local guard).
 		if (typeof isLocalId === "function" && isLocalId(payload.id)
 			&& (typeof localPlayers === "undefined" || localPlayers == null || localPlayers.length <= 1)) {
 			secondWindCam = {
@@ -2344,7 +2367,26 @@ function registerEffectHandlers(server) {
 	// respawn position itself arrives via gameUpdates. Tint with the revived kart's
 	// colour so it reads as that player's save.
 	server.on("secondWind", function (payload) {
+		// Revive landed: end the death-beat visual (kart draws again, now at the flag) and
+		// release the camera pan back to the normal follow.
 		var p = playerList[payload.id];
+		if (p != null) {
+			p.secondWindDown = false;
+			p.recapState = RECAP_ALIVE;
+			p.deathMessage = null;
+			p.deathX = null;
+			p.deathY = null;
+			p.deathAt = null;
+			// Snap the render position to the flag so the reappearing kart doesn't
+			// smooth-slide across the map from the (frozen) death spot to here.
+			if (payload.x != null && payload.y != null) {
+				p.x = p.tx = payload.x;
+				p.y = p.ty = payload.y;
+			}
+		}
+		if (typeof secondWindCam !== "undefined" && secondWindCam != null && isLocalId(payload.id)) {
+			secondWindCam = null;
+		}
 		var col = (p != null && p.color != null) ? p.color
 			: ((config.boons != null && config.boons.secondWindTotem != null) ? config.boons.secondWindTotem.color : "#CBD2DC");
 		spawnTriggerPulse(payload.x, payload.y, col);

@@ -47,6 +47,11 @@ var server = null,
     // { fromX, fromY, toX, toY, ms, startedAt }. Set by the secondWindPending handler
     // (local + solo only), cleared when the pan completes or on a new round.
     secondWindCam = null,
+    // Second Wind flag claim: localPlayerId -> the flag (hazard ownerId) that local
+    // player is CURRENTLY anchored to. A flag draws in a local player's colour only
+    // while it's that player's active anchor, so re-anchoring to a new flag repaints the
+    // old one neutral (matches the server's single moving checkpoint). Reset each round.
+    secondWindClaimByPlayer = {},
     // Per-player smoothed look-ahead vectors keyed by player id (see
     // computeFocusedView). Smoothing the lead itself keeps steering wiggle,
     // punches and bounces from snapping the camera; cleared whenever the

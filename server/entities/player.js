@@ -861,7 +861,8 @@ class Player extends Circle {
 			id: this.id,
 			fromX: this.secondWindDeathX, fromY: this.secondWindDeathY,
 			toX: this.secondWind.x, toY: this.secondWind.y,
-			ms: delay
+			ms: delay,
+			cause: this.secondWindDeathCause // so the client plays the right death animation
 		});
 	}
 	// Death-beat over (called from Player.update): revive at the flag if it's still a
