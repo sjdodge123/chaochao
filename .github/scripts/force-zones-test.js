@@ -8,17 +8,19 @@
 // every tick a kart overlaps the zone (the Dash Arrows boon's continuous-contact
 // trick), so it reads as a steady wind / pull, not a bonk.
 //
-//   [A] Gust Fan (pure). A centre-anchored rotated rect; handleHit pushes the
-//       victim's velocity ALONG the wind by a fixed increment each call; outside
-//       karts / protected karts / pucks are handled correctly.
-//   [B] Vortex Well (pure). A circular pull; handleHit pulls the victim toward the
-//       core with strength ramping rim->core (zero past the rim); protected karts
-//       skipped.
+//   [A] Gust Fan (pure). A centre-anchored rotated rect; applyForce pushes the
+//       victim's velocity ALONG the wind by a fixed increment when inside the zone;
+//       outside / protected / finished karts are skipped.
+//   [B] Vortex Well (pure). A circular pull with a CALM-EYE profile (zero at the
+//       dead centre AND the rim, peak in the mid-ring); applyForce pulls inward;
+//       protected karts skipped; nothing past the rim.
 //   [C] Wire (compressor). Both are static, so the per-tick row stays 3 fields
 //       (no streamAngle / netState); newHazards carries the gust's wind angle.
-//   [D] Live tick loop. The hazards spawn from map entries; a parked kart drifts
-//       downwind through the gust, a parked kart is sucked toward the well, and a
-//       fast kart shoots through the well instead of being trapped.
+//   [D] Live tick loop. The hazards spawn from map entries; force is applied ONCE
+//       per tick by gameBoard.updateHazards (not 2x via handleHit). A parked kart
+//       drifts downwind through the gust; a parked kart is drawn toward the well;
+//       and — the key playability guarantee — a kart flooring outward from the
+//       dead centre can drive its way out (the well is not a roach motel).
 
 const path = require('path');
 const repoRoot = path.join(__dirname, '..', '..');
@@ -123,34 +125,31 @@ try {
         check(Math.abs(g.windX) < 1e-9 && Math.abs(g.windY - 1) < 1e-9, 'wind vector points along angle (+y here)');
         check(g.vertices.length === 4, 'is a rotated rect (4 corners)');
 
-        // A kart anywhere in the zone gets the SAME steady push along the wind.
+        check(g.forceZone === true, 'flags forceZone (gameBoard applies the force once/tick, not via handleHit)');
+        check(g.handleHit({ isPlayer: true, x: 500, y: 400, velX: 0, velY: 0 }) === undefined, 'handleHit is a no-op (force is not applied on contact)');
+
+        // A kart inside the zone gets the steady push along the wind.
         const p = { isPlayer: true, alive: true, reachedGoal: false, x: 500, y: 400, velX: 0, velY: 0 };
-        g.handleHit(p);
-        check(Math.abs(p.velX) < 1e-9 && Math.abs(p.velY - GF.force) < 1e-9, 'pushes the kart downwind by exactly force per tick');
-        g.handleHit(p);
-        check(Math.abs(p.velY - 2 * GF.force) < 1e-9, 'the push accumulates every overlap tick (continuous force)');
+        g.applyForce(p);
+        check(Math.abs(p.velX) < 1e-9 && Math.abs(p.velY - GF.force) < 1e-9, 'pushes a kart inside the zone downwind by exactly force per tick');
+        g.applyForce(p);
+        check(Math.abs(p.velY - 2 * GF.force) < 1e-9, 'each tick accumulates (continuous force)');
 
-        // Protected / star-power karts are immune (same policy as explosion force).
+        // A kart OUTSIDE the rotated rect gets nothing.
+        const outside = { isPlayer: true, alive: true, reachedGoal: false, x: 500, y: 400 + GF.height, velX: 0, velY: 0 };
+        check(g.applyForce(outside) === false && outside.velY === 0, 'a kart outside the zone (across-wind beyond half-height) is not pushed');
+
+        // Protected / star-power / finished karts are immune (same policy as explosion force).
         const prot = { isPlayer: true, alive: true, reachedGoal: false, x: 500, y: 400, velX: 0, velY: 0, isProtected: () => true };
-        g.handleHit(prot);
-        check(prot.velY === 0, 'a protected (spawn-shield/invuln) kart is not pushed');
+        check(g.applyForce(prot) === false && prot.velY === 0, 'a protected (spawn-shield/invuln) kart is not pushed');
         const star = { isPlayer: true, alive: true, reachedGoal: false, x: 500, y: 400, velX: 0, velY: 0, hasStarPower: () => true };
-        g.handleHit(star);
-        check(star.velY === 0, 'a Star Power kart is not pushed');
-
-        // A finished/dead kart is left alone.
+        check(g.applyForce(star) === false && star.velY === 0, 'a Star Power kart is not pushed');
         const done = { isPlayer: true, alive: true, reachedGoal: true, x: 500, y: 400, velX: 0, velY: 0 };
-        g.handleHit(done);
-        check(done.velY === 0, 'a finished kart is not pushed');
-
-        // A puck (hockey) rides the wind too.
-        const puck = { isPuck: true, x: 500, y: 400, velX: 0, velY: 0 };
-        g.handleHit(puck);
-        check(Math.abs(puck.velY - GF.force) < 1e-9, 'a puck is carried by the wind');
+        check(g.applyForce(done) === false && done.velY === 0, 'a finished kart is not pushed');
 
         // Regression (review #1): a non-finite angle is sanitized BEFORE the Rect
-        // builds its corners, so the zone still has finite vertices (collision-live)
-        // rather than NaN corners that silently never overlap.
+        // builds its corners, so the zone still has finite vertices rather than NaN
+        // corners that silently never register.
         const bad = new GustFan(500, 400, GF.width, GF.height, NaN, GF.color, 'g-nan', 'sig-a');
         check(bad.angle === 0 && bad.vertices.every(v => Number.isFinite(v.x) && Number.isFinite(v.y)),
             'a non-finite wind angle falls back to 0 with finite rotated corners');
@@ -161,37 +160,34 @@ try {
     {
         const v = new VortexWell(500, 400, VW.radius, VW.color, 'v-b', 'sig-b');
         check(v.moveable === false, 'is stationary (not moveable)');
+        check(v.forceZone === true, 'flags forceZone (gameBoard applies the pull once/tick)');
         check(v.isVortex === true, 'flags isVortex (AI routes around the core)');
-        check(v.radius === VW.radius, 'pull reach is the configured radius');
+        check(v.handleHit({ isPlayer: true, x: 550, y: 400, velX: 0, velY: 0 }) === undefined, 'handleHit is a no-op (pull is not applied on contact)');
 
         // A kart to the RIGHT of the core is pulled LEFT (toward the core).
         const near = { isPlayer: true, alive: true, reachedGoal: false, x: 550, y: 400, velX: 0, velY: 0 };
-        v.handleHit(near);
+        v.applyForce(near);
         check(near.velX < 0 && Math.abs(near.velY) < 1e-9, 'pulls a kart toward the core (inward)');
 
-        // Strength ramps rim->core: a kart deep in pulls HARDER than one near the rim.
-        const deep = { isPlayer: true, alive: true, reachedGoal: false, x: 530, y: 400, velX: 0, velY: 0 };  // dist 30
-        const rim = { isPlayer: true, alive: true, reachedGoal: false, x: 500 + VW.radius - 10, y: 400, velX: 0, velY: 0 }; // dist ~140
-        v.handleHit(deep); v.handleHit(rim);
-        check(Math.abs(deep.velX) > Math.abs(rim.velX), 'the pull is stronger near the core than near the rim');
+        // Calm-eye profile: the pull peaks in the MID-RING and is WEAKER both near the
+        // dead centre and near the rim — that's what makes the centre escapable.
+        function pullMag(dist) {
+            const o = { isPlayer: true, alive: true, reachedGoal: false, x: 500 + dist, y: 400, velX: 0, velY: 0 };
+            v.applyForce(o); return Math.abs(o.velX);
+        }
+        const mid = pullMag(VW.radius * 0.5);   // peak
+        const nearCentre = pullMag(VW.radius * 0.12);
+        const nearRim = pullMag(VW.radius * 0.9);
+        check(mid > nearCentre && mid > nearRim, 'the pull peaks in the mid-ring (calm eye at the centre, calm at the rim)');
+        check(nearCentre < mid * 0.6, 'the dead centre is a calm eye (much weaker pull than the ring)');
 
         // No pull past the rim.
         const out = { isPlayer: true, alive: true, reachedGoal: false, x: 500 + VW.radius + 30, y: 400, velX: 0, velY: 0 };
-        v.handleHit(out);
-        check(out.velX === 0 && out.velY === 0, 'a kart outside the pull radius is untouched');
+        check(v.applyForce(out) === false && out.velX === 0 && out.velY === 0, 'a kart outside the pull radius is untouched');
 
         // Protected kart immune.
         const prot = { isPlayer: true, alive: true, reachedGoal: false, x: 550, y: 400, velX: 0, velY: 0, isProtected: () => true };
-        v.handleHit(prot);
-        check(prot.velX === 0, 'a protected kart is not pulled');
-
-        // Regression (review #2): the pull PLATEAUS inside the (drawn) core radius —
-        // a kart at half the core distance gets the same force as one at the core
-        // edge, not an ever-spiking one as dist->0 (matches the art, no jitter trap).
-        const atCore = { isPlayer: true, alive: true, reachedGoal: false, x: 500 + VW.coreRadius, y: 400, velX: 0, velY: 0 };
-        const inCore = { isPlayer: true, alive: true, reachedGoal: false, x: 500 + VW.coreRadius / 2, y: 400, velX: 0, velY: 0 };
-        v.handleHit(atCore); v.handleHit(inCore);
-        check(Math.abs(Math.abs(inCore.velX) - Math.abs(atCore.velX)) < 1e-9, 'the pull is flat (plateaued) inside the core radius');
+        check(v.applyForce(prot) === false && prot.velX === 0, 'a protected kart is not pulled');
     }
 
     // ----------------------------------------------------------------------
@@ -222,48 +218,58 @@ try {
         const ghz = gRoom.game.gameBoard.hazardList[gIds[0]];
         check(ghz != null && ghz.id === GF.id && ghz.isGust === true, 'the spawned hazard is a stationary GustFan');
 
-        // Park the kart at the gust centre, no input (human, braking) — let the wind work.
+        // Park the kart at the gust centre, no input (human, braking) — let the wind
+        // work. Force is applied once/tick by gameBoard.updateHazards, not 2x.
         gBot.isAI = false;
         gBot.x = gBot.newX = GX; gBot.y = gBot.newY = GY; gBot.velX = 0; gBot.velY = 0;
         const startY = gBot.y;
-        for (let f = 0; f < 14; f++) { gRoom.update(DT); clock += config.serverTickSpeed; fireDueTimers(); }
+        for (let f = 0; f < 20; f++) {
+            gBot.moveForward = gBot.moveBackward = gBot.turnLeft = gBot.turnRight = false;
+            gRoom.update(DT); clock += config.serverTickSpeed; fireDueTimers();
+        }
         check(gBot.velY > 0, 'the wind built a downwind velocity on the parked kart (velY ' + gBot.velY.toFixed(1) + ')');
         check(gBot.y > startY + 5, 'the parked kart drifted downwind (dy ' + (gBot.y - startY).toFixed(1) + 'px)');
         check(Math.abs(gBot.x - GX) < Math.abs(gBot.y - startY), 'the drift is along the wind axis, not across it');
+        // Single-application guarantee: one tick adds exactly `force` to velY, not 2x.
+        const gBot2 = gBot; gBot2.x = gBot2.newX = GX; gBot2.y = gBot2.newY = GY; gBot2.velX = 0; gBot2.velY = 0;
+        gBot2.moveForward = gBot2.moveBackward = gBot2.turnLeft = gBot2.turnRight = false;
+        gRoom.update(DT); clock += config.serverTickSpeed; fireDueTimers();
+        check(Math.abs(gBot2.velY - GF.force) < 0.5, 'exactly one wind push per tick (velY ' + gBot2.velY.toFixed(1) + ' ~= force ' + GF.force + ', not doubled)');
 
-        // --- Vortex: a parked kart is sucked toward the core; a fast kart shoots through ---
-        const VX = COLS[4], VY = ROWS[1];
+        // --- Vortex: a parked kart is drawn inward; a stopped kart in the centre can
+        //     drive its way out (the key playability guarantee) ---
+        const VX = COLS[2], VY = ROWS[1];   // col 2 leaves room to drive out toward the goal
         const vmap = buildMap('vortex', [{ id: VW.id, x: VX, y: VY }], [0, 1, 2]);
         const { room: vRoom, bot: vBot } = bootRoom('fz-vortex', vmap, SOAK);
-        const vIds = Object.keys(vRoom.game.gameBoard.hazardList);
-        const vhz = vRoom.game.gameBoard.hazardList[vIds[0]];
+        const vhz = vRoom.game.gameBoard.hazardList[Object.keys(vRoom.game.gameBoard.hazardList)[0]];
         check(vhz != null && vhz.id === VW.id && vhz.isVortex === true, 'the vortex well spawned as a stationary VortexWell');
 
-        // Parked kart offset from the core, no input — it should be pulled inward.
+        // Parked kart in the mid-ring, no input — drawn toward the core.
         vBot.isAI = false;
-        const PARK = 90; // px right of the core, inside the pull radius
+        const PARK = VW.radius * 0.5;
         vBot.x = vBot.newX = VX + PARK; vBot.y = vBot.newY = VY; vBot.velX = 0; vBot.velY = 0;
         const parkStartDist = Math.abs(vBot.x - VX);
-        for (let f = 0; f < 16; f++) { vRoom.update(DT); clock += config.serverTickSpeed; fireDueTimers(); }
-        const parkEndDist = Math.hypot(vBot.x - VX, vBot.y - VY);
-        check(parkEndDist < parkStartDist - 5, 'the parked kart was pulled toward the well (dist ' + parkStartDist.toFixed(0) + '->' + parkEndDist.toFixed(0) + 'px)');
-
-        // Fast kart crossing tangentially: it should NOT be trapped at the core —
-        // it ends up clearly farther from the core than the parked kart did.
-        const { room: v2Room, bot: v2Bot } = bootRoom('fz-vortex2', vmap, SOAK);
-        const v2hz = v2Room.game.gameBoard.hazardList[Object.keys(v2Room.game.gameBoard.hazardList)[0]];
-        v2Bot.isAI = false;
-        // Enter the rim from the left, moving fast across the zone (+x).
-        v2Bot.x = v2Bot.newX = VX - VW.radius + 8; v2Bot.y = v2Bot.newY = VY; v2Bot.velX = 480; v2Bot.velY = 0;
-        let maxDist = 0;
-        for (let f = 0; f < 16; f++) {
-            v2Bot.velX = Math.max(v2Bot.velX, 200); // keep the racer committed across (human throttle proxy)
-            v2Room.update(DT); clock += config.serverTickSpeed; fireDueTimers();
-            maxDist = Math.max(maxDist, Math.hypot(v2Bot.x - VX, v2Bot.y - VY));
-            if (!v2Bot.alive || v2Bot.reachedGoal) { break; }
+        for (let f = 0; f < 40; f++) {
+            vBot.moveForward = vBot.moveBackward = vBot.turnLeft = vBot.turnRight = false;
+            vRoom.update(DT); clock += config.serverTickSpeed; fireDueTimers();
         }
-        check(maxDist > parkEndDist, 'a fast kart carried its speed through the well instead of being trapped (reached ' + maxDist.toFixed(0) + 'px out)');
-        void v2hz; void v2Room;
+        const parkEndDist = Math.hypot(vBot.x - VX, vBot.y - VY);
+        check(parkEndDist < parkStartDist - 5, 'a parked kart in the ring is drawn toward the core (dist ' + parkStartDist.toFixed(0) + '->' + parkEndDist.toFixed(0) + 'px)');
+
+        // ESCAPE REGRESSION: a kart stopped dead in the centre, flooring straight out,
+        // must be able to drive clear of the pull radius (not a roach motel). This is
+        // the case the original tuning failed — the well trapped you forever.
+        const { room: eRoom, bot: eBot } = bootRoom('fz-escape', vmap, SOAK);
+        eBot.isAI = false;
+        eBot.x = eBot.newX = VX; eBot.y = eBot.newY = VY; eBot.velX = 0; eBot.velY = 0;
+        let escaped = false, escTick = -1;
+        for (let f = 0; f < 240; f++) { // up to 8s
+            eBot.moveForward = false; eBot.moveBackward = false; eBot.turnLeft = false; eBot.turnRight = true; // floor +x
+            eRoom.update(DT); clock += config.serverTickSpeed; fireDueTimers();
+            if (!eBot.alive || eBot.reachedGoal) { escaped = true; escTick = f; break; }
+            if (Math.hypot(eBot.x - VX, eBot.y - VY) > VW.radius) { escaped = true; escTick = f; break; }
+        }
+        check(escaped, 'a kart flooring outward from the dead centre drives clear of the well' + (escTick >= 0 ? ' (in ' + (escTick * DT).toFixed(1) + 's)' : ' — STILL TRAPPED after 8s'));
     }
 } finally {
     Date.now = realNow;

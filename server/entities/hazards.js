@@ -327,18 +327,18 @@ class Mine extends Hazard {
 }
 
 // A gust fan: a rectangular WIND ZONE that applies a steady directional force to
-// any kart (or puck) inside it — the framework's first "force field" hazard, a
-// constant per-tick push rather than the one-shot Punch the bumpers use. The push
-// is applied in handleHit, which the collision system (engine.narrowBase) calls
-// every tick a kart overlaps the zone — the same continuous-contact trick the Dash
-// Arrows boon uses to turn an overlap into a sustained effect. The map entry's
-// (x,y) is the CENTRE and `angle` the wind direction; `width` runs ALONG the wind,
-// `height` ACROSS it. Crosswind over a lava bridge is a steering test, a tailwind a
-// committal speed lane, a headwind a shortcut toll. Composes with ice (lower drag
-// => more drift). Modelled as a rotated Rect (like the bumper wall) so a kart's
-// circle collides with the true rotated zone; getVertices/getExtents mirror
-// BumperWall's overrides because the base Rect treats width/height as far-corner
-// coords.
+// any kart inside it — the framework's first "force field" hazard, a constant
+// per-tick push rather than the one-shot Punch the bumpers use. The force is
+// applied ONCE PER TICK by gameBoard.updateHazards (a dedicated force-zone pass
+// over the player list), NOT via handleHit — the collision system calls handleHit
+// up to twice per overlapping pair, which would double (and non-deterministically
+// vary) the push. The map entry's (x,y) is the CENTRE and `angle` the wind
+// direction; `width` runs ALONG the wind, `height` ACROSS it. Crosswind over a
+// lava bridge is a steering test, a tailwind a committal speed lane, a headwind a
+// shortcut toll. Composes with ice (lower drag => more drift). Modelled as a
+// rotated Rect (like the bumper wall) so the editor/AI can read its true rotated
+// footprint; getVertices/getExtents mirror BumperWall's overrides because the base
+// Rect treats width/height as far-corner coords.
 class GustFan extends Rect {
 	constructor(x, y, width, height, angle, color, ownerId, roomSig) {
 		// Sanitize the wind direction BEFORE super(): the base Rect constructor calls
@@ -352,12 +352,15 @@ class GustFan extends Rect {
 		this.ownerId = ownerId;
 		this.roomSig = roomSig;
 		this.moveable = false;
+		this.forceZone = true;     // gameBoard.updateHazards applies applyForce once/tick
 		this.isGust = true;        // AI biases steering against the wind inside the zone
 		this.id = c.hazards.gustFan.id;
 		this.speed = 0;
 		var rad = this.angle * (Math.PI / 180);
 		this.windX = Math.cos(rad); // unit wind vector (the force direction)
 		this.windY = Math.sin(rad);
+		this.hw = this.width / 2;   // half-extents (containment test)
+		this.hh = this.height / 2;
 		this.force = c.hazards.gustFan.force;
 	}
 	// Centre-anchored rotated rectangle: half-extents along the wind (width) and
@@ -391,36 +394,48 @@ class GustFan extends Rect {
 	update() {
 		if (this.alive == false) { return; }
 	}
-	// Force zone: every overlap tick, nudge the victim's velocity along the wind by
-	// a fixed increment (NOT dt-scaled — the tick rate is fixed, matching the Dash
-	// Arrows boon). Drag turns the steady push into a bounded drift; the engine's
-	// maxVelocity clamp caps absolute speed, so a tailwind can't launch anyone.
-	// Skips protected/star-power karts (same policy as gameBoard.applyExplosionForce)
-	// so a spawn-shielded or invulnerable player isn't shoved into lava.
-	handleHit(object) {
-		if (!object.isPlayer && !object.isPuck) { return; }
-		if (object.isPlayer) {
-			if (object.alive === false || object.reachedGoal) { return; }
-			if ((object.isProtected && object.isProtected()) || (object.hasStarPower && object.hasStarPower())) { return; }
-		}
+	// Force zone (called once per tick from gameBoard.updateHazards for EVERY player;
+	// it self-filters by containment). While a kart is inside the rotated rect, nudge
+	// its velocity along the wind by a fixed increment (NOT dt-scaled — the tick rate
+	// is fixed, matching the Dash Arrows boon). Drag turns the steady push into a
+	// bounded drift; the engine's maxVelocity clamp caps absolute speed, so a tailwind
+	// can't launch anyone. Skips protected/star-power/finished/dead karts (same policy
+	// as gameBoard.applyExplosionForce) so a spawn-shielded player isn't shoved into
+	// lava. Returns true if the force was applied (for tests).
+	applyForce(object) {
+		if (!object.isPlayer || object.alive === false || object.reachedGoal) { return false; }
+		if ((object.isProtected && object.isProtected()) || (object.hasStarPower && object.hasStarPower())) { return false; }
+		var ox = object.newX != null ? object.newX : object.x;
+		var oy = object.newY != null ? object.newY : object.y;
+		var rx = ox - this.x, ry = oy - this.y;
+		var along = rx * this.windX + ry * this.windY;   // along the wind
+		var across = -rx * this.windY + ry * this.windX; // across the wind
+		if (Math.abs(along) > this.hw || Math.abs(across) > this.hh) { return false; } // outside the zone
 		object.velX += this.windX * this.force;
 		object.velY += this.windY * this.force;
+		return true;
 	}
+	handleHit(object) { } // force is applied in gameBoard.updateHazards, not on contact
 }
 
-// A vortex well: a circular PULL ZONE that drags any kart (or puck) inside its
-// radius toward the core — the anti-bumper. Like the gust fan it's a force field
-// (a constant per-tick pull applied in handleHit on every overlap tick), using the
-// same radial math as gameBoard.applyExplosionForce but INWARD and continuous
-// instead of an outward one-shot. The pull ramps from zero at the rim to full at
-// the core, so carrying speed lets you slingshot past while crawling gets you
-// sucked in; strong karts can still punch through. Often parked over lava or off
-// the racing line. The map entry's (x,y) is the core; `radius` the pull reach.
+// A vortex well: a circular PULL ZONE that drags karts toward the core — the
+// anti-bumper. A force field like the gust fan: a continuous inward pull applied
+// ONCE PER TICK by gameBoard.updateHazards (not handleHit — see GustFan). The pull
+// profile is a CALM EYE: zero at the dead centre, rising to a peak in a mid-ring,
+// falling back to zero at the rim (a parabola, peak `force` at half-radius). That
+// shape is what makes the well escapable instead of a roach motel — you build speed
+// in the quiet centre and punch out through the ring — while still drawing a
+// crawling kart inward and bending a fast kart's line (carry speed to slingshot
+// past). `force` is tuned below the kart's own thrust so driving always wins; the
+// danger is the well dragging you toward lava / off the racing line, not trapping
+// you. Often parked over lava or off-line. The map entry's (x,y) is the core;
+// `radius` the pull reach.
 class VortexWell extends Hazard {
 	constructor(x, y, radius, color, ownerId, roomSig) {
 		super(x, y, radius, color, ownerId, roomSig);
 		this.id = c.hazards.vortexWell.id;
 		this.moveable = false;      // stationary — no engine motion hook
+		this.forceZone = true;      // gameBoard.updateHazards applies applyForce once/tick
 		this.isVortex = true;       // AI routes around the core (aiController classifier)
 		this.coreRadius = c.hazards.vortexWell.coreRadius;
 		this.force = c.hazards.vortexWell.force;
@@ -428,32 +443,27 @@ class VortexWell extends Hazard {
 	update() {
 		if (this.alive == false) { return; }
 	}
-	// Force zone: pull the victim toward the core each overlap tick. Strength ramps
-	// linearly from 0 at the rim to `force` at the core (early-out at the dead
-	// centre to avoid a divide-by-zero and a jitter trap). Fixed per-tick increment
-	// (not dt-scaled), drag-bounded, maxVelocity-capped — same model as the gust
-	// fan. Skips protected/star-power karts like the gust fan and explosion force.
-	handleHit(object) {
-		if (!object.isPlayer && !object.isPuck) { return; }
-		if (object.isPlayer) {
-			if (object.alive === false || object.reachedGoal) { return; }
-			if ((object.isProtected && object.isProtected()) || (object.hasStarPower && object.hasStarPower())) { return; }
-		}
+	// Force zone (called once per tick from gameBoard.updateHazards for EVERY player;
+	// self-filters by distance). Pull the victim toward the core with the calm-eye
+	// parabola: strength = force·4·r·(1−r) where r = dist/radius (0 at centre & rim,
+	// peak `force` at r=0.5). Fixed per-tick increment (not dt-scaled), drag-bounded,
+	// maxVelocity-capped. Skips protected/star-power/finished/dead karts. Returns
+	// true if the pull was applied (for tests).
+	applyForce(object) {
+		if (!object.isPlayer || object.alive === false || object.reachedGoal) { return false; }
+		if ((object.isProtected && object.isProtected()) || (object.hasStarPower && object.hasStarPower())) { return false; }
 		var ox = object.newX != null ? object.newX : object.x;
 		var oy = object.newY != null ? object.newY : object.y;
 		var dx = this.x - ox, dy = this.y - oy;
 		var dist = Math.sqrt(dx * dx + dy * dy);
-		if (dist > this.radius) { return; }          // overlap fringe past the rim: no pull
-		if (dist < 0.0001) { return; }               // dead centre: nothing to pull toward
-		// Ramp strength rim->core, then PLATEAU inside the (drawn) core radius so the
-		// physics core matches the art and a kart oscillating at the centre gets a
-		// steady pull instead of a spiking one as dist->0.
-		var rampDist = dist < this.coreRadius ? this.coreRadius : dist;
-		var w = (this.radius - rampDist) / this.radius;  // 0 at rim -> max at the core
-		var pull = this.force * w;
+		if (dist > this.radius || dist < 0.0001) { return false; } // past the rim / dead centre: no pull
+		var r = dist / this.radius;
+		var pull = this.force * 4 * r * (1 - r);  // calm eye: 0 at centre & rim, peak at r=0.5
 		object.velX += (dx / dist) * pull;
 		object.velY += (dy / dist) * pull;
+		return true;
 	}
+	handleHit(object) { } // force is applied in gameBoard.updateHazards, not on contact
 }
 
 // --- hazard-kind registry ------------------------------------------------------
