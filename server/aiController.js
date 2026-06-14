@@ -380,13 +380,13 @@ function hazardRepulsion(bot, ctx, desiredX, desiredY, dt) {
             var cpw = closestOnSegment(bot.x, bot.y, h.ax, h.ay, h.bx, h.by);
             hx = cpw.x; hy = cpw.y;
         }
-        // A blink fence is a timed barrier: transparent while OPEN (drive straight
+        // A laser gate is a timed barrier: transparent while OPEN (drive straight
         // through), a wall to steer clear of once it's WARNING or SOLID. `blocking`
-        // (set in BlinkFence.update) folds warn+solid together so the bot starts
+        // (set in LaserGate.update) folds warn+solid together so the bot starts
         // clearing the beam a beat before it actually closes. Repel from the nearest
         // point on the beam line, like a wall — the generic radial field below does
         // the rest.
-        if (h.isFence) {
+        if (h.isLaserGate) {
             if (!h.blocking) { continue; }
             var cpf = closestOnSegment(bot.x, bot.y, h.ax, h.ay, h.bx, h.by);
             hx = cpf.x; hy = cpf.y;
@@ -2093,19 +2093,19 @@ function update(gameBoard, currentState, dt) {
             }
             continue;
         }
-        // A blink fence covers its whole centerline, but it's a TIMED gate — open on
+        // A laser gate covers its whole centerline, but it's a TIMED gate — open on
         // a published cycle — so price its cells at the mild TIMEABLE rail penalty
         // (there's a window to slip across), like a moving rail rather than a solid
         // wall. The live steering field (hazardRepulsion) holds the bot off only while
         // the beam is actually closing.
-        if (hz.isFence) {
-            var fenceMarginSq = RAIL_PENALTY_MARGIN * RAIL_PENALTY_MARGIN;
+        if (hz.isLaserGate) {
+            var gateMarginSq = RAIL_PENALTY_MARGIN * RAIL_PENALTY_MARGIN;
             for (var fi = 0; fi < map.cells.length; fi++) {
                 var fc = map.cells[fi];
                 if (!fc || !fc.site) { continue; }
                 var cpf2 = closestOnSegment(fc.site.x, fc.site.y, hz.ax, hz.ay, hz.bx, hz.by);
                 var fdx = fc.site.x - cpf2.x, fdy = fc.site.y - cpf2.y;
-                if (fdx * fdx + fdy * fdy < fenceMarginSq) {
+                if (fdx * fdx + fdy * fdy < gateMarginSq) {
                     if (railCells == null) { railCells = new Set(); }
                     railCells.add(fc.site.voronoiId);
                 }

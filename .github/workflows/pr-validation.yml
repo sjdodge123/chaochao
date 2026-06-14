@@ -217,8 +217,8 @@ jobs:
       - name: "Headless vortex-well test (force zone: calm-eye pull, once-per-tick, escape regression)"
         run: node .github/scripts/vortex-well-test.js
 
-      - name: "Headless blink-fence test (timed gate: phase machine, netState wire, bounce block-vs-pass)"
-        run: node .github/scripts/blink-fence-test.js
+      - name: "Headless laser-gate test (timed gate: phase machine, netState wire, bounce block-vs-pass)"
+        run: node .github/scripts/laser-gate-test.js
 
       - name: "Headless crusher test (rail slab: oscillation, rotated-rect contact, shove vs pinch-crush)"
         run: node .github/scripts/crusher-test.js

@@ -12,7 +12,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ### Map editor
 
-- **Two new placeables: Blink Fence & Crusher.** The Hazards palette gets two timing puzzles. A **Blink Fence** is a laser barrier strung between two pylons that blinks on a steady rhythm — it sits open, shimmers a warning, then snaps solid and blocks the lane, then opens again. While it's solid you bounce right off it (it won't kill you — but park one over lava and the shove sends a message), so read the beat and slip through on the off-beat. A **Crusher** is a heavy steel slab that slides back and forth across a corridor on a rail like a Thwomp: get clipped mid-swing and it shoves you aside, but get caught as it slams home against the wall and it crushes you flat. Authors place and rotate both from the editor; rival AI racers time the gaps and cross when the coast is clear.
+- **Two new placeables: Laser Gate & Crusher.** The Hazards palette gets two timing puzzles. A **Laser Gate** is a laser barrier strung between two pylons that blinks on a steady rhythm — it sits open, shimmers a warning, then snaps solid and blocks the lane, then opens again. While it's solid you bounce right off it (it won't kill you — but park one over lava and the shove sends a message), so read the beat and slip through on the off-beat. A **Crusher** is a heavy steel slab that slides back and forth across a corridor on a rail like a Thwomp: get clipped mid-swing and it shoves you aside, but get caught as it slams home against the wall and it crushes you flat. Authors place and rotate both from the editor; rival AI racers time the gaps and cross when the coast is clear.
 
 ## v0.40.2 — 2026-06-14
 

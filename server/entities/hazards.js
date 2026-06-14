@@ -5,10 +5,10 @@ var { Rect, Circle } = require('./shapes.js');
 var { Punch } = require('./punch.js');
 
 // --- shared rotated-rect + segment geometry -----------------------------------
-// One home for the math the rotated-rect hazards (bumper wall, blink fence, crusher)
+// One home for the math the rotated-rect hazards (bumper wall, laser gate, crusher)
 // would otherwise each re-implement.
 // Corners of a thin rect ANCHORED at (x,y), extending `width` along `angle` with
-// `height` thickness (the bumper-wall / blink-fence shape). The base Rect treats
+// `height` thickness (the bumper-wall / laser-gate shape). The base Rect treats
 // width/height as far-corner coords, which only works for an axis-aligned,
 // origin-anchored rect — hence the override.
 function anchoredRectVertices(x, y, width, height, angle) {
@@ -410,14 +410,14 @@ function vortexWellRadius(entry) {
 	return r;
 }
 
-// A blink fence: a laser barrier strung between two pylons that cycles on a
+// A laser gate: a laser barrier strung between two pylons that cycles on a
 // published rhythm — OPEN (passable) -> WARN (a shimmer telegraph, still passable)
 // -> SOLID (a wall you can't cross) -> back to OPEN. The framework's first TIMED
 // PASSABILITY GATE: collision turns on and off, so a kart only physically interacts
-// with it while it's solid. SOLID = a non-lethal BOUNCE (engine.bounceOffFence, the
+// with it while it's solid. SOLID = a non-lethal BOUNCE (engine.bounceOffSegment, the
 // rotated-segment cousin of bounceOffBoundry) rather than a lava-style burn: the
 // stated primitive is a passability gate, a bounce is recoverable, and a hidden-timing
-// DEATH from being shoved into a lit beam reads unfair — so the fence blocks, it
+// DEATH from being shoved into a lit beam reads unfair — so the gate blocks, it
 // doesn't kill (place it over/near lava if you want the danger). Directional (the
 // barrier runs along the pylon axis). A thin rotated Rect like the bumper wall (so the
 // kart collides with the BEAM, not a disc); the phase runs on a timer in update(dt)
@@ -425,19 +425,19 @@ function vortexWellRadius(entry) {
 // (warn|solid) is the AI's cue to hold off crossing; only SOLID actually collides.
 //
 // Phases (also the netState values): 0 open, 1 warn, 2 solid.
-var FENCE_OPEN = 0, FENCE_WARN = 1, FENCE_SOLID = 2;
-class BlinkFence extends Rect {
+var GATE_OPEN = 0, GATE_WARN = 1, GATE_SOLID = 2;
+class LaserGate extends Rect {
 	constructor(x, y, angle, ownerId, roomSig) {
-		super(x, y, c.hazards.blinkFence.width, c.hazards.blinkFence.height, angle, c.hazards.blinkFence.color);
+		super(x, y, c.hazards.laserGate.width, c.hazards.laserGate.height, angle, c.hazards.laserGate.color);
 		this.alive = true;
 		this.ownerId = ownerId;
 		this.roomSig = roomSig;
 		this.moveable = false;      // stationary — no engine motion hook
-		this.isFence = true;        // AI classifies the beam line (aiController)
-		this.id = c.hazards.blinkFence.id;
+		this.isLaserGate = true;        // AI classifies the beam line (aiController)
+		this.id = c.hazards.laserGate.id;
 		this.speed = 0;
-		this.phase = FENCE_OPEN;
-		this.netState = FENCE_OPEN; // shipped each tick (compressor.sendHazardUpdates)
+		this.phase = GATE_OPEN;
+		this.netState = GATE_OPEN; // shipped each tick (compressor.sendHazardUpdates)
 		this.blocking = false;      // warn|solid — AI steers clear (set in update)
 		this.timer = 0;             // seconds elapsed in the current phase
 		// Beam endpoints (anchor -> anchor + width along angle), consumed by handleHit
@@ -461,22 +461,22 @@ class BlinkFence extends Rect {
 	update(dt) {
 		if (this.alive === false) { return; }
 		this.timer += (dt || 0);
-		if (this.phase === FENCE_OPEN) {
-			if (this.timer >= c.hazards.blinkFence.openMs / 1000) { this.phase = FENCE_WARN; this.timer = 0; }
-		} else if (this.phase === FENCE_WARN) {
-			if (this.timer >= c.hazards.blinkFence.warnMs / 1000) { this.phase = FENCE_SOLID; this.timer = 0; }
-		} else { // FENCE_SOLID
-			if (this.timer >= c.hazards.blinkFence.solidMs / 1000) { this.phase = FENCE_OPEN; this.timer = 0; }
+		if (this.phase === GATE_OPEN) {
+			if (this.timer >= c.hazards.laserGate.openMs / 1000) { this.phase = GATE_WARN; this.timer = 0; }
+		} else if (this.phase === GATE_WARN) {
+			if (this.timer >= c.hazards.laserGate.warnMs / 1000) { this.phase = GATE_SOLID; this.timer = 0; }
+		} else { // GATE_SOLID
+			if (this.timer >= c.hazards.laserGate.solidMs / 1000) { this.phase = GATE_OPEN; this.timer = 0; }
 		}
 		this.netState = this.phase;
-		this.blocking = (this.phase !== FENCE_OPEN);
+		this.blocking = (this.phase !== GATE_OPEN);
 	}
 	// Solid beam = a bounce; open/warn are passable (no-op). Racers only (pucks,
 	// antlions and other hazards pass through). The bounce reverts the crossing and
-	// reflects the kart off the beam line (engine.bounceOffFence).
+	// reflects the kart off the beam line (engine.bounceOffSegment).
 	handleHit(object) {
-		if (this.phase !== FENCE_SOLID || !object.isPlayer || object.alive === false) { return; }
-		require('../engine.js').bounceOffFence(object, this, c.hazards.blinkFence.restitution);
+		if (this.phase !== GATE_SOLID || !object.isPlayer || object.alive === false) { return; }
+		require('../engine.js').bounceOffSegment(object, this, c.hazards.laserGate.restitution);
 	}
 }
 
@@ -746,11 +746,11 @@ registerHazardKind("vortexWell", {
 		return new VortexWell(entry.x, entry.y, vortexWellRadius(entry), c.hazards.vortexWell.color, mapID, roomSig);
 	}
 });
-registerHazardKind("blinkFence", {
+registerHazardKind("laserGate", {
 	railed: false,
 	directional: true, // the barrier runs along the pylon axis — needs a finite angle
 	build: function (entry, mapID, roomSig) {
-		return new BlinkFence(entry.x, entry.y, entry.angle, mapID, roomSig);
+		return new LaserGate(entry.x, entry.y, entry.angle, mapID, roomSig);
 	}
 });
 registerHazardKind("crusher", {
@@ -830,7 +830,7 @@ class Thumper extends Hazard {
 }
 
 
-module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, Mine, VortexWell, vortexWellRadius, BlinkFence, Crusher, Antlion, Thumper, HAZARD_KINDS, BOON_KINDS, hazardKindById, registerHazardKind, registerBoonKind };
+module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, Mine, VortexWell, vortexWellRadius, LaserGate, Crusher, Antlion, Thumper, HAZARD_KINDS, BOON_KINDS, hazardKindById, registerHazardKind, registerBoonKind };
 
 // Load the boon kinds AFTER module.exports is assigned: boons.js requires this
 // module for the Hazard base class + registerBoonKind, so it must see the fully
