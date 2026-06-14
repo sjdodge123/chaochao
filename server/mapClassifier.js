@@ -274,8 +274,9 @@ function hazardAvoidance(map, config) {
         } else if (hz.id === vortexId) {
             // The well drags karts toward its core across a wide radius — penalize a
             // ring out to the strong-pull core so the routed line bends around the
-            // centre, not just the single anchor cell.
-            var core = vortexR * 0.6;
+            // centre, not just the single anchor cell. Use the well's authored
+            // (per-instance) radius, falling back to the config max.
+            var core = (Number.isFinite(hz.radius) ? hz.radius : vortexR) * 0.6;
             for (var ringA = 0; ringA < 8; ringA++) {
                 var rr = ringA * Math.PI / 4;
                 addAround(hz.x + Math.cos(rr) * core, hz.y + Math.sin(rr) * core);

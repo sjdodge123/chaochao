@@ -340,7 +340,10 @@ class Mine extends Hazard {
 // past). `force` is tuned below the kart's own thrust so driving always wins; the
 // danger is the well dragging you toward lava / off the racing line, not trapping
 // you. Often parked over lava or off-line. The map entry's (x,y) is the core;
-// `radius` the pull reach.
+// `radius` the pull reach — authored PER INSTANCE in the editor (drag-to-resize),
+// clamped server-side to [minRadius, radius] from config so a crafted map can't
+// ship a giant well. coreRadius (the calm-eye / drawn centre) scales with the
+// instance radius so a small well still reads right. See vortexWellRadius().
 class VortexWell extends Hazard {
 	constructor(x, y, radius, color, ownerId, roomSig) {
 		super(x, y, radius, color, ownerId, roomSig);
@@ -348,7 +351,7 @@ class VortexWell extends Hazard {
 		this.moveable = false;      // stationary — no engine motion hook
 		this.forceZone = true;      // gameBoard.updateHazards applies applyForce once/tick
 		this.isVortex = true;       // AI routes around the core (aiController classifier)
-		this.coreRadius = c.hazards.vortexWell.coreRadius;
+		this.coreRadius = c.hazards.vortexWell.coreRadius * (radius / c.hazards.vortexWell.radius);
 		this.force = c.hazards.vortexWell.force;
 	}
 	update() {
@@ -375,6 +378,18 @@ class VortexWell extends Hazard {
 		return true;
 	}
 	handleHit(object) { } // force is applied in gameBoard.updateHazards, not on contact
+}
+// Resolve a vortex well's per-instance radius from its map entry: clamp the
+// authored value to [minRadius, radius] (config = the editor's drag bounds) so a
+// crafted/legacy map can't ship an over-sized well; a missing/non-finite value
+// (legacy entries, tests) falls back to the DEFAULT — the midpoint of the range,
+// matching the size the editor places a fresh well at.
+function vortexWellRadius(entry) {
+	var cfg = c.hazards.vortexWell;
+	var min = cfg.minRadius, max = cfg.radius;
+	var r = (entry != null && Number.isFinite(entry.radius)) ? entry.radius : (min + max) / 2;
+	if (r < min) { r = min; } else if (r > max) { r = max; }
+	return r;
 }
 
 // --- hazard-kind registry ------------------------------------------------------
@@ -478,7 +493,7 @@ registerHazardKind("vortexWell", {
 	railed: false,
 	directional: false,
 	build: function (entry, mapID, roomSig) {
-		return new VortexWell(entry.x, entry.y, c.hazards.vortexWell.radius, c.hazards.vortexWell.color, mapID, roomSig);
+		return new VortexWell(entry.x, entry.y, vortexWellRadius(entry), c.hazards.vortexWell.color, mapID, roomSig);
 	}
 });
 
@@ -550,7 +565,7 @@ class Thumper extends Hazard {
 }
 
 
-module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, Mine, VortexWell, Antlion, Thumper, HAZARD_KINDS, BOON_KINDS, hazardKindById, registerHazardKind, registerBoonKind };
+module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, Mine, VortexWell, vortexWellRadius, Antlion, Thumper, HAZARD_KINDS, BOON_KINDS, hazardKindById, registerHazardKind, registerBoonKind };
 
 // Load the boon kinds AFTER module.exports is assigned: boons.js requires this
 // module for the Hazard base class + registerBoonKind, so it must see the fully

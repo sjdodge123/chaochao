@@ -9215,7 +9215,7 @@ function buildHazardDrawers() {
     };
     if (config.hazards.vortexWell != null) {
         hazardDrawers[config.hazards.vortexWell.id] = function (h) {
-            drawVortexWell(h.x, h.y);
+            drawVortexWell(h.x, h.y, h.radius);
         };
     }
     // Boons share the hazard drawer registry (they live in the same client
@@ -9554,17 +9554,22 @@ function getVortexHazeSprite() {
     vortexHazeSprite = cv;
     return cv;
 }
-function drawVortexWell(x, y) {
+function drawVortexWell(x, y, radius) {
     var cfg = config.hazards.vortexWell;
-    var R = cfg.radius;
+    var maxR = cfg.radius;
+    var R = (radius != null && radius > 0) ? radius : maxR;   // per-instance authored size
+    var coreR = cfg.coreRadius * (R / maxR);                  // scale the centre with the well
     var spin = (Date.now() / 1100) % (Math.PI * 2);
     gameContext.save();
-    // Blurred haze swirl (baked sprite), rotated so the blur churns. One cheap blit.
+    // Blurred haze swirl (baked once at max size), rotated so the blur churns and
+    // scaled to this well's radius. One cheap blit (no per-frame filter).
     var sprite = getVortexHazeSprite();
     if (sprite != null) {
+        var s = R / maxR;
         gameContext.save();
         gameContext.translate(x, y);
         gameContext.rotate(spin);
+        gameContext.scale(s, s);
         gameContext.drawImage(sprite, -sprite.width / 2, -sprite.height / 2);
         gameContext.restore();
     }
@@ -9584,7 +9589,7 @@ function drawVortexWell(x, y) {
         gameContext.beginPath();
         var first = true;
         for (var t = 0; t <= 1.001; t += 0.08) {
-            var rr = R * (1 - t) + cfg.coreRadius * t;
+            var rr = R * (1 - t) + coreR * t;
             var ang = base + t * Math.PI * 1.6;
             var px = x + Math.cos(ang) * rr, py = y + Math.sin(ang) * rr;
             if (first) { gameContext.moveTo(px, py); first = false; }
@@ -9595,7 +9600,7 @@ function drawVortexWell(x, y) {
     gameContext.globalAlpha = 1;
     // Dark core (crisp).
     gameContext.beginPath();
-    gameContext.arc(x, y, cfg.coreRadius, 0, 2 * Math.PI);
+    gameContext.arc(x, y, coreR, 0, 2 * Math.PI);
     gameContext.fillStyle = "#2a1f44";
     gameContext.fill();
     gameContext.strokeStyle = cfg.color;

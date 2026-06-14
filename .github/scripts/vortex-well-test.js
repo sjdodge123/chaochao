@@ -23,7 +23,7 @@ const messenger = require(path.join(repoRoot, 'server', 'messenger.js'));
 const config = require(path.join(repoRoot, 'server', 'config.json'));
 const mapFormat = require(path.join(repoRoot, 'server', 'mapFormat.js'));
 const compressor = require(path.join(repoRoot, 'server', 'compressor.js'));
-const { VortexWell } = require(path.join(repoRoot, 'server', 'entities', 'hazards.js'));
+const { VortexWell, vortexWellRadius } = require(path.join(repoRoot, 'server', 'entities', 'hazards.js'));
 
 const T = config.tileMap;
 const GRASS = T.fast.id;
@@ -151,15 +151,35 @@ try {
     }
 
     // ----------------------------------------------------------------------
+    console.log('\n[A2] Per-instance size (authored radius + clamp)');
+    {
+        const mid = Math.round((VW.minRadius + VW.radius) / 2);
+        check(vortexWellRadius({}) === mid, 'a sizeless entry defaults to the midpoint of [min,max] (' + mid + ')');
+        check(vortexWellRadius({ radius: 90 }) === 90, 'an authored in-range radius is used as-is');
+        check(vortexWellRadius({ radius: 5000 }) === VW.radius, 'an over-max radius clamps to the config max (' + VW.radius + ')');
+        check(vortexWellRadius({ radius: 1 }) === VW.minRadius, 'a below-min radius clamps to minRadius (' + VW.minRadius + ')');
+        check(vortexWellRadius({ radius: NaN }) === mid, 'a non-finite radius falls back to the default');
+
+        // A smaller well only reaches within its smaller radius.
+        const small = new VortexWell(500, 400, VW.minRadius, VW.color, 'v-small', 'sig-a2');
+        check(small.radius === VW.minRadius, 'the instance carries its own (smaller) radius');
+        const justOutside = { isPlayer: true, alive: true, reachedGoal: false, x: 500 + VW.minRadius + 8, y: 400, velX: 0, velY: 0 };
+        check(small.applyForce(justOutside) === false, 'a kart just past a small well\'s rim is not pulled (radius is per-instance)');
+        const inside = { isPlayer: true, alive: true, reachedGoal: false, x: 500 + VW.minRadius * 0.5, y: 400, velX: 0, velY: 0 };
+        check(small.applyForce(inside) === true && inside.velX < 0, 'a kart inside the small well is still pulled inward');
+    }
+
+    // ----------------------------------------------------------------------
     console.log('\n[B] Wire: static row (compressor)');
     {
-        const v = new VortexWell(700, 400, VW.radius, VW.color, 'v-wire', 'sig-b');
+        const v = new VortexWell(700, 400, 95, VW.color, 'v-wire', 'sig-b');
         const list = {}; list[v.ownerId] = v;
         const rows = compressor.sendHazardUpdates(list);
         check(rows.every(r => r.length === 3), 'per-tick row stays 3 fields (no streamAngle / netState — the well is static)');
 
         const created = JSON.parse(compressor.newHazards(list));
         check(created.length === 1 && created[0][1] === VW.id, 'newHazards carries the vortex well (id ' + VW.id + ')');
+        check(created[0][8] === 95, 'newHazards ships the per-instance radius in slot [8]');
     }
 
     // ----------------------------------------------------------------------
@@ -172,6 +192,12 @@ try {
         check(vIds.length === 1, 'the vortex well spawned from the map hazard entry');
         const vhz = vRoom.game.gameBoard.hazardList[vIds[0]];
         check(vhz != null && vhz.id === VW.id && vhz.isVortex === true, 'the spawned hazard is a stationary VortexWell');
+
+        // An authored radius on the map entry flows into the spawned hazard (clamped).
+        const sizedMap = buildMap('sized', [{ id: VW.id, x: COLS[5], y: ROWS[1], radius: 95 }], [0, 1, 2]);
+        const { room: szRoom } = bootRoom('vw-sized', sizedMap, SOAK);
+        const szHz = szRoom.game.gameBoard.hazardList[Object.keys(szRoom.game.gameBoard.hazardList)[0]];
+        check(szHz != null && szHz.radius === 95, 'an authored map-entry radius (95) flows into the spawned well');
 
         // Single-application guarantee: one tick applies exactly the calm-eye pull,
         // not 2x. Pin a stopped kart at the mid-ring for one tick and compare velX to
