@@ -253,6 +253,13 @@ function hazardAvoidance(map, config) {
     var railLen = (config.hazards && config.hazards.movingBumper && config.hazards.movingBumper.width) || 100;
     var wallId = (config.hazards && config.hazards.bumperWall) ? config.hazards.bumperWall.id : null;
     var wallLen = (config.hazards && config.hazards.bumperWall && config.hazards.bumperWall.width) || 120;
+    // Blink fence (a wall along the pylon axis) and crusher (a slab sweeping its rail)
+    // both penalize a whole LANE from the anchor along `angle`, like the bumper wall /
+    // moving bumper — the fence over its beam length, the crusher over its rail length.
+    var fenceId = (config.hazards && config.hazards.blinkFence) ? config.hazards.blinkFence.id : null;
+    var fenceLen = (config.hazards && config.hazards.blinkFence && config.hazards.blinkFence.width) || 150;
+    var crusherId = (config.hazards && config.hazards.crusher) ? config.hazards.crusher.id : null;
+    var crusherLen = (config.hazards && config.hazards.crusher && config.hazards.crusher.railLength) || 150;
     // Vortex well: keep the overlay/par estimate in lockstep with the live AI
     // (aiController) — routed around at its strong-pull core (radius * coreFraction),
     // not just a 40px ring at the anchor. coreFraction is shared via config so the
@@ -264,11 +271,14 @@ function hazardAvoidance(map, config) {
         var hz = hazards[h];
         if (hz == null || typeof hz.x !== "number" || typeof hz.y !== "number") { continue; }
         addAround(hz.x, hz.y);
-        if (hz.id === movingId || hz.id === wallId) {
-            // A railed bumper sweeps from its anchor along `angle` for the rail
-            // length (engine.js confines it parametrically), and a bumper wall
-            // stands along the same anchor->angle line — penalize the whole lane.
-            var len = (hz.id === wallId) ? wallLen : railLen;
+        if (hz.id === movingId || hz.id === wallId || hz.id === fenceId || hz.id === crusherId) {
+            // A railed bumper / crusher sweeps from its anchor along `angle` for the
+            // rail length (engine.js confines it parametrically), and a bumper wall /
+            // blink fence stands along the same anchor->angle line — penalize the lane.
+            var len = railLen;
+            if (hz.id === wallId) { len = wallLen; }
+            else if (hz.id === fenceId) { len = fenceLen; }
+            else if (hz.id === crusherId) { len = crusherLen; }
             var rad = (hz.angle || 0) * Math.PI / 180;
             for (var t = 25; t <= len; t += 25) {
                 addAround(hz.x + Math.cos(rad) * t, hz.y + Math.sin(rad) * t);

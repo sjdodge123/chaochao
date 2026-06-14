@@ -1676,6 +1676,93 @@ function paintVortexWellShape(ctx, kind, x, y, angle, ringColor, radius) {
     ctx.stroke();
     ctx.restore();
 }
+// Blink-fence painter (blinkFence's `paint` hook). Two pylons with a dotted beam
+// guide between them along `angle` for the beam length — the editor shows the OPEN
+// look (the live timed blink is in-game only). Mirrors draw.js drawBlinkFence.
+function paintBlinkFenceShape(ctx, kind, x, y, angle, ringColor) {
+    var cfg = config.hazards[kind.key];
+    if (cfg == null) { return; }
+    var rad = (angle || 0) * (Math.PI / 180);
+    var bx = x + Math.cos(rad) * cfg.width, by = y + Math.sin(rad) * cfg.width;
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.setLineDash([4, 10]);
+    ctx.strokeStyle = cfg.color;
+    ctx.lineWidth = cfg.height;
+    ctx.globalAlpha = 0.6;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(bx, by); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+    for (var p = 0; p < 2; p++) {
+        var px = p === 0 ? x : bx, py = p === 0 ? y : by;
+        ctx.beginPath();
+        ctx.arc(px, py, 7, 0, 2 * Math.PI);
+        ctx.fillStyle = "#1d3a44";
+        ctx.fill();
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = cfg.color;
+        ctx.stroke();
+    }
+    ctx.restore();
+}
+// Crusher painter (crusher's `paint` hook). A recessed rail channel + motor base
+// plate from the anchor, with the heavy bolted steel BLOCK (toothed slam faces,
+// rivets, 3D bevel) at the anchor rest. Mirrors draw.js drawCrusher — deliberately
+// chunky so it reads as a piston block, not a barrier.
+function paintCrusherShape(ctx, kind, x, y, angle, ringColor) {
+    var cfg = config.hazards[kind.key];
+    if (cfg == null) { return; }
+    var rad = (angle || 0) * (Math.PI / 180);
+    var dirX = Math.cos(rad), dirY = Math.sin(rad);
+    var hw = cfg.width / 2, hh = cfg.height / 2;
+    ctx.save();
+    ctx.lineCap = "butt";
+    ctx.strokeStyle = "rgba(58,61,64,0.55)";
+    ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + dirX * cfg.railLength, y + dirY * cfg.railLength);
+    ctx.stroke();
+    ctx.translate(x, y);
+    ctx.rotate(rad + Math.PI / 2);
+    ctx.fillStyle = "#33363a";
+    ctx.fillRect(-hw - 4, -8, cfg.width + 8, 16);
+    ctx.restore();
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rad + Math.PI / 2);
+    ctx.fillStyle = "#6c7176";
+    var teeth = 7, tw = cfg.width / teeth, tooth = 6;
+    for (var ti = 0; ti < teeth; ti++) {
+        var tx0 = -hw + ti * tw;
+        ctx.beginPath();
+        ctx.moveTo(tx0, -hh); ctx.lineTo(tx0 + tw, -hh); ctx.lineTo(tx0 + tw / 2, -hh - tooth);
+        ctx.closePath(); ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(tx0, hh); ctx.lineTo(tx0 + tw, hh); ctx.lineTo(tx0 + tw / 2, hh + tooth);
+        ctx.closePath(); ctx.fill();
+    }
+    var grad = ctx.createLinearGradient(0, -hh, 0, hh);
+    grad.addColorStop(0, "#c4c9ce");
+    grad.addColorStop(0.45, cfg.color);
+    grad.addColorStop(1, "#54585d");
+    ctx.fillStyle = grad;
+    ctx.fillRect(-hw, -hh, cfg.width, cfg.height);
+    ctx.strokeStyle = "#303336";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(-hw, -hh, cfg.width, cfg.height);
+    ctx.strokeStyle = "rgba(48,51,54,0.6)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(-hw + 4, -hh + 4, cfg.width - 8, cfg.height - 8);
+    ctx.fillStyle = "#3c4044";
+    var rvx = hw - 6, rvy = hh - 5, corners = [[-rvx, -rvy], [rvx, -rvy], [rvx, rvy], [-rvx, rvy]];
+    for (var ci = 0; ci < 4; ci++) {
+        ctx.beginPath();
+        ctx.arc(corners[ci][0], corners[ci][1], 2.2, 0, 2 * Math.PI);
+        ctx.fill();
+    }
+    ctx.restore();
+}
 // Shared per-kind hazard painter for the editor canvas (placement preview +
 // placed hazards) and the load-list thumbnails — the default `paint` hook.
 // Railed kinds draw their rail bar from (x,y) along `angle`; every kind draws
@@ -2468,6 +2555,65 @@ var EDITOR_HAZARD_KINDS = [
             ctx.arc(cx, cy, 7, 0, 2 * Math.PI);
             ctx.fillStyle = "#2a1f44";
             ctx.fill();
+        }
+    },
+    {
+        key: "blinkFence", label: "Blink Fence", shortcut: "f", railed: false, directional: true,
+        segmentSelect: true, paint: paintBlinkFenceShape,
+        swatchPaint: function (ctx, size) {
+            // Two pylons with a cyan beam between — "this blocks on a timer".
+            var cy = size / 2;
+            ctx.lineCap = "round";
+            ctx.strokeStyle = "#42E0FF";
+            ctx.lineWidth = 8;
+            ctx.beginPath();
+            ctx.moveTo(20, cy);
+            ctx.lineTo(size - 20, cy);
+            ctx.stroke();
+            for (var p = 0; p < 2; p++) {
+                var px = p === 0 ? 20 : size - 20;
+                ctx.beginPath();
+                ctx.arc(px, cy, 9, 0, 2 * Math.PI);
+                ctx.fillStyle = "#1d3a44";
+                ctx.fill();
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = "#42E0FF";
+                ctx.stroke();
+            }
+        }
+    },
+    {
+        key: "crusher", label: "Crusher", shortcut: "r", railed: true, directional: true,
+        paint: paintCrusherShape,
+        swatchPaint: function (ctx, size) {
+            // A heavy bolted steel block with toothed slam faces on its rail channel.
+            var cx = size / 2, cy = size / 2, hw = 26, hh = 12;
+            ctx.strokeStyle = "rgba(58,61,64,0.7)";
+            ctx.lineWidth = 6;
+            ctx.beginPath();
+            ctx.moveTo(cx, 12); ctx.lineTo(cx, size - 12);
+            ctx.stroke();
+            ctx.fillStyle = "#6c7176";
+            var teeth = 6, tw = (hw * 2) / teeth;
+            for (var ti = 0; ti < teeth; ti++) {
+                var tx0 = cx - hw + ti * tw;
+                ctx.beginPath();
+                ctx.moveTo(tx0, cy - hh); ctx.lineTo(tx0 + tw, cy - hh); ctx.lineTo(tx0 + tw / 2, cy - hh - 6);
+                ctx.closePath(); ctx.fill();
+                ctx.beginPath();
+                ctx.moveTo(tx0, cy + hh); ctx.lineTo(tx0 + tw, cy + hh); ctx.lineTo(tx0 + tw / 2, cy + hh + 6);
+                ctx.closePath(); ctx.fill();
+            }
+            var grad = ctx.createLinearGradient(0, cy - hh, 0, cy + hh);
+            grad.addColorStop(0, "#c4c9ce"); grad.addColorStop(0.45, "#9AA0A6"); grad.addColorStop(1, "#54585d");
+            ctx.fillStyle = grad;
+            ctx.fillRect(cx - hw, cy - hh, hw * 2, hh * 2);
+            ctx.strokeStyle = "#303336";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(cx - hw, cy - hh, hw * 2, hh * 2);
+            ctx.fillStyle = "#3c4044";
+            var rc = [[-hw + 5, -hh + 4], [hw - 5, -hh + 4], [hw - 5, hh - 4], [-hw + 5, hh - 4]];
+            for (var ci = 0; ci < 4; ci++) { ctx.beginPath(); ctx.arc(cx + rc[ci][0], cy + rc[ci][1], 2.4, 0, 2 * Math.PI); ctx.fill(); }
         }
     },
     {

@@ -303,7 +303,11 @@ function railCrossingOpen(bot, h, dt, vFloor) {
     var tEnter = (perp - RAIL_STRIKE) / vBot;                    // first moment the bot is strikable
     if (tEnter < 0) { tEnter = 0; }
     var tExit = ((perp + RAIL_STRIKE) / vBot) * RAIL_CROSS_MARGIN; // bot fully clear of the band
-    var dir = (h.angle === rail.angle) ? 1 : -1;
+    // Travel direction along the rail (+1 = toward the far end / t=len). The bumper
+    // encodes it in its flipping `angle` (== rail.angle when outward); the crusher
+    // keeps a fixed broadside angle and tracks direction in `dir` instead — read that
+    // when present so the gap prediction follows the slab's real heading.
+    var dir = (h.dir != null) ? (h.dir >= 0 ? 1 : -1) : ((h.angle === rail.angle) ? 1 : -1);
     // The longest gap this rail can offer ANYWHERE (crossing right at an end while
     // the bumper runs the full rail and back). If even that doesn't cover this
     // bot's exposure — slow ground — then no safe window exists at any crossing
@@ -375,6 +379,17 @@ function hazardRepulsion(bot, ctx, desiredX, desiredY, dt) {
         if (h.isWall) {
             var cpw = closestOnSegment(bot.x, bot.y, h.ax, h.ay, h.bx, h.by);
             hx = cpw.x; hy = cpw.y;
+        }
+        // A blink fence is a timed barrier: transparent while OPEN (drive straight
+        // through), a wall to steer clear of once it's WARNING or SOLID. `blocking`
+        // (set in BlinkFence.update) folds warn+solid together so the bot starts
+        // clearing the beam a beat before it actually closes. Repel from the nearest
+        // point on the beam line, like a wall — the generic radial field below does
+        // the rest.
+        if (h.isFence) {
+            if (!h.blocking) { continue; }
+            var cpf = closestOnSegment(bot.x, bot.y, h.ax, h.ay, h.bx, h.by);
+            hx = cpf.x; hy = cpf.y;
         }
         if (h.moveable && h.rail != null) {
             var seg = bumperSegment(h);
@@ -2074,6 +2089,25 @@ function update(gameBoard, currentState, dt) {
                 if (wdx * wdx + wdy * wdy < wallMarginSq) {
                     if (staticHazardCells == null) { staticHazardCells = new Set(); }
                     staticHazardCells.add(wc.site.voronoiId);
+                }
+            }
+            continue;
+        }
+        // A blink fence covers its whole centerline, but it's a TIMED gate — open on
+        // a published cycle — so price its cells at the mild TIMEABLE rail penalty
+        // (there's a window to slip across), like a moving rail rather than a solid
+        // wall. The live steering field (hazardRepulsion) holds the bot off only while
+        // the beam is actually closing.
+        if (hz.isFence) {
+            var fenceMarginSq = RAIL_PENALTY_MARGIN * RAIL_PENALTY_MARGIN;
+            for (var fi = 0; fi < map.cells.length; fi++) {
+                var fc = map.cells[fi];
+                if (!fc || !fc.site) { continue; }
+                var cpf2 = closestOnSegment(fc.site.x, fc.site.y, hz.ax, hz.ay, hz.bx, hz.by);
+                var fdx = fc.site.x - cpf2.x, fdy = fc.site.y - cpf2.y;
+                if (fdx * fdx + fdy * fdy < fenceMarginSq) {
+                    if (railCells == null) { railCells = new Set(); }
+                    railCells.add(fc.site.voronoiId);
                 }
             }
             continue;

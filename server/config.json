@@ -523,6 +523,29 @@
             "coreFraction": 0.6,
             "force": 7,
             "antlionPull": 0.7
+        },
+        "blinkFence": {
+            "id": 909,
+            "color": "#42E0FF",
+            "width": 150,
+            "height": 9,
+            "radius": 14,
+            "openMs": 1700,
+            "warnMs": 650,
+            "solidMs": 1500,
+            "restitution": 0.85
+        },
+        "crusher": {
+            "id": 910,
+            "color": "#9AA0A6",
+            "railLength": 150,
+            "width": 92,
+            "height": 22,
+            "radius": 14,
+            "speed": 3000,
+            "attackRadius": 16,
+            "punchBonus": 16,
+            "pinchFraction": 0.8
         }
     },
     "boons": {
