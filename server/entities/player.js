@@ -159,6 +159,14 @@ class Player extends Circle {
 		// hysteresis is what makes "getting tired" then "recovered" a distinct beat.
 		this.stamina = c.punchStamina.max;
 		this.staminaExhausted = false;
+		// Land lunge (double-tap punch on solid ground): registerAttackEdge stamps each
+		// press edge so two presses within doubleTapMs arm a lunge on the second punch.
+		// lungeArmedAt times the arm so a swallowed/stale second tap can't fire a lunge
+		// on some much-later punch; staminaAtLastEdge gates it to a rested bar.
+		this.lungeArmed = false;
+		this.lungeArmedAt = 0;
+		this.lastAttackEdgeAt = null;
+		this.staminaAtLastEdge = c.punchStamina.max;
 		// Hold-to-charge punch state. charging spans press->release; chargeFrac (0..1)
 		// drives both the thrown punch's power and the telegraph fist art on the client.
 		this.charging = false;
@@ -402,6 +410,23 @@ class Player extends Circle {
 		messenger.messageRoomBySig(this.roomSig, "punch", compressor.sendPunch(this.punch));
 		this.attack = false;
 	}
+	// Stamp a punch press edge (false->true on the attack button, latched in messenger).
+	// Two edges within landLunge.doubleTapMs arm a land lunge on the second punch — but
+	// only if the bar was at least minStaminaFrac of max when the double-tap STARTED
+	// (the first edge), so the lunge fires from a rested bar and not in the middle of
+	// sustained punch-trading. Direction + off-water are checked at throw time.
+	registerAttackEdge() {
+		var L = c.landLunge;
+		var now = Date.now();
+		if (L != null && this.lastAttackEdgeAt != null
+			&& (now - this.lastAttackEdgeAt) <= L.doubleTapMs
+			&& this.staminaAtLastEdge >= c.punchStamina.max * L.minStaminaFrac) {
+			this.lungeArmed = true;
+			this.lungeArmedAt = now;
+		}
+		this.lastAttackEdgeAt = now;
+		this.staminaAtLastEdge = this.stamina;
+	}
 	startCharge() {
 		this.charging = true;
 		this.chargeStartedAt = Date.now();
@@ -575,6 +600,29 @@ class Player extends Circle {
 				: c.punchThrowBrake;
 			this.velX *= releaseBrake;
 			this.velY *= releaseBrake;
+		}
+		// Land lunge: a double-tap punch on solid ground fires a forward burst — the land
+		// cousin of the water swim stroke. The release brake above already applied (the
+		// "slowing debuff of swinging" the lunge shares with every punch); now add the
+		// lunge impulse along the held direction (engine playerMaxSpeed caps the peak).
+		// It costs the ENTIRE bar and latches exhaustion, so it's a rationed escape/closer
+		// rather than a spammable dash. Off-water only (a punch on water already swims),
+		// and the arm must be fresh (lungeArmedAt within doubleTapMs) so a swallowed second
+		// tap can't fire a stale lunge on a much-later punch.
+		if (this.lungeArmed) {
+			var L = c.landLunge;
+			var ldir = this.getMoveDir();
+			if (L != null && ldir != null && !this.onWater && !this.isZombie
+				&& (Date.now() - this.lungeArmedAt) <= L.doubleTapMs) {
+				this.velX += ldir.x * L.impulse;
+				this.velY += ldir.y * L.impulse;
+				this.stamina = 0;
+				this.staminaExhausted = true;
+				// Send the dash direction so the client streak points along the lunge even
+				// if it arrives a tick before the velocity update does.
+				messenger.messageRoomBySig(this.roomSig, "landLunge", { id: this.id, dx: ldir.x, dy: ldir.y });
+			}
+			this.lungeArmed = false;
 		}
 		// No scoring in the lobby (the bully stat isn't gated by checkForWinners).
 		if (currentState != c.stateMap.lobby) {

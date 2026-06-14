@@ -682,7 +682,7 @@ function checkForMail(client) {
 				// Latch the press edge so a sub-tick tap (press+release between two server
 				// ticks) still throws — punches now fire on release, so checkAttack would
 				// otherwise see only the trailing attack=false and drop the punch.
-				if (packet.attack && !player.attack) { player.attackQueued = true; }
+				if (packet.attack && !player.attack) { player.attackQueued = true; player.registerAttackEdge(); }
 				player.attack = packet.attack;
 			}
 			// botGuard human-verify: once this client's kart has actually travelled far

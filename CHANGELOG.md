@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- **Double-tap punch to lunge — now on dry land, not just water.** Tap punch twice quickly while holding a direction and your kart fires a forward dash burst, the same swim-stroke move you already use to cross water. On land it costs your whole stamina bar (and leaves you spent until it regenerates), so it only fires when you're rested — a one-shot escape or closer, not a spammable boost. Like any punch it still brakes you and knocks back anyone you swing into, and now kicks up speed-streaks and a whoosh when it goes off.
 
 ## v0.40.0 — 2026-06-14
 
