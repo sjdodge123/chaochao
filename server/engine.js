@@ -21,6 +21,9 @@ exports.checkCollideCells = function (player, map) {
 exports.bounceOffStoneEdges = function (player, map) {
 	bounceOffStoneEdges(player, map);
 }
+exports.bounceOffBarriers = function (player, map) {
+	bounceOffBarriers(player, map);
+}
 exports.rebuildStoneEdges = function (map) {
 	rebuildStoneEdges(map);
 }
@@ -1046,6 +1049,73 @@ function bounceOffStoneEdges(player, map) {
 		for (var j = 0; j < edges.length; j++) {
 			var f = edges[j];
 			if (f.waterCell.id !== waterId || f.lavaCell.id !== lavaId) { continue; } // stale seam
+			if (segmentsCross(player.x, player.y, slidX, slidY, f.ax, f.ay, f.bx, f.by)) { crossesAgain = true; break; }
+		}
+		if (!crossesAgain) {
+			player.newX = slidX;
+			player.newY = slidY;
+		} else {
+			player.newX = player.x;
+			player.newY = player.y;
+		}
+		player.bounced = true;
+		return;
+	}
+}
+// Author-placed solid barriers (the editor's fence/wall 2-point tool): each map
+// barrier is a {x1,y1,x2,y2} line segment a player can't pass through but slides
+// along, EXACTLY like the water/lava stone seam above. Unlike stone edges these
+// are static geometry (no live cell re-validation needed) and block crossing from
+// EITHER side. Precomputed once per map into a non-enumerable cache so the
+// per-tick test is a handful of segment crossings.
+function ensureBarrierEdges(map) {
+	if (map._barrierEdges === undefined) {
+		var edges = [];
+		var list = map.barriers;
+		if (Array.isArray(list)) {
+			for (var i = 0; i < list.length; i++) {
+				var b = list[i];
+				if (b == null) { continue; }
+				var ax = b.x1, ay = b.y1, bx = b.x2, by = b.y2;
+				if (!isFinite(ax) || !isFinite(ay) || !isFinite(bx) || !isFinite(by)) { continue; }
+				var ex = bx - ax, ey = by - ay;
+				var el = Math.sqrt(ex * ex + ey * ey);
+				if (el < 1e-9) { continue; } // zero-length segment can't wall anything
+				edges.push({ ax: ax, ay: ay, bx: bx, by: by, tanX: ex / el, tanY: ey / el });
+			}
+		}
+		Object.defineProperty(map, '_barrierEdges', { value: edges, enumerable: false, writable: true, configurable: true });
+	}
+	return map._barrierEdges;
+}
+function mapHasBarriers(map) {
+	return ensureBarrierEdges(map).length > 0;
+}
+function bounceOffBarriers(player, map) {
+	if (!mapHasBarriers(map)) {
+		return; // no barriers on this map — skip the per-tick test entirely
+	}
+	var edges = map._barrierEdges;
+	for (var i = 0; i < edges.length; i++) {
+		var e = edges[i];
+		if (!segmentsCross(player.x, player.y, player.newX, player.newY, e.ax, e.ay, e.bx, e.by)) {
+			continue;
+		}
+		// Crossing this barrier: keep only the component of the step/velocity ALONG
+		// it (drop the perpendicular), the same deflection the stone seam gives — so
+		// the player slides along the fence instead of stopping dead. Don't commit a
+		// slid position that would cross another barrier (corner guard against
+		// tunneling); hold at the pre-step position instead.
+		var sx = player.newX - player.x, sy = player.newY - player.y;
+		var sProj = sx * e.tanX + sy * e.tanY;
+		var vProj = player.velX * e.tanX + player.velY * e.tanY;
+		var slidX = player.x + sProj * e.tanX;
+		var slidY = player.y + sProj * e.tanY;
+		player.velX = vProj * e.tanX;
+		player.velY = vProj * e.tanY;
+		var crossesAgain = false;
+		for (var j = 0; j < edges.length; j++) {
+			var f = edges[j];
 			if (segmentsCross(player.x, player.y, slidX, slidY, f.ax, f.ay, f.bx, f.by)) { crossesAgain = true; break; }
 		}
 		if (!crossesAgain) {

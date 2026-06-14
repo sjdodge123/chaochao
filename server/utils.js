@@ -801,6 +801,44 @@ exports.validateMap = function (vMap, config) {
             }
         }
     }
+    // barriers: optional solid fence/wall segments from the editor's 2-point tool.
+    // Structural-only check (engine.bounceOffBarriers blocks crossing either side):
+    // finite endpoints, in-bounds, non-zero/non-absurd length, count cap. A barrier
+    // that walls the goal off is caught downstream by the same playability sim that
+    // covers holes/lava (the offline submit validator runs the real engine), so this
+    // boundary only rejects malformed/oversized geometry. (Editor mirror: create.js
+    // validateMap.)
+    if (vMap.barriers != null) {
+        if (!Array.isArray(vMap.barriers)) {
+            return { valid: false, reason: "Map has malformed barriers." };
+        }
+        var barrierCfg = (config.barriers != null) ? config.barriers : {};
+        var maxBarriers = Number.isFinite(barrierCfg.maxCount) ? barrierCfg.maxCount : 60;
+        var maxBarrierLen = Number.isFinite(barrierCfg.maxLength) ? barrierCfg.maxLength : 900;
+        if (vMap.barriers.length > maxBarriers) {
+            return { valid: false, reason: "Map has too many barriers (max " + maxBarriers + ")." };
+        }
+        var validStyles = (barrierCfg.styles != null) ? barrierCfg.styles : null;
+        for (var bi = 0; bi < vMap.barriers.length; bi++) {
+            var bar = vMap.barriers[bi];
+            if (bar == null || !Number.isFinite(bar.x1) || !Number.isFinite(bar.y1) ||
+                !Number.isFinite(bar.x2) || !Number.isFinite(bar.y2)) {
+                return { valid: false, reason: "Map has a malformed barrier." };
+            }
+            if (bar.x1 < 0 || bar.y1 < 0 || bar.x2 < 0 || bar.y2 < 0 ||
+                bar.x1 > config.worldWidth || bar.x2 > config.worldWidth ||
+                bar.y1 > config.worldHeight || bar.y2 > config.worldHeight) {
+                return { valid: false, reason: "Map has a barrier outside the world." };
+            }
+            var blen = Math.sqrt((bar.x2 - bar.x1) * (bar.x2 - bar.x1) + (bar.y2 - bar.y1) * (bar.y2 - bar.y1));
+            if (blen < 1 || blen > maxBarrierLen) {
+                return { valid: false, reason: "Map has a barrier of invalid length." };
+            }
+            if (bar.style != null && validStyles != null && validStyles[bar.style] == null) {
+                return { valid: false, reason: "Map has a barrier with an unknown style." };
+            }
+        }
+    }
     // startEdges: optional; absent => default ["left"] (legacy maps). One edge for
     // a single start, or an OPPOSITE pair (left+right / top+bottom) for a two-sided
     // start. Adjacent pairs (e.g. left+top) and repeats are rejected.

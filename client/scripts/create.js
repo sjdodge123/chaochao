@@ -251,6 +251,7 @@ function clientConnect() {
         config = c;
         buildHazardById();
         buildHazardButtons();
+        buildBarrierButtons();
         tryStart();
     });
 
@@ -596,6 +597,13 @@ function applyTileSwatches() {
         hb.classList.add("swatch");
         hb.style.backgroundImage = "url(" + buildHazardSwatchDataURL(kind) + ")";
     }
+    for (var bsi = 0; bsi < BARRIER_STYLES.length; bsi++) {
+        var bstyle = BARRIER_STYLES[bsi];
+        var bb = document.getElementById(bstyle.key + "BarrierButton");
+        if (bb == null) { continue; }
+        bb.classList.add("swatch");
+        bb.style.backgroundImage = "url(" + buildBarrierSwatchDataURL(bstyle.key) + ")";
+    }
 }
 
 
@@ -627,6 +635,8 @@ function setupPage() {
     $(document).on("keydown", function (e) {
         if (e.key === "Escape" || e.keyCode === 27) {
             if ($("#wipeConfirmModal").is(":visible")) { closeWipeConfirm(); }
+            else if (barrierStart != null) { barrierStart = null; dirty = true; }
+            else if (selectedBarrierIndex >= 0) { selectedBarrierIndex = -1; barrierDragEnd = null; dirty = true; }
             else { clearBalanceOverlay(); }
         }
     });
@@ -884,6 +894,14 @@ function animloop() {
         updateSelectedRadius();
         dirty = true;
     }
+    if (barrierDragEnd != null && selectedBarrierIndex >= 0 && vMap.barriers && vMap.barriers[selectedBarrierIndex]) {
+        // Dragging a barrier endpoint: it tracks the cursor (clamped to the world).
+        var bDrag = vMap.barriers[selectedBarrierIndex];
+        var bnx = Math.max(0, Math.min(world.width, mousex));
+        var bny = Math.max(0, Math.min(world.height, mousey));
+        if (barrierDragEnd === 0) { bDrag.x1 = bnx; bDrag.y1 = bny; } else { bDrag.x2 = bnx; bDrag.y2 = bny; }
+        dirty = true;
+    }
     if (drawBrushAimer || erasing) {
         var prev = currentCell;
         currentCell = cellIdFromPoint(mousex, mousey);
@@ -920,12 +938,19 @@ function drawEditor(dt) {
     drawWorld(dt);
     drawGate();
     renderCells();
+    renderBarriers();
     renderHazards();
     drawSelectedObject();
     drawBalanceOverlay();
     drawPointerCircle();
     if (drawObject != null) {
         drawMyObject(mousex, mousey, drawObject, null, placedDefaultRadius(drawObject));
+    }
+    // Barrier brush "in hand": before the first point is placed, show a sample of
+    // the held barrier at the cursor (like the hazard ghost) so it's clear a brush
+    // is active. Once barrierStart is set, the anchored preview line takes over.
+    if (activeTool.kind === "barrier" && barrierStart == null) {
+        drawBarrierCursorGhost(mousex, mousey, activeTool.style || "wall");
     }
 }
 // Default radius to preview a not-yet-placed resizable kind at (undefined for
@@ -1688,6 +1713,11 @@ function handleClick(event) {
     switch (event.which) {
         case 1: {
             if (erasing) { break; } // don't start a paint while a right-erase is in progress
+            // A selected barrier's delete handle takes priority over everything else.
+            if (selectedBarrierIndex >= 0 && overBarrierDeleteHandle(mousex, mousey)) {
+                removeSelectedBarrier();
+                break;
+            }
             // On-canvas hazard handles take priority over painting/selecting.
             if (selectedObject != null) {
                 if (overDeleteHandle(mousex, mousey)) { removeSelectedObject(); break; }
@@ -1704,15 +1734,25 @@ function handleClick(event) {
                     break;
                 }
             }
+            if (activeTool.kind === "barrier") { handleBarrierClick(mousex, mousey); break; }
             if (drawBrushAimer) { brushing = true; beginStroke(); break; }
             if (drawObject != null) { addObjectToMap(mousex, mousey, drawObject); break; }
+            // Mouse/Select tool: grab a barrier (endpoint to drag, or its segment to
+            // select) before falling through to hazard selection.
+            if (trySelectBarrier(mousex, mousey)) { break; }
             locateObject(mousex, mousey);
             break;
         }
         case 3: {
             if (brushing || rotatingHandle || resizingHandle) { break; } // don't erase while painting/rotating/resizing
-            // Right button: delete a hazard under the cursor, else erase to dirt
-            // (right-drag keeps erasing). Backlog UX item.
+            // Right button while mid-barrier abandons the in-progress segment first.
+            if (barrierStart != null) { barrierStart = null; dirty = true; break; }
+            // Right button: delete a barrier or hazard under the cursor, else erase to
+            // dirt (right-drag keeps erasing). Backlog UX item.
+            if (barrierUnderPoint(mousex, mousey)) {
+                removeBarrierUnderPoint(mousex, mousey);
+                break;
+            }
             if (hazardUnderPoint(mousex, mousey)) {
                 removeHazardUnderPoint(mousex, mousey);
                 break;
@@ -1738,6 +1778,14 @@ function handleUnClick(event) {
                 if (selectedObject != null) {
                     pushResizeCommand(selectedHazardIndex(), resizeStartRadius, selectedObject.radius || 0);
                 }
+                break;
+            }
+            if (barrierDragEnd != null) {
+                if (barrierDragFrom != null && selectedBarrierIndex >= 0 && vMap.barriers[selectedBarrierIndex] != null) {
+                    pushBarrierMoveCommand(selectedBarrierIndex, barrierDragFrom, snapshotBarrier(selectedBarrierIndex));
+                }
+                barrierDragEnd = null;
+                barrierDragFrom = null;
                 break;
             }
             if (brushing) { brushing = false; commitStroke(); break; }
@@ -1817,10 +1865,15 @@ function setTool(tool) {
         brushID = config.tileMap.normal.id;
         brushColor = patterns[config.tileMap.normal.id];
     }
-    // A paint/place tool can't also keep a hazard selected (no handles to show).
+    // A paint/place tool can't also keep a hazard/barrier selected (no handles to show).
     if (tool.kind !== "select") {
         setSelectedObject(null);
+        selectedBarrierIndex = -1;
+        barrierDragEnd = null;
     }
+    // Switching tools abandons any half-placed barrier (the first point of a 2-point
+    // segment with no second click yet).
+    barrierStart = null;
     updateToolButtons();
     dirty = true;
 }
@@ -1847,6 +1900,533 @@ function editorSelectHazard(typeName) {
     if (h == null) { return; }
     setTool({ kind: "hazard", id: h.id, name: typeName });
 }
+function editorSelectBarrier(styleKey) {
+    if (config == null) { return; }
+    setTool({ kind: "barrier", style: styleKey, name: styleKey + "Barrier" });
+}
+
+// --- barriers (the 2-point fence/wall tool) -----------------------------------
+// A barrier is a {x1,y1,x2,y2,style} solid segment players can't cross (server
+// collision: engine.bounceOffBarriers). Placement is two clicks: the first sets
+// barrierStart, the second commits the segment. Stored in vMap.barriers (sibling
+// of vMap.hazards). `style` only picks the renderer; collision is identical.
+// The selectable styles, mirrored as palette buttons (buildBarrierButtons).
+var BARRIER_STYLES = [
+    { key: "fence", label: "Fence" },
+    { key: "wall", label: "Barrier" }
+];
+var barrierStart = null; // {x,y} first click of an in-progress segment, or null
+var selectedBarrierIndex = -1; // index into vMap.barriers selected with the mouse tool, or -1
+var barrierDragEnd = null;     // 0 (start) or 1 (end) while dragging an endpoint, else null
+var barrierDragFrom = null;    // {x1,y1,x2,y2} snapshot at drag start, for the undo
+function barrierMaxLength() {
+    return (config != null && config.barriers != null && typeof config.barriers.maxLength === "number")
+        ? config.barriers.maxLength : 900;
+}
+function barrierMaxCount() {
+    return (config != null && config.barriers != null && typeof config.barriers.maxCount === "number")
+        ? config.barriers.maxCount : 60;
+}
+function handleBarrierClick(x, y) {
+    if (outsideMapBounds(x, y, 0)) { return; }
+    if (barrierStart == null) {
+        barrierStart = { x: x, y: y };
+        dirty = true;
+        return;
+    }
+    addBarrierToMap(barrierStart.x, barrierStart.y, x, y, activeTool.style || "wall");
+    barrierStart = null;
+    dirty = true;
+}
+function addBarrierToMap(x1, y1, x2, y2, style) {
+    var dx = x2 - x1, dy = y2 - y1;
+    var len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 1) { return; } // a click-in-place is a no-op, not a zero-length barrier
+    if (len > barrierMaxLength()) {
+        // Clamp to the max length along the drawn direction rather than rejecting.
+        var s = barrierMaxLength() / len;
+        x2 = x1 + dx * s;
+        y2 = y1 + dy * s;
+    }
+    if (vMap.barriers == undefined) { vMap.barriers = []; }
+    if (vMap.barriers.length >= barrierMaxCount()) {
+        showSubmitStatus("Barrier limit reached (" + barrierMaxCount() + ")", "#8a6d00", "white");
+        return;
+    }
+    var barrier = { x1: x1, y1: y1, x2: x2, y2: y2, style: style };
+    vMap.barriers.push(barrier);
+    pushBarrierAddCommand(barrier);
+    dirty = true;
+}
+function pushBarrierAddCommand(barrier) {
+    pushCommand({
+        undo: function () { var i = vMap.barriers.indexOf(barrier); if (i >= 0) { vMap.barriers.splice(i, 1); } },
+        redo: function () { if (vMap.barriers.indexOf(barrier) < 0) { vMap.barriers.push(barrier); } }
+    });
+}
+function pushBarrierRemoveCommand(barrier, index) {
+    pushCommand({
+        undo: function () { vMap.barriers.splice(Math.min(index, vMap.barriers.length), 0, barrier); },
+        redo: function () { var i = vMap.barriers.indexOf(barrier); if (i >= 0) { vMap.barriers.splice(i, 1); } }
+    });
+}
+function barrierIndexUnderPoint(x, y) {
+    if (vMap == null || !Array.isArray(vMap.barriers)) { return -1; }
+    var hitDist = 12; // px tolerance to grab a thin segment
+    for (var i = vMap.barriers.length - 1; i >= 0; i--) { // topmost (last drawn) first
+        var b = vMap.barriers[i];
+        var p = closestOnSegmentEditor(x, y, b.x1, b.y1, b.x2, b.y2);
+        if (getMagSq(x, y, p.x, p.y) < hitDist * hitDist) { return i; }
+    }
+    return -1;
+}
+function barrierUnderPoint(x, y) { return barrierIndexUnderPoint(x, y) >= 0; }
+function removeBarrierUnderPoint(x, y) {
+    var i = barrierIndexUnderPoint(x, y);
+    if (i < 0) { return; }
+    var removed = vMap.barriers[i];
+    vMap.barriers.splice(i, 1);
+    pushBarrierRemoveCommand(removed, i);
+    selectedBarrierIndex = -1; // a splice shifts indices — drop any stale selection
+    barrierDragEnd = null;
+    dirty = true;
+}
+// --- barrier selection + endpoint dragging (the mouse/Select tool) ------------
+var BARRIER_HANDLE_R = 9; // px grab radius for an endpoint
+// Which endpoint of which barrier is under the cursor: { index, end:0|1 } or null.
+// Selected barrier is checked first so its handles win when segments overlap.
+function barrierEndpointAt(x, y) {
+    if (vMap == null || !Array.isArray(vMap.barriers)) { return null; }
+    var r2 = BARRIER_HANDLE_R * BARRIER_HANDLE_R;
+    var order = [];
+    if (selectedBarrierIndex >= 0) { order.push(selectedBarrierIndex); }
+    for (var j = vMap.barriers.length - 1; j >= 0; j--) { if (j !== selectedBarrierIndex) { order.push(j); } }
+    for (var k = 0; k < order.length; k++) {
+        var i = order[k], b = vMap.barriers[i];
+        if (b == null) { continue; }
+        if (getMagSq(x, y, b.x1, b.y1) < r2) { return { index: i, end: 0 }; }
+        if (getMagSq(x, y, b.x2, b.y2) < r2) { return { index: i, end: 1 }; }
+    }
+    return null;
+}
+function selectBarrier(i) {
+    selectedBarrierIndex = i;
+    setSelectedObject(null); // barrier + hazard selection are mutually exclusive
+    dirty = true;
+}
+// Select tool: grab an endpoint (and start dragging it), else select the segment,
+// else report no hit so the caller can fall through to hazard selection.
+function trySelectBarrier(x, y) {
+    var ep = barrierEndpointAt(x, y);
+    if (ep != null) {
+        selectBarrier(ep.index);
+        barrierDragEnd = ep.end;
+        barrierDragFrom = snapshotBarrier(ep.index);
+        return true;
+    }
+    var si = barrierIndexUnderPoint(x, y);
+    if (si >= 0) { selectBarrier(si); return true; }
+    return false;
+}
+function snapshotBarrier(i) {
+    var b = vMap.barriers[i];
+    return { x1: b.x1, y1: b.y1, x2: b.x2, y2: b.y2 };
+}
+function pushBarrierMoveCommand(index, from, to) {
+    if (from.x1 === to.x1 && from.y1 === to.y1 && from.x2 === to.x2 && from.y2 === to.y2) { return; }
+    pushCommand({
+        undo: function () { var b = vMap.barriers[index]; if (b) { b.x1 = from.x1; b.y1 = from.y1; b.x2 = from.x2; b.y2 = from.y2; } },
+        redo: function () { var b = vMap.barriers[index]; if (b) { b.x1 = to.x1; b.y1 = to.y1; b.x2 = to.x2; b.y2 = to.y2; } }
+    });
+}
+function removeSelectedBarrier() {
+    var i = selectedBarrierIndex;
+    if (i < 0 || vMap.barriers == null || vMap.barriers[i] == null) { return; }
+    var removed = vMap.barriers[i];
+    vMap.barriers.splice(i, 1);
+    pushBarrierRemoveCommand(removed, i);
+    selectedBarrierIndex = -1;
+    barrierDragEnd = null;
+    dirty = true;
+}
+// Delete handle floats off the segment midpoint (perpendicular) so it clears the line.
+function barrierDeleteHandlePos() {
+    if (selectedBarrierIndex < 0 || vMap.barriers == null) { return null; }
+    var b = vMap.barriers[selectedBarrierIndex];
+    if (b == null) { return null; }
+    var mx = (b.x1 + b.x2) / 2, my = (b.y1 + b.y2) / 2;
+    var dx = b.x2 - b.x1, dy = b.y2 - b.y1, len = Math.sqrt(dx * dx + dy * dy) || 1;
+    var nx = -dy / len, ny = dx / len; // unit normal
+    var off = 26;
+    var hx = mx + nx * off, hy = my + ny * off;
+    // keep it on-canvas
+    hx = Math.max(14, Math.min(world.width - 14, hx));
+    hy = Math.max(14, Math.min(world.height - 14, hy));
+    return { x: hx, y: hy };
+}
+function overBarrierDeleteHandle(x, y) {
+    var p = barrierDeleteHandlePos();
+    if (p == null) { return false; }
+    return getMagSq(x, y, p.x, p.y) < 13 * 13;
+}
+// Generate one palette button per barrier style into #barrierButtonGrid (mirrors
+// buildHazardButtons; the HTML ships the grid empty). Buttons are square `.swatch`
+// chips exactly like the tile/hazard pickers: the look is a background-image data
+// URL (painted by applyTileSwatches → buildBarrierSwatchDataURL), the name lives in
+// the hover `title`, and the visible text is a screen-reader-only span (clipped by
+// the `.swatch span` rule). Idempotent for reconnects.
+function buildBarrierButtons() {
+    var grid = document.getElementById("barrierButtonGrid");
+    if (grid == null || config == null) { return; }
+    if (grid.childElementCount > 0) { return; }
+    for (var i = 0; i < BARRIER_STYLES.length; i++) {
+        (function (style) {
+            var btn = document.createElement("button");
+            btn.id = style.key + "BarrierButton";
+            btn.className = "mapEditorTile";
+            btn.title = style.label + " (2-point: click start, click end)";
+            btn.setAttribute("data-gp-nav", "");
+            var span = document.createElement("span");
+            span.textContent = style.label; // a11y/gamepad label; hidden visually
+            btn.appendChild(span);
+            btn.addEventListener("click", function (e) {
+                e.preventDefault();
+                editorSelectBarrier(style.key);
+            });
+            grid.appendChild(btn);
+        })(BARRIER_STYLES[i]);
+    }
+}
+// A barrier swatch draws the in-game look across the centre of a dirt square (like
+// the hazard swatches) so it reads as "what you'll place". Returns a data URL set
+// as the button's background-image by applyTileSwatches.
+function buildBarrierSwatchDataURL(styleKey) {
+    var size = 96;
+    var c = document.createElement("canvas");
+    c.width = size;
+    c.height = size;
+    var ctx = c.getContext("2d");
+    if (gradedTex.dirt) {
+        ctx.drawImage(gradedTex.dirt, 0, 0, size, size);
+    } else {
+        ctx.fillStyle = "#7a5b3a";
+        ctx.fillRect(0, 0, size, size);
+    }
+    // Scale the (real-pixel-scale) barrier art up so it fills the thumbnail.
+    ctx.save();
+    ctx.translate(size / 2, size / 2);
+    ctx.scale(2.2, 2.2);
+    ctx.translate(-size / 2, -size / 2);
+    var b = { x1: 12, y1: size / 2, x2: size - 12, y2: size / 2 };
+    if (styleKey === "fence") { drawBarrierFenceArt(ctx, b, 1); }
+    else { drawBarrierConcreteArt(ctx, b, 1); }
+    ctx.restore();
+    return c.toDataURL();
+}
+// Editor render: placed barriers + the live preview of an in-progress segment +
+// the selection overlay (grab handles + delete) for the selected barrier.
+function renderBarriers() {
+    if (vMap == null) { return; }
+    // NOTE: don't gate the whole function on vMap.barriers existing — on a brand-new
+    // map the array isn't created until the FIRST barrier is committed, and the
+    // in-progress placement preview (barrierStart -> cursor) must still draw before
+    // that first commit. Only the placed-barrier loop needs the array.
+    if (Array.isArray(vMap.barriers)) {
+        for (var i = 0; i < vMap.barriers.length; i++) {
+            drawEditorBarrier(vMap.barriers[i], false);
+        }
+    }
+    if (barrierStart != null) {
+        drawEditorBarrier({ x1: barrierStart.x, y1: barrierStart.y, x2: mousex, y2: mousey, style: activeTool.style || "wall" }, true);
+    }
+    drawSelectedBarrierOverlay();
+}
+function drawSelectedBarrierOverlay() {
+    if (selectedBarrierIndex < 0 || vMap.barriers == null || vMap.barriers[selectedBarrierIndex] == null) { return; }
+    var b = vMap.barriers[selectedBarrierIndex];
+    var ctx = createContext;
+    ctx.save();
+    // dashed lime highlight along the selected segment
+    ctx.strokeStyle = "#7CFF6B";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([7, 5]);
+    ctx.beginPath(); ctx.moveTo(b.x1, b.y1); ctx.lineTo(b.x2, b.y2); ctx.stroke();
+    ctx.setLineDash([]);
+    // endpoint grab handles
+    drawBarrierGrabHandle(ctx, b.x1, b.y1);
+    drawBarrierGrabHandle(ctx, b.x2, b.y2);
+    // delete handle (red ✕)
+    var dh = barrierDeleteHandlePos();
+    if (dh != null) {
+        ctx.beginPath(); ctx.arc(dh.x, dh.y, 9, 0, 2 * Math.PI);
+        ctx.fillStyle = "rgba(200,40,40,0.92)"; ctx.fill();
+        ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(dh.x - 3.5, dh.y - 3.5); ctx.lineTo(dh.x + 3.5, dh.y + 3.5);
+        ctx.moveTo(dh.x + 3.5, dh.y - 3.5); ctx.lineTo(dh.x - 3.5, dh.y + 3.5);
+        ctx.stroke();
+    }
+    ctx.restore();
+}
+function drawBarrierGrabHandle(ctx, x, y) {
+    ctx.beginPath(); ctx.arc(x, y, BARRIER_HANDLE_R, 0, 2 * Math.PI);
+    ctx.fillStyle = "rgba(124,255,107,0.9)";
+    ctx.fill();
+    ctx.strokeStyle = "#1c3d12";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+}
+// Cached horizontal barrier sample (transparent bg) blitted at the cursor as the
+// held-brush ghost — cached so the plank/crack pattern stays stable while moving.
+var barrierGhostCache = {};
+function getBarrierGhost(style) {
+    if (barrierGhostCache[style] != null) { return barrierGhostCache[style]; }
+    var w = 84, h = 30;
+    var cv = document.createElement("canvas");
+    cv.width = w; cv.height = h;
+    var gctx = cv.getContext("2d");
+    var b = { x1: 9, y1: h / 2, x2: w - 9, y2: h / 2, style: style };
+    if (style === "fence") { drawBarrierFenceArt(gctx, b, 1); }
+    else { drawBarrierConcreteArt(gctx, b, 1); }
+    barrierGhostCache[style] = cv;
+    return cv;
+}
+function drawBarrierCursorGhost(x, y, style) {
+    var cv = getBarrierGhost(style);
+    createContext.save();
+    createContext.globalAlpha = 0.8;
+    createContext.drawImage(cv, x - cv.width / 2, y - cv.height / 2);
+    // a small anchor dot marking where the first point will drop
+    createContext.globalAlpha = 1;
+    createContext.fillStyle = "#ffffff";
+    createContext.strokeStyle = "rgba(0,0,0,0.55)";
+    createContext.lineWidth = 1;
+    createContext.beginPath(); createContext.arc(x, y, 2.5, 0, 2 * Math.PI);
+    createContext.fill(); createContext.stroke();
+    createContext.restore();
+}
+function drawEditorBarrier(b, preview) {
+    var ctx = createContext;
+    var alpha = preview ? 0.6 : 1;
+    if (b.style === "fence") { drawBarrierFenceArt(ctx, b, alpha); }
+    else { drawBarrierConcreteArt(ctx, b, alpha); }
+    // Endpoint dots so a placed segment's grab points read clearly in the editor.
+    ctx.save();
+    ctx.globalAlpha = preview ? 0.85 : 1;
+    ctx.fillStyle = "#ffffff";
+    ctx.strokeStyle = "rgba(0,0,0,0.5)";
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(b.x1, b.y1, 3, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(b.x2, b.y2, 3, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+    ctx.restore();
+}
+
+// --- shared barrier art (kept VERBATIM in sync with client/scripts/draw.js) -----
+// Deterministic per-segment noise so a barrier always weathers the same way.
+function barrierSeed(b) {
+    var s = Math.floor(b.x1 * 73856093 ^ b.y1 * 19349663 ^ b.x2 * 83492791 ^ b.y2 * 2654435761) >>> 0;
+    return s || 1;
+}
+function makeBarrierRng(seed) {
+    var s = seed >>> 0;
+    return function () {
+        s = (s + 0x6D2B79F5) >>> 0;
+        var t = s;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
+var FENCE_PLANKS = ["#cf9047", "#bd7c39", "#dca35a", "#ad6e30"];
+var FENCE_POST = "#46290f";
+var FENCE_POST_LIP = "#6b4322";
+var FENCE_RAIL = "#8a5e2e";
+var FENCE_SEAM = "rgba(28,16,5,0.6)";
+var FENCE_EDGE = "rgba(30,18,6,0.7)";
+var FENCE_GRAIN = "rgba(70,44,16,0.35)";
+// Top-down wooden fence: a CONTINUOUS rail (stringer) runs the full length and the
+// boards sit on top of it end-to-end (lengthwise grain + butt-joint seams), with
+// chunky square posts standing proud at intervals/ends and varied wear (mismatched
+// shades, the odd splintered/short board). The rail shows through any board gap so
+// the fence ALWAYS reads as solid — collision is continuous, so a gap must never
+// look squeeze-through-able. Looks DOWN onto the fence, not at its face (no cross-
+// ties, which read as railroad track). Brightened + dark-outlined to pop on dirt.
+function drawBarrierFenceArt(ctx, b, alpha) {
+    var dx = b.x2 - b.x1, dy = b.y2 - b.y1;
+    var len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 1e-3) { return; }
+    var ang = Math.atan2(dy, dx);
+    var rng = makeBarrierRng(barrierSeed(b));
+    ctx.save();
+    ctx.globalAlpha = (alpha == null ? 1 : alpha);
+    ctx.translate(b.x1, b.y1);
+    ctx.rotate(ang);
+    var bandHalf = 7; // the rail is 14px wide seen from above
+    // Continuous rail first (dark outline + wood core), full length, so it shows
+    // through board gaps and the barrier never looks passable.
+    ctx.lineCap = "round";
+    ctx.strokeStyle = FENCE_EDGE;
+    ctx.lineWidth = 8;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(len, 0); ctx.stroke();
+    ctx.strokeStyle = FENCE_RAIL;
+    ctx.lineWidth = 4.5;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(len, 0); ctx.stroke();
+    ctx.lineCap = "butt";
+    ctx.lineJoin = "miter";
+    var x = 0;
+    while (x < len - 0.5) {
+        var plankLen = Math.min(len - x, 22 + rng() * 12);
+        var shade = FENCE_PLANKS[(rng() * FENCE_PLANKS.length) | 0];
+        var roll = rng();
+        if (roll < 0.12 && plankLen < len - 1) { x += plankLen; continue; } // gap (rail shows through)
+        var seam = 1.4;
+        var drawLen = plankLen - seam;
+        var broken = roll > 0.86;
+        ctx.fillStyle = shade;
+        if (broken) {
+            var bl = drawLen * (0.45 + rng() * 0.3);
+            ctx.beginPath();
+            ctx.moveTo(x, -bandHalf);
+            ctx.lineTo(x + bl, -bandHalf);
+            ctx.lineTo(x + bl - 2, 0);
+            ctx.lineTo(x + bl + 1, bandHalf);
+            ctx.lineTo(x, bandHalf);
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = FENCE_EDGE;
+            ctx.lineWidth = 1.2;
+            ctx.stroke();
+            drawLen = bl;
+        } else {
+            ctx.fillRect(x, -bandHalf, drawLen, bandHalf * 2);
+            // dark outline per board: separates the rail from terrain + defines planks
+            ctx.strokeStyle = FENCE_EDGE;
+            ctx.lineWidth = 1.2;
+            ctx.strokeRect(x + 0.6, -bandHalf + 0.6, drawLen - 1.2, bandHalf * 2 - 1.2);
+        }
+        // lengthwise grain (runs ALONG the board, not across)
+        ctx.strokeStyle = FENCE_GRAIN;
+        ctx.lineWidth = 0.7;
+        ctx.beginPath(); ctx.moveTo(x + 1.5, -bandHalf + 2.5); ctx.lineTo(x + drawLen - 1.5, -bandHalf + 2.5); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x + 1.5, bandHalf - 2.5); ctx.lineTo(x + drawLen - 1.5, bandHalf - 2.5); ctx.stroke();
+        x += plankLen;
+    }
+    // posts: ends + every ~52px, square caps standing proud of the rail
+    var np = Math.max(1, Math.round(len / 52));
+    var pstep = len / np, postHalf = 9, postW = 10;
+    for (var i = 0; i <= np; i++) {
+        var px = i * pstep;
+        ctx.fillStyle = FENCE_EDGE;
+        ctx.fillRect(px - postW / 2 - 1, -postHalf - 1, postW + 2, postHalf * 2 + 2);
+        ctx.fillStyle = FENCE_POST;
+        ctx.fillRect(px - postW / 2, -postHalf, postW, postHalf * 2);
+        ctx.fillStyle = FENCE_POST_LIP;
+        ctx.fillRect(px - postW / 2 + 1.5, -postHalf + 1.5, postW - 3, postHalf * 2 - 3);
+        ctx.fillStyle = "rgba(255,225,180,0.22)";
+        ctx.fillRect(px - postW / 2 + 1.5, -postHalf + 1.5, postW - 3, 2);
+    }
+    ctx.restore();
+}
+var CONC_BODY = "#bcc0c6";
+var CONC_DARK = "#8e939a";
+var CONC_SEAM = "rgba(70,72,78,0.45)";
+var CONC_CRACK = "rgba(45,47,52,0.62)";
+var HAZARD_Y = "#e8b800";
+var HAZARD_K = "#26262a";
+function barrierConcSlabPath(ctx, x0, x1, half, r) {
+    r = Math.min(r, (x1 - x0) / 2, half);
+    ctx.beginPath();
+    ctx.moveTo(x0 + r, -half);
+    ctx.lineTo(x1 - r, -half);
+    ctx.arc(x1 - r, -half + r, r, -Math.PI / 2, 0);
+    ctx.lineTo(x1, half - r);
+    ctx.arc(x1 - r, half - r, r, 0, Math.PI / 2);
+    ctx.lineTo(x0 + r, half);
+    ctx.arc(x0 + r, half - r, r, Math.PI / 2, Math.PI);
+    ctx.lineTo(x0, -half + r);
+    ctx.arc(x0 + r, -half + r, r, Math.PI, Math.PI * 1.5);
+    ctx.closePath();
+}
+function drawBarrierConcreteArt(ctx, b, alpha) {
+    var dx = b.x2 - b.x1, dy = b.y2 - b.y1;
+    var len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 1e-3) { return; }
+    var ang = Math.atan2(dy, dx);
+    var rng = makeBarrierRng(barrierSeed(b));
+    var half = 9;
+    ctx.save();
+    ctx.globalAlpha = (alpha == null ? 1 : alpha);
+    ctx.translate(b.x1, b.y1);
+    ctx.rotate(ang);
+    barrierConcSlabPath(ctx, 0, len, half, 4);
+    ctx.fillStyle = CONC_BODY;
+    ctx.fill();
+    ctx.save();
+    barrierConcSlabPath(ctx, 0, len, half, 4);
+    ctx.clip();
+    ctx.fillStyle = CONC_DARK;
+    ctx.fillRect(0, -half, len, 2.5);
+    ctx.fillRect(0, half - 3, len, 3);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, -4.5, len, 9); ctx.clip();
+    ctx.fillStyle = HAZARD_K; ctx.fillRect(0, -4.5, len, 9);
+    ctx.fillStyle = HAZARD_Y;
+    for (var x = -18; x < len + 18; x += 18) {
+        ctx.beginPath();
+        ctx.moveTo(x, -4.5);
+        ctx.lineTo(x + 9, -4.5);
+        ctx.lineTo(x + 9 + 9, 4.5);
+        ctx.lineTo(x + 9, 4.5);
+        ctx.closePath();
+        ctx.fill();
+    }
+    ctx.restore();
+    var seg = 54, segs = Math.max(1, Math.round(len / seg)), sstep = len / segs;
+    ctx.strokeStyle = CONC_SEAM;
+    ctx.lineWidth = 1.5;
+    for (var s = 1; s < segs; s++) {
+        var sx = s * sstep;
+        ctx.beginPath(); ctx.moveTo(sx, -half); ctx.lineTo(sx, half); ctx.stroke();
+    }
+    for (var m = 0; m < segs; m++) {
+        var cx0 = m * sstep;
+        if (rng() < 0.5) { drawBarrierConcCrack(ctx, cx0 + sstep * (0.2 + rng() * 0.6), half, rng); }
+        if (rng() < 0.32) { drawBarrierConcChip(ctx, cx0 + sstep * (0.25 + rng() * 0.5), half, rng); }
+    }
+    ctx.restore();
+    barrierConcSlabPath(ctx, 0, len, half, 4);
+    ctx.strokeStyle = "rgba(60,62,68,0.55)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+}
+function drawBarrierConcCrack(ctx, x0, half, rng) {
+    ctx.strokeStyle = CONC_CRACK;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    var x = x0, y = -half + 1;
+    ctx.moveTo(x, y);
+    var steps = 3 + ((rng() * 3) | 0);
+    for (var k = 0; k < steps; k++) {
+        x += (rng() - 0.5) * 9;
+        y += (half * 2 - 2) / steps;
+        ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+}
+function drawBarrierConcChip(ctx, x0, half, rng) {
+    var top = rng() < 0.5;
+    var yEdge = top ? -half : half;
+    var dir = top ? 1 : -1;
+    var w = 4 + rng() * 5;
+    ctx.fillStyle = CONC_DARK;
+    ctx.beginPath();
+    ctx.moveTo(x0, yEdge);
+    ctx.lineTo(x0 + w, yEdge);
+    ctx.lineTo(x0 + w * 0.5, yEdge + dir * (3 + rng() * 4));
+    ctx.closePath();
+    ctx.fill();
+}
 function editorDeselect() {
     if (selectedObject != null) { setSelectedObject(null); }
 }
@@ -1859,6 +2439,7 @@ function editorRotateSelected(deg) {
     dirty = true;
 }
 function editorDeleteSelected() {
+    if (selectedBarrierIndex >= 0) { removeSelectedBarrier(); return; }
     if (selectedObject != null) { removeSelectedObject(); }
 }
 
@@ -1871,6 +2452,9 @@ function allToolButtonIds() {
     var ids = TOOL_BUTTON_IDS.slice();
     for (var i = 0; i < EDITOR_HAZARD_KINDS.length; i++) {
         ids.push(EDITOR_HAZARD_KINDS[i].key + "Button");
+    }
+    for (var b = 0; b < BARRIER_STYLES.length; b++) {
+        ids.push(BARRIER_STYLES[b].key + "BarrierButton");
     }
     return ids;
 }
@@ -1900,6 +2484,9 @@ function activeToolButtonId() {
     }
     if (activeTool.kind === "hazard") {
         return activeTool.name + "Button";
+    }
+    if (activeTool.kind === "barrier") {
+        return (activeTool.style || "wall") + "BarrierButton";
     }
     return null;
 }
@@ -2520,6 +3107,7 @@ function hazardSelectRadius(hz) {
 }
 
 function locateObject(x, y) {
+    selectedBarrierIndex = -1; // clicking for a hazard (or empty) drops any barrier selection
     var i = hazardIndexUnderPoint(x, y);
     if (i < 0) {
         setSelectedObject(null);
@@ -2576,6 +3164,7 @@ function generateVMap() {
         cells[iCells].id = 1;
     }
     localMap.hazards = [];
+    localMap.barriers = [];
     localMap.startEdges = startEdges.slice();
     return localMap;
 }
@@ -2994,6 +3583,27 @@ function validateMap(map) {
             if (hzKind != null && hzKind.directional &&
                 typeof hazard.angle !== "number") {
                 return { valid: false, reason: "Map has a directional hazard with no direction." };
+            }
+        }
+    }
+    if (map.barriers != null) {
+        if (!Array.isArray(map.barriers)) {
+            return { valid: false, reason: "Map has malformed barriers." };
+        }
+        var maxBarriers = barrierMaxCount();
+        var maxBarrierLen = barrierMaxLength();
+        if (map.barriers.length > maxBarriers) {
+            return { valid: false, reason: "Too many barriers (max " + maxBarriers + ")." };
+        }
+        for (var bi = 0; bi < map.barriers.length; bi++) {
+            var bar = map.barriers[bi];
+            if (bar == null || typeof bar.x1 !== "number" || typeof bar.y1 !== "number" ||
+                typeof bar.x2 !== "number" || typeof bar.y2 !== "number") {
+                return { valid: false, reason: "Map has a malformed barrier." };
+            }
+            var blen = Math.sqrt((bar.x2 - bar.x1) * (bar.x2 - bar.x1) + (bar.y2 - bar.y1) * (bar.y2 - bar.y1));
+            if (blen < 1 || blen > maxBarrierLen) {
+                return { valid: false, reason: "A barrier has an invalid length." };
             }
         }
     }
