@@ -96,4 +96,22 @@ Each batch is handed off with a prompt that points the next agent here. Sequence
 
 ## 7. Status log
 - 2026-06-13 — Batch 0 (framework + Bumper Wall) shipped v0.35.1; Batch 1 (Rotor/Geyser/Mine) shipped v0.35.4. Doc created. Next: Batch 2 (Gust Fan + Vortex Well), ids 908/909.
-- 2026-06-13 — Batch 2 (Gust Fan 908 + Vortex Well 909) BUILT on worktree-hazard-batch2: config + registry + drawers + editor (palette `f`/`v` + paint/swatch) + AI (`isGust` counter-steer, `isVortex` core route-around) + headless test (`force-zones-test.js`, wired into CI) + CHANGELOG/Codex/ARCHITECTURE. Key finding: the "force-zone application path" already exists — `engine.narrowBase` fires `handleHit` every overlap tick, so a force zone is just a velocity-nudging `handleHit` (Dash Arrows pattern); **zero engine/compressor change**. Full battery + build green. **Not yet pushed / no PR** (awaiting operator go-ahead). Next: Batch 3 (Blink Fence + Crusher).
+- 2026-06-13 — Batch 2 (Gust Fan 908 + Vortex Well 909) BUILT on worktree-hazard-batch2: config + registry + drawers + editor (palette `f`/`v` + paint/swatch) + AI (`isGust` counter-steer, `isVortex` core route-around) + headless test (`force-zones-test.js`, wired into CI) + CHANGELOG/Codex/ARCHITECTURE. Key finding: the "force-zone application path" already exists — `engine.narrowBase` fires `handleHit` every overlap tick, so a force zone is just a velocity-nudging `handleHit` (Dash Arrows pattern); **zero engine/compressor change**. `/codex:review` (high) run → 4 findings fixed with regression coverage (NaN-angle vertices, vortex core plateau, classifier↔AI consistency, editor placement pad). Full battery + build green; dev server hosted for playtest. **Not yet pushed / no PR** (awaiting operator go-ahead). Next: Batch 3 (Blink Fence + Crusher).
+
+## 8. Batch 3 handover prompt
+
+> Paste this to the next agent to start Batch 3.
+
+```
+Continue the Chao Chao map-hazards initiative. Read docs/hazards/hazard-sprint-plan.md first — it's the living design doc (framework recipe §2, conventions §3, roadmap §4, per-batch specs §5, chaining workflow §6, status log §7).
+
+Do Batch 3: Blink Fence + Crusher — the two state-machine / sliding-wall hazards (§5, §4 next-free-id is 910). New bits vs prior batches:
+- Blink Fence: a laser barrier between two pylons on a published solid/open cycle (shimmer warning). Reuses the netState wire slot (open/closed phase, like the geyser) and a phase timer in update(dt). Directional (pylon axis). Solid = bounce (reuse engine.bounceOffBoundry) or a lava-style burn variant — pick one and note why. The new primitive is a TIMED PASSABILITY GATE (collision that turns on/off), so the kart must physically interact only while solid.
+- Crusher: a wall segment sliding across a corridor on a rail (Thwomp). Reuse rail movement (the movingBumper advance/rail path) + the BumperWall rotated-rect collision; lethal pinch between the crusher face and the boundary. Streams angle if it rotates; otherwise just rail position. AI: time the gap like a moving bumper (the rail-crossing logic already exists in aiController.hazardRepulsion).
+
+Create the worktree off origin/main: git worktree add -b worktree-hazard-batch3 .claude/worktrees/hazard-batch3 origin/main. Follow the add-a-kind recipe (§2): config + registry + draw + editor + headless test wired into pr-validation.yml, plus CHANGELOG/Codex(learn.js)/ARCHITECTURE. Then run the full headless battery (smoke, classifier, validate-content, mode-smoke, the AI tests since you'll touch aiController, plus your new test) + /codex:review (high), fix findings with regression coverage, and host a dev server (localhost + LAN IP) for playtest.
+
+Honor the gates: NO push/PR without explicit operator go-ahead each time. Rebase onto origin/main and re-verify before any PR; babysit CI after opening (inline bot comments via gh api repos/sjdodge123/chaochao/pulls/<n>/comments + /reviews; start-edges-test/client-perf are known noise). Update §4/§5 + the Status Log (§7) in the design doc in the same PR, and write the Batch 4 (Sentry Turret) handover prompt at the end.
+
+Reference Batch 2 (force zones) as the closest precedent for the registry/editor/AI/test wiring; reference movingBumper (rail) + bumperWall (rotated-rect collision) for the Crusher, and the geyser (netState phase timer) for the Blink Fence.
+```
