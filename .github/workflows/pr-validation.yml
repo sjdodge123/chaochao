@@ -229,6 +229,9 @@ jobs:
       - name: "Headless barriers test (fence/wall: block + slide physics, map round-trip, validation)"
         run: node .github/scripts/barriers-test.js
 
+      - name: "Headless locked-door test (pickup/carry/unlock, drop-on-death, lava-consume, goal-decoupling)"
+        run: node .github/scripts/locked-door-test.js
+
   perf-tick-budget:
     # Server-side worst-case load: a full 25-kart grid in a stacked brutal round.
     # Proves one room still ticks well within the 30 Hz interval. Zero new deps —

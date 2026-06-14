@@ -576,6 +576,47 @@ var LearnAnim = (function () {
         kart(s.ctx, p.x, p.y, p.radius, BLUE);
     };
 
+    SCENES["lockedDoor"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        var ctx = s.ctx, p = s.p; p.radius = 12; p.surface = "normal"; p.alive = true;
+        var ph = loop(s.t, 4200);
+        var grabbed = ph > 0.34, opened = ph > 0.74;
+        var keyX = W * 0.40, doorX = W * 0.74, midY = H / 2;
+        // Door: a triangle silhouette, dark while locked, glowing open once unlocked.
+        ctx.save();
+        ctx.translate(doorX, midY);
+        ctx.beginPath(); ctx.moveTo(0, -23); ctx.lineTo(21, 17); ctx.lineTo(-21, 17); ctx.closePath();
+        if (opened) {
+            ctx.globalAlpha = 0.28; ctx.fillStyle = "#ff7043"; ctx.fill();
+            ctx.globalAlpha = 0.95; ctx.lineWidth = 3; ctx.strokeStyle = "#ff7043"; ctx.stroke();
+        } else {
+            ctx.fillStyle = "#2b2438"; ctx.fill();
+            ctx.lineWidth = 3; ctx.strokeStyle = "#ff7043"; ctx.stroke();
+        }
+        ctx.restore();
+        // Loose key (matching triangle) until the kart reaches it.
+        if (!grabbed) {
+            ctx.save(); ctx.translate(keyX, midY);
+            ctx.beginPath(); ctx.moveTo(0, -11); ctx.lineTo(10, 9); ctx.lineTo(-10, 9); ctx.closePath();
+            ctx.fillStyle = "#ff7043"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#fff"; ctx.stroke();
+            ctx.restore();
+        }
+        // Kart drives in, grabs the key, carries it to the door.
+        var tx = opened ? doorX
+            : grabbed ? lerp(keyX, doorX, ease(clamp((ph - 0.34) / 0.40, 0, 1)))
+                : lerp(-20, keyX, ease(clamp(ph / 0.34, 0, 1)));
+        p.x = tx; p.y = midY; p.angle = 0;
+        updateMovementParticles(p, s.dt);
+        kart(ctx, p.x, p.y, p.radius, BLUE);
+        if (grabbed && !opened) {
+            var a = s.t / 300, ox = p.x + Math.cos(a) * 22, oy = midY + Math.sin(a) * 22;
+            ctx.save(); ctx.translate(ox, oy);
+            ctx.beginPath(); ctx.moveTo(0, -8); ctx.lineTo(7, 6); ctx.lineTo(-7, 6); ctx.closePath();
+            ctx.fillStyle = "#ff7043"; ctx.fill(); ctx.restore();
+        }
+        onCycle(s.mem, s.t - 3120, 4200, "open", function () { spawnTeleportPuff(doorX, midY, "#ffd54a"); });
+    };
+
     SCENES["bumper"] = function (s) {
         floor(s.ctx, "dirt.png", 60);
         var bx = W * 0.66, by = H / 2, p = s.p; p.radius = 11; p.surface = "normal"; p.alive = true;

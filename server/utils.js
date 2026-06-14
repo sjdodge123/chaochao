@@ -839,6 +839,30 @@ exports.validateMap = function (vMap, config) {
             }
         }
     }
+    // Locked doors + keys: 1:1, finite positions. Shapes/pairing are assigned at
+    // runtime (gameBoard.initLockedDoors), so the authored data is just point lists.
+    // (Editor mirror: create.js validateMap.) Door-aware reachability is intentionally
+    // deferred — a key sealed behind its own door is a design error a playtest catches,
+    // and the goal reachability below already treats doors as open (they aren't cells
+    // at author time).
+    var doorsArr = (vMap.doors != null) ? vMap.doors : [];
+    var keysArr = (vMap.keys != null) ? vMap.keys : [];
+    if (!Array.isArray(doorsArr) || !Array.isArray(keysArr)) {
+        return { valid: false, reason: "Map has malformed doors/keys." };
+    }
+    if (doorsArr.length !== keysArr.length) {
+        return { valid: false, reason: "Each locked door needs exactly one key (1:1)." };
+    }
+    for (var dd = 0; dd < doorsArr.length; dd++) {
+        if (doorsArr[dd] == null || !Number.isFinite(doorsArr[dd].x) || !Number.isFinite(doorsArr[dd].y)) {
+            return { valid: false, reason: "Map has a malformed door." };
+        }
+    }
+    for (var kk = 0; kk < keysArr.length; kk++) {
+        if (keysArr[kk] == null || !Number.isFinite(keysArr[kk].x) || !Number.isFinite(keysArr[kk].y)) {
+            return { valid: false, reason: "Map has a malformed key." };
+        }
+    }
     // startEdges: optional; absent => default ["left"] (legacy maps). One edge for
     // a single start, or an OPPOSITE pair (left+right / top+bottom) for a two-sided
     // start. Adjacent pairs (e.g. left+top) and repeats are rejected.

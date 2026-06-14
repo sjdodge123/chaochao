@@ -54,6 +54,11 @@ var movingHandle = false;
 var moveStartX = 0;
 var moveStartY = 0;
 var moveStartIndex = -1;
+// Select-tool key drag: the mouse/select tool can grab a placed key and move it.
+// selectedKeyIndex is the highlighted key (index into vMap.keys); draggingKey is true
+// while the button is held after grabbing it.
+var selectedKeyIndex = null;
+var draggingKey = false;
 var touchActive = false;
 var touchId = null; // identifier of the finger currently driving a touch stroke
 // Accumulates the cell changes of the in-progress paint/erase stroke so the whole
@@ -579,6 +584,26 @@ function buildHazardSwatchDataURL(kind) {
     ctx.fill();
     return c.toDataURL();
 }
+// The locked-door swatch: the dark barrier slab + lilac keyhole the door renders as,
+// so it reads as "what you'll place" like the other palette swatches.
+function buildDoorSwatchDataURL() {
+    var size = 96;
+    var c = document.createElement("canvas");
+    c.width = size;
+    c.height = size;
+    var ctx = c.getContext("2d");
+    ctx.fillStyle = "#2b2438";
+    ctx.fillRect(0, 0, size, size);
+    ctx.strokeStyle = "#cbb6ff";
+    ctx.lineWidth = 6;
+    ctx.strokeRect(5, 5, size - 10, size - 10);
+    ctx.fillStyle = "#cbb6ff"; // keyhole
+    ctx.beginPath();
+    ctx.arc(size / 2, size * 0.42, 13, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.fillRect(size / 2 - 6, size * 0.42, 12, 30);
+    return c.toDataURL();
+}
 function applyTileSwatches() {
     if (config == null) { return; }
     var tiles = [
@@ -611,6 +636,11 @@ function applyTileSwatches() {
         if (bb == null) { continue; }
         bb.classList.add("swatch");
         bb.style.backgroundImage = "url(" + buildBarrierSwatchDataURL(bstyle.key) + ")";
+    }
+    var doorBtn = document.getElementById("doorObjectiveButton");
+    if (doorBtn != null) {
+        doorBtn.classList.add("swatch");
+        doorBtn.style.backgroundImage = "url(" + buildDoorSwatchDataURL() + ")";
     }
 }
 
@@ -685,6 +715,7 @@ function setupPage() {
     $("#randomTileButton").on("click", function () { editorSelectTile("random"); return false; });
     $("#goalTileButton").on("click", function () { editorSelectTile("goal"); return false; });
     $("#emptyTileButton").on("click", function () { editorSelectTile("empty"); return false; });
+    $("#doorObjectiveButton").on("click", function () { editorSelectDoor(); return false; });
     $(".startEdgeButton").on("click", function () {
         var edges = ($(this).attr("data-edges") || "left").split("+");
         setStartEdges(edges);
@@ -919,6 +950,14 @@ function animloop() {
         if (barrierDragEnd === 0) { bDrag.x1 = bnx; bDrag.y1 = bny; } else { bDrag.x2 = bnx; bDrag.y2 = bny; }
         dirty = true;
     }
+    if (draggingKey && selectedKeyIndex != null && Array.isArray(vMap.keys) && vMap.keys[selectedKeyIndex] != null) {
+        // Select tool: drag the grabbed key to follow the cursor (clamped in bounds).
+        if (!outsideMapBounds(mousex, mousey, 0)) {
+            vMap.keys[selectedKeyIndex].x = mousex;
+            vMap.keys[selectedKeyIndex].y = mousey;
+            dirty = true;
+        }
+    }
     if (drawBrushAimer || erasing) {
         var prev = currentCell;
         currentCell = cellIdFromPoint(mousex, mousey);
@@ -957,6 +996,7 @@ function drawEditor(dt) {
     renderCells();
     renderBarriers();
     renderHazards();
+    drawDoorsKeys();
     drawSelectedObject();
     drawBalanceOverlay();
     drawPointerCircle();
@@ -968,6 +1008,9 @@ function drawEditor(dt) {
     // is active. Once barrierStart is set, the anchored preview line takes over.
     if (activeTool.kind === "barrier" && barrierStart == null) {
         drawBarrierCursorGhost(mousex, mousey, activeTool.style || "wall");
+    }
+    if (activeTool.kind === "door") {
+        drawDoorKeyPreview(mousex, mousey);
     }
 }
 // Default radius to preview a not-yet-placed resizable kind at (undefined for
@@ -1859,11 +1902,15 @@ function handleClick(event) {
                 }
             }
             if (activeTool.kind === "barrier") { handleBarrierClick(mousex, mousey); break; }
+            if (activeTool.kind === "door") { placeDoorOrKey(mousex, mousey); break; }
             if (drawBrushAimer) { brushing = true; beginStroke(); break; }
             if (drawObject != null) { addObjectToMap(mousex, mousey, drawObject); break; }
             // Mouse/Select tool: grab a barrier (endpoint to drag, or its segment to
-            // select) before falling through to hazard selection.
+            // select), then a placed key, before falling through to hazard selection.
             if (trySelectBarrier(mousex, mousey)) { break; }
+            var kHit = keyIndexUnderPoint(mousex, mousey);
+            if (kHit >= 0) { selectedKeyIndex = kHit; draggingKey = true; setSelectedObject(null); dirty = true; break; }
+            selectedKeyIndex = null;
             locateObject(mousex, mousey);
             break;
         }
@@ -1871,12 +1918,14 @@ function handleClick(event) {
             if (brushing || rotatingHandle || resizingHandle) { break; } // don't erase while painting/rotating/resizing
             // Right button while mid-barrier abandons the in-progress segment first.
             if (barrierStart != null) { barrierStart = null; dirty = true; break; }
-            // Right button: delete a barrier or hazard under the cursor, else erase to
-            // dirt (right-drag keeps erasing). Backlog UX item.
+            // Right button: delete a barrier / door-key pair / hazard under the cursor,
+            // else erase to dirt (right-drag keeps erasing). Backlog UX item.
             if (barrierUnderPoint(mousex, mousey)) {
                 removeBarrierUnderPoint(mousex, mousey);
                 break;
             }
+            var dkHit = doorKeyUnderPoint(mousex, mousey);
+            if (dkHit != null) { removeDoorKeyPair(dkHit.index); break; }
             if (hazardUnderPoint(mousex, mousey)) {
                 removeHazardUnderPoint(mousex, mousey);
                 break;
@@ -1902,6 +1951,7 @@ function handleUnClick(event) {
                 moveStartIndex = -1;
                 break;
             }
+            if (draggingKey) { draggingKey = false; dirty = true; break; }
             if (rotatingHandle) {
                 rotatingHandle = false;
                 if (selectedObject != null) {
@@ -1991,6 +2041,13 @@ function handleTouchEnd(event) {
 // Every input path routes through setTool(); the legacy render flags are derived
 // here so draw/paint code is untouched.
 function setTool(tool) {
+    // Leaving the door tool with a door placed but no key yet — drop the dangling door
+    // so doors:keys can't desync.
+    if (tool.kind !== "door" && typeof pendingDoorIndex !== "undefined" && pendingDoorIndex != null) {
+        discardPendingDoor();
+    }
+    // Dropping the select tool clears any held key selection.
+    if (tool.kind !== "select") { selectedKeyIndex = null; draggingKey = false; }
     activeTool = tool;
     drawBrushAimer = (tool.kind === "tile" || tool.kind === "eraser");
     drawObject = (tool.kind === "hazard") ? tool.id : null;
@@ -2359,6 +2416,240 @@ function drawEditorBarrier(b, preview) {
 
 // Barrier art (drawBarrierFenceArt / drawBarrierConcreteArt + seed/rng helpers)
 // lives in the shared client/scripts/barrierArt.js (also used in-game by draw.js).
+
+// --- Locked-door objective placement -----------------------------------------
+// One brush: a click drops a DOOR, then the editor auto-arms the matching KEY
+// (placed by the next click) so doors:keys stay 1:1. Shapes + which key opens
+// which door are assigned in-game each round, so the editor stays generic.
+var pendingDoorIndex = null;
+function editorSelectDoor() {
+    if (config == null) { return; }
+    setTool({ kind: "door" });
+}
+function ensureDoorKeyArrays() {
+    if (!Array.isArray(vMap.doors)) { vMap.doors = []; }
+    if (!Array.isArray(vMap.keys)) { vMap.keys = []; }
+}
+function placeDoorOrKey(x, y) {
+    if (outsideMapBounds(x, y, 0)) { return; }
+    ensureDoorKeyArrays();
+    if (pendingDoorIndex == null) {
+        // SNAP the door to its cell's SITE (the voronoi generator point, deep inside the
+        // cell). Storing the site — not the raw click — means the editor, the server
+        // barrier (cellAtPoint), and the in-game render (nearest-site) all resolve to the
+        // EXACT same cell, so the door fills/blocks the identical tile everywhere. A click
+        // near a cell edge would otherwise land in different cells across those resolvers.
+        var dcell = doorCellAt(x, y);
+        var px = (dcell != null && dcell.site != null) ? dcell.site.x : x;
+        var py = (dcell != null && dcell.site != null) ? dcell.site.y : y;
+        vMap.doors.push({ x: px, y: py });
+        pendingDoorIndex = vMap.doors.length - 1; // next click places this door's key
+    } else {
+        vMap.keys.push({ x: x, y: y });
+        pendingDoorIndex = null;
+    }
+    dirty = true;
+}
+// Pop a dangling door that never got its key (when leaving the door tool).
+function discardPendingDoor() {
+    if (pendingDoorIndex == null) { return; }
+    if (Array.isArray(vMap.doors) && pendingDoorIndex === vMap.doors.length - 1) {
+        vMap.doors.pop();
+    }
+    pendingDoorIndex = null;
+    dirty = true;
+}
+// Index of a placed key under (x,y), or -1 — for the select tool's grab/drag.
+function keyIndexUnderPoint(x, y) {
+    if (!Array.isArray(vMap.keys)) { return -1; }
+    var r2 = 22 * 22;
+    for (var i = 0; i < vMap.keys.length; i++) {
+        var k = vMap.keys[i];
+        if (k != null && (k.x - x) * (k.x - x) + (k.y - y) * (k.y - y) <= r2) { return i; }
+    }
+    return -1;
+}
+function doorKeyUnderPoint(x, y) {
+    var r2 = 22 * 22;
+    if (Array.isArray(vMap.keys)) {
+        for (var i = 0; i < vMap.keys.length; i++) {
+            var k = vMap.keys[i];
+            if ((k.x - x) * (k.x - x) + (k.y - y) * (k.y - y) <= r2) { return { kind: "key", index: i }; }
+        }
+    }
+    if (Array.isArray(vMap.doors)) {
+        for (var j = 0; j < vMap.doors.length; j++) {
+            var d = vMap.doors[j];
+            if ((d.x - x) * (d.x - x) + (d.y - y) * (d.y - y) <= r2) { return { kind: "door", index: j }; }
+        }
+    }
+    return null;
+}
+// Remove a door/key PAIR (keeps 1:1). doors[i] pairs keys[i] (placed in order); the
+// key splice is index-guarded so deleting a not-yet-keyed pending door can't drop an
+// unrelated pair's key.
+function removeDoorKeyPair(index) {
+    if (Array.isArray(vMap.doors) && index < vMap.doors.length) { vMap.doors.splice(index, 1); }
+    if (Array.isArray(vMap.keys) && index < vMap.keys.length) { vMap.keys.splice(index, 1); }
+    pendingDoorIndex = null;
+    selectedKeyIndex = null; // indices shifted; drop any held key selection
+    draggingKey = false;
+    dirty = true;
+}
+// Trace the voronoi cell `cell`'s polygon into ctx (no fill/stroke).
+function traceCellPolygon(ctx, cell) {
+    var hes = (cell != null) ? cell.halfedges : null;
+    if (!hes || hes.length === 0) { return false; }
+    ctx.beginPath();
+    var v = getStartpoint(hes[0]);
+    ctx.moveTo(v.x, v.y);
+    for (var h = 0; h < hes.length; h++) { v = getEndpoint(hes[h]); ctx.lineTo(v.x, v.y); }
+    ctx.closePath();
+    return true;
+}
+// The vMap cell whose polygon contains (x,y) — the tile a door at that point fills.
+function doorCellAt(x, y) {
+    if (typeof cellIdFromPoint !== "function" || vMap == null || !Array.isArray(vMap.cells)) { return null; }
+    var idx = cellIdFromPoint(x, y);
+    if (idx == null) { return null; }
+    return vMap.cells[idx] || null;
+}
+// Nearest cell (by site) in an arbitrary map — used by the thumbnail render, which
+// draws any map, not just the live vMap (so it can't use the vMap cell index).
+function nearestCellInMap(map, x, y) {
+    if (map == null || !Array.isArray(map.cells)) { return null; }
+    var best = Infinity, bc = null;
+    for (var i = 0; i < map.cells.length; i++) {
+        var s = map.cells[i].site;
+        if (s == null) { continue; }
+        var dx = s.x - x, dy = s.y - y, d = dx * dx + dy * dy;
+        if (d < best) { best = d; bc = map.cells[i]; }
+    }
+    return bc;
+}
+// Draw a map's locked doors (filled tiles) + keys (glyphs) into ctx — shared by the
+// live editor canvas and the load-list thumbnail.
+function drawMapDoorsKeys(ctx, map) {
+    if (map == null) { return; }
+    if (Array.isArray(map.doors)) {
+        for (var di = 0; di < map.doors.length; di++) {
+            var dr = map.doors[di];
+            if (dr == null) { continue; }
+            var dcell = nearestCellInMap(map, dr.x, dr.y);
+            if (dcell != null && traceCellPolygon(ctx, dcell)) {
+                ctx.fillStyle = "#2b2438"; ctx.fill();
+                ctx.lineWidth = 2; ctx.strokeStyle = "#cbb6ff"; ctx.stroke();
+            }
+            ctx.fillStyle = "#cbb6ff";
+            ctx.beginPath(); ctx.arc(dr.x, dr.y - 3, 5, 0, 2 * Math.PI); ctx.fill();
+            ctx.fillRect(dr.x - 2.5, dr.y - 3, 5, 12);
+        }
+    }
+    if (Array.isArray(map.keys)) {
+        for (var ki = 0; ki < map.keys.length; ki++) {
+            if (map.keys[ki] != null) { drawEditorKeyGlyph(ctx, map.keys[ki].x, map.keys[ki].y); }
+        }
+    }
+}
+// Inscribed radius of a cell (distance from site to the nearest edge) — the largest
+// circle that fits inside it. Used to keep the door keyhole within small tiles.
+function editorCellInnerRadius(cell) {
+    if (cell == null || !cell.halfedges || cell.halfedges.length === 0 || cell.site == null) { return 16; }
+    var s = cell.site, min = Infinity;
+    for (var i = 0; i < cell.halfedges.length; i++) {
+        var a = getStartpoint(cell.halfedges[i]), b = getEndpoint(cell.halfedges[i]);
+        var dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy, d;
+        if (l2 < 1e-9) { var gx = s.x - a.x, gy = s.y - a.y; d = Math.sqrt(gx * gx + gy * gy); }
+        else {
+            var t = ((s.x - a.x) * dx + (s.y - a.y) * dy) / l2; if (t < 0) { t = 0; } else if (t > 1) { t = 1; }
+            var cx = a.x + t * dx, cy = a.y + t * dy, ex = s.x - cx, ey = s.y - cy; d = Math.sqrt(ex * ex + ey * ey);
+        }
+        if (d < min) { min = d; }
+    }
+    return (min === Infinity) ? 16 : min;
+}
+// A door fills its whole tile (the cell it sits on) — a dark barrier slab — with a
+// keyhole marker so it reads as locked. Matches the in-game render (drawLockedDoors).
+function drawEditorDoorGlyph(ctx, x, y) {
+    var cell = doorCellAt(x, y);
+    ctx.save();
+    if (cell != null && traceCellPolygon(ctx, cell)) {
+        ctx.fillStyle = "#2b2438";
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#cbb6ff";
+        ctx.stroke();
+    } else {
+        // Fallback (cell lookup missed): a slab disc so the door never shows bare terrain.
+        ctx.fillStyle = "#2b2438";
+        ctx.beginPath(); ctx.arc(x, y, 20, 0, 2 * Math.PI); ctx.fill();
+        ctx.lineWidth = 2; ctx.strokeStyle = "#cbb6ff"; ctx.stroke();
+    }
+    // Keyhole, scaled down for small tiles so it stays inside the cell bounds.
+    var kh = (cell != null) ? Math.max(0.35, Math.min(1, editorCellInnerRadius(cell) / 16)) : 1;
+    ctx.translate(x, y);
+    ctx.scale(kh, kh);
+    ctx.fillStyle = "#cbb6ff";
+    ctx.beginPath(); ctx.arc(0, -3, 5, 0, 2 * Math.PI); ctx.fill();
+    ctx.fillRect(-2.5, -3, 5, 12);
+    ctx.restore();
+}
+function drawEditorKeyGlyph(ctx, x, y) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = "#ffca28";
+    ctx.strokeStyle = "rgba(255,255,255,0.9)";
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(-6, 0, 7, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+    ctx.fillRect(-1, -2, 14, 4); // shaft
+    ctx.fillRect(9, 2, 4, 5);    // tooth
+    ctx.restore();
+}
+function drawDoorsKeys() {
+    var ctx = createContext;
+    var doors = Array.isArray(vMap.doors) ? vMap.doors : [];
+    var keys = Array.isArray(vMap.keys) ? vMap.keys : [];
+    ctx.save();
+    ctx.strokeStyle = "rgba(203,182,255,0.5)";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 5]);
+    var n = Math.min(doors.length, keys.length);
+    for (var i = 0; i < n; i++) {
+        ctx.beginPath();
+        ctx.moveTo(doors[i].x, doors[i].y);
+        ctx.lineTo(keys[i].x, keys[i].y);
+        ctx.stroke();
+    }
+    ctx.restore();
+    for (var d = 0; d < doors.length; d++) { drawEditorDoorGlyph(ctx, doors[d].x, doors[d].y); }
+    for (var k = 0; k < keys.length; k++) { drawEditorKeyGlyph(ctx, keys[k].x, keys[k].y); }
+    // Selection ring around the key the select tool is holding.
+    if (selectedKeyIndex != null && keys[selectedKeyIndex] != null) {
+        ctx.save();
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.arc(keys[selectedKeyIndex].x, keys[selectedKeyIndex].y, 18, 0, 2 * Math.PI);
+        ctx.stroke();
+        ctx.restore();
+    }
+}
+function drawDoorKeyPreview(x, y) {
+    var ctx = createContext;
+    if (pendingDoorIndex != null && Array.isArray(vMap.doors) && vMap.doors[pendingDoorIndex] != null) {
+        var d = vMap.doors[pendingDoorIndex];
+        ctx.save();
+        ctx.strokeStyle = "rgba(255,202,40,0.7)";
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath(); ctx.moveTo(d.x, d.y); ctx.lineTo(x, y); ctx.stroke();
+        ctx.restore();
+        drawEditorKeyGlyph(ctx, x, y);
+    } else {
+        drawEditorDoorGlyph(ctx, x, y);
+    }
+}
 function editorDeselect() {
     if (selectedObject != null) { setSelectedObject(null); }
 }
@@ -2379,7 +2670,7 @@ function editorDeleteSelected() {
 var TOOL_BUTTON_IDS = ["selectToolButton", "eraserToolButton", "slowTileButton",
     "normalTileButton", "fastTileButton", "lavaTileButton", "iceTileButton",
     "waterTileButton", "abilityTileButton", "randomTileButton", "goalTileButton",
-    "emptyTileButton"];
+    "emptyTileButton", "doorObjectiveButton"];
 function allToolButtonIds() {
     var ids = TOOL_BUTTON_IDS.slice();
     for (var i = 0; i < EDITOR_HAZARD_KINDS.length; i++) {
@@ -2419,6 +2710,9 @@ function activeToolButtonId() {
     }
     if (activeTool.kind === "barrier") {
         return (activeTool.style || "wall") + "BarrierButton";
+    }
+    if (activeTool.kind === "door") {
+        return "doorObjectiveButton";
     }
     return null;
 }
@@ -3205,6 +3499,8 @@ function generateVMap() {
     }
     localMap.hazards = [];
     localMap.barriers = [];
+    localMap.doors = [];
+    localMap.keys = [];
     localMap.startEdges = startEdges.slice();
     return localMap;
 }
@@ -3369,6 +3665,8 @@ function renderMapThumbnail(map) {
             (hzKind.paint || paintHazardShape)(ctx, hzKind, hz.x, hz.y, hz.angle || 0, "#E5392B", hz.radius);
         }
     }
+    // Locked doors (filled tiles) + keys, so the load-list thumbnail shows the objective.
+    drawMapDoorsKeys(ctx, map);
     var url = cv.toDataURL("image/jpeg", 0.7);
     if (map.id != null && patternsReady) { thumbnailCache[map.id] = url; }
     return url;
@@ -3657,6 +3955,30 @@ function validateMap(map) {
             if (bar.style != null && validBarrierStyles != null && validBarrierStyles.indexOf(bar.style) < 0) {
                 return { valid: false, reason: "A barrier has an unknown style." };
             }
+        }
+    }
+    // Locked doors + keys must be 1:1 and well-formed. (Server mirror: utils.validateMap.)
+    if (typeof pendingDoorIndex !== "undefined" && pendingDoorIndex != null) {
+        return { valid: false, reason: "Place the key for the door you just dropped." };
+    }
+    var doorsArr = (map.doors != null) ? map.doors : [];
+    var keysArr = (map.keys != null) ? map.keys : [];
+    if (!Array.isArray(doorsArr) || !Array.isArray(keysArr)) {
+        return { valid: false, reason: "Map has malformed doors/keys." };
+    }
+    if (doorsArr.length !== keysArr.length) {
+        return { valid: false, reason: "Each locked door needs exactly one key (1:1)." };
+    }
+    for (var dd = 0; dd < doorsArr.length; dd++) {
+        var dob = doorsArr[dd];
+        if (dob == null || typeof dob.x !== "number" || typeof dob.y !== "number") {
+            return { valid: false, reason: "Map has a malformed door." };
+        }
+    }
+    for (var kk = 0; kk < keysArr.length; kk++) {
+        var kob = keysArr[kk];
+        if (kob == null || typeof kob.x !== "number" || typeof kob.y !== "number") {
+            return { valid: false, reason: "Map has a malformed key." };
         }
     }
     if (map.startEdges != null) {

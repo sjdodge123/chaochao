@@ -137,6 +137,17 @@
         "offPathSamples": 4,
         "color": "#FFD54A"
     },
+    "lockedDoor": {
+        "_doc": "Locked-door + key objective. Maps place N doors and N keys in the editor (1:1). At map-init the game randomly pairs each door with a key and assigns each pair a SHAPE, so the matching is different every round. A door's home cell is stamped to tileMap.door.id (a no-go wall). A key sits on the ground at its authored spot; the first eligible racer to touch it CARRIES it (like a held ability — shown as its shape around the kart, abilities/punch unaffected). Carrying the matching shape into its door UNLOCKS it (cell flips to normal/passable) for everyone. On death/infection/finish the carrier DROPS the key on nearby walkable ground; during collapse a loose key sitting on lava is CONSUMED (gone for the round — the door stays shut). Zombies can't carry keys.",
+        "enabled": true,
+        "shapes": ["circle", "triangle", "square", "diamond", "pentagon", "hexagon"],
+        "keyRadius": 15,
+        "pickupRadius": 30,
+        "unlockRadius": 48,
+        "zoomOutMs": 1700,
+        "pingMs": 1300,
+        "unlockAnimMs": 900
+    },
     "music": {
         "calm": ["slowstride", "slow-pipes", "8bit-action-1"],
         "exciting": ["mind_in_motion", "the-rush", "beastv2", "bumpinbits1", "bumpinbits2", "bumpinbits3", "bumpinbits4", "bumpinbits5", "8bit-action-3", "8bit-action-6"],
@@ -237,6 +248,15 @@
             "acel": 300,
             "canBeRandomed": false,
             "color": "#13131f"
+        },
+        "door": {
+            "_doc": "A LOCKED DOOR barrier (see config.lockedDoor). Maps place doors + matching keys via the editor (1:1). At map-init the game converts each door's home cell to this id, which the engine treats as a no-go wall (bounceOffLockedDoors) blocking ALL players until the matching shaped key is carried into it. On unlock the cell flips back to normal (passable). canBeRandomed:false; never painted directly — only stamped at runtime.",
+            "id": 12,
+            "brakeCoeff": 0.235,
+            "dragCoeff": 0.25,
+            "acel": 300,
+            "canBeRandomed": false,
+            "color": "#2b2438"
         },
         "abilities": {
             "canBeRandomed": false,

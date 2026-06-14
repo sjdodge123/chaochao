@@ -77,6 +77,15 @@ class GameBoard {
 		// round — `collected` latches). Rebuilt fresh in loadNextMap; the Game reads
 		// this list each racing tick (checkBonusOrbPickups).
 		this.bonusOrbs = [];
+		// Locked-door objective (any mode): doors + matching shaped keys placed by the
+		// map author. Rebuilt fresh each round in loadNextMap (initLockedDoors): door
+		// home-cells are stamped to tileMap.door.id (no-go walls) and each door is
+		// randomly paired with a key + assigned a shape. The Game reads these each
+		// racing tick (checkLockedDoors) for pickup/carry/drop/unlock. hasLockedDoors
+		// gates the per-player door bounce so doorless maps pay nothing.
+		this.lockedDoors = [];
+		this.lockedKeys = [];
+		this.hasLockedDoors = false;
 
 		this.lobbyStartButton;
 		this.alivePlayerCount = 0;
@@ -386,6 +395,7 @@ class GameBoard {
 			_engine.bounceOffStoneEdges(this.playerList[player], this.currentMap);
 			_engine.bounceOffBarriers(this.playerList[player], this.currentMap);
 			_engine.bounceZombieOffWater(this.playerList[player], this.currentMap);
+			if (this.hasLockedDoors) { _engine.bounceOffLockedDoors(this.playerList[player], this.currentMap); }
 			objectArray.push(this.playerList[player]);
 		}
 		for (var projID in this.projectileList) {
@@ -2497,6 +2507,11 @@ class GameBoard {
 		this.soloStartDistance = this.world.height + 400;
 		this.tileChanges = {};
 		this.boilingWater = {}; // drop any half-boiled water from the previous round
+		// Locked-door state is rebuilt per round in loadNextMap (initLockedDoors); clear it
+		// here so a doorless next map doesn't inherit the previous round's bounce/objective.
+		this.lockedDoors = [];
+		this.lockedKeys = [];
+		this.hasLockedDoors = false;
 		this.pendingBeams = {}; // drop any telegraph whose strike timer this reset cancels
 		this.pendingAbilityTimers = []; // bound growth; lobby ones are canceled in clearLobbyAbilities
 		// AI vision-fairness state, reset each round.
@@ -2773,7 +2788,13 @@ class GameBoard {
 		// a cell that random tiles / abilities / heatwave just turned to lava. Empty
 		// in FFA modes (generateBonusOrbs guards on isTeamsMode).
 		this.bonusOrbs = this.generateBonusOrbs();
-		this.newMapPayload = { id: this.currentMap.id, abilities: abilityGen, round: this.round, randomTiles: randomGen, brutalRoundConfig: this.brutalConfig, hazards: compressor.newHazards(this.hazardList), heatwave: heatwaveGen, bonusOrbs: this.bonusOrbs, barriers: (this.currentMap.barriers || null), currentState: currentState };
+		// Locked doors are initialised LAST so they read final tile state (a door cell is
+		// stamped over whatever terrain ended up there). The client gets door/key spawn
+		// info with the map so joiners see the same objective. The payload references the
+		// LIVE door/key arrays (like bonusOrbs) so a re-send to a mid-round joiner carries
+		// CURRENT state (unlocked doors / carried / consumed keys), not a stale snapshot.
+		this.initLockedDoors();
+		this.newMapPayload = { id: this.currentMap.id, abilities: abilityGen, round: this.round, randomTiles: randomGen, brutalRoundConfig: this.brutalConfig, hazards: compressor.newHazards(this.hazardList), heatwave: heatwaveGen, bonusOrbs: this.bonusOrbs, barriers: (this.currentMap.barriers || null), lockedDoors: this.lockedDoors, lockedKeys: this.lockedKeys, currentState: currentState };
 		messenger.messageRoomBySig(this.roomSig, "newMap", this.newMapPayload);
 	}
 	// Team-modes only: choose 1-2 floating bonus-orb spawn points on the current map.
@@ -2782,17 +2803,25 @@ class GameBoard {
 	// goal/bumper/ability/empty/background) and a second orb is kept minSeparation
 	// away from the first so a team can't sweep both in one pass. Returns
 	// [{ x, y, collected:false }, ...] (the array index is the orb id over the wire).
+	// The id-set of walkable ground (slow/normal/fast/ice) — everything else is deadly,
+	// non-traversable, or a pickup/objective. Cached; shared by bonus-orb placement and the
+	// key drop-spot search so "what counts as walkable" lives in exactly one place.
+	walkableGroundIds() {
+		if (this._walkableGroundIds == null) {
+			var s = {};
+			s[c.tileMap.slow.id] = true;
+			s[c.tileMap.normal.id] = true;
+			s[c.tileMap.fast.id] = true;
+			s[c.tileMap.ice.id] = true;
+			this._walkableGroundIds = s;
+		}
+		return this._walkableGroundIds;
+	}
 	generateBonusOrbs() {
 		var cfg = c.bonusOrb;
 		if (cfg == null || cfg.enabled === false || !this.isTeamsMode()) { return []; }
 		if (this.currentMap == null || this.currentMap.cells == null) { return []; }
-		// Walkable ground only: slow/normal/fast/ice. Everything else is deadly,
-		// non-traversable, or already a pickup/objective.
-		var walkableIds = {};
-		walkableIds[c.tileMap.slow.id] = true;
-		walkableIds[c.tileMap.normal.id] = true;
-		walkableIds[c.tileMap.fast.id] = true;
-		walkableIds[c.tileMap.ice.id] = true;
+		var walkableIds = this.walkableGroundIds();
 		var safeCells = [];
 		for (var i = 0; i < this.currentMap.cells.length; i++) {
 			var cell = this.currentMap.cells[i];
@@ -2858,6 +2887,89 @@ class GameBoard {
 			}
 			if (tooClose) { continue; }
 			orbs.push({ x: px, y: py, collected: false });
+		}
+	}
+	// Build this round's locked doors + keys from the authored entities (currentMap.doors /
+	// .keys, 1:1). Each door's home cell is stamped to the barrier tile id, and doors are
+	// randomly paired with keys + assigned shapes so the matching differs every round.
+	// Returns { doors, keys } payloads for the client (positions + shape, no live state).
+	initLockedDoors() {
+		this.lockedDoors = [];
+		this.lockedKeys = [];
+		this.hasLockedDoors = false;
+		var cfg = c.lockedDoor;
+		var map = this.currentMap;
+		if (cfg == null || cfg.enabled === false) { return; }
+		if (map == null || !Array.isArray(map.cells)) { return; }
+		var doors = Array.isArray(map.doors) ? map.doors : [];
+		var keys = Array.isArray(map.keys) ? map.keys : [];
+		var n = Math.min(doors.length, keys.length); // 1:1 enforced at submit; min() is defensive
+		if (n === 0) { return; }
+		var shapePool = (Array.isArray(cfg.shapes) && cfg.shapes.length > 0) ? cfg.shapes.slice() : ["circle", "triangle", "square", "diamond"];
+		utils.shuffleArray(shapePool);
+		var keyOrder = [];
+		for (var k = 0; k < n; k++) { keyOrder.push(k); }
+		utils.shuffleArray(keyOrder); // which authored key spot opens which door
+		var normalId = c.tileMap.normal.id, doorId = c.tileMap.door.id;
+		// A door must OPEN into walkable ground — if the cell underneath was painted lava/
+		// empty/water/etc. (or a door), unlock would otherwise reveal a death tile / hole.
+		// Preserve only the walkable-ground varieties (slow/normal/fast/ice); fall back to
+		// normal for anything else.
+		var openableId = {};
+		openableId[c.tileMap.slow.id] = true;
+		openableId[c.tileMap.normal.id] = true;
+		openableId[c.tileMap.fast.id] = true;
+		openableId[c.tileMap.ice.id] = true;
+		for (var i = 0; i < n; i++) {
+			var shape = shapePool[i % shapePool.length];
+			var dEnt = doors[i];
+			var cell = _engine.cellAtPoint(dEnt.x, dEnt.y, map);
+			var voronoiId = (cell != null && cell.site != null) ? cell.site.voronoiId : null;
+			// What the door reveals on unlock: keep the authored ground only if it's
+			// walkable, else open into normal terrain (never lava/empty/water/door).
+			var authoredId = (cell != null) ? cell.id : normalId;
+			var originalId = openableId[authoredId] === true ? authoredId : normalId;
+			if (cell != null) { cell.id = doorId; }
+			this.lockedDoors.push({ index: i, x: dEnt.x, y: dEnt.y, shape: shape, voronoiId: voronoiId, originalId: originalId, unlocked: false });
+			var kEnt = keys[keyOrder[i]];
+			this.lockedKeys.push({ index: i, doorIndex: i, shape: shape, x: kEnt.x, y: kEnt.y, carriedBy: null, used: false, consumed: false });
+		}
+		this.hasLockedDoors = this.lockedDoors.length > 0;
+	}
+	// A loose key sitting on lava (collapse front reached it) — consumed for the round.
+	keyOnLava(key) {
+		if (key == null || this.currentMap == null) { return false; }
+		return _engine.isOnCellOfType(key.x, key.y, this.currentMap, c.tileMap.lava.id);
+	}
+	// Nearest walkable ground to (x,y) to drop a key on a carrier's death — the death spot
+	// itself if it's already walkable, else the closest slow/normal/fast/ice cell site.
+	findKeyDropSpot(x, y) {
+		var map = this.currentMap;
+		var walkable = this.walkableGroundIds();
+		var here = _engine.cellAtPoint(x, y, map);
+		if (here != null && walkable[here.id] === true) { return { x: x, y: y }; }
+		if (map == null || !Array.isArray(map.cells)) { return { x: x, y: y }; }
+		var best = Infinity, bx = x, by = y;
+		for (var i = 0; i < map.cells.length; i++) {
+			var cell = map.cells[i];
+			if (cell == null || cell.site == null || walkable[cell.id] !== true) { continue; }
+			var dx = cell.site.x - x, dy = cell.site.y - y, d = dx * dx + dy * dy;
+			if (d < best) { best = d; bx = cell.site.x; by = cell.site.y; }
+		}
+		return { x: bx, y: by };
+	}
+	// Flip an unlocked door's home cell back to passable terrain. Guarded so a collapse
+	// that already turned the barrier to lava is never reverted to safe ground.
+	unlockDoorCell(door) {
+		if (door == null) { return; }
+		door.unlocked = true;
+		var map = this.currentMap;
+		if (map == null || !Array.isArray(map.cells) || door.voronoiId == null) { return; }
+		for (var i = 0; i < map.cells.length; i++) {
+			if (map.cells[i].site != null && map.cells[i].site.voronoiId === door.voronoiId) {
+				if (map.cells[i].id === c.tileMap.door.id) { map.cells[i].id = door.originalId; }
+				break;
+			}
 		}
 	}
 	// The direct start->goal route(s) as polylines of cell-site points. A few origins

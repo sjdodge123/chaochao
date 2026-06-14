@@ -282,6 +282,12 @@ function findPathToNearestGoal(map, point, options) {
     var LAVA = c.tileMap.lava.id;
     var GOAL = c.tileMap.goal.id;
     var EMPTY = c.tileMap.empty.id;
+    // A LOCKED door cell carries tileMap.door.id and is a wall (the engine bounces karts
+    // off it) until its key unlocks it (cell flips to normal). Block it like an empty hole
+    // so runtime routing (bonus-orb racing lines, AI pathing) goes around a shut door. At
+    // author/validation time doors are entities, not cells, so this never blocks the
+    // submit-time reachability walk (the goal stays reachable through the future door).
+    var DOOR = (c.tileMap.door != null) ? c.tileMap.door.id : -999;
 
     var blocked = null;
     if (options.blocked) {
@@ -409,7 +415,7 @@ function findPathToNearestGoal(map, point, options) {
             // Lava and empty holes are impassable; so are caller-blocked cells. The
             // goal is always enterable. The start cell is allowed even if it sits on
             // lava.
-            if ((cells[v].id === LAVA || cells[v].id === EMPTY) && cells[v].id !== GOAL) {
+            if ((cells[v].id === LAVA || cells[v].id === EMPTY || cells[v].id === DOOR) && cells[v].id !== GOAL) {
                 continue;
             }
             if (blocked && blocked[cells[v].site.voronoiId]) {

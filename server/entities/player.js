@@ -131,6 +131,10 @@ class Player extends Circle {
 		//Attack
 		this.acquiredAbility = null;
 		this.ability = null;
+		// Locked-door key currently carried (like a held ability, but does NOT block
+		// abilities/punch): { keyIndex, doorIndex, shape } or null. Set/cleared by the
+		// room's checkLockedDoors pass; dropped on death/infection/finish.
+		this.heldKey = null;
 		this.punch = null;
 		this.punchedBy = null;
 		this.murderedBy = null;
@@ -1219,6 +1223,16 @@ class Player extends Circle {
 			this.dragCoeff = object.dragCoeff;
 			return;
 		}
+		if (c.tileMap.door != null && object.id == c.tileMap.door.id) {
+			// Locked-door barrier: the engine bounces players off its rim
+			// (bounceOffLockedDoors) before they ever commit inside. Defensive fallback
+			// (a hard knockback flung the center past the rim): keep normal grip so the
+			// previous tile's physics don't persist while they're pushed back out.
+			this.acel = object.acel;
+			this.brakeCoeff = object.brakeCoeff;
+			this.dragCoeff = object.dragCoeff;
+			return;
+		}
 		if (object.id == c.tileMap.normal.id) {
 			if (this.isZombie == true) {
 				this.applyInfectedMods(object);
@@ -1562,6 +1576,7 @@ class Player extends Circle {
 		this.turnRight = false;
 		this.attack = false;
 		this.reachedGoal = false;
+		this.heldKey = null;
 		this.timeReached = null;
 		this.eliminatedAt = null;
 		this.teamPointsCredited = false; // per-round latch: finish points credited once

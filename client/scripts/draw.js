@@ -3904,6 +3904,9 @@ function drawObjects(dt) {
         drawTerrainFX(dt);
     }
     drawOrbitalBeamTelegraph();
+    // Locked-door barriers (under everything) + loose keys on the ground (under karts).
+    if (typeof drawLockedDoors === "function") { drawLockedDoors(); }
+    if (typeof drawLooseKeys === "function") { drawLooseKeys(); }
     // Bonus orbs sit on the ground under the karts (so a kart visibly rolls over one).
     if (typeof drawBonusOrbs === "function") { drawBonusOrbs(); }
     drawPlayers(dt);
@@ -4375,6 +4378,31 @@ function computeWorldViewTarget(dt) {
             var pcy = focusedView.cy + (bunkerFX.y - focusedView.cy) * w;
             racingScale = racingScale + (pbScale - racingScale) * w;
             return clampViewToWorld(pcx, pcy, racingScale);
+        }
+    }
+    // Locked-door cinematic: on a key PICKUP (ping) or door UNLOCK, pull the camera back
+    // toward the door so every player notices it — peaking mid-animation (the unlock burst
+    // is timed to this peak), then easing back to the normal follow. Unlock pulls harder.
+    if (typeof doorFX !== "undefined" && doorFX != null && doorFX.x != null) {
+        var dcfg = (typeof config !== "undefined" && config && config.lockedDoor) ? config.lockedDoor : {};
+        var dtotal = doorFX.kind === "unlock" ? (dcfg.zoomOutMs || 1700) : (dcfg.pingMs || 1300);
+        var dms2 = Date.now() - doorFX.animStart;
+        if (dms2 >= dtotal) {
+            doorFX = null;
+        } else {
+            var dPanOut = dtotal * 0.32, dHold = dtotal * 0.30, dPanIn = dtotal - dPanOut - dHold;
+            var dw;
+            if (dms2 < dPanOut) { dw = smoothstep(dms2 / dPanOut); }
+            else if (dms2 < dPanOut + dHold) { dw = 1; }
+            else { dw = 1 - smoothstep((dms2 - dPanOut - dHold) / dPanIn); }
+            if (dw > 0) {
+                var pullFrac = doorFX.kind === "unlock" ? 0.30 : 0.55; // smaller = more zoom-out
+                var dScale = 1 + (focusedView.scale - 1) * pullFrac;
+                var dcx2 = focusedView.cx + (doorFX.x - focusedView.cx) * dw;
+                var dcy2 = focusedView.cy + (doorFX.y - focusedView.cy) * dw;
+                racingScale = racingScale + (dScale - racingScale) * dw;
+                return clampViewToWorld(dcx2, dcy2, racingScale);
+            }
         }
     }
     return clampViewToWorld(focusedView.cx, focusedView.cy, racingScale);
@@ -6609,6 +6637,9 @@ function drawPlayer(player, dt) {
 
     if (player.ability != null) {
         drawAbilityIndicator(player.x, player.y, player);
+    }
+    if (player.heldKey != null && typeof drawHeldKey === "function") {
+        drawHeldKey(player);
     }
     drawEmoji(player);
     if (player.name != null) {
@@ -9435,6 +9466,260 @@ function drawBarriers() {
 // aligns with the server collider. Pulses + bobs while live; on pickup it plays a
 // brief expanding ring burst (popAt, set by the bonusOrbCollected handler) then is
 // gone for the rest of the round.
+// --- Locked doors + keys (any mode) ---------------------------------------------
+// Doors render as a dark slab over their cell with a glowing SHAPE silhouette (the
+// barrier itself is server-authoritative; this is just the visual). Keys render as the
+// same shape — bobbing on the ground when loose, orbiting their carrier when held. Each
+// shape gets its own colour so a player can match key->door at a glance. doorFX drives a
+// shared camera zoom-out: a brief ping on pickup, a stronger pull-back + burst on unlock
+// (the burst is timed to the camera peak). All world-space (raw coords, like karts).
+var doorFX = null;
+function keyShapeColor(shape) {
+    switch (shape) {
+        case "triangle": return "#ff7043";
+        case "square": return "#42a5f5";
+        case "diamond": return "#ec407a";
+        case "pentagon": return "#ab47bc";
+        case "hexagon": return "#26c6da";
+        case "circle":
+        default: return "#ffca28";
+    }
+}
+// Trace a named shape's polygon (or circle) into the current path, centred at (x,y).
+function traceShapePath(ctx, shape, x, y, r) {
+    ctx.beginPath();
+    var sides = 0, rot = -Math.PI / 2;
+    switch (shape) {
+        case "triangle": sides = 3; break;
+        case "square": sides = 4; rot = -Math.PI / 4; break;
+        case "diamond": sides = 4; rot = -Math.PI / 2; break;
+        case "pentagon": sides = 5; break;
+        case "hexagon": sides = 6; rot = 0; break;
+        case "circle":
+        default: ctx.arc(x, y, r, 0, 2 * Math.PI); return;
+    }
+    for (var i = 0; i < sides; i++) {
+        var a = rot + i * (2 * Math.PI / sides);
+        var px = x + Math.cos(a) * r, py = y + Math.sin(a) * r;
+        if (i === 0) { ctx.moveTo(px, py); } else { ctx.lineTo(px, py); }
+    }
+    ctx.closePath();
+}
+function drawKeyGlyph(ctx, shape, x, y, r) {
+    // High-contrast double outline (thick dark halo + bright inner edge) so the bright
+    // fill reads on light grass AND dark lava/stone — keys must be easy to spot.
+    traceShapePath(ctx, shape, x, y, r);
+    ctx.fillStyle = keyShapeColor(shape);
+    ctx.fill();
+    ctx.lineWidth = 4.5;
+    ctx.strokeStyle = "rgba(0,0,0,0.9)";
+    ctx.stroke();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(255,255,255,0.97)";
+    ctx.stroke();
+}
+// Nearest cell to a world point (the door/key sits on its site) + that cell's outer
+// radius, cached on the door so we only scan the map once.
+function _findCellNear(x, y) {
+    if (typeof currentMap === "undefined" || currentMap == null || !currentMap.cells) { return null; }
+    var best = Infinity, bestCell = null;
+    for (var i = 0; i < currentMap.cells.length; i++) {
+        var s = currentMap.cells[i].site;
+        if (s == null) { continue; }
+        var dx = s.x - x, dy = s.y - y, d = dx * dx + dy * dy;
+        if (d < best) { best = d; bestCell = currentMap.cells[i]; }
+    }
+    return bestCell;
+}
+function _cellOuterRadius(cell) {
+    if (cell == null || !cell.halfedges || cell.halfedges.length === 0 || cell.site == null) { return 26; }
+    var max = 0, s = cell.site;
+    for (var i = 0; i < cell.halfedges.length; i++) {
+        var v = getEndpoint(cell.halfedges[i]);
+        var dx = v.x - s.x, dy = v.y - s.y, d = dx * dx + dy * dy;
+        if (d > max) { max = d; }
+    }
+    return Math.sqrt(max) || 26;
+}
+function _distToSeg(px, py, ax, ay, bx, by) {
+    var dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+    if (l2 < 1e-9) { var gx = px - ax, gy = py - ay; return Math.sqrt(gx * gx + gy * gy); }
+    var t = ((px - ax) * dx + (py - ay) * dy) / l2;
+    if (t < 0) { t = 0; } else if (t > 1) { t = 1; }
+    var cx = ax + t * dx, cy = ay + t * dy, ex = px - cx, ey = py - cy;
+    return Math.sqrt(ex * ex + ey * ey);
+}
+// Inscribed radius: distance from the site to the NEAREST cell edge — the largest
+// circle that fits INSIDE the cell. Used to size the door shape hint so it stays
+// within the painted tile's bounds (small tiles get a small hint, by design).
+function _cellInnerRadius(cell) {
+    if (cell == null || !cell.halfedges || cell.halfedges.length === 0 || cell.site == null) { return 14; }
+    var s = cell.site, min = Infinity;
+    for (var i = 0; i < cell.halfedges.length; i++) {
+        var a = getStartpoint(cell.halfedges[i]), b = getEndpoint(cell.halfedges[i]);
+        var dd = _distToSeg(s.x, s.y, a.x, a.y, b.x, b.y);
+        if (dd < min) { min = dd; }
+    }
+    return (min === Infinity) ? 14 : min;
+}
+function drawLockedDoors() {
+    if (typeof lockedDoorList === "undefined" || lockedDoorList.length === 0) { return; }
+    if (currentState !== config.stateMap.gated && currentState !== config.stateMap.racing && currentState !== config.stateMap.collapsing) { return; }
+    var doorColor = (config.tileMap.door && config.tileMap.door.color) ? config.tileMap.door.color : "#2b2438";
+    var now = Date.now();
+    for (var i = 0; i < lockedDoorList.length; i++) {
+        var d = lockedDoorList[i];
+        if (d.unlocked) { continue; }
+        // Resolve (and cache) the door's cell. Retry while null — currentMap may not be
+        // loaded yet on the first frames after the newMap payload set this door list, and
+        // caching a null would leave the slab undrawn (bare terrain showing through).
+        if (d._cell == null) { d._cell = _findCellNear(d.x, d.y); if (d._cell != null) { d._ri = _cellInnerRadius(d._cell); } }
+        var col = keyShapeColor(d.shape);
+        var pulse = 0.5 + 0.5 * Math.sin(now / 500 + i);
+        gameContext.save();
+        // Dark barrier slab over the door cell.
+        var haveCell = (d._cell != null && traceCellPath(gameContext, d._cell));
+        if (haveCell) {
+            gameContext.fillStyle = doorColor;
+            gameContext.fill();
+            // A thick GLOWING border in the key's colour hugging the cell — this is what
+            // makes the door's exact footprint unmistakable and colour-codes it to its key.
+            gameContext.globalAlpha = 0.45 + pulse * 0.45;
+            gameContext.lineWidth = 6;
+            gameContext.strokeStyle = col;
+            gameContext.stroke();
+            gameContext.globalAlpha = 1;
+            gameContext.lineWidth = 1.5;
+            gameContext.strokeStyle = "rgba(0,0,0,0.6)";
+            gameContext.stroke();
+        }
+        // Centre emblem: an OPAQUE bright shape in the key's colour with a white edge
+        // (identity) + a dark keyhole punched in (reads as "locked"). Sized by the
+        // inscribed radius so it stays inside the tile.
+        var sr = Math.max(5, (d._ri || 14) * 0.78);
+        traceShapePath(gameContext, d.shape, d.x, d.y, sr);
+        gameContext.fillStyle = col;
+        gameContext.fill();
+        gameContext.lineWidth = 2.5;
+        gameContext.strokeStyle = "rgba(255,255,255,0.95)";
+        gameContext.stroke();
+        var kr = Math.max(2, sr * 0.30); // keyhole
+        gameContext.fillStyle = "rgba(18,14,28,0.92)";
+        gameContext.beginPath();
+        gameContext.arc(d.x, d.y - kr * 0.2, kr, 0, 2 * Math.PI);
+        gameContext.fill();
+        gameContext.fillRect(d.x - kr * 0.42, d.y - kr * 0.2, kr * 0.84, kr * 1.9);
+        gameContext.restore();
+    }
+}
+function drawLooseKeys() {
+    if (typeof lockedKeyList === "undefined" || lockedKeyList.length === 0) { return; }
+    if (currentState !== config.stateMap.gated && currentState !== config.stateMap.racing && currentState !== config.stateMap.collapsing) { return; }
+    var now = Date.now();
+    var baseR = (config.lockedDoor && config.lockedDoor.keyRadius) ? config.lockedDoor.keyRadius : 15;
+    for (var i = 0; i < lockedKeyList.length; i++) {
+        var key = lockedKeyList[i];
+        if (key.consumed || key.carriedBy != null) { continue; } // carried keys draw on the kart
+        var pulse = 0.5 + 0.5 * Math.sin(now / 300 + i * 1.7);
+        var cy = key.y + Math.sin(now / 480 + i * 2.1) * 4; // a little float
+        var r = baseR * (0.98 + pulse * 0.12);
+        var col = keyShapeColor(key.shape);
+        gameContext.save();
+        // Ground shadow lifts the key off the terrain.
+        gameContext.globalAlpha = 0.28;
+        gameContext.fillStyle = "#000";
+        gameContext.beginPath();
+        gameContext.ellipse(key.x, key.y + baseR * 0.95, baseR * 0.85, baseR * 0.34, 0, 0, 2 * Math.PI);
+        gameContext.fill();
+        // Pulsing high-contrast beacon: a bright expanding ring over a dark backing ring
+        // so it stands out on any terrain.
+        var ringR = baseR * 1.7 + pulse * 7;
+        gameContext.globalAlpha = 0.55 + pulse * 0.35;
+        gameContext.lineWidth = 5;
+        gameContext.strokeStyle = "rgba(0,0,0,0.6)";
+        gameContext.beginPath();
+        gameContext.arc(key.x, cy, ringR, 0, 2 * Math.PI);
+        gameContext.stroke();
+        gameContext.lineWidth = 2.5;
+        gameContext.strokeStyle = col;
+        gameContext.beginPath();
+        gameContext.arc(key.x, cy, ringR, 0, 2 * Math.PI);
+        gameContext.stroke();
+        gameContext.globalAlpha = 1;
+        drawKeyGlyph(gameContext, key.shape, key.x, cy, r);
+        gameContext.restore();
+    }
+}
+// Key orbiting a carrier (drawn from drawPlayers, alongside the armed-ability ring).
+function drawHeldKey(player) {
+    if (player == null || player.heldKey == null) { return; }
+    var now = Date.now();
+    var ang = (now / 700) % (2 * Math.PI);
+    var orbit = (player.radius || 6) + 16;
+    var kx = player.x + Math.cos(ang) * orbit;
+    var ky = player.y + Math.sin(ang) * orbit;
+    gameContext.save();
+    drawKeyGlyph(gameContext, player.heldKey.shape, kx, ky, 9);
+    gameContext.restore();
+}
+// Camera cinematics + world-space FX, triggered by the key/door events.
+function triggerDoorPing(x, y, shape) {
+    if (x == null || y == null) { return; }
+    doorFX = { x: x, y: y, shape: shape, kind: "ping", animStart: Date.now() };
+    _spawnDoorRingFX(x, y, shape, "ping");
+}
+function triggerDoorUnlock(x, y, shape) {
+    if (x == null || y == null) { return; }
+    doorFX = { x: x, y: y, shape: shape, kind: "unlock", animStart: Date.now() };
+    _spawnDoorRingFX(x, y, shape, "unlock");
+}
+function _spawnDoorRingFX(x, y, shape, kind) {
+    if (typeof addEffect !== "function") { return; }
+    var cfg = (typeof config !== "undefined" && config && config.lockedDoor) ? config.lockedDoor : {};
+    if (kind === "ping") {
+        addEffect({
+            x: x, y: y, maxAge: cfg.pingMs || 1300,
+            draw: function (ctx, t) {
+                for (var k = 0; k < 2; k++) {
+                    var tt = (t + k * 0.5) % 1;
+                    ctx.globalAlpha = (1 - tt) * 0.7;
+                    ctx.lineWidth = 3 * (1 - tt) + 1;
+                    ctx.strokeStyle = keyShapeColor(shape);
+                    ctx.beginPath();
+                    ctx.arc(x, y, 20 + tt * 72, 0, 2 * Math.PI);
+                    ctx.stroke();
+                }
+                ctx.globalAlpha = 0.9;
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = keyShapeColor(shape);
+                traceShapePath(ctx, shape, x, y, 17);
+                ctx.stroke();
+            }
+        });
+    } else {
+        // Unlock burst — held back until the camera reaches its peak (after the pan-out),
+        // then a bright flash + the shape bursting open.
+        var peak = 0.40;
+        addEffect({
+            x: x, y: y, maxAge: cfg.unlockAnimMs ? (cfg.unlockAnimMs + 600) : 1500,
+            draw: function (ctx, t) {
+                if (t < peak) { return; }
+                var u = (t - peak) / (1 - peak);
+                ctx.globalAlpha = (1 - u) * 0.85;
+                ctx.fillStyle = "#fff6cc";
+                ctx.beginPath();
+                ctx.arc(x, y, 18 + u * 64, 0, 2 * Math.PI);
+                ctx.fill();
+                ctx.globalAlpha = (1 - u);
+                ctx.lineWidth = 4 * (1 - u) + 1;
+                ctx.strokeStyle = keyShapeColor(shape);
+                traceShapePath(ctx, shape, x, y, 18 + u * 44);
+                ctx.stroke();
+            }
+        });
+    }
+}
+
 var BONUS_ORB_POP_MS = 500;
 function drawBonusOrbs() {
     if (typeof bonusOrbList === "undefined" || bonusOrbList.length === 0) { return; }
@@ -10851,7 +11136,7 @@ function drawBrutalBadges() {
 // Sits below the race timer + brutal badges, screen-space (drawn inside drawHUD).
 var combatLog = []; // newest first
 var COMBAT_LOG_MAX = 6;
-var COMBAT_LOG_LIFE_MS = { kill: 6500, death: 6500, ability: 4500, score: 7500, orb: 6500 };
+var COMBAT_LOG_LIFE_MS = { kill: 6500, death: 6500, ability: 4500, score: 7500, orb: 6500, keyPickup: 5000, keyDrop: 5000, doorUnlock: 7000 };
 var _combatAbilityLabels = null;
 var _combatAbilityIcons = null;
 
@@ -10964,6 +11249,20 @@ function combatLogOrb(ownerId, points) {
     pushCombatEntry({ type: "orb", ownerId: ownerId, ownerName: combatNameOf(ownerId), points: (points != null) ? points : 1 });
 }
 
+// Locked-door key picked up / dropped / used to unlock a door. The shape token reads
+// true to the in-world key/door so the feed says which objective just moved.
+function combatLogKeyPickup(ownerId, shape) {
+    if (ownerId == null) { return; }
+    pushCombatEntry({ type: "keyPickup", ownerId: ownerId, ownerName: combatNameOf(ownerId), shape: shape });
+}
+function combatLogKeyDrop(ownerId, shape) {
+    if (ownerId == null) { return; }
+    pushCombatEntry({ type: "keyDrop", ownerId: ownerId, ownerName: combatNameOf(ownerId), shape: shape });
+}
+function combatLogDoorUnlock(ownerId, shape) {
+    pushCombatEntry({ type: "doorUnlock", ownerId: ownerId, ownerName: (ownerId != null) ? combatNameOf(ownerId) : "", shape: shape });
+}
+
 // Scoring finishes. firstPlaceWinner / secondPlaceWinner / playerConcluded all
 // fire for a podium finisher, and teams modes add a teamPointsDelta — so this
 // upgrades an existing recent row (better rank / +points) instead of stacking
@@ -11016,6 +11315,23 @@ function drawCombatOrbToken(cx, cy, r) {
     gameContext.lineWidth = 1.3;
     gameContext.strokeStyle = "rgba(255,255,255,0.85)";
     gameContext.stroke();
+}
+
+// Locked-door key marker — the shape silhouette in its key colour on a white disc,
+// matching the in-world key/door glyph.
+function drawCombatKeyToken(shape, cx, cy, r) {
+    gameContext.beginPath();
+    gameContext.arc(cx, cy, r, 0, Math.PI * 2);
+    gameContext.fillStyle = "rgba(255,255,255,0.92)";
+    gameContext.fill();
+    gameContext.lineWidth = 1.2;
+    gameContext.strokeStyle = "rgba(0,0,0,0.35)";
+    gameContext.stroke();
+    if (typeof traceShapePath === "function") {
+        traceShapePath(gameContext, shape, cx, cy, r * 0.62);
+        gameContext.fillStyle = (typeof keyShapeColor === "function") ? keyShapeColor(shape) : "#ffca28";
+        gameContext.fill();
+    }
 }
 
 // Cart-cosmetic thumbnail for a live player, with a team-coloured ring in teams
@@ -11075,6 +11391,22 @@ function combatRowSegments(entry) {
         segs.push({ k: "thumb", id: entry.ownerId });
         segs.push({ k: "text", text: entry.ownerName, color: combatColorOf(entry.ownerId, "#ffffff"), bold: false });
         segs.push({ k: "text", text: "+" + entry.points, color: "#ffd54a", bold: true });
+    } else if (entry.type === "keyPickup") {
+        segs.push({ k: "keyshape", shape: entry.shape });
+        segs.push({ k: "thumb", id: entry.ownerId });
+        segs.push({ k: "text", text: entry.ownerName, color: combatColorOf(entry.ownerId, "#ffffff"), bold: false });
+        segs.push({ k: "text", text: "got key", color: "#cbd3da", bold: false, small: true });
+    } else if (entry.type === "keyDrop") {
+        segs.push({ k: "keyshape", shape: entry.shape });
+        segs.push({ k: "thumb", id: entry.ownerId });
+        segs.push({ k: "text", text: entry.ownerName, color: combatColorOf(entry.ownerId, "#ffffff"), bold: false });
+        segs.push({ k: "text", text: "dropped key", color: "#cbd3da", bold: false, small: true });
+    } else if (entry.type === "doorUnlock") {
+        segs.push({ k: "glyph", emoji: "🔓" });
+        segs.push({ k: "keyshape", shape: entry.shape });
+        segs.push({ k: "thumb", id: entry.ownerId });
+        segs.push({ k: "text", text: entry.ownerName, color: combatColorOf(entry.ownerId, "#ffffff"), bold: false });
+        segs.push({ k: "text", text: "opened door", color: "#ffd54a", bold: true, small: true });
     } else { // score — 🥇/🥈/🏁 marker conveys the placement
         segs.push({ k: "glyph", emoji: combatScoreEmoji(entry.rankLabel) });
         segs.push({ k: "thumb", id: entry.playerId });
@@ -11123,6 +11455,7 @@ function drawCombatLog() {
             else if (seg.k === "thumb") { seg.w = thumbR * 2; }
             else if (seg.k === "abilityicon") { seg.w = badgeR * 2; }
             else if (seg.k === "orb") { seg.w = badgeR * 2; }
+            else if (seg.k === "keyshape") { seg.w = badgeR * 2; }
             else { // text
                 gameContext.font = (seg.bold ? "bold " : "") + (seg.small ? "11px" : "13px") + " Arial";
                 seg.w = gameContext.measureText(seg.text).width;
@@ -11167,6 +11500,8 @@ function drawCombatLog() {
                 drawAbilityIconToken(sg.img, cx + badgeR, cy, badgeR);
             } else if (sg.k === "orb") {
                 drawCombatOrbToken(cx + badgeR, cy, badgeR);
+            } else if (sg.k === "keyshape") {
+                drawCombatKeyToken(sg.shape, cx + badgeR, cy, badgeR);
             } else {
                 gameContext.font = (sg.bold ? "bold " : "") + (sg.small ? "11px" : "13px") + " Arial";
                 gameContext.textAlign = "left";
