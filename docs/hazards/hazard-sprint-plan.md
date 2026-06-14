@@ -14,7 +14,7 @@ Grow the roster of map-placeable hazards on top of the **hazard-kind registry** 
 
 Single source of truth: `server/entities/hazards.js` (`HAZARD_KINDS` / `registerHazardKind` / `hazardKindById`). Adding a kind touches exactly these spots:
 
-1. **`server/config.json` → `hazards.<key>`** — id + tuning. **Next free id: 908** (900–905 = bumper/movingBumper/bumperWall/rotor/geyser/mine; **906 antlion, 907 thumper are taken** by the antlion brutal mode, not registry kinds).
+1. **`server/config.json` → `hazards.<key>`** — id + tuning. **Next free id: 910** (900–905 = bumper/movingBumper/bumperWall/rotor/geyser/mine; **906 antlion, 907 thumper are taken** by the antlion brutal mode, not registry kinds; **908 gustFan, 909 vortexWell** = Batch 2 force zones).
 2. **`server/entities/hazards.js`** — a `Hazard`/`Rect` subclass + one `registerHazardKind(key, { railed, directional, build })` call.
 3. **`client/scripts/draw.js`** — a drawer in `buildHazardDrawers` (id → fn).
 4. **`client/scripts/create.js`** — an entry in `EDITOR_HAZARD_KINDS` (palette button, swatch, paint, shortcut). Optional hooks: `paint` / `swatchPaint` / `segmentSelect`.
@@ -62,19 +62,20 @@ Effort ascends; cheap+reused first, AI/economy-heavy last.
 
 - [x] **Batch 0 — Framework + Bumper Wall** (id 902) — PR #300 → v0.35.1.
 - [x] **Batch 1 — Rotor (903), Geyser (904), Proximity Mine (905)** — PR #303 → v0.35.4. Proved the `streamAngle` (rotor) and `netState` (geyser/mine) wire slots, the `advance(dt)` motion hook, and the `dt`→`update(dt)` stationary-timer path.
-- [ ] **Batch 2 — Gust Fan + Vortex Well** ← NEXT (ids 908, 909). The two constant-force-field hazards.
-- [ ] **Batch 3 — Blink Fence + Crusher.**
+- [x] **Batch 2 — Gust Fan (908), Vortex Well (909)** — the two constant-force-field hazards. Proved the **force-zone primitive**: a continuous per-tick force applied in `handleHit` (the collision system's every-overlap-tick contact, reusing the Dash Arrows boon's trick) instead of a one-shot Punch — no engine/compressor change, no new wire slot (both static; gust ships its wind angle via the existing `newHazards` angle slot). Gust = rotated Rect (`isGust`, AI counter-steers the wind); Vortex = circular Hazard (`isVortex`, AI routes around the core). Test: `.github/scripts/force-zones-test.js`.
+- [ ] **Batch 3 — Blink Fence + Crusher** ← NEXT.
 - [ ] **Batch 4 — Sentry Turret.**
 - [ ] **Batch 5 — Warp Pads.**
 - [ ] **Batch 6 — Magpie Drone.**
 
 ## 5. Per-batch design specs
 
-### Batch 2 — Gust Fan + Vortex Well  (the new primitive: a force ZONE, not a punch)
-The genuinely new bit vs batch 1: apply a constant per-tick force to players **inside a region** rather than via the Punch system. Add a small "force zone" application path (reference: the radial-force math in `engine.explosion` / `applyExplosionForce`, applied continuously instead of once). Both are static; neither needs new wire slots (position + optional angle is enough).
-- **Gust Fan** (id 908, `directional: true`) — a rectangular wind zone applying a steady directional force along `angle`. Crosswind over a lava bridge = steering test; tailwind = committal speed lane; headwind = shortcut toll. Composes with ice. AI: bias steering against the wind vector inside the zone.
-- **Vortex Well** (id 909, `directional: false`) — a radial **pull** toward a core within a visible radius (anti-bumper). Carry speed → slingshot past; crawl → pulled in. Often parked over lava/off-line. AI: treat the inner radius like a hazard cell to route around; strong karts can punch through.
-- Tests: force applied only inside the zone; direction correct; a parked kart drifts with the gust / toward the well; a fast kart escapes.
+### Batch 2 — Gust Fan + Vortex Well  ✅ SHIPPED (the new primitive: a force ZONE, not a punch)
+The genuinely new bit vs batch 1: apply a constant per-tick force to players **inside a region** rather than via the Punch system. **How it landed:** the force-zone application path turned out to already exist — `engine.narrowBase` calls `hazard.handleHit(player)` *every tick a kart overlaps the hazard's collision shape* (this is how the Dash Arrows boon applies a continuous boost). So a force zone is just a `handleHit` that nudges `player.velX/velY` each call (a fixed per-tick increment, NOT dt-scaled, matching Dash Arrows) — **no new playerList loop, no engine change, no compressor change.** Drag bounds the steady push into a drift; the engine's `maxVelocity` clamp caps absolute speed; both skip protected/star-power karts like `applyExplosionForce`. Both are static, so the per-tick wire row stays 3 fields; the gust's wind angle rides the existing `newHazards` angle slot.
+- **Gust Fan** (id 908, `directional: true`) — a centre-anchored rotated **Rect** wind zone (`isGust`); `handleHit` adds `force` along the unit wind vector (`windX/windY` from `angle`). `width` runs along the wind, `height` across. Crosswind/tailwind/headwind authoring. Composes with ice (lower drag ⇒ bigger drift). AI (`hazardRepulsion`): inside the rotated-rect, bias the heading against the wind (`GUST_COUNTER_STRENGTH`); classifier skips its cells (traversable, drive through).
+- **Vortex Well** (id 909, `directional: false`) — a circular **Hazard** (`isVortex`); `handleHit` pulls toward the core, strength ramping linearly 0 at the rim → `force` at the core, zero past the rim. Carry speed → slingshot; crawl → reeled in. AI: the generic radial `hazardRepulsion` field (h.radius) keeps bots off it, and the classifier penalizes the inner-`0.6·radius` core cells as STATIC so A* routes around the centre.
+- Tests (`.github/scripts/force-zones-test.js`, wired into `pr-validation.yml`): [A] gust push/accumulate/protected/puck, [B] vortex inward/ramp/rim-cutoff/protected, [C] static 3-field wire + gust angle in `newHazards`, [D] live loop — parked kart drifts downwind, parked kart sucked toward the well, fast kart shoots through instead of being trapped.
+- **Deferred polish:** custom in-game SFX (none added — silent like batch-1 hazards); the editor selects/rotates both via the default disc handle (gust uses `config.radius` 80 for the handle, not its true rect footprint) — fine for v1; the `mapClassifier` route-around still treats the gust as a point obstacle (conservative, harmless).
 
 ### Batch 3 — Blink Fence + Crusher
 - **Blink Fence** — a laser barrier between two pylons on a published cycle (solid Ns / open Ns, shimmer warning). Solid = wall bounce (reuse `bounceOffBoundry`) or lava-style burn variant. Uses `netState` (open/closed) like a traffic light. Directional (pylon axis).
@@ -95,3 +96,4 @@ Each batch is handed off with a prompt that points the next agent here. Sequence
 
 ## 7. Status log
 - 2026-06-13 — Batch 0 (framework + Bumper Wall) shipped v0.35.1; Batch 1 (Rotor/Geyser/Mine) shipped v0.35.4. Doc created. Next: Batch 2 (Gust Fan + Vortex Well), ids 908/909.
+- 2026-06-13 — Batch 2 (Gust Fan 908 + Vortex Well 909) BUILT on worktree-hazard-batch2: config + registry + drawers + editor (palette `f`/`v` + paint/swatch) + AI (`isGust` counter-steer, `isVortex` core route-around) + headless test (`force-zones-test.js`, wired into CI) + CHANGELOG/Codex/ARCHITECTURE. Key finding: the "force-zone application path" already exists — `engine.narrowBase` fires `handleHit` every overlap tick, so a force zone is just a velocity-nudging `handleHit` (Dash Arrows pattern); **zero engine/compressor change**. Full battery + build green. **Not yet pushed / no PR** (awaiting operator go-ahead). Next: Batch 3 (Blink Fence + Crusher).

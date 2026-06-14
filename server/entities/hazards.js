@@ -326,6 +326,130 @@ class Mine extends Hazard {
 	}
 }
 
+// A gust fan: a rectangular WIND ZONE that applies a steady directional force to
+// any kart (or puck) inside it — the framework's first "force field" hazard, a
+// constant per-tick push rather than the one-shot Punch the bumpers use. The push
+// is applied in handleHit, which the collision system (engine.narrowBase) calls
+// every tick a kart overlaps the zone — the same continuous-contact trick the Dash
+// Arrows boon uses to turn an overlap into a sustained effect. The map entry's
+// (x,y) is the CENTRE and `angle` the wind direction; `width` runs ALONG the wind,
+// `height` ACROSS it. Crosswind over a lava bridge is a steering test, a tailwind a
+// committal speed lane, a headwind a shortcut toll. Composes with ice (lower drag
+// => more drift). Modelled as a rotated Rect (like the bumper wall) so a kart's
+// circle collides with the true rotated zone; getVertices/getExtents mirror
+// BumperWall's overrides because the base Rect treats width/height as far-corner
+// coords.
+class GustFan extends Rect {
+	constructor(x, y, width, height, angle, color, ownerId, roomSig) {
+		super(x, y, width, height, angle, color);
+		this.alive = true;
+		this.ownerId = ownerId;
+		this.roomSig = roomSig;
+		this.moveable = false;
+		this.isGust = true;        // AI biases steering against the wind inside the zone
+		this.id = c.hazards.gustFan.id;
+		this.speed = 0;
+		// Sanitize the wind direction: directional kinds are validated to a finite
+		// angle by validateMap, but a preview/built-in path could still pass junk
+		// (a non-finite angle NaNs the wind vector and the rotated corners).
+		this.angle = Number.isFinite(angle) ? angle : 0;
+		var rad = this.angle * (Math.PI / 180);
+		this.windX = Math.cos(rad); // unit wind vector (the force direction)
+		this.windY = Math.sin(rad);
+		this.force = c.hazards.gustFan.force;
+	}
+	// Centre-anchored rotated rectangle: half-extents along the wind (width) and
+	// across it (height), rotated by angle. Called by the Rect constructor, so it
+	// may only read x/y/width/height/angle.
+	getVertices() {
+		var rad = (this.angle || 0) * (Math.PI / 180);
+		var dx = Math.cos(rad), dy = Math.sin(rad);   // along wind
+		var nx = -dy, ny = dx;                         // across wind
+		var hw = this.width / 2, hh = this.height / 2;
+		return [
+			{ x: this.x + dx * hw + nx * hh, y: this.y + dy * hw + ny * hh },
+			{ x: this.x - dx * hw + nx * hh, y: this.y - dy * hw + ny * hh },
+			{ x: this.x - dx * hw - nx * hh, y: this.y - dy * hw - ny * hh },
+			{ x: this.x + dx * hw - nx * hh, y: this.y + dy * hw - ny * hh }
+		];
+	}
+	// Base Rect.getExtents skips the last vertex (length-1 loop); for a rotated zone
+	// that drops a corner from the quadtree AABB, so cover all four.
+	getExtents() {
+		var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+		for (var i = 0; i < this.vertices.length; i++) {
+			var v = this.vertices[i];
+			if (v.x < minX) { minX = v.x; }
+			if (v.x > maxX) { maxX = v.x; }
+			if (v.y < minY) { minY = v.y; }
+			if (v.y > maxY) { maxY = v.y; }
+		}
+		return { minX, maxX, minY, maxY };
+	}
+	update() {
+		if (this.alive == false) { return; }
+	}
+	// Force zone: every overlap tick, nudge the victim's velocity along the wind by
+	// a fixed increment (NOT dt-scaled — the tick rate is fixed, matching the Dash
+	// Arrows boon). Drag turns the steady push into a bounded drift; the engine's
+	// maxVelocity clamp caps absolute speed, so a tailwind can't launch anyone.
+	// Skips protected/star-power karts (same policy as gameBoard.applyExplosionForce)
+	// so a spawn-shielded or invulnerable player isn't shoved into lava.
+	handleHit(object) {
+		if (!object.isPlayer && !object.isPuck) { return; }
+		if (object.isPlayer) {
+			if (object.alive === false || object.reachedGoal) { return; }
+			if ((object.isProtected && object.isProtected()) || (object.hasStarPower && object.hasStarPower())) { return; }
+		}
+		object.velX += this.windX * this.force;
+		object.velY += this.windY * this.force;
+	}
+}
+
+// A vortex well: a circular PULL ZONE that drags any kart (or puck) inside its
+// radius toward the core — the anti-bumper. Like the gust fan it's a force field
+// (a constant per-tick pull applied in handleHit on every overlap tick), using the
+// same radial math as gameBoard.applyExplosionForce but INWARD and continuous
+// instead of an outward one-shot. The pull ramps from zero at the rim to full at
+// the core, so carrying speed lets you slingshot past while crawling gets you
+// sucked in; strong karts can still punch through. Often parked over lava or off
+// the racing line. The map entry's (x,y) is the core; `radius` the pull reach.
+class VortexWell extends Hazard {
+	constructor(x, y, radius, color, ownerId, roomSig) {
+		super(x, y, radius, color, ownerId, roomSig);
+		this.id = c.hazards.vortexWell.id;
+		this.moveable = false;      // stationary — no engine motion hook
+		this.isVortex = true;       // AI routes around the core (aiController classifier)
+		this.coreRadius = c.hazards.vortexWell.coreRadius;
+		this.force = c.hazards.vortexWell.force;
+	}
+	update() {
+		if (this.alive == false) { return; }
+	}
+	// Force zone: pull the victim toward the core each overlap tick. Strength ramps
+	// linearly from 0 at the rim to `force` at the core (early-out at the dead
+	// centre to avoid a divide-by-zero and a jitter trap). Fixed per-tick increment
+	// (not dt-scaled), drag-bounded, maxVelocity-capped — same model as the gust
+	// fan. Skips protected/star-power karts like the gust fan and explosion force.
+	handleHit(object) {
+		if (!object.isPlayer && !object.isPuck) { return; }
+		if (object.isPlayer) {
+			if (object.alive === false || object.reachedGoal) { return; }
+			if ((object.isProtected && object.isProtected()) || (object.hasStarPower && object.hasStarPower())) { return; }
+		}
+		var ox = object.newX != null ? object.newX : object.x;
+		var oy = object.newY != null ? object.newY : object.y;
+		var dx = this.x - ox, dy = this.y - oy;
+		var dist = Math.sqrt(dx * dx + dy * dy);
+		if (dist > this.radius) { return; }          // overlap fringe past the rim: no pull
+		if (dist < 0.0001) { return; }               // dead centre: nothing to pull toward
+		var w = (this.radius - dist) / this.radius;  // 0 at rim -> 1 at core
+		var pull = this.force * w;
+		object.velX += (dx / dist) * pull;
+		object.velY += (dy / dist) * pull;
+	}
+}
+
 // --- hazard-kind registry ------------------------------------------------------
 // Single source of truth for the map-authorable hazard kinds. Everything with
 // per-kind behavior keys off this: gameBoard.generateHazards builds via
@@ -423,6 +547,20 @@ registerHazardKind("mine", {
 		return new Mine(entry.x, entry.y, c.hazards.mine.radius, c.hazards.mine.color, mapID, roomSig);
 	}
 });
+registerHazardKind("gustFan", {
+	railed: false,
+	directional: true, // `angle` is the wind direction (validateMap enforces a finite angle)
+	build: function (entry, mapID, roomSig) {
+		return new GustFan(entry.x, entry.y, c.hazards.gustFan.width, c.hazards.gustFan.height, entry.angle, c.hazards.gustFan.color, mapID, roomSig);
+	}
+});
+registerHazardKind("vortexWell", {
+	railed: false,
+	directional: false,
+	build: function (entry, mapID, roomSig) {
+		return new VortexWell(entry.x, entry.y, c.hazards.vortexWell.radius, c.hazards.vortexWell.color, mapID, roomSig);
+	}
+});
 
 // Antlion (brutal round 1014): a sand-dwelling chaser. It is NOT moveable in the
 // engine's sense — engine.updateHazards is rail-only and zeroes velocity for
@@ -492,7 +630,7 @@ class Thumper extends Hazard {
 }
 
 
-module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, Mine, Antlion, Thumper, HAZARD_KINDS, BOON_KINDS, hazardKindById, registerHazardKind, registerBoonKind };
+module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, Mine, GustFan, VortexWell, Antlion, Thumper, HAZARD_KINDS, BOON_KINDS, hazardKindById, registerHazardKind, registerBoonKind };
 
 // Load the boon kinds AFTER module.exports is assigned: boons.js requires this
 // module for the Hazard base class + registerBoonKind, so it must see the fully

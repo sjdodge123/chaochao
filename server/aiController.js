@@ -31,6 +31,7 @@ var BRAKE_SPEED_MIN = 30;       // only brake for turns/lava when moving faster 
 var HAZARD_AVOID_RADIUS = 64;   // px: start steering away from a bumper within this
 var HAZARD_AVOID_STRENGTH = 1.7;// weight of hazard repulsion vs desired heading
 var BUMPER_DANGER_PAD = 22;     // px: extra clearance for a bumper's strike (radius+punch)
+var GUST_COUNTER_STRENGTH = 0.6;// counter-steer bias against a gust fan's wind while inside the zone
 // MOVING-bumper rail crossing. The whole swept rail used to be a permanent
 // repulsive wall, so on a route that HAD to cross it the bots queued up at the
 // rail and oscillated forever — there was no notion of timing the gap. But the
@@ -368,6 +369,21 @@ function hazardRepulsion(bot, ctx, desiredX, desiredY, dt) {
         // should drive THROUGH a speed pad, not around it. Seeking them is a later
         // polish pass; for now they're simply transparent to the avoidance field.
         if (h.helpful) { continue; }
+        // A gust fan is a traversable WIND ZONE, not an obstacle: don't steer around
+        // its anchor (the generic radial field below would). Instead, while INSIDE
+        // the zone, bias the heading AGAINST the wind so the bot fights the drift
+        // back toward its line. Containment is the rotated-rect test in the gust's
+        // local frame (along/across the wind vector vs the half-extents).
+        if (h.isGust) {
+            var gdx = bot.x - h.x, gdy = bot.y - h.y;
+            var gAlong = gdx * h.windX + gdy * h.windY;
+            var gPerp = -gdx * h.windY + gdy * h.windX;
+            if (Math.abs(gAlong) <= h.width / 2 && Math.abs(gPerp) <= h.height / 2) {
+                rx -= h.windX * GUST_COUNTER_STRENGTH;
+                ry -= h.windY * GUST_COUNTER_STRENGTH;
+            }
+            continue;
+        }
         var hx = h.x, hy = h.y;
         // A bumper wall is a static segment: repel from the nearest point on its
         // centerline (the generic radial field below does the rest). No gap to
@@ -1981,6 +1997,28 @@ function update(gameBoard, currentState, dt) {
             }
             continue;
         }
+        // A vortex well drags karts toward its core across a wide radius — penalize
+        // the cells in the strong-pull CORE (an inner fraction of the pull radius) so
+        // A* routes around the dangerous centre, at the harsh STATIC price (there is
+        // no gap to time; the pull is constant). Bots still skirt the outer pull, and
+        // a strong/fast kart can punch through — this only bends the planned route.
+        if (hz.isVortex) {
+            var pullR = hz.radius * 0.6;
+            var pr2 = pullR * pullR;
+            for (var vi = 0; vi < map.cells.length; vi++) {
+                var vc = map.cells[vi];
+                if (!vc || !vc.site) { continue; }
+                var vdx2 = vc.site.x - hz.x, vdy2 = vc.site.y - hz.y;
+                if (vdx2 * vdx2 + vdy2 * vdy2 < pr2) {
+                    if (staticHazardCells == null) { staticHazardCells = new Set(); }
+                    staticHazardCells.add(vc.site.voronoiId);
+                }
+            }
+            continue;
+        }
+        // A gust fan is a traversable wind zone — never price its cells into the
+        // route (bots drive THROUGH it; hazardRepulsion counter-steers the drift).
+        if (hz.isGust) { continue; }
         var bestI = -1, bestD = Infinity;
         for (var ci2 = 0; ci2 < map.cells.length; ci2++) {
             var cc = map.cells[ci2];

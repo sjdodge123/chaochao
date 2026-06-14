@@ -214,6 +214,9 @@ jobs:
       - name: "Headless mine test (proximity trip, fuse, one-shot blast)"
         run: node .github/scripts/mine-test.js
 
+      - name: "Headless force-zones test (Gust Fan + Vortex Well: continuous force, drift/pull/escape, AI)"
+        run: node .github/scripts/force-zones-test.js
+
       - name: "Headless boons test (Dash Arrows: registry/handleHit, live boost, AI blind to boons)"
         run: node .github/scripts/boons-test.js
 
