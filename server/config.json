@@ -566,6 +566,21 @@
             "attackRadius": 16,
             "punchBonus": 16,
             "pinchFraction": 0.8
+        },
+        "sentryTurret": {
+            "id": 911,
+            "color": "#FF5C5C",
+            "radius": 18,
+            "range": 300,
+            "arc": 110,
+            "turnSpeed": 150,
+            "barrelLength": 28,
+            "cooldownMs": 2400,
+            "chargeMs": 700,
+            "fireMs": 180,
+            "shotRadius": 16,
+            "shotSpeed": 9000,
+            "shotLifetime": 1.4
         }
     },
     "boons": {

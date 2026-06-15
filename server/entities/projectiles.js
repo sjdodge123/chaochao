@@ -130,6 +130,67 @@ class BombProj extends Projectile {
 	}
 }
 
+// A sentry-turret shot (the Sentry Turret hazard's projectile). It rides the same
+// projList wire the abilities use, but with its OWN type ("turretShot") so the client
+// gives it a unique look (a glowing red energy bolt, draw.js) and its own fire/impact
+// SFX — not the iceCannon's snowflake sprite + sounds. It resolves as a recoverable
+// SHOVE, NOT a terrain freeze: an auto-firing turret reusing the iceCannon's freeze
+// (which ices every cell the shot crosses each tick + a 100px burst) would runaway-ice
+// the whole arena, so the shot mutates no terrain and only knocks karts off course via
+// gameBoard.shoveShot -> applyExplosionForce. Its distinct type also means
+// engine/gameBoard's snowFlake-only cell-collision is skipped for it (it flies THROUGH
+// terrain — wanted). It detonates on the first live racer it touches (a tracked shot
+// connecting) OR on its fuse (the max-range failsafe), whichever comes first. The owner
+// is the turret hazard's mapID, so there's no player to recoil or credit.
+class TurretShot extends Projectile {
+	constructor(x, y, radius, color, ownerId, roomSig, angle) {
+		super(x, y, radius, color, ownerId, roomSig, angle);
+		this.speed = c.hazards.sentryTurret.shotSpeed;
+		this.type = "turretShot";   // unique client drawer (draw.js) + fire/impact SFX
+		this.shove = false;         // gameBoard.updateProjectiles picks this up -> knockback
+		// Fuse (the max-range failsafe). Date.now-based like SnowFlakeProj so the
+		// headless clock (which mocks Date.now) ages it deterministically per tick.
+		this.fuse = c.hazards.sentryTurret.shotLifetime;
+		this.fuseTimer = null;
+	}
+	update() {
+		this.checkFuse();
+		super.update();
+	}
+	checkFuse() {
+		if (this.fuseTimer != null) {
+			if (Date.now() - this.fuseTimer < this.fuse * 1000) {
+				return;
+			}
+			this.detonate();
+			return;
+		}
+		this.fuseTimer = Date.now();
+	}
+	detonate() {
+		this.shove = true;
+		this.alive = false;
+	}
+	// Detonate on the first live racer OR antlion it touches. Pass through terrain (no
+	// icing) and ignore protected/star karts — a brush past one of those shouldn't waste
+	// the shot mid-flight (the knockback already shrugs them off downstream). Antlions
+	// (the chasing brutal-round hazard) are valid targets: the burst knocks them back
+	// via their impulse channel (gameBoard.shoveAntlions).
+	handleHit(object) {
+		if (object.isAntlion && object.alive !== false) {
+			this.detonate();
+			return;
+		}
+		if (!object.isPlayer || object.alive === false) {
+			return;
+		}
+		if (object.isProtected() || object.hasStarPower()) {
+			return;
+		}
+		this.detonate();
+	}
+}
+
 class Puck extends Projectile {
 	constructor(x, y, radius, color, ownerId, roomSig, angle) {
 		super(x, y, radius, color, ownerId, roomSig, angle);
@@ -146,4 +207,4 @@ class Puck extends Projectile {
 	}
 }
 
-module.exports = { Projectile, CloudProj, SnowFlakeProj, BombProj, Puck };
+module.exports = { Projectile, CloudProj, SnowFlakeProj, BombProj, TurretShot, Puck };

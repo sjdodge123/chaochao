@@ -7402,6 +7402,41 @@ function drawProjectiles(dt) {
             gameContext.drawImage(cloudImage, -centerX, -centerY);
             gameContext.restore();
         }
+        if (projectileList[proj].type == 'turretShot') {
+            // A glowing red energy bolt oriented along its flight (angle shipped on
+            // spawn): a trailing streak + layered ellipses (outer glow -> hot body ->
+            // white-hot core). All flat fills — no per-frame filter/shadow (mobile GPU).
+            var tp = projectileList[proj];
+            var tr = tp.radius || 14;
+            gameContext.save();
+            gameContext.translate(tp.x, tp.y);
+            gameContext.rotate((tp.angle || 0) * (Math.PI / 180));
+            var streak = gameContext.createLinearGradient(-tr * 2.6, 0, 0, 0);
+            streak.addColorStop(0, "rgba(255,90,55,0)");
+            streak.addColorStop(1, "rgba(255,120,70,0.55)");
+            gameContext.fillStyle = streak;
+            gameContext.beginPath();
+            gameContext.moveTo(-tr * 2.6, 0);
+            gameContext.lineTo(0, -tr * 0.5);
+            gameContext.lineTo(0, tr * 0.5);
+            gameContext.closePath();
+            gameContext.fill();
+            gameContext.globalAlpha = 0.4;
+            gameContext.fillStyle = "#ff5436";
+            gameContext.beginPath();
+            gameContext.ellipse(0, 0, tr * 1.3, tr * 0.72, 0, 0, 2 * Math.PI);
+            gameContext.fill();
+            gameContext.globalAlpha = 1;
+            gameContext.fillStyle = "#ff8a3c";
+            gameContext.beginPath();
+            gameContext.ellipse(0, 0, tr * 0.85, tr * 0.46, 0, 0, 2 * Math.PI);
+            gameContext.fill();
+            gameContext.fillStyle = "#fff3d0";
+            gameContext.beginPath();
+            gameContext.ellipse(tr * 0.12, 0, tr * 0.42, tr * 0.24, 0, 0, 2 * Math.PI);
+            gameContext.fill();
+            gameContext.restore();
+        }
     }
 }
 
@@ -9372,6 +9407,11 @@ function buildHazardDrawers() {
             drawCrusher(h.x, h.y, h.railX, h.railY, h.angle);
         };
     }
+    if (config.hazards.sentryTurret != null) {
+        hazardDrawers[config.hazards.sentryTurret.id] = function (h) {
+            drawSentryTurret(h.x, h.y, h.angle, h.state);
+        };
+    }
     // Boons share the hazard drawer registry (they live in the same client
     // hazardList). Their visual language is teal/helpful, the inverse of the
     // bumper-orange "this flings you" rule.
@@ -10216,6 +10256,63 @@ function drawCrusher(x, y, railX, railY, angle) {
         gameContext.arc(corners[ci][0], corners[ci][1], 2.2, 0, 2 * Math.PI);
         gameContext.fill();
     }
+    gameContext.restore();
+}
+
+// Sentry turret: a stationary emplacement with a barrel that tracks (h.angle, the
+// smoothed streamed facing) and a phase glow (h.state: 0 idle, 1 charging telegraph,
+// 2 firing). The rotating barrel + charge ring ARE the dodge telegraph — break the
+// barrel's line during the charge and the shot aborts (server). The full firing arc
+// is shown in the editor (it has the fixed mount angle); live, the barrel is the cue.
+function drawSentryTurret(x, y, angle, state) {
+    var cfg = config.hazards.sentryTurret;
+    var rad = (angle || 0) * (Math.PI / 180);
+    gameContext.save();
+    // Charging: a pulsing red telegraph ring around the body — "it's locking on".
+    if (state === 1) {
+        var pulse = 0.35 + 0.4 * (0.5 + 0.5 * Math.sin(Date.now() / 70));
+        gameContext.globalAlpha = pulse;
+        gameContext.strokeStyle = cfg.color;
+        gameContext.lineWidth = 3;
+        gameContext.beginPath();
+        gameContext.arc(x, y, cfg.radius + 7, 0, 2 * Math.PI);
+        gameContext.stroke();
+        gameContext.globalAlpha = 1;
+    }
+    // Barrel.
+    var bx = x + Math.cos(rad) * cfg.barrelLength, by = y + Math.sin(rad) * cfg.barrelLength;
+    gameContext.lineCap = "round";
+    gameContext.strokeStyle = "#34383d";
+    gameContext.lineWidth = 9;
+    gameContext.beginPath();
+    gameContext.moveTo(x, y);
+    gameContext.lineTo(bx, by);
+    gameContext.stroke();
+    // Muzzle flash on the firing tick.
+    if (state === 2) {
+        gameContext.globalAlpha = 0.6;
+        gameContext.fillStyle = cfg.color;
+        gameContext.beginPath();
+        gameContext.arc(bx, by, 12, 0, 2 * Math.PI);
+        gameContext.fill();
+        gameContext.globalAlpha = 1;
+        gameContext.fillStyle = "#fff2c8";
+        gameContext.beginPath();
+        gameContext.arc(bx, by, 6, 0, 2 * Math.PI);
+        gameContext.fill();
+    }
+    // Body: a bolted base ring with a red dome (the hazard-orange "this hurts" cue).
+    gameContext.fillStyle = "#5a6066";
+    gameContext.beginPath();
+    gameContext.arc(x, y, cfg.radius, 0, 2 * Math.PI);
+    gameContext.fill();
+    gameContext.lineWidth = 3;
+    gameContext.strokeStyle = "#2b2f33";
+    gameContext.stroke();
+    gameContext.fillStyle = cfg.color;
+    gameContext.beginPath();
+    gameContext.arc(x, y, cfg.radius * 0.55, 0, 2 * Math.PI);
+    gameContext.fill();
     gameContext.restore();
 }
 

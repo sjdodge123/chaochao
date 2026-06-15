@@ -10,7 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### Map editor
+
+- **New hazard: the Sentry Turret.** The first hazard that *shoots back*. A fixed gun emplacement tracks the nearest racer inside its firing arc, charges up with a warning glow, then fires a glowing bolt at them with its own zap-and-thunk sound. The bolt doesn't freeze or kill you — it bursts on impact and **knocks you off your line** — but a shove into lava or off a ledge does the rest, so it's brutal guarding a narrow pass. The charge-up is your tell: break out of the barrel's line while it's locking on and the shot fizzles, so juke across the arc rather than crawl through it. **Duck behind a wall or fence and you're safe** — a barrier blocks the turret's line of sight (it won't even fire at you) and stops any bolt already in the air. In an **Antlion** round the turret also targets the antlions — a hit knocks them back, so a well-placed turret helps fend off the swarm. Authors place it from the hazards palette and aim its mount facing (the centre of its firing cone, shown right in the editor); rival AI racers keep out of the line of fire. Lightning rounds leave it alone (it's a stationary, timed hazard).
+- **Editor: placed objects are selected right away.** Drop a hazard or boon and it's immediately selected in the cursor tool — grab, rotate, resize, or delete it on the spot without first clicking Select. Place the next one by picking it from the palette again.
 
 ## v0.42.0 — 2026-06-15
 

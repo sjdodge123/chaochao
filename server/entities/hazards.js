@@ -642,6 +642,149 @@ class Crusher extends Rect {
 	}
 }
 
+// A sentry turret: a stationary emplacement that tracks the nearest racer inside its
+// firing arc and lobs an aimed shot every cooldown. The FIRST projectile-emitting map
+// element — every prior hazard hit via the Punch/force machinery on contact; this one
+// fires a real projectile (a TurretShot) that rides the iceCannon ability's
+// projectile wire (see entities/projectiles.js + gameBoard.fireTurret). The shot
+// SHOVES (knockback), it does NOT freeze terrain like an iceCannon — an auto-firing
+// turret reusing the freeze would runaway-ice the arena (rationale on TurretShot).
+//
+// Two state layers ride the framework wires: the live barrel facing on `streamAngle`
+// (like the rotor) and the phase on `netState` (like the geyser). Directional — the
+// authored `angle` is the turret's MOUNT facing, the centre of its firing arc.
+//
+// Per-tick logic needs the room's player list (to acquire a target), which the
+// stationary update(dt) hook doesn't get — so it lives in serve(playerList, dt, live),
+// called from gameBoard.updateHazards (the geyser's punch + the vortex's force run
+// there too). serve sets `fireRequest` on the firing edge; gameBoard spawns the shot
+// (mirroring the abilityList spawnSnowFlake flag -> gameBoard.spawnSnowFlake pattern).
+//
+// Phases (also the netState values): 0 idle/scanning, 1 charging (the lock-on
+// telegraph — a dodge window, like the geyser charge / laser-gate warn), 2 firing.
+var TURRET_IDLE = 0, TURRET_CHARGING = 1, TURRET_FIRING = 2;
+class Turret extends Hazard {
+	constructor(x, y, angle, ownerId, roomSig) {
+		super(x, y, c.hazards.sentryTurret.radius, c.hazards.sentryTurret.color, ownerId, roomSig);
+		this.id = c.hazards.sentryTurret.id;
+		this.moveable = false;      // stationary — no engine motion hook
+		this.streamAngle = true;    // ship the live barrel facing per tick (rotor pattern)
+		this.isTurret = true;       // AI penalizes the cone of fire (aiController)
+		// Mount facing = the centre of the firing arc. Directional, so validateMap
+		// enforces a finite angle; guard anyway (a non-finite angle NaNs the aim math).
+		// NORMALIZE to [0,360): the arc-membership tests (here + AI) use a single-mod
+		// shortest-delta that assumes the reference angle is in range — a crafted/hand-
+		// edited map shipping e.g. 720 or -400 would otherwise corrupt the wedge.
+		this.mountAngle = Number.isFinite(angle) ? ((angle % 360) + 360) % 360 : 0;
+		this.angle = this.mountAngle;   // current barrel facing (streamed; eases to/from mount)
+		this.range = c.hazards.sentryTurret.range;
+		this.arc = c.hazards.sentryTurret.arc;
+		this.turnSpeed = c.hazards.sentryTurret.turnSpeed; // barrel tracking, degrees/sec
+		this.phase = TURRET_IDLE;
+		this.netState = TURRET_IDLE; // shipped each tick (compressor.sendHazardUpdates)
+		this.timer = 0;             // seconds elapsed in charging/firing
+		// Start "loaded" so a turret guarding the start line threatens promptly.
+		this.cooldownTimer = c.hazards.sentryTurret.cooldownMs / 1000;
+		this.fireRequest = false;   // gameBoard.fireTurret consumes this on the firing edge
+		this.x = this.newX = x;     // stationary; seed newX/newY so a stray move() is a no-op
+		this.y = this.newY = y;
+	}
+	// Stationary: no motion + no timer that runs without the player list. All per-tick
+	// work is in serve() (needs playerList), called from gameBoard.updateHazards.
+	update() { }
+	// Shortest-arc step of `cur` toward `target` by at most `maxStep` (all degrees).
+	stepAngleToward(cur, target, maxStep) {
+		var diff = ((target - cur + 540) % 360) - 180;
+		if (Math.abs(diff) <= maxStep) { return ((target % 360) + 360) % 360; }
+		return ((cur + (diff < 0 ? -1 : 1) * maxStep) % 360 + 360) % 360;
+	}
+	// Whether a candidate at (tx,ty) is a valid target: inside range, inside the mount
+	// arc, and (if `map` has barriers) not shielded behind a wall/fence. Returns the
+	// angle to it (for aiming) or null. Shared by the racer + antlion passes so both use
+	// the identical arc/range/line-of-sight test.
+	targetAngleIfVisible(tx, ty, halfArc, eng, map) {
+		var dx = tx - this.x, dy = ty - this.y;
+		var d2 = dx * dx + dy * dy;
+		if (d2 < 1) { return null; }
+		var ang = Math.atan2(dy, dx) * 180 / Math.PI;
+		if (Math.abs(((ang - this.mountAngle + 540) % 360) - 180) > halfArc) { return null; }
+		if (eng != null && eng.barrierCrossing(this.x, this.y, tx, ty, map) != null) { return null; }
+		return { angle: ang, d2: d2 };
+	}
+	// Nearest valid target inside range AND inside the mount arc, as { angle }, or null.
+	// Considers racers (skipping protected/star — knockback shrugs them off — and
+	// finished karts) AND antlions (the chasing brutal-round hazard, passed in by
+	// gameBoard during the antlion round). Zombies are alive racers, so the turret
+	// tracks them like anyone else. A barrier between the turret and a candidate shields
+	// it (line of sight). Picks whichever target — racer or antlion — is closest.
+	acquireTarget(playerList, map, antlions) {
+		var best = null, bestD2 = this.range * this.range, halfArc = this.arc / 2;
+		var eng = (map != null) ? require('../engine.js') : null;
+		for (var id in playerList) {
+			var p = playerList[id];
+			if (p == null || p.alive === false || p.reachedGoal) { continue; }
+			if (typeof p.isProtected === "function" && p.isProtected()) { continue; }
+			if (typeof p.hasStarPower === "function" && p.hasStarPower()) { continue; }
+			var hit = this.targetAngleIfVisible(p.x, p.y, halfArc, eng, map);
+			if (hit != null && hit.d2 < bestD2) { bestD2 = hit.d2; best = { angle: hit.angle }; }
+		}
+		if (antlions != null) {
+			for (var ai = 0; ai < antlions.length; ai++) {
+				var an = antlions[ai];
+				if (an == null || an.alive === false) { continue; }
+				var ahit = this.targetAngleIfVisible(an.x, an.y, halfArc, eng, map);
+				if (ahit != null && ahit.d2 < bestD2) { bestD2 = ahit.d2; best = { angle: ahit.angle }; }
+			}
+		}
+		return best;
+	}
+	// Per-tick: aim + run the cooldown->charge->fire state machine. `live` is false
+	// outside racing/collapsing (karts are penned) — the turret idles and the barrel
+	// eases back to its mount facing. `map` (optional) lets it skip targets shielded by
+	// a barrier; `antlions` (optional) are extra targets during the antlion round. Sets
+	// fireRequest on the firing edge.
+	serve(playerList, dt, live, map, antlions) {
+		dt = dt || 0;
+		if (this.alive === false) { return; }
+		var target = live ? this.acquireTarget(playerList, map, antlions) : null;
+		var wantAngle = (target != null) ? target.angle : this.mountAngle;
+		this.angle = this.stepAngleToward(this.angle, wantAngle, this.turnSpeed * dt);
+		this.cooldownTimer += dt; // always recovering, so it's loaded when a target appears
+		var cfg = c.hazards.sentryTurret;
+		if (this.phase === TURRET_IDLE) {
+			if (target != null && this.cooldownTimer >= cfg.cooldownMs / 1000) {
+				this.phase = TURRET_CHARGING; this.timer = 0;
+			}
+		} else if (this.phase === TURRET_CHARGING) {
+			this.timer += dt;
+			// Juke out of the arc during the lock-on and the shot is aborted — the
+			// telegraph is a real dodge window (bait the turret, then break the line).
+			if (target == null) {
+				this.phase = TURRET_IDLE; this.timer = 0;
+			} else if (this.timer >= cfg.chargeMs / 1000) {
+				this.fireRequest = true;    // fire along the current barrel angle
+				this.cooldownTimer = 0;
+				this.phase = TURRET_FIRING; this.timer = 0;
+			}
+		} else { // TURRET_FIRING
+			this.timer += dt;
+			if (this.timer >= cfg.fireMs / 1000) { this.phase = TURRET_IDLE; this.timer = 0; }
+		}
+		this.netState = this.phase;
+	}
+	// The muzzle world position (where the shot spawns + where the client draws the
+	// barrel tip), barrelLength out along the current barrel facing.
+	muzzle() {
+		var rad = this.angle * (Math.PI / 180);
+		return {
+			x: this.x + Math.cos(rad) * c.hazards.sentryTurret.barrelLength,
+			y: this.y + Math.sin(rad) * c.hazards.sentryTurret.barrelLength
+		};
+	}
+	// Touch is harmless — the turret's only damage is its shot.
+	handleHit(object) { }
+}
+
 // --- hazard-kind registry ------------------------------------------------------
 // Single source of truth for the map-authorable hazard kinds. Everything with
 // per-kind behavior keys off this: gameBoard.generateHazards builds via
@@ -761,6 +904,13 @@ registerHazardKind("crusher", {
 		return new Crusher(entry.x, entry.y, rail, mapID, roomSig);
 	}
 });
+registerHazardKind("sentryTurret", {
+	railed: false,
+	directional: true, // the authored angle is the mount facing (centre of the firing arc)
+	build: function (entry, mapID, roomSig) {
+		return new Turret(entry.x, entry.y, entry.angle, mapID, roomSig);
+	}
+});
 
 // Antlion (brutal round 1014): a sand-dwelling chaser. It is NOT moveable in the
 // engine's sense — engine.updateHazards is rail-only and zeroes velocity for
@@ -830,7 +980,7 @@ class Thumper extends Hazard {
 }
 
 
-module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, Mine, VortexWell, vortexWellRadius, LaserGate, Crusher, Antlion, Thumper, HAZARD_KINDS, BOON_KINDS, hazardKindById, registerHazardKind, registerBoonKind };
+module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, Mine, VortexWell, vortexWellRadius, LaserGate, Crusher, Turret, Antlion, Thumper, HAZARD_KINDS, BOON_KINDS, hazardKindById, registerHazardKind, registerBoonKind };
 
 // Load the boon kinds AFTER module.exports is assigned: boons.js requires this
 // module for the Hazard base class + registerBoonKind, so it must see the fully
