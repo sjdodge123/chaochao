@@ -11208,50 +11208,81 @@ function drawSlipstream(x, y, angle) {
     gameContext.restore();
 }
 
-// Launch Pad — a directional ramp you drive over to be flung airborne along its facing.
-// A round pad with a bold launch arrow + a burst of motion ticks pointing the throw way,
-// pulsing so it reads as "live". Orange palette (pale on water). Dark contrast halo under
-// the arrow so it stays legible on any terrain. Cheap sin/phase, no shadowBlur/filter.
+// Launch Pad — a SPRINGBOARD you drive over to be flung airborne along its facing. A coiled
+// metal spring (behind) drives a bouncy orange board (front) that carries a bold launch
+// arrow; the spring compresses + the board nudges forward on a live bounce so it reads as
+// "springy". Orange palette (pale on water). Dark contrast halo under the art. Shared shape
+// in drawSpringboardBody so the live drawer + editor painter match. Cheap sin/phase only.
+function drawSpringboardBody(ctx, r, accent, light, dark, bounce) {
+    var hw = r * 0.62;            // half-width across the board
+    var backX = -r * 0.95;       // anchor / spring end
+    var frontX = r * 0.95;       // launch lip
+    var compress = 1 - 0.22 * bounce;   // spring squashes with the bounce
+    var shift = bounce * r * 0.14;      // board kicks forward as it springs
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    // Anchor plate at the very back (what the spring pushes off).
+    ctx.fillStyle = dark;
+    ctx.fillRect(backX - 1, -hw * 1.05, r * 0.16, hw * 2.1);
+    // Coil spring: a zig-zag running along the axis from the anchor to the board, drawn over
+    // a dark halo, in metallic grey. Its forward end (and tightness) tracks the compression.
+    var sx0 = backX + r * 0.1;
+    var sx1 = (-r * 0.05 - sx0) * compress + sx0 + shift;
+    var segs = 7;
+    function coil() {
+        ctx.beginPath();
+        for (var s = 0; s <= segs; s++) {
+            var px = sx0 + (sx1 - sx0) * (s / segs);
+            var py = (s % 2 === 0) ? -hw * 0.66 : hw * 0.66;
+            if (s === 0) { ctx.moveTo(px, py); } else { ctx.lineTo(px, py); }
+        }
+    }
+    coil(); ctx.strokeStyle = BOON_HALO; ctx.lineWidth = 7; ctx.stroke();
+    coil(); ctx.strokeStyle = "#cfd4d8"; ctx.lineWidth = 3.5; ctx.stroke();
+    // Springboard surface: a rounded board (capsule) shifted forward by the bounce, shaded
+    // light front -> dark back so the launch lip pops.
+    var bx0 = -r * 0.15 + shift, bx1 = frontX + shift, rr = hw;
+    function board() {
+        ctx.beginPath();
+        ctx.moveTo(bx0 + rr, -hw);
+        ctx.lineTo(bx1 - rr, -hw);
+        ctx.arc(bx1 - rr, 0, rr, -Math.PI / 2, Math.PI / 2);
+        ctx.lineTo(bx0 + rr, hw);
+        ctx.arc(bx0 + rr, 0, rr, Math.PI / 2, -Math.PI / 2);
+        ctx.closePath();
+    }
+    board();
+    var grad = ctx.createLinearGradient(bx0, 0, bx1, 0);
+    grad.addColorStop(0, dark);
+    grad.addColorStop(1, light);
+    ctx.fillStyle = grad; ctx.fill();
+    ctx.strokeStyle = BOON_HALO; ctx.lineWidth = 2.5; ctx.stroke();
+    // Bright launch lip at the front (+x) edge.
+    ctx.beginPath();
+    ctx.moveTo(bx1 - rr * 0.2, -hw * 0.8);
+    ctx.arc(bx1 - rr, 0, rr, -Math.PI / 2.4, Math.PI / 2.4);
+    ctx.strokeStyle = light; ctx.lineWidth = 3; ctx.stroke();
+    // Bold launch arrow on the board pointing +x.
+    ctx.beginPath();
+    ctx.moveTo(bx0 + rr * 0.6, -hw * 0.62);
+    ctx.lineTo(bx1 - rr * 0.5, 0);
+    ctx.lineTo(bx0 + rr * 0.6, hw * 0.62);
+    ctx.strokeStyle = BOON_HALO; ctx.lineWidth = 8; ctx.stroke();
+    ctx.strokeStyle = accent; ctx.lineWidth = 4.5; ctx.stroke();
+}
 function drawLaunchPad(x, y, angle) {
     var cfg = config.boons.launchPad;
     var r = cfg.radius;
     var rad = (angle || 0) * (Math.PI / 180);
     var onWater = boonOnWater(x, y);
     var accent = onWater ? cfg.colorWater : cfg.color;
-    var pulse = 0.5 + 0.5 * Math.sin(Date.now() / 260);
+    var light = onWater ? "#ffe9cf" : "#ffc890";
+    var dark = onWater ? "#caa06f" : "#9c4e1c";
+    var bounce = 0.5 + 0.5 * Math.sin(Date.now() / 230);
     gameContext.save();
     gameContext.translate(x, y);
     gameContext.rotate(rad);
-    // Faint round footprint.
-    gameContext.beginPath();
-    gameContext.arc(0, 0, r, 0, 2 * Math.PI);
-    gameContext.fillStyle = onWater ? "rgba(255,216,168,0.06)" : "rgba(255,140,66,0.06)";
-    gameContext.fill();
-    gameContext.strokeStyle = onWater ? "rgba(255,216,168,0.16)" : "rgba(255,140,66,0.16)";
-    gameContext.lineWidth = 1;
-    gameContext.stroke();
-    // Three "thrust" ticks behind the arrow, brightening with the pulse — the launch energy.
-    gameContext.lineCap = "round";
-    for (var i = 0; i < 3; i++) {
-        var tx = -r * 0.6 + i * r * 0.34;
-        var th = r * (0.30 + 0.10 * i);
-        gameContext.globalAlpha = 0.25 + 0.5 * pulse * ((i + 1) / 3);
-        gameContext.beginPath();
-        gameContext.moveTo(tx, -th);
-        gameContext.lineTo(tx, th);
-        gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 6; gameContext.stroke();
-        gameContext.strokeStyle = accent; gameContext.lineWidth = 3; gameContext.stroke();
-    }
-    gameContext.globalAlpha = 1;
-    // Bold launch arrow pointing +x (the throw direction).
-    var aw = r * 0.95;
-    gameContext.lineJoin = "round";
-    gameContext.beginPath();
-    gameContext.moveTo(-r * 0.1, -r * 0.5);
-    gameContext.lineTo(aw, 0);
-    gameContext.lineTo(-r * 0.1, r * 0.5);
-    gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 9; gameContext.stroke();
-    gameContext.strokeStyle = accent; gameContext.lineWidth = 5; gameContext.stroke();
+    drawSpringboardBody(gameContext, r, accent, light, dark, bounce);
     gameContext.restore();
 }
 
