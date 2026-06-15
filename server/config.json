@@ -649,8 +649,8 @@
             "autoFireMs": 3000,
             "minAimMs": 250,
             "sweepSpeed": 160,
-            "flightDistance": 280,
-            "flightDurationMs": 720
+            "flightDistance": 210,
+            "flightDurationMs": 540
         },
         "slingshotRings": {
             "_doc": "Drive THROUGH a ring for a speed PULSE along the ring's author-set axis, scaled by how CENTERED your pass was — dead-centre is the full pulse, clipping the rim barely boosts. Reuses the Dash Arrows capped-add (adds only the remaining gap to the cap, so it never overshoots/tunnels and never brakes a faster kart) but the cap scales with centeredness; chaining consecutive rings within chainWindowMs raises the cap (chainBonus per link, up to chainMax) so a line of rings stacks into a bigger launch than any one ring. Purely axial, so a backward pass fights it. radius is the circular hitbox. colorWater is the on-water palette.",

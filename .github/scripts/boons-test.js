@@ -678,8 +678,8 @@ try {
         const kind = hazardKindById(BARREL.id);
         check(kind != null && kind.helpful === true, 'barrelCannon resolves through the registry + is helpful (id ' + BARREL.id + ')');
         check(kind != null && kind.directional === true && kind.railed === false, 'barrelCannon is directional + not railed');
-        check(BARREL.flightDistance > config.boons.launchPad.distance,
-            'the barrel fires a LONGER arc than the Launch Pad (' + BARREL.flightDistance + ' > ' + config.boons.launchPad.distance + ')');
+        check(BARREL.flightDistance >= 120 && BARREL.flightDistance <= 400,
+            'the barrel fires a committed arc of a sane distance (' + BARREL.flightDistance + ' px)');
 
         const map = buildMap('barrel', [{ id: BARREL.id, x: PAD_X, y: ROWS[2], angle: 0 }], [2]);
         const { room, bot } = bootRoom('boon-barrel', map, RACER);
