@@ -251,6 +251,8 @@ class Player extends Circle {
 		this.airborneToY = 0;
 		this.barreledUntil = 0;
 		this.barrel = null;
+		this.barrelAimAngle = 0;  // live aim while loaded (deg); player turns it, streamed via angle
+		this.barrelArmAt = 0;     // earliest a punch can fire (a brief aim window after loading)
 		// Slingshot Rings chain: consecutive rings hit inside chainWindowMs raise the pulse
 		// cap (slingChainCount), so a row of rings launches harder than one. Re-armed per ring.
 		this.slingChainUntil = 0;
@@ -371,6 +373,7 @@ class Player extends Circle {
 		// normal movement/attack runs — tick the arc/barrel instead. (Mirrors the Second
 		// Wind death-beat above: position is driven absolutely, velocity stays 0.)
 		if (this.isAloft()) {
+			this.dt = dt;
 			if (this.isBarreled()) {
 				this.tickBarrel();
 			} else {
@@ -1010,6 +1013,7 @@ class Player extends Circle {
 		this.airborneToY = Math.max(margin, Math.min(c.worldHeight - margin, this.y + dirY * distance));
 		this.airborneStartAt = Date.now();
 		this.airborneUntil = this.airborneStartAt + durationMs;
+		this.angle = angleDeg || 0; // face the travel direction (streamed; kart points along the arc)
 		this.enabled = false;
 		this.velX = 0;
 		this.velY = 0;
@@ -1072,15 +1076,20 @@ class Player extends Circle {
 		this.enabled = true;
 		messenger.messageRoomBySig(this.roomSig, "airborneLand", { id: this.id, x: this.x, y: this.y });
 	}
-	// Barrel Cannon: capture the racer into the barrel — frozen at the mouth, aiming along
-	// the barrel's facing — until they punch or autoFireMs elapses (tickBarrel fires them).
-	// Guards re-entry (already loaded/aloft) so the engine double-dispatch no-ops.
+	// Barrel Cannon: capture the racer into the barrel — frozen at the mouth, aiming from
+	// the barrel's author-set facing — until they punch (after a brief arming window) or the
+	// fuse (autoFireMs) elapses (tickBarrel turns the aim + fires them). Guards re-entry
+	// (already loaded/aloft) so the engine double-dispatch no-ops.
 	loadIntoBarrel(barrel) {
 		if (this.isAloft() || barrel == null) {
 			return false;
 		}
 		this.barrel = barrel;
-		this.barreledUntil = Date.now() + barrel.autoFireMs;
+		var now = Date.now();
+		this.barreledUntil = now + barrel.autoFireMs;
+		this.barrelArmAt = now + (barrel.minAimMs || 0);
+		this.barrelAimAngle = barrel.angle || 0; // start aimed where the author pointed it
+		this.angle = this.barrelAimAngle;         // streamed → the loaded kart faces the aim
 		this.x = barrel.x;
 		this.y = barrel.y;
 		this.newX = this.x;
@@ -1103,12 +1112,15 @@ class Player extends Circle {
 			messenger.messageRoomBySig(this.roomSig, "onFire", { owner: this.id, value: 0 });
 		}
 		messenger.messageRoomBySig(this.roomSig, "barrelLoaded", {
-			id: this.id, x: barrel.x, y: barrel.y, angle: barrel.angle, ms: barrel.autoFireMs
+			id: this.id, x: barrel.x, y: barrel.y, angle: this.barrelAimAngle, ms: barrel.autoFireMs
 		});
 		return true;
 	}
-	// Per tick while loaded (Player.update): hold the kart at the barrel mouth; fire on a
-	// punch press or once the auto-fire timer elapses, handing off to the shared airborne arc.
+	// Per tick while loaded (Player.update): hold the kart at the barrel mouth and let the
+	// player AIM — turn left/right swings the barrel (aimTurnSpeed deg/s), the aim rides the
+	// streamed `angle` so the kart visibly turns. Fire on a punch press (once past the brief
+	// arming window so a held punch can't instant-fire) or when the fuse (autoFireMs) runs
+	// out, handing off to the shared airborne arc in the CURRENT aim direction.
 	tickBarrel() {
 		var barrel = this.barrel;
 		if (barrel == null) {
@@ -1116,20 +1128,32 @@ class Player extends Circle {
 			this.enabled = true;
 			return;
 		}
+		var now = Date.now();
+		var dt = this.dt || (c.serverTickSpeed / 1000);
+		var turn = barrel.aimTurnSpeed || 0;
+		// Turn left/right swings the aim (the same horizontal input as steering). Vertical
+		// input is ignored — you only rotate the barrel, not drive.
+		if (this.turnLeft && !this.turnRight) {
+			this.barrelAimAngle -= turn * dt;
+		} else if (this.turnRight && !this.turnLeft) {
+			this.barrelAimAngle += turn * dt;
+		}
+		this.angle = this.barrelAimAngle; // stream the live aim
 		this.x = barrel.x;
 		this.y = barrel.y;
 		this.newX = this.x;
 		this.newY = this.y;
 		this.velX = 0;
 		this.velY = 0;
-		var fire = this.attack || this.attackQueued || Date.now() >= this.barreledUntil;
-		if (fire) {
-			var angle = barrel.angle;
+		var punched = (this.attack || this.attackQueued) && now >= this.barrelArmAt;
+		var fuseDone = now >= this.barreledUntil;
+		if (punched || fuseDone) {
+			var aim = this.barrelAimAngle;
 			var distance = barrel.flightDistance;
 			var durationMs = barrel.flightDurationMs;
 			this.barreledUntil = 0;
 			this.barrel = null;
-			this.launchAirborne(angle, distance, durationMs);
+			this.launchAirborne(aim, distance, durationMs);
 		}
 	}
 	// Lobby-only protection.
@@ -2056,6 +2080,7 @@ class Player extends Circle {
 		this.airborneStartAt = 0;
 		this.barreledUntil = 0;
 		this.barrel = null;
+		this.barrelArmAt = 0;
 		this.slingChainUntil = 0;
 		this.slingChainCount = 0;
 		// Clear lobby-only state on every race (re)start so a lobby respawn's invuln

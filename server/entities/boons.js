@@ -354,6 +354,8 @@ class BarrelCannon extends Boon {
 		this.id = c.boons.barrelCannon.id;
 		this.angle = angle;
 		this.autoFireMs = c.boons.barrelCannon.autoFireMs;
+		this.minAimMs = c.boons.barrelCannon.minAimMs;
+		this.aimTurnSpeed = c.boons.barrelCannon.aimTurnSpeed;
 		this.flightDistance = c.boons.barrelCannon.flightDistance;
 		this.flightDurationMs = c.boons.barrelCannon.flightDurationMs;
 	}
