@@ -237,18 +237,15 @@ function prepRacer(p) {
 // finish, plus that pickup/unlock events actually fired (it solved it, didn't luck across).
 (function scenarioF() {
     const sig = 'ld-F';
-    const GOAL = config.tileMap.goal.id, LAVA = config.tileMap.lava.id, DOOR = config.tileMap.door.id;
+    const GOAL = config.tileMap.goal.id, LAVA = config.tileMap.lava.id;
 
     // Mocked clock + scheduled timeouts, installed BEFORE driving the loop so AI
     // time-based logic (re-path throttle, anti-stuck, cooldowns) advances in sim time
-    // and a tight synchronous tick loop doesn't freeze wall-clock (harness memo).
-    let simNow = 5e6; Date.now = () => simNow;
-    const pend = [];
-    global.setTimeout = (fn, d, ...a) => { pend.push({ at: simNow + (d || 0), fn, a }); return pend.length; };
-    global.clearTimeout = () => { };
-    function tickClock(ms) { simNow += ms; pend.sort((a, b) => a.at - b.at); while (pend.length && pend[0].at <= simNow) { const t = pend.shift(); try { t.fn(...t.a); } catch (e) { } } }
-    function mulberry32(seed) { let a = seed >>> 0; return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
-    Math.random = mulberry32(0x10CCD0);
+    // and a tight synchronous tick loop doesn't freeze wall-clock (harness memo). Shared
+    // primitives so this doesn't fork yet another copy of the clock/PRNG.
+    const harness = require(path.join(repoRoot, '.github', 'scripts', 'headless-harness.js'));
+    const tickClock = harness.installMockClock(5e6);
+    Math.random = harness.mulberry32(0x10CCD0);
 
     let map = JSON.parse(fs.readFileSync(path.join(repoRoot, 'client', 'maps', 'Duality.json'), 'utf8'));
     if (mapFormat.isSitesOnly(map)) { map = mapFormat.reconstruct(map); }
@@ -336,7 +333,9 @@ function prepRacer(p) {
     ok(cellGraph.findPathToNearestGoal(gb.currentMap, gate0, { passableDoors: true }) != null, 'F: live map — goal reachable if the door were open');
 
     // Drive the race. Count finish EDGES (rounds may cycle); keep notchesToWin high so a
-    // finish doesn't end the match before others can also solve it.
+    // finish doesn't end the match before others can also solve it. Reset the shared event
+    // log first so the pickup/unlock assertions reflect THIS scenario, not leakage from A/B.
+    events = [];
     const TICKS = Math.round(75 / DT);
     const prevGoal = {}; for (const b of bots) { prevGoal[b.id] = false; }
     let finishers = 0;
