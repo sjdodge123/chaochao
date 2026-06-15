@@ -354,6 +354,12 @@ class BarrelCannon extends Boon {
 		super(x, y, c.boons.barrelCannon.radius, c.boons.barrelCannon.color, ownerId, roomSig);
 		this.id = c.boons.barrelCannon.id;
 		this.angle = angle;
+		this.authorAngle = angle;
+		// The barrel ITSELF rotates to show the aim: while a racer is loaded, tickBarrel
+		// drives this.angle to the auto-spin aim; opting into the streamAngle wire slot
+		// (compressor.sendHazardUpdates) ships it each tick so the client barrel spins
+		// (eased like the rotor) instead of drawing a separate aim arrow.
+		this.streamAngle = true;
 		this.autoFireMs = c.boons.barrelCannon.autoFireMs;
 		this.minAimMs = c.boons.barrelCannon.minAimMs;
 		this.sweepSpeed = c.boons.barrelCannon.sweepSpeed;
