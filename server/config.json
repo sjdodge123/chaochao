@@ -641,14 +641,14 @@
             "durationMs": 520
         },
         "barrelCannon": {
-            "_doc": "Drive in to be LOADED (DK-barrel style): the racer is captured at the barrel mouth and can AIM — turn left/right swings the barrel (aimTurnSpeed deg/s, starting from the author-set facing). A burning fuse counts down over autoFireMs; press PUNCH (after a brief minAimMs arming window so a held punch can't instant-fire) to launch NOW in the current aim, or the fuse auto-fires in the current aim when it runs out. The launch is a committed airborne arc (flightDistance over flightDurationMs) — same lava/tile immunity while aloft + normal resolution on landing as the Launch Pad. Reuses the shared 'airborne' player state (Player.loadIntoBarrel → tickBarrel → launchAirborne); the live aim rides the player's streamed angle so the loaded kart visibly turns. colorWater is the on-water palette.",
+            "_doc": "Drive in to be LOADED (DK-barrel style): the racer is captured at the barrel mouth and the barrel AUTO-SPINS on its own (sweepSpeed deg/s, starting from the author-set facing) — it's a TIMING shot, not free aim. A burning fuse counts down over autoFireMs; press PUNCH to launch NOW in whatever direction the barrel currently points (after a brief minAimMs arming window so a held punch can't instant-fire), or the fuse auto-fires in the current direction when it runs out. The launch is a committed airborne arc (flightDistance over flightDurationMs) — same lava/tile immunity while aloft + normal resolution on landing as the Launch Pad. Reuses the shared 'airborne' player state (Player.loadIntoBarrel → tickBarrel → launchAirborne); the spinning aim rides the player's streamed angle so the loaded kart visibly rotates. colorWater is the on-water palette.",
             "id": 956,
             "color": "#C8743C",
             "colorWater": "#E6B88A",
             "radius": 30,
-            "autoFireMs": 1600,
-            "minAimMs": 350,
-            "aimTurnSpeed": 150,
+            "autoFireMs": 3000,
+            "minAimMs": 250,
+            "sweepSpeed": 160,
             "flightDistance": 280,
             "flightDurationMs": 720
         },

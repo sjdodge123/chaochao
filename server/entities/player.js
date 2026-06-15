@@ -1116,11 +1116,12 @@ class Player extends Circle {
 		});
 		return true;
 	}
-	// Per tick while loaded (Player.update): hold the kart at the barrel mouth and let the
-	// player AIM — turn left/right swings the barrel (aimTurnSpeed deg/s), the aim rides the
-	// streamed `angle` so the kart visibly turns. Fire on a punch press (once past the brief
-	// arming window so a held punch can't instant-fire) or when the fuse (autoFireMs) runs
-	// out, handing off to the shared airborne arc in the CURRENT aim direction.
+	// Per tick while loaded (Player.update): hold the kart at the barrel mouth while the
+	// barrel AUTO-SPINS (sweepSpeed deg/s) — a DK-style TIMING shot, not free aim (player
+	// movement/steering input is ignored). The spinning aim rides the streamed `angle` so
+	// the kart visibly rotates. Fire on a punch press (once past the brief arming window so
+	// a held punch can't instant-fire) or when the fuse (autoFireMs) runs out, launching on
+	// the shared airborne arc in whatever direction the barrel currently points.
 	tickBarrel() {
 		var barrel = this.barrel;
 		if (barrel == null) {
@@ -1130,15 +1131,9 @@ class Player extends Circle {
 		}
 		var now = Date.now();
 		var dt = this.dt || (c.serverTickSpeed / 1000);
-		var turn = barrel.aimTurnSpeed || 0;
-		// Turn left/right swings the aim (the same horizontal input as steering). Vertical
-		// input is ignored — you only rotate the barrel, not drive.
-		if (this.turnLeft && !this.turnRight) {
-			this.barrelAimAngle -= turn * dt;
-		} else if (this.turnRight && !this.turnLeft) {
-			this.barrelAimAngle += turn * dt;
-		}
-		this.angle = this.barrelAimAngle; // stream the live aim
+		// Auto-spin the barrel (wrapped to 0..360 so the streamed angle stays tidy).
+		this.barrelAimAngle = (this.barrelAimAngle + (barrel.sweepSpeed || 0) * dt) % 360;
+		this.angle = this.barrelAimAngle; // stream the spinning aim
 		this.x = barrel.x;
 		this.y = barrel.y;
 		this.newX = this.x;
