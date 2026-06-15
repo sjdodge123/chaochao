@@ -1784,26 +1784,9 @@ function paintBarrelCannonShape(ctx, kind, x, y, angle, ringColor) {
     ctx.strokeStyle = ironDk;
     ctx.lineWidth = 2.5;
     ctx.stroke();
-    ctx.save();
-    capsule();
-    ctx.clip();
-    ctx.strokeStyle = "rgba(40,24,10,0.22)";
-    ctx.lineWidth = 1.2;
-    for (var sv = -2; sv <= 2; sv++) {
-        var sy = sv * (hy / 2.7);
-        ctx.beginPath();
-        ctx.moveTo(-hx, sy);
-        ctx.lineTo(hx, sy);
-        ctx.stroke();
-    }
-    ctx.strokeStyle = "rgba(255,247,228,0.45)";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(-hx + hy * 0.5, -hy * 0.64);
-    ctx.lineTo(hx - hy * 0.5, -hy * 0.64);
-    ctx.stroke();
-    ctx.restore();
-    var bands = [-bodyLen * 0.27, bodyLen * 0.06];
+    // Two riveted iron hoops clustered toward the centre (icon look — clean rounded wood
+    // back end, no staves/specular/breech ring).
+    var bands = [-bodyLen * 0.16, bodyLen * 0.0];
     for (var b = 0; b < bands.length; b++) {
         var bxh = bands[b];
         ctx.strokeStyle = ironDk; ctx.lineWidth = 5;
@@ -1812,31 +1795,21 @@ function paintBarrelCannonShape(ctx, kind, x, y, angle, ringColor) {
         ctx.beginPath(); ctx.moveTo(bxh - 1.4, -hy * 0.66); ctx.lineTo(bxh - 1.4, hy * 0.66); ctx.stroke();
         ctx.fillStyle = ironHi;
         for (var rv = -1; rv <= 1; rv += 2) {
-            ctx.beginPath(); ctx.arc(bxh, rv * hy * 0.6, 1.5, 0, 2 * Math.PI); ctx.fill();
+            ctx.beginPath(); ctx.arc(bxh, rv * hy * 0.62, 1.6, 0, 2 * Math.PI); ctx.fill();
         }
     }
+    var mx = hx - hy * 0.28;
     ctx.beginPath();
-    ctx.ellipse(-hx + hy * 0.05, 0, hy * 0.34, hy * 0.95, 0, 0, 2 * Math.PI);
-    ctx.fillStyle = iron; ctx.fill();
-    ctx.beginPath();
-    ctx.ellipse(-hx + hy * 0.16, 0, hy * 0.22, hy * 0.72, 0, 0, 2 * Math.PI);
-    ctx.fillStyle = tones.dark; ctx.fill();
-    ctx.strokeStyle = ironHi; ctx.lineWidth = 1; ctx.stroke();
-    var mx = hx - hy * 0.04;
-    ctx.beginPath();
-    ctx.ellipse(mx, 0, hy * 0.32, hy * 1.0, 0, 0, 2 * Math.PI);
+    ctx.ellipse(mx, 0, hy * 0.34, hy * 0.98, 0, 0, 2 * Math.PI);
     ctx.fillStyle = iron; ctx.fill();
     ctx.strokeStyle = ironHi; ctx.lineWidth = 1.4; ctx.stroke();
-    ctx.beginPath();
-    ctx.ellipse(mx, 0, hy * 0.2, hy * 0.66, 0, 0, 2 * Math.PI);
-    ctx.fillStyle = ironDk; ctx.fill();
     ctx.globalAlpha = 0.7;
     ctx.beginPath();
-    ctx.ellipse(mx, 0, hy * 0.12, hy * 0.44, 0, 0, 2 * Math.PI);
+    ctx.ellipse(mx, 0, hy * 0.16, hy * 0.55, 0, 0, 2 * Math.PI);
     ctx.fillStyle = tones.bore; ctx.fill();
-    ctx.globalAlpha = 0.45;
+    ctx.globalAlpha = 0.4;
     ctx.beginPath();
-    ctx.ellipse(mx, 0, hy * 0.05, hy * 0.24, 0, 0, 2 * Math.PI);
+    ctx.ellipse(mx, 0, hy * 0.07, hy * 0.28, 0, 0, 2 * Math.PI);
     ctx.fillStyle = "#fff3c8"; ctx.fill();
     ctx.globalAlpha = 1;
     ctx.restore();
