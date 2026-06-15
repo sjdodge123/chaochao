@@ -617,6 +617,7 @@ function stopAllSounds() {
     stopAllDriftSounds();
     stopFireWalkSound();
     stopHeatwaveDrone();
+    stopBarrelFuse();
 }
 
 // ----------------------------------------------------------------------------
@@ -665,6 +666,110 @@ function playBunkerDoorHiss() {
     g.gain.exponentialRampToValueAtTime(0.0001, now + 0.46);        // vent out
     src.connect(filt); filt.connect(g); g.connect(sfxBus);
     try { src.start(now); src.stop(now + 0.5); } catch (e) { try { src.disconnect(); } catch (e2) {} }
+}
+
+// ----------------------------------------------------------------------------
+// Barrel Cannon (boon) — a looping burning-fuse sizzle while a racer is loaded + a one-shot
+// cannon "thwoomp" on launch + a springy "boing" for the Launch Pad. Pure Web Audio (no
+// assets), through sfxBus so the master toggle + lobby dampen apply. The fuse loop lives
+// OUTSIDE activeVoices (drift-skid pattern) so it must be stopped explicitly (on launch +
+// stopAllSounds). Volumes set for MID-RACE listening (the lobby damps all SFX to 10%).
+var barrelFuseVoice = null;
+
+function startBarrelFuse(ms) {
+    var ctx = getCtx();
+    if (!ctx || ctx.state !== "running") { return; }
+    if (gameMuted || masterVolume === 0) { return; }
+    if (barrelFuseVoice != null) { stopBarrelFuse(); }
+    var now = ctx.currentTime;
+    var dur = Math.max(0.2, (ms || 1600) / 1000);
+    // Filtered-noise sizzle that BUILDS as the fuse burns down (more urgent near launch).
+    var noise = ctx.createBufferSource();
+    noise.buffer = getDriftNoiseBuffer(ctx);
+    noise.loop = true;
+    var filt = ctx.createBiquadFilter();
+    filt.type = "bandpass"; filt.Q.value = 1.4; filt.frequency.value = 2300;
+    var g = ctx.createGain();
+    var base = Math.max(0.0002, 0.020 * masterVolume * sfxVolumeScalar);
+    var peak = Math.max(0.0003, 0.065 * masterVolume * sfxVolumeScalar);
+    g.gain.setValueAtTime(base, now);
+    g.gain.exponentialRampToValueAtTime(peak, now + dur);
+    // Flicker the level so it crackles like a fuse instead of hissing steadily.
+    var lfo = ctx.createOscillator(); lfo.type = "sine"; lfo.frequency.value = 13;
+    var lfoGain = ctx.createGain(); lfoGain.gain.value = base * 0.7;
+    lfo.connect(lfoGain); lfoGain.connect(g.gain);
+    noise.connect(filt); filt.connect(g); g.connect(sfxBus);
+    try { noise.start(now); lfo.start(now); }
+    catch (e) { try { g.disconnect(); } catch (e2) {} return; }
+    barrelFuseVoice = { noise: noise, lfo: lfo, gain: g };
+}
+
+function stopBarrelFuse() {
+    var v = barrelFuseVoice;
+    if (v == null) { return; }
+    barrelFuseVoice = null;
+    var ctx = getCtx();
+    if (!ctx) { try { v.noise.stop(); v.lfo.stop(); } catch (e) {} return; }
+    var now = ctx.currentTime;
+    try {
+        v.gain.gain.cancelScheduledValues(now);
+        v.gain.gain.setTargetAtTime(0.0001, now, 0.05);
+        v.noise.stop(now + 0.2); v.lfo.stop(now + 0.2);
+    } catch (e) {}
+}
+
+// One-shot cannon "thwoomp" on a Barrel Cannon launch: a low sine drop (the boom) under a
+// short lowpassed noise burst (the air pop).
+function playBarrelLaunch() {
+    var ctx = getCtx();
+    if (!ctx || ctx.state !== "running") { return; }
+    if (gameMuted || masterVolume === 0) { return; }
+    var now = ctx.currentTime;
+    var peak = Math.max(0.0003, 0.22 * masterVolume * sfxVolumeScalar);
+    var osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(260, now);
+    osc.frequency.exponentialRampToValueAtTime(58, now + 0.28);
+    var og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, now);
+    og.gain.exponentialRampToValueAtTime(peak, now + 0.012);
+    og.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
+    osc.connect(og); og.connect(sfxBus);
+    var noise = ctx.createBufferSource();
+    noise.buffer = getDriftNoiseBuffer(ctx);
+    noise.loop = true;
+    var filt = ctx.createBiquadFilter();
+    filt.type = "lowpass";
+    filt.frequency.setValueAtTime(1800, now);
+    filt.frequency.exponentialRampToValueAtTime(500, now + 0.18);
+    var ng = ctx.createGain();
+    var npeak = Math.max(0.0003, 0.16 * masterVolume * sfxVolumeScalar);
+    ng.gain.setValueAtTime(0.0001, now);
+    ng.gain.exponentialRampToValueAtTime(npeak, now + 0.008);
+    ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+    noise.connect(filt); filt.connect(ng); ng.connect(sfxBus);
+    try { osc.start(now); osc.stop(now + 0.36); noise.start(now); noise.stop(now + 0.22); }
+    catch (e) { try { og.disconnect(); ng.disconnect(); } catch (e2) {} }
+}
+
+// One-shot springy "boing" on a Launch Pad fling: a quick up-then-wobble pitch chirp.
+function playLaunchPadSpring() {
+    var ctx = getCtx();
+    if (!ctx || ctx.state !== "running") { return; }
+    if (gameMuted || masterVolume === 0) { return; }
+    var now = ctx.currentTime;
+    var peak = Math.max(0.0003, 0.15 * masterVolume * sfxVolumeScalar);
+    var osc = ctx.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(300, now);
+    osc.frequency.exponentialRampToValueAtTime(820, now + 0.13);
+    osc.frequency.exponentialRampToValueAtTime(540, now + 0.26);
+    var g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(peak, now + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.3);
+    osc.connect(g); g.connect(sfxBus);
+    try { osc.start(now); osc.stop(now + 0.32); } catch (e) {}
 }
 
 // ----------------------------------------------------------------------------

@@ -329,7 +329,7 @@ class LaunchPad extends Boon {
 		if (!this.isEligiblePlayer(object) || typeof object.launchAirborne !== "function") {
 			return;
 		}
-		object.launchAirborne(this.angle, this.distance, this.durationMs);
+		object.launchAirborne(this.angle, this.distance, this.durationMs, "pad");
 	}
 }
 

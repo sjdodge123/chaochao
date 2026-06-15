@@ -684,6 +684,13 @@ function checkForMail(client) {
 				// otherwise see only the trailing attack=false and drop the punch.
 				if (packet.attack && !player.attack) { player.attackQueued = true; player.registerAttackEdge(); }
 				player.attack = packet.attack;
+			} else if (typeof player.isBarreled === "function" && player.isBarreled()) {
+				// Frozen + loaded in a Barrel Cannon: movement stays ignored (the barrel
+				// auto-spins), but the punch press MUST still register so the player can TIME
+				// the launch — tickBarrel fires on attack/attackQueued. Without this the kart
+				// is disabled, so the input above is skipped and punch never fires the barrel.
+				if (packet.attack && !player.attack) { player.attackQueued = true; }
+				player.attack = packet.attack;
 			}
 			// botGuard human-verify: once this client's kart has actually travelled far
 			// enough under its own server-simulated input, emit a one-shot signal so the
