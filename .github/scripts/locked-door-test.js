@@ -80,6 +80,98 @@ function prepRacer(p) {
     p.awake = true; p.isSpectator = false; p.alive = true; p.isZombie = false; p.reachedGoal = false; p.heldKey = null;
 }
 
+// --- Shared bot-driven scaffolding (scenarios F + G) -------------------------------
+// Build a door-GATED variant of a committed map: lava every goal entrance (frontier cell)
+// except the door (nearest the gate) and — when opts.leaveFarOpen — the farthest one (the
+// long way around). Places the door + a key (opts.keyNearGate: near the gate for a clear
+// shortcut detour; otherwise the farthest reachable cell, a genuine off-route fetch).
+// Returns { map, doorCellIdx, keyCellIdx, gate0, goalSet, reach, adj } or null if the map's
+// geometry can't host the case.
+function buildGatedDoorMap(mapName, opts) {
+    opts = opts || {};
+    const GOAL = config.tileMap.goal.id, LAVA = config.tileMap.lava.id;
+    let map = JSON.parse(fs.readFileSync(path.join(repoRoot, 'client', 'maps', mapName + '.json'), 'utf8'));
+    if (mapFormat.isSitesOnly(map)) { map = mapFormat.reconstruct(map); }
+    const cells = map.cells;
+    const adj = cellGraph.getAdjacency(map);
+    const goalSet = new Set();
+    for (let i = 0; i < cells.length; i++) { if (cells[i].id === GOAL) { goalSet.add(i); } }
+    const frontier = [];
+    goalSet.forEach((gi) => { (adj.neighbors[gi] || []).forEach((n) => { if (!goalSet.has(n) && walkable(cells[n].id) && frontier.indexOf(n) === -1) { frontier.push(n); } }); });
+    if (goalSet.size === 0 || frontier.length < 2) { return null; }
+    const edges = (Array.isArray(map.startEdges) && map.startEdges.length) ? map.startEdges : ['left'];
+    const gateSamples = [];
+    for (const e of edges) { for (const s of cellGraph.edgeSampleOrigins(e)) { gateSamples.push(s); } }
+    const gate0 = gateSamples[0];
+    const dGate = (ci) => Math.hypot(cells[ci].site.x - gate0.x, cells[ci].site.y - gate0.y);
+    frontier.sort((a, b) => dGate(a) - dGate(b));
+    const doorCellIdx = frontier[0];
+    const farCellIdx = opts.leaveFarOpen ? frontier[frontier.length - 1] : -1;
+    for (const fi of frontier) { if (fi !== doorCellIdx && fi !== farCellIdx) { cells[fi].id = LAVA; } }
+    map.doors = [{ x: cells[doorCellIdx].site.x, y: cells[doorCellIdx].site.y }];
+    // Reachable-from-gate flood with the door treated as the wall it'll become.
+    const reach = new Set(), stack = [];
+    for (const s of gateSamples) { const ci = cellGraph.nearestCellIndex(cells, s); if (!reach.has(ci) && (walkable(cells[ci].id) || cells[ci].id === GOAL)) { reach.add(ci); stack.push(ci); } }
+    while (stack.length) {
+        const u = stack.pop();
+        for (const v of (adj.neighbors[u] || [])) {
+            if (reach.has(v) || v === doorCellIdx) { continue; }
+            if (walkable(cells[v].id) || cells[v].id === GOAL) { reach.add(v); stack.push(v); }
+        }
+    }
+    let keyCellIdx = -1, keyBest = opts.keyNearGate ? Infinity : -1;
+    reach.forEach((i) => {
+        if (i === doorCellIdx || !walkable(cells[i].id)) { return; }
+        const d = dGate(i);
+        if (opts.keyNearGate) { if (d > 40 && d < keyBest) { keyBest = d; keyCellIdx = i; } }
+        else if (d > keyBest) { keyBest = d; keyCellIdx = i; }
+    });
+    if (keyCellIdx < 0) { return null; }
+    map.keys = [{ x: cells[keyCellIdx].site.x, y: cells[keyCellIdx].site.y }];
+    return { map: map, doorCellIdx: doorCellIdx, keyCellIdx: keyCellIdx, gate0: gate0, goalSet: goalSet, reach: reach, adj: adj };
+}
+
+// Build a preview room with 5 bots on `map`, warm up the gate, start the race, and drive it
+// for `seconds` (mocked clock via `tickClock`). hooks.onReady(gb) runs ONCE right after
+// startRace, on the FRESH round-start map (before any collapse mutates it) — assert fresh-map
+// invariants there. hooks.onStop(gb, finishers) may return true to stop early. Returns
+// { room, gb, bots, finishers, threw, ok }. Resets the shared event log so pickup/unlock
+// assertions reflect this run, not leakage from earlier scenarios.
+function driveBotField(sig, map, seconds, tickClock, hooks) {
+    hooks = hooks || {};
+    const room = game.getRoom(sig, 6);
+    room.game.gameBoard.isPreview = true;
+    room.game.gameBoard.previewMap = map;
+    const cast = (config.aiRacers && config.aiRacers.cast) || [];
+    const bots = [];
+    for (let i = 0; i < 5; i++) {
+        const b = room.world.createNewBot(sig + '-bot' + i, cast.length ? cast[i % cast.length] : null);
+        room.playerList[b.id] = b; bots.push(b);
+    }
+    room.game.determineGameState(bots[0]);
+    room.game.startLobby(); room.game.startGated();
+    for (let g = 0; g < 30; g++) { tickClock(config.serverTickSpeed); room.update(DT); }
+    room.game.startRace();
+    const gb = room.game.gameBoard;
+    const built = gb.lockedDoors.length === 1 && gb.lockedKeys.length === 1;
+    if (!built) { fail(sig + ': setup did not build exactly one door + key'); }
+    // Fresh round-start map invariants (door stamped, nothing collapsed yet).
+    if (built && hooks.onReady) { hooks.onReady(gb); }
+    events = [];
+    const TICKS = Math.round(seconds / DT);
+    const prevGoal = {}; for (const b of bots) { prevGoal[b.id] = false; }
+    let finishers = 0, threw = false;
+    for (let f = 0; built && f < TICKS; f++) {
+        room.game.notchesToWin = 99;
+        tickClock(config.serverTickSpeed);
+        try { room.update(DT); } catch (e) { threw = true; fail(sig + ': tick threw: ' + e.message + '\n' + e.stack); break; }
+        for (const b of bots) { if (b.reachedGoal && !prevGoal[b.id]) { finishers++; } prevGoal[b.id] = !!b.reachedGoal; }
+        if (hooks.onStop && hooks.onStop(gb, finishers)) { break; }
+        if (room.game.currentState === config.stateMap.gameOver) { break; }
+    }
+    return { room: room, gb: gb, bots: bots, finishers: finishers, threw: threw, ok: built };
+}
+
 // --- Scenario A: init + pickup + unlock --------------------------------------
 (function scenarioA() {
     const sig = 'ld-A';
@@ -237,121 +329,34 @@ function prepRacer(p) {
 // finish, plus that pickup/unlock events actually fired (it solved it, didn't luck across).
 (function scenarioF() {
     const sig = 'ld-F';
-    const GOAL = config.tileMap.goal.id, LAVA = config.tileMap.lava.id;
-
-    // Mocked clock + scheduled timeouts, installed BEFORE driving the loop so AI
-    // time-based logic (re-path throttle, anti-stuck, cooldowns) advances in sim time
-    // and a tight synchronous tick loop doesn't freeze wall-clock (harness memo). Shared
-    // primitives so this doesn't fork yet another copy of the clock/PRNG.
+    // Mocked clock installed BEFORE driving so AI time logic (re-path throttle, anti-stuck,
+    // cooldowns) advances in sim time and the tight synchronous loop doesn't freeze wall-clock.
     const harness = require(path.join(repoRoot, '.github', 'scripts', 'headless-harness.js'));
     const tickClock = harness.installMockClock(5e6);
     Math.random = harness.mulberry32(0x10CCD0);
 
-    let map = JSON.parse(fs.readFileSync(path.join(repoRoot, 'client', 'maps', 'Duality.json'), 'utf8'));
-    if (mapFormat.isSitesOnly(map)) { map = mapFormat.reconstruct(map); }
-    const cells = map.cells;
-    const adj = cellGraph.getAdjacency(map);
-    const isWalk = walkable;
+    // Fully gate Duality's goal (every entrance lava'd but the door); key on the FARTHEST
+    // reachable cell — a genuine off-route fetch the bot must seek out.
+    const built = buildGatedDoorMap('Duality', { leaveFarOpen: false, keyNearGate: false });
+    if (built == null) { fail('F: Duality lacks a multi-entry goal to gate'); return; }
+    const { map, doorCellIdx, gate0, goalSet, reach, adj } = built;
 
-    // Goal region + its walkable, non-goal frontier (the cells you can enter the goal from).
-    const goalSet = new Set();
-    for (let i = 0; i < cells.length; i++) { if (cells[i].id === GOAL) { goalSet.add(i); } }
-    const frontier = new Set();
-    goalSet.forEach((gi) => {
-        const nb = adj.neighbors[gi] || [];
-        for (let k = 0; k < nb.length; k++) { if (!goalSet.has(nb[k]) && isWalk(cells[nb[k]].id)) { frontier.add(nb[k]); } }
-    });
-    const frontierArr = [...frontier];
-    if (goalSet.size === 0 || frontierArr.length < 2) { fail('F: Duality lacks a multi-entry goal to gate (frontier=' + frontierArr.length + ')'); return; }
-
-    // Start-edge gate point (the racers' launch line) for reachability + distance picks.
-    const edges = (Array.isArray(map.startEdges) && map.startEdges.length) ? map.startEdges : ['left'];
-    const gateSamples = [];
-    for (const e of edges) { for (const s of cellGraph.edgeSampleOrigins(e)) { gateSamples.push(s); } }
-    const gate0 = gateSamples[0];
-
-    // Door = the frontier cell nearest the gate (faces the approach); lava every OTHER
-    // frontier cell so the single door is the goal region's ONLY entrance.
-    frontierArr.sort((a, b) => Math.hypot(cells[a].site.x - gate0.x, cells[a].site.y - gate0.y) - Math.hypot(cells[b].site.x - gate0.x, cells[b].site.y - gate0.y));
-    const doorCellIdx = frontierArr[0];
-    for (let i = 1; i < frontierArr.length; i++) { cells[frontierArr[i]].id = LAVA; }
-    const dSite = cells[doorCellIdx].site;
-    map.doors = [{ x: dSite.x, y: dSite.y }];
-
-    // Reachable-from-gate flood over walkable ground with the door treated as the wall it
-    // will become — this is exactly the start-side region a baseline bot can move through.
-    const reach = new Set();
-    const stack = [];
-    for (const s of gateSamples) { const ci = cellGraph.nearestCellIndex(cells, s); if (!reach.has(ci) && (isWalk(cells[ci].id) || cells[ci].id === GOAL)) { reach.add(ci); stack.push(ci); } }
-    while (stack.length) {
-        const u = stack.pop();
-        const nb = adj.neighbors[u] || [];
-        for (let k = 0; k < nb.length; k++) {
-            const v = nb[k];
-            if (reach.has(v)) { continue; }
-            if (v === doorCellIdx) { continue; } // door is shut — a wall
-            if (isWalk(cells[v].id) || cells[v].id === GOAL) { reach.add(v); stack.push(v); }
-        }
-    }
     ok(!reach.has(doorCellIdx) && [...goalSet].every((g) => !reach.has(g)), 'F: with the door shut, the goal region is sealed off from the gate (baseline-impossible)');
-    // The door must be approachable: at least one of its neighbours is start-side-reachable.
-    const doorApproachable = (adj.neighbors[doorCellIdx] || []).some((n) => reach.has(n));
-    ok(doorApproachable, 'F: the door has a start-side-reachable approach cell');
+    ok((adj.neighbors[doorCellIdx] || []).some((n) => reach.has(n)), 'F: the door has a start-side-reachable approach cell');
 
-    // Key = the reachable walkable cell FARTHEST from the gate (a genuine detour off the
-    // racing line, never behind the door), so the bot must seek it out, not stumble on it.
-    let keyIdx = -1, keyD = -1;
-    reach.forEach((i) => {
-        if (i === doorCellIdx || !isWalk(cells[i].id)) { return; }
-        const d = Math.hypot(cells[i].site.x - gate0.x, cells[i].site.y - gate0.y);
-        if (d > keyD) { keyD = d; keyIdx = i; }
+    const res = driveBotField(sig, map, 75, tickClock, {
+        // Fresh round-start map: goal unreachable while shut, reachable once the door opens
+        // (confirms the gate is real and the AI's "would-opening-doors-help?" probe will fire).
+        onReady: (gb) => {
+            ok(cellGraph.findPathToNearestGoal(gb.currentMap, gate0) == null, 'F: live map — goal unreachable with the door shut');
+            ok(cellGraph.findPathToNearestGoal(gb.currentMap, gate0, { passableDoors: true }) != null, 'F: live map — goal reachable if the door were open');
+        },
+        onStop: (gb, fin) => gb.lockedDoors[0].unlocked && fin > 0
     });
-    if (keyIdx < 0) { fail('F: no reachable walkable cell to host the key'); return; }
-    map.keys = [{ x: cells[keyIdx].site.x, y: cells[keyIdx].site.y }];
-
-    // Build the room with a field of bots (real engine, mocked clock, seeded RNG).
-    const room = game.getRoom(sig, 6);
-    room.game.gameBoard.isPreview = true;
-    room.game.gameBoard.previewMap = map;
-    const cast = (config.aiRacers && config.aiRacers.cast) || [];
-    const bots = [];
-    for (let i = 0; i < 5; i++) {
-        const b = room.world.createNewBot(sig + '-bot' + i, cast.length ? cast[i % cast.length] : null);
-        room.playerList[b.id] = b; bots.push(b);
-    }
-    room.game.determineGameState(bots[0]);
-    room.game.startLobby(); room.game.startGated();
-    for (let g = 0; g < 30; g++) { tickClock(config.serverTickSpeed); room.update(DT); }
-    room.game.startRace();
-    const gb = room.game.gameBoard;
-    if (gb.lockedDoors.length !== 1 || gb.lockedKeys.length !== 1) { fail('F: gated map did not build exactly one door + key'); return; }
-
-    // Live cell-graph invariants on the running map: goal unreachable while shut, reachable
-    // once the door is treated as open. (Confirms the gate is real and the AI's own
-    // "would-opening-doors-help?" probe will fire.)
-    ok(cellGraph.findPathToNearestGoal(gb.currentMap, gate0) == null, 'F: live map — goal unreachable with the door shut');
-    ok(cellGraph.findPathToNearestGoal(gb.currentMap, gate0, { passableDoors: true }) != null, 'F: live map — goal reachable if the door were open');
-
-    // Drive the race. Count finish EDGES (rounds may cycle); keep notchesToWin high so a
-    // finish doesn't end the match before others can also solve it. Reset the shared event
-    // log first so the pickup/unlock assertions reflect THIS scenario, not leakage from A/B.
-    events = [];
-    const TICKS = Math.round(75 / DT);
-    const prevGoal = {}; for (const b of bots) { prevGoal[b.id] = false; }
-    let finishers = 0;
-    let threw = false;
-    for (let f = 0; f < TICKS; f++) {
-        room.game.notchesToWin = 99;
-        tickClock(config.serverTickSpeed);
-        try { room.update(DT); } catch (e) { threw = true; fail('F: tick threw: ' + e.message + '\n' + e.stack); break; }
-        for (const b of bots) { if (b.reachedGoal && !prevGoal[b.id]) { finishers++; } prevGoal[b.id] = !!b.reachedGoal; }
-        if (gb.lockedDoors[0].unlocked && finishers > 0) { break; } // solved + at least one through
-        if (room.game.currentState === config.stateMap.gameOver) { break; }
-    }
-    ok(!threw, 'F: door-gated race ticked without throwing');
+    ok(!res.threw, 'F: door-gated race ticked without throwing');
     ok(countEvents('keyPickedUp') >= 1, 'F: a bot picked up the key');
-    ok(gb.lockedDoors[0].unlocked === true || countEvents('doorUnlocked') >= 1, 'F: a bot carried the key to the door and unlocked it');
-    ok(finishers >= 1, 'F: at least one bot reached the goal through the unlocked door (got ' + finishers + ')');
+    ok(res.ok && (res.gb.lockedDoors[0].unlocked === true || countEvents('doorUnlocked') >= 1), 'F: a bot carried the key to the door and unlocked it');
+    ok(res.finishers >= 1, 'F: at least one bot reached the goal through the unlocked door (got ' + res.finishers + ')');
 })();
 
 // --- Scenario G: bot-driven — bots OPT INTO an optional shortcut (split behaviour) -----
@@ -366,83 +371,38 @@ function prepRacer(p) {
 // lava to force the long alternate, so we don't re-assert the unlock on this hostile approach.
 (function scenarioG() {
     const sig = 'ld-G';
-    const GOAL = config.tileMap.goal.id, LAVA = config.tileMap.lava.id;
     const harness = require(path.join(repoRoot, '.github', 'scripts', 'headless-harness.js'));
     const tickClock = harness.installMockClock(9e6);
     Math.random = harness.mulberry32(0xC0FFEE);
 
-    let map = JSON.parse(fs.readFileSync(path.join(repoRoot, 'client', 'maps', 'Duality.json'), 'utf8'));
-    if (mapFormat.isSitesOnly(map)) { map = mapFormat.reconstruct(map); }
-    const cells = map.cells;
-    const adj = cellGraph.getAdjacency(map);
+    // Two-entrance goal: door near the gate (short) + one far entrance left open (the long
+    // way); key near the gate so the detour to grab it is small and the shortcut clearly worth it.
+    const built = buildGatedDoorMap('Duality', { leaveFarOpen: true, keyNearGate: true });
+    if (built == null) { fail('G: Duality goal needs >=2 entrances'); return; }
+    const { map, gate0 } = built;
 
-    const goalSet = new Set();
-    for (let i = 0; i < cells.length; i++) { if (cells[i].id === GOAL) { goalSet.add(i); } }
-    const frontier = [];
-    goalSet.forEach((gi) => { (adj.neighbors[gi] || []).forEach((n) => { if (!goalSet.has(n) && walkable(cells[n].id) && frontier.indexOf(n) === -1) { frontier.push(n); } }); });
-    if (frontier.length < 2) { fail('G: goal needs >=2 entrances (got ' + frontier.length + ')'); return; }
+    const res = driveBotField(sig, map, 80, tickClock, {
+        // Fresh round-start map: the door is a genuine SHORTCUT — goal reachable the long way,
+        // but opening it is meaningfully faster. Compare TIME (estimatePathTime) — the SAME
+        // metric the shortcut decision uses (a geometrically-shorter route across slow tiles
+        // isn't necessarily faster), so this guards the code's actual accept boundary.
+        onReady: (gb) => {
+            const shutRoute = cellGraph.findPathToNearestGoal(gb.currentMap, gate0);
+            const openRoute = cellGraph.findPathToNearestGoal(gb.currentMap, gate0, { passableDoors: true });
+            ok(shutRoute != null, 'G: goal reachable with the door shut (the long way — shortcut is optional, not forced)');
+            const shutTime = shutRoute ? cellGraph.estimatePathTime(gb.currentMap, shutRoute.path) : 0;
+            const openTime = openRoute ? cellGraph.estimatePathTime(gb.currentMap, openRoute.path) : 0;
+            ok(openTime > 0 && shutTime > 0 && openTime < shutTime * 0.85,
+                'G: opening the door is a real shortcut in TIME (open ' + Math.round(openTime * 100) / 100 + 's < shut ' + Math.round(shutTime * 100) / 100 + 's)');
+        }
+    });
 
-    const edges = (Array.isArray(map.startEdges) && map.startEdges.length) ? map.startEdges : ['left'];
-    const gateSamples = [];
-    for (const e of edges) { for (const s of cellGraph.edgeSampleOrigins(e)) { gateSamples.push(s); } }
-    const gate0 = gateSamples[0];
-    const dGate = (ci) => Math.hypot(cells[ci].site.x - gate0.x, cells[ci].site.y - gate0.y);
-
-    // Door = entrance nearest the gate (short); FAR = entrance farthest (the long open way);
-    // lava every other entrance so exactly those two remain.
-    frontier.sort((a, b) => dGate(a) - dGate(b));
-    const doorCellIdx = frontier[0];
-    const farCellIdx = frontier[frontier.length - 1];
-    for (const fi of frontier) { if (fi !== doorCellIdx && fi !== farCellIdx) { cells[fi].id = LAVA; } }
-    map.doors = [{ x: cells[doorCellIdx].site.x, y: cells[doorCellIdx].site.y }];
-
-    // Key near the gate (a small detour on the short side), so fetching it is clearly worth
-    // it versus the long way around — and a bot on the long route would never pass over it.
-    const reach = new Set(), stack = [];
-    for (const s of gateSamples) { const ci = cellGraph.nearestCellIndex(cells, s); if (!reach.has(ci) && (walkable(cells[ci].id) || cells[ci].id === GOAL)) { reach.add(ci); stack.push(ci); } }
-    while (stack.length) { const u = stack.pop(); for (const v of (adj.neighbors[u] || [])) { if (reach.has(v) || v === doorCellIdx) { continue; } if (walkable(cells[v].id) || cells[v].id === GOAL) { reach.add(v); stack.push(v); } } }
-    let keyCellIdx = -1, keyBest = Infinity;
-    reach.forEach((i) => { if (i === doorCellIdx || !walkable(cells[i].id)) { return; } const d = dGate(i); if (d > 40 && d < keyBest) { keyBest = d; keyCellIdx = i; } });
-    if (keyCellIdx < 0) { fail('G: no reachable walkable cell to host the key'); return; }
-    map.keys = [{ x: cells[keyCellIdx].site.x, y: cells[keyCellIdx].site.y }];
-
-    const room = game.getRoom(sig, 6);
-    room.game.gameBoard.isPreview = true; room.game.gameBoard.previewMap = map;
-    const cast = (config.aiRacers && config.aiRacers.cast) || [];
-    const bots = [];
-    for (let i = 0; i < 5; i++) { const b = room.world.createNewBot(sig + '-bot' + i, cast.length ? cast[i % cast.length] : null); room.playerList[b.id] = b; bots.push(b); }
-    room.game.determineGameState(bots[0]);
-    room.game.startLobby(); room.game.startGated();
-    for (let g = 0; g < 30; g++) { tickClock(config.serverTickSpeed); room.update(DT); }
-    room.game.startRace();
-    const gb = room.game.gameBoard;
-    if (gb.lockedDoors.length !== 1 || gb.lockedKeys.length !== 1) { fail('G: setup did not build exactly one door + key'); return; }
-
-    // The door is a genuine SHORTCUT on the LIVE map: goal reachable the long way, but the
-    // door-open route much shorter — so a bot fetching the key is an OPTIONAL choice, not forced.
-    const shutRoute = cellGraph.findPathToNearestGoal(gb.currentMap, gate0);
-    const openRoute = cellGraph.findPathToNearestGoal(gb.currentMap, gate0, { passableDoors: true });
-    ok(shutRoute != null, 'G: goal reachable with the door shut (the long way — shortcut is optional, not forced)');
-    ok(openRoute != null && shutRoute != null && openRoute.distance < shutRoute.distance * 0.85,
-        'G: opening the door is a real shortcut (much shorter than the long way)');
-
-    events = [];
-    const TICKS = Math.round(80 / DT);
-    const prevGoal = {}; for (const b of bots) { prevGoal[b.id] = false; }
-    let finishers = 0, threw = false;
-    for (let f = 0; f < TICKS; f++) {
-        room.game.notchesToWin = 99;
-        tickClock(config.serverTickSpeed);
-        try { room.update(DT); } catch (e) { threw = true; fail('G: tick threw: ' + e.message + '\n' + e.stack); break; }
-        for (const b of bots) { if (b.reachedGoal && !prevGoal[b.id]) { finishers++; } prevGoal[b.id] = !!b.reachedGoal; }
-        if (room.game.currentState === config.stateMap.gameOver) { break; }
-    }
-    ok(!threw, 'G: shortcut map ticked without throwing');
+    ok(!res.threw, 'G: shortcut map ticked without throwing');
     // A bot CHOSE the optional shortcut: it detoured to fetch the key even though the goal was
     // reachable the long way (a bot on the long route never passes the key). Not every bot
     // will — the rest race the open route — which is the intended split.
     ok(countEvents('keyPickedUp') >= 1, 'G: at least one bot chose the optional shortcut (fetched the key)');
-    ok(finishers >= 1, 'G: the field still finishes the race (got ' + finishers + ')');
+    ok(res.finishers >= 1, 'G: the field still finishes the race (got ' + res.finishers + ')');
 })();
 
 if (failures > 0) {

@@ -653,7 +653,16 @@ var BARRIER_PATH_PENALTY = 45;
 // pickup fires server-side on proximity) then CARRY it to the door (drive within
 // unlockRadius — the unlock fires server-side), after which normal goal pathing
 // resumes. Pickup/unlock are pure proximity in checkLockedDoors; the bot only steers.
-var DOOR_FINAL_APPROACH = 120;  // px: home straight on the key/door point for the last stretch
+// px: home straight on the key/door point for the last stretch. It MUST comfortably exceed
+// the server-side trip reach (pickupRadius / unlockRadius + a kart radius from
+// config.lockedDoor) so the homing override engages before the bot considers the approach
+// cell "reached" and stops short of the trip radius — derived from config so retuning the
+// radii can't silently reintroduce door stalls.
+var DOOR_FINAL_APPROACH = (function () {
+    var cfg = c.lockedDoor || {};
+    var reach = Math.max(cfg.pickupRadius || 30, cfg.unlockRadius || 48) + (c.playerBaseRadius || 7.5);
+    return Math.max(120, Math.round(reach * 2));
+})();
 // Shortcut-awareness: when the goal IS reachable without a door, a bot may STILL fetch a
 // key + open the door if doing so is meaningfully shorter than the open route. Optional
 // (the goal is reachable either way), so it's safe to ration: only the nearest few bots
@@ -1581,23 +1590,34 @@ function blockingDoorsOnPath(ctx, path) {
     return out;
 }
 
-// Nearest loose, un-consumed key whose door is on the bot's OWN blocking list. A bot
-// only ever pursues a key that unblocks ITS route — never a key for some other door
-// (that would burn the wrong key and leave the door that actually gates it shut, the
-// multi-door stall). With keys restricted to blocking doors, "all bots dogpile one
-// key" self-limits: once a bot grabs it, it's no longer loose, so the rest re-evaluate
-// next re-path and stage at the door — so no separate pursuer ration is needed (and a
-// ration that isn't door-aware would starve the very key a sealed-off bot needs).
-function pickKeyToPursue(bot, ctx, blockingIdx) {
-    var best = null, bestD = Infinity;
+// Nearest loose, un-consumed, REACHABLE key whose door is on the bot's OWN blocking list,
+// as { key, kv, route }. A bot only ever pursues a key that unblocks ITS route — never a key
+// for some other door (that would burn the wrong key and leave the gating door shut, the
+// multi-door stall). It must also be reachable with the doors shut: on a multi-door map the
+// straight-line-nearest matching key can sit behind ANOTHER shut door, so we walk candidates
+// nearest-first and return the first whose route is non-null (else the bot would beeline,
+// avoidance-off, at an unreachable key). The route is handed back so steerBot reuses it.
+// "All bots dogpile one key" self-limits: once a bot grabs it, it's no longer loose, so the
+// rest re-evaluate and stage — no separate pursuer ration (a non-door-aware one would starve
+// the very key a sealed-off bot needs).
+function pickKeyToPursue(bot, ctx, baseOpts, blockingIdx) {
+    var cands = [];
     for (var i = 0; i < ctx.lockedKeys.length; i++) {
         var key = ctx.lockedKeys[i];
         if (key.carriedBy != null || key.used || key.consumed) { continue; }
         if (blockingIdx.indexOf(key.doorIndex) === -1) { continue; }
-        var d = mag(key.x - bot.x, key.y - bot.y);
-        if (d < bestD) { best = key; bestD = d; }
+        cands.push({ key: key, d: mag(key.x - bot.x, key.y - bot.y) });
     }
-    return best;
+    cands.sort(function (a, b) { return a.d - b.d; });
+    var scOpts = Object.assign({}, baseOpts);
+    for (var ci = 0; ci < cands.length; ci++) {
+        var kv = keyCellVoronoiId(ctx, cands[ci].key);
+        if (kv == null) { continue; }
+        scOpts.goalSet = [kv];
+        var route = cellGraph.findPathToNearestGoal(ctx.map, { x: bot.x, y: bot.y }, scOpts);
+        if (route != null) { return { key: cands[ci].key, kv: kv, route: route }; }
+    }
+    return null;
 }
 
 // Nearest still-shut blocking door — where a non-pursuer stages so it's ready to
@@ -1615,18 +1635,20 @@ function nearestBlockingDoor(bot, ctx, blockingIdx) {
     return best;
 }
 
-// How many OTHER eligible (empty-handed, racing) bots are strictly closer to this key than
-// `bot` — the bot's pursuit rank. Computed lazily here (only when a bot actually evaluates a
-// key on its re-path) rather than as a per-tick global table, so it costs nothing on the
-// ticks/maps where no shortcut is considered. Optional-shortcut rationing is SAFE (the goal
-// is reachable either way) so capping pursuers can't strand anyone, unlike the mandatory case.
-function shortcutRank(ctx, bot, key) {
+// How many OTHER empty-handed racers (bots OR humans) are strictly closer to this key than
+// `bot` — the bot's pursuit rank. Humans count: a human nearer the key will likely grab it
+// (pickup is pure proximity), so a bot shouldn't burn a detour contesting it. Computed lazily
+// (only when a bot actually evaluates a key on its re-path), and short-circuits the moment the
+// rank reaches `cap` — the only caller asks `rank < SHORTCUT_PURSUERS`, so counting past it is
+// wasted. Optional-shortcut rationing is SAFE (the goal is reachable either way), so capping
+// pursuers can't strand anyone, unlike the mandatory case.
+function shortcutRank(ctx, bot, key, cap) {
     var rank = 0;
     var bd = mag(bot.x - key.x, bot.y - key.y);
     for (var id in ctx.players) {
         var p = ctx.players[id];
-        if (p === bot || !p.isAI || !p.alive || !p.awake || p.isSpectator || p.isZombie || p.reachedGoal || p.heldKey != null) { continue; }
-        if (mag(p.x - key.x, p.y - key.y) < bd) { rank++; }
+        if (p === bot || !p.alive || !p.awake || p.isSpectator || p.isZombie || p.reachedGoal || p.heldKey != null) { continue; }
+        if (mag(p.x - key.x, p.y - key.y) < bd) { rank++; if (rank >= cap) { return rank; } }
     }
     return rank;
 }
@@ -1648,9 +1670,11 @@ function considerShortcut(bot, ctx, baseOpts, goalRoute) {
     var openTime = cellGraph.estimatePathTime(ctx.map, goalRoute.path);
     if (!(openTime > 0)) { return null; }
     // Aggressive bots accept a smaller saving, cautious bots demand a bigger one, so the field
-    // splits organically. Clamp < 1 so a "shortcut" is never accepted when it's not faster.
-    var factor = clamp01(SHORTCUT_FACTOR + (ai.risk - 0.5) * SHORTCUT_RISK_SPREAD);
-    if (factor > 0.97) { factor = 0.97; } else if (factor < 0.4) { factor = 0.4; }
+    // splits organically. Bounded to [0.4, 0.97] so a "shortcut" is never accepted unless it's
+    // genuinely faster (factor < 1) and a single bot can't demand an absurd saving.
+    var factor = Math.min(0.97, Math.max(0.4, SHORTCUT_FACTOR + (ai.risk - 0.5) * SHORTCUT_RISK_SPREAD));
+    // One reusable options object for the two probes per key (avoids cloning baseOpts 2x/key).
+    var scOpts = Object.assign({}, baseOpts);
     var best = null, bestTime = Infinity, bestKv = null, bestRoute = null;
     for (var i = 0; i < ctx.lockedKeys.length; i++) {
         var key = ctx.lockedKeys[i];
@@ -1661,18 +1685,20 @@ function considerShortcut(bot, ctx, baseOpts, goalRoute) {
         // (a dropped key at your feet is worth grabbing), or the bot is one of the key's
         // nearest pursuers (the ration that produces the split).
         var near = mag(key.x - bot.x, key.y - bot.y);
-        var eligible = ai.shortcutKeyIndex === key.index || near <= SHORTCUT_GRAB_RADIUS || shortcutRank(ctx, bot, key) < SHORTCUT_PURSUERS;
+        var eligible = ai.shortcutKeyIndex === key.index || near <= SHORTCUT_GRAB_RADIUS || shortcutRank(ctx, bot, key, SHORTCUT_PURSUERS) < SHORTCUT_PURSUERS;
         if (!eligible) { continue; }
         // Cheap straight-line prefilter: reaching the key alone already costs > the whole open
         // route's geometric length means no shortcut is plausible — skip before any Dijkstra.
         if (near >= openDist) { continue; }
         var kv = keyCellVoronoiId(ctx, key);
         if (kv == null) { continue; }
-        var toKey = cellGraph.findPathToNearestGoal(ctx.map, { x: bot.x, y: bot.y }, Object.assign({}, baseOpts, { goalSet: [kv] }));
+        scOpts.goalSet = [kv]; scOpts.openDoorIds = null;
+        var toKey = cellGraph.findPathToNearestGoal(ctx.map, { x: bot.x, y: bot.y }, scOpts);
         if (toKey == null) { continue; } // key not reachable with the doors shut
         // Open ONLY this key's door (a bot holds one key); passableDoors would open every door
         // and overstate the saving on a multi-door map.
-        var fromKey = cellGraph.findPathToNearestGoal(ctx.map, { x: key.x, y: key.y }, Object.assign({}, baseOpts, { openDoorIds: [door.voronoiId] }));
+        scOpts.goalSet = null; scOpts.openDoorIds = [door.voronoiId];
+        var fromKey = cellGraph.findPathToNearestGoal(ctx.map, { x: key.x, y: key.y }, scOpts);
         if (fromKey == null) { continue; }
         // The shortcut must actually USE this door — else opening it gains nothing and the
         // carrier's mandatory detour to the door is pure cost the estimate would miss.
@@ -1695,6 +1721,10 @@ function considerShortcut(bot, ctx, baseOpts, goalRoute) {
 // 'door'    — carrying a key: drive into its matched door to unlock it.
 // 'stage'   — walled but no matching key is loose (another bot has it): wait at the door.
 // 'shortcut'— goal reachable, but a key+door is a worthwhile shorter route (optional).
+// NOTE for steering, only TWO distinctions are read, not four: beeline is suppressed for
+// 'stage'|'shortcut' (no die-for-it) and allowed for 'key'|'door'; everything else just tests
+// doorMode != null. The four labels are kept for intent/diagnostics — don't assume a reader
+// branches on 'key' vs 'door' (they steer identically) without adding that branch yourself.
 // `goalRoute` is the bot's already-computed plain goal route (null = walled); reused so
 // we don't recompute it here. `carrying` short-circuits to the door (no goal route needed).
 function computeDoorObjective(bot, ctx, baseOpts, goalRoute, carrying) {
@@ -1724,16 +1754,14 @@ function computeDoorObjective(bot, ctx, baseOpts, goalRoute, carrying) {
     if (opened == null) { return null; } // genuinely lava-walled, not a door — existing fallback handles it
     var blockingIdx = blockingDoorsOnPath(ctx, opened.path);
     if (blockingIdx.length === 0) { return null; } // opened up for some non-door reason; nothing to fetch
-    var key = pickKeyToPursue(bot, ctx, blockingIdx);
-    if (key != null) {
-        var kv = keyCellVoronoiId(ctx, key);
-        if (kv != null) {
-            var kset = {}; kset[kv] = true;
-            return { mode: 'key', goalSet: kset, finalPoint: { x: key.x, y: key.y } };
-        }
+    var pick = pickKeyToPursue(bot, ctx, baseOpts, blockingIdx);
+    if (pick != null) {
+        var kset = {}; kset[pick.kv] = true;
+        // Reuse the reachability route pickKeyToPursue already computed (steerBot honours obj.route).
+        return { mode: 'key', goalSet: kset, finalPoint: { x: pick.key.x, y: pick.key.y }, route: pick.route };
     }
-    // No matching key is loose (another bot is carrying it) — stage at the door so we
-    // pour through the moment it opens.
+    // No matching key is loose/reachable (another bot is carrying it, or each is itself sealed
+    // behind another shut door) — stage at the door so we pour through the moment it opens.
     var sdoor = nearestBlockingDoor(bot, ctx, blockingIdx);
     if (sdoor != null) {
         var sset = doorApproachCells(ctx, sdoor);
@@ -2595,6 +2623,10 @@ function update(gameBoard, currentState, dt) {
         doorIndexByVoronoiId = {};
         for (var di = 0; di < gameBoard.lockedDoors.length; di++) {
             var dr = gameBoard.lockedDoors[di];
+            // Doors snap to distinct cell sites, so one cell normally hosts one door. If two
+            // doors ever resolved to the SAME cell (degenerate authoring), last-write-wins here
+            // is benign: that cell is a single wall, and unlocking EITHER door flips the shared
+            // cell to passable, so the route opens regardless of which index we recorded.
             if (dr != null && dr.voronoiId != null) { doorIndexByVoronoiId[dr.voronoiId] = dr.index; }
         }
     }

@@ -511,10 +511,9 @@ function estimatePathTime(map, path) {
         return 0;
     }
     var cells = map.cells;
-    var idToIndex = {};
-    for (var i = 0; i < cells.length; i++) {
-        idToIndex[cells[i].site.voronoiId] = i;
-    }
+    // Reuse the adjacency cache's voronoiId->index table instead of rebuilding it per call
+    // (this runs in the AI's per-re-path shortcut hot path on door maps).
+    var idToIndex = getAdjacency(map).idToIndex;
     var pts = [];
     for (var p = 0; p < path.length; p++) {
         var ci = idToIndex[path[p]];
