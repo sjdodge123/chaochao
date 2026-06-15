@@ -354,6 +354,97 @@ function prepRacer(p) {
     ok(finishers >= 1, 'F: at least one bot reached the goal through the unlocked door (got ' + finishers + ')');
 })();
 
+// --- Scenario G: bot-driven — bots OPT INTO an optional shortcut (split behaviour) -----
+// A controlled two-entrance goal: a door near the gate (the SHORT way in) and one far
+// frontier cell left open (the LONG way around); every other entrance is lava'd so exactly
+// those two exist. The goal is reachable WITHOUT the door (the long way), so a bot is never
+// forced to fetch the key — but opening the near door is a much shorter route. This asserts
+// the SHORTCUT DECISION: at least one bot chooses to detour for the key (it would otherwise
+// never touch it on the long route), and the field still finishes. The carry->unlock->finish
+// mechanics that follow a pickup are the SAME carrier code proven by scenario F, which runs
+// it on a clean (non-lava-flanked) door; here the synthetic door is deliberately ringed by
+// lava to force the long alternate, so we don't re-assert the unlock on this hostile approach.
+(function scenarioG() {
+    const sig = 'ld-G';
+    const GOAL = config.tileMap.goal.id, LAVA = config.tileMap.lava.id;
+    const harness = require(path.join(repoRoot, '.github', 'scripts', 'headless-harness.js'));
+    const tickClock = harness.installMockClock(9e6);
+    Math.random = harness.mulberry32(0xC0FFEE);
+
+    let map = JSON.parse(fs.readFileSync(path.join(repoRoot, 'client', 'maps', 'Duality.json'), 'utf8'));
+    if (mapFormat.isSitesOnly(map)) { map = mapFormat.reconstruct(map); }
+    const cells = map.cells;
+    const adj = cellGraph.getAdjacency(map);
+
+    const goalSet = new Set();
+    for (let i = 0; i < cells.length; i++) { if (cells[i].id === GOAL) { goalSet.add(i); } }
+    const frontier = [];
+    goalSet.forEach((gi) => { (adj.neighbors[gi] || []).forEach((n) => { if (!goalSet.has(n) && walkable(cells[n].id) && frontier.indexOf(n) === -1) { frontier.push(n); } }); });
+    if (frontier.length < 2) { fail('G: goal needs >=2 entrances (got ' + frontier.length + ')'); return; }
+
+    const edges = (Array.isArray(map.startEdges) && map.startEdges.length) ? map.startEdges : ['left'];
+    const gateSamples = [];
+    for (const e of edges) { for (const s of cellGraph.edgeSampleOrigins(e)) { gateSamples.push(s); } }
+    const gate0 = gateSamples[0];
+    const dGate = (ci) => Math.hypot(cells[ci].site.x - gate0.x, cells[ci].site.y - gate0.y);
+
+    // Door = entrance nearest the gate (short); FAR = entrance farthest (the long open way);
+    // lava every other entrance so exactly those two remain.
+    frontier.sort((a, b) => dGate(a) - dGate(b));
+    const doorCellIdx = frontier[0];
+    const farCellIdx = frontier[frontier.length - 1];
+    for (const fi of frontier) { if (fi !== doorCellIdx && fi !== farCellIdx) { cells[fi].id = LAVA; } }
+    map.doors = [{ x: cells[doorCellIdx].site.x, y: cells[doorCellIdx].site.y }];
+
+    // Key near the gate (a small detour on the short side), so fetching it is clearly worth
+    // it versus the long way around — and a bot on the long route would never pass over it.
+    const reach = new Set(), stack = [];
+    for (const s of gateSamples) { const ci = cellGraph.nearestCellIndex(cells, s); if (!reach.has(ci) && (walkable(cells[ci].id) || cells[ci].id === GOAL)) { reach.add(ci); stack.push(ci); } }
+    while (stack.length) { const u = stack.pop(); for (const v of (adj.neighbors[u] || [])) { if (reach.has(v) || v === doorCellIdx) { continue; } if (walkable(cells[v].id) || cells[v].id === GOAL) { reach.add(v); stack.push(v); } } }
+    let keyCellIdx = -1, keyBest = Infinity;
+    reach.forEach((i) => { if (i === doorCellIdx || !walkable(cells[i].id)) { return; } const d = dGate(i); if (d > 40 && d < keyBest) { keyBest = d; keyCellIdx = i; } });
+    if (keyCellIdx < 0) { fail('G: no reachable walkable cell to host the key'); return; }
+    map.keys = [{ x: cells[keyCellIdx].site.x, y: cells[keyCellIdx].site.y }];
+
+    const room = game.getRoom(sig, 6);
+    room.game.gameBoard.isPreview = true; room.game.gameBoard.previewMap = map;
+    const cast = (config.aiRacers && config.aiRacers.cast) || [];
+    const bots = [];
+    for (let i = 0; i < 5; i++) { const b = room.world.createNewBot(sig + '-bot' + i, cast.length ? cast[i % cast.length] : null); room.playerList[b.id] = b; bots.push(b); }
+    room.game.determineGameState(bots[0]);
+    room.game.startLobby(); room.game.startGated();
+    for (let g = 0; g < 30; g++) { tickClock(config.serverTickSpeed); room.update(DT); }
+    room.game.startRace();
+    const gb = room.game.gameBoard;
+    if (gb.lockedDoors.length !== 1 || gb.lockedKeys.length !== 1) { fail('G: setup did not build exactly one door + key'); return; }
+
+    // The door is a genuine SHORTCUT on the LIVE map: goal reachable the long way, but the
+    // door-open route much shorter — so a bot fetching the key is an OPTIONAL choice, not forced.
+    const shutRoute = cellGraph.findPathToNearestGoal(gb.currentMap, gate0);
+    const openRoute = cellGraph.findPathToNearestGoal(gb.currentMap, gate0, { passableDoors: true });
+    ok(shutRoute != null, 'G: goal reachable with the door shut (the long way — shortcut is optional, not forced)');
+    ok(openRoute != null && shutRoute != null && openRoute.distance < shutRoute.distance * 0.85,
+        'G: opening the door is a real shortcut (much shorter than the long way)');
+
+    events = [];
+    const TICKS = Math.round(80 / DT);
+    const prevGoal = {}; for (const b of bots) { prevGoal[b.id] = false; }
+    let finishers = 0, threw = false;
+    for (let f = 0; f < TICKS; f++) {
+        room.game.notchesToWin = 99;
+        tickClock(config.serverTickSpeed);
+        try { room.update(DT); } catch (e) { threw = true; fail('G: tick threw: ' + e.message + '\n' + e.stack); break; }
+        for (const b of bots) { if (b.reachedGoal && !prevGoal[b.id]) { finishers++; } prevGoal[b.id] = !!b.reachedGoal; }
+        if (room.game.currentState === config.stateMap.gameOver) { break; }
+    }
+    ok(!threw, 'G: shortcut map ticked without throwing');
+    // A bot CHOSE the optional shortcut: it detoured to fetch the key even though the goal was
+    // reachable the long way (a bot on the long route never passes the key). Not every bot
+    // will — the rest race the open route — which is the intended split.
+    ok(countEvents('keyPickedUp') >= 1, 'G: at least one bot chose the optional shortcut (fetched the key)');
+    ok(finishers >= 1, 'G: the field still finishes the race (got ' + finishers + ')');
+})();
+
 if (failures > 0) {
     console.log('\nLocked-door test FAILED with ' + failures + ' error(s).');
     process.exit(1);

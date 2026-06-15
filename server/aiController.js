@@ -178,9 +178,10 @@ function newBotState(profile) {
         escapeStage: 0,    // 1 = gentle (relax+wander-kill), 2 = committed (thread-or-die)
         heldAbilityId: null,// which ability the bot is currently holding
         abilityHeldSince: 0,// ms: when it picked up the held ability (hold-timeout)
-        doorMode: null,     // locked-door objective: 'key'|'door'|'stage' or null (race the goal)
+        doorMode: null,     // locked-door objective: 'key'|'door'|'stage'|'shortcut' or null (race the goal)
         doorFinalPoint: null,// {x,y} to home straight onto for the last stretch (key spot / door)
         hadKey: false,      // was carrying a key last tick (force an instant re-path on pickup/drop)
+        shortcutKeyIndex: null,// loose key this bot has committed to fetch as an optional shortcut (sticky)
         pathSeed: 1 + Math.floor(Math.random() * 1e9), // per-bot route-diversity seed
         // Personality knobs (0..1 unless noted).
         skill: clamp01(pick('skill', 0.7) + jitter), // speed + precision + reaction
@@ -653,6 +654,16 @@ var BARRIER_PATH_PENALTY = 45;
 // unlockRadius — the unlock fires server-side), after which normal goal pathing
 // resumes. Pickup/unlock are pure proximity in checkLockedDoors; the bot only steers.
 var DOOR_FINAL_APPROACH = 120;  // px: home straight on the key/door point for the last stretch
+// Shortcut-awareness: when the goal IS reachable without a door, a bot may STILL fetch a
+// key + open the door if doing so is meaningfully shorter than the open route. Optional
+// (the goal is reachable either way), so it's safe to ration: only the nearest few bots
+// to a loose key consider it, the rest race the open route — which is what produces a
+// natural split (some take the shortcut, some don't). Per-bot risk varies the bar so it's
+// not a robotic all-or-nothing.
+var SHORTCUT_FACTOR = 0.85;     // base: door route must be <= 85% of the open route length to bother
+var SHORTCUT_RISK_SPREAD = 0.26;// per-bot threshold spread by risk (aggressive bots accept smaller savings)
+var SHORTCUT_PURSUERS = 2;      // nearest eligible bots that consider a given loose key as a shortcut
+var SHORTCUT_GRAB_RADIUS = 90;  // px: a loose key this close is considered regardless of the pursuer ration
 
 var AB = c.tileMap.abilities;
 
@@ -1512,10 +1523,13 @@ function decideLunge(bot, ctx) {
 // held key into its door -> unlock) into navigation targets the normal cell-graph
 // pathing then drives to.
 
-// Tiles a route may approach a door across (anything the bot can stand on): not
-// lava, an empty hole, or another shut door.
+// Tiles a route may approach a door across: anything the bot can stand on (not lava, an
+// empty hole, or another shut door) EXCEPT the goal itself. A carrier must press the door
+// from its NEAR side to unlock it; the goal sits on the far side, so if the goal is
+// reachable another way (a shortcut map) and we allowed it as an "approach" cell, the
+// carrier would just drive to the goal and finish carrying the key — never opening the door.
 function doorRouteWalkable(ctx, id) {
-    return id !== ctx.lavaId && id !== ctx.emptyId && id !== ctx.doorId;
+    return id !== ctx.lavaId && id !== ctx.emptyId && id !== ctx.doorId && id !== ctx.goalId;
 }
 
 // Walkable cells bordering a door's home cell, as a goalSet for findPathToNearestGoal.
@@ -1601,11 +1615,54 @@ function nearestBlockingDoor(bot, ctx, blockingIdx) {
     return best;
 }
 
+// Optional SHORTCUT: the goal is already reachable (goalRoute != null), but fetching a
+// loose key and opening its door might be a shorter way to the finish. Returns a 'shortcut'
+// objective (fetch the key) when worth it, else null (race the open route). Cost: up to 2
+// extra Dijkstra, but only for the nearest SHORTCUT_PURSUERS bots to a loose key (the
+// ration in update()) — or a bot already committed, or one with a key right in front.
+function considerShortcut(bot, ctx, baseOpts, goalRoute) {
+    if (!Array.isArray(ctx.lockedKeys) || goalRoute == null) { return null; }
+    var ai = bot.ai;
+    var openDist = goalRoute.distance;
+    if (!(openDist > 0)) { return null; }
+    var allowed = ctx.shortcutAllowed != null ? ctx.shortcutAllowed[bot.id] : null;
+    // Aggressive/risk-taking bots accept a smaller saving (higher factor); cautious bots
+    // demand a bigger one — so the field splits organically, not as a uniform decision.
+    var factor = SHORTCUT_FACTOR + (ai.risk - 0.5) * SHORTCUT_RISK_SPREAD;
+    var best = null, bestDist = Infinity, bestKv = null;
+    for (var i = 0; i < ctx.lockedKeys.length; i++) {
+        var key = ctx.lockedKeys[i];
+        if (key.carriedBy != null || key.used || key.consumed) { continue; }
+        var door = ctx.lockedDoors[key.doorIndex];
+        if (door == null || door.unlocked) { continue; }
+        // Consider this key only if the bot is one of its nearest pursuers, has already
+        // committed to it (sticky, avoids flip-flop), or it's right in front of the bot
+        // (a dropped key at your feet is worth grabbing even if you're not the nearest).
+        var near = mag(key.x - bot.x, key.y - bot.y);
+        var eligible = (allowed != null && allowed[key.index]) || ai.shortcutKeyIndex === key.index || near <= SHORTCUT_GRAB_RADIUS;
+        if (!eligible) { continue; }
+        var kv = keyCellVoronoiId(ctx, key);
+        if (kv == null) { continue; }
+        var toKey = cellGraph.findPathToNearestGoal(ctx.map, { x: bot.x, y: bot.y }, Object.assign({}, baseOpts, { goalSet: [kv] }));
+        if (toKey == null) { continue; } // key not reachable with the door shut
+        var fromKey = cellGraph.findPathToNearestGoal(ctx.map, { x: key.x, y: key.y }, Object.assign({}, baseOpts, { passableDoors: true }));
+        if (fromKey == null) { continue; }
+        var scDist = toKey.distance + fromKey.distance; // bot -> key -> (through door) -> goal
+        if (scDist < openDist * factor && scDist < bestDist) {
+            best = key; bestDist = scDist; bestKv = kv;
+        }
+    }
+    if (best == null) { return null; }
+    var gset = {}; gset[bestKv] = true;
+    return { mode: 'shortcut', goalSet: gset, finalPoint: { x: best.x, y: best.y }, keyIndex: best.index };
+}
+
 // The bot's locked-door objective this re-path, or null to race the goal normally.
-//   { mode:'key'|'door'|'stage', goalSet:{voronoiId:true}, finalPoint:{x,y}|null }
-// 'key'  — empty-handed, goal walled by a door: drive onto the matching key.
-// 'door' — carrying a key: drive into its matched door to unlock it.
-// 'stage'— walled but no matching key is loose (another bot has it): wait at the door.
+//   { mode:'key'|'door'|'stage'|'shortcut', goalSet:{voronoiId:true}|[voronoiId], finalPoint:{x,y}|null }
+// 'key'     — empty-handed, goal WALLED by a door: drive onto the matching key (mandatory).
+// 'door'    — carrying a key: drive into its matched door to unlock it.
+// 'stage'   — walled but no matching key is loose (another bot has it): wait at the door.
+// 'shortcut'— goal reachable, but a key+door is a worthwhile shorter route (optional).
 // `goalRoute` is the bot's already-computed plain goal route (null = walled); reused so
 // we don't recompute it here. `carrying` short-circuits to the door (no goal route needed).
 function computeDoorObjective(bot, ctx, baseOpts, goalRoute, carrying) {
@@ -1622,9 +1679,9 @@ function computeDoorObjective(bot, ctx, baseOpts, goalRoute, carrying) {
         }
         return null; // door already open (or data gone) -> race the goal
     }
-    // Empty-handed: only engage if the goal is currently UNREACHABLE. If the bot can
-    // already reach a goal (goalRoute != null), race it and ignore keys.
-    if (goalRoute != null) { return null; }
+    // Empty-handed and the goal IS reachable: race it — unless fetching a key to open a
+    // door is a worthwhile shorter route (considerShortcut returns null = just race open).
+    if (goalRoute != null) { return considerShortcut(bot, ctx, baseOpts, goalRoute); }
     // During a collapse a null goal route usually means the closing lava ring (not a
     // door) walled us off — don't divert to chase a key into the advancing front; let
     // the collapse flee-to-safe-center branch handle it.
@@ -1710,8 +1767,11 @@ function steerBot(bot, ctx, dt) {
         // must aim at the bot's own door target (the key spot it's fetching, or the door it
         // carries the key to), which the override below points at ai.doorFinalPoint. A
         // 'stage' bot has no target of its own (it's waiting on another bot's key), so it
-        // just holds at the door — suppress its beeline entirely.
-        if (ai.doorMode === 'stage') { beelining = false; }
+        // just holds at the door — suppress its beeline entirely. A 'shortcut' is OPTIONAL
+        // (the goal is reachable the normal way), so never let a bot drive avoidance-off
+        // INTO lava to reach a shortcut key — suppress its beeline too; if it can't make
+        // progress toward the key it'll re-evaluate and just race the open route.
+        if (ai.doorMode === 'stage' || ai.doorMode === 'shortcut') { beelining = false; }
     }
 
     // --- Re-path on a throttle (and immediately if we have no path) ---
@@ -1750,12 +1810,17 @@ function steerBot(bot, ctx, dt) {
         ai.doorMode = null; ai.doorFinalPoint = null;
         if (ctx.hasLockedDoors && ctx.bunkerSafeIds == null) {
             var obj = computeDoorObjective(bot, ctx, pathOpts, route, carrying);
+            // Remember a committed shortcut key (sticky, so the choice doesn't flip-flop as
+            // bots jostle for nearest-rank); cleared the moment the bot isn't shortcutting.
+            ai.shortcutKeyIndex = (obj != null && obj.mode === 'shortcut') ? obj.keyIndex : null;
             if (obj != null) {
                 pathOpts.goalSet = obj.goalSet;
                 ai.doorMode = obj.mode;
                 ai.doorFinalPoint = obj.finalPoint;
                 route = cellGraph.findPathToNearestGoal(ctx.map, { x: bot.x, y: bot.y }, pathOpts);
             }
+        } else {
+            ai.shortcutKeyIndex = null;
         }
         // If the danger ring walled us off, retry without it so we still aim at a
         // goal (better a tight line than freezing in front of the lava). Keep the
@@ -1814,14 +1879,16 @@ function steerBot(bot, ctx, dt) {
             if (turnCos < TURN_BRAKE_COS) { sharpTurn = true; }
         }
         // Locked-door final approach: the route only reaches the key's cell / a door's
-        // neighbour, but pickup/unlock need the bot within pickupRadius/unlockRadius of the
-        // exact point. Once close, steer straight at it so the bot drives onto the key (grab)
-        // or presses into the door (unlock) — avoidance still applies, so it won't cut into
-        // flanking lava. No bend braking here: this last nudge is short and deliberate.
+        // near-side neighbour (the door cell itself is a wall it can't path INTO), but
+        // pickup/unlock need the bot within pickupRadius/unlockRadius of the exact point.
+        // Home straight at it once the bot is on the LAST leg (it has reached the approach
+        // cell — the remaining gap to the door/key can be a whole cell wide, larger than any
+        // fixed radius) OR within DOOR_FINAL_APPROACH. Avoidance still applies, so it won't
+        // cut into flanking lava. No bend braking here: this last nudge is short and deliberate.
         if (ai.doorFinalPoint != null) {
             var fpx = ai.doorFinalPoint.x - bot.x, fpy = ai.doorFinalPoint.y - bot.y;
             var fpm = mag(fpx, fpy);
-            if (fpm < DOOR_FINAL_APPROACH && fpm > 0.001) {
+            if ((ai.wpIndex >= last || fpm < DOOR_FINAL_APPROACH) && fpm > 0.001) {
                 desiredX = fpx / fpm; desiredY = fpy / fpm; sharpTurn = false;
             }
         }
@@ -2481,19 +2548,47 @@ function update(gameBoard, currentState, dt) {
         }
     }
 
-    // Locked doors + keys: the one lookup the objective layer needs — voronoiId -> door
-    // index, so a route crossing a door cell can name which door it is. (The voronoiId ->
-    // cell-index map it also needs is the adjacency cache's own idToIndex, reused directly
-    // in doorApproachCells; no per-tick rebuild.) Coordination is implicit: a bot only
-    // pursues a key whose door blocks ITS route, and the key stops being loose the moment
-    // someone grabs it, so the rest re-evaluate and stage — no pursuer ration needed.
+    // Locked doors + keys. doorIndexByVoronoiId (voronoiId -> door index) lets a route
+    // crossing a door cell name which door it is. (The voronoiId -> cell-index map the
+    // objective layer also needs is the adjacency cache's own idToIndex, reused directly in
+    // doorApproachCells; no per-tick rebuild.)
+    //
+    // For the MANDATORY case (door is the only way) coordination is implicit — a bot only
+    // pursues a key whose door blocks ITS route, and a grabbed key stops being loose, so
+    // the rest re-evaluate and stage; no ration (a ration there would starve the needed
+    // key). For the OPTIONAL SHORTCUT case the goal is reachable either way, so a ration IS
+    // safe and is exactly what splits the field: only the nearest SHORTCUT_PURSUERS bots to
+    // a loose key consider it as a shortcut, the rest race the open route. (A bot already
+    // committed, or one with a key right in front, bypasses the ration — see considerShortcut.)
     var hasLockedDoors = gameBoard.hasLockedDoors === true;
-    var doorIndexByVoronoiId = null;
+    var doorIndexByVoronoiId = null, shortcutAllowed = null;
     if (hasLockedDoors) {
         doorIndexByVoronoiId = {};
         for (var di = 0; di < gameBoard.lockedDoors.length; di++) {
             var dr = gameBoard.lockedDoors[di];
             if (dr != null && dr.voronoiId != null) { doorIndexByVoronoiId[dr.voronoiId] = dr.index; }
+        }
+        var scElig = [];
+        for (var seid in playerList) {
+            var sep = playerList[seid];
+            if (sep.isAI && sep.alive && sep.awake && !sep.isSpectator && !sep.isZombie && !sep.reachedGoal && sep.heldKey == null) {
+                scElig.push(sep);
+            }
+        }
+        shortcutAllowed = {};
+        for (var ski = 0; ski < gameBoard.lockedKeys.length; ski++) {
+            var slk = gameBoard.lockedKeys[ski];
+            if (slk == null || slk.carriedBy != null || slk.used || slk.consumed) { continue; }
+            var ranked = [];
+            for (var rb = 0; rb < scElig.length; rb++) {
+                var rbx = scElig[rb].x - slk.x, rby = scElig[rb].y - slk.y;
+                ranked.push({ id: scElig[rb].id, d2: rbx * rbx + rby * rby });
+            }
+            ranked.sort(function (a, b) { return a.d2 - b.d2; });
+            for (var rr = 0; rr < ranked.length && rr < SHORTCUT_PURSUERS; rr++) {
+                if (shortcutAllowed[ranked[rr].id] == null) { shortcutAllowed[ranked[rr].id] = {}; }
+                shortcutAllowed[ranked[rr].id][slk.index] = true;
+            }
         }
     }
 
@@ -2502,6 +2597,7 @@ function update(gameBoard, currentState, dt) {
         lavaId: LAVA,
         emptyId: c.tileMap.empty.id,
         doorId: c.tileMap.door != null ? c.tileMap.door.id : -999,
+        goalId: GOAL,
         iceId: c.tileMap.ice.id,
         waterId: c.tileMap.water != null ? c.tileMap.water.id : -999,
         siteById: buildSiteIndex(map),
@@ -2513,6 +2609,7 @@ function update(gameBoard, currentState, dt) {
         lockedDoors: gameBoard.lockedDoors,
         lockedKeys: gameBoard.lockedKeys,
         doorIndexByVoronoiId: doorIndexByVoronoiId, // path cell -> the door it is (blocking-door detection)
+        shortcutAllowed: shortcutAllowed, // botId -> { keyIndex:true } it may consider as an OPTIONAL shortcut
         staticHazardCells: staticHazardCells, // static bumper cells (harsh path penalty)
         railCells: railCells, // moving-rail swept cells (mild path penalty — timeable)
         barrierEdges: cellGraph.getBarrierBlockedEdges(map), // adjacency edges a solid barrier cuts (route around)
