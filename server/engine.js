@@ -75,6 +75,9 @@ exports.bounceOffStoneEdges = function (player, map) {
 exports.bounceOffBarriers = function (player, map) {
 	bounceOffBarriers(player, map);
 }
+exports.barrierCrossing = function (x1, y1, x2, y2, map) {
+	return barrierCrossing(x1, y1, x2, y2, map);
+}
 exports.rebuildStoneEdges = function (map) {
 	rebuildStoneEdges(map);
 }
@@ -1147,6 +1150,22 @@ function ensureBarrierEdges(map) {
 }
 function mapHasBarriers(map) {
 	return ensureBarrierEdges(map).length > 0;
+}
+// The first point where the segment (x1,y1)->(x2,y2) crosses a map barrier (a
+// wall/fence), or null if it crosses none. Players slide along barriers
+// (bounceOffBarriers); this is the straight-line test used to BLOCK the sentry
+// turret's line-of-sight + its shot on a barrier (a wall shields whoever's behind it).
+function barrierCrossing(x1, y1, x2, y2, map) {
+	if (map == null) { return null; }
+	var edges = ensureBarrierEdges(map);
+	if (edges.length === 0) { return null; }
+	var best = null, bestT = Infinity;
+	for (var i = 0; i < edges.length; i++) {
+		var e = edges[i];
+		var hit = geometry.segmentIntersectionPoint(x1, y1, x2, y2, e.ax, e.ay, e.bx, e.by);
+		if (hit != null && hit.t < bestT) { bestT = hit.t; best = { x: hit.x, y: hit.y }; }
+	}
+	return best;
 }
 function bounceOffBarriers(player, map) {
 	if (!mapHasBarriers(map)) {

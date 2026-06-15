@@ -1680,6 +1680,26 @@ function registerCombatHandlers(server) {
 		fireMuzzleFlash(owner, "#bfefff");
 		playSound(bombShot);
 	});
+	server.on("spawnTurretShot", function (payload) {
+		// A Sentry Turret fired. No owning player (it's a map hazard), so the payload
+		// carries the muzzle position + heading; the turret's own FIRING state flashes.
+		// Its own electric "pew" (not the bomb/ice shot), attenuated by distance.
+		spawnTurretShot(payload);
+		if (payload != null && typeof playTurretFire === "function" && typeof antlionSfxLevel === "function") {
+			playTurretFire(antlionSfxLevel(payload.x, payload.y));
+		}
+	});
+	server.on("turretShotBurst", function (payload) {
+		// A turret shot connecting/expiring: its own red impact spark + thunk (not the
+		// iceCannon's ice flash). No terrain freeze — the shove sends no tileChanges.
+		if (payload == null || payload.x == null) { return; }
+		if (currentState != config.stateMap.racing && currentState != config.stateMap.collapsing && currentState != config.stateMap.lobby) { return; }
+		spawnExplosion(payload.x, payload.y, 60, "#ff6a3c");
+		if (typeof recapMarkEffect === "function") { recapMarkEffect("explosion", payload.x, payload.y, { radius: 60, color: "#ff6a3c" }); }
+		if (typeof playTurretImpact === "function" && typeof antlionSfxLevel === "function") {
+			playTurretImpact(antlionSfxLevel(payload.x, payload.y));
+		}
+	});
 	server.on("spawnClouds", function (packet) {
 		spawnClouds(packet);
 	});

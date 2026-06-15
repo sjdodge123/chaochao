@@ -1112,6 +1112,23 @@ function spawnSnowFlake(owner) {
 	snowFlake.color = "black";
 	projectileList[owner] = snowFlake;
 }
+// A sentry-turret shot: built from the spawnTurretShot event (which carries x/y +
+// the fire angle — there's no owning player to read a position/heading from). Its own
+// type "turretShot" gets the unique red-bolt drawer (draw.js); it ages on the same
+// projList wire as any projectile. The angle is constant (it flies straight) and the
+// per-tick wire never overwrites it, so the bolt stays oriented along its flight.
+function spawnTurretShot(payload) {
+	if (payload == null || payload.owner == null) { return; }
+	var shot = {};
+	shot.ownerId = payload.owner;
+	shot.x = payload.x;
+	shot.y = payload.y;
+	shot.angle = payload.angle || 0;
+	shot.radius = config.hazards.sentryTurret.shotRadius;
+	shot.color = "#ff6a3c";
+	shot.type = "turretShot"; // draw immediately, before the first per-tick wire sets type
+	projectileList[payload.owner] = shot;
+}
 function spawnSwapAimer(owner) {
 	var aimer = {};
 	aimer.ownerId = owner;

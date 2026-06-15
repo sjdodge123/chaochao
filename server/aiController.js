@@ -391,6 +391,30 @@ function hazardRepulsion(bot, ctx, desiredX, desiredY, dt) {
             var cpf = closestOnSegment(bot.x, bot.y, h.ax, h.ay, h.bx, h.by);
             hx = cpf.x; hy = cpf.y;
         }
+        // A sentry turret fires down a CONE (its mount arc, out to range). Don't sit in
+        // the line of fire: when the bot is inside the wedge, push it LATERALLY toward
+        // the nearer cone edge (the short way out) — perpendicular to the turret->bot
+        // line, so it clears the wedge while still driving forward rather than backing
+        // off. Ramps up closer in. This is ADDED to the generic radial body-avoidance
+        // below (no `continue`) so a bot skirting the turret from outside the arc still
+        // steers around the emplacement body like it does every other hazard.
+        if (h.isTurret) {
+            var tdx0 = bot.x - h.x, tdy0 = bot.y - h.y;
+            var tdist = mag(tdx0, tdy0);
+            var trange = c.hazards.sentryTurret.range;
+            if (tdist > 0.0001 && tdist < trange) {
+                var tbang = Math.atan2(tdy0, tdx0) * 180 / Math.PI;
+                var tsigned = ((tbang - h.mountAngle + 540) % 360) - 180; // signed offset from mount centre
+                if (Math.abs(tsigned) < c.hazards.sentryTurret.arc / 2) {
+                    var tw = (trange - tdist) / trange; tw = tw * tw;
+                    var tsign = (tsigned >= 0) ? 1 : -1; // toward the nearer cone edge
+                    // perpendicular to the radial (turret->bot) line = the tangential exit
+                    rx += (-tdy0 / tdist) * tsign * tw;
+                    ry += (tdx0 / tdist) * tsign * tw;
+                }
+            }
+            // fall through to the generic radial field (body avoidance)
+        }
         if (h.moveable && h.rail != null) {
             var seg = bumperSegment(h);
             var cp = closestOnSegment(bot.x, bot.y, seg.ax, seg.ay, seg.bx, seg.by);
@@ -2131,6 +2155,28 @@ function update(gameBoard, currentState, dt) {
                     if (staticHazardCells == null) { staticHazardCells = new Set(); }
                     staticHazardCells.add(vc.site.voronoiId);
                 }
+            }
+            continue;
+        }
+        // A sentry turret threatens a CONE (its fixed mount arc, out to range). Price the
+        // cells inside that wedge at the mild TIMEABLE rail penalty — it fires
+        // periodically and the shot only SHOVES (recoverable), so a bot can risk
+        // crossing between shots rather than wall off the whole wedge; the live steering
+        // (hazardRepulsion) keeps it from PARKING in the line of fire. Uses the fixed
+        // mount angle (the arc the barrel sweeps), not the live barrel facing.
+        if (hz.isTurret) {
+            var turretR2 = c.hazards.sentryTurret.range * c.hazards.sentryTurret.range;
+            var turretHalf = c.hazards.sentryTurret.arc / 2;
+            for (var ti2 = 0; ti2 < map.cells.length; ti2++) {
+                var tcell = map.cells[ti2];
+                if (!tcell || !tcell.site) { continue; }
+                var tcdx = tcell.site.x - hz.x, tcdy = tcell.site.y - hz.y;
+                var tcd2 = tcdx * tcdx + tcdy * tcdy;
+                if (tcd2 < 1 || tcd2 > turretR2) { continue; }
+                var tcang = Math.atan2(tcdy, tcdx) * 180 / Math.PI;
+                if (Math.abs(((tcang - hz.mountAngle + 540) % 360) - 180) > turretHalf) { continue; }
+                if (railCells == null) { railCells = new Set(); }
+                railCells.add(tcell.site.voronoiId);
             }
             continue;
         }

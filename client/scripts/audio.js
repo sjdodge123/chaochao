@@ -907,6 +907,74 @@ function playAntlionBite(level) {
     catch (e) { try { src.disconnect(); osc.disconnect(); } catch (e2) {} }
 }
 
+// Sentry-turret fire: a deep electric "vwomp" — a descending saw zap with a sub-bass
+// body under it for weight, and only a soft low transient tick (no bright hiss).
+// Deliberately NOT the bomb/ice shot. level (0..1) attenuates by distance.
+function playTurretFire(level) {
+    var ctx = getCtx();
+    if (!ctx || ctx.state !== "running") { return; }
+    if (gameMuted || masterVolume === 0) { return; }
+    var lvl = (level == null) ? 1 : Math.max(0, Math.min(1, level));
+    if (lvl <= 0.02) { return; }
+    var now = ctx.currentTime;
+    // deep zap: descending sawtooth 620 -> 140 Hz (was 1400->360 — much lower now)
+    var osc = ctx.createOscillator();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(620, now);
+    osc.frequency.exponentialRampToValueAtTime(140, now + 0.14);
+    var og = ctx.createGain();
+    var oPeak = Math.max(0.0002, 0.17 * lvl * masterVolume * sfxVolumeScalar);
+    og.gain.setValueAtTime(0.0001, now);
+    og.gain.exponentialRampToValueAtTime(oPeak, now + 0.007);
+    og.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+    osc.connect(og); og.connect(sfxBus);
+    // sub-body for weight: sine 190 -> 60 Hz
+    var sub = ctx.createOscillator();
+    sub.type = "sine";
+    sub.frequency.setValueAtTime(190, now);
+    sub.frequency.exponentialRampToValueAtTime(60, now + 0.14);
+    var sg = ctx.createGain();
+    var sPeak = Math.max(0.0002, 0.12 * lvl * masterVolume * sfxVolumeScalar);
+    sg.gain.setValueAtTime(0.0001, now);
+    sg.gain.exponentialRampToValueAtTime(sPeak, now + 0.008);
+    sg.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+    sub.connect(sg); sg.connect(sfxBus);
+    // soft low transient tick (not the old bright hiss)
+    var src = noiseSweepSource(ctx, now, lvl, {
+        q: 1.4, freqs: [[1100, 0], [480, 0.05]], peakCoeff: 0.05, attackT: 0.005, releaseT: 0.07
+    });
+    try { osc.start(now); osc.stop(now + 0.2); sub.start(now); sub.stop(now + 0.22); src.start(now); src.stop(now + 0.08); }
+    catch (e) { try { osc.disconnect(); sub.disconnect(); src.disconnect(); } catch (e2) {} }
+}
+
+// Sentry-turret shot impact: a punchy metallic thunk under a short noise spit — the
+// shot connecting/bursting. Distinct from the ice-burst. level (0..1) by distance.
+function playTurretImpact(level) {
+    var ctx = getCtx();
+    if (!ctx || ctx.state !== "running") { return; }
+    if (gameMuted || masterVolume === 0) { return; }
+    var lvl = (level == null) ? 1 : Math.max(0, Math.min(1, level));
+    if (lvl <= 0.02) { return; }
+    var now = ctx.currentTime;
+    // low knock: square 230 -> 70 Hz
+    var osc = ctx.createOscillator();
+    osc.type = "square";
+    osc.frequency.setValueAtTime(230, now);
+    osc.frequency.exponentialRampToValueAtTime(70, now + 0.1);
+    var og = ctx.createGain();
+    var oPeak = Math.max(0.0002, 0.13 * lvl * masterVolume * sfxVolumeScalar);
+    og.gain.setValueAtTime(0.0001, now);
+    og.gain.exponentialRampToValueAtTime(oPeak, now + 0.008);
+    og.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+    osc.connect(og); og.connect(sfxBus);
+    // spit of noise
+    var src = noiseSweepSource(ctx, now, lvl, {
+        q: 1.2, freqs: [[1800, 0], [500, 0.08]], peakCoeff: 0.12, attackT: 0.005, releaseT: 0.1
+    });
+    try { osc.start(now); osc.stop(now + 0.16); src.start(now); src.stop(now + 0.11); }
+    catch (e) { try { osc.disconnect(); src.disconnect(); } catch (e2) {} }
+}
+
 // Land-lunge dash: a quick airy "fwoosh" — a bandpassed noise sweep that rises then
 // settles, with a short rising thrust tone under it. level (0..1) attenuates by
 // distance like the other positional synth SFX. Distinct from the melee thwack the

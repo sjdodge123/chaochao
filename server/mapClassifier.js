@@ -270,6 +270,12 @@ function hazardAvoidance(map, config) {
     var vortexId = (config.hazards && config.hazards.vortexWell) ? config.hazards.vortexWell.id : null;
     var vortexR = (config.hazards && config.hazards.vortexWell && config.hazards.vortexWell.radius) || 150;
     var vortexCoreFrac = (config.hazards && config.hazards.vortexWell && config.hazards.vortexWell.coreFraction) || 0.6;
+    // Sentry turret: penalize the firing CONE (mount arc, out to range) — sample the
+    // centre line + both arc edges so the routed line bends out of the line of fire, in
+    // lockstep with the live AI (aiController's isTurret cone branch).
+    var turretId = (config.hazards && config.hazards.sentryTurret) ? config.hazards.sentryTurret.id : null;
+    var turretRange = (config.hazards && config.hazards.sentryTurret && config.hazards.sentryTurret.range) || 300;
+    var turretArc = (config.hazards && config.hazards.sentryTurret && config.hazards.sentryTurret.arc) || 110;
     for (var h = 0; h < hazards.length; h++) {
         var hz = hazards[h];
         if (hz == null || typeof hz.x !== "number" || typeof hz.y !== "number") { continue; }
@@ -295,6 +301,16 @@ function hazardAvoidance(map, config) {
             for (var ringA = 0; ringA < 8; ringA++) {
                 var rr = ringA * Math.PI / 4;
                 addAround(hz.x + Math.cos(rr) * core, hz.y + Math.sin(rr) * core);
+            }
+        } else if (hz.id === turretId) {
+            var mount = (hz.angle || 0) * Math.PI / 180;
+            var halfArc = (turretArc / 2) * Math.PI / 180;
+            var edges = [-halfArc, 0, halfArc];
+            for (var e = 0; e < edges.length; e++) {
+                var coneRad = mount + edges[e];
+                for (var ct = 25; ct <= turretRange; ct += 25) {
+                    addAround(hz.x + Math.cos(coneRad) * ct, hz.y + Math.sin(coneRad) * ct);
+                }
             }
         }
     }

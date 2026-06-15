@@ -223,6 +223,9 @@ jobs:
       - name: "Headless crusher test (rail slab: oscillation, rotated-rect contact, shove vs pinch-crush)"
         run: node .github/scripts/crusher-test.js
 
+      - name: "Headless sentry-turret test (aim/state machine, streamAngle+netState wire, fire+shove vs no terrain freeze)"
+        run: node .github/scripts/sentry-turret-test.js
+
       - name: "Headless boons test (Dash Arrows: registry/handleHit, live boost, AI blind to boons)"
         run: node .github/scripts/boons-test.js
 

@@ -14,7 +14,7 @@ var { Gate } = require('./shapes.js');
 var { LobbyStartButton, LobbyStation } = require('./player.js');
 var { ExplosionAimer, SwapAimer } = require('./aimers.js');
 var { hazardKindById, Antlion, Thumper } = require('./hazards.js');
-var { CloudProj, SnowFlakeProj, BombProj, Puck } = require('./projectiles.js');
+var { CloudProj, SnowFlakeProj, BombProj, TurretShot, Puck } = require('./projectiles.js');
 var { Blindfold, Swap, IceCannon, Bomb, SpeedBuff, SpeedDebuff, TileSwap, Cut, StarPower, BombTrigger, OrbitalBeam } = require('./abilities.js');
 
 // Depth (px) of a starting gate measured inward from its world edge. Matches the
@@ -578,6 +578,12 @@ class GameBoard {
 			if (this.projectileList[id].explodeIce == true) {
 				this.explodeIce(id);
 			}
+			// Sentry-turret shot detonation: a recoverable knockback, NO terrain
+			// mutation (see TurretShot). Checked BEFORE the alive guard below — handleHit
+			// sets shove+alive=false the same tick, so the burst must fire before delete.
+			if (this.projectileList[id].shove == true) {
+				this.shoveShot(id);
+			}
 			if (this.projectileList[id].tileChanges != null && Object.keys(this.projectileList[id].tileChanges).length > 0) {
 				var tileDelta = {};
 				for (var vid in this.projectileList[id].tileChanges) {
@@ -593,6 +599,22 @@ class GameBoard {
 				messenger.messageRoomBySig(this.roomSig, "terminateProj", id);
 				delete this.projectileList[id];
 				continue;
+			}
+			// A turret bolt doesn't pass through a wall/fence: if its move this tick
+			// (x,y -> newX,newY, computed by engine.updateProjectiles) crosses a barrier,
+			// it's absorbed AT the wall — a fizzle (impact FX + sound, NO knockback), so
+			// a barrier fully shields whoever's behind it. (The line-of-sight check in
+			// Turret.acquireTarget already stops it firing at a walled target; this
+			// catches a kart that ducks behind a wall after the shot is away.)
+			var proj = this.projectileList[id];
+			if (proj.type === "turretShot" && this.currentMap != null) {
+				var wallHit = _engine.barrierCrossing(proj.x, proj.y, proj.newX, proj.newY, this.currentMap);
+				if (wallHit != null) {
+					messenger.messageRoomBySig(this.roomSig, 'turretShotBurst', { owner: id, x: wallHit.x, y: wallHit.y });
+					messenger.messageRoomBySig(this.roomSig, "terminateProj", id);
+					delete this.projectileList[id];
+					continue;
+				}
 			}
 			this.projectileList[id].update();
 		}
@@ -621,6 +643,17 @@ class GameBoard {
 		// pair, which would double (and non-deterministically vary) the force. Each
 		// hazard's applyForce self-filters by containment and skips protected karts.
 		var forceZonesLive = (currentState == c.stateMap.racing || currentState == c.stateMap.collapsing);
+		// Antlions are extra turret targets — collect them once (cheap; only the antlion
+		// round populates any, and they live in hazardList alongside the turret). Gated
+		// on the round being active so non-antlion maps pay nothing.
+		var turretAntlions = null;
+		if (this.checkForActiveBrutal(c.brutalRounds.antlion.id)) {
+			turretAntlions = [];
+			for (var aid in this.hazardList) {
+				var ah = this.hazardList[aid];
+				if (ah.isAntlion && ah.alive !== false) { turretAntlions.push(ah); }
+			}
+		}
 		for (var id in this.hazardList) {
 			var hazard = this.hazardList[id];
 			// dt lets stationary stateful kinds (geyser/mine/fence) run their phase
@@ -629,6 +662,17 @@ class GameBoard {
 			if (forceZonesLive && hazard.forceZone && hazard.alive !== false) {
 				for (var pid in this.playerList) {
 					hazard.applyForce(this.playerList[pid]);
+				}
+			}
+			// Sentry turret: aim + run its cooldown/charge/fire machine here (it needs
+			// the player list to acquire a target, which update(dt) doesn't get). serve
+			// raises fireRequest on the firing edge; we spawn the shot onto the SAME
+			// projectile wire the iceCannon uses. Idle (no charge) outside racing.
+			if (hazard.isTurret && hazard.alive !== false) {
+				hazard.serve(this.playerList, dt, forceZonesLive, this.currentMap, turretAntlions);
+				if (hazard.fireRequest) {
+					hazard.fireRequest = false;
+					this.fireTurret(hazard);
 				}
 			}
 			if (hazard.punch != null && this.punchList[hazard.ownerId] == null) {
@@ -1340,6 +1384,53 @@ class GameBoard {
 		this.lobbyLastActivity = Date.now();
 		messenger.messageRoomBySig(this.roomSig, 'snowFlakeExploded', { owner: owner, x: explodeLoc.x, y: explodeLoc.y });
 		messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(tileDelta));
+	}
+	// Spawn a sentry turret's shot onto the SAME projectile wire the iceCannon ability
+	// uses (keyed by the turret's mapID/ownerId, so it never collides with a player's
+	// projectile). The client builds its render-side projectile from the spawnTurretShot
+	// event (it carries x/y since there's no owning player to read a position from), then
+	// the per-tick projList wire keeps it positioned and terminateProj removes it.
+	fireTurret(turret) {
+		// One live shot per turret at a time — don't orphan an in-flight shot under the
+		// same key. The long cooldown means it's almost always already gone.
+		if (this.projectileList[turret.ownerId] != null) { return; }
+		var muzzle = turret.muzzle();
+		var shot = new TurretShot(muzzle.x, muzzle.y, c.hazards.sentryTurret.shotRadius, "black", turret.ownerId, this.roomSig, turret.angle);
+		this.projectileList[turret.ownerId] = shot;
+		// Ship the fire angle so the client can draw the bolt oriented along its flight
+		// (the per-tick projList wire only carries x/y, no heading).
+		messenger.messageRoomBySig(this.roomSig, "spawnTurretShot", { owner: turret.ownerId, x: muzzle.x, y: muzzle.y, angle: turret.angle });
+	}
+	// A turret shot detonating: a knockback only (reuses the explosion-force helper), no
+	// tile changes. owner is the turret's mapID (no playerList entry), so no kill credit
+	// or recoil — applyExplosionForce's playerList[owner] guard already handles that. The
+	// client draws the turret's OWN red burst + plays its impact SFX (turretShotBurst),
+	// not the iceCannon's ice flash.
+	shoveShot(owner) {
+		var proj = this.projectileList[owner];
+		if (proj == null) { return; }
+		var loc = { x: proj.x, y: proj.y };
+		this.applyExplosionForce(loc, owner);
+		this.shoveAntlions(loc);
+		messenger.messageRoomBySig(this.roomSig, 'turretShotBurst', { owner: owner, x: loc.x, y: loc.y });
+	}
+	// Knock antlions caught in a turret-shot burst back along the blast — antlions chase
+	// via newX/newY (not velX/velY), so the kart explosion force can't touch them; reuse
+	// their dedicated impulse channel (impVX/impVY), the same one the thumper slam uses.
+	// No-op unless the antlion round is live.
+	shoveAntlions(loc) {
+		if (!this.checkForActiveBrutal(c.brutalRounds.antlion.id)) { return; }
+		var radius = c.tileMap.abilities.bomb.explosionRadius;
+		for (var id in this.hazardList) {
+			var h = this.hazardList[id];
+			if (!h.isAntlion || h.alive === false) { continue; }
+			var dx = h.x - loc.x, dy = h.y - loc.y;
+			var d = utils.getMag(dx, dy);
+			if (d >= radius) { continue; }
+			var ux = (d > 0.0001) ? dx / d : 1, uy = (d > 0.0001) ? dy / d : 0;
+			h.impVX += ux * c.brutalRounds.antlion.slamImpulse;
+			h.impVY += uy * c.brutalRounds.antlion.slamImpulse;
+		}
 	}
 	explodeLava(explodeLoc, radius) {
 		var cells = this.currentMap.cells;

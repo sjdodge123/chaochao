@@ -1896,6 +1896,55 @@ function paintCrusherShape(ctx, kind, x, y, angle, ringColor) {
     }
     ctx.restore();
 }
+// Sentry-turret painter (sentryTurret's `paint` hook). Shows the body + barrel at the
+// authored MOUNT angle, plus a faint wedge for the firing arc out to the threat range —
+// so authors see exactly the cone the turret covers (the AI penalizes the same wedge).
+function paintSentryTurretShape(ctx, kind, x, y, angle, ringColor) {
+    var cfg = config.hazards[kind.key];
+    if (cfg == null) { return; }
+    var rad = (angle || 0) * (Math.PI / 180);
+    var half = (cfg.arc / 2) * (Math.PI / 180);
+    ctx.save();
+    // Firing-arc wedge (the threat cone) — bold enough to read at a glance: a radial
+    // fill that's densest at the turret and fades toward the range edge, with a solid
+    // bright outline so the cone's reach and width are obvious while aiming.
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.arc(x, y, cfg.range, rad - half, rad + half);
+    ctx.closePath();
+    var coneGrad = ctx.createRadialGradient(x, y, cfg.radius, x, y, cfg.range);
+    coneGrad.addColorStop(0, "rgba(255,92,92,0.38)");
+    coneGrad.addColorStop(1, "rgba(255,92,92,0.12)");
+    ctx.fillStyle = coneGrad;
+    ctx.fill();
+    ctx.globalAlpha = 0.9;
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = cfg.color;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    // Barrel along the mount facing.
+    var bx = x + Math.cos(rad) * cfg.barrelLength, by = y + Math.sin(rad) * cfg.barrelLength;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "#34383d";
+    ctx.lineWidth = 8;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+    // Body + dome.
+    ctx.fillStyle = "#5a6066";
+    ctx.beginPath();
+    ctx.arc(x, y, cfg.radius, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "#2b2f33";
+    ctx.stroke();
+    ctx.fillStyle = cfg.color;
+    ctx.beginPath();
+    ctx.arc(x, y, cfg.radius * 0.55, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.restore();
+}
 // Shared per-kind hazard painter for the editor canvas (placement preview +
 // placed hazards) and the load-list thumbnails — the default `paint` hook.
 // Railed kinds draw their rail bar from (x,y) along `angle`; every kind draws
@@ -3033,6 +3082,42 @@ var EDITOR_HAZARD_KINDS = [
         }
     },
     {
+        key: "sentryTurret", label: "Sentry Turret", shortcut: "s", railed: false, directional: true,
+        paint: paintSentryTurretShape,
+        swatchPaint: function (ctx, size) {
+            // A barrel on a domed base over a faint firing wedge — "this shoots you".
+            var cx = size * 0.42, cy = size / 2;
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.arc(cx, cy, size * 0.5, -0.5, 0.5);
+            ctx.closePath();
+            ctx.fillStyle = "#FF5C5C";
+            ctx.globalAlpha = 0.15;
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            ctx.lineCap = "round";
+            ctx.strokeStyle = "#34383d";
+            ctx.lineWidth = 7;
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(cx + 20, cy);
+            ctx.stroke();
+            ctx.fillStyle = "#5a6066";
+            ctx.beginPath();
+            ctx.arc(cx, cy, 13, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = "#2b2f33";
+            ctx.stroke();
+            ctx.fillStyle = "#FF5C5C";
+            ctx.beginPath();
+            ctx.arc(cx, cy, 7, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.restore();
+        }
+    },
+    {
         key: "dashArrows", label: "Dash Arrows", shortcut: "d", railed: false, directional: true,
         group: "boon", paint: paintDashArrowsShape,
         swatchPaint: function (ctx, size) {
@@ -3530,6 +3615,15 @@ function addObjectToMap(x, y, obj) {
     }
     vMap.hazards.push(hazard);
     pushHazardAddCommand(hazard);
+    // Drop straight into the cursor tool with the just-placed object selected, so its
+    // move/rotate/resize/delete handles are live IMMEDIATELY — the author can reposition
+    // or aim it (directional kinds especially) without first clicking the Select tool.
+    // Switching off the placement tool also means a stray click reaching for a handle
+    // can't silently drop another object. (setTool to "select" doesn't clear the
+    // selection — only switching AWAY from select does — so set the tool first, then
+    // the selection sticks.) Pick the palette tool again to place the next one.
+    setTool({ kind: "select" });
+    setSelectedObject({ index: vMap.hazards.length - 1, id: hazard.id, x: hazard.x, y: hazard.y, angle: hazard.angle, radius: hazardSelectRadius(hazard) });
     dirty = true;
 }
 // Drag-resize bounds for a kind's config: [minRadius, radius(max)], with a
