@@ -1650,6 +1650,40 @@ function paintSecondWindTotemShape(ctx, kind, x, y, angle, ringColor) {
 // Launch Pad painter (the launchPad `paint` hook) — mirrors the in-game look
 // (draw.js drawLaunchPad): a round orange footprint, thrust ticks, and a bold launch
 // arrow along `angle`. On water the palette is pale-orange. Static in the editor.
+// Editor-only: a dotted launch trajectory + landing marker for the fling boons (Launch
+// Pad, Barrel Cannon), so an author can see ~where a racer comes down and place the pad
+// accordingly. Drawn in map/world space (before the painter's own translate/rotate), with
+// the landing point clamped to the world the same way the server clamps it. For the Barrel
+// Cannon this uses the author-set START aim — the player can re-aim in-game — so it's an
+// approximation, which is exactly what placement needs.
+function paintBoonTrajectory(ctx, x, y, angleDeg, distance, color) {
+    if (config == null || !distance) { return; }
+    var rad = (angleDeg || 0) * (Math.PI / 180);
+    var margin = (config.playerBaseRadius || 7.5);
+    var tx = Math.max(margin, Math.min(config.worldWidth - margin, x + Math.cos(rad) * distance));
+    var ty = Math.max(margin, Math.min(config.worldHeight - margin, y + Math.sin(rad) * distance));
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.globalAlpha = 0.55;
+    ctx.setLineDash([7, 6]);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(tx, ty);
+    ctx.strokeStyle = "rgba(10,40,55,0.5)"; ctx.lineWidth = 4; ctx.stroke();
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
+    ctx.setLineDash([]);
+    // Landing marker: a small ring + crosshair where the racer comes down.
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    ctx.arc(tx, ty, 9, 0, 2 * Math.PI);
+    ctx.strokeStyle = "rgba(10,40,55,0.5)"; ctx.lineWidth = 4; ctx.stroke();
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(tx - 6, ty); ctx.lineTo(tx + 6, ty);
+    ctx.moveTo(tx, ty - 6); ctx.lineTo(tx, ty + 6);
+    ctx.stroke();
+    ctx.restore();
+}
 function paintLaunchPadShape(ctx, kind, x, y, angle, ringColor) {
     var cfg = objCfgByKey(kind.key);
     if (cfg == null) { return; }
@@ -1657,6 +1691,7 @@ function paintLaunchPadShape(ctx, kind, x, y, angle, ringColor) {
     var rad = (angle || 0) * (Math.PI / 180);
     var onWater = editorBoonOnWater(x, y);
     var accent = onWater ? cfg.colorWater : cfg.color;
+    paintBoonTrajectory(ctx, x, y, angle, cfg.distance, accent);
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(rad);
@@ -1697,35 +1732,70 @@ function paintBarrelCannonShape(ctx, kind, x, y, angle, ringColor) {
     var rad = (angle || 0) * (Math.PI / 180);
     var onWater = editorBoonOnWater(x, y);
     var wood = onWater ? cfg.colorWater : cfg.color;
-    var bodyLen = r * 1.7, bodyW = r * 1.25;
+    var woodHi = onWater ? "rgba(255,255,255,0.28)" : "rgba(255,222,170,0.35)";
+    var iron = "rgba(52,34,20,0.92)";
+    paintBoonTrajectory(ctx, x, y, angle, cfg.flightDistance, wood);
+    var bodyLen = r * 2.0, bodyW = r * 1.55;
+    var hx = bodyLen / 2, hy = bodyW / 2, rr = hy;
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(rad);
-    var hx = bodyLen / 2, hy = bodyW / 2, rr = hy;
-    ctx.beginPath();
-    ctx.moveTo(-hx + rr, -hy);
-    ctx.lineTo(hx - rr, -hy);
-    ctx.arc(hx - rr, 0, rr, -Math.PI / 2, Math.PI / 2);
-    ctx.lineTo(-hx + rr, hy);
-    ctx.arc(-hx + rr, 0, rr, Math.PI / 2, -Math.PI / 2);
-    ctx.closePath();
+    function capsule() {
+        ctx.beginPath();
+        ctx.moveTo(-hx + rr, -hy);
+        ctx.lineTo(hx - rr, -hy);
+        ctx.arc(hx - rr, 0, rr, -Math.PI / 2, Math.PI / 2);
+        ctx.lineTo(-hx + rr, hy);
+        ctx.arc(-hx + rr, 0, rr, Math.PI / 2, -Math.PI / 2);
+        ctx.closePath();
+    }
+    capsule();
     ctx.fillStyle = wood;
     ctx.fill();
-    ctx.strokeStyle = "rgba(60,30,10,0.85)";
+    ctx.strokeStyle = "rgba(40,24,10,0.9)";
     ctx.lineWidth = 2.5;
     ctx.stroke();
-    ctx.strokeStyle = "rgba(60,30,10,0.55)";
-    ctx.lineWidth = 3;
-    for (var b = -1; b <= 1; b += 2) {
-        var bx = b * bodyLen * 0.18;
+    ctx.save();
+    capsule();
+    ctx.clip();
+    ctx.strokeStyle = "rgba(40,24,10,0.30)";
+    ctx.lineWidth = 1.5;
+    for (var sv = -2; sv <= 2; sv++) {
+        var sy = sv * (hy / 2.6);
         ctx.beginPath();
-        ctx.moveTo(bx, -bodyW / 2 + 2);
-        ctx.lineTo(bx, bodyW / 2 - 2);
+        ctx.moveTo(-hx, sy);
+        ctx.lineTo(hx, sy);
+        ctx.stroke();
+    }
+    ctx.fillStyle = woodHi;
+    ctx.fillRect(-hx, -hy * 0.72, bodyLen, hy * 0.34);
+    ctx.restore();
+    ctx.strokeStyle = iron;
+    ctx.lineWidth = 3.5;
+    var bands = [-bodyLen * 0.30, 0, bodyLen * 0.30];
+    for (var b = 0; b < bands.length; b++) {
+        ctx.beginPath();
+        ctx.moveTo(bands[b], -hy + 1.5);
+        ctx.lineTo(bands[b], hy - 1.5);
         ctx.stroke();
     }
     ctx.beginPath();
-    ctx.ellipse(bodyLen / 2 - bodyW * 0.16, 0, bodyW * 0.16, bodyW * 0.34, 0, 0, 2 * Math.PI);
-    ctx.fillStyle = "rgba(25,12,4,0.9)";
+    ctx.ellipse(-hx + hy * 0.12, 0, hy * 0.42, hy * 0.86, 0, 0, 2 * Math.PI);
+    ctx.fillStyle = "rgba(60,38,18,0.95)";
+    ctx.fill();
+    ctx.strokeStyle = iron; ctx.lineWidth = 2; ctx.stroke();
+    var mx = hx - hy * 0.10;
+    ctx.beginPath();
+    ctx.ellipse(mx, 0, hy * 0.30, hy * 0.95, 0, 0, 2 * Math.PI);
+    ctx.fillStyle = iron;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(mx, 0, hy * 0.18, hy * 0.62, 0, 0, 2 * Math.PI);
+    ctx.fillStyle = "rgba(20,10,3,0.95)";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(mx, 0, hy * 0.10, hy * 0.40, 0, 0, 2 * Math.PI);
+    ctx.fillStyle = onWater ? "#bfe9ff" : "#ffb24a";
     ctx.fill();
     ctx.restore();
 }
@@ -3380,9 +3450,10 @@ var EDITOR_HAZARD_KINDS = [
         key: "barrelCannon", label: "Barrel Cannon", shortcut: "k", railed: false, directional: true,
         group: "boon", paint: paintBarrelCannonShape,
         swatchPaint: function (ctx, size) {
-            // A wooden barrel aimed right with a dark muzzle — "load in, fire THIS way".
+            // A banded wooden barrel aimed right with an iron muzzle ring + warm bore —
+            // "load in, fire THIS way".
             var cx = size / 2, cy = size / 2;
-            var hx = size * 0.28, hy = size * 0.20, rr = hy;
+            var hx = size * 0.30, hy = size * 0.22, rr = hy;
             ctx.beginPath();
             ctx.moveTo(cx - hx + rr, cy - hy);
             ctx.lineTo(cx + hx - rr, cy - hy);
@@ -3392,13 +3463,27 @@ var EDITOR_HAZARD_KINDS = [
             ctx.closePath();
             ctx.fillStyle = "#C8743C";
             ctx.fill();
-            ctx.strokeStyle = "rgba(60,30,10,0.85)";
+            ctx.strokeStyle = "rgba(40,24,10,0.9)";
             ctx.lineWidth = 2.5;
             ctx.stroke();
+            // Iron hoop bands.
+            ctx.strokeStyle = "rgba(52,34,20,0.92)";
+            ctx.lineWidth = 3;
+            for (var b = -1; b <= 1; b++) {
+                var bx2 = cx + b * hx * 0.6;
+                ctx.beginPath();
+                ctx.moveTo(bx2, cy - hy + 1.5);
+                ctx.lineTo(bx2, cy + hy - 1.5);
+                ctx.stroke();
+            }
+            // Muzzle ring + glowing bore.
+            var mx = cx + hx - hy * 0.35;
             ctx.beginPath();
-            ctx.ellipse(cx + hx - hy * 0.5, cy, hy * 0.35, hy * 0.72, 0, 0, 2 * Math.PI);
-            ctx.fillStyle = "rgba(25,12,4,0.9)";
-            ctx.fill();
+            ctx.ellipse(mx, cy, hy * 0.34, hy * 0.92, 0, 0, 2 * Math.PI);
+            ctx.fillStyle = "rgba(52,34,20,0.92)"; ctx.fill();
+            ctx.beginPath();
+            ctx.ellipse(mx, cy, hy * 0.15, hy * 0.5, 0, 0, 2 * Math.PI);
+            ctx.fillStyle = "#ffb24a"; ctx.fill();
         }
     },
     {

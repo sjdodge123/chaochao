@@ -690,7 +690,7 @@ try {
         check(packet.length === 1 && packet[0][1] === BARREL.id && packet[0][4] === 0,
             'compressor.newHazards ships the barrel as [ownerId, ' + BARREL.id + ', x, y, angle]');
 
-        // LOAD: driving in captures the racer at the mouth (frozen, not yet airborne).
+        // LOAD: driving in captures the racer at the mouth (frozen, aiming at the author angle).
         bot.reset(config.stateMap.racing); bot.currentState = config.stateMap.racing;
         bot.x = bot.newX = PAD_X - 40; bot.y = bot.newY = ROWS[2]; bot.velX = 120; bot.velY = 30;
         let since = events.length;
@@ -699,32 +699,55 @@ try {
             'driving in LOADS the racer (held in the barrel, not yet airborne)');
         check(bot.x === PAD_X && bot.y === ROWS[2] && bot.velX === 0,
             'the loaded racer is pinned at the barrel mouth, momentum zeroed');
+        check(bot.barrelAimAngle === 0 && bot.angle === 0,
+            'the aim starts at the author facing + rides the streamed angle');
         check(emittedSince('barrelLoaded', since), 'a barrelLoaded event fired for the client');
-        // Held: an update before any punch / auto-fire keeps the racer loaded.
-        bot.update(config.stateMap.racing, DT);
-        check(bot.isBarreled(), 'with no punch + before auto-fire the racer stays loaded');
 
-        // FIRE on punch press: the next update fires the longer committed arc.
-        const fromX = bot.x;
+        // ARM WINDOW: a punch in the first minAimMs does NOT fire (a held punch can't insta-launch).
+        bot.attack = true;
+        bot.update(config.stateMap.racing, DT);
+        check(bot.isBarreled(), 'a punch within the arming window does not fire (held-punch guard)');
+        bot.attack = false;
+
+        // AIM: turn right swings the aim clockwise; turn left swings it back (rides angle).
+        clock += 50;
+        bot.turnRight = true;
+        for (let i = 0; i < 4; i++) { clock += config.serverTickSpeed; bot.update(config.stateMap.racing, DT); }
+        bot.turnRight = false;
+        check(bot.barrelAimAngle > 0 && Math.abs(bot.angle - bot.barrelAimAngle) < 0.001,
+            'turning right swings the aim (streamed via angle)');
+        const aimedRight = bot.barrelAimAngle;
+        bot.turnLeft = true;
+        for (let j = 0; j < 2; j++) { clock += config.serverTickSpeed; bot.update(config.stateMap.racing, DT); }
+        bot.turnLeft = false;
+        check(bot.barrelAimAngle < aimedRight, 'turning left swings the aim back');
+
+        // FIRE on punch past the arming window, along the CURRENT aim (point straight down).
+        bot.barrelAimAngle = 90;
+        clock += BARREL.minAimMs + 20;
         bot.attack = true;
         since = events.length;
         bot.update(config.stateMap.racing, DT);
-        check(!bot.isBarreled() && bot.isAirborne(), 'pressing punch fires the racer out of the barrel (now airborne)');
-        check(Math.abs(bot.airborneToX - (fromX + BARREL.flightDistance)) < 0.001,
-            'the fired arc lands flightDistance px along the barrel facing');
+        check(!bot.isBarreled() && bot.isAirborne(), 'a punch past the arming window fires the racer');
+        check(Math.abs(bot.airborneToX - PAD_X) < 0.001 && bot.airborneToY > ROWS[2],
+            'fired along the CURRENT aim (straight down), not the fixed author facing');
+        check(Math.abs(bot.airborneToY - (ROWS[2] + BARREL.flightDistance)) < 1,
+            'the fired arc lands flightDistance px along the aim');
         check(emittedSince('airbornePending', since), 'firing emits airbornePending (the flight)');
-        // Land it out so the bot is clean.
+        bot.attack = false;
         clock += BARREL.flightDurationMs + 10; bot.update(config.stateMap.racing, DT);
         check(!bot.isAloft(), 'the fired racer lands');
 
-        // FIRE on auto-timeout: load again, never punch, advance past autoFireMs.
+        // FIRE on fuse auto-timeout: load again, never punch, advance past autoFireMs.
         bot.reset(config.stateMap.racing); bot.currentState = config.stateMap.racing;
         bot.x = bot.newX = PAD_X - 40; bot.y = bot.newY = ROWS[2];
         barrel.handleHit(bot);
         check(bot.isBarreled(), 'loaded again for the auto-fire case');
         clock += BARREL.autoFireMs + 20;
         bot.update(config.stateMap.racing, DT);
-        check(!bot.isBarreled() && bot.isAirborne(), 'after autoFireMs the barrel auto-fires (no punch needed)');
+        check(!bot.isBarreled() && bot.isAirborne(), 'the fuse auto-fires when it runs out (no punch needed)');
+        check(Math.abs(bot.airborneToX - (PAD_X + BARREL.flightDistance)) < 1,
+            'auto-fire launches flightDistance px along the (un-turned) author facing');
         clock += BARREL.flightDurationMs + 10; bot.update(config.stateMap.racing, DT);
 
         // Racers only.

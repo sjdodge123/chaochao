@@ -6210,10 +6210,10 @@ function checkDrawPlayer(player, dt) {
         drawAirborneKart(player, dt);
         return;
     }
-    // Loaded in a Barrel Cannon: telegraph the fire direction with a short aim arrow ahead
-    // of the captured kart (press punch to fire that way), then draw the kart normally.
-    if (player.barrelAim != null && camera.inBounds(player)) {
-        drawBarrelAim(player);
+    // Loaded in a Barrel Cannon: a burning fuse counting down to launch + an aim arrow in
+    // the kart's current facing (turn to aim, punch to fire), drawn under the kart.
+    if (player.barrelLoaded != null && camera.inBounds(player)) {
+        drawBarrelLoadedFx(player);
     }
     if (camera.inBounds(player)) {
         drawPlayer(player, dt);
@@ -6248,35 +6248,81 @@ function drawAirborneKart(player, dt) {
     drawPlayer(player, dt);
     player.y = savedY;
 }
-// Barrel aim telegraph: a short pulsing arrow from the loaded kart along the barrel facing.
-function drawBarrelAim(player) {
-    var aim = player.barrelAim;
-    if (Date.now() > aim.until) { player.barrelAim = null; return; }
-    var rad = (aim.angle || 0) * (Math.PI / 180);
+// Barrel-loaded telegraph: a burning fuse that counts down to the auto-launch + an aim
+// arrow in the kart's CURRENT facing (the live aim rides player.angle, so the arrow swings
+// as the player turns). Press punch to fire now, or the fuse fires you when it burns out.
+function drawBarrelLoadedFx(player) {
+    var bl = player.barrelLoaded;
+    var now = Date.now();
+    if (now > bl.startAt + bl.ms + 300) { player.barrelLoaded = null; return; }
+    var t = Math.max(0, Math.min(1, (now - bl.startAt) / Math.max(1, bl.ms))); // fuse burn 0..1
     var cx = player.x + camera.getCameraX();
     var cy = player.y + camera.getCameraY();
     var cfg = config.boons.barrelCannon;
     var color = boonOnWater(player.x, player.y) ? cfg.colorWater : cfg.color;
-    var pulse = 0.5 + 0.5 * Math.sin(Date.now() / 180);
-    var len = 26 + 8 * pulse;
-    var hx = cx + Math.cos(rad) * len, hy = cy + Math.sin(rad) * len;
+    var rad = (typeof player.angle === "number" ? player.angle : 0) * (Math.PI / 180);
+    var pulse = 0.5 + 0.5 * Math.sin(now / 150);
     gameContext.save();
-    gameContext.globalAlpha = 0.6 + 0.4 * pulse;
     gameContext.lineCap = "round";
     gameContext.lineJoin = "round";
+    // Aim arrow in the current facing (dashed so it reads as a "this way" guide).
+    var len = 30 + 6 * pulse;
+    var bx = cx + Math.cos(rad) * 14, by = cy + Math.sin(rad) * 14;
+    var hx = cx + Math.cos(rad) * len, hy = cy + Math.sin(rad) * len;
+    gameContext.globalAlpha = 0.85;
+    gameContext.setLineDash([5, 4]);
     gameContext.beginPath();
-    gameContext.moveTo(cx + Math.cos(rad) * 12, cy + Math.sin(rad) * 12);
+    gameContext.moveTo(bx, by);
     gameContext.lineTo(hx, hy);
-    gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 7; gameContext.stroke();
-    gameContext.strokeStyle = color; gameContext.lineWidth = 3.5; gameContext.stroke();
-    // arrowhead
-    var ah = 7;
+    gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 6; gameContext.stroke();
+    gameContext.strokeStyle = color; gameContext.lineWidth = 3; gameContext.stroke();
+    gameContext.setLineDash([]);
+    var ah = 8;
     gameContext.beginPath();
     gameContext.moveTo(hx - Math.cos(rad - 0.5) * ah, hy - Math.sin(rad - 0.5) * ah);
     gameContext.lineTo(hx, hy);
     gameContext.lineTo(hx - Math.cos(rad + 0.5) * ah, hy - Math.sin(rad + 0.5) * ah);
-    gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 7; gameContext.stroke();
-    gameContext.strokeStyle = color; gameContext.lineWidth = 3.5; gameContext.stroke();
+    gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 6; gameContext.stroke();
+    gameContext.strokeStyle = color; gameContext.lineWidth = 3; gameContext.stroke();
+    // Burning fuse: a wick curling up from the barrel that shortens as it burns, with a
+    // bright spark at the burning tip. Flickers red + faster near the end (imminent launch).
+    var imminent = t > 0.72;
+    var br = (config.playerBaseRadius || 7.5);
+    var wickBaseX = cx, wickBaseY = cy - br * 1.4;       // top of the barrel
+    var wickLen = 16 * (1 - t);                           // burns down toward the barrel
+    var curl = 6;
+    var tipX = wickBaseX + curl, tipY = wickBaseY - wickLen;
+    gameContext.globalAlpha = 1;
+    gameContext.beginPath();
+    gameContext.moveTo(wickBaseX, wickBaseY);
+    gameContext.quadraticCurveTo(wickBaseX + curl, wickBaseY - wickLen * 0.5, tipX, tipY);
+    gameContext.strokeStyle = "rgba(40,28,18,0.9)"; gameContext.lineWidth = 3; gameContext.stroke();
+    // Spark at the burning tip.
+    var sparkFlick = imminent ? (0.5 + 0.5 * Math.sin(now / 50)) : pulse;
+    var sparkR = 3 + 2.2 * sparkFlick;
+    gameContext.fillStyle = imminent ? "#ff5a2e" : "#ffd23f";
+    gameContext.globalAlpha = 0.85 + 0.15 * sparkFlick;
+    gameContext.beginPath();
+    gameContext.arc(tipX, tipY, sparkR, 0, 2 * Math.PI);
+    gameContext.fill();
+    gameContext.fillStyle = "#fff6c8";
+    gameContext.globalAlpha = 0.9;
+    gameContext.beginPath();
+    gameContext.arc(tipX, tipY, sparkR * 0.45, 0, 2 * Math.PI);
+    gameContext.fill();
+    // A couple of stray sparks flying off near the end.
+    if (imminent) {
+        for (var i = 0; i < 3; i++) {
+            var sa = (now / 60 + i * 2.1);
+            var sd = 4 + (i + 1) * 2.5 * sparkFlick;
+            gameContext.globalAlpha = 0.5 * (1 - sparkFlick * 0.4);
+            gameContext.beginPath();
+            gameContext.arc(tipX + Math.cos(sa) * sd, tipY + Math.sin(sa) * sd, 1.4, 0, 2 * Math.PI);
+            gameContext.fillStyle = "#ffb04a";
+            gameContext.fill();
+        }
+    }
+    gameContext.globalAlpha = 1;
     gameContext.restore();
 }
 // =========================== Infection zombie body ===========================
@@ -11229,53 +11275,92 @@ function drawLaunchPad(x, y, angle) {
     gameContext.restore();
 }
 
-// Barrel Cannon — a wooden barrel you drive into to be loaded, then fired along its facing.
-// A capsule barrel body with hoop bands and a dark muzzle at the firing (+x) end. Brown
-// palette (pale on water). Directional. Cheap fills/strokes, no shadowBlur/filter.
+// Barrel Cannon — a chunky wooden launch barrel you drive into to be loaded, then fired
+// along its facing. Top-down: a banded barrel body with lengthwise wood staves, dark iron
+// hoop bands, a lit top highlight, a back cap, and a flared muzzle ring with a warm glowing
+// bore at the firing (+x) end (reads as "loaded energy" / which way it shoots). Brown
+// palette (pale on water). Directional. Cheap fills/strokes only — no shadowBlur/filter.
 function drawBarrelCannon(x, y, angle) {
     var cfg = config.boons.barrelCannon;
     var r = cfg.radius;
     var rad = (angle || 0) * (Math.PI / 180);
     var onWater = boonOnWater(x, y);
     var wood = onWater ? cfg.colorWater : cfg.color;
-    var bodyLen = r * 1.7, bodyW = r * 1.25;
+    var woodHi = onWater ? "rgba(255,255,255,0.28)" : "rgba(255,222,170,0.35)";
+    var iron = "rgba(52,34,20,0.92)";
+    var bodyLen = r * 2.0, bodyW = r * 1.55;
+    var hx = bodyLen / 2, hy = bodyW / 2;
     gameContext.save();
     gameContext.translate(x, y);
     gameContext.rotate(rad);
-    // Barrel body (a rounded capsule along the facing axis).
-    function capsule(hx, hy) {
-        var rr = hy;
+    function capsule(ax, ay) {
+        var rr = ay;
         gameContext.beginPath();
-        gameContext.moveTo(-hx + rr, -hy);
-        gameContext.lineTo(hx - rr, -hy);
-        gameContext.arc(hx - rr, 0, rr, -Math.PI / 2, Math.PI / 2);
-        gameContext.lineTo(-hx + rr, hy);
-        gameContext.arc(-hx + rr, 0, rr, Math.PI / 2, -Math.PI / 2);
+        gameContext.moveTo(-ax + rr, -ay);
+        gameContext.lineTo(ax - rr, -ay);
+        gameContext.arc(ax - rr, 0, rr, -Math.PI / 2, Math.PI / 2);
+        gameContext.lineTo(-ax + rr, ay);
+        gameContext.arc(-ax + rr, 0, rr, Math.PI / 2, -Math.PI / 2);
         gameContext.closePath();
     }
-    capsule(bodyLen / 2, bodyW / 2);
+    // Body.
+    capsule(hx, hy);
     gameContext.fillStyle = wood;
-    gameContext.globalAlpha = 0.92;
     gameContext.fill();
-    gameContext.globalAlpha = 1;
-    gameContext.strokeStyle = "rgba(60,30,10,0.85)";
+    gameContext.strokeStyle = "rgba(40,24,10,0.9)";
     gameContext.lineWidth = 2.5;
     gameContext.stroke();
-    // Two hoop bands across the body.
-    gameContext.strokeStyle = "rgba(60,30,10,0.55)";
-    gameContext.lineWidth = 3;
-    for (var b = -1; b <= 1; b += 2) {
-        var bx = b * bodyLen * 0.18;
+    // Clip to the body for the inner staves/highlight so nothing spills past the rim.
+    gameContext.save();
+    capsule(hx, hy);
+    gameContext.clip();
+    // Lengthwise wood staves (thin darker seams running along the barrel).
+    gameContext.strokeStyle = "rgba(40,24,10,0.30)";
+    gameContext.lineWidth = 1.5;
+    for (var sv = -2; sv <= 2; sv++) {
+        var sy = sv * (hy / 2.6);
         gameContext.beginPath();
-        gameContext.moveTo(bx, -bodyW / 2 + 2);
-        gameContext.lineTo(bx, bodyW / 2 - 2);
+        gameContext.moveTo(-hx, sy);
+        gameContext.lineTo(hx, sy);
         gameContext.stroke();
     }
-    // Dark muzzle opening at the firing (+x) end.
+    // Lit top highlight band (a stripe of light along the upper third).
+    gameContext.fillStyle = woodHi;
+    gameContext.fillRect(-hx, -hy * 0.72, bodyLen, hy * 0.34);
+    gameContext.restore();
+    // Iron hoop bands across the body (near each end + middle).
+    gameContext.strokeStyle = iron;
+    gameContext.lineWidth = 3.5;
+    var bands = [-bodyLen * 0.30, 0, bodyLen * 0.30];
+    for (var b = 0; b < bands.length; b++) {
+        gameContext.beginPath();
+        gameContext.moveTo(bands[b], -hy + 1.5);
+        gameContext.lineTo(bands[b], hy - 1.5);
+        gameContext.stroke();
+    }
+    // Back cap (the closed breech end).
     gameContext.beginPath();
-    gameContext.ellipse(bodyLen / 2 - bodyW * 0.16, 0, bodyW * 0.16, bodyW * 0.34, 0, 0, 2 * Math.PI);
-    gameContext.fillStyle = "rgba(25,12,4,0.9)";
+    gameContext.ellipse(-hx + hy * 0.12, 0, hy * 0.42, hy * 0.86, 0, 0, 2 * Math.PI);
+    gameContext.fillStyle = "rgba(60,38,18,0.95)";
     gameContext.fill();
+    gameContext.strokeStyle = iron; gameContext.lineWidth = 2; gameContext.stroke();
+    // Flared muzzle ring at the firing (+x) end + a warm glowing bore.
+    var mx = hx - hy * 0.10;
+    gameContext.beginPath();
+    gameContext.ellipse(mx, 0, hy * 0.30, hy * 0.95, 0, 0, 2 * Math.PI);
+    gameContext.fillStyle = iron;
+    gameContext.fill();
+    var glow = 0.45 + 0.25 * (0.5 + 0.5 * Math.sin(Date.now() / 360));
+    gameContext.beginPath();
+    gameContext.ellipse(mx, 0, hy * 0.18, hy * 0.62, 0, 0, 2 * Math.PI);
+    gameContext.fillStyle = "rgba(20,10,3,0.95)";
+    gameContext.fill();
+    gameContext.globalAlpha = glow;
+    gameContext.beginPath();
+    gameContext.ellipse(mx, 0, hy * 0.10, hy * 0.40, 0, 0, 2 * Math.PI);
+    gameContext.fillStyle = onWater ? "#bfe9ff" : "#ffb24a";
+    gameContext.fill();
+    gameContext.globalAlpha = 1;
     gameContext.restore();
 }
 

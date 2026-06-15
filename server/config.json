@@ -641,14 +641,16 @@
             "durationMs": 520
         },
         "barrelCannon": {
-            "_doc": "Drive in to be LOADED (DK-barrel style): the racer is captured at the barrel mouth, frozen + aiming along the barrel's author-set facing, until they press PUNCH or autoFireMs elapses — then fired on a LONGER committed airborne arc than the Launch Pad (flightDistance over flightDurationMs). Reuses the same 'airborne' player state (Player.loadIntoBarrel → launchAirborne); same lava/tile immunity while aloft + normal resolution on landing. colorWater is the on-water palette.",
+            "_doc": "Drive in to be LOADED (DK-barrel style): the racer is captured at the barrel mouth and can AIM — turn left/right swings the barrel (aimTurnSpeed deg/s, starting from the author-set facing). A burning fuse counts down over autoFireMs; press PUNCH (after a brief minAimMs arming window so a held punch can't instant-fire) to launch NOW in the current aim, or the fuse auto-fires in the current aim when it runs out. The launch is a committed airborne arc (flightDistance over flightDurationMs) — same lava/tile immunity while aloft + normal resolution on landing as the Launch Pad. Reuses the shared 'airborne' player state (Player.loadIntoBarrel → tickBarrel → launchAirborne); the live aim rides the player's streamed angle so the loaded kart visibly turns. colorWater is the on-water palette.",
             "id": 956,
             "color": "#C8743C",
             "colorWater": "#E6B88A",
             "radius": 30,
-            "autoFireMs": 1000,
-            "flightDistance": 430,
-            "flightDurationMs": 820
+            "autoFireMs": 1600,
+            "minAimMs": 350,
+            "aimTurnSpeed": 150,
+            "flightDistance": 280,
+            "flightDurationMs": 720
         },
         "slingshotRings": {
             "_doc": "Drive THROUGH a ring for a speed PULSE along the ring's author-set axis, scaled by how CENTERED your pass was — dead-centre is the full pulse, clipping the rim barely boosts. Reuses the Dash Arrows capped-add (adds only the remaining gap to the cap, so it never overshoots/tunnels and never brakes a faster kart) but the cap scales with centeredness; chaining consecutive rings within chainWindowMs raises the cap (chainBonus per link, up to chainMax) so a line of rings stacks into a bigger launch than any one ring. Purely axial, so a backward pass fights it. radius is the circular hitbox. colorWater is the on-water palette.",

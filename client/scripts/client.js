@@ -2433,7 +2433,7 @@ function registerEffectHandlers(server) {
 		var p = playerList[payload.id];
 		if (p != null) {
 			p.airborne = { startAt: Date.now(), ms: payload.ms || 500 };
-			p.barrelAim = null; // a fired barrel ends the loaded-aim telegraph
+			p.barrelLoaded = null; // a fired barrel ends the loaded fuse/aim telegraph
 		}
 	});
 	server.on("airborneLand", function (payload) {
@@ -2449,11 +2449,12 @@ function registerEffectHandlers(server) {
 		}
 	});
 	server.on("barrelLoaded", function (payload) {
-		// Loaded in a Barrel Cannon: show the fire-direction aim arrow until the barrel
-		// fires (airbornePending clears it) or the load window lapses.
+		// Loaded in a Barrel Cannon: run the burning-fuse + aim-arrow telegraph until the
+		// barrel fires (airbornePending clears it) or the fuse window lapses. The live aim
+		// rides the kart's streamed angle, so the arrow just reads player.angle each frame.
 		var p = playerList[payload.id];
 		if (p != null) {
-			p.barrelAim = { angle: payload.angle || 0, until: Date.now() + (payload.ms || 1000) + 250 };
+			p.barrelLoaded = { startAt: Date.now(), ms: payload.ms || 1600 };
 		}
 	});
 	server.on("startLobbyTimer", function () {
