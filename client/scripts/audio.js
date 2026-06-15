@@ -718,38 +718,55 @@ function stopBarrelFuse() {
     } catch (e) {}
 }
 
-// One-shot cannon "thwoomp" on a Barrel Cannon launch: a low sine drop (the boom) under a
-// short lowpassed noise burst (the air pop).
+// One-shot cannon EXPLOSION on a Barrel Cannon launch: a sharp broadband crack (the bang),
+// a deep pitch-dropping sine boom, and a lowpassed noise rumble tail that decays out. Pure
+// Web Audio (no asset), through sfxBus so the master toggle + lobby dampen apply.
 function playBarrelLaunch() {
     var ctx = getCtx();
     if (!ctx || ctx.state !== "running") { return; }
     if (gameMuted || masterVolume === 0) { return; }
     var now = ctx.currentTime;
-    var peak = Math.max(0.0003, 0.22 * masterVolume * sfxVolumeScalar);
+    // Deep boom body: sine dropping low.
     var osc = ctx.createOscillator();
     osc.type = "sine";
-    osc.frequency.setValueAtTime(260, now);
-    osc.frequency.exponentialRampToValueAtTime(58, now + 0.28);
+    osc.frequency.setValueAtTime(300, now);
+    osc.frequency.exponentialRampToValueAtTime(48, now + 0.34);
     var og = ctx.createGain();
+    var bpeak = Math.max(0.0003, 0.32 * masterVolume * sfxVolumeScalar);
     og.gain.setValueAtTime(0.0001, now);
-    og.gain.exponentialRampToValueAtTime(peak, now + 0.012);
-    og.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
+    og.gain.exponentialRampToValueAtTime(bpeak, now + 0.01);
+    og.gain.exponentialRampToValueAtTime(0.0001, now + 0.42);
     osc.connect(og); og.connect(sfxBus);
-    var noise = ctx.createBufferSource();
-    noise.buffer = getDriftNoiseBuffer(ctx);
-    noise.loop = true;
-    var filt = ctx.createBiquadFilter();
-    filt.type = "lowpass";
-    filt.frequency.setValueAtTime(1800, now);
-    filt.frequency.exponentialRampToValueAtTime(500, now + 0.18);
-    var ng = ctx.createGain();
-    var npeak = Math.max(0.0003, 0.16 * masterVolume * sfxVolumeScalar);
-    ng.gain.setValueAtTime(0.0001, now);
-    ng.gain.exponentialRampToValueAtTime(npeak, now + 0.008);
-    ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
-    noise.connect(filt); filt.connect(ng); ng.connect(sfxBus);
-    try { osc.start(now); osc.stop(now + 0.36); noise.start(now); noise.stop(now + 0.22); }
-    catch (e) { try { og.disconnect(); ng.disconnect(); } catch (e2) {} }
+    // Sharp broadband crack (the bang transient) — bright noise, very fast decay.
+    var crack = ctx.createBufferSource();
+    crack.buffer = getDriftNoiseBuffer(ctx);
+    crack.loop = true;
+    var hp = ctx.createBiquadFilter();
+    hp.type = "highpass"; hp.frequency.value = 900;
+    var cg = ctx.createGain();
+    var cpeak = Math.max(0.0003, 0.3 * masterVolume * sfxVolumeScalar);
+    cg.gain.setValueAtTime(cpeak, now);
+    cg.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
+    crack.connect(hp); hp.connect(cg); cg.connect(sfxBus);
+    // Rumble tail: lowpassed noise sweeping down, the blast settling.
+    var rumble = ctx.createBufferSource();
+    rumble.buffer = getDriftNoiseBuffer(ctx);
+    rumble.loop = true;
+    var lp = ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.setValueAtTime(1400, now);
+    lp.frequency.exponentialRampToValueAtTime(220, now + 0.4);
+    var rg = ctx.createGain();
+    var rpeak = Math.max(0.0003, 0.22 * masterVolume * sfxVolumeScalar);
+    rg.gain.setValueAtTime(0.0001, now);
+    rg.gain.exponentialRampToValueAtTime(rpeak, now + 0.012);
+    rg.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
+    rumble.connect(lp); lp.connect(rg); rg.connect(sfxBus);
+    try {
+        osc.start(now); osc.stop(now + 0.44);
+        crack.start(now); crack.stop(now + 0.11);
+        rumble.start(now); rumble.stop(now + 0.47);
+    } catch (e) { try { og.disconnect(); cg.disconnect(); rg.disconnect(); } catch (e2) {} }
 }
 
 // One-shot springy "boing" on a Launch Pad fling: a quick up-then-wobble pitch chirp.

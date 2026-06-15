@@ -1706,35 +1706,52 @@ function paintLaunchPadShape(ctx, kind, x, y, angle, ringColor) {
     var rad = (angle || 0) * (Math.PI / 180);
     var onWater = editorBoonOnWater(x, y);
     var accent = onWater ? cfg.colorWater : cfg.color;
+    var light = onWater ? "#ffe9cf" : "#ffc890";
+    var dark = onWater ? "#caa06f" : "#9c4e1c";
+    var halo = EDITOR_BOON_HALO;
     paintBoonTrajectory(ctx, x, y, angle, cfg.distance, accent);
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(rad);
-    ctx.beginPath();
-    ctx.arc(0, 0, r, 0, 2 * Math.PI);
-    ctx.fillStyle = onWater ? "rgba(255,216,168,0.06)" : "rgba(255,140,66,0.06)";
-    ctx.fill();
-    ctx.strokeStyle = onWater ? "rgba(255,216,168,0.16)" : "rgba(255,140,66,0.16)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
+    // Springboard at rest (no live bounce in the editor); mirrors draw.js drawSpringboardBody.
+    var hw = r * 0.62, backX = -r * 0.95, frontX = r * 0.95;
     ctx.lineCap = "round";
-    for (var i = 0; i < 3; i++) {
-        var tx = -r * 0.6 + i * r * 0.34;
-        var th = r * (0.30 + 0.10 * i);
-        ctx.beginPath();
-        ctx.moveTo(tx, -th);
-        ctx.lineTo(tx, th);
-        ctx.strokeStyle = EDITOR_BOON_HALO; ctx.lineWidth = 6; ctx.stroke();
-        ctx.strokeStyle = accent; ctx.lineWidth = 3; ctx.stroke();
-    }
-    var aw = r * 0.95;
     ctx.lineJoin = "round";
+    ctx.fillStyle = dark;
+    ctx.fillRect(backX - 1, -hw * 1.05, r * 0.16, hw * 2.1);
+    var sx0 = backX + r * 0.1, sx1 = -r * 0.05, segs = 7;
+    function coil() {
+        ctx.beginPath();
+        for (var s = 0; s <= segs; s++) {
+            var px = sx0 + (sx1 - sx0) * (s / segs);
+            var py = (s % 2 === 0) ? -hw * 0.66 : hw * 0.66;
+            if (s === 0) { ctx.moveTo(px, py); } else { ctx.lineTo(px, py); }
+        }
+    }
+    coil(); ctx.strokeStyle = halo; ctx.lineWidth = 7; ctx.stroke();
+    coil(); ctx.strokeStyle = "#cfd4d8"; ctx.lineWidth = 3.5; ctx.stroke();
+    var bx0 = -r * 0.15, bx1 = frontX, rr = hw;
+    function board() {
+        ctx.beginPath();
+        ctx.moveTo(bx0 + rr, -hw);
+        ctx.lineTo(bx1 - rr, -hw);
+        ctx.arc(bx1 - rr, 0, rr, -Math.PI / 2, Math.PI / 2);
+        ctx.lineTo(bx0 + rr, hw);
+        ctx.arc(bx0 + rr, 0, rr, Math.PI / 2, -Math.PI / 2);
+        ctx.closePath();
+    }
+    board();
+    var grad = ctx.createLinearGradient(bx0, 0, bx1, 0);
+    grad.addColorStop(0, dark);
+    grad.addColorStop(1, light);
+    ctx.fillStyle = grad; ctx.fill();
+    ctx.strokeStyle = halo; ctx.lineWidth = 2.5; ctx.stroke();
     ctx.beginPath();
-    ctx.moveTo(-r * 0.1, -r * 0.5);
-    ctx.lineTo(aw, 0);
-    ctx.lineTo(-r * 0.1, r * 0.5);
-    ctx.strokeStyle = EDITOR_BOON_HALO; ctx.lineWidth = 9; ctx.stroke();
-    ctx.strokeStyle = accent; ctx.lineWidth = 5; ctx.stroke();
+    ctx.moveTo(bx0 + rr * 0.6, -hw * 0.62);
+    ctx.lineTo(bx1 - rr * 0.5, 0);
+    ctx.lineTo(bx0 + rr * 0.6, hw * 0.62);
+    ctx.strokeStyle = halo; ctx.lineWidth = 8; ctx.stroke();
+    ctx.strokeStyle = accent; ctx.lineWidth = 4.5; ctx.stroke();
     ctx.restore();
 }
 // Barrel Cannon painter (the barrelCannon `paint` hook) — mirrors the in-game look
@@ -3440,25 +3457,38 @@ var EDITOR_HAZARD_KINDS = [
         key: "launchPad", label: "Launch Pad", shortcut: "p", railed: false, directional: true,
         group: "boon", paint: paintLaunchPadShape,
         swatchPaint: function (ctx, size) {
-            // A bold orange launch arrow pointing right — "this flings you THIS way".
-            var cx = size / 2, cy = size / 2;
-            ctx.strokeStyle = "#FF8C42";
-            ctx.lineWidth = 9;
+            // A springboard: a coiled spring driving an orange board with a launch arrow.
+            var cx = size / 2, cy = size / 2, hw = size * 0.16;
             ctx.lineCap = "round";
             ctx.lineJoin = "round";
+            // Coil spring (zig-zag) at the back.
+            var sx0 = cx - size * 0.34, sx1 = cx - size * 0.06, segs = 6;
             ctx.beginPath();
-            ctx.moveTo(cx - 18, cy - 18);
-            ctx.lineTo(cx + 20, cy);
-            ctx.lineTo(cx - 18, cy + 18);
-            ctx.stroke();
-            ctx.lineWidth = 6;
-            for (var i = 0; i < 2; i++) {
-                var tx = cx - 26 + i * 9;
-                ctx.beginPath();
-                ctx.moveTo(tx, cy - 12);
-                ctx.lineTo(tx, cy + 12);
-                ctx.stroke();
+            for (var s = 0; s <= segs; s++) {
+                var px = sx0 + (sx1 - sx0) * (s / segs);
+                var py = cy + ((s % 2 === 0) ? -hw : hw);
+                if (s === 0) { ctx.moveTo(px, py); } else { ctx.lineTo(px, py); }
             }
+            ctx.strokeStyle = "#cfd4d8"; ctx.lineWidth = 4; ctx.stroke();
+            // Board (rounded) with a gradient.
+            var bx0 = cx - size * 0.04, bx1 = cx + size * 0.34, rr = hw;
+            ctx.beginPath();
+            ctx.moveTo(bx0 + rr, cy - hw);
+            ctx.lineTo(bx1 - rr, cy - hw);
+            ctx.arc(bx1 - rr, cy, rr, -Math.PI / 2, Math.PI / 2);
+            ctx.lineTo(bx0 + rr, cy + hw);
+            ctx.arc(bx0 + rr, cy, rr, Math.PI / 2, -Math.PI / 2);
+            ctx.closePath();
+            var grad = ctx.createLinearGradient(bx0, 0, bx1, 0);
+            grad.addColorStop(0, "#9c4e1c");
+            grad.addColorStop(1, "#ffc890");
+            ctx.fillStyle = grad; ctx.fill();
+            // Launch arrow on the board.
+            ctx.beginPath();
+            ctx.moveTo(bx0 + rr * 0.6, cy - hw * 0.6);
+            ctx.lineTo(bx1 - rr * 0.5, cy);
+            ctx.lineTo(bx0 + rr * 0.6, cy + hw * 0.6);
+            ctx.strokeStyle = "#FF8C42"; ctx.lineWidth = 5; ctx.stroke();
         }
     },
     {
