@@ -2435,6 +2435,17 @@ function registerEffectHandlers(server) {
 			p.airborne = { startAt: Date.now(), ms: payload.ms || 500 };
 			p.barrelLoaded = null; // a fired barrel ends the loaded fuse/aim telegraph
 		}
+		// Launch SFX (local seats only, to avoid a crowd of barrels spamming): a cannon
+		// "thwoomp" for a Barrel Cannon (also kills its fuse loop), a springy boing for a
+		// Launch Pad.
+		if (typeof isLocalId === "function" && isLocalId(payload.id)) {
+			if (payload.source === "barrel") {
+				if (typeof stopBarrelFuse === "function") { stopBarrelFuse(); }
+				if (typeof playBarrelLaunch === "function") { playBarrelLaunch(); }
+			} else if (typeof playLaunchPadSpring === "function") {
+				playLaunchPadSpring();
+			}
+		}
 	});
 	server.on("airborneLand", function (payload) {
 		// Touchdown: drop the hop and snap the render position to the landing spot so the
@@ -2455,6 +2466,11 @@ function registerEffectHandlers(server) {
 		var p = playerList[payload.id];
 		if (p != null) {
 			p.barrelLoaded = { startAt: Date.now(), ms: payload.ms || 1600 };
+		}
+		// Burning-fuse sizzle while you're the one loaded (local seats only).
+		if (typeof isLocalId === "function" && isLocalId(payload.id)
+			&& typeof startBarrelFuse === "function") {
+			startBarrelFuse(payload.ms || 1600);
 		}
 	});
 	server.on("startLobbyTimer", function () {

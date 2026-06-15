@@ -1000,7 +1000,7 @@ class Player extends Circle {
 	// (the isAloft guards skip tiles/collision/punches). Player.update.tickAirborne lerps
 	// the kart along the arc; finishAirborne lands it. No mid-flight steering. Guards
 	// re-entry so the engine double-dispatch + an already-aloft kart are both no-ops.
-	launchAirborne(angleDeg, distance, durationMs) {
+	launchAirborne(angleDeg, distance, durationMs, source) {
 		if (this.isAloft()) {
 			return;
 		}
@@ -1038,7 +1038,8 @@ class Player extends Circle {
 			id: this.id,
 			fromX: this.airborneFromX, fromY: this.airborneFromY,
 			toX: this.airborneToX, toY: this.airborneToY,
-			ms: durationMs
+			ms: durationMs,
+			source: source || "pad" // 'pad' (Launch Pad spring) or 'barrel' (cannon thwoomp)
 		});
 	}
 	// Per tick during flight (Player.update): lerp the kart along the arc, writing position
@@ -1148,7 +1149,7 @@ class Player extends Circle {
 			var durationMs = barrel.flightDurationMs;
 			this.barreledUntil = 0;
 			this.barrel = null;
-			this.launchAirborne(aim, distance, durationMs);
+			this.launchAirborne(aim, distance, durationMs, "barrel");
 		}
 	}
 	// Lobby-only protection.
