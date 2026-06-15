@@ -34,6 +34,18 @@ Any `aiController`/`cellGraph` steering or pathing change must be A/B-checked th
 
 Watch for the known traps: `generateHash` needs **numeric** seeds; the cell graph must re-read live `cell.id` (a door that opened mid-round must become walkable); and don't introduce a stuck-probe beeline treadmill on the slow approach to a key (see the bumper-crossing `STUCK_SPEED_MAX` lesson).
 
-## Until this lands
+## Status: LANDED
 
-Bot-heavy locked-door rooms can stall, so **don't put locked-door maps into the default rotation** (or only feature them in human-heavy contexts) until bots can solve them. There is intentionally no failsafe timer.
+Implemented in `server/aiController.js` (objective layer: `computeDoorObjective` + the
+per-tick coordination/lookup build in `update`) and `server/cellGraph.js` (the
+`options.passableDoors` flag used to detect which doors block the goal). A walled bot
+fetches the nearest matching loose key, carries it to the door (driving within
+`unlockRadius` to fire the server-side unlock), then resumes goal pathing; light
+coordination (`KEY_PURSUERS`) keeps the pack from dogpiling one key, and non-pursuers
+stage at the door. Validated by the bot-driven scenario F in
+`.github/scripts/locked-door-test.js` (baseline-impossible invariant + bots actually
+finish) and an A/B of `ai-fitness.js` on the control maps (byte-identical — the change
+is gated behind `gameBoard.hasLockedDoors`, so non-door maps are untouched).
+
+Locked-door maps are now safe for bot-heavy rooms. There is still intentionally no
+failsafe timer — the door only opens via its key.

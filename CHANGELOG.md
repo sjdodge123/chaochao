@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- **Bots can now solve locked-door maps.** AI racers understand keys and doors: when a locked door is sealing off the only way to the finish, a bot will break off, fetch the matching key, carry it to the door and unlock it for everyone — then get back to racing. They coordinate so the whole pack doesn't pile onto one key, and the rest wait at the door ready to pour through the moment it opens. This means locked-door maps work in bot-heavy rooms instead of stalling at the barrier.
 
 ## v0.43.0 — 2026-06-15
 
