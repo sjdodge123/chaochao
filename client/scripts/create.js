@@ -1746,72 +1746,99 @@ function paintBarrelCannonShape(ctx, kind, x, y, angle, ringColor) {
     var r = cfg.radius;
     var rad = (angle || 0) * (Math.PI / 180);
     var onWater = editorBoonOnWater(x, y);
-    var wood = onWater ? cfg.colorWater : cfg.color;
-    var woodHi = onWater ? "rgba(255,255,255,0.28)" : "rgba(255,222,170,0.35)";
-    var iron = "rgba(52,34,20,0.92)";
-    paintBoonRangeRing(ctx, x, y, cfg.flightDistance, wood);
-    var bodyLen = r * 2.0, bodyW = r * 1.55;
-    var hx = bodyLen / 2, hy = bodyW / 2, rr = hy;
+    // Same palette + shape as the in-game drawer (draw.js drawBarrelBody); duplicated here
+    // because the editor is a separate bundle. Static bore glow (no live pulse).
+    var tones = onWater
+        ? { mid: cfg.colorWater, light: "#f3fbff", dark: "#9bc0d4", bore: "#bfe9ff" }
+        : { mid: cfg.color, light: "#e8a866", dark: "#7c4a25", bore: "#ffc24a" };
+    var iron = "#3a2614", ironHi = "#7a5e44", ironDk = "#22160b";
+    paintBoonRangeRing(ctx, x, y, cfg.flightDistance, tones.mid);
+    var bodyLen = r * 2.2, bodyW = r * 1.7;
+    var hx = bodyLen / 2, hy = bodyW / 2;
     ctx.save();
     ctx.translate(x, y);
+    // Grounding shadow (world-space).
+    ctx.globalAlpha = 0.2;
+    ctx.fillStyle = "#000";
+    ctx.beginPath();
+    ctx.ellipse(0, r * 0.32, r * 1.2, r * 0.85, 0, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.globalAlpha = 1;
     ctx.rotate(rad);
     function capsule() {
         ctx.beginPath();
-        ctx.moveTo(-hx + rr, -hy);
-        ctx.lineTo(hx - rr, -hy);
-        ctx.arc(hx - rr, 0, rr, -Math.PI / 2, Math.PI / 2);
-        ctx.lineTo(-hx + rr, hy);
-        ctx.arc(-hx + rr, 0, rr, Math.PI / 2, -Math.PI / 2);
+        ctx.moveTo(-hx + hy, -hy);
+        ctx.lineTo(hx - hy, -hy);
+        ctx.arc(hx - hy, 0, hy, -Math.PI / 2, Math.PI / 2);
+        ctx.lineTo(-hx + hy, hy);
+        ctx.arc(-hx + hy, 0, hy, Math.PI / 2, -Math.PI / 2);
         ctx.closePath();
     }
     capsule();
-    ctx.fillStyle = wood;
+    var grad = ctx.createLinearGradient(0, -hy, 0, hy);
+    grad.addColorStop(0, tones.light);
+    grad.addColorStop(0.42, tones.mid);
+    grad.addColorStop(1, tones.dark);
+    ctx.fillStyle = grad;
     ctx.fill();
-    ctx.strokeStyle = "rgba(40,24,10,0.9)";
+    ctx.strokeStyle = ironDk;
     ctx.lineWidth = 2.5;
     ctx.stroke();
     ctx.save();
     capsule();
     ctx.clip();
-    ctx.strokeStyle = "rgba(40,24,10,0.30)";
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "rgba(40,24,10,0.22)";
+    ctx.lineWidth = 1.2;
     for (var sv = -2; sv <= 2; sv++) {
-        var sy = sv * (hy / 2.6);
+        var sy = sv * (hy / 2.7);
         ctx.beginPath();
         ctx.moveTo(-hx, sy);
         ctx.lineTo(hx, sy);
         ctx.stroke();
     }
-    ctx.fillStyle = woodHi;
-    ctx.fillRect(-hx, -hy * 0.72, bodyLen, hy * 0.34);
+    ctx.strokeStyle = "rgba(255,247,228,0.45)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-hx + hy * 0.5, -hy * 0.64);
+    ctx.lineTo(hx - hy * 0.5, -hy * 0.64);
+    ctx.stroke();
     ctx.restore();
-    ctx.strokeStyle = iron;
-    ctx.lineWidth = 3.5;
-    var bands = [-bodyLen * 0.30, 0, bodyLen * 0.30];
+    var bands = [-bodyLen * 0.27, bodyLen * 0.06];
     for (var b = 0; b < bands.length; b++) {
-        ctx.beginPath();
-        ctx.moveTo(bands[b], -hy + 1.5);
-        ctx.lineTo(bands[b], hy - 1.5);
-        ctx.stroke();
+        var bxh = bands[b];
+        ctx.strokeStyle = ironDk; ctx.lineWidth = 5;
+        ctx.beginPath(); ctx.moveTo(bxh, -hy + 1); ctx.lineTo(bxh, hy - 1); ctx.stroke();
+        ctx.strokeStyle = ironHi; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(bxh - 1.4, -hy * 0.66); ctx.lineTo(bxh - 1.4, hy * 0.66); ctx.stroke();
+        ctx.fillStyle = ironHi;
+        for (var rv = -1; rv <= 1; rv += 2) {
+            ctx.beginPath(); ctx.arc(bxh, rv * hy * 0.6, 1.5, 0, 2 * Math.PI); ctx.fill();
+        }
     }
     ctx.beginPath();
-    ctx.ellipse(-hx + hy * 0.12, 0, hy * 0.42, hy * 0.86, 0, 0, 2 * Math.PI);
-    ctx.fillStyle = "rgba(60,38,18,0.95)";
-    ctx.fill();
-    ctx.strokeStyle = iron; ctx.lineWidth = 2; ctx.stroke();
-    var mx = hx - hy * 0.10;
+    ctx.ellipse(-hx + hy * 0.05, 0, hy * 0.34, hy * 0.95, 0, 0, 2 * Math.PI);
+    ctx.fillStyle = iron; ctx.fill();
     ctx.beginPath();
-    ctx.ellipse(mx, 0, hy * 0.30, hy * 0.95, 0, 0, 2 * Math.PI);
-    ctx.fillStyle = iron;
-    ctx.fill();
+    ctx.ellipse(-hx + hy * 0.16, 0, hy * 0.22, hy * 0.72, 0, 0, 2 * Math.PI);
+    ctx.fillStyle = tones.dark; ctx.fill();
+    ctx.strokeStyle = ironHi; ctx.lineWidth = 1; ctx.stroke();
+    var mx = hx - hy * 0.04;
     ctx.beginPath();
-    ctx.ellipse(mx, 0, hy * 0.18, hy * 0.62, 0, 0, 2 * Math.PI);
-    ctx.fillStyle = "rgba(20,10,3,0.95)";
-    ctx.fill();
+    ctx.ellipse(mx, 0, hy * 0.32, hy * 1.0, 0, 0, 2 * Math.PI);
+    ctx.fillStyle = iron; ctx.fill();
+    ctx.strokeStyle = ironHi; ctx.lineWidth = 1.4; ctx.stroke();
     ctx.beginPath();
-    ctx.ellipse(mx, 0, hy * 0.10, hy * 0.40, 0, 0, 2 * Math.PI);
-    ctx.fillStyle = onWater ? "#bfe9ff" : "#ffb24a";
-    ctx.fill();
+    ctx.ellipse(mx, 0, hy * 0.2, hy * 0.66, 0, 0, 2 * Math.PI);
+    ctx.fillStyle = ironDk; ctx.fill();
+    ctx.globalAlpha = 0.7;
+    ctx.beginPath();
+    ctx.ellipse(mx, 0, hy * 0.12, hy * 0.44, 0, 0, 2 * Math.PI);
+    ctx.fillStyle = tones.bore; ctx.fill();
+    ctx.globalAlpha = 0.45;
+    ctx.beginPath();
+    ctx.ellipse(mx, 0, hy * 0.05, hy * 0.24, 0, 0, 2 * Math.PI);
+    ctx.fillStyle = "#fff3c8"; ctx.fill();
+    ctx.globalAlpha = 1;
     ctx.restore();
 }
 // Slingshot Rings painter (the slingshotRings `paint` hook) — mirrors the in-game look
@@ -3465,10 +3492,11 @@ var EDITOR_HAZARD_KINDS = [
         key: "barrelCannon", label: "Barrel Cannon", shortcut: "k", railed: false, directional: true,
         group: "boon", paint: paintBarrelCannonShape,
         swatchPaint: function (ctx, size) {
-            // A banded wooden barrel aimed right with an iron muzzle ring + warm bore —
-            // "load in, fire THIS way".
+            // A rounded wooden barrel (cross-axis gradient) aimed right with riveted iron
+            // hoops + an iron muzzle ring + warm glowing bore — "load in, fire THIS way".
             var cx = size / 2, cy = size / 2;
-            var hx = size * 0.30, hy = size * 0.22, rr = hy;
+            var hx = size * 0.32, hy = size * 0.24, rr = hy;
+            var iron = "#3a2614", ironHi = "#7a5e44", ironDk = "#22160b";
             ctx.beginPath();
             ctx.moveTo(cx - hx + rr, cy - hy);
             ctx.lineTo(cx + hx - rr, cy - hy);
@@ -3476,29 +3504,30 @@ var EDITOR_HAZARD_KINDS = [
             ctx.lineTo(cx - hx + rr, cy + hy);
             ctx.arc(cx - hx + rr, cy, rr, Math.PI / 2, -Math.PI / 2);
             ctx.closePath();
-            ctx.fillStyle = "#C8743C";
-            ctx.fill();
-            ctx.strokeStyle = "rgba(40,24,10,0.9)";
-            ctx.lineWidth = 2.5;
-            ctx.stroke();
-            // Iron hoop bands.
-            ctx.strokeStyle = "rgba(52,34,20,0.92)";
-            ctx.lineWidth = 3;
-            for (var b = -1; b <= 1; b++) {
-                var bx2 = cx + b * hx * 0.6;
-                ctx.beginPath();
-                ctx.moveTo(bx2, cy - hy + 1.5);
-                ctx.lineTo(bx2, cy + hy - 1.5);
-                ctx.stroke();
+            var grad = ctx.createLinearGradient(0, cy - hy, 0, cy + hy);
+            grad.addColorStop(0, "#e8a866");
+            grad.addColorStop(0.42, "#C8743C");
+            grad.addColorStop(1, "#7c4a25");
+            ctx.fillStyle = grad; ctx.fill();
+            ctx.strokeStyle = ironDk; ctx.lineWidth = 2.5; ctx.stroke();
+            // Riveted iron hoop bands.
+            for (var b = -1; b <= 0; b++) {
+                var bx2 = cx + b * hx * 0.5 - size * 0.02;
+                ctx.strokeStyle = ironDk; ctx.lineWidth = 4;
+                ctx.beginPath(); ctx.moveTo(bx2, cy - hy + 1.5); ctx.lineTo(bx2, cy + hy - 1.5); ctx.stroke();
+                ctx.fillStyle = ironHi;
+                ctx.beginPath(); ctx.arc(bx2, cy - hy * 0.62, 1.6, 0, 2 * Math.PI); ctx.fill();
+                ctx.beginPath(); ctx.arc(bx2, cy + hy * 0.62, 1.6, 0, 2 * Math.PI); ctx.fill();
             }
-            // Muzzle ring + glowing bore.
-            var mx = cx + hx - hy * 0.35;
+            // Iron muzzle ring + glowing bore.
+            var mx = cx + hx - hy * 0.3;
             ctx.beginPath();
-            ctx.ellipse(mx, cy, hy * 0.34, hy * 0.92, 0, 0, 2 * Math.PI);
-            ctx.fillStyle = "rgba(52,34,20,0.92)"; ctx.fill();
+            ctx.ellipse(mx, cy, hy * 0.34, hy * 0.98, 0, 0, 2 * Math.PI);
+            ctx.fillStyle = iron; ctx.fill();
+            ctx.strokeStyle = ironHi; ctx.lineWidth = 1.2; ctx.stroke();
             ctx.beginPath();
             ctx.ellipse(mx, cy, hy * 0.15, hy * 0.5, 0, 0, 2 * Math.PI);
-            ctx.fillStyle = "#ffb24a"; ctx.fill();
+            ctx.fillStyle = "#ffc24a"; ctx.fill();
         }
     },
     {

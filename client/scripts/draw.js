@@ -11275,92 +11275,125 @@ function drawLaunchPad(x, y, angle) {
     gameContext.restore();
 }
 
-// Barrel Cannon — a chunky wooden launch barrel you drive into to be loaded, then fired
-// along its facing. Top-down: a banded barrel body with lengthwise wood staves, dark iron
-// hoop bands, a lit top highlight, a back cap, and a flared muzzle ring with a warm glowing
-// bore at the firing (+x) end (reads as "loaded energy" / which way it shoots). Brown
-// palette (pale on water). Directional. Cheap fills/strokes only — no shadowBlur/filter.
+// Barrel Cannon — a chunky wooden launch cannon you drive into to be loaded, then fired
+// along its facing. Top-down: a rounded barrel body shaded with a cross-axis gradient
+// (lit top -> shadowed bottom) for a cylindrical read, lengthwise wood staves + a specular
+// streak, riveted iron hoop bands, a recessed wooden breech at the back, and a flared iron
+// muzzle ring with a warm pulsing bore at the firing (+x) end (which way it shoots). A soft
+// grounding shadow sits underneath. Brown palette (pale on water). Cheap — one gradient +
+// fills/strokes, no shadowBlur/filter. Shared shape: drawBarrelBody (reused by the editor).
+function barrelTones(onWater, cfg) {
+    return onWater
+        ? { mid: cfg.colorWater, light: "#f3fbff", dark: "#9bc0d4", bore: "#bfe9ff" }
+        : { mid: cfg.color, light: "#e8a866", dark: "#7c4a25", bore: "#ffc24a" };
+}
+// Draw the barrel into `ctx`, centred at the origin and already rotated to its facing.
+// `glow` is the bore brightness 0..1 (animated live, fixed in the editor). Used by both the
+// in-game drawer and the editor painter so they always match.
+function drawBarrelBody(ctx, r, tones, glow) {
+    var iron = "#3a2614", ironHi = "#7a5e44", ironDk = "#22160b";
+    var bodyLen = r * 2.2, bodyW = r * 1.7;
+    var hx = bodyLen / 2, hy = bodyW / 2;
+    function capsule(ax, ay) {
+        var rr = ay;
+        ctx.beginPath();
+        ctx.moveTo(-ax + rr, -ay);
+        ctx.lineTo(ax - rr, -ay);
+        ctx.arc(ax - rr, 0, rr, -Math.PI / 2, Math.PI / 2);
+        ctx.lineTo(-ax + rr, ay);
+        ctx.arc(-ax + rr, 0, rr, Math.PI / 2, -Math.PI / 2);
+        ctx.closePath();
+    }
+    // Body with a cross-axis gradient (lit top -> shadowed bottom = a rounded cylinder).
+    capsule(hx, hy);
+    var grad = ctx.createLinearGradient(0, -hy, 0, hy);
+    grad.addColorStop(0, tones.light);
+    grad.addColorStop(0.42, tones.mid);
+    grad.addColorStop(1, tones.dark);
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.strokeStyle = ironDk;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    // Lengthwise wood staves + a bright specular streak, clipped to the body.
+    ctx.save();
+    capsule(hx, hy);
+    ctx.clip();
+    ctx.strokeStyle = "rgba(40,24,10,0.22)";
+    ctx.lineWidth = 1.2;
+    for (var sv = -2; sv <= 2; sv++) {
+        var sy = sv * (hy / 2.7);
+        ctx.beginPath();
+        ctx.moveTo(-hx, sy);
+        ctx.lineTo(hx, sy);
+        ctx.stroke();
+    }
+    ctx.strokeStyle = "rgba(255,247,228,0.45)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-hx + hy * 0.5, -hy * 0.64);
+    ctx.lineTo(hx - hy * 0.5, -hy * 0.64);
+    ctx.stroke();
+    ctx.restore();
+    // Iron hoop bands with a metallic highlight + rivets.
+    var bands = [-bodyLen * 0.27, bodyLen * 0.06];
+    for (var b = 0; b < bands.length; b++) {
+        var bxh = bands[b];
+        ctx.strokeStyle = ironDk; ctx.lineWidth = 5;
+        ctx.beginPath(); ctx.moveTo(bxh, -hy + 1); ctx.lineTo(bxh, hy - 1); ctx.stroke();
+        ctx.strokeStyle = ironHi; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(bxh - 1.4, -hy * 0.66); ctx.lineTo(bxh - 1.4, hy * 0.66); ctx.stroke();
+        ctx.fillStyle = ironHi;
+        for (var rv = -1; rv <= 1; rv += 2) {
+            ctx.beginPath(); ctx.arc(bxh, rv * hy * 0.6, 1.5, 0, 2 * Math.PI); ctx.fill();
+        }
+    }
+    // Recessed wooden breech at the back (-x): an iron rim around a darker wooden lid.
+    ctx.beginPath();
+    ctx.ellipse(-hx + hy * 0.05, 0, hy * 0.34, hy * 0.95, 0, 0, 2 * Math.PI);
+    ctx.fillStyle = iron; ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(-hx + hy * 0.16, 0, hy * 0.22, hy * 0.72, 0, 0, 2 * Math.PI);
+    ctx.fillStyle = tones.dark; ctx.fill();
+    ctx.strokeStyle = ironHi; ctx.lineWidth = 1; ctx.stroke();
+    // Flared iron muzzle ring at the firing (+x) end + a warm pulsing glowing bore.
+    var mx = hx - hy * 0.04;
+    ctx.beginPath();
+    ctx.ellipse(mx, 0, hy * 0.32, hy * 1.0, 0, 0, 2 * Math.PI);
+    ctx.fillStyle = iron; ctx.fill();
+    ctx.strokeStyle = ironHi; ctx.lineWidth = 1.4; ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(mx, 0, hy * 0.2, hy * 0.66, 0, 0, 2 * Math.PI);
+    ctx.fillStyle = ironDk; ctx.fill();
+    var g = (glow == null) ? 0.6 : glow;
+    ctx.globalAlpha = g;
+    ctx.beginPath();
+    ctx.ellipse(mx, 0, hy * 0.12, hy * 0.44, 0, 0, 2 * Math.PI);
+    ctx.fillStyle = tones.bore; ctx.fill();
+    ctx.globalAlpha = g * 0.6;
+    ctx.beginPath();
+    ctx.ellipse(mx, 0, hy * 0.05, hy * 0.24, 0, 0, 2 * Math.PI);
+    ctx.fillStyle = "#fff3c8"; ctx.fill();
+    ctx.globalAlpha = 1;
+}
 function drawBarrelCannon(x, y, angle) {
     var cfg = config.boons.barrelCannon;
     var r = cfg.radius;
     var rad = (angle || 0) * (Math.PI / 180);
     var onWater = boonOnWater(x, y);
-    var wood = onWater ? cfg.colorWater : cfg.color;
-    var woodHi = onWater ? "rgba(255,255,255,0.28)" : "rgba(255,222,170,0.35)";
-    var iron = "rgba(52,34,20,0.92)";
-    var bodyLen = r * 2.0, bodyW = r * 1.55;
-    var hx = bodyLen / 2, hy = bodyW / 2;
+    var tones = barrelTones(onWater, cfg);
     gameContext.save();
     gameContext.translate(x, y);
-    gameContext.rotate(rad);
-    function capsule(ax, ay) {
-        var rr = ay;
-        gameContext.beginPath();
-        gameContext.moveTo(-ax + rr, -ay);
-        gameContext.lineTo(ax - rr, -ay);
-        gameContext.arc(ax - rr, 0, rr, -Math.PI / 2, Math.PI / 2);
-        gameContext.lineTo(-ax + rr, ay);
-        gameContext.arc(-ax + rr, 0, rr, Math.PI / 2, -Math.PI / 2);
-        gameContext.closePath();
-    }
-    // Body.
-    capsule(hx, hy);
-    gameContext.fillStyle = wood;
-    gameContext.fill();
-    gameContext.strokeStyle = "rgba(40,24,10,0.9)";
-    gameContext.lineWidth = 2.5;
-    gameContext.stroke();
-    // Clip to the body for the inner staves/highlight so nothing spills past the rim.
-    gameContext.save();
-    capsule(hx, hy);
-    gameContext.clip();
-    // Lengthwise wood staves (thin darker seams running along the barrel).
-    gameContext.strokeStyle = "rgba(40,24,10,0.30)";
-    gameContext.lineWidth = 1.5;
-    for (var sv = -2; sv <= 2; sv++) {
-        var sy = sv * (hy / 2.6);
-        gameContext.beginPath();
-        gameContext.moveTo(-hx, sy);
-        gameContext.lineTo(hx, sy);
-        gameContext.stroke();
-    }
-    // Lit top highlight band (a stripe of light along the upper third).
-    gameContext.fillStyle = woodHi;
-    gameContext.fillRect(-hx, -hy * 0.72, bodyLen, hy * 0.34);
-    gameContext.restore();
-    // Iron hoop bands across the body (near each end + middle).
-    gameContext.strokeStyle = iron;
-    gameContext.lineWidth = 3.5;
-    var bands = [-bodyLen * 0.30, 0, bodyLen * 0.30];
-    for (var b = 0; b < bands.length; b++) {
-        gameContext.beginPath();
-        gameContext.moveTo(bands[b], -hy + 1.5);
-        gameContext.lineTo(bands[b], hy - 1.5);
-        gameContext.stroke();
-    }
-    // Back cap (the closed breech end).
+    // Soft grounding shadow (world-space, so it stays put regardless of facing).
+    gameContext.globalAlpha = 0.2;
+    gameContext.fillStyle = "#000";
     gameContext.beginPath();
-    gameContext.ellipse(-hx + hy * 0.12, 0, hy * 0.42, hy * 0.86, 0, 0, 2 * Math.PI);
-    gameContext.fillStyle = "rgba(60,38,18,0.95)";
-    gameContext.fill();
-    gameContext.strokeStyle = iron; gameContext.lineWidth = 2; gameContext.stroke();
-    // Flared muzzle ring at the firing (+x) end + a warm glowing bore.
-    var mx = hx - hy * 0.10;
-    gameContext.beginPath();
-    gameContext.ellipse(mx, 0, hy * 0.30, hy * 0.95, 0, 0, 2 * Math.PI);
-    gameContext.fillStyle = iron;
-    gameContext.fill();
-    var glow = 0.45 + 0.25 * (0.5 + 0.5 * Math.sin(Date.now() / 360));
-    gameContext.beginPath();
-    gameContext.ellipse(mx, 0, hy * 0.18, hy * 0.62, 0, 0, 2 * Math.PI);
-    gameContext.fillStyle = "rgba(20,10,3,0.95)";
-    gameContext.fill();
-    gameContext.globalAlpha = glow;
-    gameContext.beginPath();
-    gameContext.ellipse(mx, 0, hy * 0.10, hy * 0.40, 0, 0, 2 * Math.PI);
-    gameContext.fillStyle = onWater ? "#bfe9ff" : "#ffb24a";
+    gameContext.ellipse(0, r * 0.32, r * 1.2, r * 0.85, 0, 0, 2 * Math.PI);
     gameContext.fill();
     gameContext.globalAlpha = 1;
+    gameContext.rotate(rad);
+    var glow = 0.55 + 0.3 * (0.5 + 0.5 * Math.sin(Date.now() / 320));
+    drawBarrelBody(gameContext, r, tones, glow);
     gameContext.restore();
 }
 
