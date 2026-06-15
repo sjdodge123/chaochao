@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.42.0 — 2026-06-15
+
 ### Map editor
 
 - **Two new Boons: Guard Halo & Second Wind Flag.** Two helpful placeables that change how a fight or a fall plays out. Drive through a **Guard Halo** to pick up a **one-hit shield** — the next hit that would knock you around (a punch, a bumper, a bomb, an ice shot, a slice) is absorbed and the shield pops, leaving you put. You can only hold one at a time, and each halo recharges for a few seconds after someone grabs it (a filling ring shows when it's ready again), so racing a rival to it matters. A **Second Wind Flag** is a respawn checkpoint: drive over it to plant your claim (the flag flutters and turns your colour), and from then on **every time you'd die you respawn back at your flag** instead of being knocked out — over and over, for the whole round. When you go down there's a brief beat where the camera sweeps from where you fell to your flag, then you pop back in. The flag keeps saving you until the closing lava finally swallows it — once it burns, you're on your own. (It won't save you from being turned into a zombie either.) Drive over a different flag to move your checkpoint. Authors place both from the **Boons** palette, and as with every boon, rival AI racers drive straight through them. Place either on **water** and it switches to a watery look so it still reads against the blue.
