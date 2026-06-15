@@ -709,30 +709,27 @@ try {
         check(bot.isBarreled(), 'a punch within the arming window does not fire (held-punch guard)');
         bot.attack = false;
 
-        // AIM: turn right swings the aim clockwise; turn left swings it back (rides angle).
+        // AUTO-SPIN: with NO player input the barrel sweeps on its own (DK timing shot),
+        // and the spinning aim rides the streamed angle.
+        const a0 = bot.barrelAimAngle;
         clock += 50;
-        bot.turnRight = true;
         for (let i = 0; i < 4; i++) { clock += config.serverTickSpeed; bot.update(config.stateMap.racing, DT); }
-        bot.turnRight = false;
-        check(bot.barrelAimAngle > 0 && Math.abs(bot.angle - bot.barrelAimAngle) < 0.001,
-            'turning right swings the aim (streamed via angle)');
-        const aimedRight = bot.barrelAimAngle;
-        bot.turnLeft = true;
-        for (let j = 0; j < 2; j++) { clock += config.serverTickSpeed; bot.update(config.stateMap.racing, DT); }
-        bot.turnLeft = false;
-        check(bot.barrelAimAngle < aimedRight, 'turning left swings the aim back');
+        check(bot.barrelAimAngle !== a0 && Math.abs(bot.angle - bot.barrelAimAngle) < 0.001,
+            'the barrel auto-spins with no input (streamed via angle)');
 
-        // FIRE on punch past the arming window, along the CURRENT aim (point straight down).
-        bot.barrelAimAngle = 90;
+        // FIRE on punch past the arming window, in whatever direction the barrel is pointing.
         clock += BARREL.minAimMs + 20;
         bot.attack = true;
         since = events.length;
         bot.update(config.stateMap.racing, DT);
         check(!bot.isBarreled() && bot.isAirborne(), 'a punch past the arming window fires the racer');
-        check(Math.abs(bot.airborneToX - PAD_X) < 0.001 && bot.airborneToY > ROWS[2],
-            'fired along the CURRENT aim (straight down), not the fixed author facing');
-        check(Math.abs(bot.airborneToY - (ROWS[2] + BARREL.flightDistance)) < 1,
-            'the fired arc lands flightDistance px along the aim');
+        // The launch direction is the barrel's CURRENT spin angle (retained on the bot),
+        // and it lands flightDistance px away along it (no clamp at this spot).
+        const frad = bot.barrelAimAngle * Math.PI / 180;
+        check(Math.abs(bot.airborneToX - (PAD_X + Math.cos(frad) * BARREL.flightDistance)) < 1 &&
+            Math.abs(bot.airborneToY - (ROWS[2] + Math.sin(frad) * BARREL.flightDistance)) < 1,
+            'fires flightDistance px in the barrel\'s current spin direction');
+        check(bot.barrelAimAngle !== 0, 'the fire direction is the spun aim, not the fixed author facing');
         check(emittedSince('airbornePending', since), 'firing emits airbornePending (the flight)');
         bot.attack = false;
         clock += BARREL.flightDurationMs + 10; bot.update(config.stateMap.racing, DT);
@@ -746,8 +743,9 @@ try {
         clock += BARREL.autoFireMs + 20;
         bot.update(config.stateMap.racing, DT);
         check(!bot.isBarreled() && bot.isAirborne(), 'the fuse auto-fires when it runs out (no punch needed)');
-        check(Math.abs(bot.airborneToX - (PAD_X + BARREL.flightDistance)) < 1,
-            'auto-fire launches flightDistance px along the (un-turned) author facing');
+        const adx = bot.airborneToX - PAD_X, ady = bot.airborneToY - ROWS[2];
+        check(Math.abs(Math.sqrt(adx * adx + ady * ady) - BARREL.flightDistance) < 2,
+            'auto-fire launches flightDistance px in the current spin direction');
         clock += BARREL.flightDurationMs + 10; bot.update(config.stateMap.racing, DT);
 
         // Racers only.

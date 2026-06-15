@@ -1684,6 +1684,21 @@ function paintBoonTrajectory(ctx, x, y, angleDeg, distance, color) {
     ctx.stroke();
     ctx.restore();
 }
+// Editor-only: a dashed RANGE ring for the Barrel Cannon. Because the barrel auto-spins,
+// the launch can go ANY direction, so the useful authoring info is how FAR it throws — a
+// ring at flightDistance (where a racer lands, in whichever direction they time the shot).
+function paintBoonRangeRing(ctx, x, y, distance, color) {
+    if (config == null || !distance) { return; }
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.setLineDash([7, 6]);
+    ctx.beginPath();
+    ctx.arc(x, y, distance, 0, 2 * Math.PI);
+    ctx.strokeStyle = "rgba(10,40,55,0.5)"; ctx.lineWidth = 4; ctx.stroke();
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+}
 function paintLaunchPadShape(ctx, kind, x, y, angle, ringColor) {
     var cfg = objCfgByKey(kind.key);
     if (cfg == null) { return; }
@@ -1734,7 +1749,7 @@ function paintBarrelCannonShape(ctx, kind, x, y, angle, ringColor) {
     var wood = onWater ? cfg.colorWater : cfg.color;
     var woodHi = onWater ? "rgba(255,255,255,0.28)" : "rgba(255,222,170,0.35)";
     var iron = "rgba(52,34,20,0.92)";
-    paintBoonTrajectory(ctx, x, y, angle, cfg.flightDistance, wood);
+    paintBoonRangeRing(ctx, x, y, cfg.flightDistance, wood);
     var bodyLen = r * 2.0, bodyW = r * 1.55;
     var hx = bodyLen / 2, hy = bodyW / 2, rr = hy;
     ctx.save();

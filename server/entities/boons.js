@@ -342,8 +342,9 @@ registerBoonKind("launchPad", {
 });
 
 // Barrel Cannon — drive in to be LOADED (DK-barrel style): the racer is captured at the
-// barrel mouth, frozen + aiming along the barrel's facing, until they press punch or
-// autoFireMs elapses, then fired on a LONGER committed airborne arc than the Launch Pad.
+// barrel mouth and the barrel AUTO-SPINS; you press punch to TIME the shot (or the fuse
+// fires you when it runs out), launching on a committed airborne arc along whatever
+// direction the barrel currently points — a longer flight than the Launch Pad.
 // Reuses the same shared airborne state (Player.loadIntoBarrel holds them, then
 // launchAirborne flies them) — same lava/tile immunity aloft, same land-where-you-land
 // resolution. Directional (author-rotated). (Racers only — see isEligiblePlayer;
@@ -355,7 +356,7 @@ class BarrelCannon extends Boon {
 		this.angle = angle;
 		this.autoFireMs = c.boons.barrelCannon.autoFireMs;
 		this.minAimMs = c.boons.barrelCannon.minAimMs;
-		this.aimTurnSpeed = c.boons.barrelCannon.aimTurnSpeed;
+		this.sweepSpeed = c.boons.barrelCannon.sweepSpeed;
 		this.flightDistance = c.boons.barrelCannon.flightDistance;
 		this.flightDurationMs = c.boons.barrelCannon.flightDurationMs;
 	}
