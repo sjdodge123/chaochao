@@ -2426,6 +2426,36 @@ function registerEffectHandlers(server) {
 			: ((config.boons != null && config.boons.secondWindTotem != null) ? config.boons.secondWindTotem.color : "#CBD2DC");
 		spawnTriggerPulse(payload.x, payload.y, col);
 	});
+	server.on("airbornePending", function (payload) {
+		// Launch Pad / Barrel Cannon flight: flag the kart airborne so checkDrawPlayer hops
+		// it up over the terrain (the server lerps the ground position along the arc via
+		// gameUpdates; the hop is the cosmetic vertical lift). Cleared on airborneLand.
+		var p = playerList[payload.id];
+		if (p != null) {
+			p.airborne = { startAt: Date.now(), ms: payload.ms || 500 };
+			p.barrelAim = null; // a fired barrel ends the loaded-aim telegraph
+		}
+	});
+	server.on("airborneLand", function (payload) {
+		// Touchdown: drop the hop and snap the render position to the landing spot so the
+		// kart doesn't smooth-slide across the map from the last lerped arc point.
+		var p = playerList[payload.id];
+		if (p != null) {
+			p.airborne = null;
+			if (payload.x != null && payload.y != null) {
+				p.x = p.tx = payload.x;
+				p.y = p.ty = payload.y;
+			}
+		}
+	});
+	server.on("barrelLoaded", function (payload) {
+		// Loaded in a Barrel Cannon: show the fire-direction aim arrow until the barrel
+		// fires (airbornePending clears it) or the load window lapses.
+		var p = playerList[payload.id];
+		if (p != null) {
+			p.barrelAim = { angle: payload.angle || 0, until: Date.now() + (payload.ms || 1000) + 250 };
+		}
+	});
 	server.on("startLobbyTimer", function () {
 		if (lobbyStartButton != null) {
 			lobbyStartButton.startSpin = true;

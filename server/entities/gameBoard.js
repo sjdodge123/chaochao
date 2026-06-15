@@ -1278,7 +1278,8 @@ class GameBoard {
 			randomPlayer.awake == false ||
 			randomPlayer.hasStarPower() ||
 			randomPlayer.isInvuln() ||
-			randomPlayer.isReviving()) {
+			randomPlayer.isReviving() ||
+			randomPlayer.isAloft()) {
 			if (count > 100 || Object.keys(gameBoard.playerList).length == 1 || gameBoard.alivePlayerCount == 1 || gameBoard.alivePlayerCount - gameBoard.sleepingPlayerCount == 1 || gameBoard.playerList[packet.owner] == undefined) {
 				messenger.messageRoomBySig(gameBoard.roomSig, "fizzle", packet.owner);
 				return;

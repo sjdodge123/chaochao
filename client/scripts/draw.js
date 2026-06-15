@@ -6202,6 +6202,19 @@ function checkDrawPlayer(player, dt) {
         drawDeathMessage(player);
         return;
     }
+    // Airborne (Launch Pad / Barrel Cannon flight): the kart hops up along a parabola with
+    // a shrinking ground shadow so it reads as flying OVER the terrain (the server already
+    // lerps its ground position along the arc; this is the purely-cosmetic vertical lift).
+    // Client-only state set by the airbornePending/airborneLand handlers.
+    if (player.airborne != null && camera.inBounds(player)) {
+        drawAirborneKart(player, dt);
+        return;
+    }
+    // Loaded in a Barrel Cannon: telegraph the fire direction with a short aim arrow ahead
+    // of the captured kart (press punch to fire that way), then draw the kart normally.
+    if (player.barrelAim != null && camera.inBounds(player)) {
+        drawBarrelAim(player);
+    }
     if (camera.inBounds(player)) {
         drawPlayer(player, dt);
         // Wet sheen + droplets on top of the kart while it dries off after swimming.
@@ -6209,6 +6222,62 @@ function checkDrawPlayer(player, dt) {
         // Flame-walking FX: steam off the shield on water, embers on lava (unified).
         drawFireWalkFX(player);
     }
+}
+// Airborne hop: parabolic vertical lift + a shrinking ground shadow. drawPlayer reads
+// player.x/y (+camera) everywhere, so we lift the kart by temporarily raising player.y for
+// the one draw call and restore it immediately. Skips drip/fire FX (irrelevant aloft).
+function drawAirborneKart(player, dt) {
+    var a = player.airborne;
+    var t = Math.max(0, Math.min(1, (Date.now() - a.startAt) / Math.max(1, a.ms)));
+    var hop = 4 * t * (1 - t); // 0 -> 1 -> 0 over the flight
+    var maxHop = 28;
+    var hopPx = maxHop * hop;
+    var br = (config.playerBaseRadius || 7.5);
+    var gx = player.x + camera.getCameraX();
+    var gy = player.y + camera.getCameraY();
+    // Ground shadow under the arc — shrinks + fades as the kart rises.
+    gameContext.save();
+    gameContext.globalAlpha = 0.30 * (1 - 0.6 * hop);
+    gameContext.fillStyle = "#000";
+    gameContext.beginPath();
+    gameContext.ellipse(gx, gy, br * (1.15 - 0.45 * hop), br * (0.6 - 0.25 * hop), 0, 0, 2 * Math.PI);
+    gameContext.fill();
+    gameContext.restore();
+    var savedY = player.y;
+    player.y = savedY - hopPx; // up is -y
+    drawPlayer(player, dt);
+    player.y = savedY;
+}
+// Barrel aim telegraph: a short pulsing arrow from the loaded kart along the barrel facing.
+function drawBarrelAim(player) {
+    var aim = player.barrelAim;
+    if (Date.now() > aim.until) { player.barrelAim = null; return; }
+    var rad = (aim.angle || 0) * (Math.PI / 180);
+    var cx = player.x + camera.getCameraX();
+    var cy = player.y + camera.getCameraY();
+    var cfg = config.boons.barrelCannon;
+    var color = boonOnWater(player.x, player.y) ? cfg.colorWater : cfg.color;
+    var pulse = 0.5 + 0.5 * Math.sin(Date.now() / 180);
+    var len = 26 + 8 * pulse;
+    var hx = cx + Math.cos(rad) * len, hy = cy + Math.sin(rad) * len;
+    gameContext.save();
+    gameContext.globalAlpha = 0.6 + 0.4 * pulse;
+    gameContext.lineCap = "round";
+    gameContext.lineJoin = "round";
+    gameContext.beginPath();
+    gameContext.moveTo(cx + Math.cos(rad) * 12, cy + Math.sin(rad) * 12);
+    gameContext.lineTo(hx, hy);
+    gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 7; gameContext.stroke();
+    gameContext.strokeStyle = color; gameContext.lineWidth = 3.5; gameContext.stroke();
+    // arrowhead
+    var ah = 7;
+    gameContext.beginPath();
+    gameContext.moveTo(hx - Math.cos(rad - 0.5) * ah, hy - Math.sin(rad - 0.5) * ah);
+    gameContext.lineTo(hx, hy);
+    gameContext.lineTo(hx - Math.cos(rad + 0.5) * ah, hy - Math.sin(rad + 0.5) * ah);
+    gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 7; gameContext.stroke();
+    gameContext.strokeStyle = color; gameContext.lineWidth = 3.5; gameContext.stroke();
+    gameContext.restore();
 }
 // =========================== Infection zombie body ===========================
 // Ported from docs/spikes/zombie-prototype.html — the "Infected sprinter" variant
@@ -9440,6 +9509,21 @@ function buildHazardDrawers() {
             drawSecondWindTotem(h);
         };
     }
+    if (config.boons != null && config.boons.launchPad != null) {
+        hazardDrawers[config.boons.launchPad.id] = function (h) {
+            drawLaunchPad(h.x, h.y, h.angle);
+        };
+    }
+    if (config.boons != null && config.boons.barrelCannon != null) {
+        hazardDrawers[config.boons.barrelCannon.id] = function (h) {
+            drawBarrelCannon(h.x, h.y, h.angle);
+        };
+    }
+    if (config.boons != null && config.boons.slingshotRings != null) {
+        hazardDrawers[config.boons.slingshotRings.id] = function (h) {
+            drawSlingshotRings(h.x, h.y, h.angle);
+        };
+    }
 }
 function drawHazard(hazard) {
     if (hazardDrawers == null) {
@@ -11094,6 +11178,145 @@ function drawSlipstream(x, y, angle) {
         gameContext.lineTo(w / 2 - 22, ly + 7);
         gameContext.strokeStyle = halo; gameContext.lineWidth = 6; gameContext.stroke();
         gameContext.strokeStyle = stroke; gameContext.lineWidth = 3; gameContext.stroke();
+    }
+    gameContext.restore();
+}
+
+// Launch Pad — a directional ramp you drive over to be flung airborne along its facing.
+// A round pad with a bold launch arrow + a burst of motion ticks pointing the throw way,
+// pulsing so it reads as "live". Orange palette (pale on water). Dark contrast halo under
+// the arrow so it stays legible on any terrain. Cheap sin/phase, no shadowBlur/filter.
+function drawLaunchPad(x, y, angle) {
+    var cfg = config.boons.launchPad;
+    var r = cfg.radius;
+    var rad = (angle || 0) * (Math.PI / 180);
+    var onWater = boonOnWater(x, y);
+    var accent = onWater ? cfg.colorWater : cfg.color;
+    var pulse = 0.5 + 0.5 * Math.sin(Date.now() / 260);
+    gameContext.save();
+    gameContext.translate(x, y);
+    gameContext.rotate(rad);
+    // Faint round footprint.
+    gameContext.beginPath();
+    gameContext.arc(0, 0, r, 0, 2 * Math.PI);
+    gameContext.fillStyle = onWater ? "rgba(255,216,168,0.06)" : "rgba(255,140,66,0.06)";
+    gameContext.fill();
+    gameContext.strokeStyle = onWater ? "rgba(255,216,168,0.16)" : "rgba(255,140,66,0.16)";
+    gameContext.lineWidth = 1;
+    gameContext.stroke();
+    // Three "thrust" ticks behind the arrow, brightening with the pulse — the launch energy.
+    gameContext.lineCap = "round";
+    for (var i = 0; i < 3; i++) {
+        var tx = -r * 0.6 + i * r * 0.34;
+        var th = r * (0.30 + 0.10 * i);
+        gameContext.globalAlpha = 0.25 + 0.5 * pulse * ((i + 1) / 3);
+        gameContext.beginPath();
+        gameContext.moveTo(tx, -th);
+        gameContext.lineTo(tx, th);
+        gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 6; gameContext.stroke();
+        gameContext.strokeStyle = accent; gameContext.lineWidth = 3; gameContext.stroke();
+    }
+    gameContext.globalAlpha = 1;
+    // Bold launch arrow pointing +x (the throw direction).
+    var aw = r * 0.95;
+    gameContext.lineJoin = "round";
+    gameContext.beginPath();
+    gameContext.moveTo(-r * 0.1, -r * 0.5);
+    gameContext.lineTo(aw, 0);
+    gameContext.lineTo(-r * 0.1, r * 0.5);
+    gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 9; gameContext.stroke();
+    gameContext.strokeStyle = accent; gameContext.lineWidth = 5; gameContext.stroke();
+    gameContext.restore();
+}
+
+// Barrel Cannon — a wooden barrel you drive into to be loaded, then fired along its facing.
+// A capsule barrel body with hoop bands and a dark muzzle at the firing (+x) end. Brown
+// palette (pale on water). Directional. Cheap fills/strokes, no shadowBlur/filter.
+function drawBarrelCannon(x, y, angle) {
+    var cfg = config.boons.barrelCannon;
+    var r = cfg.radius;
+    var rad = (angle || 0) * (Math.PI / 180);
+    var onWater = boonOnWater(x, y);
+    var wood = onWater ? cfg.colorWater : cfg.color;
+    var bodyLen = r * 1.7, bodyW = r * 1.25;
+    gameContext.save();
+    gameContext.translate(x, y);
+    gameContext.rotate(rad);
+    // Barrel body (a rounded capsule along the facing axis).
+    function capsule(hx, hy) {
+        var rr = hy;
+        gameContext.beginPath();
+        gameContext.moveTo(-hx + rr, -hy);
+        gameContext.lineTo(hx - rr, -hy);
+        gameContext.arc(hx - rr, 0, rr, -Math.PI / 2, Math.PI / 2);
+        gameContext.lineTo(-hx + rr, hy);
+        gameContext.arc(-hx + rr, 0, rr, Math.PI / 2, -Math.PI / 2);
+        gameContext.closePath();
+    }
+    capsule(bodyLen / 2, bodyW / 2);
+    gameContext.fillStyle = wood;
+    gameContext.globalAlpha = 0.92;
+    gameContext.fill();
+    gameContext.globalAlpha = 1;
+    gameContext.strokeStyle = "rgba(60,30,10,0.85)";
+    gameContext.lineWidth = 2.5;
+    gameContext.stroke();
+    // Two hoop bands across the body.
+    gameContext.strokeStyle = "rgba(60,30,10,0.55)";
+    gameContext.lineWidth = 3;
+    for (var b = -1; b <= 1; b += 2) {
+        var bx = b * bodyLen * 0.18;
+        gameContext.beginPath();
+        gameContext.moveTo(bx, -bodyW / 2 + 2);
+        gameContext.lineTo(bx, bodyW / 2 - 2);
+        gameContext.stroke();
+    }
+    // Dark muzzle opening at the firing (+x) end.
+    gameContext.beginPath();
+    gameContext.ellipse(bodyLen / 2 - bodyW * 0.16, 0, bodyW * 0.16, bodyW * 0.34, 0, 0, 2 * Math.PI);
+    gameContext.fillStyle = "rgba(25,12,4,0.9)";
+    gameContext.fill();
+    gameContext.restore();
+}
+
+// Slingshot Rings — a ring you drive THROUGH for a speed pulse along its axis, scaled by
+// how centred your pass is. Drawn as a glowing torus seen edge-on (a tall ellipse facing
+// the pass axis) with a brighter aimed sheen + small axis arrows so the throw direction
+// reads. Violet palette (pale on water). Pulses; dark contrast halo under the ring. Cheap.
+function drawSlingshotRings(x, y, angle) {
+    var cfg = config.boons.slingshotRings;
+    var r = cfg.radius;
+    var rad = (angle || 0) * (Math.PI / 180);
+    var onWater = boonOnWater(x, y);
+    var accent = onWater ? cfg.colorWater : cfg.color;
+    var pulse = 0.5 + 0.5 * Math.sin(Date.now() / 300);
+    gameContext.save();
+    gameContext.translate(x, y);
+    gameContext.rotate(rad);
+    // The ring is perpendicular to the pass axis, so edge-on it's a tall, thin ellipse
+    // (narrow along the axis, full height across it).
+    var rx = r * 0.42, ry = r * 0.95;
+    gameContext.beginPath();
+    gameContext.ellipse(0, 0, rx, ry, 0, 0, 2 * Math.PI);
+    gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 8; gameContext.stroke();
+    gameContext.strokeStyle = accent; gameContext.lineWidth = 4 + 1.5 * pulse; gameContext.stroke();
+    // Inner sheen ellipse (the "through here" hole).
+    gameContext.globalAlpha = 0.35 + 0.3 * pulse;
+    gameContext.beginPath();
+    gameContext.ellipse(0, 0, rx * 0.5, ry * 0.66, 0, 0, 2 * Math.PI);
+    gameContext.strokeStyle = accent; gameContext.lineWidth = 2; gameContext.stroke();
+    gameContext.globalAlpha = 1;
+    // Small axis arrows fore + aft so the pulse direction reads.
+    gameContext.lineCap = "round";
+    gameContext.lineJoin = "round";
+    for (var s = -1; s <= 1; s += 2) {
+        var ax = s * r * 1.05;
+        gameContext.beginPath();
+        gameContext.moveTo(ax - s * 7, -6);
+        gameContext.lineTo(ax, 0);
+        gameContext.lineTo(ax - s * 7, 6);
+        gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 6; gameContext.stroke();
+        gameContext.strokeStyle = accent; gameContext.lineWidth = 3; gameContext.stroke();
     }
     gameContext.restore();
 }

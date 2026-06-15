@@ -1647,6 +1647,122 @@ function paintSecondWindTotemShape(ctx, kind, x, y, angle, ringColor) {
     ctx.stroke();
     ctx.restore();
 }
+// Launch Pad painter (the launchPad `paint` hook) — mirrors the in-game look
+// (draw.js drawLaunchPad): a round orange footprint, thrust ticks, and a bold launch
+// arrow along `angle`. On water the palette is pale-orange. Static in the editor.
+function paintLaunchPadShape(ctx, kind, x, y, angle, ringColor) {
+    var cfg = objCfgByKey(kind.key);
+    if (cfg == null) { return; }
+    var r = cfg.radius;
+    var rad = (angle || 0) * (Math.PI / 180);
+    var onWater = editorBoonOnWater(x, y);
+    var accent = onWater ? cfg.colorWater : cfg.color;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rad);
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, 2 * Math.PI);
+    ctx.fillStyle = onWater ? "rgba(255,216,168,0.06)" : "rgba(255,140,66,0.06)";
+    ctx.fill();
+    ctx.strokeStyle = onWater ? "rgba(255,216,168,0.16)" : "rgba(255,140,66,0.16)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.lineCap = "round";
+    for (var i = 0; i < 3; i++) {
+        var tx = -r * 0.6 + i * r * 0.34;
+        var th = r * (0.30 + 0.10 * i);
+        ctx.beginPath();
+        ctx.moveTo(tx, -th);
+        ctx.lineTo(tx, th);
+        ctx.strokeStyle = EDITOR_BOON_HALO; ctx.lineWidth = 6; ctx.stroke();
+        ctx.strokeStyle = accent; ctx.lineWidth = 3; ctx.stroke();
+    }
+    var aw = r * 0.95;
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.1, -r * 0.5);
+    ctx.lineTo(aw, 0);
+    ctx.lineTo(-r * 0.1, r * 0.5);
+    ctx.strokeStyle = EDITOR_BOON_HALO; ctx.lineWidth = 9; ctx.stroke();
+    ctx.strokeStyle = accent; ctx.lineWidth = 5; ctx.stroke();
+    ctx.restore();
+}
+// Barrel Cannon painter (the barrelCannon `paint` hook) — mirrors the in-game look
+// (draw.js drawBarrelCannon): a wooden capsule barrel with hoop bands + a dark muzzle
+// at the firing (+x) end, aimed along `angle`. On water the palette is pale.
+function paintBarrelCannonShape(ctx, kind, x, y, angle, ringColor) {
+    var cfg = objCfgByKey(kind.key);
+    if (cfg == null) { return; }
+    var r = cfg.radius;
+    var rad = (angle || 0) * (Math.PI / 180);
+    var onWater = editorBoonOnWater(x, y);
+    var wood = onWater ? cfg.colorWater : cfg.color;
+    var bodyLen = r * 1.7, bodyW = r * 1.25;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rad);
+    var hx = bodyLen / 2, hy = bodyW / 2, rr = hy;
+    ctx.beginPath();
+    ctx.moveTo(-hx + rr, -hy);
+    ctx.lineTo(hx - rr, -hy);
+    ctx.arc(hx - rr, 0, rr, -Math.PI / 2, Math.PI / 2);
+    ctx.lineTo(-hx + rr, hy);
+    ctx.arc(-hx + rr, 0, rr, Math.PI / 2, -Math.PI / 2);
+    ctx.closePath();
+    ctx.fillStyle = wood;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(60,30,10,0.85)";
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(60,30,10,0.55)";
+    ctx.lineWidth = 3;
+    for (var b = -1; b <= 1; b += 2) {
+        var bx = b * bodyLen * 0.18;
+        ctx.beginPath();
+        ctx.moveTo(bx, -bodyW / 2 + 2);
+        ctx.lineTo(bx, bodyW / 2 - 2);
+        ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.ellipse(bodyLen / 2 - bodyW * 0.16, 0, bodyW * 0.16, bodyW * 0.34, 0, 0, 2 * Math.PI);
+    ctx.fillStyle = "rgba(25,12,4,0.9)";
+    ctx.fill();
+    ctx.restore();
+}
+// Slingshot Rings painter (the slingshotRings `paint` hook) — mirrors the in-game look
+// (draw.js drawSlingshotRings): an edge-on violet ring (tall ellipse) perpendicular to
+// the pass axis, with axis arrows fore + aft along `angle`. On water the palette is pale.
+function paintSlingshotRingsShape(ctx, kind, x, y, angle, ringColor) {
+    var cfg = objCfgByKey(kind.key);
+    if (cfg == null) { return; }
+    var r = cfg.radius;
+    var rad = (angle || 0) * (Math.PI / 180);
+    var onWater = editorBoonOnWater(x, y);
+    var accent = onWater ? cfg.colorWater : cfg.color;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rad);
+    var rx = r * 0.42, ry = r * 0.95;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, rx, ry, 0, 0, 2 * Math.PI);
+    ctx.strokeStyle = EDITOR_BOON_HALO; ctx.lineWidth = 8; ctx.stroke();
+    ctx.strokeStyle = accent; ctx.lineWidth = 4; ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(0, 0, rx * 0.5, ry * 0.66, 0, 0, 2 * Math.PI);
+    ctx.strokeStyle = accent; ctx.lineWidth = 2; ctx.stroke();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (var s = -1; s <= 1; s += 2) {
+        var ax = s * r * 1.05;
+        ctx.beginPath();
+        ctx.moveTo(ax - s * 7, -6);
+        ctx.lineTo(ax, 0);
+        ctx.lineTo(ax - s * 7, 6);
+        ctx.strokeStyle = EDITOR_BOON_HALO; ctx.lineWidth = 6; ctx.stroke();
+        ctx.strokeStyle = accent; ctx.lineWidth = 3; ctx.stroke();
+    }
+    ctx.restore();
+}
 // Wall-band painter (bumperWall's `paint` hook). Mirrors the in-game look
 // (draw.js drawBumperWall): rim band over the bumper-orange core, anchored at
 // (x,y) and extending `width` along `angle`.
@@ -3233,6 +3349,79 @@ var EDITOR_HAZARD_KINDS = [
             ctx.strokeStyle = "rgba(10,40,55,0.6)";
             ctx.lineWidth = 2;
             ctx.stroke();
+        }
+    },
+    {
+        key: "launchPad", label: "Launch Pad", shortcut: "p", railed: false, directional: true,
+        group: "boon", paint: paintLaunchPadShape,
+        swatchPaint: function (ctx, size) {
+            // A bold orange launch arrow pointing right — "this flings you THIS way".
+            var cx = size / 2, cy = size / 2;
+            ctx.strokeStyle = "#FF8C42";
+            ctx.lineWidth = 9;
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+            ctx.beginPath();
+            ctx.moveTo(cx - 18, cy - 18);
+            ctx.lineTo(cx + 20, cy);
+            ctx.lineTo(cx - 18, cy + 18);
+            ctx.stroke();
+            ctx.lineWidth = 6;
+            for (var i = 0; i < 2; i++) {
+                var tx = cx - 26 + i * 9;
+                ctx.beginPath();
+                ctx.moveTo(tx, cy - 12);
+                ctx.lineTo(tx, cy + 12);
+                ctx.stroke();
+            }
+        }
+    },
+    {
+        key: "barrelCannon", label: "Barrel Cannon", shortcut: "k", railed: false, directional: true,
+        group: "boon", paint: paintBarrelCannonShape,
+        swatchPaint: function (ctx, size) {
+            // A wooden barrel aimed right with a dark muzzle — "load in, fire THIS way".
+            var cx = size / 2, cy = size / 2;
+            var hx = size * 0.28, hy = size * 0.20, rr = hy;
+            ctx.beginPath();
+            ctx.moveTo(cx - hx + rr, cy - hy);
+            ctx.lineTo(cx + hx - rr, cy - hy);
+            ctx.arc(cx + hx - rr, cy, rr, -Math.PI / 2, Math.PI / 2);
+            ctx.lineTo(cx - hx + rr, cy + hy);
+            ctx.arc(cx - hx + rr, cy, rr, Math.PI / 2, -Math.PI / 2);
+            ctx.closePath();
+            ctx.fillStyle = "#C8743C";
+            ctx.fill();
+            ctx.strokeStyle = "rgba(60,30,10,0.85)";
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.ellipse(cx + hx - hy * 0.5, cy, hy * 0.35, hy * 0.72, 0, 0, 2 * Math.PI);
+            ctx.fillStyle = "rgba(25,12,4,0.9)";
+            ctx.fill();
+        }
+    },
+    {
+        key: "slingshotRings", label: "Slingshot Rings", shortcut: "j", railed: false, directional: true,
+        group: "boon", paint: paintSlingshotRingsShape,
+        swatchPaint: function (ctx, size) {
+            // An edge-on violet ring with axis arrows — "drive THROUGH for a speed pulse".
+            var cx = size / 2, cy = size / 2;
+            ctx.strokeStyle = "#C77DFF";
+            ctx.lineWidth = 5;
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+            ctx.beginPath();
+            ctx.ellipse(cx, cy, size * 0.16, size * 0.34, 0, 0, 2 * Math.PI);
+            ctx.stroke();
+            for (var s = -1; s <= 1; s += 2) {
+                var ax = cx + s * size * 0.34;
+                ctx.beginPath();
+                ctx.moveTo(ax - s * 8, cy - 7);
+                ctx.lineTo(ax, cy);
+                ctx.lineTo(ax - s * 8, cy + 7);
+                ctx.stroke();
+            }
         }
     }
 ];

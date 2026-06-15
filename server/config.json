@@ -630,6 +630,37 @@
             "radius": 28,
             "respawnDelayMs": 2000,
             "respawnInvulnMs": 1500
+        },
+        "launchPad": {
+            "_doc": "Drive over to be FLUNG on a committed airborne arc along the pad's author-set facing (durationMs). While aloft you ignore ALL ground tiles (lava included), hazards, and incoming punches — you're untouchable in the air — then you land where the arc ends (distance px along the facing, clamped to the world) and normal tile resolution resumes: land in lava and you die, so the landing zone is the author's responsibility. No mid-flight steering — placement + rotation are the lever. Shares the 'airborne' player state with the Barrel Cannon (Player.launchAirborne). colorWater is the on-water palette so the pad reads against blue water.",
+            "id": 955,
+            "color": "#FF8C42",
+            "colorWater": "#FFD8A8",
+            "radius": 26,
+            "distance": 230,
+            "durationMs": 520
+        },
+        "barrelCannon": {
+            "_doc": "Drive in to be LOADED (DK-barrel style): the racer is captured at the barrel mouth, frozen + aiming along the barrel's author-set facing, until they press PUNCH or autoFireMs elapses — then fired on a LONGER committed airborne arc than the Launch Pad (flightDistance over flightDurationMs). Reuses the same 'airborne' player state (Player.loadIntoBarrel → launchAirborne); same lava/tile immunity while aloft + normal resolution on landing. colorWater is the on-water palette.",
+            "id": 956,
+            "color": "#C8743C",
+            "colorWater": "#E6B88A",
+            "radius": 30,
+            "autoFireMs": 1000,
+            "flightDistance": 430,
+            "flightDurationMs": 820
+        },
+        "slingshotRings": {
+            "_doc": "Drive THROUGH a ring for a speed PULSE along the ring's author-set axis, scaled by how CENTERED your pass was — dead-centre is the full pulse, clipping the rim barely boosts. Reuses the Dash Arrows capped-add (adds only the remaining gap to the cap, so it never overshoots/tunnels and never brakes a faster kart) but the cap scales with centeredness; chaining consecutive rings within chainWindowMs raises the cap (chainBonus per link, up to chainMax) so a line of rings stacks into a bigger launch than any one ring. Purely axial, so a backward pass fights it. radius is the circular hitbox. colorWater is the on-water palette.",
+            "id": 957,
+            "color": "#C77DFF",
+            "colorWater": "#E9D4FF",
+            "radius": 34,
+            "pulse": 120,
+            "pulseCap": 360,
+            "chainWindowMs": 900,
+            "chainBonus": 60,
+            "chainMax": 3
         }
     },
     "barriers": {
