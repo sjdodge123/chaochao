@@ -139,7 +139,10 @@ function buildAdjacency(map) {
         neighbors[ci] = list;
         doorways[ci] = widths;
     }
-    return { neighbors: neighbors, doorways: doorways };
+    // idToIndex (voronoiId -> cell index) is built above for adjacency and exposed here
+    // so callers needing the same lookup (e.g. the locked-door AI resolving a door's home
+    // cell) reuse this cached table instead of rebuilding it per tick.
+    return { neighbors: neighbors, doorways: doorways, idToIndex: idToIndex };
 }
 
 function getAdjacency(map) {

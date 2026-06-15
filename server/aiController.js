@@ -653,7 +653,6 @@ var BARRIER_PATH_PENALTY = 45;
 // unlockRadius — the unlock fires server-side), after which normal goal pathing
 // resumes. Pickup/unlock are pure proximity in checkLockedDoors; the bot only steers.
 var DOOR_FINAL_APPROACH = 120;  // px: home straight on the key/door point for the last stretch
-var KEY_PURSUERS = 2;           // bots allowed to chase a single loose key (others stage at the door)
 
 var AB = c.tileMap.abilities;
 
@@ -1524,11 +1523,13 @@ function doorRouteWalkable(ctx, id) {
 // paths to a reachable neighbour and makes the final push toward the door point. The
 // neighbour set is whichever side is reachable from the bot (Dijkstra ignores the
 // far, door-walled side). Returns null if the door cell or its neighbours are gone.
+// Reuses the adjacency cache's voronoiId->cell-index table (idToIndex) — no per-tick
+// rebuild of a map that's static for the round.
 function doorApproachCells(ctx, door) {
-    if (door == null || door.voronoiId == null || ctx.cellIndexByVoronoiId == null) { return null; }
-    var idx = ctx.cellIndexByVoronoiId[door.voronoiId];
-    if (idx == null) { return null; }
+    if (door == null || door.voronoiId == null) { return null; }
     var adj = cellGraph.getAdjacency(ctx.map);
+    var idx = adj.idToIndex[door.voronoiId];
+    if (idx == null) { return null; }
     var nbrs = adj.neighbors[idx];
     if (!nbrs) { return null; }
     var set = null;
@@ -1543,7 +1544,9 @@ function doorApproachCells(ctx, door) {
 }
 
 // The voronoiId of the cell a loose key currently sits in (its goalSet — driving
-// onto that cell brings the bot within pickupRadius).
+// onto that cell brings the bot within pickupRadius). In a Voronoi diagram the cell
+// CONTAINING a point is exactly its nearest-site cell, so nearestCellIndex is the
+// correct (and cheap) point->cell resolution here.
 function keyCellVoronoiId(ctx, key) {
     var idx = cellGraph.nearestCellIndex(ctx.map.cells, { x: key.x, y: key.y });
     var cell = ctx.map.cells[idx];
@@ -1564,29 +1567,29 @@ function blockingDoorsOnPath(ctx, path) {
     return out;
 }
 
-// Nearest loose, un-consumed key this bot is ALLOWED to pursue (light coordination,
-// computed in update) whose door is on the blocking list — falling back to any
-// allowed loose key when none match (better to grab a key than stall).
+// Nearest loose, un-consumed key whose door is on the bot's OWN blocking list. A bot
+// only ever pursues a key that unblocks ITS route — never a key for some other door
+// (that would burn the wrong key and leave the door that actually gates it shut, the
+// multi-door stall). With keys restricted to blocking doors, "all bots dogpile one
+// key" self-limits: once a bot grabs it, it's no longer loose, so the rest re-evaluate
+// next re-path and stage at the door — so no separate pursuer ration is needed (and a
+// ration that isn't door-aware would starve the very key a sealed-off bot needs).
 function pickKeyToPursue(bot, ctx, blockingIdx) {
-    var allowed = ctx.keyAllowed != null ? ctx.keyAllowed[bot.id] : null;
-    if (allowed == null) { return null; }
-    var best = null, bestD = Infinity, bestMatch = false;
+    var best = null, bestD = Infinity;
     for (var i = 0; i < ctx.lockedKeys.length; i++) {
         var key = ctx.lockedKeys[i];
         if (key.carriedBy != null || key.used || key.consumed) { continue; }
-        if (!allowed[key.index]) { continue; }
-        var matches = blockingIdx.indexOf(key.doorIndex) !== -1;
+        if (blockingIdx.indexOf(key.doorIndex) === -1) { continue; }
         var d = mag(key.x - bot.x, key.y - bot.y);
-        // Prefer a key that opens a blocking door; among equal match-status, nearest.
-        if ((matches && !bestMatch) || ((matches === bestMatch) && d < bestD)) {
-            best = key; bestD = d; bestMatch = matches;
-        }
+        if (d < bestD) { best = key; bestD = d; }
     }
     return best;
 }
 
 // Nearest still-shut blocking door — where a non-pursuer stages so it's ready to
-// pour through the instant the carrier opens it (instead of milling at a wall).
+// pour through the instant the carrier opens it (instead of milling at a wall). The
+// candidates are doors on the bot's own would-open route, so they're reachable up to
+// the barrier (the bot is on their near side).
 function nearestBlockingDoor(bot, ctx, blockingIdx) {
     var best = null, bestD = Infinity;
     for (var i = 0; i < blockingIdx.length; i++) {
@@ -1602,25 +1605,32 @@ function nearestBlockingDoor(bot, ctx, blockingIdx) {
 //   { mode:'key'|'door'|'stage', goalSet:{voronoiId:true}, finalPoint:{x,y}|null }
 // 'key'  — empty-handed, goal walled by a door: drive onto the matching key.
 // 'door' — carrying a key: drive into its matched door to unlock it.
-// 'stage'— walled but not pursuing a key (another bot has it): wait at the door.
-function computeDoorObjective(bot, ctx, baseOpts) {
-    // Carrying a key -> head to its still-shut door.
-    if (bot.heldKey != null) {
+// 'stage'— walled but no matching key is loose (another bot has it): wait at the door.
+// `goalRoute` is the bot's already-computed plain goal route (null = walled); reused so
+// we don't recompute it here. `carrying` short-circuits to the door (no goal route needed).
+function computeDoorObjective(bot, ctx, baseOpts, goalRoute, carrying) {
+    // Carrying a key -> head to its still-shut door. goalSet is the door's reachable
+    // near-side neighbours; if those are all lava/hole (gs == null) we still return the
+    // 'door' objective with a null goalSet, so pathing falls back to the goal tiles (race
+    // there if some route exists) while finalPoint keeps the door as the homing/beeline
+    // target — so a carrier that gets close unlocks on approach, and a sealed-in one
+    // beelines at its door (delivering the key, or dying and dropping it) instead of idling.
+    if (carrying) {
         var door = ctx.lockedDoors[bot.heldKey.doorIndex];
         if (door != null && !door.unlocked) {
-            var gs = doorApproachCells(ctx, door);
-            if (gs != null) { return { mode: 'door', goalSet: gs, finalPoint: { x: door.x, y: door.y } }; }
+            return { mode: 'door', goalSet: doorApproachCells(ctx, door), finalPoint: { x: door.x, y: door.y } };
         }
         return null; // door already open (or data gone) -> race the goal
     }
-    // Empty-handed: only engage if the goal is currently UNREACHABLE (a shut door, or
-    // lava, walls us off). If we can already reach a goal, ignore keys and race.
-    var normal = cellGraph.findPathToNearestGoal(ctx.map, { x: bot.x, y: bot.y }, baseOpts);
-    if (normal != null) { return null; }
+    // Empty-handed: only engage if the goal is currently UNREACHABLE. If the bot can
+    // already reach a goal (goalRoute != null), race it and ignore keys.
+    if (goalRoute != null) { return null; }
+    // During a collapse a null goal route usually means the closing lava ring (not a
+    // door) walled us off — don't divert to chase a key into the advancing front; let
+    // the collapse flee-to-safe-center branch handle it.
+    if (ctx.collapsing) { return null; }
     // Walled. Would opening the doors free us? Path treating door cells as passable.
-    var openOpts = {};
-    for (var k in baseOpts) { openOpts[k] = baseOpts[k]; }
-    openOpts.passableDoors = true;
+    var openOpts = Object.assign({}, baseOpts, { passableDoors: true });
     var opened = cellGraph.findPathToNearestGoal(ctx.map, { x: bot.x, y: bot.y }, openOpts);
     if (opened == null) { return null; } // genuinely lava-walled, not a door — existing fallback handles it
     var blockingIdx = blockingDoorsOnPath(ctx, opened.path);
@@ -1633,7 +1643,8 @@ function computeDoorObjective(bot, ctx, baseOpts) {
             return { mode: 'key', goalSet: kset, finalPoint: { x: key.x, y: key.y } };
         }
     }
-    // No key to chase (not our turn, or all loose keys are spoken for) — stage at the door.
+    // No matching key is loose (another bot is carrying it) — stage at the door so we
+    // pour through the moment it opens.
     var sdoor = nearestBlockingDoor(bot, ctx, blockingIdx);
     if (sdoor != null) {
         var sset = doorApproachCells(ctx, sdoor);
@@ -1693,12 +1704,14 @@ function steerBot(bot, ctx, dt) {
         // center (collapseLoc), which beats charging a goal tile with lava avoidance off
         // into the advancing collapse front.
         beelining = !ctx.collapsing && (nowProbe - ai.headwayAt) >= BEELINE_AFTER_MS;
-        // On a locked-door objective (fetching a key, carrying it to a door, or staging
-        // at one) the goal-beeline is wrong: it abandons the key and charges the nearest
-        // GOAL tile with avoidance off, driving into the very door wall it can't pass. Let
-        // the door objective run instead — escapes still fire to thread a real pinch, but
-        // the sealed-in goal beeline stays off until the door opens and goal pathing resumes.
-        if (ai.doorMode != null) { beelining = false; }
+        // On a locked-door objective the goal-beeline target is wrong: it would charge the
+        // nearest GOAL tile with avoidance off, driving into the very door wall it can't
+        // pass. For 'key'/'door' modes the beeline is still useful once sealed in — but it
+        // must aim at the bot's own door target (the key spot it's fetching, or the door it
+        // carries the key to), which the override below points at ai.doorFinalPoint. A
+        // 'stage' bot has no target of its own (it's waiting on another bot's key), so it
+        // just holds at the door — suppress its beeline entirely.
+        if (ai.doorMode === 'stage') { beelining = false; }
     }
 
     // --- Re-path on a throttle (and immediately if we have no path) ---
@@ -1723,6 +1736,11 @@ function steerBot(bot, ctx, dt) {
         // safe bunker island instead — otherwise findPathToNearestGoal returns null
         // and the bot just sits there.
         if (ctx.bunkerSafeIds != null) { pathOpts.goalSet = ctx.bunkerSafeIds; }
+        // Plain goal route. A key-carrier always heads to its door, so skip its goal
+        // search entirely; everyone else computes it once here and the locked-door layer
+        // REUSES it (no duplicate Dijkstra) to decide whether the bot is walled.
+        var carrying = ctx.hasLockedDoors && bot.heldKey != null;
+        var route = carrying ? null : cellGraph.findPathToNearestGoal(ctx.map, { x: bot.x, y: bot.y }, pathOpts);
         // Locked-door objective: on a door-gated map a walled bot fetches the matching
         // key, then carries it to the door, instead of trying (and failing) to path to a
         // goal sealed behind a shut door. The objective just retargets the SAME pathing
@@ -1731,14 +1749,14 @@ function steerBot(bot, ctx, dt) {
         // key spot / door so the proximity radius trips even from the cell's edge.
         ai.doorMode = null; ai.doorFinalPoint = null;
         if (ctx.hasLockedDoors && ctx.bunkerSafeIds == null) {
-            var obj = computeDoorObjective(bot, ctx, pathOpts);
+            var obj = computeDoorObjective(bot, ctx, pathOpts, route, carrying);
             if (obj != null) {
                 pathOpts.goalSet = obj.goalSet;
                 ai.doorMode = obj.mode;
                 ai.doorFinalPoint = obj.finalPoint;
+                route = cellGraph.findPathToNearestGoal(ctx.map, { x: bot.x, y: bot.y }, pathOpts);
             }
         }
-        var route = cellGraph.findPathToNearestGoal(ctx.map, { x: bot.x, y: bot.y }, pathOpts);
         // If the danger ring walled us off, retry without it so we still aim at a
         // goal (better a tight line than freezing in front of the lava). Keep the
         // hazard penalty on the retry — it's soft, so it never nulls the path.
@@ -1753,7 +1771,11 @@ function steerBot(bot, ctx, dt) {
             }
             ai.path = route.path;
             ai.waypoints = pts;
-            ai.goal = route.goal;
+            // On a door objective `route.goal` is the key/door cell, not the finish — keep
+            // ai.goal pointing at the real nearest goal tile so goalRank/rubber-band/ability
+            // timing still read true race position (else a far key-detour reads as a rank flip).
+            ai.goal = (ai.doorMode != null && ctx.goalTiles && ctx.goalTiles.length > 0)
+                ? nearestGoalPoint(bot.x, bot.y, ctx.goalTiles) : route.goal;
             // Skip the start cell (≈ current position) so the carrot looks ahead.
             ai.wpIndex = pts.length > 1 ? 1 : 0;
         } else {
@@ -1813,13 +1835,13 @@ function steerBot(bot, ctx, dt) {
         // A zombie with no reachable goal path (it's lava-immune and often sits on
         // lava) still HUNTS — fall through to the intercept override below, which
         // sets desired toward the prey. Don't freeze in the no-path hold.
-    } else if (beelining && ctx.goalTiles && ctx.goalTiles.length > 0) {
-        // No path AND stuck for BEELINE_AFTER_MS: it's sealed off (the goal is lava-walled
-        // from here and a re-path will keep returning null). Don't keep holding — that's
-        // exactly the off-terrain corner freeze where the bot never moves and never dies.
-        // The unconditional beeline override below points `desired` straight at the nearest
-        // goal (with avoidance off) to thread out or die clearing it; just don't fall into
-        // the hold/return branch here.
+    } else if (beelining && ((ctx.goalTiles && ctx.goalTiles.length > 0) || (ai.doorMode != null && ai.doorFinalPoint != null))) {
+        // No path AND stuck for BEELINE_AFTER_MS: it's sealed off (the goal — or, on a door
+        // objective, the bot's key/door target — is lava-walled from here and a re-path will
+        // keep returning null). Don't keep holding — that's exactly the off-terrain corner
+        // freeze where the bot never moves and never dies. The beeline override below points
+        // `desired` straight at the target (with avoidance off) to thread out or die clearing
+        // it (freeing a held key); just don't fall into the hold/return branch here.
     } else {
         // No path and not collapsing: hold position (don't drive blindly). A walled
         // bot isn't "stuck at a pinch", so clear any charging escape and re-anchor
@@ -1890,11 +1912,21 @@ function steerBot(bot, ctx, dt) {
     ctx.riskMult = 1 - 0.45 * ai.risk;
 
     // A last-resort beeline overrides the path/carrot heading and points STRAIGHT at the
-    // nearest goal, so a bot sealed in a corner drives decisively out (or into the walling
-    // lava). Avoidance is turned off just below so nothing bends it back into the pocket.
-    if (beelining && ctx.goalTiles && ctx.goalTiles.length > 0) {
-        var ngb = nearestGoalPoint(bot.x, bot.y, ctx.goalTiles);
-        var bgx = ngb.x - bot.x, bgy = ngb.y - bot.y, bgm = mag(bgx, bgy) || 1;
+    // target, so a bot sealed in a corner drives decisively out (or into the walling lava).
+    // Avoidance is turned off just below so nothing bends it back into the pocket. On a
+    // locked-door objective the target is the bot's OWN door point (the key it's fetching
+    // or the door it's carrying a key to) — NOT the finish, which sits behind a wall it
+    // can't pass; this frees a sealed carrier (deliver the key, or die and drop it).
+    var beelineTarget = null;
+    if (beelining) {
+        if (ai.doorMode != null && ai.doorFinalPoint != null) {
+            beelineTarget = ai.doorFinalPoint;
+        } else if (ctx.goalTiles && ctx.goalTiles.length > 0) {
+            beelineTarget = nearestGoalPoint(bot.x, bot.y, ctx.goalTiles);
+        }
+    }
+    if (beelineTarget != null) {
+        var bgx = beelineTarget.x - bot.x, bgy = beelineTarget.y - bot.y, bgm = mag(bgx, bgy) || 1;
         desiredX = bgx / bgm; desiredY = bgy / bgm;
     }
 
@@ -2449,46 +2481,19 @@ function update(gameBoard, currentState, dt) {
         }
     }
 
-    // Locked doors + keys: the lookups the objective layer needs (voronoiId -> door
-    // index / cell index) and light coordination so the field doesn't dogpile one key.
-    // Each loose, un-consumed key is "claimed" by its nearest KEY_PURSUERS eligible bots
-    // (empty-handed racers); the rest stage at the door. Recomputed every tick so a claim
-    // re-assigns the instant a pursuer dies, finishes, or grabs the key.
+    // Locked doors + keys: the one lookup the objective layer needs — voronoiId -> door
+    // index, so a route crossing a door cell can name which door it is. (The voronoiId ->
+    // cell-index map it also needs is the adjacency cache's own idToIndex, reused directly
+    // in doorApproachCells; no per-tick rebuild.) Coordination is implicit: a bot only
+    // pursues a key whose door blocks ITS route, and the key stops being loose the moment
+    // someone grabs it, so the rest re-evaluate and stage — no pursuer ration needed.
     var hasLockedDoors = gameBoard.hasLockedDoors === true;
-    var doorIndexByVoronoiId = null, cellIndexByVoronoiId = null, keyAllowed = null;
+    var doorIndexByVoronoiId = null;
     if (hasLockedDoors) {
         doorIndexByVoronoiId = {};
         for (var di = 0; di < gameBoard.lockedDoors.length; di++) {
             var dr = gameBoard.lockedDoors[di];
             if (dr != null && dr.voronoiId != null) { doorIndexByVoronoiId[dr.voronoiId] = dr.index; }
-        }
-        cellIndexByVoronoiId = {};
-        for (var cix = 0; cix < map.cells.length; cix++) {
-            if (map.cells[cix] != null && map.cells[cix].site != null) {
-                cellIndexByVoronoiId[map.cells[cix].site.voronoiId] = cix;
-            }
-        }
-        var eligible = [];
-        for (var eid in playerList) {
-            var ep = playerList[eid];
-            if (ep.isAI && ep.alive && ep.awake && !ep.isSpectator && !ep.isZombie && !ep.reachedGoal && ep.heldKey == null) {
-                eligible.push(ep);
-            }
-        }
-        keyAllowed = {};
-        for (var ki = 0; ki < gameBoard.lockedKeys.length; ki++) {
-            var lk = gameBoard.lockedKeys[ki];
-            if (lk == null || lk.carriedBy != null || lk.used || lk.consumed) { continue; }
-            var ranked = eligible.slice().sort((function (key) {
-                return function (b1, b2) {
-                    return mag(b1.x - key.x, b1.y - key.y) - mag(b2.x - key.x, b2.y - key.y);
-                };
-            })(lk));
-            for (var rk = 0; rk < ranked.length && rk < KEY_PURSUERS; rk++) {
-                var bid2 = ranked[rk].id;
-                if (keyAllowed[bid2] == null) { keyAllowed[bid2] = {}; }
-                keyAllowed[bid2][lk.index] = true;
-            }
         }
     }
 
@@ -2508,8 +2513,6 @@ function update(gameBoard, currentState, dt) {
         lockedDoors: gameBoard.lockedDoors,
         lockedKeys: gameBoard.lockedKeys,
         doorIndexByVoronoiId: doorIndexByVoronoiId, // path cell -> the door it is (blocking-door detection)
-        cellIndexByVoronoiId: cellIndexByVoronoiId, // door voronoiId -> cell index (neighbour lookup)
-        keyAllowed: keyAllowed, // botId -> { keyIndex:true } the bot may pursue (anti-dogpile)
         staticHazardCells: staticHazardCells, // static bumper cells (harsh path penalty)
         railCells: railCells, // moving-rail swept cells (mild path penalty — timeable)
         barrierEdges: cellGraph.getBarrierBlockedEdges(map), // adjacency edges a solid barrier cuts (route around)
