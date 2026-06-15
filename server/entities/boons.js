@@ -308,4 +308,138 @@ registerBoonKind("secondWindTotem", {
 	}
 });
 
-module.exports = { Boon, DashArrows, RechargeSpring, Slipstream, GuardHalo, SecondWindTotem };
+// Launch Pad — drive over to be FLUNG on a committed airborne arc along the pad's
+// facing. The pad's only job is to start the shared "airborne" player state
+// (Player.launchAirborne): while aloft the racer ignores every ground tile (lava
+// included), hazard, and punch — they're untouchable in the air (the isAloft guards in
+// Player.update/handleHit/killPlayer) — then they land where the arc ends and normal
+// tile resolution resumes (land in lava and you die — author placement is the risk).
+// No mid-flight steering. Directional (author-rotated). (Racers only — see
+// isEligiblePlayer. launchAirborne itself guards re-entry, so the engine double-dispatch
+// and an already-aloft kart are both no-ops.)
+class LaunchPad extends Boon {
+	constructor(x, y, angle, ownerId, roomSig) {
+		super(x, y, c.boons.launchPad.radius, c.boons.launchPad.color, ownerId, roomSig);
+		this.id = c.boons.launchPad.id;
+		this.angle = angle;
+		this.distance = c.boons.launchPad.distance;
+		this.durationMs = c.boons.launchPad.durationMs;
+	}
+	handleHit(object) {
+		if (!this.isEligiblePlayer(object) || typeof object.launchAirborne !== "function") {
+			return;
+		}
+		object.launchAirborne(this.angle, this.distance, this.durationMs);
+	}
+}
+
+registerBoonKind("launchPad", {
+	railed: false,
+	directional: true,
+	build: function (entry, mapID, roomSig) {
+		return new LaunchPad(entry.x, entry.y, entry.angle, mapID, roomSig);
+	}
+});
+
+// Barrel Cannon — drive in to be LOADED (DK-barrel style): the racer is captured at the
+// barrel mouth, frozen + aiming along the barrel's facing, until they press punch or
+// autoFireMs elapses, then fired on a LONGER committed airborne arc than the Launch Pad.
+// Reuses the same shared airborne state (Player.loadIntoBarrel holds them, then
+// launchAirborne flies them) — same lava/tile immunity aloft, same land-where-you-land
+// resolution. Directional (author-rotated). (Racers only — see isEligiblePlayer;
+// loadIntoBarrel guards re-entry so the double-dispatch / already-loaded calls no-op.)
+class BarrelCannon extends Boon {
+	constructor(x, y, angle, ownerId, roomSig) {
+		super(x, y, c.boons.barrelCannon.radius, c.boons.barrelCannon.color, ownerId, roomSig);
+		this.id = c.boons.barrelCannon.id;
+		this.angle = angle;
+		this.autoFireMs = c.boons.barrelCannon.autoFireMs;
+		this.flightDistance = c.boons.barrelCannon.flightDistance;
+		this.flightDurationMs = c.boons.barrelCannon.flightDurationMs;
+	}
+	handleHit(object) {
+		if (!this.isEligiblePlayer(object) || typeof object.loadIntoBarrel !== "function") {
+			return;
+		}
+		object.loadIntoBarrel(this);
+	}
+}
+
+registerBoonKind("barrelCannon", {
+	railed: false,
+	directional: true,
+	build: function (entry, mapID, roomSig) {
+		return new BarrelCannon(entry.x, entry.y, entry.angle, mapID, roomSig);
+	}
+});
+
+// Slingshot Rings — drive THROUGH a ring for a speed pulse along the ring's axis, scaled
+// by how CENTERED the pass was (dead-centre = full pulse, clipping the rim = barely any).
+// Reuses the Dash Arrows capped-add (add only the remaining gap to the cap, so it never
+// overshoots — which could tunnel a thin wall in one tick — and never brakes a kart
+// already faster along the axis), but the per-tick add is scaled by centeredness and the
+// cap is raised when consecutive rings are hit inside chainWindowMs (chainBonus per link,
+// up to chainMax) — so a line of rings stacks into a bigger launch than any one ring.
+// Purely axial, so a backward pass fights it. (Racers only — see isEligiblePlayer; pucks
+// use projectile physics that wouldn't carry a raw velocity impulse, so they're excluded.)
+class SlingshotRings extends Boon {
+	constructor(x, y, angle, ownerId, roomSig) {
+		super(x, y, c.boons.slingshotRings.radius, c.boons.slingshotRings.color, ownerId, roomSig);
+		this.id = c.boons.slingshotRings.id;
+		this.angle = angle;
+		this.pulse = c.boons.slingshotRings.pulse;
+		this.pulseCap = c.boons.slingshotRings.pulseCap;
+		this.chainWindowMs = c.boons.slingshotRings.chainWindowMs;
+		this.chainBonus = c.boons.slingshotRings.chainBonus;
+		this.chainMax = c.boons.slingshotRings.chainMax;
+	}
+	handleHit(object) {
+		if (!this.isEligiblePlayer(object)) {
+			return;
+		}
+		if (!this.claimTickContact(object)) {
+			return; // engine double-dispatch: only pulse once per overlap tick
+		}
+		var rad = (this.angle || 0) * (Math.PI / 180);
+		var dirX = Math.cos(rad), dirY = Math.sin(rad);
+		// Centeredness: perpendicular distance of the kart from the ring centre (its
+		// component along the axis-normal). 1 dead-centre, 0 at the rim. A glancing pass
+		// barely boosts; a centred pass gets the full pulse.
+		var ox = (object.x || 0) - this.x, oy = (object.y || 0) - this.y;
+		var perp = Math.abs(ox * -dirY + oy * dirX);
+		var reach = this.radius + (c.playerBaseRadius || 7.5);
+		var centered = 1 - Math.min(1, perp / reach);
+		if (centered <= 0) {
+			return;
+		}
+		// Chain: consecutive rings within chainWindowMs stack a cap bonus (up to chainMax),
+		// so a row of rings launches harder than one. The window re-arms on every ring.
+		var now = Date.now();
+		if (object.slingChainUntil != null && object.slingChainUntil > 0 && now <= object.slingChainUntil) {
+			object.slingChainCount = Math.min(this.chainMax, (object.slingChainCount || 0) + 1);
+		} else {
+			object.slingChainCount = 0;
+		}
+		object.slingChainUntil = now + this.chainWindowMs;
+		// Capped-add toward the (chain-raised) cap, scaled by how centred the pass is.
+		var cap = Math.min(this.pulseCap + this.chainBonus * object.slingChainCount,
+			object.maxVelocity || c.playerMaxSpeed);
+		var along = object.velX * dirX + object.velY * dirY;
+		if (along >= cap) {
+			return;
+		}
+		var add = Math.min(this.pulse, cap - along) * centered;
+		object.velX += dirX * add;
+		object.velY += dirY * add;
+	}
+}
+
+registerBoonKind("slingshotRings", {
+	railed: false,
+	directional: true,
+	build: function (entry, mapID, roomSig) {
+		return new SlingshotRings(entry.x, entry.y, entry.angle, mapID, roomSig);
+	}
+});
+
+module.exports = { Boon, DashArrows, RechargeSpring, Slipstream, GuardHalo, SecondWindTotem, LaunchPad, BarrelCannon, SlingshotRings };

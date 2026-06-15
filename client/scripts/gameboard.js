@@ -811,6 +811,29 @@ function drawThumbnailBoonGlyph(ctx, hz) {
 		ctx.lineTo(-s * 0.4, -s * 0.1);
 		ctx.closePath();
 		ctx.fill();
+	} else if (kind === "launchPad") {
+		// A bold forward launch arrow (directional, rotate to the facing).
+		ctx.rotate((hz.angle || 0) * Math.PI / 180);
+		ctx.beginPath();
+		ctx.moveTo(-s * 0.7, -s * 0.7); ctx.lineTo(s * 0.7, 0); ctx.lineTo(-s * 0.7, s * 0.7);
+		ctx.stroke();
+	} else if (kind === "barrelCannon") {
+		// A little barrel capsule aimed along the facing (directional).
+		ctx.rotate((hz.angle || 0) * Math.PI / 180);
+		ctx.beginPath();
+		ctx.moveTo(-s * 0.7, -s * 0.5);
+		ctx.lineTo(s * 0.4, -s * 0.5);
+		ctx.lineTo(s * 0.7, 0);
+		ctx.lineTo(s * 0.4, s * 0.5);
+		ctx.lineTo(-s * 0.7, s * 0.5);
+		ctx.closePath();
+		ctx.stroke();
+	} else if (kind === "slingshotRings") {
+		// An edge-on ring (tall ellipse) perpendicular to the pass axis (directional).
+		ctx.rotate((hz.angle || 0) * Math.PI / 180);
+		ctx.beginPath();
+		ctx.ellipse(0, 0, s * 0.4, s * 0.9, 0, 0, 2 * Math.PI);
+		ctx.stroke();
 	} else {
 		// Generic boon dot.
 		ctx.beginPath();

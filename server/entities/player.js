@@ -237,6 +237,24 @@ class Player extends Circle {
 		// slow-pan the camera from the death spot to the flag.
 		this.secondWindPendingUntil = 0;
 		this.secondWindDeathCause = null;
+		// Airborne (Launch Pad / Barrel Cannon flight): the shared "aloft" player state.
+		// While airborneUntil > 0 the racer is on a committed scripted arc — frozen input,
+		// tile/collision/punch-immune (the isAloft guards) — and Player.update lerps them
+		// from airborneFrom* to airborneTo* until the timer elapses, then they land. The
+		// Barrel Cannon adds a pre-flight LOADED phase: while barreledUntil > 0 the racer is
+		// held at the barrel mouth (this.barrel) until they punch or autoFireMs elapses.
+		this.airborneUntil = 0;
+		this.airborneStartAt = 0;
+		this.airborneFromX = 0;
+		this.airborneFromY = 0;
+		this.airborneToX = 0;
+		this.airborneToY = 0;
+		this.barreledUntil = 0;
+		this.barrel = null;
+		// Slingshot Rings chain: consecutive rings hit inside chainWindowMs raise the pulse
+		// cap (slingChainCount), so a row of rings launches harder than one. Re-armed per ring.
+		this.slingChainUntil = 0;
+		this.slingChainCount = 0;
 
 		//Achievements
 		this.savior = 0;
@@ -344,6 +362,19 @@ class Player extends Circle {
 		if (this.isReviving()) {
 			if (Date.now() >= this.secondWindPendingUntil) {
 				this.finishSecondWind(currentState);
+			}
+			return;
+		}
+		// Airborne (Launch Pad) / loaded in a Barrel Cannon: the racer is on a committed
+		// scripted arc, or held in the barrel awaiting a punch/auto-fire. Frozen +
+		// tile/collision/punch-immune (the isAloft guards in handleHit/killPlayer); no
+		// normal movement/attack runs — tick the arc/barrel instead. (Mirrors the Second
+		// Wind death-beat above: position is driven absolutely, velocity stays 0.)
+		if (this.isAloft()) {
+			if (this.isBarreled()) {
+				this.tickBarrel();
+			} else {
+				this.tickAirborne();
 			}
 			return;
 		}
@@ -944,6 +975,163 @@ class Player extends Circle {
 		this.invulnUntil = Date.now() + c.boons.secondWindTotem.respawnInvulnMs;
 		messenger.messageRoomBySig(this.roomSig, "secondWind", { id: this.id, x: this.x, y: this.y });
 	}
+	// Airborne / Barrel boons: predicates for the shared "aloft" player state.
+	// isAirborne(): mid-flight on a committed arc (Launch Pad, or a fired Barrel Cannon).
+	// isBarreled(): loaded + held in a Barrel Cannon, awaiting a punch / auto-fire.
+	// isAloft(): the single umbrella predicate every untouchable-limbo gate consults
+	//   (Player.update freeze, handleHit guard, killPlayer guard, the AI steer gate, the
+	//   swap target filter) — mirrors isReviving(), so a new death/hit entry point only has
+	//   to add this one check.
+	isAirborne() {
+		return this.airborneUntil > 0;
+	}
+	isBarreled() {
+		return this.barreledUntil > 0;
+	}
+	isAloft() {
+		return this.airborneUntil > 0 || this.barreledUntil > 0;
+	}
+	// Launch Pad / Barrel Cannon: fling the racer on a committed scripted arc along
+	// angleDeg. Snapshots the launch spot, computes the (world-clamped) landing spot,
+	// freezes input + zeroes velocity, and makes the racer untouchable for the flight
+	// (the isAloft guards skip tiles/collision/punches). Player.update.tickAirborne lerps
+	// the kart along the arc; finishAirborne lands it. No mid-flight steering. Guards
+	// re-entry so the engine double-dispatch + an already-aloft kart are both no-ops.
+	launchAirborne(angleDeg, distance, durationMs) {
+		if (this.isAloft()) {
+			return;
+		}
+		var rad = (angleDeg || 0) * (Math.PI / 180);
+		var dirX = Math.cos(rad), dirY = Math.sin(rad);
+		var margin = c.playerBaseRadius || 7.5;
+		this.airborneFromX = this.x;
+		this.airborneFromY = this.y;
+		this.airborneToX = Math.max(margin, Math.min(c.worldWidth - margin, this.x + dirX * distance));
+		this.airborneToY = Math.max(margin, Math.min(c.worldHeight - margin, this.y + dirY * distance));
+		this.airborneStartAt = Date.now();
+		this.airborneUntil = this.airborneStartAt + durationMs;
+		this.enabled = false;
+		this.velX = 0;
+		this.velY = 0;
+		this.newX = this.x;
+		this.newY = this.y;
+		this.cancelCharge();
+		this.attack = false;
+		this.attackQueued = false;
+		this.ability = null;
+		this.moveForward = false;
+		this.moveBackward = false;
+		this.turnLeft = false;
+		this.turnRight = false;
+		// Untouchable for the whole flight + a touch beyond (covers the landing frame).
+		this.invulnUntil = Math.max(this.invulnUntil, this.airborneUntil + 150);
+		if (this.onFire > 0) {
+			this.onFire = 0;
+			this.fireTimer = null;
+			messenger.messageRoomBySig(this.roomSig, "onFire", { owner: this.id, value: 0 });
+		}
+		messenger.messageRoomBySig(this.roomSig, "airbornePending", {
+			id: this.id,
+			fromX: this.airborneFromX, fromY: this.airborneFromY,
+			toX: this.airborneToX, toY: this.airborneToY,
+			ms: durationMs
+		});
+	}
+	// Per tick during flight (Player.update): lerp the kart along the arc, writing position
+	// absolutely (x/y/newX/newY) with velocity held at 0 so the engine's integration is a
+	// no-op and the arc is fully deterministic. Lands when the timer elapses.
+	tickAirborne() {
+		var now = Date.now();
+		if (now >= this.airborneUntil) {
+			this.finishAirborne();
+			return;
+		}
+		var span = Math.max(1, this.airborneUntil - this.airborneStartAt);
+		var t = (now - this.airborneStartAt) / span;
+		if (t < 0) { t = 0; }
+		if (t > 1) { t = 1; }
+		var px = this.airborneFromX + (this.airborneToX - this.airborneFromX) * t;
+		var py = this.airborneFromY + (this.airborneToY - this.airborneFromY) * t;
+		this.x = px;
+		this.y = py;
+		this.newX = px;
+		this.newY = py;
+		this.velX = 0;
+		this.velY = 0;
+	}
+	// Flight over: land at the arc end and hand control back. Normal collision/tile
+	// resolution resumes next tick — so landing on lava kills you (author placement risk).
+	finishAirborne() {
+		this.airborneUntil = 0;
+		this.x = this.airborneToX;
+		this.y = this.airborneToY;
+		this.newX = this.x;
+		this.newY = this.y;
+		this.velX = 0;
+		this.velY = 0;
+		this.enabled = true;
+		messenger.messageRoomBySig(this.roomSig, "airborneLand", { id: this.id, x: this.x, y: this.y });
+	}
+	// Barrel Cannon: capture the racer into the barrel — frozen at the mouth, aiming along
+	// the barrel's facing — until they punch or autoFireMs elapses (tickBarrel fires them).
+	// Guards re-entry (already loaded/aloft) so the engine double-dispatch no-ops.
+	loadIntoBarrel(barrel) {
+		if (this.isAloft() || barrel == null) {
+			return false;
+		}
+		this.barrel = barrel;
+		this.barreledUntil = Date.now() + barrel.autoFireMs;
+		this.x = barrel.x;
+		this.y = barrel.y;
+		this.newX = this.x;
+		this.newY = this.y;
+		this.enabled = false;
+		this.velX = 0;
+		this.velY = 0;
+		this.cancelCharge();
+		this.attack = false;
+		this.attackQueued = false;
+		this.ability = null;
+		this.moveForward = false;
+		this.moveBackward = false;
+		this.turnLeft = false;
+		this.turnRight = false;
+		this.invulnUntil = Math.max(this.invulnUntil, this.barreledUntil + 150);
+		if (this.onFire > 0) {
+			this.onFire = 0;
+			this.fireTimer = null;
+			messenger.messageRoomBySig(this.roomSig, "onFire", { owner: this.id, value: 0 });
+		}
+		messenger.messageRoomBySig(this.roomSig, "barrelLoaded", {
+			id: this.id, x: barrel.x, y: barrel.y, angle: barrel.angle, ms: barrel.autoFireMs
+		});
+		return true;
+	}
+	// Per tick while loaded (Player.update): hold the kart at the barrel mouth; fire on a
+	// punch press or once the auto-fire timer elapses, handing off to the shared airborne arc.
+	tickBarrel() {
+		var barrel = this.barrel;
+		if (barrel == null) {
+			this.barreledUntil = 0;
+			this.enabled = true;
+			return;
+		}
+		this.x = barrel.x;
+		this.y = barrel.y;
+		this.newX = this.x;
+		this.newY = this.y;
+		this.velX = 0;
+		this.velY = 0;
+		var fire = this.attack || this.attackQueued || Date.now() >= this.barreledUntil;
+		if (fire) {
+			var angle = barrel.angle;
+			var distance = barrel.flightDistance;
+			var durationMs = barrel.flightDurationMs;
+			this.barreledUntil = 0;
+			this.barrel = null;
+			this.launchAirborne(angle, distance, durationMs);
+		}
+	}
 	// Lobby-only protection.
 	// isTimedInvuln(): inside the timed post-respawn grace window.
 	// isInvuln(): timed grace OR "held" — parked in the start circle keeps it alive
@@ -1249,6 +1437,12 @@ class Player extends Circle {
 		// goal, terrain) until the revive resolves. (Punch/puck/cut/explosion are also
 		// covered by the invuln set in beginSecondWind; this also skips map cells.)
 		if (this.isReviving()) {
+			return;
+		}
+		// Airborne (Launch Pad / Barrel Cannon flight) or loaded in a barrel: untouchable —
+		// ignore all map cells (lava included), hazards, punches, and the goal until the
+		// kart lands (the flight invuln also covers punch/puck/cut/explosion).
+		if (this.isAloft()) {
 			return;
 		}
 		if (object.isLobbyStart) {
@@ -1679,6 +1873,11 @@ class Player extends Circle {
 		if (packet.isReviving()) {
 			return;
 		}
+		// Airborne (Launch Pad / Barrel Cannon): can't be killed mid-flight or while loaded
+		// in a barrel — the kart is untouchable until it lands (then a real hit can land).
+		if (packet.isAloft()) {
+			return;
+		}
 		// Second Wind Totem (boon): a death does NOT end the run if the racer has an
 		// attuned, still-standing flag. Instead it starts the death-beat — the racer
 		// freezes for respawnDelayMs while the client pans to the flag, then revives there
@@ -1851,6 +2050,14 @@ class Player extends Circle {
 		this.secondWind = null;
 		this.secondWindPendingUntil = 0;
 		this.secondWindDeathCause = null;
+		// Airborne / barrel boons are per-round transient state — never bleed a mid-flight
+		// or loaded kart (or a stale slingshot chain) across a round boundary.
+		this.airborneUntil = 0;
+		this.airborneStartAt = 0;
+		this.barreledUntil = 0;
+		this.barrel = null;
+		this.slingChainUntil = 0;
+		this.slingChainCount = 0;
 		// Clear lobby-only state on every race (re)start so a lobby respawn's invuln
 		// grace / sanctuary flag / pending-respawn can never bleed into a real round.
 		this.invulnUntil = 0;

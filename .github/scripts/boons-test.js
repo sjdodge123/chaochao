@@ -610,6 +610,188 @@ try {
         check(totem.safe === true && totem.netState === 100,
             'updateHazards keeps a solid-ground flag flagged safe + standing (netState 100)');
     }
+
+    // ----------------------------------------------------------------------
+    console.log('\n[H] Launch Pad flings a racer on a committed airborne arc (tile/lava-immune aloft)');
+    {
+        const PAD = config.boons.launchPad; // id 955
+        const kind = hazardKindById(PAD.id);
+        check(kind != null && kind.helpful === true, 'launchPad resolves through the registry + is helpful (id ' + PAD.id + ')');
+        check(kind != null && kind.directional === true && kind.railed === false, 'launchPad is directional + not railed');
+
+        const map = buildMap('launch', [{ id: PAD.id, x: PAD_X, y: ROWS[2], angle: 0 }], [2]);
+        const { room, bot } = bootRoom('boon-launch', map, RACER);
+        const pad = room.game.gameBoard.hazardList[Object.keys(room.game.gameBoard.hazardList)[0]];
+        check(pad != null && pad.id === PAD.id && pad.helpful === true,
+            'the pad spawned from the map entry into hazardList (helpful=true)');
+        // Ships on the wire as [ownerId, id, x, y, angle].
+        const packet = JSON.parse(compressor.newHazards(room.game.gameBoard.hazardList));
+        check(packet.length === 1 && packet[0][1] === PAD.id && packet[0][2] === PAD_X &&
+            packet[0][3] === ROWS[2] && packet[0][4] === 0,
+            'compressor.newHazards ships the pad as [ownerId, ' + PAD.id + ', x, y, angle]');
+
+        bot.reset(config.stateMap.racing); bot.currentState = config.stateMap.racing;
+        bot.x = bot.newX = PAD_X; bot.y = bot.newY = ROWS[2]; bot.velX = 90; bot.velY = 0;
+        const fromX = bot.x, fromY = bot.y;
+        let since = events.length;
+        pad.handleHit(bot);
+        check(bot.isAirborne() && bot.isAloft() && bot.enabled === false,
+            'driving over the pad flings the racer airborne (frozen + aloft)');
+        check(Math.abs(bot.airborneToX - (fromX + PAD.distance)) < 0.001 && Math.abs(bot.airborneToY - fromY) < 0.001,
+            'the landing spot is distance px along the +x facing');
+        check(bot.velX === 0 && bot.velY === 0, 'launch zeroes velocity (no mid-flight steering)');
+        check(emittedSince('airbornePending', since), 'an airbornePending event fired for the client hop/camera');
+        // Double-dispatch + already-aloft are no-ops (the landing spot doesn't move).
+        const toX0 = bot.airborneToX;
+        pad.handleHit(bot);
+        check(bot.airborneToX === toX0, 'a second hit while already aloft is a no-op (no re-launch)');
+
+        // Mid-flight: lava/punches can't kill (isAloft guard) and the kart lerps along the arc.
+        bot.killSelf('lava');
+        check(bot.alive === true && bot.isAirborne(), 'lava cannot kill a racer mid-flight (immune aloft)');
+        clock += Math.floor(PAD.durationMs / 2);
+        bot.update(config.stateMap.racing, DT);
+        check(bot.isAirborne() && bot.x > fromX && bot.x < bot.airborneToX,
+            'mid-arc the kart has lerped part-way to the landing spot');
+
+        // Land: past the duration the next update finishes the flight at the arc end.
+        clock += PAD.durationMs;
+        since = events.length;
+        bot.update(config.stateMap.racing, DT);
+        check(!bot.isAloft() && bot.enabled === true, 'after the duration the racer lands + regains control');
+        check(Math.abs(bot.x - toX0) < 0.001 && bot.velX === 0, 'landed exactly at the arc end with momentum zeroed');
+        check(emittedSince('airborneLand', since), 'an airborneLand event fired on touchdown');
+
+        // Racers only: a non-player and a zombie are ignored.
+        const proj = { isProjectile: true };
+        pad.handleHit(proj);
+        check(proj.airborneUntil == null, 'a non-player object is not launched');
+        const zombie = { isPlayer: true, isZombie: true };
+        pad.handleHit(zombie);
+        check(zombie.airborneUntil == null, 'a zombie is not launched (boons skip the infection side)');
+    }
+
+    // ----------------------------------------------------------------------
+    console.log('\n[I] Barrel Cannon loads a racer then fires a longer arc on punch / auto-fire');
+    {
+        const BARREL = config.boons.barrelCannon; // id 956
+        const kind = hazardKindById(BARREL.id);
+        check(kind != null && kind.helpful === true, 'barrelCannon resolves through the registry + is helpful (id ' + BARREL.id + ')');
+        check(kind != null && kind.directional === true && kind.railed === false, 'barrelCannon is directional + not railed');
+        check(BARREL.flightDistance > config.boons.launchPad.distance,
+            'the barrel fires a LONGER arc than the Launch Pad (' + BARREL.flightDistance + ' > ' + config.boons.launchPad.distance + ')');
+
+        const map = buildMap('barrel', [{ id: BARREL.id, x: PAD_X, y: ROWS[2], angle: 0 }], [2]);
+        const { room, bot } = bootRoom('boon-barrel', map, RACER);
+        const barrel = room.game.gameBoard.hazardList[Object.keys(room.game.gameBoard.hazardList)[0]];
+        check(barrel != null && barrel.id === BARREL.id && barrel.helpful === true,
+            'the barrel spawned from the map entry into hazardList (helpful=true)');
+        const packet = JSON.parse(compressor.newHazards(room.game.gameBoard.hazardList));
+        check(packet.length === 1 && packet[0][1] === BARREL.id && packet[0][4] === 0,
+            'compressor.newHazards ships the barrel as [ownerId, ' + BARREL.id + ', x, y, angle]');
+
+        // LOAD: driving in captures the racer at the mouth (frozen, not yet airborne).
+        bot.reset(config.stateMap.racing); bot.currentState = config.stateMap.racing;
+        bot.x = bot.newX = PAD_X - 40; bot.y = bot.newY = ROWS[2]; bot.velX = 120; bot.velY = 30;
+        let since = events.length;
+        barrel.handleHit(bot);
+        check(bot.isBarreled() && bot.isAloft() && !bot.isAirborne() && bot.enabled === false,
+            'driving in LOADS the racer (held in the barrel, not yet airborne)');
+        check(bot.x === PAD_X && bot.y === ROWS[2] && bot.velX === 0,
+            'the loaded racer is pinned at the barrel mouth, momentum zeroed');
+        check(emittedSince('barrelLoaded', since), 'a barrelLoaded event fired for the client');
+        // Held: an update before any punch / auto-fire keeps the racer loaded.
+        bot.update(config.stateMap.racing, DT);
+        check(bot.isBarreled(), 'with no punch + before auto-fire the racer stays loaded');
+
+        // FIRE on punch press: the next update fires the longer committed arc.
+        const fromX = bot.x;
+        bot.attack = true;
+        since = events.length;
+        bot.update(config.stateMap.racing, DT);
+        check(!bot.isBarreled() && bot.isAirborne(), 'pressing punch fires the racer out of the barrel (now airborne)');
+        check(Math.abs(bot.airborneToX - (fromX + BARREL.flightDistance)) < 0.001,
+            'the fired arc lands flightDistance px along the barrel facing');
+        check(emittedSince('airbornePending', since), 'firing emits airbornePending (the flight)');
+        // Land it out so the bot is clean.
+        clock += BARREL.flightDurationMs + 10; bot.update(config.stateMap.racing, DT);
+        check(!bot.isAloft(), 'the fired racer lands');
+
+        // FIRE on auto-timeout: load again, never punch, advance past autoFireMs.
+        bot.reset(config.stateMap.racing); bot.currentState = config.stateMap.racing;
+        bot.x = bot.newX = PAD_X - 40; bot.y = bot.newY = ROWS[2];
+        barrel.handleHit(bot);
+        check(bot.isBarreled(), 'loaded again for the auto-fire case');
+        clock += BARREL.autoFireMs + 20;
+        bot.update(config.stateMap.racing, DT);
+        check(!bot.isBarreled() && bot.isAirborne(), 'after autoFireMs the barrel auto-fires (no punch needed)');
+        clock += BARREL.flightDurationMs + 10; bot.update(config.stateMap.racing, DT);
+
+        // Racers only.
+        const zombie = { isPlayer: true, isZombie: true };
+        barrel.handleHit(zombie);
+        check(zombie.barreledUntil == null, 'a zombie is not loaded (boons skip the infection side)');
+    }
+
+    // ----------------------------------------------------------------------
+    console.log('\n[J] Slingshot Rings pulse along the axis, scaled by centeredness + chained');
+    {
+        const RING = config.boons.slingshotRings; // id 957
+        const kind = hazardKindById(RING.id);
+        check(kind != null && kind.helpful === true, 'slingshotRings resolves through the registry + is helpful (id ' + RING.id + ')');
+        check(kind != null && kind.directional === true && kind.railed === false, 'slingshotRings is directional + not railed');
+
+        const reach = RING.radius + config.playerBaseRadius;
+        // A dead-centre pass on a +x ring gets the full pulse along +x.
+        const r1 = kind.build({ x: 300, y: 200, angle: 0 }, 'ring-a', 'sig-j');
+        const centered = { id: 'kc', isPlayer: true, x: 300, y: 200, velX: 0, velY: 0, maxVelocity: config.playerMaxSpeed };
+        r1.handleHit(centered);
+        check(Math.abs(centered.velX - RING.pulse) < 0.001 && Math.abs(centered.velY) < 0.001,
+            'a dead-centre pass gets the full pulse along +x (+' + RING.pulse + ')');
+
+        // A glancing pass near the rim barely boosts.
+        const r2 = kind.build({ x: 300, y: 200, angle: 0 }, 'ring-b', 'sig-j');
+        const glancing = { id: 'kg', isPlayer: true, x: 300, y: 200 + 0.9 * reach, velX: 0, velY: 0, maxVelocity: config.playerMaxSpeed };
+        r2.handleHit(glancing);
+        check(glancing.velX > 0 && glancing.velX < centered.velX * 0.4,
+            'a glancing rim pass boosts much less than a centred one (velX=' + glancing.velX.toFixed(1) + ')');
+
+        // Engine double-dispatch guard: a repeat hit on the same kart in one tick is a no-op.
+        const v0 = centered.velX;
+        r1.handleHit(centered);
+        check(Math.abs(centered.velX - v0) < 0.001, 'a repeat hit on the same kart in one tick does NOT pulse again');
+
+        // Chaining raises the cap: a kart already at a single ring's cap can't be pushed by
+        // one ring, but a SECOND ring in the chain window lifts the cap and pushes it past.
+        const atCap = { id: 'kk', isPlayer: true, x: 300, y: 200, velX: RING.pulseCap, velY: 0, maxVelocity: config.playerMaxSpeed };
+        const ringA = kind.build({ x: 300, y: 200, angle: 0 }, 'ring-c', 'sig-j');
+        ringA.handleHit(atCap);
+        check(Math.abs(atCap.velX - RING.pulseCap) < 0.001, 'at a single ring cap, that ring adds nothing (no overshoot)');
+        check(atCap.slingChainUntil > clock, 'the first ring armed the chain window');
+        clock += 100; // a few ticks later, still inside chainWindowMs
+        const ringB = kind.build({ x: 300, y: 200, angle: 0 }, 'ring-d', 'sig-j');
+        ringB.handleHit(atCap);
+        check(atCap.slingChainCount >= 1 && atCap.velX > RING.pulseCap,
+            'a chained second ring raised the cap and pushed past it (velX=' + atCap.velX.toFixed(1) + ' > ' + RING.pulseCap + ')');
+
+        // Racers only: a non-player, a puck, and a zombie are ignored.
+        const proj = { id: 'pj', isProjectile: true, x: 300, y: 200, velX: 0, velY: 0 };
+        r1.handleHit(proj);
+        check(proj.velX === 0, 'a non-player object is not pulsed');
+        const puck = { id: 'pk', isPuck: true, x: 300, y: 200, velX: 0, velY: 0, maxVelocity: config.playerMaxSpeed };
+        r1.handleHit(puck);
+        check(puck.velX === 0, 'a puck is NOT pulsed (projectile physics would not carry it)');
+        const zring = { id: 'zj', isPlayer: true, isZombie: true, x: 300, y: 200, velX: 0, velY: 0, maxVelocity: config.playerMaxSpeed };
+        r1.handleHit(zring);
+        check(zring.velX === 0, 'a zombie is not pulsed (boons skip the infection side)');
+
+        // Wire: ships as [ownerId, id, x, y, angle].
+        const map = buildMap('rings', [{ id: RING.id, x: PAD_X, y: ROWS[2], angle: 0 }], [2]);
+        const { room } = bootRoom('boon-rings', map, RACER);
+        const packet = JSON.parse(compressor.newHazards(room.game.gameBoard.hazardList));
+        check(packet.length === 1 && packet[0][1] === RING.id && packet[0][4] === 0,
+            'compressor.newHazards ships the ring as [ownerId, ' + RING.id + ', x, y, angle]');
+    }
 } finally {
     Date.now = realNow;
     Math.random = realRandom;
