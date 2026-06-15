@@ -294,8 +294,19 @@ function findPathToNearestGoal(map, point, options) {
     // The locked-door AI uses this to ask "would the goal be reachable if the doors were
     // open?" — and reads which door cells the resulting route crosses to learn WHICH doors
     // it must unlock (the keys to fetch). It never affects live racing routes.
+    // options.openDoorIds: a narrower form — treat ONLY these door cells (by voronoiId) as
+    // open, the rest stay walls. The shortcut AI uses it to cost the route a carrier of ONE
+    // key would actually get (its single door open, others still shut) — passableDoors would
+    // over-open every door and overstate the saving on a multi-door map.
     var DOOR = (c.tileMap.door != null) ? c.tileMap.door.id : -999;
     var allowDoors = options.passableDoors === true;
+    var openDoorSet = null;
+    if (options.openDoorIds != null) {
+        openDoorSet = {};
+        if (options.openDoorIds.forEach) { options.openDoorIds.forEach(function (id) { openDoorSet[id] = true; }); }
+        else if (Array.isArray(options.openDoorIds)) { for (var od = 0; od < options.openDoorIds.length; od++) { openDoorSet[options.openDoorIds[od]] = true; } }
+        else { for (var ok in options.openDoorIds) { if (options.openDoorIds[ok]) { openDoorSet[ok] = true; } } }
+    }
 
     var blocked = null;
     if (options.blocked) {
@@ -422,8 +433,10 @@ function findPathToNearestGoal(map, point, options) {
             }
             // Lava and empty holes are impassable; so are caller-blocked cells. The
             // goal is always enterable. The start cell is allowed even if it sits on
-            // lava.
-            if ((cells[v].id === LAVA || cells[v].id === EMPTY || (cells[v].id === DOOR && !allowDoors)) && cells[v].id !== GOAL) {
+            // lava. A door cell is a wall unless passableDoors opens all of them, or this
+            // specific door is in openDoorIds.
+            var doorOpen = allowDoors || (openDoorSet != null && openDoorSet[cells[v].site.voronoiId]);
+            if ((cells[v].id === LAVA || cells[v].id === EMPTY || (cells[v].id === DOOR && !doorOpen)) && cells[v].id !== GOAL) {
                 continue;
             }
             if (blocked && blocked[cells[v].site.voronoiId]) {
