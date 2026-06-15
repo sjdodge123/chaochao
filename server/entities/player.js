@@ -1132,9 +1132,11 @@ class Player extends Circle {
 		}
 		var now = Date.now();
 		var dt = this.dt || (c.serverTickSpeed / 1000);
-		// Auto-spin the barrel (wrapped to 0..360 so the streamed angle stays tidy).
-		this.barrelAimAngle = (this.barrelAimAngle + (barrel.sweepSpeed || 0) * dt) % 360;
-		this.angle = this.barrelAimAngle; // stream the spinning aim
+		// Auto-spin the aim. Kept monotonic (no 0..360 wrap) so the BARREL's streamed angle
+		// eases smoothly on the client instead of snapping backwards through a wrap.
+		this.barrelAimAngle = this.barrelAimAngle + (barrel.sweepSpeed || 0) * dt;
+		this.angle = this.barrelAimAngle;  // (kart is hidden while loaded; harmless)
+		barrel.angle = this.barrelAimAngle; // the barrel graphic spins to the aim (streamAngle)
 		this.x = barrel.x;
 		this.y = barrel.y;
 		this.newX = this.x;

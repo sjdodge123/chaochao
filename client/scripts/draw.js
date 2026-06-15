@@ -6210,10 +6210,12 @@ function checkDrawPlayer(player, dt) {
         drawAirborneKart(player, dt);
         return;
     }
-    // Loaded in a Barrel Cannon: a burning fuse counting down to launch + an aim arrow in
-    // the kart's current facing (turn to aim, punch to fire), drawn under the kart.
-    if (player.barrelLoaded != null && camera.inBounds(player)) {
-        drawBarrelLoadedFx(player);
+    // Loaded in a Barrel Cannon: the racer is INSIDE the barrel (hidden), which spins on
+    // its own to show the aim (the barrel hazard streams its angle — see boons.js). We only
+    // draw the burning fuse counting down to launch; the kart is hidden until it fires.
+    if (player.barrelLoaded != null) {
+        if (camera.inBounds(player)) { drawBarrelLoadedFx(player); }
+        return;
     }
     if (camera.inBounds(player)) {
         drawPlayer(player, dt);
@@ -6248,9 +6250,9 @@ function drawAirborneKart(player, dt) {
     drawPlayer(player, dt);
     player.y = savedY;
 }
-// Barrel-loaded telegraph: a burning fuse that counts down to the auto-launch + an aim
-// arrow in the kart's CURRENT facing (the live aim rides player.angle, so the arrow swings
-// as the player turns). Press punch to fire now, or the fuse fires you when it burns out.
+// Barrel-loaded telegraph: just a burning fuse counting down to the auto-launch (the barrel
+// itself spins to show the aim — see boons.js streamAngle; the racer is hidden inside it).
+// Press punch to fire now, or the fuse fires you when it burns out.
 function drawBarrelLoadedFx(player) {
     var bl = player.barrelLoaded;
     var now = Date.now();
@@ -6258,32 +6260,10 @@ function drawBarrelLoadedFx(player) {
     var t = Math.max(0, Math.min(1, (now - bl.startAt) / Math.max(1, bl.ms))); // fuse burn 0..1
     var cx = player.x + camera.getCameraX();
     var cy = player.y + camera.getCameraY();
-    var cfg = config.boons.barrelCannon;
-    var color = boonOnWater(player.x, player.y) ? cfg.colorWater : cfg.color;
-    var rad = (typeof player.angle === "number" ? player.angle : 0) * (Math.PI / 180);
     var pulse = 0.5 + 0.5 * Math.sin(now / 150);
     gameContext.save();
     gameContext.lineCap = "round";
     gameContext.lineJoin = "round";
-    // Aim arrow in the current facing (dashed so it reads as a "this way" guide).
-    var len = 30 + 6 * pulse;
-    var bx = cx + Math.cos(rad) * 14, by = cy + Math.sin(rad) * 14;
-    var hx = cx + Math.cos(rad) * len, hy = cy + Math.sin(rad) * len;
-    gameContext.globalAlpha = 0.85;
-    gameContext.setLineDash([5, 4]);
-    gameContext.beginPath();
-    gameContext.moveTo(bx, by);
-    gameContext.lineTo(hx, hy);
-    gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 6; gameContext.stroke();
-    gameContext.strokeStyle = color; gameContext.lineWidth = 3; gameContext.stroke();
-    gameContext.setLineDash([]);
-    var ah = 8;
-    gameContext.beginPath();
-    gameContext.moveTo(hx - Math.cos(rad - 0.5) * ah, hy - Math.sin(rad - 0.5) * ah);
-    gameContext.lineTo(hx, hy);
-    gameContext.lineTo(hx - Math.cos(rad + 0.5) * ah, hy - Math.sin(rad + 0.5) * ah);
-    gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 6; gameContext.stroke();
-    gameContext.strokeStyle = color; gameContext.lineWidth = 3; gameContext.stroke();
     // Burning fuse: a wick curling up from the barrel that shortens as it burns, with a
     // bright spark at the burning tip. Flickers red + faster near the end (imminent launch).
     var imminent = t > 0.72;
