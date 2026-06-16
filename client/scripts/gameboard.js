@@ -902,52 +902,38 @@ function drawThumbnailBoonGlyph(ctx, hz) {
 	ctx.restore();
 	return true;
 }
-// Draw a hazard's thumbnail glyph (next-map preview) at the hazard's spot — a distinct,
-// recognizable mark per kind so the 9 non-bumper hazards don't all read as an identical
-// red-ringed bumper dot. Honors per-instance authored geometry (vortex radius, rail length,
-// directional angle, wall/beam span) the way the boon path does, so a resized/rotated hazard
-// shows its real footprint. Bumper (900) + movingBumper (901) are NOT handled here — they keep
-// their existing dedicated draw in the loop. Returns true if `hz` was one of the 9 kinds (so
-// the caller skips the generic bumper draw), false otherwise. Mirrors the in-game drawer
-// language (draw.js buildHazardDrawers) so the preview can't drift from the game.
-function drawThumbnailHazardGlyph(ctx, hz) {
-	if (config.hazards == null || hz == null) { return false; }
-	var H = config.hazards;
-	// Resolve which of the 9 kinds this is (skip bumper/movingBumper — handled by the caller).
-	var cfg = null, kind = null;
-	var kinds = ["bumperWall", "rotor", "geyser", "mine", "vortexWell", "laserGate", "crusher", "sentryTurret", "magpieDrone"];
-	for (var ki = 0; ki < kinds.length; ki++) {
-		var k = kinds[ki];
-		if (H[k] != null && H[k].id === hz.id) { cfg = H[k]; kind = k; break; }
-	}
-	if (cfg == null) { return false; }
-	// Authored value if finite+positive, else the config default.
-	function authored(field, dflt) {
-		var v = hz[field];
-		return (typeof v === "number" && isFinite(v) && v > 0) ? v : dflt;
-	}
-	var ang = (hz.angle || 0) * Math.PI / 180;
-	ctx.save();
-	ctx.translate(hz.x, hz.y);
-	ctx.lineCap = "round";
-	ctx.lineJoin = "round";
-	var col = cfg.color || "#F07B36";
-	if (kind === "bumperWall") {
+// The authored per-instance value when finite+positive, else the config default. Pure
+// (takes hz explicitly) so the per-kind glyph drawers below can share it.
+function thumbAuthored(hz, field, dflt) {
+	var v = hz[field];
+	return (typeof v === "number" && isFinite(v) && v > 0) ? v : dflt;
+}
+// Per-kind thumbnail glyph drawers (a dispatch table, parallel to draw.js
+// buildHazardDrawers and create.js EDITOR_HAZARD_KINDS.paint). Each is called with the
+// canvas already translated to the hazard's (x,y) and lineCap/lineJoin set; it draws a
+// recognizable mark honoring authored geometry (radius / rail length / span / angle), so
+// the 9 non-bumper hazards don't all read as an identical red-ringed bumper dot. Keep the
+// three encodings in sync when a kind's look changes. Bumper + movingBumper are
+// intentionally absent — they keep their dedicated draw in buildMapThumbnailCanvas.
+var THUMB_HAZARD_GLYPHS = {
+	bumperWall: function (ctx, cfg, hz) {
 		// Orange wall band along the facing (honors authored span).
-		var span = authored("width", cfg.width || 120);
+		var span = thumbAuthored(hz, "width", cfg.width || 120);
 		var thick = Math.max(8, cfg.height || 10);
-		ctx.rotate(ang);
-		ctx.fillStyle = col;
+		ctx.rotate((hz.angle || 0) * Math.PI / 180);
+		ctx.fillStyle = cfg.color || "#F07B36";
 		ctx.strokeStyle = "rgba(10,40,55,0.6)";
 		ctx.lineWidth = 2;
 		ctx.beginPath();
 		ctx.rect(-span / 2, -thick / 2, span, thick);
 		ctx.fill();
 		ctx.stroke();
-	} else if (kind === "rotor") {
+	},
+	rotor: function (ctx, cfg, hz) {
 		// Hub + sweeping arms out to the orbit radius.
-		var orbit = authored("orbitRadius", cfg.orbitRadius || 70);
-		ctx.rotate(ang);
+		var col = cfg.color || "#F07B36";
+		var orbit = thumbAuthored(hz, "orbitRadius", cfg.orbitRadius || 70);
+		ctx.rotate((hz.angle || 0) * Math.PI / 180);
 		ctx.strokeStyle = col;
 		ctx.lineWidth = Math.max(4, cfg.armWidth || 6);
 		for (var a = 0; a < 3; a++) {
@@ -958,8 +944,10 @@ function drawThumbnailHazardGlyph(ctx, hz) {
 			ctx.restore();
 		}
 		ctx.beginPath(); ctx.arc(0, 0, (cfg.radius || 10) + 4, 0, 2 * Math.PI); ctx.fillStyle = "#2a2f33"; ctx.fill();
-	} else if (kind === "geyser") {
+	},
+	geyser: function (ctx, cfg, hz) {
 		// Eruption: an attack-radius ring + a core + upward spray ticks.
+		var col = cfg.color || "#F07B36";
 		var er = cfg.attackRadius || 40;
 		ctx.strokeStyle = col;
 		ctx.lineWidth = 3;
@@ -971,8 +959,10 @@ function drawThumbnailHazardGlyph(ctx, hz) {
 		for (var sp = -1; sp <= 1; sp++) {
 			ctx.beginPath(); ctx.moveTo(sp * er * 0.4, -er * 0.2); ctx.lineTo(sp * er * 0.4, -er * 0.7); ctx.stroke();
 		}
-	} else if (kind === "mine") {
+	},
+	mine: function (ctx, cfg, hz) {
 		// Spiked sea-mine: faint blast ring, body disc, radiating spikes.
+		var col = cfg.color || "#F07B36";
 		var blast = cfg.attackRadius || 95, body = cfg.bodyRadius || 11;
 		ctx.strokeStyle = "rgba(229,57,43,0.5)";
 		ctx.lineWidth = 2;
@@ -988,9 +978,11 @@ function drawThumbnailHazardGlyph(ctx, hz) {
 		}
 		ctx.fillStyle = col;
 		ctx.beginPath(); ctx.arc(0, 0, body, 0, 2 * Math.PI); ctx.fill();
-	} else if (kind === "vortexWell") {
+	},
+	vortexWell: function (ctx, cfg, hz) {
 		// Purple inward swirl drawn at the AUTHORED radius (the key per-instance fix).
-		var vr = authored("radius", cfg.radius || 150);
+		var col = cfg.color || "#F07B36";
+		var vr = thumbAuthored(hz, "radius", cfg.radius || 150);
 		ctx.globalAlpha = 0.85;
 		ctx.strokeStyle = col;
 		ctx.lineWidth = 3;
@@ -1008,20 +1000,24 @@ function drawThumbnailHazardGlyph(ctx, hz) {
 		ctx.globalAlpha = 1;
 		ctx.fillStyle = col;
 		ctx.beginPath(); ctx.arc(0, 0, cfg.coreRadius || 18, 0, 2 * Math.PI); ctx.fill();
-	} else if (kind === "laserGate") {
+	},
+	laserGate: function (ctx, cfg, hz) {
 		// Cyan beam between two pylons along the facing (honors authored span).
-		var beam = authored("width", cfg.width || 150);
-		ctx.rotate(ang);
+		var col = cfg.color || "#F07B36";
+		var beam = thumbAuthored(hz, "width", cfg.width || 150);
+		ctx.rotate((hz.angle || 0) * Math.PI / 180);
 		ctx.strokeStyle = col;
 		ctx.lineWidth = Math.max(4, cfg.height || 9);
 		ctx.beginPath(); ctx.moveTo(-beam / 2, 0); ctx.lineTo(beam / 2, 0); ctx.stroke();
 		ctx.fillStyle = "#2a2f33";
 		ctx.beginPath(); ctx.arc(-beam / 2, 0, cfg.radius || 14, 0, 2 * Math.PI); ctx.fill();
 		ctx.beginPath(); ctx.arc(beam / 2, 0, cfg.radius || 14, 0, 2 * Math.PI); ctx.fill();
-	} else if (kind === "crusher") {
+	},
+	crusher: function (ctx, cfg, hz) {
 		// Grey rail (authored length) + a heavy block parked at the rail anchor.
-		var rl = authored("railLength", cfg.railLength || 150);
-		ctx.rotate(ang);
+		var col = cfg.color || "#F07B36";
+		var rl = thumbAuthored(hz, "railLength", cfg.railLength || 150);
+		ctx.rotate((hz.angle || 0) * Math.PI / 180);
 		ctx.strokeStyle = "#5f6368";
 		ctx.lineWidth = 4;
 		ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(rl, 0); ctx.stroke();
@@ -1030,10 +1026,12 @@ function drawThumbnailHazardGlyph(ctx, hz) {
 		ctx.strokeStyle = "rgba(10,40,55,0.6)";
 		ctx.lineWidth = 2;
 		ctx.beginPath(); ctx.rect(-bw / 2, -bh / 2, bw, bh); ctx.fill(); ctx.stroke();
-	} else if (kind === "sentryTurret") {
+	},
+	sentryTurret: function (ctx, cfg, hz) {
 		// Red base + a barrel along the facing + a faint firing cone.
+		var col = cfg.color || "#F07B36";
 		var range = cfg.range || 300, arc = (cfg.arc || 110) * Math.PI / 180, bl = cfg.barrelLength || 28;
-		ctx.rotate(ang);
+		ctx.rotate((hz.angle || 0) * Math.PI / 180);
 		ctx.fillStyle = "rgba(255,92,92,0.16)";
 		ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, range, -arc / 2, arc / 2); ctx.closePath(); ctx.fill();
 		ctx.strokeStyle = col;
@@ -1041,10 +1039,12 @@ function drawThumbnailHazardGlyph(ctx, hz) {
 		ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(bl, 0); ctx.stroke();
 		ctx.fillStyle = col;
 		ctx.beginPath(); ctx.arc(0, 0, cfg.radius || 18, 0, 2 * Math.PI); ctx.fill();
-	} else if (kind === "magpieDrone") {
+	},
+	magpieDrone: function (ctx, cfg, hz) {
 		// Blue rail (authored length) + a little bird body at the anchor.
-		var ml = authored("railLength", cfg.railLength || 170);
-		ctx.rotate(ang);
+		var col = cfg.color || "#F07B36";
+		var ml = thumbAuthored(hz, "railLength", cfg.railLength || 170);
+		ctx.rotate((hz.angle || 0) * Math.PI / 180);
 		ctx.strokeStyle = "rgba(91,108,196,0.7)";
 		ctx.lineWidth = 3;
 		ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(ml, 0); ctx.stroke();
@@ -1054,6 +1054,30 @@ function drawThumbnailHazardGlyph(ctx, hz) {
 		ctx.moveTo(br2, 0); ctx.lineTo(-br2 * 0.5, -br2 * 0.7); ctx.lineTo(-br2 * 0.2, 0); ctx.lineTo(-br2 * 0.5, br2 * 0.7);
 		ctx.closePath(); ctx.fill();
 	}
+};
+// Lazy hazard-id -> registry-key cache (built once from config, no per-call allocation).
+var _thumbHazardKindById = null;
+function thumbHazardKindKey(id) {
+	if (_thumbHazardKindById == null) {
+		_thumbHazardKindById = {};
+		for (var key in THUMB_HAZARD_GLYPHS) {
+			if (config.hazards[key] != null) { _thumbHazardKindById[config.hazards[key].id] = key; }
+		}
+	}
+	return Object.prototype.hasOwnProperty.call(_thumbHazardKindById, id) ? _thumbHazardKindById[id] : null;
+}
+// Draw a hazard's thumbnail glyph (next-map preview) at the hazard's spot. Dispatches
+// through THUMB_HAZARD_GLYPHS; returns true if `hz` was one of those kinds (so the caller
+// skips the generic bumper draw), false otherwise (bumper/movingBumper fall through).
+function drawThumbnailHazardGlyph(ctx, hz) {
+	if (config.hazards == null || hz == null) { return false; }
+	var kind = thumbHazardKindKey(hz.id);
+	if (kind == null) { return false; }
+	ctx.save();
+	ctx.translate(hz.x, hz.y);
+	ctx.lineCap = "round";
+	ctx.lineJoin = "round";
+	THUMB_HAZARD_GLYPHS[kind](ctx, config.hazards[kind], hz);
 	ctx.restore();
 	return true;
 }

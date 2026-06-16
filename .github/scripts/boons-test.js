@@ -1165,6 +1165,13 @@ try {
         // not a setback — so it earns no deduction.
         const fwd = mapClassifier.classify(lmap([{ id: PAD.id, x: TC[3], y: TR[1], angle: 0 }]), config);
         check(!hasLaunchTrap(fwd), 'a launch pad facing TOWARD the goal is NOT penalised (score ' + fwd.balanceScore + ')');
+        // LETHAL: a pad on the line flinging racers PERPENDICULAR into the void (no drivable
+        // landing) is the worst case — it must launchtrap-deduct AND hard-fail outright, not be
+        // skipped as a "crossing" (the inherited zip heuristic would have silently exempted it).
+        const lethal = mapClassifier.classify(lmap([{ id: PAD.id, x: TC[3], y: TR[1], angle: 90 }]), config);
+        check(hasLaunchTrap(lethal), 'a launch pad flinging racers off the line into the void is penalised (launchtrap)');
+        check((lethal.hardFail || []).some(h => /instant death/.test(h)), 'a lethal launch pad HARD-FAILS the map (instant death)');
+        check(lethal.tier !== 'featured', 'a lethal launch pad cannot be featured (tier ' + lethal.tier + ')');
     }
 
     // ----------------------------------------------------------------------

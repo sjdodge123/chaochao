@@ -139,3 +139,13 @@ All changes verified against the full suite: `unit-tests, boons-test, validate-c
 ## Open question for the operator
 
 The user asked to confirm `warptrap`+`ziptrap` exist (they do) and ask whether any *other* kind can trap a racer. **Yes — three more:** launchPad/barrelCannon/slingshotRings (aimed flings, fix #2), vortexWell (pull, fix #4), magpieDrone (steal, fix #4). Decision needed: do we want trap-severity scoring for the aimed launchers (fix #2 — recommended), and optionally vortex/magpie (fix #4)?
+
+## Code-review hardening (post-implementation, high-effort review)
+
+A multi-angle review of the implemented fixes surfaced one real correctness gap plus cleanup/altitude items; all were fixed:
+
+- **Correctness — lethal launch-pad landing was silently exempt.** `launcherTrapSeverity` inherited zip's `Infinity ⇒ not-a-trap` heuristic, but a launch pad's landing isn't validated drivable (warp/zip endpoints are). So a pad flinging a line-driving racer into lava / off-world / a goal-less pocket — the *most* punishing placement, an unavoidable death — earned **zero** deduction and could pass the featured gate. Fixed: a non-finite landing on an on-line pad is now reported as `lethal` and **hard-fails** the map outright (max deduction). New `boons-test` [O2] assertions lock it in.
+- **Reuse + efficiency — `racingLineContext`.** The warp/zip/launch severity passes each rebuilt the same idToCell / driveTime / racing-line / `distToSegSq` / `onRacingLine` machinery (~80 lines ×3) and re-ran the edge-sample pathfinding 3× per `classify()`. Extracted a module-level `distToSegSq` + `racingLineContext(map, config, pathOpts)` factory; `classify()` memoizes by options-key so zip+launch share one no-shortcut context (built once) and warp keeps its own — built lazily, still O(0) on trap-free maps.
+- **Altitude — thumbnail dispatch table.** `drawThumbnailHazardGlyph`'s 9-branch if/else became a module-level `THUMB_HAZARD_GLYPHS` registry (parallel to draw.js `buildHazardDrawers` / create.js `EDITOR_HAZARD_KINDS.paint`), with a lazy id→kind cache replacing the per-hazard array allocation + linear scan.
+- **Altitude — `MINE_SPENT` constant.** Exported `MINE_ARMED/FUSE/SPENT` from `entities/hazards.js`; `aiController` now references `MINE_SPENT` instead of the magic literal `2`.
+- **Altitude — `sizable` kind flag.** `validateMap`'s vortex-radius check now reads a `hazardKind.sizable` flag (set on vortexWell + lilyPad) instead of pinning vortexWell's id — a new resizable kind is covered automatically.

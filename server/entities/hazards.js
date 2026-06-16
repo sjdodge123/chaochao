@@ -1083,6 +1083,7 @@ registerHazardKind("mine", {
 registerHazardKind("vortexWell", {
 	railed: false,
 	directional: false,
+	sizable: true, // carries an authored per-instance radius — validateMap rejects a non-finite one
 	build: function (entry, mapID, roomSig) {
 		return new VortexWell(entry.x, entry.y, vortexWellRadius(entry), c.hazards.vortexWell.color, mapID, roomSig);
 	}
@@ -1201,7 +1202,7 @@ class Thumper extends Hazard {
 }
 
 
-module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, Mine, VortexWell, vortexWellRadius, LaserGate, Crusher, Turret, MagpieDrone, magpieRailLength, WarpPad, linkWarpPads, Antlion, Thumper, HAZARD_KINDS, BOON_KINDS, hazardKindById, registerHazardKind, registerBoonKind };
+module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, Mine, VortexWell, vortexWellRadius, LaserGate, Crusher, Turret, MagpieDrone, magpieRailLength, WarpPad, linkWarpPads, Antlion, Thumper, HAZARD_KINDS, BOON_KINDS, hazardKindById, registerHazardKind, registerBoonKind, MINE_ARMED, MINE_FUSE, MINE_SPENT };
 
 // Load the boon kinds AFTER module.exports is assigned: boons.js requires this
 // module for the Hazard base class + registerBoonKind, so it must see the fully

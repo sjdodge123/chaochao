@@ -59,6 +59,67 @@ function startEdgesOf(map) {
     return (Array.isArray(map.startEdges) && map.startEdges.length > 0) ? map.startEdges : ['left'];
 }
 
+// Squared distance from point (px,py) to segment a->b. Shared by the *TrapSeverity
+// on-racing-line tests (a pad on a long straight between two waypoints is still "on the
+// line" even when far from either endpoint, so test point-to-SEGMENT, not point-to-cell).
+function distToSegSq(px, py, a, b) {
+    var abx = b.x - a.x, aby = b.y - a.y;
+    var len2 = abx * abx + aby * aby;
+    var t = (len2 < 1e-6) ? 0 : (((px - a.x) * abx + (py - a.y) * aby) / len2);
+    if (t < 0) { t = 0; } else if (t > 1) { t = 1; }
+    var cx = a.x + abx * t, cy = a.y + aby * t;
+    var dx = px - cx, dy = py - cy;
+    return dx * dx + dy * dy;
+}
+
+// Build the racing-line context the warp/zip/launch trap-severity passes share: a
+// driveTime(x,y) (pure-driving seconds to the nearest goal under `pathOpts`) and an
+// onRacingLine(x,y,radius) test against the polyline of every gate sample's route under the
+// same options. `pathOpts` is passed straight to cellGraph.findPathToNearestGoal: the warp
+// pass uses {noWarp:true} (zip still credited), the zip/launch passes use {noWarp:true,
+// noZip:true} (no shortcut credit at all) and therefore share one context. Pricing mirrors
+// the options: noZip => estimatePathTime's 4-arg no-zip-credit form. Build it ONCE per
+// distinct options per classify() (the caller memoizes) and only when a map actually has
+// the relevant placeable, so trap-free maps pay nothing.
+function racingLineContext(map, config, pathOpts) {
+    var idToCell = {};
+    for (var ci = 0; ci < map.cells.length; ci++) {
+        var s = map.cells[ci] && map.cells[ci].site;
+        if (s != null) { idToCell[s.voronoiId] = map.cells[ci]; }
+    }
+    var noZip = !!pathOpts.noZip;
+    function driveTime(x, y) {
+        var r = cellGraph.findPathToNearestGoal(map, { x: x, y: y }, pathOpts);
+        if (r == null) { return Infinity; }
+        var t = noZip ? cellGraph.estimatePathTime(map, r.path, true, true)
+                      : cellGraph.estimatePathTime(map, r.path, true);
+        return (t > 0) ? t : 0;
+    }
+    var lineSegs = [];
+    var edges = startEdgesOf(map);
+    for (var e = 0; e < edges.length; e++) {
+        var samples = cellGraph.edgeSampleOrigins(edges[e]);
+        for (var s2 = 0; s2 < samples.length; s2++) {
+            var rr = cellGraph.findPathToNearestGoal(map, samples[s2], pathOpts);
+            if (rr == null) { continue; }
+            var pts = [];
+            for (var pi = 0; pi < rr.path.length; pi++) {
+                var cell = idToCell[rr.path[pi]];
+                if (cell != null && cell.site != null) { pts.push(cell.site); }
+            }
+            for (var pj = 0; pj + 1 < pts.length; pj++) { lineSegs.push([pts[pj], pts[pj + 1]]); }
+        }
+    }
+    function onRacingLine(x, y, radius) {
+        var r2 = radius * radius;
+        for (var si = 0; si < lineSegs.length; si++) {
+            if (distToSegSq(x, y, lineSegs[si][0], lineSegs[si][1]) <= r2) { return true; }
+        }
+        return false;
+    }
+    return { driveTime: driveTime, onRacingLine: onRacingLine };
+}
+
 // Every drivable terrain tile the balance model grades the COMPOSITION of: its
 // share of the board feeds traits, the interest/blandness check, and the hazard
 // deductions. background/empty (the non-drivable void) are excluded on purpose.
@@ -469,7 +530,7 @@ function edgeParTimes(map, config) {
 // within warpTrapRadius of a no-warp racing line — an off-line mouth (a side-pocket exit) is
 // harmless because nobody drives over it. Returns { worst: seconds, count }. O(0) on warp-free
 // maps (early return), and only runs the extra pathfinding when a map actually has pairs.
-function warpTrapSeverity(map, config) {
+function warpTrapSeverity(map, config, getCtx) {
     var warpId = (config.boons && config.boons.warpPad) ? config.boons.warpPad.id : null;
     if (warpId == null || !Array.isArray(map.hazards) || !Array.isArray(map.cells)) { return { worst: 0, count: 0 }; }
     var byPair = {};
@@ -482,52 +543,11 @@ function warpTrapSeverity(map, config) {
     for (var pk in byPair) { if (byPair[pk].length === 2) { pairs.push(byPair[pk]); } }
     if (pairs.length === 0) { return { worst: 0, count: 0 }; }
 
-    var idToCell = {};
-    for (var ci = 0; ci < map.cells.length; ci++) {
-        var s = map.cells[ci] && map.cells[ci].site;
-        if (s != null) { idToCell[s.voronoiId] = map.cells[ci]; }
-    }
-    function driveTime(x, y) {
-        var r = cellGraph.findPathToNearestGoal(map, { x: x, y: y }, { noWarp: true });
-        if (r == null) { return Infinity; }
-        var t = cellGraph.estimatePathTime(map, r.path, true); // true => price as PURE DRIVING
-        return (t > 0) ? t : 0;
-    }
-    // No-warp racing lines from every gate sample, as polyline SEGMENT lists (consecutive
-    // cell sites) — a pad on a long straight run between two waypoints is still "on the line"
-    // even when it's far from either endpoint, so test point-to-SEGMENT distance, not just to
-    // the cell centres.
-    var lineSegs = [];
-    var edges = startEdgesOf(map);
-    for (var e = 0; e < edges.length; e++) {
-        var samples = cellGraph.edgeSampleOrigins(edges[e]);
-        for (var s2 = 0; s2 < samples.length; s2++) {
-            var rr = cellGraph.findPathToNearestGoal(map, samples[s2], { noWarp: true });
-            if (rr == null) { continue; }
-            var pts = [];
-            for (var pi = 0; pi < rr.path.length; pi++) {
-                var cell = idToCell[rr.path[pi]];
-                if (cell != null && cell.site != null) { pts.push(cell.site); }
-            }
-            for (var pj = 0; pj + 1 < pts.length; pj++) { lineSegs.push([pts[pj], pts[pj + 1]]); }
-        }
-    }
-    function distToSegSq(px, py, a, b) {
-        var abx = b.x - a.x, aby = b.y - a.y;
-        var len2 = abx * abx + aby * aby;
-        var t = (len2 < 1e-6) ? 0 : (((px - a.x) * abx + (py - a.y) * aby) / len2);
-        if (t < 0) { t = 0; } else if (t > 1) { t = 1; }
-        var cx = a.x + abx * t, cy = a.y + aby * t;
-        var dx = px - cx, dy = py - cy;
-        return dx * dx + dy * dy;
-    }
-    function onRacingLine(x, y, radius) {
-        var r2 = radius * radius;
-        for (var si = 0; si < lineSegs.length; si++) {
-            if (distToSegSq(x, y, lineSegs[si][0], lineSegs[si][1]) <= r2) { return true; }
-        }
-        return false;
-    }
+    // Warp routes are measured WITH zip still credited (noWarp only): the warp is the only
+    // shortcut being removed to expose the no-warp racing line. Built lazily, only now that
+    // we know the map has pairs.
+    var ctx = getCtx({ noWarp: true });
+    var driveTime = ctx.driveTime, onRacingLine = ctx.onRacingLine;
     var trapRadius = bal(config, 'warpTrapRadius', 100);
     var lateralSec = bal(config, 'warpTrapLateralSec', 1.5);
     var worst = 0, count = 0;
@@ -562,7 +582,7 @@ function warpTrapSeverity(map, config) {
 // has an infinite no-cable drive time and is skipped — not a trap. Only counts when the start
 // post is within ziplineTrapRadius of a no-shortcut racing line. Returns { worst, count }.
 // O(0) on zip-free maps; only the extra pathfinding runs when a map actually has a cable.
-function ziplineTrapSeverity(map, config) {
+function ziplineTrapSeverity(map, config, getCtx) {
     var zipId = (config.boons && config.boons.zipline) ? config.boons.zipline.id : null;
     if (zipId == null || !Array.isArray(map.hazards) || !Array.isArray(map.cells)) { return { worst: 0, count: 0 }; }
     var zips = [];
@@ -576,51 +596,10 @@ function ziplineTrapSeverity(map, config) {
     }
     if (zips.length === 0) { return { worst: 0, count: 0 }; }
 
-    var idToCell = {};
-    for (var ci = 0; ci < map.cells.length; ci++) {
-        var s = map.cells[ci] && map.cells[ci].site;
-        if (s != null) { idToCell[s.voronoiId] = map.cells[ci]; }
-    }
-    // Pure-driving time to goal with NO shortcuts (no warp, no zip), so the racing line and the
-    // setback measure what a racer driving on their own would experience.
-    function driveTime(x, y) {
-        var r = cellGraph.findPathToNearestGoal(map, { x: x, y: y }, { noWarp: true, noZip: true });
-        if (r == null) { return Infinity; }
-        var t = cellGraph.estimatePathTime(map, r.path, true, true); // pure driving (no warp/zip credit)
-        return (t > 0) ? t : 0;
-    }
-    // No-shortcut racing lines from every gate sample, as polyline SEGMENT lists.
-    var lineSegs = [];
-    var edges = startEdgesOf(map);
-    for (var e = 0; e < edges.length; e++) {
-        var samples = cellGraph.edgeSampleOrigins(edges[e]);
-        for (var s2 = 0; s2 < samples.length; s2++) {
-            var rr = cellGraph.findPathToNearestGoal(map, samples[s2], { noWarp: true, noZip: true });
-            if (rr == null) { continue; }
-            var pts = [];
-            for (var pi = 0; pi < rr.path.length; pi++) {
-                var cell = idToCell[rr.path[pi]];
-                if (cell != null && cell.site != null) { pts.push(cell.site); }
-            }
-            for (var pj = 0; pj + 1 < pts.length; pj++) { lineSegs.push([pts[pj], pts[pj + 1]]); }
-        }
-    }
-    function distToSegSq(px, py, a, b) {
-        var abx = b.x - a.x, aby = b.y - a.y;
-        var len2 = abx * abx + aby * aby;
-        var t = (len2 < 1e-6) ? 0 : (((px - a.x) * abx + (py - a.y) * aby) / len2);
-        if (t < 0) { t = 0; } else if (t > 1) { t = 1; }
-        var cx = a.x + abx * t, cy = a.y + aby * t;
-        var dx = px - cx, dy = py - cy;
-        return dx * dx + dy * dy;
-    }
-    function onRacingLine(x, y, radius) {
-        var r2 = radius * radius;
-        for (var si = 0; si < lineSegs.length; si++) {
-            if (distToSegSq(x, y, lineSegs[si][0], lineSegs[si][1]) <= r2) { return true; }
-        }
-        return false;
-    }
+    // Pure-driving time to goal with NO shortcuts (no warp, no zip) — shared with the launch
+    // pass (same options), built lazily only now that we know the map has cables.
+    var ctx = getCtx({ noWarp: true, noZip: true });
+    var driveTime = ctx.driveTime, onRacingLine = ctx.onRacingLine;
     var trapRadius = bal(config, 'ziplineTrapRadius', 100);
     var speed = (config.boons.zipline.speed || 30);
     var worst = 0, count = 0;
@@ -649,18 +628,24 @@ function ziplineTrapSeverity(map, config) {
 // the natural racing line and its facing points BACKWARD or off-line: a racer driving the line
 // is flung away from the goal with no way to cancel. The setback is how much longer the race
 // gets from the landing point vs from the pad (drive time at landing - drive time at pad). Only
-// counts when the pad is within launcherTrapRadius of a no-shortcut racing line. Returns
-// { worst, count }. O(0) on pad-free maps.
+// counts when the pad is within launcherTrapRadius of a no-shortcut racing line.
+//
+// A LETHAL pad is the worst case: an on-line pad whose fling lands in lava / off the world / a
+// goal-less pocket (driveTime(landing) is non-finite) flings a line-driving racer to certain
+// death or strands them, with no opt-out. Unlike a zip — whose far post is validated drivable
+// and which you ride deliberately to cross a chasm — a launch pad's landing is NOT validated,
+// so a non-finite landing is a death trap, not a "crossing." It's reported as `lethal` so
+// classify() hard-fails the map outright. Returns { worst, count, lethal }. O(0) on pad-free maps.
 //
 // Only the Launch Pad is scored here — NOT the Barrel Cannon (its launch direction is a
 // player-TIMED skill shot off a continuously sweeping barrel, not an author-fixed angle, so a
 // well-placed barrel is fair) and NOT the Slingshot Rings (a capped-add axial speed pulse that
 // "never brakes a faster kart" — a mis-aimed pass merely under-fires, it can't fling you back).
-function launcherTrapSeverity(map, config) {
+function launcherTrapSeverity(map, config, getCtx) {
     var padId = (config.boons && config.boons.launchPad) ? config.boons.launchPad.id : null;
     var dist = (config.boons && config.boons.launchPad && typeof config.boons.launchPad.distance === 'number')
         ? config.boons.launchPad.distance : 0;
-    if (padId == null || dist <= 0 || !Array.isArray(map.hazards) || !Array.isArray(map.cells)) { return { worst: 0, count: 0 }; }
+    if (padId == null || dist <= 0 || !Array.isArray(map.hazards) || !Array.isArray(map.cells)) { return { worst: 0, count: 0, lethal: 0 }; }
     var pads = [];
     for (var i = 0; i < map.hazards.length; i++) {
         var hz = map.hazards[i];
@@ -668,68 +653,37 @@ function launcherTrapSeverity(map, config) {
         if (typeof hz.x !== "number" || typeof hz.y !== "number" || !isFinite(hz.angle)) { continue; }
         pads.push(hz);
     }
-    if (pads.length === 0) { return { worst: 0, count: 0 }; }
+    if (pads.length === 0) { return { worst: 0, count: 0, lethal: 0 }; }
 
-    var idToCell = {};
-    for (var ci = 0; ci < map.cells.length; ci++) {
-        var s = map.cells[ci] && map.cells[ci].site;
-        if (s != null) { idToCell[s.voronoiId] = map.cells[ci]; }
-    }
-    // Pure-driving time to goal with NO shortcuts, so the racing line and the setback measure
-    // what a racer driving on their own would experience (a forward-facing pad isn't credited).
-    function driveTime(x, y) {
-        var r = cellGraph.findPathToNearestGoal(map, { x: x, y: y }, { noWarp: true, noZip: true });
-        if (r == null) { return Infinity; }
-        var t = cellGraph.estimatePathTime(map, r.path, true, true); // pure driving (no shortcut credit)
-        return (t > 0) ? t : 0;
-    }
-    // No-shortcut racing lines from every gate sample, as polyline SEGMENT lists.
-    var lineSegs = [];
-    var edges = startEdgesOf(map);
-    for (var e = 0; e < edges.length; e++) {
-        var samples = cellGraph.edgeSampleOrigins(edges[e]);
-        for (var s2 = 0; s2 < samples.length; s2++) {
-            var rr = cellGraph.findPathToNearestGoal(map, samples[s2], { noWarp: true, noZip: true });
-            if (rr == null) { continue; }
-            var pts = [];
-            for (var pi = 0; pi < rr.path.length; pi++) {
-                var cell = idToCell[rr.path[pi]];
-                if (cell != null && cell.site != null) { pts.push(cell.site); }
-            }
-            for (var pj = 0; pj + 1 < pts.length; pj++) { lineSegs.push([pts[pj], pts[pj + 1]]); }
-        }
-    }
-    function distToSegSq(px, py, a, b) {
-        var abx = b.x - a.x, aby = b.y - a.y;
-        var len2 = abx * abx + aby * aby;
-        var t = (len2 < 1e-6) ? 0 : (((px - a.x) * abx + (py - a.y) * aby) / len2);
-        if (t < 0) { t = 0; } else if (t > 1) { t = 1; }
-        var cx = a.x + abx * t, cy = a.y + aby * t;
-        var dx = px - cx, dy = py - cy;
-        return dx * dx + dy * dy;
-    }
-    function onRacingLine(x, y, radius) {
-        var r2 = radius * radius;
-        for (var si = 0; si < lineSegs.length; si++) {
-            if (distToSegSq(x, y, lineSegs[si][0], lineSegs[si][1]) <= r2) { return true; }
-        }
-        return false;
-    }
+    // Pure-driving, no-shortcut context (shared with the zip pass, same options), built lazily
+    // only now that we know the map has pads.
+    var ctx = getCtx({ noWarp: true, noZip: true });
+    var driveTime = ctx.driveTime, onRacingLine = ctx.onRacingLine;
     var trapRadius = bal(config, 'launcherTrapRadius', 100);
-    var worst = 0, count = 0;
+    var worst = 0, count = 0, lethal = 0;
     for (var pi2 = 0; pi2 < pads.length; pi2++) {
         var p = pads[pi2];
+        var tPad = driveTime(p.x, p.y);
+        // A pad off the routable graph isn't on any racing line — nobody drives over it.
+        if (!isFinite(tPad)) { continue; }
+        if (!onRacingLine(p.x, p.y, trapRadius)) { continue; }
         var rad = (p.angle || 0) * (Math.PI / 180);
         var lx = p.x + Math.cos(rad) * dist, ly = p.y + Math.sin(rad) * dist;
-        var tPad = driveTime(p.x, p.y), tLand = driveTime(lx, ly);
-        if (!isFinite(tPad) || !isFinite(tLand)) { continue; } // landing only reachable by the fling => a real crossing, not a trap
+        var tLand = driveTime(lx, ly);
+        if (!isFinite(tLand)) {
+            // Landing in lava / off-world / a goal-less pocket: an unavoidable death or
+            // race-ender on the line. The most punishing placement — flag it lethal.
+            lethal++;
+            count++;
+            continue;
+        }
         var setback = tLand - tPad; // positive => the fling lands you FARTHER from goal (backward)
-        if (setback > 0 && onRacingLine(p.x, p.y, trapRadius)) {
+        if (setback > 0) {
             if (setback > worst) { worst = setback; }
             count++;
         }
     }
-    return { worst: worst, count: count };
+    return { worst: worst, count: count, lethal: lethal };
 }
 
 // Up to n items evenly spaced across the list by INDEX (gate position), always
@@ -993,13 +947,25 @@ function classify(map, config) {
         var fairnessMax = bal(config, 'fairnessMax', 20);
         deduct(Math.min(fairnessMax, Math.round(Math.max(0, fairnessGap - tol) * perSec)), 'fairness');
     }
+    // The three trap-severity passes below share their no-shortcut racing-line context: the
+    // warp pass measures with {noWarp:true} (zip still credited), the zip + launch passes share
+    // {noWarp:true, noZip:true}. Memoize by options-key so a map carrying warp + zip + launch
+    // builds each distinct context ONCE (not once per pass). The getter is only invoked from
+    // inside a severity fn AFTER it confirms the map has that placeable, so a trap-free map
+    // never builds a context (the expensive edge-sample pathfinding stays O(0)).
+    var _racingCtxCache = {};
+    function getRacingCtx(pathOpts) {
+        var key = (pathOpts.noWarp ? 'W' : '') + (pathOpts.noZip ? 'Z' : '');
+        if (_racingCtxCache[key] == null) { _racingCtxCache[key] = racingLineContext(map, config, pathOpts); }
+        return _racingCtxCache[key];
+    }
     // WARP-PAD TRAP: a teleport whose goal-side mouth sits on the racing line flings a naive
     // racer backward — invisible to the optimal-path par/fairness above (the optimal route
     // takes the pair from its start side). Strong soft deduction (so a bad teleport clearly
     // drops out of Featured and shows the author a 'warptrap' line), plus a hard-fail for a
     // catastrophic one (a setback that effectively resets the race). Zero cost on warp-free maps.
     {
-        var warpTrap = warpTrapSeverity(map, config);
+        var warpTrap = warpTrapSeverity(map, config, getRacingCtx);
         if (warpTrap.worst > 0) {
             var wtTol = bal(config, 'warpTrapTolSec', 1.0);
             var wtPerSec = bal(config, 'warpTrapPerSec', 6);
@@ -1016,7 +982,7 @@ function classify(map, config) {
     // (which only takes a zip when it genuinely shortcuts). Same soft-deduction + hard-fail
     // shape as the warp trap (it shows the author a 'ziptrap' line). Zero cost on zip-free maps.
     {
-        var zipTrap = ziplineTrapSeverity(map, config);
+        var zipTrap = ziplineTrapSeverity(map, config, getRacingCtx);
         if (zipTrap.worst > 0) {
             var ztTol = bal(config, 'ziplineTrapTolSec', 1.0);
             var ztPerSec = bal(config, 'ziplineTrapPerSec', 6);
@@ -1035,8 +1001,14 @@ function classify(map, config) {
     // (capped boost, never brakes) are deliberately excluded — see launcherTrapSeverity. Zero
     // cost on launch-pad-free maps.
     {
-        var launchTrap = launcherTrapSeverity(map, config);
-        if (launchTrap.worst > 0) {
+        var launchTrap = launcherTrapSeverity(map, config, getRacingCtx);
+        // A LETHAL pad (flings a line-driving racer into lava / off-world with no opt-out) is the
+        // worst placement — apply the max deduction AND hard-fail outright, regardless of the
+        // backward-setback magnitude (which is undefined for a non-finite landing).
+        if (launchTrap.lethal > 0) {
+            deduct(bal(config, 'launcherTrapMax', 45), 'launchtrap');
+            hardFail.push('a launch pad on the racing line flings racers into lava / off the map (instant death)');
+        } else if (launchTrap.worst > 0) {
             var ltTol = bal(config, 'launcherTrapTolSec', 1.0);
             var ltPerSec = bal(config, 'launcherTrapPerSec', 6);
             var ltMax = bal(config, 'launcherTrapMax', 45);
