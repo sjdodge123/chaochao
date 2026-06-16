@@ -331,6 +331,32 @@ jobs:
       - name: Runtime button gate
         run: node .github/scripts/button-gate.js
 
+  mobile-layout:
+    # Mobile layout gate on the LIVE DOM at real phone viewports (portrait +
+    # landscape): no menu page may overflow horizontally (sideways scroll / clipped
+    # controls), and the lobby's top-edge HUD elements must not overlap (the gear vs
+    # the status/sign-in banner). Browser-dependent — mirrors the button-gate setup.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v6
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Cache Playwright browser
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Mobile layout gate
+        run: node .github/scripts/mobile-layout-test.js
+
   client-perf:
     # Client render-perf REGRESSION gate (relative, non-blocking). Measures the
     # 25-kart brutal scenario's scripting ms/frame for BOTH the PR head and its

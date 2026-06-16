@@ -3932,6 +3932,7 @@ function drawObjects(dt) {
         drawMapTitle();
     }
     drawSpectatorBanner();
+    hudProbeReset();
     drawHUD();
     drawMouseDriveIndicator();
     drawOffscreenGoalIndicator();
@@ -11324,6 +11325,32 @@ function compareSite(siteA, siteB) {
     return true;
 }
 
+// --- HUD overlap probe (opt-in: ?hudprobe=1) -----------------------------------
+// Publishes the current frame's top-edge HUD element rects (in LOGICAL canvas
+// coords) to window.__hudRects so the headless CI guard (mobile-layout-test.js)
+// can assert no two collide — the exact class of bug where a newly-added lobby
+// banner overlapped the settings gear. Zero cost unless the flag is set.
+var hudProbeOn = (typeof location !== "undefined" && !!location.search &&
+    /[?&]hudprobe=1\b/.test(location.search));
+function hudProbeReset() {
+    if (hudProbeOn && typeof window !== "undefined") {
+        window.__hudRects = [];
+    }
+}
+function hudProbeRect(name, x, y, w, h) {
+    if (!hudProbeOn || typeof window === "undefined" || !window.__hudRects) {
+        return;
+    }
+    // Idempotent per name within a frame: if an element re-draws, keep the latest
+    // rect rather than appending a duplicate (a same-name pair would self-overlap
+    // and false-fail the guard).
+    var rects = window.__hudRects;
+    for (var i = 0; i < rects.length; i++) {
+        if (rects[i].name === name) { rects[i] = { name: name, x: x, y: y, w: w, h: h }; return; }
+    }
+    rects.push({ name: name, x: x, y: y, w: w, h: h });
+}
+
 function drawHUD() {
     drawGameInfo();
     drawRaceTimer();
@@ -12517,6 +12544,8 @@ function drawTouchControls(ctx) {
             ctx.restore();
         }
         drawTouchLabel(window.document.fullscreenElement ? "Exit" : "Fullscreen", exitButton.baseX, exitButton.baseY + exitSize / 2 + 16, ctx);
+        var exHit = exitButton.radius || exitSize / 2;
+        hudProbeRect("touchExit", exitButton.baseX - exHit, exitButton.baseY - exHit, exHit * 2, exHit * 2);
     }
     if (chatButton != null && chatButton.isVisible()) {
         var chatSize = chatButton.iconSize || 34;
@@ -12524,6 +12553,8 @@ function drawTouchControls(ctx) {
         ctx.drawImage(chatToUse, chatButton.baseX - chatSize / 2, chatButton.baseY - chatSize / 2, chatSize, chatSize);
         ctx.restore();
         drawTouchLabel("Emoji", chatButton.baseX, chatButton.baseY + chatSize / 2 + 16, ctx);
+        var chHit = chatButton.radius || chatSize / 2;
+        hudProbeRect("touchEmoji", chatButton.baseX - chHit, chatButton.baseY - chHit, chHit * 2, chHit * 2);
     }
 }
 

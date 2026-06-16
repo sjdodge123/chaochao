@@ -627,6 +627,11 @@ function resize() {
     if (typeof layoutTouchControls === "function") {
         layoutTouchControls();
     }
+    // Keep the DOM settings gear pinned to the canvas's top-right as the letterbox
+    // fit changes (orientation / fullscreen / URL-bar collapse).
+    if (typeof positionTouchSettingsButton === "function") {
+        positionTouchSettingsButton();
+    }
 
     camera = {
         active: false,

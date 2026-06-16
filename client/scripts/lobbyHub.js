@@ -1376,6 +1376,9 @@ function drawLobbyStatusCard() {
         cx += cell.w;
     }
     ctx.restore();
+    if (typeof hudProbeRect === "function") {
+        hudProbeRect("lobbyStatusCard", x, y, w, h);
+    }
 }
 
 // One-shot match-start announcement for brutal MODES: during the ROUND-1 gate
