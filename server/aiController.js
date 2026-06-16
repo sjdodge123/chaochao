@@ -18,6 +18,7 @@
 
 var c = require('./config.json');
 var cellGraph = require('./cellGraph.js');
+var hazardsModule = require('./entities/hazards.js'); // for the MINE_SPENT phase constant
 
 // --- Tunables (Phase 6 will fold per-personality/difficulty scaling on top) ---
 // In-race speeds are drag-limited and modest (~40/s normal .. ~78/s fast — the
@@ -2556,13 +2557,13 @@ function update(gameBoard, currentState, dt) {
             }
             continue;
         }
-        // A SPENT mine has already fired and is permanently inert (phase MINE_SPENT === 2 in
-        // entities/hazards.js — monotonic: armed -> fuse -> spent, never re-arms). Stop pricing
-        // its cell into the route so bots stop avoiding a dud. Only the mine relaxes here: its
-        // spent state never flips back, so it can't flicker a bot's path. A geyser is left fully
-        // priced even while dormant — its dormant<->erupt cycle WOULD flicker the penalty and
-        // thrash routes, and stable over-avoidance of a brief-eruption point hazard is cheap.
-        if (c.hazards.mine != null && hz.id === c.hazards.mine.id && hz.phase === 2) { continue; }
+        // A SPENT mine has already fired and is permanently inert (MINE_SPENT is monotonic:
+        // armed -> fuse -> spent, never re-arms). Stop pricing its cell into the route so bots
+        // stop avoiding a dud. Only the mine relaxes here: its spent state never flips back, so
+        // it can't flicker a bot's path. A geyser is left fully priced even while dormant — its
+        // dormant<->erupt cycle WOULD flicker the penalty and thrash routes, and stable
+        // over-avoidance of a brief-eruption point hazard is cheap.
+        if (c.hazards.mine != null && hz.id === c.hazards.mine.id && hz.phase === hazardsModule.MINE_SPENT) { continue; }
         var bestI = -1, bestD = Infinity;
         for (var ci2 = 0; ci2 < map.cells.length; ci2++) {
             var cc = map.cells[ci2];

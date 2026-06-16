@@ -588,6 +588,7 @@ function lilyPadRadius(entry) {
 registerBoonKind("lilyPad", {
 	railed: false,
 	directional: false,
+	sizable: true, // carries an authored per-instance radius — validateMap rejects a non-finite one
 	build: function (entry, mapID, roomSig) {
 		return new LilyPad(entry.x, entry.y, lilyPadRadius(entry), entry.angle, mapID, roomSig);
 	}

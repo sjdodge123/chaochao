@@ -825,13 +825,14 @@ exports.validateMap = function (vMap, config) {
             if (hazardKind.directional && !Number.isFinite(hazard.angle)) {
                 return { valid: false, reason: "Map has a directional hazard with no direction." };
             }
-            // VortexWell carries an authored radius; the build clamps it, but an
-            // explicitly non-finite radius should be rejected here (parity with the
-            // finite-angle rule) rather than relying on the downstream clamp.
-            var vortexId = (config.hazards.vortexWell != null) ? config.hazards.vortexWell.id : null;
-            if (vortexId != null && hazard.id === vortexId &&
+            // Sizable kinds (vortex well, lily pad) carry an authored per-instance
+            // radius; the build clamps it, but an explicitly non-finite radius should
+            // be rejected here (parity with the directional finite-angle rule) rather
+            // than relying on the downstream clamp. Driven off the kind registry's
+            // `sizable` flag so a new resizable kind is covered automatically.
+            if (hazardKind.sizable &&
                 hazard.radius != null && !Number.isFinite(hazard.radius)) {
-                return { valid: false, reason: "Map has a vortex well with an invalid radius." };
+                return { valid: false, reason: "Map has a sizable hazard with an invalid radius." };
             }
         }
         // Warp pads are PAIRED teleporters: each carries a finite integer `pair`, and
