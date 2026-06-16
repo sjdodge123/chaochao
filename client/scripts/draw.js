@@ -11208,67 +11208,51 @@ function drawSlipstream(x, y, angle) {
     gameContext.restore();
 }
 
-// Launch Pad — a SPRINGBOARD you drive over to be flung airborne along its facing. A coiled
-// metal spring (behind) drives a bouncy orange board (front) that carries a bold launch
-// arrow; the spring compresses + the board nudges forward on a live bounce so it reads as
-// "springy". Orange palette (pale on water). Dark contrast halo under the art. Shared shape
-// in drawSpringboardBody so the live drawer + editor painter match. Cheap sin/phase only.
-function drawSpringboardBody(ctx, r, accent, light, dark, bounce) {
-    var hw = r * 0.62;            // half-width across the board
-    var backX = -r * 0.95;       // anchor / spring end
-    var frontX = r * 0.95;       // launch lip
-    var compress = 1 - 0.22 * bounce;   // spring squashes with the bounce
-    var shift = bounce * r * 0.14;      // board kicks forward as it springs
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    // Anchor plate at the very back (what the spring pushes off).
-    ctx.fillStyle = dark;
-    ctx.fillRect(backX - 1, -hw * 1.05, r * 0.16, hw * 2.1);
-    // Coil spring: a zig-zag running along the axis from the anchor to the board, drawn over
-    // a dark halo, in metallic grey. Its forward end (and tightness) tracks the compression.
-    var sx0 = backX + r * 0.1;
-    var sx1 = (-r * 0.05 - sx0) * compress + sx0 + shift;
-    var segs = 7;
-    function coil() {
+// Launch Pad — a CHEVRON KICKER ramp you drive over to be flung airborne along its facing.
+// A trapezoid ramp rises from a low back edge to a tall, bright launch lip at the front (+x),
+// shaded dark->light along the slope; three orange speed chevrons point up the ramp and pulse
+// (brightening toward the lip) on a live bounce so it reads "launch THIS way". Orange palette
+// (pale on water). Dark contrast halo under the art. Shared shape in drawKickerRamp so the
+// live drawer + editor painter match. Cheap: one gradient + strokes, no shadowBlur/filter.
+function drawKickerRamp(ctx, r, accent, light, mid, dark, bounce) {
+    var hwBack = r * 0.5, hwFront = r * 0.82, frontX = r * 0.92;
+    function rampPath() {
         ctx.beginPath();
-        for (var s = 0; s <= segs; s++) {
-            var px = sx0 + (sx1 - sx0) * (s / segs);
-            var py = (s % 2 === 0) ? -hw * 0.66 : hw * 0.66;
-            if (s === 0) { ctx.moveTo(px, py); } else { ctx.lineTo(px, py); }
-        }
-    }
-    coil(); ctx.strokeStyle = BOON_HALO; ctx.lineWidth = 7; ctx.stroke();
-    coil(); ctx.strokeStyle = "#cfd4d8"; ctx.lineWidth = 3.5; ctx.stroke();
-    // Springboard surface: a rounded board (capsule) shifted forward by the bounce, shaded
-    // light front -> dark back so the launch lip pops.
-    var bx0 = -r * 0.15 + shift, bx1 = frontX + shift, rr = hw;
-    function board() {
-        ctx.beginPath();
-        ctx.moveTo(bx0 + rr, -hw);
-        ctx.lineTo(bx1 - rr, -hw);
-        ctx.arc(bx1 - rr, 0, rr, -Math.PI / 2, Math.PI / 2);
-        ctx.lineTo(bx0 + rr, hw);
-        ctx.arc(bx0 + rr, 0, rr, Math.PI / 2, -Math.PI / 2);
+        ctx.moveTo(-r, -hwBack);
+        ctx.lineTo(frontX, -hwFront);
+        ctx.lineTo(frontX, hwFront);
+        ctx.lineTo(-r, hwBack);
         ctx.closePath();
     }
-    board();
-    var grad = ctx.createLinearGradient(bx0, 0, bx1, 0);
-    grad.addColorStop(0, dark);
-    grad.addColorStop(1, light);
-    ctx.fillStyle = grad; ctx.fill();
+    rampPath();
+    var g = ctx.createLinearGradient(-r, 0, r, 0);
+    g.addColorStop(0, dark);
+    g.addColorStop(0.6, mid);
+    g.addColorStop(1, light);
+    ctx.fillStyle = g; ctx.fill();
     ctx.strokeStyle = BOON_HALO; ctx.lineWidth = 2.5; ctx.stroke();
-    // Bright launch lip at the front (+x) edge.
+    // Three speed chevrons up the ramp, brightening toward the lip with the bounce.
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    var cw1 = r * 0.2, cw2 = r * 0.15;
+    for (var i = 0; i < 3; i++) {
+        var cx = -r * 0.4 + i * r * 0.42;
+        var ch = r * (0.34 + i * 0.08);
+        ctx.globalAlpha = 0.45 + 0.55 * bounce * ((i + 1) / 3);
+        ctx.beginPath();
+        ctx.moveTo(cx - cw1, ch);
+        ctx.lineTo(cx + cw2, 0);
+        ctx.lineTo(cx - cw1, -ch);
+        ctx.strokeStyle = accent; ctx.lineWidth = Math.max(3, r * 0.16); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    // Bright raised launch lip at the front (+x) edge.
+    var lift = bounce * r * 0.06;
     ctx.beginPath();
-    ctx.moveTo(bx1 - rr * 0.2, -hw * 0.8);
-    ctx.arc(bx1 - rr, 0, rr, -Math.PI / 2.4, Math.PI / 2.4);
-    ctx.strokeStyle = light; ctx.lineWidth = 3; ctx.stroke();
-    // Bold launch arrow on the board pointing +x.
-    ctx.beginPath();
-    ctx.moveTo(bx0 + rr * 0.6, -hw * 0.62);
-    ctx.lineTo(bx1 - rr * 0.5, 0);
-    ctx.lineTo(bx0 + rr * 0.6, hw * 0.62);
-    ctx.strokeStyle = BOON_HALO; ctx.lineWidth = 8; ctx.stroke();
-    ctx.strokeStyle = accent; ctx.lineWidth = 4.5; ctx.stroke();
+    ctx.moveTo(frontX, -hwFront - lift);
+    ctx.lineTo(frontX, hwFront + lift);
+    ctx.strokeStyle = BOON_HALO; ctx.lineWidth = 7; ctx.stroke();
+    ctx.strokeStyle = light; ctx.lineWidth = 4; ctx.stroke();
 }
 function drawLaunchPad(x, y, angle) {
     var cfg = config.boons.launchPad;
@@ -11277,12 +11261,13 @@ function drawLaunchPad(x, y, angle) {
     var onWater = boonOnWater(x, y);
     var accent = onWater ? cfg.colorWater : cfg.color;
     var light = onWater ? "#ffe9cf" : "#ffc890";
-    var dark = onWater ? "#caa06f" : "#9c4e1c";
+    var mid = onWater ? "#e0b483" : "#c0651f";
+    var dark = onWater ? "#b58a5a" : "#7e3d14";
     var bounce = 0.5 + 0.5 * Math.sin(Date.now() / 230);
     gameContext.save();
     gameContext.translate(x, y);
     gameContext.rotate(rad);
-    drawSpringboardBody(gameContext, r, accent, light, dark, bounce);
+    drawKickerRamp(gameContext, r, accent, light, mid, dark, bounce);
     gameContext.restore();
 }
 
