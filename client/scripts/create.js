@@ -1707,51 +1707,49 @@ function paintLaunchPadShape(ctx, kind, x, y, angle, ringColor) {
     var onWater = editorBoonOnWater(x, y);
     var accent = onWater ? cfg.colorWater : cfg.color;
     var light = onWater ? "#ffe9cf" : "#ffc890";
-    var dark = onWater ? "#caa06f" : "#9c4e1c";
+    var mid = onWater ? "#e0b483" : "#c0651f";
+    var dark = onWater ? "#b58a5a" : "#7e3d14";
     var halo = EDITOR_BOON_HALO;
     paintBoonTrajectory(ctx, x, y, angle, cfg.distance, accent);
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(rad);
-    // Springboard at rest (no live bounce in the editor); mirrors draw.js drawSpringboardBody.
-    var hw = r * 0.62, backX = -r * 0.95, frontX = r * 0.95;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.fillStyle = dark;
-    ctx.fillRect(backX - 1, -hw * 1.05, r * 0.16, hw * 2.1);
-    var sx0 = backX + r * 0.1, sx1 = -r * 0.05, segs = 7;
-    function coil() {
+    // Chevron kicker at rest (fixed bounce in the editor); mirrors draw.js drawKickerRamp.
+    var hwBack = r * 0.5, hwFront = r * 0.82, frontX = r * 0.92, bounce = 0.6;
+    function rampPath() {
         ctx.beginPath();
-        for (var s = 0; s <= segs; s++) {
-            var px = sx0 + (sx1 - sx0) * (s / segs);
-            var py = (s % 2 === 0) ? -hw * 0.66 : hw * 0.66;
-            if (s === 0) { ctx.moveTo(px, py); } else { ctx.lineTo(px, py); }
-        }
-    }
-    coil(); ctx.strokeStyle = halo; ctx.lineWidth = 7; ctx.stroke();
-    coil(); ctx.strokeStyle = "#cfd4d8"; ctx.lineWidth = 3.5; ctx.stroke();
-    var bx0 = -r * 0.15, bx1 = frontX, rr = hw;
-    function board() {
-        ctx.beginPath();
-        ctx.moveTo(bx0 + rr, -hw);
-        ctx.lineTo(bx1 - rr, -hw);
-        ctx.arc(bx1 - rr, 0, rr, -Math.PI / 2, Math.PI / 2);
-        ctx.lineTo(bx0 + rr, hw);
-        ctx.arc(bx0 + rr, 0, rr, Math.PI / 2, -Math.PI / 2);
+        ctx.moveTo(-r, -hwBack);
+        ctx.lineTo(frontX, -hwFront);
+        ctx.lineTo(frontX, hwFront);
+        ctx.lineTo(-r, hwBack);
         ctx.closePath();
     }
-    board();
-    var grad = ctx.createLinearGradient(bx0, 0, bx1, 0);
-    grad.addColorStop(0, dark);
-    grad.addColorStop(1, light);
-    ctx.fillStyle = grad; ctx.fill();
+    rampPath();
+    var g = ctx.createLinearGradient(-r, 0, r, 0);
+    g.addColorStop(0, dark);
+    g.addColorStop(0.6, mid);
+    g.addColorStop(1, light);
+    ctx.fillStyle = g; ctx.fill();
     ctx.strokeStyle = halo; ctx.lineWidth = 2.5; ctx.stroke();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    var cw1 = r * 0.2, cw2 = r * 0.15;
+    for (var i = 0; i < 3; i++) {
+        var cx = -r * 0.4 + i * r * 0.42;
+        var ch = r * (0.34 + i * 0.08);
+        ctx.globalAlpha = 0.45 + 0.55 * bounce * ((i + 1) / 3);
+        ctx.beginPath();
+        ctx.moveTo(cx - cw1, ch);
+        ctx.lineTo(cx + cw2, 0);
+        ctx.lineTo(cx - cw1, -ch);
+        ctx.strokeStyle = accent; ctx.lineWidth = Math.max(3, r * 0.16); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
     ctx.beginPath();
-    ctx.moveTo(bx0 + rr * 0.6, -hw * 0.62);
-    ctx.lineTo(bx1 - rr * 0.5, 0);
-    ctx.lineTo(bx0 + rr * 0.6, hw * 0.62);
-    ctx.strokeStyle = halo; ctx.lineWidth = 8; ctx.stroke();
-    ctx.strokeStyle = accent; ctx.lineWidth = 4.5; ctx.stroke();
+    ctx.moveTo(frontX, -hwFront);
+    ctx.lineTo(frontX, hwFront);
+    ctx.strokeStyle = halo; ctx.lineWidth = 7; ctx.stroke();
+    ctx.strokeStyle = light; ctx.lineWidth = 4; ctx.stroke();
     ctx.restore();
 }
 // Barrel Cannon painter (the barrelCannon `paint` hook) — mirrors the in-game look
@@ -3457,38 +3455,36 @@ var EDITOR_HAZARD_KINDS = [
         key: "launchPad", label: "Launch Pad", shortcut: "p", railed: false, directional: true,
         group: "boon", paint: paintLaunchPadShape,
         swatchPaint: function (ctx, size) {
-            // A springboard: a coiled spring driving an orange board with a launch arrow.
-            var cx = size / 2, cy = size / 2, hw = size * 0.16;
+            // A chevron kicker: a trapezoid ramp rising to a bright lip with orange chevrons.
+            var cx = size / 2, cy = size / 2, r = size * 0.36;
+            var hwBack = r * 0.5, hwFront = r * 0.86, frontX = cx + r * 0.92;
             ctx.lineCap = "round";
             ctx.lineJoin = "round";
-            // Coil spring (zig-zag) at the back.
-            var sx0 = cx - size * 0.34, sx1 = cx - size * 0.06, segs = 6;
             ctx.beginPath();
-            for (var s = 0; s <= segs; s++) {
-                var px = sx0 + (sx1 - sx0) * (s / segs);
-                var py = cy + ((s % 2 === 0) ? -hw : hw);
-                if (s === 0) { ctx.moveTo(px, py); } else { ctx.lineTo(px, py); }
-            }
-            ctx.strokeStyle = "#cfd4d8"; ctx.lineWidth = 4; ctx.stroke();
-            // Board (rounded) with a gradient.
-            var bx0 = cx - size * 0.04, bx1 = cx + size * 0.34, rr = hw;
-            ctx.beginPath();
-            ctx.moveTo(bx0 + rr, cy - hw);
-            ctx.lineTo(bx1 - rr, cy - hw);
-            ctx.arc(bx1 - rr, cy, rr, -Math.PI / 2, Math.PI / 2);
-            ctx.lineTo(bx0 + rr, cy + hw);
-            ctx.arc(bx0 + rr, cy, rr, Math.PI / 2, -Math.PI / 2);
+            ctx.moveTo(cx - r, cy - hwBack);
+            ctx.lineTo(frontX, cy - hwFront);
+            ctx.lineTo(frontX, cy + hwFront);
+            ctx.lineTo(cx - r, cy + hwBack);
             ctx.closePath();
-            var grad = ctx.createLinearGradient(bx0, 0, bx1, 0);
-            grad.addColorStop(0, "#9c4e1c");
+            var grad = ctx.createLinearGradient(cx - r, 0, cx + r, 0);
+            grad.addColorStop(0, "#7e3d14");
+            grad.addColorStop(0.6, "#c0651f");
             grad.addColorStop(1, "#ffc890");
             ctx.fillStyle = grad; ctx.fill();
-            // Launch arrow on the board.
+            // Speed chevrons up the ramp.
+            for (var i = 0; i < 3; i++) {
+                var chx = cx - r * 0.4 + i * r * 0.42, ch = r * (0.34 + i * 0.08);
+                ctx.beginPath();
+                ctx.moveTo(chx - r * 0.2, cy + ch);
+                ctx.lineTo(chx + r * 0.15, cy);
+                ctx.lineTo(chx - r * 0.2, cy - ch);
+                ctx.strokeStyle = "#FF8C42"; ctx.lineWidth = 4; ctx.stroke();
+            }
+            // Bright launch lip.
             ctx.beginPath();
-            ctx.moveTo(bx0 + rr * 0.6, cy - hw * 0.6);
-            ctx.lineTo(bx1 - rr * 0.5, cy);
-            ctx.lineTo(bx0 + rr * 0.6, cy + hw * 0.6);
-            ctx.strokeStyle = "#FF8C42"; ctx.lineWidth = 5; ctx.stroke();
+            ctx.moveTo(frontX, cy - hwFront);
+            ctx.lineTo(frontX, cy + hwFront);
+            ctx.strokeStyle = "#ffc890"; ctx.lineWidth = 4; ctx.stroke();
         }
     },
     {
