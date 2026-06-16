@@ -68,6 +68,11 @@
         "warpTrapRadius": 100,
         "warpTrapHardSec": 22,
         "warpTrapLateralSec": 1.5,
+        "ziplineTrapTolSec": 1.0,
+        "ziplineTrapPerSec": 6,
+        "ziplineTrapMax": 45,
+        "ziplineTrapRadius": 100,
+        "ziplineTrapHardSec": 22,
         "lengthMax": 5,
         "minDrivableFrac": 0.40,
         "parMin": 8,
@@ -681,6 +686,30 @@
             "minTransitMs": 1000,
             "maxTransitMs": 3200,
             "emergeGraceMs": 400
+        },
+        "zipline": {
+            "_doc": "A two-post cable (a RAILED boon, id 959 — like movingBumper it rides a HazardRail, but its length is AUTHOR-SET, not fixed config). Drive onto the start post to be CARRIED along the line toward the far post: while riding you ignore ALL ground tiles (lava included), hazards, and punches — you're untouchable on the cable (reuses the shared isAloft 'aloft' state) — and you slide at `speed` px/s. NOTE: speed is deliberately SLOWER than normal driving cruise (~40 px/s on normal ground) — the zipline trades speed for a safe, untouchable, lava-proof crossing, so it's a slow deliberate glide, not a fast-travel shortcut. It is ONE-WAY/directional: the start post is the collidable trigger (the rail origin), the far post is the author-aimed destination, so rotation + length are the authoring lever (a longer line carries you further but costs more stamina). HOLDING the cable DRAINS stamina at staminaDrainPerSec (no passive regen while aloft) — run the bar dry and you're AUTO-DROPPED, so a long zipline is a stamina gamble (a full bar carries you ~1000px before it empties). PUNCH to drop off EARLY. On any drop-off (early, end-of-line, or stamina-out) you keep your along-rail SPEED as real velocity. height is the drawn cable/post thickness. colorWater is the on-water palette.",
+            "id": 959,
+            "color": "#F2C14E",
+            "colorWater": "#FBE8B0",
+            "radius": 26,
+            "height": 18,
+            "speed": 30,
+            "staminaDrainPerSec": 3,
+            "minLength": 140,
+            "maxLength": 1200,
+            "reboardCooldownMs": 600
+        },
+        "lilyPad": {
+            "_doc": "Drivable stepping-stones placed OVER water tiles (cluster a few into a path across the deep). A pad is SOLID to drive on — while you overlap an un-sunk pad the water-swim physics are suppressed (handleMapCellHit treats your footing as normal ground, like the fire-walk override) so you skim across instead of swimming. But a pad SINKS while stood on: its sink progress climbs to fully-submerged over sinkMs, and a fully-sunk pad stops holding you up — you drop into the punch-swim water below. Step off and the pad REFLOATS over refloatMs, ready again. Sink progress rides the wire netState slot (0 = floating .. 100 = fully sunk) so the client draws the pad settling into the water. No camping a single pad — keep moving across the cluster. The pad is RESIZABLE in the editor (sizable: ships a per-instance radius on the wire, like the vortex well): radius is the MAX size + minRadius the smallest, and the on-canvas handle drags the per-instance disc in that range (a fresh pad places at the midpoint) so authors can lay big stable stones or tight skip-stones. While you stand on a pad your punch-stamina regenerates faster (staminaRegenMult x the normal rate) — a pad-hop across deep water lets you recover the strokes the swim cost; the sink keeps it from being a camp spot. color is the lily green; colorWater is unused (a lily pad is always on water) but kept for the shared on-water render path.",
+            "id": 960,
+            "color": "#56D06A",
+            "colorWater": "#C7ECBD",
+            "radius": 46,
+            "minRadius": 22,
+            "sinkMs": 1700,
+            "refloatMs": 1300,
+            "staminaRegenMult": 2.5
         }
     },
     "barriers": {

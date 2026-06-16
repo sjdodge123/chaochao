@@ -215,6 +215,11 @@ class Player extends Circle {
 		// now + water.dripMs; while active, handleMapCellHit scales their drive by
 		// water.dripMoveFactor so they trudge for a beat after climbing out.
 		this.dripUntil = 0;
+		// Lily Pad (boon): while a not-fully-sunk pad is underfoot, its handleHit stamps
+		// this to now + a tick's grace; handleMapCellHit's water branch reads it to give
+		// solid footing (skim, don't swim). A fully-sunk pad stops stamping, so this lapses
+		// and the racer drops into the water below.
+		this.onLilyPadUntil = 0;
 
 		//Star Power: timestamp until which the player is invulnerable to rival
 		//abilities and punches (set by GameBoard.checkAbilities on use).
@@ -253,6 +258,21 @@ class Player extends Circle {
 		this.barrel = null;
 		this.barrelAimAngle = 0;  // live aim while loaded (deg); player turns it, streamed via angle
 		this.barrelArmAt = 0;     // earliest a punch can fire (a brief aim window after loading)
+		// Zipline (boon): the shared "aloft" state again — while ziplineRail != null the racer
+		// is CARRIED along an author-placed cable, frozen + tile/collision/punch-immune (the
+		// isAloft guards), sliding at zipSpeed px/s from zipT toward the far post (zipLength).
+		// Holding drains stamina (no passive regen while aloft); punch (zipDropRequested) drops
+		// off early; on any drop-off the along-rail speed is kept as real velocity (fling off).
+		this.ziplineRail = null;
+		this.zipT = 0;            // along-rail position in px (0 = start post .. zipLength = far post)
+		this.zipLength = 0;
+		this.zipSpeed = 0;
+		this.zipDrainPerSec = 0;
+		this.zipDirX = 0;
+		this.zipDirY = 0;
+		this.zipDropRequested = false;
+		this.zipReboardAt = 0;    // re-arm latch: can't re-board until now (set on drop-off) so a
+		// punch-drop near the start post doesn't instantly re-grab you (mirrors warpArmed).
 		// Slingshot Rings chain: consecutive rings hit inside chainWindowMs raise the pulse
 		// cap (slingChainCount), so a row of rings launches harder than one. Re-armed per ring.
 		// slingChainAt = when the last chain link counted (min-gap so a one-tick cluster of
@@ -379,6 +399,8 @@ class Player extends Circle {
 			this.dt = dt;
 			if (this.isBarreled()) {
 				this.tickBarrel();
+			} else if (this.isZiplined()) {
+				this.tickZipline(dt);
 			} else {
 				this.tickAirborne();
 			}
@@ -797,8 +819,16 @@ class Player extends Circle {
 		// regen so staminaExhausted stays latched (and the move penalty holds) for the window.
 		if (Date.now() < this.regenPauseUntil) { return; }
 		var s = c.punchStamina;
+		// Lily Pad (boon): standing on a pad is a brief rest stop — punch-stamina regenerates
+		// faster (lilyPad.staminaRegenMult) so a pad-hop across deep water lets you recover the
+		// strokes the swim cost. onLilyPadUntil was stamped this tick by the pad's handleHit
+		// (checkCollisions runs before updatePlayers); the pad sinks, so you can't camp it.
+		var regenMult = 1;
+		if (this.onLilyPadUntil > Date.now() && c.boons.lilyPad != null && c.boons.lilyPad.staminaRegenMult) {
+			regenMult = c.boons.lilyPad.staminaRegenMult;
+		}
 		if (this.stamina < s.max) {
-			this.stamina = Math.min(s.max, this.stamina + s.regenPerSec * dt);
+			this.stamina = Math.min(s.max, this.stamina + s.regenPerSec * regenMult * dt);
 		}
 		if (this.staminaExhausted && this.stamina >= s.exhaustRecover) {
 			this.staminaExhausted = false;
@@ -994,8 +1024,14 @@ class Player extends Circle {
 	isBarreled() {
 		return this.barreledUntil > 0;
 	}
+	// Riding a Zipline cable (boon): carried along the rail, untouchable, awaiting the far
+	// post / an early-drop punch / a stamina-out auto-drop. Folded into the isAloft umbrella
+	// so every existing untouchable-limbo guard covers it with no new special case.
+	isZiplined() {
+		return this.ziplineRail != null;
+	}
 	isAloft() {
-		return this.airborneUntil > 0 || this.barreledUntil > 0;
+		return this.airborneUntil > 0 || this.barreledUntil > 0 || this.ziplineRail != null;
 	}
 	// Launch Pad / Barrel Cannon: fling the racer on a committed scripted arc along
 	// angleDeg. Snapshots the launch spot, computes the (world-clamped) landing spot,
@@ -1090,6 +1126,124 @@ class Player extends Circle {
 		this.attackQueued = false;
 		this.enabled = true;
 		messenger.messageRoomBySig(this.roomSig, "airborneLand", { id: this.id, x: this.x, y: this.y });
+	}
+	// Zipline (boon): mount the cable and be carried toward the far post. Snapshots the
+	// rail geometry, projects the racer onto the line so they start where they actually
+	// touched the post (not a teleport back), freezes input + zeroes velocity, and makes
+	// them untouchable for the ride (the isAloft guards). Player.update.tickZipline slides
+	// them along the rail and drains stamina; finishZipline drops them off. Guards re-entry
+	// so the engine double-dispatch + an already-aloft kart are both no-ops. A held ability
+	// is kept (a zip must not consume it — mirrors launchAirborne).
+	boardZipline(rail, speed, drainPerSec) {
+		if (this.isAloft() || rail == null) {
+			return;
+		}
+		// Re-arm latch: after dropping off (esp. an early punch-drop while still over the start
+		// post), don't re-grab until the brief cooldown passes — otherwise the still-overlapping
+		// post re-boards you next tick and the slow carried velocity can't escape its radius.
+		if (Date.now() < this.zipReboardAt) {
+			return;
+		}
+		var rad = (rail.angle || 0) * (Math.PI / 180);
+		this.zipDirX = Math.cos(rad);
+		this.zipDirY = Math.sin(rad);
+		this.zipLength = rail.width;
+		this.zipSpeed = speed;
+		this.zipDrainPerSec = drainPerSec;
+		// Project the mount point onto the rail line (clamped to the span) so the slide
+		// begins from where the kart sits along the cable, never behind the start post.
+		var along = (this.x - rail.x) * this.zipDirX + (this.y - rail.y) * this.zipDirY;
+		this.zipT = Math.max(0, Math.min(this.zipLength, along));
+		this.ziplineRail = rail;
+		this.zipDropRequested = false;
+		// Snap onto the cable line (cancel any perpendicular offset) and face the travel dir.
+		this.x = rail.x + this.zipDirX * this.zipT;
+		this.y = rail.y + this.zipDirY * this.zipT;
+		this.newX = this.x;
+		this.newY = this.y;
+		this.angle = rail.angle || 0;
+		this.enabled = false;
+		this.velX = 0;
+		this.velY = 0;
+		this.cancelCharge();
+		this.attack = false;
+		this.attackQueued = false;
+		// Boarding breaks any open Slingshot Rings chain (the untouchable ride is a pause,
+		// not a continued run of ring passes) — mirrors launchAirborne.
+		this.slingChainUntil = 0;
+		this.slingChainCount = 0;
+		this.moveForward = false;
+		this.moveBackward = false;
+		this.turnLeft = false;
+		this.turnRight = false;
+		// Untouchable for the ride + a touch beyond (covers the drop-off frame).
+		this.invulnUntil = Math.max(this.invulnUntil, Date.now() + 150);
+		if (this.onFire > 0) {
+			this.onFire = 0;
+			this.fireTimer = null;
+			messenger.messageRoomBySig(this.roomSig, "onFire", { owner: this.id, value: 0 });
+		}
+		// Ship the rail geometry so the client can draw the rider clipped onto the cable (a
+		// trolley + strap over the kart + a lift shadow) for the ride. `ms` = the max ride time
+		// (full-length slide) + a buffer, so the client can self-clear the rig if a ziplineEnd is
+		// ever missed (packet loss / a reset that races the event) — mirrors the airborne backstop.
+		var maxRideMs = (speed > 0 ? (rail.width / speed) * 1000 : 1000) + 1000;
+		messenger.messageRoomBySig(this.roomSig, "ziplineBoard", {
+			id: this.id, x1: rail.x, y1: rail.y, angle: rail.angle, length: rail.width, ms: maxRideMs
+		});
+	}
+	// Per tick while riding (Player.update): drain stamina (no passive regen while aloft —
+	// the update dispatch returns before regenStamina), slide along the rail at zipSpeed,
+	// writing position absolutely with velocity held at 0. Drops off on a punch request, an
+	// empty stamina bar (auto-drop), or reaching the far post.
+	tickZipline(dt) {
+		// Stamina cost of holding the cable — the long-zipline balance knob. Empty = auto-drop.
+		this.stamina = Math.max(0, this.stamina - this.zipDrainPerSec * (dt || 0));
+		if (this.stamina <= 0) {
+			this.staminaExhausted = true;
+			this.finishZipline("stamina");
+			return;
+		}
+		if (this.zipDropRequested) {
+			this.finishZipline("punch");
+			return;
+		}
+		this.zipT += this.zipSpeed * (dt || 0);
+		if (this.zipT >= this.zipLength) {
+			this.zipT = this.zipLength;
+			this.finishZipline("end");
+			return;
+		}
+		this.x = this.ziplineRail.x + this.zipDirX * this.zipT;
+		this.y = this.ziplineRail.y + this.zipDirY * this.zipT;
+		this.newX = this.x;
+		this.newY = this.y;
+		this.velX = 0;
+		this.velY = 0;
+	}
+	// Drop off the cable: hand control back and KEEP the along-rail speed as real velocity
+	// (you fling forward off the line, whatever the drop reason). Clears the punch latch so
+	// the drop-off press can't carry into the landing tick and instantly spend a held
+	// ability. Normal collision/tile resolution resumes next tick (land on lava = death).
+	finishZipline(reason) {
+		var rail = this.ziplineRail;
+		this.ziplineRail = null;
+		if (rail != null) {
+			this.x = rail.x + this.zipDirX * this.zipT;
+			this.y = rail.y + this.zipDirY * this.zipT;
+			this.newX = this.x;
+			this.newY = this.y;
+		}
+		// Carry momentum off: the slide speed becomes forward velocity along the rail.
+		this.velX = this.zipDirX * this.zipSpeed;
+		this.velY = this.zipDirY * this.zipSpeed;
+		this.zipDropRequested = false;
+		this.attack = false;
+		this.attackQueued = false;
+		this.enabled = true;
+		// Re-arm cooldown so the still-overlapping start post can't re-grab you this/next tick.
+		this.zipReboardAt = Date.now() + (c.boons.zipline.reboardCooldownMs || 600);
+		messenger.messageRoomBySig(this.roomSig, "ziplineEnd", { id: this.id, x: this.x, y: this.y, reason: reason || "end" });
 	}
 	// Barrel Cannon: capture the racer into the barrel — frozen at the mouth, aiming from
 	// the barrel's author-set facing — until they punch (after a brief arming window) or the
@@ -1728,6 +1882,24 @@ class Player extends Circle {
 				// the swim physics so this same tick starts treating it as deep water.
 				messenger.messageRoomBySig(this.roomSig, "flameExtinguished", { owner: this.id, x: this.x, y: this.y });
 			}
+			// Lily Pad (boon): a floating pad over this water gives SOLID footing — skim
+			// across on normal grip instead of swimming. The pad's handleHit stamped
+			// onLilyPadUntil THIS tick (checkCollisions runs before updatePlayers), and
+			// only while the pad isn't fully sunk; a sunk pad stops stamping, so the racer
+			// falls through to the deep-water swim below and is dumped in. Mirrors the
+			// fire-walk override above (solid grip + clear onWater so no swim stroke). Climb
+			// onto a pad straight from the water and the drip-wet slow still applies.
+			if (this.onLilyPadUntil > Date.now() && this.isZombie != true) {
+				if (this.onWater) {
+					this.dripUntil = Date.now() + c.tileMap.water.dripMs;
+				}
+				this.onWater = false;
+				var lilyGround = c.tileMap.normal;
+				this.acel = lilyGround.acel;
+				this.dragCoeff = lilyGround.dragCoeff;
+				this.brakeCoeff = lilyGround.brakeCoeff;
+				return;
+			}
 			// Deep water. Low acel + high drag (config) make passive drive almost nil —
 			// you barely move unless you PUNCH to swim (throwChargedPunch reads onWater,
 			// set above). Zombies get their infection-modded grip like any other tile.
@@ -2125,6 +2297,16 @@ class Player extends Circle {
 		// ends must emerge un-frozen and re-armed next round, never stuck warping).
 		this.warping = null;
 		this.warpArmed = true;
+		// Zipline ride is the same kind of per-round "aloft" state — a racer carried on a cable
+		// when the round ends must NOT respawn still ziplined (isAloft would freeze them, input
+		// disabled, sliding a stale rail for the new round). Drop them off cleanly + tell the
+		// client to clear the trolley rig (no ziplineEnd fires on its own at a round boundary).
+		if (this.ziplineRail != null) {
+			messenger.messageRoomBySig(this.roomSig, "ziplineEnd", { id: this.id, x: this.x, y: this.y, reason: "reset" });
+		}
+		this.ziplineRail = null;
+		this.zipDropRequested = false;
+		this.zipReboardAt = 0;
 		if (currentState == c.stateMap.gameOver) {
 			this.survivalist = 0;
 			this.brutalist = 0;

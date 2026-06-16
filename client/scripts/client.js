@@ -1057,6 +1057,7 @@ function registerScoreHandlers(server) {
 			// A death cancels any warp-pad transit visual (the server dropped the transit too):
 			// clear the hidden flag + release the camera so the death skull shows.
 			if (playerList[id].warping) { playerList[id].warping = false; playerList[id].warpHideUntil = 0; }
+			playerList[id].ziplining = null; // a death drops them off any zipline rig too
 			if (typeof warpCam !== "undefined" && warpCam != null && typeof isLocalId === "function" && isLocalId(id)) { warpCam = null; }
 			// Remember where/when they fell: a dead local player can press attack
 			// to ping every dead player's spot, and the floating skull fades from
@@ -2509,6 +2510,25 @@ function registerEffectHandlers(server) {
 				p.y = p.ty = payload.y;
 			}
 		}
+	});
+	server.on("ziplineBoard", function (payload) {
+		// Riding a Zipline: flag the kart attached so checkDrawPlayer draws the trolley rig
+		// (a pulley + strap clipped onto the cable over the kart + a lift shadow) for the
+		// ride. The server slides the ground position along the rail via gameUpdates; this is
+		// purely the cosmetic "you're clipped on" overlay. Cleared on ziplineEnd.
+		var p = playerList[payload.id];
+		if (p != null) {
+			// `until` is a self-clear backstop: if a ziplineEnd is ever missed (packet loss / a
+			// round reset that races the event), the rig still drops once the max ride time lapses.
+			p.ziplining = {
+				x1: payload.x1, y1: payload.y1, angle: payload.angle || 0, length: payload.length || 0,
+				until: Date.now() + (payload.ms || 45000)
+			};
+		}
+	});
+	server.on("ziplineEnd", function (payload) {
+		var p = playerList[payload.id];
+		if (p != null) { p.ziplining = null; }
 	});
 	server.on("barrelLoaded", function (payload) {
 		// Loaded in a Barrel Cannon: run the burning-fuse + aim-arrow telegraph until the

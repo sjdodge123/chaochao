@@ -691,6 +691,12 @@ function checkForMail(client) {
 				// is disabled, so the input above is skipped and punch never fires the barrel.
 				if (packet.attack && !player.attack) { player.attackQueued = true; }
 				player.attack = packet.attack;
+			} else if (typeof player.isZiplined === "function" && player.isZiplined()) {
+				// Frozen + carried on a Zipline cable: steering is ignored (you ride the line),
+				// but the punch press MUST register so the player can DROP OFF early — tickZipline
+				// reads zipDropRequested. Without this the disabled kart drops the input above.
+				if (packet.attack && !player.attack) { player.zipDropRequested = true; }
+				player.attack = packet.attack;
 			}
 			// botGuard human-verify: once this client's kart has actually travelled far
 			// enough under its own server-simulated input, emit a one-shot signal so the

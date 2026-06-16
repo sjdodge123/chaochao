@@ -51,15 +51,18 @@ const path = require('path');
 const repoRoot = path.join(__dirname, '..', '..');
 const messenger = require(path.join(repoRoot, 'server', 'messenger.js'));
 const config = require(path.join(repoRoot, 'server', 'config.json'));
+const utils = require(path.join(repoRoot, 'server', 'utils.js'));
 const mapFormat = require(path.join(repoRoot, 'server', 'mapFormat.js'));
 const compressor = require(path.join(repoRoot, 'server', 'compressor.js'));
 const aiController = require(path.join(repoRoot, 'server', 'aiController.js'));
+const cellGraph = require(path.join(repoRoot, 'server', 'cellGraph.js'));
 const { hazardKindById, Bumper } = require(path.join(repoRoot, 'server', 'entities', 'hazards.js'));
 
 const T = config.tileMap;
 const GRASS = T.fast.id;
 const EMPTY = T.empty.id;
 const GOAL = T.goal.id;
+const LAVA = T.lava.id;
 const DT = config.serverTickSpeed / 1000;
 const DASH = config.boons.dashArrows; // id 950
 
@@ -840,6 +843,341 @@ try {
         const packet = JSON.parse(compressor.newHazards(room.game.gameBoard.hazardList));
         check(packet.length === 1 && packet[0][1] === RING.id && packet[0][4] === 0,
             'compressor.newHazards ships the ring as [ownerId, ' + RING.id + ', x, y, angle]');
+    }
+
+    // ----------------------------------------------------------------------
+    console.log('\n[K] Zipline carries a racer along an author-placed cable (stamina-drained, tile/lava-immune)');
+    {
+        const ZIP = config.boons.zipline; // id 959
+        const kind = hazardKindById(ZIP.id);
+        check(kind != null && kind.helpful === true, 'zipline resolves through the registry + is helpful (id ' + ZIP.id + ')');
+        check(kind != null && kind.directional === true && kind.railed === true, 'zipline is directional + railed');
+
+        const LEN = 300;
+        const map = buildMap('zip', [{ id: ZIP.id, x: PAD_X, y: ROWS[2], angle: 0, length: LEN }], [2]);
+        const { room, bot } = bootRoom('boon-zip', map, RACER);
+        const zip = room.game.gameBoard.hazardList[Object.keys(room.game.gameBoard.hazardList)[0]];
+        check(zip != null && zip.id === ZIP.id && zip.helpful === true && zip.rail != null,
+            'the zipline spawned from the map entry into hazardList (helpful=true, has a rail)');
+        // Wire: a railed kind ships the rail origin/angle + the author-set LENGTH on slot [9].
+        const packet = JSON.parse(compressor.newHazards(room.game.gameBoard.hazardList));
+        check(packet.length === 1 && packet[0][1] === ZIP.id && packet[0][4] === 0 &&
+            Math.abs(packet[0][5] - PAD_X) < 0.001 && Math.abs(packet[0][6] - ROWS[2]) < 0.001 &&
+            Math.abs(packet[0][9] - LEN) < 0.001,
+            'compressor.newHazards ships [.. angle, railX, railY, .., railLength=' + LEN + ']');
+
+        // BOARD: driving onto the start post carries the racer (frozen, aloft, ability kept).
+        bot.reset(config.stateMap.racing); bot.currentState = config.stateMap.racing;
+        bot.x = bot.newX = PAD_X; bot.y = bot.newY = ROWS[2]; bot.velX = 80; bot.velY = 0;
+        bot.ability = { id: 99, use: function () {} };
+        let since = events.length;
+        zip.handleHit(bot);
+        check(bot.isZiplined() && bot.isAloft() && bot.enabled === false,
+            'driving onto the post boards the racer (frozen + aloft)');
+        check(bot.ability != null && bot.ability.id === 99, 'boarding keeps the held ability (not consumed)');
+        check(emittedSince('ziplineBoard', since), 'a ziplineBoard event fired for the client');
+        // A second hit while already riding is a no-op (re-entry guarded by isAloft).
+        const rail0 = bot.ziplineRail;
+        zip.handleHit(bot);
+        check(bot.ziplineRail === rail0, 'a second hit while already riding does not re-board');
+        // Mid-ride: lava can't kill (the isAloft guard now covers ziplined) and the kart slides.
+        bot.killSelf('lava');
+        check(bot.alive === true && bot.isZiplined(), 'lava cannot kill a racer mid-ride (immune aloft)');
+        const x0 = bot.x;
+        bot.update(config.stateMap.racing, DT);
+        check(bot.isZiplined() && bot.x > x0 && Math.abs(bot.y - ROWS[2]) < 0.001,
+            'the kart slides along the +x cable (no perpendicular drift)');
+        check(bot.stamina < config.punchStamina.max, 'holding the cable drains stamina');
+
+        // ARRIVE: riding to the far post drops off, KEEPING the along-rail speed as velocity.
+        let guard = 0; since = events.length;
+        while (bot.isZiplined() && guard++ < 5000) { clock += config.serverTickSpeed; bot.update(config.stateMap.racing, DT); }
+        check(!bot.isZiplined() && bot.enabled === true, 'reaching the far post drops the racer off + regains control');
+        check(Math.abs(bot.x - (PAD_X + LEN)) < ZIP.speed * DT + 1, 'lands at/near the far post (x=' + bot.x.toFixed(1) + ')');
+        check(Math.abs(bot.velX - ZIP.speed) < 0.001 && Math.abs(bot.velY) < 0.001,
+            'drop-off carries the along-rail speed as forward velocity (+' + ZIP.speed + ')');
+        check(emittedSince('ziplineEnd', since), 'a ziplineEnd event fired on drop-off');
+
+        // EARLY DROP-OFF: a punch mid-ride drops you off immediately, carrying momentum.
+        bot.reset(config.stateMap.racing); bot.currentState = config.stateMap.racing;
+        bot.x = bot.newX = PAD_X; bot.y = bot.newY = ROWS[2]; bot.velX = bot.velY = 0;
+        zip.handleHit(bot);
+        bot.zipDropRequested = true;
+        bot.update(config.stateMap.racing, DT);
+        check(!bot.isZiplined() && Math.abs(bot.velX - ZIP.speed) < 0.001,
+            'a punch drops the racer off early, carrying the along-rail momentum');
+
+        // STAMINA-OUT: holding past an empty bar auto-drops you.
+        bot.reset(config.stateMap.racing); bot.currentState = config.stateMap.racing;
+        bot.x = bot.newX = PAD_X; bot.y = bot.newY = ROWS[2]; bot.velX = bot.velY = 0;
+        zip.handleHit(bot);
+        bot.stamina = ZIP.staminaDrainPerSec * DT * 0.5; // less than one tick's drain
+        bot.update(config.stateMap.racing, DT);
+        check(!bot.isZiplined() && bot.staminaExhausted === true,
+            'running the stamina bar dry auto-drops the racer (long ziplines are a gamble)');
+
+        // Round-end safety: reset() must DROP a mid-ride racer (not respawn them still ziplined +
+        // frozen + input-disabled into the next round — the cross-round soft-lock).
+        bot.reset(config.stateMap.racing); bot.currentState = config.stateMap.racing;
+        bot.x = bot.newX = PAD_X; bot.y = bot.newY = ROWS[2]; bot.velX = bot.velY = 0;
+        zip.handleHit(bot);
+        check(bot.isZiplined(), '(boarded for the reset test)');
+        bot.reset(config.stateMap.gameOver);
+        check(!bot.isZiplined() && bot.ziplineRail == null && bot.enabled === true,
+            'reset() drops a mid-ride racer + un-freezes them (no cross-round soft-lock)');
+
+        // Re-board cooldown: an early punch-drop while still over the start post must NOT re-grab.
+        bot.reset(config.stateMap.racing); bot.currentState = config.stateMap.racing;
+        bot.x = bot.newX = PAD_X; bot.y = bot.newY = ROWS[2]; bot.velX = bot.velY = 0;
+        zip.handleHit(bot);                      // board (at the start post, zipT 0)
+        bot.zipDropRequested = true;
+        bot.update(config.stateMap.racing, DT);  // drop off → arms the re-board cooldown
+        check(!bot.isZiplined(), '(dropped off for the cooldown test)');
+        zip.handleHit(bot);                      // still over the post — immediate re-grab attempt
+        check(!bot.isZiplined(), 'a re-board within the cooldown is refused (no instant re-grab at the start post)');
+        clock += ZIP.reboardCooldownMs + 50;
+        zip.handleHit(bot);
+        check(bot.isZiplined(), 'after the cooldown the post can board again');
+        bot.finishZipline('cleanup');
+
+        // Racers only: a zombie + a non-player are ignored.
+        const zombie = { isPlayer: true, isZombie: true };
+        zip.handleHit(zombie);
+        check(zombie.ziplineRail == null, 'a zombie is not boarded (boons skip the infection side)');
+        const proj = { isProjectile: true };
+        zip.handleHit(proj);
+        check(proj.ziplineRail == null, 'a non-player object is not boarded');
+    }
+
+    // ----------------------------------------------------------------------
+    console.log('\n[L] Lily Pads give solid footing over water, sink while stood on, refloat when vacated');
+    {
+        const LILY = config.boons.lilyPad; // id 960
+        const kind = hazardKindById(LILY.id);
+        check(kind != null && kind.helpful === true, 'lilyPad resolves through the registry + is helpful (id ' + LILY.id + ')');
+        check(kind != null && kind.directional === false && kind.railed === false, 'lilyPad is non-directional + not railed');
+
+        // Sink/refloat cycle on the pad itself.
+        const pad = kind.build({ x: 300, y: 200 }, 'lily-a', 'sig-l');
+        check(pad.netState === 0, 'a fresh pad starts floating (netState 0)');
+        const racer = { id: 'kl', isPlayer: true };
+        pad.handleHit(racer);
+        check(racer.onLilyPadUntil > clock, 'standing on the pad stamps onLilyPadUntil (solid this tick)');
+        check(pad.occupiedUntil > clock, 'the pad marks itself occupied');
+        let guard = 0;
+        while (pad.netState < 100 && guard++ < 5000) { pad.handleHit(racer); pad.update(DT); clock += config.serverTickSpeed; }
+        check(pad.netState >= 100, 'holding the pad down sinks it fully (netState 100)');
+        racer.onLilyPadUntil = 0;
+        pad.handleHit(racer);
+        check(racer.onLilyPadUntil === 0, 'a fully-sunk pad gives no footing (you drop into the swim)');
+        let g2 = 0;
+        while (pad.netState > 0 && g2++ < 5000) { pad.update(DT); clock += config.serverTickSpeed; }
+        check(pad.netState <= 0, 'stepping off lets the pad refloat back to floating (netState 0)');
+
+        // Racers only: a zombie is never given footing.
+        const zlily = { isPlayer: true, isZombie: true };
+        const padZ = kind.build({ x: 300, y: 200 }, 'lily-z', 'sig-l');
+        padZ.handleHit(zlily);
+        check(zlily.onLilyPadUntil == null, 'a zombie is not given lily-pad footing');
+
+        // SOLID OVERRIDE in the water tile branch: a racer over water with a pad underfoot
+        // skims (normal grip, onWater cleared); without one they drop into the swim.
+        const map = buildMap('lily', [{ id: LILY.id, x: PAD_X, y: ROWS[2] }], [2]);
+        const { room, bot } = bootRoom('boon-lily', map, RACER);
+        const packet = JSON.parse(compressor.newHazards(room.game.gameBoard.hazardList));
+        const lilyDefault = Math.round((LILY.minRadius + LILY.radius) / 2);
+        check(packet.length === 1 && packet[0][1] === LILY.id && packet[0][7] === 0 && packet[0][8] === lilyDefault,
+            'compressor.newHazards ships the pad with its sink netState (0 = floating) + default radius (' + lilyDefault + ')');
+        // Resizable: an over-sized authored radius is clamped to the config max + shipped on [8].
+        const bigMap = buildMap('lilybig', [{ id: LILY.id, x: PAD_X, y: ROWS[2], radius: 9999 }], [2]);
+        const bigPacket = JSON.parse(compressor.newHazards(bootRoom('boon-lilybig', bigMap, RACER).room.game.gameBoard.hazardList));
+        check(bigPacket[0][8] === LILY.radius, 'an over-sized pad radius is clamped to the config max (' + LILY.radius + ') and shipped on the wire');
+        // The baked random ROTATION must reach the client (slot [4]) so the in-game leaf rotation
+        // + the ~30% lotus-bloom roll (both keyed off the angle) match the editor, not all 0.
+        const rotMap = buildMap('lilyrot', [{ id: LILY.id, x: PAD_X, y: ROWS[2], angle: 247, radius: 30 }], [2]);
+        const rotPacket = JSON.parse(compressor.newHazards(bootRoom('boon-lilyrot', rotMap, RACER).room.game.gameBoard.hazardList));
+        check(rotPacket[0][4] === 247, 'the pad ships its baked rotation on the wire ([4]) so the in-game look matches the editor');
+
+        const waterCell = {
+            id: config.tileMap.water.id, acel: config.tileMap.water.acel,
+            dragCoeff: config.tileMap.water.dragCoeff, brakeCoeff: config.tileMap.water.brakeCoeff
+        };
+        bot.reset(config.stateMap.racing); bot.currentState = config.stateMap.racing;
+        bot.onFire = 0; bot.onWater = false;
+        bot.onLilyPadUntil = clock + 100;
+        bot.handleMapCellHit(waterCell);
+        check(bot.onWater === false && bot.dragCoeff === config.tileMap.normal.dragCoeff,
+            'a pad underfoot gives solid footing over water (skim, not swim)');
+        bot.onLilyPadUntil = 0;
+        bot.handleMapCellHit(waterCell);
+        check(bot.onWater === true && bot.dragCoeff === config.tileMap.water.dragCoeff,
+            'without a pad the racer drops into the deep-water swim');
+
+        // Faster stamina regen while standing on a pad (a brief rest stop; the sink stops camping).
+        const mult = config.boons.lilyPad.staminaRegenMult;
+        check(mult > 1, 'lilyPad has a stamina-regen multiplier > 1 (' + mult + 'x)');
+        bot.charging = false; bot.regenPauseUntil = 0; bot.staminaExhausted = false;
+        bot.stamina = 20; bot.onLilyPadUntil = 0;
+        bot.regenStamina(DT);
+        const offPadGain = bot.stamina - 20;
+        bot.stamina = 20; bot.onLilyPadUntil = clock + 100;
+        bot.regenStamina(DT);
+        const onPadGain = bot.stamina - 20;
+        check(Math.abs(onPadGain - offPadGain * mult) < 1e-6 && onPadGain > offPadGain,
+            'a racer on a pad regenerates stamina ' + mult + 'x faster (' + onPadGain.toFixed(2) + ' vs ' + offPadGain.toFixed(2) + ' per tick)');
+    }
+
+    // ----------------------------------------------------------------------
+    console.log('\n[M] Zipline AI: bots route THROUGH a cable to cross what they cannot drive');
+    {
+        const ZIP = config.boons.zipline; // id 959
+        // A single grass lane (row 1) to the goal — but a LAVA cell at col 4 walls the lane.
+        function laneMap(haz) {
+            const s = [];
+            for (let col = 0; col < COLS.length; col++) for (let row = 0; row < ROWS.length; row++) {
+                let id = EMPTY;
+                if (row === 1) { id = (col === 8) ? GOAL : (col === 4 ? LAVA : GRASS); }
+                s.push({ x: COLS[col], y: ROWS[row], id: id });
+            }
+            return mapFormat.reconstruct({ bbox: { xl: 0, xr: config.worldWidth, yt: 0, yb: config.worldHeight }, sites: s, hazards: haz, startEdges: ['left'], name: 'ziplane', author: 'test', id: 'ziptest-lane-' + Math.random() });
+        }
+        // Without a cable the lava wall makes the goal UNREACHABLE by driving.
+        const noZip = laneMap([]);
+        check(cellGraph.findPathToNearestGoal(noZip, { x: COLS[0], y: ROWS[1] }) == null,
+            'without a cable the lava wall blocks the lane (goal unreachable by driving)');
+        // A cable spanning the lava (col3 start -> col5 far) opens a one-way crossing.
+        const len = COLS[5] - COLS[3];
+        const zipMap = laneMap([{ id: ZIP.id, x: COLS[3], y: ROWS[1], angle: 0, length: len }]);
+        const links = cellGraph.getZiplineLinks(zipMap);
+        check(links != null && Object.keys(links).length === 1, 'getZiplineLinks builds exactly one start-cell edge (the cable is one-way)');
+        const startCell = Number(Object.keys(links)[0]), farCell = links[startCell].to;
+        check(links[farCell] == null, 'the edge is ONE-WAY — the far cell does not link back');
+        const rZip = cellGraph.findPathToNearestGoal(zipMap, { x: COLS[0], y: ROWS[1] });
+        check(rZip != null, 'with the cable the goal is reachable — the bot routes over the lava on the zip');
+        const par = cellGraph.estimatePathTime(zipMap, rZip.path);
+        check(par > links[startCell].rideSec && links[startCell].rideSec > 0,
+            'par includes the slow ride time (par ' + par.toFixed(1) + 's, ride ' + links[startCell].rideSec.toFixed(1) + 's)');
+        // A live bot actually drives onto the cable and finishes (boards + rides + lands).
+        const laneOnly = (haz) => {
+            const s = [];
+            for (let col = 0; col < COLS.length; col++) for (let row = 0; row < ROWS.length; row++) {
+                let id = EMPTY;
+                if (row === 1) { id = (col === 8) ? GOAL : (col === 4 ? LAVA : GRASS); }
+                s.push({ x: COLS[col], y: ROWS[row], id: id });
+            }
+            return mapFormat.reconstruct({ bbox: { xl: 0, xr: config.worldWidth, yt: 0, yb: config.worldHeight }, sites: s, hazards: haz, startEdges: ['left'], name: 'zipai', author: 'test', id: 'ziptest-ai' });
+        };
+        const aiMap = laneOnly([{ id: ZIP.id, x: COLS[3], y: ROWS[1], angle: 0, length: len }]);
+        const { room: zRoom, bot: zBot } = bootRoom('boon-zipai', aiMap, RACER);
+        let rode = false, done = false;
+        for (let f = 0; f < 2400; f++) { // up to 80s (the ride is slow by design)
+            zRoom.update(DT); clock += config.serverTickSpeed; fireDueTimers();
+            if (zBot.isZiplined()) { rode = true; }
+            if (zBot.reachedGoal) { done = true; break; }
+        }
+        check(rode, 'the bot drove onto the cable and boarded it (took the crossing)');
+        check(done, 'the bot rode across the lava and reached the goal (no stall)');
+        // A zero-length cable yields no link (no crash).
+        check(cellGraph.getZiplineLinks(laneMap([{ id: ZIP.id, x: COLS[3], y: ROWS[1], angle: 0, length: 0 }])) == null,
+            'a zero-length cable yields no link');
+    }
+
+    // ----------------------------------------------------------------------
+    console.log('\n[N] Zipline validation: both ends must sit on drivable ground (the cable may SPAN lava)');
+    {
+        const ZIP = config.boons.zipline;
+        function vmap(haz, lavaCols) {
+            const s = [];
+            for (let col = 0; col < COLS.length; col++) {
+                let id = (col === 8) ? GOAL : GRASS;
+                if (lavaCols && lavaCols.indexOf(col) >= 0) { id = LAVA; }
+                s.push({ x: COLS[col], y: ROWS[1], id: id });
+            }
+            return mapFormat.reconstruct({ bbox: { xl: 0, xr: config.worldWidth, yt: 0, yb: config.worldHeight }, sites: s, hazards: haz, startEdges: ['left'], name: 'zv', author: 'test', id: 'zipvalid-' + Math.random() });
+        }
+        const L = COLS[3] - COLS[1];
+        const zhz = (lavaCols) => vmap([{ id: ZIP.id, x: COLS[1], y: ROWS[1], angle: 0, length: L }], lavaCols);
+        check(utils.validateMap(zhz(null), config).valid === true, 'a cable with both posts on grass validates');
+        const farLava = utils.validateMap(zhz([3]), config);
+        check(farLava.valid === false && /land on drivable ground/.test(farLava.reason || ''), 'a cable LANDING on lava is rejected');
+        const startLava = utils.validateMap(zhz([1]), config);
+        check(startLava.valid === false && /start post must sit on drivable/.test(startLava.reason || ''), 'a cable STARTING on lava is rejected');
+        check(utils.validateMap(zhz([2]), config).valid === true, 'a cable may SPAN lava (col2) when both posts are on grass — you ride over it');
+        const noLen = utils.validateMap(vmap([{ id: ZIP.id, x: COLS[1], y: ROWS[1], angle: 0 }], null), config);
+        check(noLen.valid === false && /length/.test(noLen.reason || ''), 'a cable with no length is rejected');
+        const offWorld = utils.validateMap(vmap([{ id: ZIP.id, x: COLS[7], y: ROWS[1], angle: 0, length: 9000 }], null), config);
+        check(offWorld.valid === false && /inside the map/.test(offWorld.reason || ''), 'a cable whose far post lands off the map is rejected (no off-world snap)');
+    }
+
+    // ----------------------------------------------------------------------
+    console.log('\n[O] Zipline fairness: a forced-slow-ride trap on the line is caught; a lava crossing is not');
+    {
+        const mapClassifier = require(path.join(repoRoot, 'server', 'mapClassifier.js'));
+        const ZIP = config.boons.zipline;
+        const TC = [80, 300, 520, 740, 960, 1180, 1400], TR = [260, 460, 660];
+        function tmap(haz, lavaAt) {
+            const s = [];
+            for (let ci = 0; ci < TC.length; ci++) for (let ri = 0; ri < TR.length; ri++) {
+                let id = EMPTY;
+                if (ri === 1) { id = (ci === TC.length - 1) ? GOAL : GRASS; }
+                if (lavaAt && lavaAt(ci, ri)) { id = LAVA; }
+                s.push({ x: TC[ci], y: TR[ri], id: id });
+            }
+            return mapFormat.reconstruct({ bbox: { xl: 0, xr: config.worldWidth, yt: 0, yb: config.worldHeight }, sites: s, hazards: haz, startEdges: ['left'], name: 'zf', author: 'test', id: 'zipfair-' + Math.random() });
+        }
+        const hasZipTrap = (cls) => (cls.deductions || []).some(d => d.indexOf('ziptrap') === 0);
+        const base = mapClassifier.classify(tmap([]), config).balanceScore;
+        // TRAP: a cable on the OPEN racing line (start col1 -> far col4, all grass) snatches a
+        // forward racer onto a slow ride that's slower than just driving the span.
+        const trapLen = TC[4] - TC[1];
+        const trap = mapClassifier.classify(tmap([{ id: ZIP.id, x: TC[1], y: TR[1], angle: 0, length: trapLen }]), config);
+        check(hasZipTrap(trap), 'a cable on the open racing line is penalised (ziptrap deduction)');
+        check(trap.balanceScore < base - 5, 'the ziptrap drops the balance score (' + base + ' -> ' + trap.balanceScore + ')');
+        // NOT a trap: the same cable SPANS a lava gap (cols 2-3 on the line are lava) — the far
+        // side is reachable only BY the cable, so it's a legit crossing, not a forced setback.
+        const cross = mapClassifier.classify(tmap([{ id: ZIP.id, x: TC[1], y: TR[1], angle: 0, length: trapLen }], (ci, ri) => ri === 1 && (ci === 2 || ci === 3)), config);
+        check(!hasZipTrap(cross), 'a cable that SPANS lava (a real crossing) is NOT penalised (score ' + cross.balanceScore + ')');
+    }
+
+    // ----------------------------------------------------------------------
+    console.log('\n[P] Lily Pad AI + validation: bots skim a pad path across water; a pad must sit on water');
+    {
+        const LILY = config.boons.lilyPad; // id 960
+        const WATER = config.tileMap.water.id;
+        // A single lane (row 1) with WATER in the middle (cols 3-5); the rest grass to the goal.
+        function laneMap(haz) {
+            const s = [];
+            for (let col = 0; col < COLS.length; col++) for (let row = 0; row < ROWS.length; row++) {
+                let id = EMPTY;
+                if (row === 1) { id = (col === 8) ? GOAL : ((col >= 3 && col <= 5) ? WATER : GRASS); }
+                s.push({ x: COLS[col], y: ROWS[row], id: id });
+            }
+            return mapFormat.reconstruct({ bbox: { xl: 0, xr: config.worldWidth, yt: 0, yb: config.worldHeight }, sites: s, hazards: haz, startEdges: ['left'], name: 'lilylane', author: 'test', id: 'lilytest-' + Math.random() });
+        }
+        // Without pads, the lane must SWIM the 3 water cells (slow).
+        const noLily = laneMap([]);
+        const rNo = cellGraph.findPathToNearestGoal(noLily, { x: COLS[0], y: ROWS[1] });
+        const parNo = cellGraph.estimatePathTime(noLily, rNo.path);
+        // Pads on the 3 water cells make the crossing a fast skim.
+        const pads = [3, 4, 5].map(function (col) { return { id: LILY.id, x: COLS[col], y: ROWS[1], radius: 30 }; });
+        const lilyMap = laneMap(pads);
+        const padded = cellGraph.getLilyPaddedCells(lilyMap);
+        check(padded != null && Object.keys(padded).length === 3, 'getLilyPaddedCells marks the 3 water cells carrying a pad');
+        const rLily = cellGraph.findPathToNearestGoal(lilyMap, { x: COLS[0], y: ROWS[1] });
+        const parLily = cellGraph.estimatePathTime(lilyMap, rLily.path);
+        check(parLily < parNo, 'a pad path makes the water crossing FASTER in par — bots route across it (' + parNo.toFixed(1) + 's -> ' + parLily.toFixed(1) + 's)');
+        // An off-water pad is inert to the graph.
+        const mixed = cellGraph.getLilyPaddedCells(laneMap([{ id: LILY.id, x: COLS[0], y: ROWS[1], radius: 30 }, { id: LILY.id, x: COLS[4], y: ROWS[1], radius: 30 }]));
+        check(mixed != null && Object.keys(mixed).length === 1, 'only the pad ON water (col4) counts; a pad on grass (col0) is ignored');
+        // Validation: a pad ON water validates; a pad on dry ground is rejected.
+        function vmap(haz) {
+            const s = [];
+            for (let col = 0; col < COLS.length; col++) { var id = (col === 8) ? GOAL : ((col >= 3 && col <= 5) ? WATER : GRASS); s.push({ x: COLS[col], y: ROWS[1], id: id }); }
+            return mapFormat.reconstruct({ bbox: { xl: 0, xr: config.worldWidth, yt: 0, yb: config.worldHeight }, sites: s, hazards: haz, startEdges: ['left'], name: 'lilyv', author: 'test', id: 'lilyvalid-' + Math.random() });
+        }
+        check(utils.validateMap(vmap([{ id: LILY.id, x: COLS[4], y: ROWS[1], radius: 30 }]), config).valid === true, 'a lily pad ON water validates');
+        const onGrass = utils.validateMap(vmap([{ id: LILY.id, x: COLS[1], y: ROWS[1], radius: 30 }]), config);
+        check(onGrass.valid === false && /must sit on water/.test(onGrass.reason || ''), 'a lily pad on dry ground is rejected (must sit on water)');
     }
 } finally {
     Date.now = realNow;

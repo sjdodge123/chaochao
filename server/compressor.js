@@ -278,6 +278,13 @@ exports.newHazards = function (hazardList) {
 			// the slot's payload matches its contract.
 			hazard.sizable ? hazard.radius : null
 		];
+		// [9] author-set rail LENGTH — APPENDED only for railed kinds whose span is
+		// authored, not fixed by config (the Zipline cable), so every other hazard's row
+		// stays 9 fields. Lets the client draw the full cable + far post from
+		// origin/angle/length. (decoder: gameboard.js applyHazards, hazard.length > 9.)
+		if (rail != null && hazard.railLengthAuthored) {
+			listItem.push(rail.width);
+		}
 		packet.push(listItem);
 	}
 	packet = JSON.stringify(packet);

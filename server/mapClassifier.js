@@ -536,6 +536,96 @@ function warpTrapSeverity(map, config) {
     return { worst: worst, count: count };
 }
 
+// Zipline TRAP severity — the cable analog of warpTrapSeverity. A zipline AUTO-GRABS any
+// racer who drives onto its start post and carries them SLOWLY to the far post. That's a boon
+// when it spans something you couldn't drive (a lava chasm) — but a TRAP when the start post
+// sits on the natural racing line over open ground: a racer driving the line gets snatched
+// onto a slow ride and LOSES time vs just driving that span. The setback is rideTime minus the
+// forward driving progress the ride actually buys (drive time saved by landing at the far post
+// instead of the start). A zip whose far side is only reachable BY the cable (a real crossing)
+// has an infinite no-cable drive time and is skipped — not a trap. Only counts when the start
+// post is within ziplineTrapRadius of a no-shortcut racing line. Returns { worst, count }.
+// O(0) on zip-free maps; only the extra pathfinding runs when a map actually has a cable.
+function ziplineTrapSeverity(map, config) {
+    var zipId = (config.boons && config.boons.zipline) ? config.boons.zipline.id : null;
+    if (zipId == null || !Array.isArray(map.hazards) || !Array.isArray(map.cells)) { return { worst: 0, count: 0 }; }
+    var zips = [];
+    for (var i = 0; i < map.hazards.length; i++) {
+        var hz = map.hazards[i];
+        if (hz == null || hz.id !== zipId) { continue; }
+        if (typeof hz.x !== "number" || typeof hz.y !== "number") { continue; }
+        if (typeof hz.length !== "number" || !isFinite(hz.length) || hz.length <= 0) { continue; }
+        if (!isFinite(hz.angle)) { continue; }
+        zips.push(hz);
+    }
+    if (zips.length === 0) { return { worst: 0, count: 0 }; }
+
+    var idToCell = {};
+    for (var ci = 0; ci < map.cells.length; ci++) {
+        var s = map.cells[ci] && map.cells[ci].site;
+        if (s != null) { idToCell[s.voronoiId] = map.cells[ci]; }
+    }
+    // Pure-driving time to goal with NO shortcuts (no warp, no zip), so the racing line and the
+    // setback measure what a racer driving on their own would experience.
+    function driveTime(x, y) {
+        var r = cellGraph.findPathToNearestGoal(map, { x: x, y: y }, { noWarp: true, noZip: true });
+        if (r == null) { return Infinity; }
+        var t = cellGraph.estimatePathTime(map, r.path, true, true); // pure driving (no warp/zip credit)
+        return (t > 0) ? t : 0;
+    }
+    // No-shortcut racing lines from every gate sample, as polyline SEGMENT lists.
+    var lineSegs = [];
+    var edges = startEdgesOf(map);
+    for (var e = 0; e < edges.length; e++) {
+        var samples = cellGraph.edgeSampleOrigins(edges[e]);
+        for (var s2 = 0; s2 < samples.length; s2++) {
+            var rr = cellGraph.findPathToNearestGoal(map, samples[s2], { noWarp: true, noZip: true });
+            if (rr == null) { continue; }
+            var pts = [];
+            for (var pi = 0; pi < rr.path.length; pi++) {
+                var cell = idToCell[rr.path[pi]];
+                if (cell != null && cell.site != null) { pts.push(cell.site); }
+            }
+            for (var pj = 0; pj + 1 < pts.length; pj++) { lineSegs.push([pts[pj], pts[pj + 1]]); }
+        }
+    }
+    function distToSegSq(px, py, a, b) {
+        var abx = b.x - a.x, aby = b.y - a.y;
+        var len2 = abx * abx + aby * aby;
+        var t = (len2 < 1e-6) ? 0 : (((px - a.x) * abx + (py - a.y) * aby) / len2);
+        if (t < 0) { t = 0; } else if (t > 1) { t = 1; }
+        var cx = a.x + abx * t, cy = a.y + aby * t;
+        var dx = px - cx, dy = py - cy;
+        return dx * dx + dy * dy;
+    }
+    function onRacingLine(x, y, radius) {
+        var r2 = radius * radius;
+        for (var si = 0; si < lineSegs.length; si++) {
+            if (distToSegSq(x, y, lineSegs[si][0], lineSegs[si][1]) <= r2) { return true; }
+        }
+        return false;
+    }
+    var trapRadius = bal(config, 'ziplineTrapRadius', 100);
+    var speed = (config.boons.zipline.speed || 30);
+    var worst = 0, count = 0;
+    for (var zi = 0; zi < zips.length; zi++) {
+        var z = zips[zi];
+        var rad = (z.angle || 0) * (Math.PI / 180);
+        var fx = z.x + Math.cos(rad) * z.length, fy = z.y + Math.sin(rad) * z.length;
+        var tStart = driveTime(z.x, z.y), tFar = driveTime(fx, fy);
+        if (!isFinite(tStart) || !isFinite(tFar)) { continue; } // far reachable only by cable => real crossing, not a trap
+        var rideSec = (speed > 0) ? (z.length / speed) : 0;
+        // The forced ride costs rideSec but moves you forward by (tStart - tFar) of drive time;
+        // the net setback is how much SLOWER the forced ride is than just driving the span.
+        var setback = rideSec - (tStart - tFar);
+        if (setback > 0 && onRacingLine(z.x, z.y, trapRadius)) {
+            if (setback > worst) { worst = setback; }
+            count++;
+        }
+    }
+    return { worst: worst, count: count };
+}
+
 // Up to n items evenly spaced across the list by INDEX (gate position), always
 // including the first and last so the fan spans the whole gate.
 function spreadPick(list, n) {
@@ -812,6 +902,23 @@ function classify(map, config) {
             var wtHard = bal(config, 'warpTrapHardSec', 22);
             if (warpTrap.worst > wtHard) {
                 hardFail.push('a warp pad on the racing line flings racers ~' + warpTrap.worst.toFixed(0) + 's backward (a trap)');
+            }
+        }
+    }
+    // ZIPLINE TRAP: a cable whose start post sits on the racing line over open ground snatches
+    // a forward racer onto a slow ride that costs them time — invisible to the optimal-path par
+    // (which only takes a zip when it genuinely shortcuts). Same soft-deduction + hard-fail
+    // shape as the warp trap (it shows the author a 'ziptrap' line). Zero cost on zip-free maps.
+    {
+        var zipTrap = ziplineTrapSeverity(map, config);
+        if (zipTrap.worst > 0) {
+            var ztTol = bal(config, 'ziplineTrapTolSec', 1.0);
+            var ztPerSec = bal(config, 'ziplineTrapPerSec', 6);
+            var ztMax = bal(config, 'ziplineTrapMax', 45);
+            deduct(Math.min(ztMax, Math.round(Math.max(0, zipTrap.worst - ztTol) * ztPerSec)), 'ziptrap');
+            var ztHard = bal(config, 'ziplineTrapHardSec', 22);
+            if (zipTrap.worst > ztHard) {
+                hardFail.push('a zipline on the racing line forces racers onto a ~' + zipTrap.worst.toFixed(0) + 's slow ride (a trap)');
             }
         }
     }

@@ -6262,6 +6262,18 @@ function checkDrawPlayer(player, dt) {
         if (camera.inBounds(player)) { drawBarrelLoadedFx(player); }
         return;
     }
+    // Riding a Zipline: the kart is clipped onto the cable. Lift it off the ground with a
+    // shadow + draw a trolley clamped on the rope over it + a strap, so it reads as hanging
+    // from the line rather than driving beside it. Client-only state (ziplineBoard/End).
+    // Self-clearing backstop (like the airborne branch): if a ziplineEnd is ever missed, drop
+    // the rig once the max ride time lapses so the kart can't hang under a phantom trolley forever.
+    if (player.ziplining != null && player.ziplining.until != null && Date.now() > player.ziplining.until) {
+        player.ziplining = null;
+    }
+    if (player.ziplining != null) {
+        if (camera.inBounds(player)) { drawZiplineKart(player, dt); }
+        return;
+    }
     if (camera.inBounds(player)) {
         drawPlayer(player, dt);
         // Wet sheen + droplets on top of the kart while it dries off after swimming.
@@ -6299,6 +6311,73 @@ function drawAirborneKart(player, dt) {
     } finally {
         player.y = savedY;
     }
+}
+// Zipline ride: the kart is clipped onto the cable and HANGS UNDER it. The cable line stays
+// at the streamed position (gx,gy, where the static rope is drawn); the trolley clamps there
+// and the kart dangles straight down from it on a strap. drawPlayer reads player.x/y
+// (+camera) everywhere, so we drop the kart by temporarily lowering player.y for the one draw
+// call and restore it in a finally (a throw can't strand the kart displaced).
+function drawZiplineKart(player, dt) {
+    var br = (config.playerBaseRadius || 7.5);
+    var gx = player.x + camera.getCameraX();
+    var gy = player.y + camera.getCameraY();           // the CABLE point (trolley clamps here)
+    var bob = Math.sin(Date.now() / 220) * 1.2;
+    var hang = br + 8 + bob;                            // how far below the cable the kart dangles
+    var rad = (player.ziplining.angle || 0) * (Math.PI / 180);
+    var dirX = Math.cos(rad), dirY = Math.sin(rad);
+    var ky = gy + hang;                                 // hanging kart centre (straight DOWN)
+    // Faint contact shadow under the hanging kart.
+    gameContext.save();
+    gameContext.globalAlpha = 0.22;
+    gameContext.fillStyle = "#000";
+    gameContext.beginPath();
+    gameContext.ellipse(gx, ky + br * 0.7, br * 0.95, br * 0.45, 0, 0, 2 * Math.PI);
+    gameContext.fill();
+    gameContext.restore();
+    // Strap from the cable down to the kart (drawn UNDER the kart so it tucks into the roof).
+    gameContext.save();
+    gameContext.lineCap = "round";
+    gameContext.strokeStyle = ZIP_STRAP; gameContext.lineWidth = 3;
+    gameContext.beginPath(); gameContext.moveTo(gx, gy); gameContext.lineTo(gx, ky - br * 0.5); gameContext.stroke();
+    gameContext.restore();
+    // The kart, dropped to the hanging position.
+    var savedY = player.y;
+    player.y = savedY + hang;
+    try {
+        drawPlayer(player, dt);
+    } finally {
+        player.y = savedY;
+    }
+    // Trolley + cable bit OVER everything, clamped on the cable line above the kart.
+    var seg = 16;
+    gameContext.save();
+    gameContext.lineCap = "round";
+    // rope segment (twin gold strands over a dark halo) — the bit of cable the trolley grips
+    gameContext.beginPath();
+    gameContext.moveTo(gx - dirX * seg, gy - dirY * seg);
+    gameContext.lineTo(gx + dirX * seg, gy + dirY * seg);
+    gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 6; gameContext.stroke();
+    gameContext.strokeStyle = "#F2C14E"; gameContext.lineWidth = 2.5; gameContext.stroke();
+    // trolley pulley clamped on the rope
+    gameContext.beginPath(); gameContext.arc(gx, gy, 5, 0, 2 * Math.PI);
+    gameContext.fillStyle = ZIP_STEEL; gameContext.fill();
+    gameContext.strokeStyle = "#e9eef2"; gameContext.lineWidth = 2; gameContext.stroke();
+    gameContext.beginPath(); gameContext.arc(gx, gy, 1.8, 0, 2 * Math.PI);
+    gameContext.fillStyle = "#F2C14E"; gameContext.fill();
+    // a couple of faint speed streaks trailing back along the cable (at the kart's level)
+    gameContext.strokeStyle = "rgba(255,255,255,0.35)"; gameContext.lineWidth = 1.5;
+    for (var i = 0; i < 2; i++) {
+        var so = (i - 0.5) * 5;
+        var bxs = gx - dirX * (10 + ((Date.now() / 90 + i * 13) % 10)) + (-dirY) * so;
+        var bys = ky - dirY * (10 + ((Date.now() / 90 + i * 13) % 10)) + (dirX) * so;
+        gameContext.globalAlpha = 0.5;
+        gameContext.beginPath();
+        gameContext.moveTo(bxs, bys);
+        gameContext.lineTo(bxs - dirX * 7, bys - dirY * 7);
+        gameContext.stroke();
+    }
+    gameContext.globalAlpha = 1;
+    gameContext.restore();
 }
 // Barrel-loaded telegraph: just a burning fuse counting down to the auto-launch (the barrel
 // itself spins to show the aim — see boons.js streamAngle; the racer is hidden inside it).
@@ -9605,6 +9684,20 @@ function buildHazardDrawers() {
             drawSlingshotRings(h.x, h.y, h.angle);
         };
     }
+    if (config.boons != null && config.boons.zipline != null) {
+        hazardDrawers[config.boons.zipline.id] = function (h) {
+            // railX/railY = the start post (rail origin); railLength = the author-set span.
+            drawZipline(h.railX != null ? h.railX : h.x, h.railY != null ? h.railY : h.y,
+                h.angle, h.railLength != null ? h.railLength : config.boons.zipline.minLength);
+        };
+    }
+    if (config.boons != null && config.boons.lilyPad != null) {
+        hazardDrawers[config.boons.lilyPad.id] = function (h) {
+            // h.state = sink % (netState) 0 floating..100 sunk; h.radius = author-resized size;
+            // h.angle = the baked per-pad random rotation (cosmetic variety).
+            drawLilyPad(h.x, h.y, h.state, h.radius, h.angle);
+        };
+    }
 }
 function drawHazard(hazard) {
     if (hazardDrawers == null) {
@@ -11523,6 +11616,145 @@ function drawSlingshotRings(x, y, angle) {
         gameContext.lineTo(ax - s * 7, 6);
         gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 6; gameContext.stroke();
         gameContext.strokeStyle = accent; gameContext.lineWidth = 3; gameContext.stroke();
+    }
+    gameContext.restore();
+}
+
+// Shared Zipline look — "Rope & Wooden Poles" cable with a "Parked Trolley" mount marker
+// (the in-game drawer + the editor painter render identically). cap = the canvas 2d context.
+// The rope is two twisted golden strands over a dark halo; a wooden pole stands at each end;
+// the START end (x,y) carries a pulley trolley (wheel on the rope + a little hanging hook) as
+// the mount marker — no big disc. Purely strokes/arcs (no shadowBlur/filter), so it's cheap.
+var ZIP_ROPE_DARK = "#C79A33", ZIP_ROPE_DARK_W = "#E6CF95"; // 2nd twist strand (land / water)
+var ZIP_WOOD = "#6b4a26", ZIP_WOOD_DARK = "#4a3119", ZIP_STEEL = "#2a2018", ZIP_STRAP = "#2a2e33";
+function paintZiplineLook(cap, x, y, angle, length, accent, ropeDark) {
+    var rad = (angle || 0) * (Math.PI / 180);
+    var dirX = Math.cos(rad), dirY = Math.sin(rad);
+    var ex = x + dirX * length, ey = y + dirY * length;
+    var perpX = -dirY, perpY = dirX;
+    cap.save();
+    cap.lineCap = "round";
+    // Rope cable: a slight droop, a dark halo, then two offset golden strands for the twist.
+    var sag = Math.min(20, length * 0.07);
+    var mx = (x + ex) / 2 + perpX * sag, my = (y + ey) / 2 + perpY * sag;
+    cap.beginPath();
+    cap.moveTo(x, y); cap.quadraticCurveTo(mx, my, ex, ey);
+    cap.strokeStyle = BOON_HALO; cap.lineWidth = 9; cap.stroke();
+    for (var o = -1; o <= 1; o += 2) {
+        cap.beginPath();
+        cap.moveTo(x + perpX * o * 2, y + perpY * o * 2);
+        cap.quadraticCurveTo(mx + perpX * o * 2, my + perpY * o * 2, ex + perpX * o * 2, ey + perpY * o * 2);
+        cap.strokeStyle = o < 0 ? accent : ropeDark; cap.lineWidth = 2.5; cap.stroke();
+    }
+    // Wooden poles: a stub across the cable at each end + a darker cap segment.
+    for (var p = 0; p < 2; p++) {
+        var px = p === 0 ? x : ex, py = p === 0 ? y : ey;
+        cap.strokeStyle = ZIP_WOOD; cap.lineWidth = 8;
+        cap.beginPath();
+        cap.moveTo(px - perpX * 16, py - perpY * 16); cap.lineTo(px + perpX * 16, py + perpY * 16); cap.stroke();
+        cap.strokeStyle = ZIP_WOOD_DARK; cap.lineWidth = 8;
+        cap.beginPath();
+        cap.moveTo(px + perpX * 16, py + perpY * 16); cap.lineTo(px + perpX * 22, py + perpY * 22); cap.stroke();
+    }
+    // Parked trolley at the START (the mount): a pulley wheel ON the rope + a hanging hook.
+    cap.beginPath(); cap.arc(x, y, 6, 0, 2 * Math.PI); cap.fillStyle = ZIP_STEEL; cap.fill();
+    cap.strokeStyle = "#e9eef2"; cap.lineWidth = 2; cap.stroke();
+    cap.beginPath(); cap.arc(x, y, 2, 0, 2 * Math.PI); cap.fillStyle = accent; cap.fill();
+    var hx = x + perpX * 12, hy = y + perpY * 12;
+    cap.strokeStyle = ZIP_STRAP; cap.lineWidth = 3;
+    cap.beginPath(); cap.moveTo(x, y); cap.lineTo(hx, hy); cap.stroke();
+    cap.strokeStyle = accent; cap.lineWidth = 2.5;
+    cap.beginPath(); cap.arc(hx, hy, 4, 0.5, 5.6); cap.stroke();
+    cap.restore();
+}
+
+// Zipline (in-game) — "Rope & Wooden Poles" cable + "Parked Trolley" mount (see
+// paintZiplineLook). x,y = the START post (rail origin); the cable runs along `angle` for the
+// author-set `length` to the far post. On water it switches to the pale rope palette.
+function drawZipline(x, y, angle, length) {
+    var cfg = config.boons.zipline;
+    var len = (typeof length === "number" && isFinite(length) && length > 0) ? length : cfg.minLength;
+    var onWater = boonOnWater(x, y);
+    var accent = onWater ? cfg.colorWater : cfg.color;
+    var ropeDark = onWater ? ZIP_ROPE_DARK_W : ZIP_ROPE_DARK;
+    paintZiplineLook(gameContext, x, y, angle, len, accent, ropeDark);
+}
+
+// Lily Pad — a drivable stepping-stone over water that SINKS while stood on. `state` is the
+// server sink % (netState: 0 = floating .. 100 = fully sunk). As it sinks the leaf shrinks a
+// touch and a water film creeps over it, so a pad about to drop you reads at a glance. Art is
+// the "Cartoon Pop" style: saturated green, a thick dark outline, a rim-light crescent + gloss
+// dot. ~30% of pads (deterministic from the baked random `angle`) also carry a little pink
+// LOTUS bloom that fades as the pad goes under. Cheap (filled arcs + strokes, no filter).
+var LILY_OUTLINE = "#16331d", LILY_RIMLIGHT = "#c8ffce", LILY_VEIN = "rgba(20,60,30,0.5)";
+var LILY_PETAL = "#f6b0cb", LILY_CENTER = "#ffd24a";
+// A near-full disc with a wedge notch cut toward the centre (the lily-leaf silhouette).
+function lilyLeafPath(cap, r) {
+    cap.beginPath();
+    cap.arc(0, 0, r, 0.42, 2 * Math.PI - 0.42);
+    cap.lineTo(0, 0);
+    cap.closePath();
+}
+// ~30% of pads bloom — keyed off the baked random angle so it's stable per pad + identical on
+// every client (angles ending 0,1,2 hit, spread evenly across all rotations).
+function lilyHasFlower(angle) {
+    return (Math.round(angle || 0) % 10 + 10) % 10 < 3;
+}
+// The lotus bloom (also used by the editor painter via paintLilyBloom — kept here as the single
+// source for the in-game look). alpha lets it fade out as the pad sinks.
+function drawLilyBloom(cap, r, alpha) {
+    if (alpha <= 0) { return; }
+    cap.save();
+    cap.globalAlpha = alpha;
+    var pr = r * 0.42;
+    cap.fillStyle = LILY_PETAL;
+    for (var p = 0; p < 6; p++) {
+        cap.save(); cap.rotate(p / 6 * Math.PI * 2);
+        cap.beginPath(); cap.ellipse(0, -pr * 0.55, pr * 0.34, pr * 0.62, 0, 0, 2 * Math.PI); cap.fill();
+        cap.restore();
+    }
+    cap.fillStyle = LILY_CENTER; cap.beginPath(); cap.arc(0, 0, pr * 0.34, 0, 2 * Math.PI); cap.fill();
+    cap.restore();
+}
+function drawLilyPad(x, y, state, radius, angle) {
+    var cfg = config.boons.lilyPad;
+    var sink = Math.max(0, Math.min(100, state == null ? 0 : state)) / 100;
+    var baseR = (typeof radius === "number" && isFinite(radius) && radius > 0) ? radius : cfg.radius;
+    var r = baseR * (1 - 0.16 * sink); // settles a little as it goes under
+    gameContext.save();
+    gameContext.translate(x, y);
+    // Soft contact shadow on the water (drawn unrotated — it's symmetric).
+    gameContext.beginPath();
+    gameContext.arc(0, 0, r + 2, 0, 2 * Math.PI);
+    gameContext.fillStyle = "rgba(8,35,26,0.20)";
+    gameContext.fill();
+    gameContext.rotate((angle || 0) * (Math.PI / 180)); // baked per-pad random rotation
+    // Saturated leaf.
+    lilyLeafPath(gameContext, r);
+    gameContext.fillStyle = cfg.color;
+    gameContext.fill();
+    // Rim-light crescent (upper-left), under the outline.
+    gameContext.save();
+    gameContext.globalAlpha = 0.5; gameContext.strokeStyle = LILY_RIMLIGHT; gameContext.lineWidth = 3;
+    gameContext.beginPath(); gameContext.arc(0, 0, r * 0.86, Math.PI * 1.05, Math.PI * 1.7); gameContext.stroke();
+    gameContext.restore();
+    // Thick dark cartoon outline.
+    lilyLeafPath(gameContext, r);
+    gameContext.strokeStyle = LILY_OUTLINE; gameContext.lineWidth = 4; gameContext.stroke();
+    // Gloss dot + a single bold vein.
+    gameContext.fillStyle = "rgba(255,255,255,0.7)";
+    gameContext.beginPath(); gameContext.arc(-r * 0.32, -r * 0.34, r * 0.16, 0, 2 * Math.PI); gameContext.fill();
+    gameContext.strokeStyle = LILY_VEIN; gameContext.lineWidth = 2;
+    gameContext.beginPath(); gameContext.moveTo(0, 0); gameContext.lineTo(r * 0.8, r * 0.1); gameContext.stroke();
+    // Lotus bloom on ~30% of pads, fading as the pad submerges.
+    if (lilyHasFlower(angle)) { drawLilyBloom(gameContext, r, Math.max(0, 1 - sink)); }
+    // Water film creeping over it as it sinks.
+    if (sink > 0.5) {
+        gameContext.globalAlpha = 0.55 * ((sink - 0.5) * 2);
+        gameContext.beginPath(); gameContext.arc(0, 0, r, 0, 2 * Math.PI);
+        gameContext.fillStyle = config.tileMap.water != null ? config.tileMap.water.color : "#2f6fb0";
+        gameContext.fill();
+        gameContext.globalAlpha = 1;
     }
     gameContext.restore();
 }

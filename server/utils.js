@@ -863,6 +863,69 @@ exports.validateMap = function (vMap, config) {
                 }
             }
         }
+        // Ziplines (a BOON, one-way carried cable): you DRIVE onto the START post and LAND at
+        // the FAR post, so BOTH ends must sit on drivable ground. The cable itself can SPAN
+        // lava/water/holes — you ride over them untouchable — but boarding on, or landing in,
+        // lava / a hole / a (locked-)door cell is a death or a dead end, so reject those.
+        var zipId = (config.boons.zipline != null) ? config.boons.zipline.id : null;
+        if (zipId != null) {
+            var tmz = config.tileMap;
+            var zNonDrivable = {};
+            if (tmz.empty != null) { zNonDrivable[tmz.empty.id] = true; }
+            if (tmz.door != null) { zNonDrivable[tmz.door.id] = true; }
+            if (tmz.background != null) { zNonDrivable[tmz.background.id] = true; }
+            if (tmz.lava != null) { zNonDrivable[tmz.lava.id] = true; }
+            var zDoorCells = {};
+            var doorsForZip = Array.isArray(vMap.doors) ? vMap.doors : [];
+            for (var zd = 0; zd < doorsForZip.length; zd++) {
+                var zdc = (doorsForZip[zd] != null) ? nearestCell(vMap.cells, doorsForZip[zd].x, doorsForZip[zd].y) : null;
+                if (zdc != null && zdc.site != null) { zDoorCells[zdc.site.voronoiId] = true; }
+            }
+            for (var zp = 0; zp < vMap.hazards.length; zp++) {
+                var zhz = vMap.hazards[zp];
+                if (zhz == null || zhz.id !== zipId) { continue; }
+                // The registry already enforces directional => finite angle above; a zipline
+                // ALSO needs a finite positive length (the rail span the cable covers).
+                if (!Number.isFinite(zhz.length) || zhz.length <= 0) {
+                    return { valid: false, reason: "A zipline needs a finite, positive length." };
+                }
+                var zRad = zhz.angle * (Math.PI / 180);
+                var zfx = zhz.x + Math.cos(zRad) * zhz.length;
+                var zfy = zhz.y + Math.sin(zRad) * zhz.length;
+                // The far post must land INSIDE the world — nearestCell would otherwise snap an
+                // off-map landing to some in-bounds cell and pass the drivable check below while
+                // the cable actually points off the playfield.
+                if (zfx < 0 || zfx > config.worldWidth || zfy < 0 || zfy > config.worldHeight) {
+                    return { valid: false, reason: "A zipline must land inside the map." };
+                }
+                var zStartCell = nearestCell(vMap.cells, zhz.x, zhz.y);
+                var zFarCell = nearestCell(vMap.cells, zfx, zfy);
+                if (zStartCell != null && (zNonDrivable[zStartCell.id] ||
+                    (zStartCell.site != null && zDoorCells[zStartCell.site.voronoiId]))) {
+                    return { valid: false, reason: "A zipline's start post must sit on drivable ground (not lava / a hole / a door)." };
+                }
+                if (zFarCell != null && (zNonDrivable[zFarCell.id] ||
+                    (zFarCell.site != null && zDoorCells[zFarCell.site.voronoiId]))) {
+                    return { valid: false, reason: "A zipline must land on drivable ground (not lava / a hole / a door)." };
+                }
+            }
+        }
+        // Lily Pads (a BOON) are floating stepping-stones — they only do anything OVER water (the
+        // solid-footing override fires only on a water tile), so a pad on dry ground is an inert,
+        // confusing placeable. The editor already blocks an off-water drop; enforce it here too so
+        // a crafted/submitted map can't ship a pad that floats on nothing.
+        var lilyId = (config.boons.lilyPad != null) ? config.boons.lilyPad.id : null;
+        var waterId = (config.tileMap.water != null) ? config.tileMap.water.id : null;
+        if (lilyId != null && waterId != null) {
+            for (var lp = 0; lp < vMap.hazards.length; lp++) {
+                var lhz = vMap.hazards[lp];
+                if (lhz == null || lhz.id !== lilyId) { continue; }
+                var lcell = nearestCell(vMap.cells, lhz.x, lhz.y);
+                if (lcell != null && lcell.id !== waterId) {
+                    return { valid: false, reason: "A lily pad must sit on water." };
+                }
+            }
+        }
     }
     // barriers: optional solid fence/wall segments from the editor's 2-point tool.
     // Structural check (engine.bounceOffBarriers blocks crossing either side):
