@@ -1264,7 +1264,10 @@ function drawLobbyStatusCard() {
     for (i = 0; i < cells.length; i++) {
         key += "\u0000" + cells[i].label + "\u0001" + cells[i].value + "\u0001" + cells[i].stable;
     }
-    key += " s" + s.toFixed(2);
+    // Key on fitRatio, not the clamped s: the maxW cap below also depends on
+    // cornerInset (= cssToLogical(88)), which keeps varying with fitRatio even once
+    // s has clamped to 2 — so two fits with the same s still need distinct layouts.
+    key += " f" + ((typeof fitRatio === "number" && fitRatio > 0) ? fitRatio.toFixed(3) : "1");
     var w;
     if (statusCardLayout != null && statusCardLayout.key === key) {
         // Cache hit: reuse widths + pre-ellipsized strings; skip all measuring.
@@ -1305,7 +1308,11 @@ function drawLobbyStatusCard() {
     // wide). Without the corner term the 2x phone scale-up overlapped them in portrait,
     // where the buttons grow large in logical space.
     var cornerInset = (typeof cssToLogical === "function") ? cssToLogical(88) : 88;
-    var maxW = Math.min(LOGICAL_WIDTH - 80, LOGICAL_WIDTH - 2 * cornerInset - 24) / s;
+    // Floor the available width so an extreme (sub-real) letterbox where cornerInset
+    // grows past half the canvas can't drive maxW to zero/negative (which would scale
+    // cell widths by a negative factor and invert the card).
+    var avail = Math.max(LOGICAL_WIDTH * 0.4, LOGICAL_WIDTH - 2 * cornerInset - 24);
+    var maxW = Math.min(LOGICAL_WIDTH - 80, avail) / s;
     if (w > maxW) {
         var k = maxW / w;
         for (i = 0; i < cells.length; i++) { cells[i].w *= k; }

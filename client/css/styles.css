@@ -1431,9 +1431,16 @@ body.osk-open .gamepad-prompts {
         max-height: 94vh;
         overflow-y: auto;
     }
+    /* Column-MAJOR fill (auto-flow: column over a fixed 5-row track) so the rows
+       run top-to-bottom down the left column then the right — matching the linear
+       DOM order the gamepad/keyboard focus ring walks (moveSettingsFocus ±1). A
+       row-major grid would make D-pad "Down" jump sideways. 5 rows fits the ~7-9
+       settings in two columns; extra tracks collapse to 0 height. */
     .settings-rows {
         display: grid;
         grid-template-columns: 1fr 1fr;
+        grid-template-rows: repeat(5, auto);
+        grid-auto-flow: column;
         gap: 0.4rem 0.6rem;
     }
     .settings-row {
@@ -1449,12 +1456,15 @@ body.osk-open .gamepad-prompts {
    Start button. Sits above the settings modal so it can also toggle it closed.
    Top/left are set in JS (positionTouchSettingsButton) so the gear tracks the
    LETTERBOXED game canvas's top-right corner — stacked under the Fullscreen/Exit
-   touch button and clear of the centred lobby status banner. The 0,0 fallback is
-   never seen: positioning runs before the `.visible` class is toggled on. */
+   touch button and clear of the centred lobby status banner. JS sets `left`,
+   which wins over this `right` fallback; the fallback only applies if the gear is
+   ever revealed before it's positioned (canvas not yet measured) — top-RIGHT keeps
+   it clear of the top-left Emoji button even then, rather than 0,0. */
 #touchSettingsBtn {
     position: fixed;
-    top: 0;
-    left: 0;
+    top: 12px;
+    right: 12px;
+    left: auto;
     width: 48px;
     height: 48px;
     display: none;
