@@ -153,6 +153,15 @@ group('validateMap', function () {
     eq(utils.validateMap({ cells: [goalCell()], hazards: [{ id: c.hazards.bumper.id, x: NaN, y: 0 }] }, c).valid, false, 'NaN hazard position rejected');
     eq(utils.validateMap({ cells: [goalCell()], hazards: [{ id: c.hazards.movingBumper.id, x: 0, y: 0 }] }, c).valid, false, 'moving bumper without angle rejected');
     eq(utils.validateMap({ cells: [goalCell()], hazards: [{ id: c.hazards.movingBumper.id, x: 0, y: 0, angle: 45 }] }, c).valid, true, 'moving bumper WITH a finite angle is accepted');
+    // antlion (906) / thumper (907) have a config.hazards entry (so they pass the id
+    // membership set) but NO registerHazardKind, so they're brutal-round-only runtime
+    // entities, not editor placeables — validateMap must reject them by kind, not just
+    // accept-and-silently-drop at build time.
+    eq(utils.validateMap({ cells: [goalCell()], hazards: [{ id: c.hazards.antlion.id, x: 0, y: 0 }] }, c).valid, false, 'antlion id (no registered kind) rejected');
+    eq(utils.validateMap({ cells: [goalCell()], hazards: [{ id: c.hazards.thumper.id, x: 0, y: 0 }] }, c).valid, false, 'thumper id (no registered kind) rejected');
+    // vortexWell carries an authored radius; a non-finite one is rejected (parity with the angle rule)
+    eq(utils.validateMap({ cells: [goalCell()], hazards: [{ id: c.hazards.vortexWell.id, x: 0, y: 0, radius: Infinity }] }, c).valid, false, 'vortex well with a non-finite radius rejected');
+    eq(utils.validateMap({ cells: [goalCell()], hazards: [{ id: c.hazards.vortexWell.id, x: 0, y: 0, radius: 80 }] }, c).valid, true, 'vortex well with a finite radius accepted');
 
     // boon branches: boons share the hazards[] array and the kind registry, so they
     // validate the same way. dashArrows is directional => needs a finite angle, and

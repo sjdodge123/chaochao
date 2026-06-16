@@ -67,7 +67,7 @@ var RFX_BLIND = 1;
 // projectile tuple: [type, x, y, color, radius]; hazard tuple: [id, x, y, angle, railX, railY]
 var RP_TYPE = 0, RP_X = 1, RP_Y = 2, RP_COLOR = 3, RP_RADIUS = 4;
 var RH_ID = 0, RH_X = 1, RH_Y = 2, RH_ANGLE = 3, RH_RAILX = 4, RH_RAILY = 5,
-	RH_STATE = 6, RH_RADIUS = 7, RH_CLAIM = 8, RH_RAILLEN = 9;
+	RH_STATE = 6, RH_RADIUS = 7, RH_CLAIM = 8, RH_RAILLEN = 9, RH_TX = 10;
 // player.recapState values (also the RF_STATE values captured per frame)
 var RECAP_ALIVE = 0, RECAP_DIED = 1, RECAP_SCORED = 2;
 
@@ -331,7 +331,9 @@ function recapCaptureProjs() {
 // Snapshot live hazards AND boons (they share hazardList). railX/railY are static (a
 // bumper's rail anchor); angle animates, so it's captured per frame. state = phase/netState
 // (geyser/mine/spring/halo/flag), radius = sizable kinds (vortex well), claim = the
-// Second Wind flag's client-claimed colour (so recap replays it in the colour you saw).
+// Second Wind flag's client-claimed colour (so recap replays it in the colour you saw). tx =
+// the Magpie Drone's live target-x along its rail, so its drawer can mirror the bird to face
+// its travel direction in the recap (without it the bird always faces right).
 function recapCaptureHazards() {
 	var out = [];
 	if (typeof hazardList === "undefined" || hazardList == null) {
@@ -346,7 +348,7 @@ function recapCaptureHazards() {
 		out.push([h.id, h.x, h.y, (h.angle != null ? h.angle : 0),
 			(h.railX != null ? h.railX : h.x), (h.railY != null ? h.railY : h.y),
 			(h.state != null ? h.state : null), (h.radius != null ? h.radius : null), claim,
-			(h.railLength != null ? h.railLength : null)]);
+			(h.railLength != null ? h.railLength : null), (h.tx != null ? h.tx : null)]);
 	}
 	return out;
 }
@@ -1728,7 +1730,7 @@ function recapDrawHazard(h) {
 					// draw from their true origin + author-set span in the recap, not a stub.
 					drawer({
 						id: id, x: h[RH_X], y: h[RH_Y], angle: h[RH_ANGLE], state: h[RH_STATE], radius: h[RH_RADIUS],
-						railX: h[RH_RAILX], railY: h[RH_RAILY], railLength: h[RH_RAILLEN]
+						railX: h[RH_RAILX], railY: h[RH_RAILY], railLength: h[RH_RAILLEN], tx: h[RH_TX]
 					});
 			}
 		}

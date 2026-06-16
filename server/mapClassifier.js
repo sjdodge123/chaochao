@@ -276,6 +276,10 @@ function hazardAvoidance(map, config) {
     var vortexId = (config.hazards && config.hazards.vortexWell) ? config.hazards.vortexWell.id : null;
     var vortexR = (config.hazards && config.hazards.vortexWell && config.hazards.vortexWell.radius) || 150;
     var vortexCoreFrac = (config.hazards && config.hazards.vortexWell && config.hazards.vortexWell.coreFraction) || 0.6;
+    // Rotor: arms sweep a full circle out to orbitRadius, so the danger is the whole RING at
+    // arm reach, not the hub cell — penalize that ring (mirrors the live AI's isRotor branch).
+    var rotorId = (config.hazards && config.hazards.rotor) ? config.hazards.rotor.id : null;
+    var rotorOrbit = (config.hazards && config.hazards.rotor && config.hazards.rotor.orbitRadius) || 70;
     // Sentry turret: penalize the firing CONE (mount arc, out to range) — sample the
     // centre line + both arc edges so the routed line bends out of the line of fire, in
     // lockstep with the live AI (aiController's isTurret cone branch).
@@ -308,6 +312,13 @@ function hazardAvoidance(map, config) {
             for (var ringA = 0; ringA < 8; ringA++) {
                 var rr = ringA * Math.PI / 4;
                 addAround(hz.x + Math.cos(rr) * core, hz.y + Math.sin(rr) * core);
+            }
+        } else if (hz.id === rotorId) {
+            // Penalize the swept arm-ring at orbit radius (the arms reach the whole circle).
+            var orbit = (Number.isFinite(hz.orbitRadius) ? hz.orbitRadius : rotorOrbit);
+            for (var rotA = 0; rotA < 8; rotA++) {
+                var ra = rotA * Math.PI / 4;
+                addAround(hz.x + Math.cos(ra) * orbit, hz.y + Math.sin(ra) * orbit);
             }
         } else if (hz.id === turretId) {
             var mount = (hz.angle || 0) * Math.PI / 180;
@@ -631,6 +642,96 @@ function ziplineTrapSeverity(map, config) {
     return { worst: worst, count: count };
 }
 
+// Launch-pad TRAP severity — the aimed-fling analog of warpTrapSeverity. A Launch Pad
+// FLINGS any racer who drives over it on a committed, UN-STEERABLE airborne arc along the
+// author-set facing for a fixed `distance`, landing them wherever the arc ends. That's a boon
+// when the facing points forward (a shortcut over a chasm) — but a TRAP when the pad sits on
+// the natural racing line and its facing points BACKWARD or off-line: a racer driving the line
+// is flung away from the goal with no way to cancel. The setback is how much longer the race
+// gets from the landing point vs from the pad (drive time at landing - drive time at pad). Only
+// counts when the pad is within launcherTrapRadius of a no-shortcut racing line. Returns
+// { worst, count }. O(0) on pad-free maps.
+//
+// Only the Launch Pad is scored here — NOT the Barrel Cannon (its launch direction is a
+// player-TIMED skill shot off a continuously sweeping barrel, not an author-fixed angle, so a
+// well-placed barrel is fair) and NOT the Slingshot Rings (a capped-add axial speed pulse that
+// "never brakes a faster kart" — a mis-aimed pass merely under-fires, it can't fling you back).
+function launcherTrapSeverity(map, config) {
+    var padId = (config.boons && config.boons.launchPad) ? config.boons.launchPad.id : null;
+    var dist = (config.boons && config.boons.launchPad && typeof config.boons.launchPad.distance === 'number')
+        ? config.boons.launchPad.distance : 0;
+    if (padId == null || dist <= 0 || !Array.isArray(map.hazards) || !Array.isArray(map.cells)) { return { worst: 0, count: 0 }; }
+    var pads = [];
+    for (var i = 0; i < map.hazards.length; i++) {
+        var hz = map.hazards[i];
+        if (hz == null || hz.id !== padId) { continue; }
+        if (typeof hz.x !== "number" || typeof hz.y !== "number" || !isFinite(hz.angle)) { continue; }
+        pads.push(hz);
+    }
+    if (pads.length === 0) { return { worst: 0, count: 0 }; }
+
+    var idToCell = {};
+    for (var ci = 0; ci < map.cells.length; ci++) {
+        var s = map.cells[ci] && map.cells[ci].site;
+        if (s != null) { idToCell[s.voronoiId] = map.cells[ci]; }
+    }
+    // Pure-driving time to goal with NO shortcuts, so the racing line and the setback measure
+    // what a racer driving on their own would experience (a forward-facing pad isn't credited).
+    function driveTime(x, y) {
+        var r = cellGraph.findPathToNearestGoal(map, { x: x, y: y }, { noWarp: true, noZip: true });
+        if (r == null) { return Infinity; }
+        var t = cellGraph.estimatePathTime(map, r.path, true, true); // pure driving (no shortcut credit)
+        return (t > 0) ? t : 0;
+    }
+    // No-shortcut racing lines from every gate sample, as polyline SEGMENT lists.
+    var lineSegs = [];
+    var edges = startEdgesOf(map);
+    for (var e = 0; e < edges.length; e++) {
+        var samples = cellGraph.edgeSampleOrigins(edges[e]);
+        for (var s2 = 0; s2 < samples.length; s2++) {
+            var rr = cellGraph.findPathToNearestGoal(map, samples[s2], { noWarp: true, noZip: true });
+            if (rr == null) { continue; }
+            var pts = [];
+            for (var pi = 0; pi < rr.path.length; pi++) {
+                var cell = idToCell[rr.path[pi]];
+                if (cell != null && cell.site != null) { pts.push(cell.site); }
+            }
+            for (var pj = 0; pj + 1 < pts.length; pj++) { lineSegs.push([pts[pj], pts[pj + 1]]); }
+        }
+    }
+    function distToSegSq(px, py, a, b) {
+        var abx = b.x - a.x, aby = b.y - a.y;
+        var len2 = abx * abx + aby * aby;
+        var t = (len2 < 1e-6) ? 0 : (((px - a.x) * abx + (py - a.y) * aby) / len2);
+        if (t < 0) { t = 0; } else if (t > 1) { t = 1; }
+        var cx = a.x + abx * t, cy = a.y + aby * t;
+        var dx = px - cx, dy = py - cy;
+        return dx * dx + dy * dy;
+    }
+    function onRacingLine(x, y, radius) {
+        var r2 = radius * radius;
+        for (var si = 0; si < lineSegs.length; si++) {
+            if (distToSegSq(x, y, lineSegs[si][0], lineSegs[si][1]) <= r2) { return true; }
+        }
+        return false;
+    }
+    var trapRadius = bal(config, 'launcherTrapRadius', 100);
+    var worst = 0, count = 0;
+    for (var pi2 = 0; pi2 < pads.length; pi2++) {
+        var p = pads[pi2];
+        var rad = (p.angle || 0) * (Math.PI / 180);
+        var lx = p.x + Math.cos(rad) * dist, ly = p.y + Math.sin(rad) * dist;
+        var tPad = driveTime(p.x, p.y), tLand = driveTime(lx, ly);
+        if (!isFinite(tPad) || !isFinite(tLand)) { continue; } // landing only reachable by the fling => a real crossing, not a trap
+        var setback = tLand - tPad; // positive => the fling lands you FARTHER from goal (backward)
+        if (setback > 0 && onRacingLine(p.x, p.y, trapRadius)) {
+            if (setback > worst) { worst = setback; }
+            count++;
+        }
+    }
+    return { worst: worst, count: count };
+}
+
 // Up to n items evenly spaced across the list by INDEX (gate position), always
 // including the first and last so the fan spans the whole gate.
 function spreadPick(list, n) {
@@ -924,6 +1025,25 @@ function classify(map, config) {
             var ztHard = bal(config, 'ziplineTrapHardSec', 22);
             if (zipTrap.worst > ztHard) {
                 hardFail.push('a zipline on the racing line forces racers onto a ~' + zipTrap.worst.toFixed(0) + 's slow ride (a trap)');
+            }
+        }
+    }
+    // LAUNCH-PAD TRAP: a Launch Pad on the racing line whose author-set facing flings racers
+    // BACKWARD on an un-steerable arc — invisible to the optimal-path par (which only takes the
+    // fling when it shortcuts). Same soft-deduction + hard-fail shape as the warp/zip traps (it
+    // shows the author a 'launchtrap' line). Barrel Cannon (player-timed) and Slingshot Rings
+    // (capped boost, never brakes) are deliberately excluded — see launcherTrapSeverity. Zero
+    // cost on launch-pad-free maps.
+    {
+        var launchTrap = launcherTrapSeverity(map, config);
+        if (launchTrap.worst > 0) {
+            var ltTol = bal(config, 'launcherTrapTolSec', 1.0);
+            var ltPerSec = bal(config, 'launcherTrapPerSec', 6);
+            var ltMax = bal(config, 'launcherTrapMax', 45);
+            deduct(Math.min(ltMax, Math.round(Math.max(0, launchTrap.worst - ltTol) * ltPerSec)), 'launchtrap');
+            var ltHard = bal(config, 'launcherTrapHardSec', 22);
+            if (launchTrap.worst > ltHard) {
+                hardFail.push('a launch pad on the racing line flings racers ~' + launchTrap.worst.toFixed(0) + 's backward (a trap)');
             }
         }
     }

@@ -2556,6 +2556,13 @@ function update(gameBoard, currentState, dt) {
             }
             continue;
         }
+        // A SPENT mine has already fired and is permanently inert (phase MINE_SPENT === 2 in
+        // entities/hazards.js — monotonic: armed -> fuse -> spent, never re-arms). Stop pricing
+        // its cell into the route so bots stop avoiding a dud. Only the mine relaxes here: its
+        // spent state never flips back, so it can't flicker a bot's path. A geyser is left fully
+        // priced even while dormant — its dormant<->erupt cycle WOULD flicker the penalty and
+        // thrash routes, and stable over-avoidance of a brief-eruption point hazard is cheap.
+        if (c.hazards.mine != null && hz.id === c.hazards.mine.id && hz.phase === 2) { continue; }
         var bestI = -1, bestD = Infinity;
         for (var ci2 = 0; ci2 < map.cells.length; ci2++) {
             var cc = map.cells[ci2];
