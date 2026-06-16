@@ -1700,6 +1700,18 @@ function registerCombatHandlers(server) {
 			playTurretImpact(antlionSfxLevel(payload.x, payload.y));
 		}
 	});
+	server.on("turretDestroyed", function (payload) {
+		// A player punched a Sentry Turret offline. One-shot smash: a grey debris burst
+		// + a metallic crunch (not the turret's red shot impact). The wire keeps drawing
+		// the wreck via its destroyed netState, so nothing else to do here.
+		if (payload == null || payload.x == null) { return; }
+		if (currentState != config.stateMap.racing && currentState != config.stateMap.collapsing && currentState != config.stateMap.lobby) { return; }
+		spawnExplosion(payload.x, payload.y, 50, "#9aa0a6");
+		if (typeof recapMarkEffect === "function") { recapMarkEffect("explosion", payload.x, payload.y, { radius: 50, color: "#9aa0a6" }); }
+		if (typeof playTurretBreak === "function" && typeof antlionSfxLevel === "function") {
+			playTurretBreak(antlionSfxLevel(payload.x, payload.y));
+		}
+	});
 	server.on("spawnClouds", function (packet) {
 		spawnClouds(packet);
 	});

@@ -675,6 +675,13 @@ class GameBoard {
 					this.fireTurret(hazard);
 				}
 			}
+			// A turret a player just smashed with a punch (handleHit set alive=false +
+			// destroyedRequest this tick). Ship the one-shot wreck FX/SFX; the wire keeps
+			// drawing it as a dead emplacement from its netState (TURRET_DESTROYED).
+			if (hazard.isTurret && hazard.destroyedRequest) {
+				hazard.destroyedRequest = false;
+				messenger.messageRoomBySig(this.roomSig, "turretDestroyed", { owner: hazard.ownerId, x: hazard.x, y: hazard.y });
+			}
 			if (hazard.punch != null && this.punchList[hazard.ownerId] == null) {
 				this.punchList[hazard.ownerId] = hazard.punch;
 				messenger.messageRoomBySig(this.roomSig, "punch", compressor.sendPunch(hazard.punch));

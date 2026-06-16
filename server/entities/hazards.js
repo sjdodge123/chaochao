@@ -660,9 +660,15 @@ class Crusher extends Rect {
 // there too). serve sets `fireRequest` on the firing edge; gameBoard spawns the shot
 // (mirroring the abilityList spawnSnowFlake flag -> gameBoard.spawnSnowFlake pattern).
 //
+// Unlike every prior hazard, the turret can be DESTROYED: a solid player punch
+// smashes it offline for the rest of the round. The charge telegraph is the
+// opening — rush the emplacement during its cooldown/lock-on and break it before
+// it fires (or pick it off from outside its arc, where it can't shoot back).
+//
 // Phases (also the netState values): 0 idle/scanning, 1 charging (the lock-on
-// telegraph — a dodge window, like the geyser charge / laser-gate warn), 2 firing.
-var TURRET_IDLE = 0, TURRET_CHARGING = 1, TURRET_FIRING = 2;
+// telegraph — a dodge window, like the geyser charge / laser-gate warn), 2 firing,
+// 3 destroyed (an inert wreck — serve()/AI/firing all skip it).
+var TURRET_IDLE = 0, TURRET_CHARGING = 1, TURRET_FIRING = 2, TURRET_DESTROYED = 3;
 class Turret extends Hazard {
 	constructor(x, y, angle, ownerId, roomSig) {
 		super(x, y, c.hazards.sentryTurret.radius, c.hazards.sentryTurret.color, ownerId, roomSig);
@@ -686,6 +692,8 @@ class Turret extends Hazard {
 		// Start "loaded" so a turret guarding the start line threatens promptly.
 		this.cooldownTimer = c.hazards.sentryTurret.cooldownMs / 1000;
 		this.fireRequest = false;   // gameBoard.fireTurret consumes this on the firing edge
+		this.destroyedRequest = false; // gameBoard.updateHazards consumes this to ship the wreck FX
+		this.breakable = false;     // only punch-breakable while racing/collapsing (set in serve)
 		this.x = this.newX = x;     // stationary; seed newX/newY so a stray move() is a no-op
 		this.y = this.newY = y;
 	}
@@ -746,6 +754,11 @@ class Turret extends Hazard {
 	serve(playerList, dt, live, map, antlions) {
 		dt = dt || 0;
 		if (this.alive === false) { return; }
+		// Only smashable while it's an actual threat (racing/collapsing). Off the race
+		// — e.g. the decorative turret on the lobby tutorial map, where it never fires —
+		// a stray punch shouldn't leave a permanent wreck. serve() runs every tick (after
+		// checkCollisions), so handleHit reads last tick's liveness — stable across a state.
+		this.breakable = !!live;
 		var target = live ? this.acquireTarget(playerList, map, antlions) : null;
 		var wantAngle = (target != null) ? target.angle : this.mountAngle;
 		this.angle = this.stepAngleToward(this.angle, wantAngle, this.turnSpeed * dt);
@@ -781,8 +794,25 @@ class Turret extends Hazard {
 			y: this.y + Math.sin(rad) * c.hazards.sentryTurret.barrelLength
 		};
 	}
-	// Touch is harmless — the turret's only damage is its shot.
-	handleHit(object) { }
+	// Touch is harmless — the turret's only damage is its shot. But a SOLID PLAYER
+	// PUNCH smashes it: one good hit takes it offline for the rest of the round. Only
+	// real player swings count — map-owned shoves (other hazards' knockback punches)
+	// and the hockey puck can't, and an already-wrecked turret ignores everything.
+	// A CLASHED punch (countered by resolvePunchClashes — two players parrying each
+	// other) lands on nothing, so it can't break the turret either (mirrors the same
+	// guard in Player.handlePunchHit). alive=false drops it from serve()/firing and
+	// the AI cone-avoidance (both guard alive===false); the wreck stays in hazardList
+	// so the netState wire keeps drawing it. destroyedRequest is the firing-edge flag
+	// gameBoard turns into the break FX.
+	handleHit(object) {
+		if (this.alive === false || !this.breakable) { return; }
+		if (object == null || !object.isPunch || object.mapOwned || object.clashed) { return; }
+		this.phase = TURRET_DESTROYED;
+		this.netState = TURRET_DESTROYED;
+		this.alive = false;       // inert wreck for the rest of the round
+		this.destroyedRequest = true;
+		object.landed = true;     // the punch connected — keep it out of the clash pass
+	}
 }
 
 // --- hazard-kind registry ------------------------------------------------------
