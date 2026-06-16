@@ -6206,13 +6206,22 @@ function checkDrawPlayer(player, dt) {
     // a shrinking ground shadow so it reads as flying OVER the terrain (the server already
     // lerps its ground position along the arc; this is the purely-cosmetic vertical lift).
     // Client-only state set by the airbornePending/airborneLand handlers.
-    if (player.airborne != null && camera.inBounds(player)) {
-        drawAirborneKart(player, dt);
-        return;
+    // Self-clearing backstop (independent of camera bounds) so a dropped airborneLand never
+    // strands the kart in the airborne branch (suppressing its FX, or — for barrelLoaded —
+    // keeping it hidden) after the flight should have ended.
+    if (player.airborne != null && Date.now() > player.airborne.startAt + player.airborne.ms + 600) {
+        player.airborne = null;
+    }
+    if (player.airborne != null) {
+        if (camera.inBounds(player)) { drawAirborneKart(player, dt); }
+        return; // aloft: hopped when in view, otherwise skip the normal ground draw
     }
     // Loaded in a Barrel Cannon: the racer is INSIDE the barrel (hidden), which spins on
     // its own to show the aim (the barrel hazard streams its angle — see boons.js). We only
     // draw the burning fuse counting down to launch; the kart is hidden until it fires.
+    if (player.barrelLoaded != null && Date.now() > player.barrelLoaded.startAt + player.barrelLoaded.ms + 600) {
+        player.barrelLoaded = null;
+    }
     if (player.barrelLoaded != null) {
         if (camera.inBounds(player)) { drawBarrelLoadedFx(player); }
         return;
@@ -6247,8 +6256,13 @@ function drawAirborneKart(player, dt) {
     gameContext.restore();
     var savedY = player.y;
     player.y = savedY - hopPx; // up is -y
-    drawPlayer(player, dt);
-    player.y = savedY;
+    // try/finally so a throw inside the hot drawPlayer path can't leave player.y lifted
+    // (which would feed interpolation + render the kart at the wrong height all round).
+    try {
+        drawPlayer(player, dt);
+    } finally {
+        player.y = savedY;
+    }
 }
 // Barrel-loaded telegraph: just a burning fuse counting down to the auto-launch (the barrel
 // itself spins to show the aim — see boons.js streamAngle; the racer is hidden inside it).

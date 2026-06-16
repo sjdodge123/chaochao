@@ -635,10 +635,15 @@ try {
         const fromX = bot.x, fromY = bot.y;
         // An ability held BEFORE the launch must survive the flight (not be consumed).
         bot.ability = { id: 99, use: function () {} };
+        // A Slingshot chain in progress must be broken by going airborne (the flight is an
+        // untouchable pause, not a continued run of ring passes).
+        bot.slingChainUntil = clock + 5000; bot.slingChainCount = 2;
         let since = events.length;
         pad.handleHit(bot);
         check(bot.isAirborne() && bot.isAloft() && bot.enabled === false,
             'driving over the pad flings the racer airborne (frozen + aloft)');
+        check(bot.slingChainUntil === 0 && bot.slingChainCount === 0,
+            'launching breaks any in-progress Slingshot chain');
         check(Math.abs(bot.airborneToX - (fromX + PAD.distance)) < 0.001 && Math.abs(bot.airborneToY - fromY) < 0.001,
             'the landing spot is distance px along the +x facing');
         check(bot.velX === 0 && bot.velY === 0, 'launch zeroes velocity (no mid-flight steering)');
@@ -664,6 +669,8 @@ try {
         check(Math.abs(bot.x - toX0) < 0.001 && bot.velX === 0, 'landed exactly at the arc end with momentum zeroed');
         check(emittedSince('airborneLand', since), 'an airborneLand event fired on touchdown');
         check(bot.ability != null && bot.ability.id === 99, 'a held ability survives the launch (not consumed)');
+        check(bot.attack === false && bot.attackQueued === false,
+            'landing clears the punch latch so a held ability is not auto-spent on touchdown');
         bot.ability = null;
 
         // Racers only: a non-player and a zombie are ignored.
@@ -710,10 +717,13 @@ try {
             'the aim starts at the author facing + rides the streamed angle');
         check(emittedSince('barrelLoaded', since), 'a barrelLoaded event fired for the client');
 
-        // ARM WINDOW: a punch in the first minAimMs does NOT fire (a held punch can't insta-launch).
-        bot.attack = true;
+        // ARM WINDOW: a punch (held OR a queued press-edge) in the first minAimMs does NOT
+        // fire AND is discarded — not latched — so it can't force-fire the instant armAt opens.
+        bot.attack = true; bot.attackQueued = true;
         bot.update(config.stateMap.racing, DT);
-        check(bot.isBarreled(), 'a punch within the arming window does not fire (held-punch guard)');
+        check(bot.isBarreled(), 'a punch within the arming window does not fire');
+        check(bot.attack === false && bot.attackQueued === false,
+            'a punch in the arming window is discarded, not latched (no force-fire at armAt)');
         bot.attack = false;
 
         // AUTO-SPIN: with NO player input the barrel sweeps on its own (DK timing shot),
@@ -742,6 +752,8 @@ try {
         clock += BARREL.flightDurationMs + 10; bot.update(config.stateMap.racing, DT);
         check(!bot.isAloft(), 'the fired racer lands');
         check(bot.ability != null && bot.ability.id === 99, 'the held ability survives firing out of the barrel');
+        check(bot.attack === false && bot.attackQueued === false,
+            'landing clears the punch latch (held ability not auto-spent on touchdown)');
         bot.ability = null;
 
         // FIRE on fuse auto-timeout: load again, never punch, advance past autoFireMs.
@@ -792,17 +804,24 @@ try {
         check(Math.abs(centered.velX - v0) < 0.001, 'a repeat hit on the same kart in one tick does NOT pulse again');
 
         // Chaining raises the cap: a kart already at a single ring's cap can't be pushed by
-        // one ring, but a SECOND ring in the chain window lifts the cap and pushes it past.
+        // one ring, but a SECOND ring (a SEPARATE pass, >= chainMinGapMs later) lifts the cap.
         const atCap = { id: 'kk', isPlayer: true, x: 300, y: 200, velX: RING.pulseCap, velY: 0, maxVelocity: config.playerMaxSpeed };
         const ringA = kind.build({ x: 300, y: 200, angle: 0 }, 'ring-c', 'sig-j');
         ringA.handleHit(atCap);
         check(Math.abs(atCap.velX - RING.pulseCap) < 0.001, 'at a single ring cap, that ring adds nothing (no overshoot)');
         check(atCap.slingChainUntil > clock, 'the first ring armed the chain window');
-        clock += 100; // a few ticks later, still inside chainWindowMs
+        check(atCap.slingChainCount === 0, 'the first ring is not itself a chain link');
+        // A SECOND ring hit in the SAME tick (a tight cluster) must NOT count as a chain link.
+        const ringCluster = kind.build({ x: 300, y: 200, angle: 0 }, 'ring-cl', 'sig-j');
+        ringCluster.handleHit(atCap);
+        check(atCap.slingChainCount === 0,
+            'a second ring overlapped in the SAME tick does not inflate the chain (min-gap)');
+        // A real second pass, chainMinGapMs later, DOES chain and pushes past the single cap.
+        clock += RING.chainMinGapMs + 20;
         const ringB = kind.build({ x: 300, y: 200, angle: 0 }, 'ring-d', 'sig-j');
         ringB.handleHit(atCap);
         check(atCap.slingChainCount >= 1 && atCap.velX > RING.pulseCap,
-            'a chained second ring raised the cap and pushed past it (velX=' + atCap.velX.toFixed(1) + ' > ' + RING.pulseCap + ')');
+            'a chained second pass raised the cap and pushed past it (velX=' + atCap.velX.toFixed(1) + ' > ' + RING.pulseCap + ')');
 
         // Racers only: a non-player, a puck, and a zombie are ignored.
         const proj = { id: 'pj', isProjectile: true, x: 300, y: 200, velX: 0, velY: 0 };

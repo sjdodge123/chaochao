@@ -255,8 +255,11 @@ class Player extends Circle {
 		this.barrelArmAt = 0;     // earliest a punch can fire (a brief aim window after loading)
 		// Slingshot Rings chain: consecutive rings hit inside chainWindowMs raise the pulse
 		// cap (slingChainCount), so a row of rings launches harder than one. Re-armed per ring.
+		// slingChainAt = when the last chain link counted (min-gap so a one-tick cluster of
+		// rings can't multi-increment the chain — see boons.js SlingshotRings).
 		this.slingChainUntil = 0;
 		this.slingChainCount = 0;
+		this.slingChainAt = 0;
 
 		//Achievements
 		this.savior = 0;
@@ -1013,6 +1016,11 @@ class Player extends Circle {
 		this.airborneToY = Math.max(margin, Math.min(c.worldHeight - margin, this.y + dirY * distance));
 		this.airborneStartAt = Date.now();
 		this.airborneUntil = this.airborneStartAt + durationMs;
+		// Going airborne breaks any Slingshot Rings chain — the flight is an untouchable
+		// pause, not a continued run of ring passes, so a ring hit after landing starts
+		// fresh instead of inheriting a still-open chain window (which outlasts the flight).
+		this.slingChainUntil = 0;
+		this.slingChainCount = 0;
 		this.angle = angleDeg || 0; // face the travel direction (streamed; kart points along the arc)
 		this.enabled = false;
 		this.velX = 0;
@@ -1075,6 +1083,11 @@ class Player extends Circle {
 		this.newY = this.y;
 		this.velX = 0;
 		this.velY = 0;
+		// Clear the punch latch so the press that fired the launch can't carry into the
+		// landing tick and instantly spend a held ability (checkAttack resumes next tick);
+		// a held ability stays held until the player deliberately presses again.
+		this.attack = false;
+		this.attackQueued = false;
 		this.enabled = true;
 		messenger.messageRoomBySig(this.roomSig, "airborneLand", { id: this.id, x: this.x, y: this.y });
 	}
@@ -1150,6 +1163,13 @@ class Player extends Circle {
 		this.velX = 0;
 		this.velY = 0;
 		barrel.occupiedUntil = this.barreledUntil + 300; // keep the idle spin yielded while loaded
+		// Arming window: discard any punch (held OR the queued press-edge) until barrelArmAt,
+		// so an early tap can't latch in attackQueued and force-fire the instant the window
+		// opens — the timing shot stays the player's to take.
+		if (now < this.barrelArmAt) {
+			this.attack = false;
+			this.attackQueued = false;
+		}
 		var punched = (this.attack || this.attackQueued) && now >= this.barrelArmAt;
 		var fuseDone = now >= this.barreledUntil;
 		if (punched || fuseDone) {
@@ -2089,6 +2109,7 @@ class Player extends Circle {
 		this.barrelArmAt = 0;
 		this.slingChainUntil = 0;
 		this.slingChainCount = 0;
+		this.slingChainAt = 0;
 		// Clear lobby-only state on every race (re)start so a lobby respawn's invuln
 		// grace / sanctuary flag / pending-respawn can never bleed into a real round.
 		this.invulnUntil = 0;

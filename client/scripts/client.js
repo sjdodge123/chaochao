@@ -2440,7 +2440,7 @@ function registerEffectHandlers(server) {
 		// Launch Pad.
 		if (typeof isLocalId === "function" && isLocalId(payload.id)) {
 			if (payload.source === "barrel") {
-				if (typeof stopBarrelFuse === "function") { stopBarrelFuse(); }
+				if (typeof stopBarrelFuse === "function") { stopBarrelFuse(payload.id); }
 				if (typeof playBarrelLaunch === "function") { playBarrelLaunch(); }
 			} else if (typeof playLaunchPadSpring === "function") {
 				playLaunchPadSpring();
@@ -2467,10 +2467,11 @@ function registerEffectHandlers(server) {
 		if (p != null) {
 			p.barrelLoaded = { startAt: Date.now(), ms: payload.ms || 1600 };
 		}
-		// Burning-fuse sizzle while you're the one loaded (local seats only).
+		// Burning-fuse sizzle while you're the one loaded (local seats only; keyed by id so
+		// two local couch-coop racers loaded at once don't share/clobber one voice).
 		if (typeof isLocalId === "function" && isLocalId(payload.id)
 			&& typeof startBarrelFuse === "function") {
-			startBarrelFuse(payload.ms || 1600);
+			startBarrelFuse(payload.id, payload.ms || 1600);
 		}
 	});
 	server.on("startLobbyTimer", function () {
