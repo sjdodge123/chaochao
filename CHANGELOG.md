@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.46.0 — 2026-06-16
+
 ### Map editor
 
 - **Three new Boons: Launch Pad, Barrel Cannon & Slingshot Rings.** A trio of helpful placeables that send you flying. Drive over a **Launch Pad** to be flung through the air in the direction it points — while you're airborne nothing can touch you (lava and hazards included), and you land wherever the arc drops you, so authors aim it across gaps and over danger. A **Barrel Cannon** scoops you in DK-style: the barrel **spins on its own** with a **burning fuse**, and you **time your punch** to fire in whatever direction it's pointing — or let the fuse burn all the way down and it launches you automatically. It's a longer, committed flight than the Launch Pad, and in the editor a dashed ring shows how far it throws so authors can place it. **Slingshot Rings** give you a speed burst as you drive *through* them, along the ring's axis; the more **centered** your pass, the bigger the kick, and hitting a **row of rings** in quick succession stacks the boost into a real launch. Authors place all three from the **Boons** palette and rotate them to aim; as with every boon, rival AI racers drive straight through them, and each switches to a watery look when placed on water.
