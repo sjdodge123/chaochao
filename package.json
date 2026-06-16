@@ -18,6 +18,9 @@
         "esbuild": "^0.28.0",
         "playwright": "^1.60.0"
     },
+    "overrides": {
+        "ws": "^8.21.0"
+    },
     "scripts": {
         "build": "node build.js",
         "start": "node index.js",
