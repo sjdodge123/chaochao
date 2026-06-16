@@ -655,6 +655,32 @@
         width: auto;
       }
     }
+
+    /* --- responsive: short landscape (phone on its side) -------------------- */
+    /* A landscape phone is WIDER than 768px, so it keeps the desktop side-rail
+       layout — but its height is tiny. There the action bar wraps to 2-3 rows and
+       eats the height the aspect-locked map canvas needs, leaving the map small in
+       a sea of empty space. Pin the bar to a single, horizontally-scrollable row so
+       the canvas reclaims that vertical space (≈+30% taller map). Trim the chrome a
+       touch to fit more of the bar without scrolling. */
+    @media screen and (min-width: 769px) and (max-height: 540px) {
+      #editorTopbar {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 5px 8px;
+        gap: 4px;
+      }
+      .ed-bar-group { flex: 0 0 auto; gap: 3px; }
+      .ed-bar-divider { margin: 2px 1px; }
+      /* Pack the bar left (drop the push-right spacer) and trim the text buttons so
+         the whole bar fits the phone's width without horizontal scrolling. (The
+         action bar still scrolls if an even narrower phone can't fit it.) */
+      .ed-bar-spacer { display: none; }
+      #editorTopbar .ed-btn { padding: 0 6px; gap: 4px; }
+      #toolRail { padding: 8px; }
+      #canvasWindow { padding: 6px; }
+    }
   </style>
 </head>
 
