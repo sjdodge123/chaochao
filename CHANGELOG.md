@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.48.0 — 2026-06-16
+
 ### Map editor
 
 - **New placeable: Zipline.** A two-post cable — a boon. Drive onto the start post and you're **carried along the line**, sailing over everything beneath you: lava, hazards, water and rivals all pass harmlessly under you while you ride (you hang from the cable on a little trolley), and you can't be punched off. It's a **slow, deliberate glide** — slower than driving — so it's not a fast-travel shortcut; it's a *safe* one, trading speed for a lava-proof crossing. Punch to **drop off early** — and however you leave the cable (early, at the far post, or if you run out of juice) you keep the line's speed and fling forward off the end. The catch: **holding the cable drains your punch meter**, and if it empties you're dropped right there — so a long zipline is a real gamble over whatever's below. Authors place it from the **boons** palette with **two clicks** (the start post, then the far post), which sets the cable's direction *and* length. Rival AI racers understand the cable and route **through** it when it's genuinely the best way across (e.g. a lava chasm they can't drive), but skip it on open ground where driving is faster.
