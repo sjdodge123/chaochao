@@ -1088,6 +1088,10 @@ class Player extends Circle {
 		this.barrel = barrel;
 		var now = Date.now();
 		this.barreledUntil = now + barrel.autoFireMs;
+		// Claim the barrel so its idle spin yields to the player's faster aim spin (a
+		// timestamp past the fuse + a buffer, refreshed each tick in tickBarrel, so a
+		// disconnect mid-load can't strand the barrel "occupied" forever).
+		barrel.occupiedUntil = this.barreledUntil + 300;
 		this.barrelArmAt = now + (barrel.minAimMs || 0);
 		this.barrelAimAngle = barrel.angle || 0; // start aimed where the author pointed it
 		this.angle = this.barrelAimAngle;         // streamed → the loaded kart faces the aim
@@ -1143,6 +1147,7 @@ class Player extends Circle {
 		this.newY = this.y;
 		this.velX = 0;
 		this.velY = 0;
+		barrel.occupiedUntil = this.barreledUntil + 300; // keep the idle spin yielded while loaded
 		var punched = (this.attack || this.attackQueued) && now >= this.barrelArmAt;
 		var fuseDone = now >= this.barreledUntil;
 		if (punched || fuseDone) {
@@ -1151,6 +1156,7 @@ class Player extends Circle {
 			var durationMs = barrel.flightDurationMs;
 			this.barreledUntil = 0;
 			this.barrel = null;
+			barrel.occupiedUntil = 0; // empty again → idle spin resumes next tick
 			this.launchAirborne(aim, distance, durationMs, "barrel");
 		}
 	}
