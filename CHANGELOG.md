@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.47.0 — 2026-06-16
+
 ### Map editor
 
 - **New placeable: Warp Pads.** Paired teleporters — a boon. Drive onto one pad and you're whisked to its linked partner across the map, **keeping all your speed and heading**, so a well-placed pair is a real shortcut; the linked pads glow in a matching colour so you can tell which goes where. It's not instant — you commit on contact and ride a brief warp: the camera **pulls back and sweeps across to the exit**, then you emerge there (invulnerable while you travel, so you can't be knocked out of the portal). The trip is longer for a longer hop, so a cross-map jump really feels like a journey. The catch: the exit throws you out facing whatever way you came in, and an author can aim a partner's mouth right at lava — so punch a rival onto a pad whose far end opens over the fire and let the portal finish the job. Stepping in plays a rising "vwoop" and popping out a bright chime, and the combat feed logs who warped. You won't bounce straight back — a pad won't grab you again until you've rolled off it. Authors place them as a **pair** (click pad A, then pad B) from the **boons** palette, on solid ground (not over lava, a hole, or a locked door); the editor and the next-map preview draw each pair in its in-game colour so the preview is accurate. Rival AI racers understand the link and route THROUGH a pad pair when it genuinely shortens their way to the goal — but the warp's travel time means they'll skip a pair that barely helps.
