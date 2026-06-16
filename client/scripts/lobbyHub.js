@@ -1251,10 +1251,20 @@ function drawLobbyStatusCard() {
     var ctx = gameContext;
     ctx.save();
     var i;
+    // Scale factor that keeps the card a readable PHYSICAL size on small /
+    // letterboxed screens. fitRatio is CSS-px per logical unit (≈0.48 on a
+    // landscape phone, ≥1 on desktop); 1/fitRatio renders the card at its
+    // 1366-baseline physical size, capped at 2x so it never dominates a tiny
+    // canvas. Desktop (fitRatio>=1) gets s=1 → unchanged.
+    var s = 1;
+    if (typeof fitRatio === "number" && fitRatio > 0) {
+        s = Math.max(1, Math.min(2, 1 / fitRatio));
+    }
     var key = (gold || "") + "\u0000" + LOGICAL_WIDTH;
     for (i = 0; i < cells.length; i++) {
         key += "\u0000" + cells[i].label + "\u0001" + cells[i].value + "\u0001" + cells[i].stable;
     }
+    key += " s" + s.toFixed(2);
     var w;
     if (statusCardLayout != null && statusCardLayout.key === key) {
         // Cache hit: reuse widths + pre-ellipsized strings; skip all measuring.
@@ -1290,7 +1300,12 @@ function drawLobbyStatusCard() {
             w = gw;
         }
     }
-    var maxW = LOGICAL_WIDTH - 80;
+    // Cap the SCALED width so the centred card clears both the canvas edge AND the
+    // top-corner touch buttons (emoji left / fullscreen right, each ≈ cssToLogical(88)
+    // wide). Without the corner term the 2x phone scale-up overlapped them in portrait,
+    // where the buttons grow large in logical space.
+    var cornerInset = (typeof cssToLogical === "function") ? cssToLogical(88) : 88;
+    var maxW = Math.min(LOGICAL_WIDTH - 80, LOGICAL_WIDTH - 2 * cornerInset - 24) / s;
     if (w > maxW) {
         var k = maxW / w;
         for (i = 0; i < cells.length; i++) { cells[i].w *= k; }
@@ -1315,8 +1330,14 @@ function drawLobbyStatusCard() {
     }
     var bandH = (gold != null) ? STATUS_CARD_BAND_H : 0;
     var h = bandH + (cells.length ? STATUS_CARD_CELLS_H : 0);
-    var x = (LOGICAL_WIDTH - w) / 2;
-    var y = lobbyBannerRowY(0);
+    // Anchor + scale around the card's top centre, then draw at the origin in base
+    // logical units (every offset below is multiplied by s by the transform).
+    var cardX = (LOGICAL_WIDTH - w * s) / 2;
+    var cardY = lobbyBannerRowY(0);
+    ctx.translate(cardX, cardY);
+    ctx.scale(s, s);
+    var x = 0;
+    var y = 0;
     drawHudPanel(x, y, w, h, {
         fill: hubSurface(),
         alpha: 0.92,
@@ -1377,7 +1398,7 @@ function drawLobbyStatusCard() {
     }
     ctx.restore();
     if (typeof hudProbeRect === "function") {
-        hudProbeRect("lobbyStatusCard", x, y, w, h);
+        hudProbeRect("lobbyStatusCard", cardX, cardY, w * s, h * s);
     }
 }
 
