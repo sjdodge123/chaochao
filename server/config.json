@@ -62,6 +62,12 @@
         "fairnessToleranceSec": 0.2,
         "fairnessPerSec": 2,
         "fairnessRoutesPerEdge": 4,
+        "warpTrapTolSec": 1.0,
+        "warpTrapPerSec": 6,
+        "warpTrapMax": 45,
+        "warpTrapRadius": 100,
+        "warpTrapHardSec": 22,
+        "warpTrapLateralSec": 1.5,
         "lengthMax": 5,
         "minDrivableFrac": 0.40,
         "parMin": 8,
@@ -665,6 +671,16 @@
             "chainMinGapMs": 120,
             "chainBonus": 60,
             "chainMax": 3
+        },
+        "warpPad": {
+            "_doc": "Paired teleporter (a BOON, id 958). A racer driving onto pad A is whisked to its partner pad B preserving velocity (and vice-versa); the exit heading is whatever you arrived with — so an author can aim a pad's exit at lava and a rival punched onto its partner flies out into it. Pads are authored as a PAIR in the editor (two-click): each map-entry carries a `pair` integer and the two entries sharing a value are linked. The pair id rides the netState wire slot so the client colour-matches the two halves. The warp is NOT instant: on entry the racer COMMITS — it's frozen + invulnerable for the transit while the local player's camera cinematically pans to the exit at a constant rate, then it emerges at pad B with velocity restored (server: gameBoard.updateWarpPads transit state machine; client: a warpCam pan + the kart hidden in transit). The transit DURATION scales with the teleport DISTANCE — `transitMs = clamp(dist/warpSpeed·1000, minTransitMs, maxTransitMs)` — so the camera travels the gap at a steady warpSpeed px/s (a longer hop reads as a longer journey, a short one is quick). That cost is why the AI only routes THROUGH a pair when it genuinely shortens the trip (cellGraph weights the warp edge by the transit time and estimatePathTime adds it to par). Ping-pong is stopped by a per-player ARMED latch (player.warpArmed): a racer re-arms only once it has left every pad's radius. radius is both the trigger zone and the drawn portal disc. emergeGraceMs is a brief post-emerge invuln so you don't instantly die landing near a collapse front.",
+            "id": 958,
+            "color": "#C24DFF",
+            "radius": 30,
+            "warpSpeed": 380,
+            "minTransitMs": 1000,
+            "maxTransitMs": 3200,
+            "emergeGraceMs": 400
         }
     },
     "barriers": {

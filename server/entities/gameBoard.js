@@ -13,7 +13,7 @@ var aiController = require('../aiController.js');
 var { Gate } = require('./shapes.js');
 var { LobbyStartButton, LobbyStation } = require('./player.js');
 var { ExplosionAimer, SwapAimer } = require('./aimers.js');
-var { hazardKindById, Antlion, Thumper } = require('./hazards.js');
+var { hazardKindById, linkWarpPads, Antlion, Thumper } = require('./hazards.js');
 var { CloudProj, SnowFlakeProj, BombProj, TurretShot, Puck } = require('./projectiles.js');
 var { Blindfold, Swap, IceCannon, Bomb, SpeedBuff, SpeedDebuff, TileSwap, Cut, StarPower, BombTrigger, OrbitalBeam } = require('./abilities.js');
 
@@ -189,6 +189,7 @@ class GameBoard {
 		// (hazard.update() -> move()). Early-outs unless the round is active.
 		this.updateAntlionRound(currentState, dt);
 		this.updateHazards(currentState, dt);
+		this.updateWarpPads(currentState);
 		if (currentState == c.stateMap.lobby) {
 			this.checkLobbyMapReset();
 			// SPIKE (lobby hub): runs AFTER checkCollisions so touchingStation reflects
@@ -390,7 +391,9 @@ class GameBoard {
 			}
 		}
 		for (var player in this.playerList) {
-			if (!this.playerList[player].alive) {
+			if (!this.playerList[player].alive || this.playerList[player].warping != null) {
+				// A warping racer is out of play (frozen + invulnerable) — no tile effects
+				// (lava), no collision, until it emerges from the exit pad.
 				continue;
 			}
 			_engine.preventEscape(this.playerList[player], this.world);
@@ -511,6 +514,10 @@ class GameBoard {
 	updatePlayers(currentState, dt) {
 		for (var playerID in this.playerList) {
 			var player = this.playerList[playerID];
+			// A racer mid warp-pad transit is frozen + invulnerable and out of play — skip
+			// its per-tick update (no goal/fire/cell processing) until it emerges. Warps only
+			// happen in racing/collapsing, so this never affects lobby respawn handling below.
+			if (player.warping != null) { continue; }
 			// handleHit (during checkCollisions, just above) flags lobby lava/goal hits
 			// instead of running the real death/win path; perform the safe respawn here
 			// where the spawn pad and playerList are in scope.
@@ -688,6 +695,77 @@ class GameBoard {
 				setTimeout(this.terminatePunch, 100, { id: hazard.ownerId, punchList: this.punchList, roomSig: this.roomSig });
 				hazard.punch = null;
 			}
+		}
+	}
+
+	// Warp pads: one pass per tick over the player list (NOT in handleHit, which the
+	// collision system fires up to twice per pair and would double-fire in one tick). The
+	// warp is a 2-stage TRANSIT, not an instant teleport: a racer that drives onto a pad
+	// COMMITS — it's frozen in place + invulnerable for transitMs (the engine + collision +
+	// AI all skip a `warping` racer; isInvuln covers lava/knockback) while the local client
+	// pans its camera to the exit — then it EMERGES at the partner pad with its velocity
+	// restored. Ping-pong is stopped by a per-player ARMED latch (warpArmed): a racer
+	// re-arms only once it has left every pad's radius, so it never bounces straight back
+	// and a kart parked on a pad doesn't oscillate. Only while racing/collapsing.
+	updateWarpPads(currentState) {
+		if (currentState != c.stateMap.racing && currentState != c.stateMap.collapsing) { return; }
+		var cfg = c.boons.warpPad;
+		var now = Date.now();
+		// 1) Advance in-progress transits: once transitMs has elapsed, EMERGE the racer at
+		// the exit with its stored velocity (+ a brief post-emerge invuln grace so it doesn't
+		// instantly die landing near a collapse front).
+		for (var tid in this.playerList) {
+			var tp = this.playerList[tid];
+			if (tp == null || tp.warping == null) { continue; }
+			// A racer that died mid-transit (an infection kill-timer firing) drops the transit
+			// silently — never relocate a dead kart or emit a ghost emerge. (killPlayer also
+			// clears warping; this is defence in depth against any ordering.)
+			if (tp.alive === false) { tp.warping = null; continue; }
+			if (now < tp.warping.until) { continue; }
+			var ex = tp.warping.exitX, ey = tp.warping.exitY;
+			tp.x = tp.newX = ex;
+			tp.y = tp.newY = ey;
+			tp.velX = tp.warping.velX;
+			tp.velY = tp.warping.velY;
+			tp.warping = null;
+			tp.warpArmed = false; // it's standing on the exit pad now — don't immediately re-warp
+			messenger.messageRoomBySig(this.roomSig, "warpEnd", { id: tid, x: ex, y: ey });
+		}
+		// 2) Start a transit for any armed racer that just drove onto a pad.
+		var pads = null;
+		for (var hid in this.hazardList) {
+			var h = this.hazardList[hid];
+			if (h != null && h.isWarpPad && h.alive !== false && h.partner != null) {
+				(pads || (pads = [])).push(h);
+			}
+		}
+		if (pads == null) { return; }
+		for (var pid in this.playerList) {
+			var p = this.playerList[pid];
+			if (p == null || !p.isPlayer || p.alive === false || p.reachedGoal || p.warping != null) { continue; }
+			var onPad = null;
+			for (var k = 0; k < pads.length; k++) {
+				if (pads[k].contains(p)) { onPad = pads[k]; break; }
+			}
+			if (onPad == null) { p.warpArmed = true; continue; } // off all pads → re-armed
+			if (p.warpArmed === false) { continue; }              // still sitting on a pad it landed on
+			// COMMIT: freeze in transit, stash the exit + the velocity to restore on emerge.
+			// The transit DURATION is distance-based (onPad.transitMs, set by linkWarpPads) so
+			// the camera travels the gap at a steady rate — a longer hop reads as a longer trip.
+			var transitMs = onPad.transitMs || c.boons.warpPad.maxTransitMs || 2000;
+			p.warping = {
+				until: now + transitMs,
+				enterX: onPad.x, enterY: onPad.y,
+				exitX: onPad.partner.x, exitY: onPad.partner.y,
+				velX: p.velX, velY: p.velY
+			};
+			p.velX = 0; p.velY = 0;
+			// Invulnerable through the transit + a brief emerge grace (Player.isInvuln →
+			// lava/knockback/targeting immunity). Never shorten an existing longer grace.
+			var invulnEnd = p.warping.until + cfg.emergeGraceMs;
+			if (p.invulnUntil < invulnEnd) { p.invulnUntil = invulnEnd; }
+			p.warpArmed = false;
+			messenger.messageRoomBySig(this.roomSig, "warpStart", { id: pid, enterX: onPad.x, enterY: onPad.y, exitX: onPad.partner.x, exitY: onPad.partner.y, durationMs: transitMs });
 		}
 	}
 
@@ -3514,6 +3592,10 @@ class GameBoard {
 			}
 			this.hazardList[mapID] = hazard;
 		}
+		// Warp pads reference each OTHER (a pair), which can't be resolved in build()
+		// since a pad's partner may be built later in the loop — link them now that the
+		// whole list exists. Cheap no-op on warp-free maps.
+		linkWarpPads(this.hazardList);
 	}
 	generateAbilities() {
 		var abilityTilesAvaliable = [];

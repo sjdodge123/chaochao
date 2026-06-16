@@ -165,6 +165,12 @@ class Engine {
 			if (player.alive == false) {
 				continue;
 			}
+			// A racer mid warp-pad transit is frozen — no input/integration until it emerges
+			// (gameBoard.updateWarpPads relocates it). It's also skipped by the collision
+			// pass + invulnerable, so it can't be moved, hit, or burned while in transit.
+			if (player.warping != null) {
+				continue;
+			}
 			var dirX = 0;
 			var dirY = 0;
 			var braking = false;

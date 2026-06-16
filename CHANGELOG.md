@@ -10,7 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### Map editor
+
+- **New placeable: Warp Pads.** Paired teleporters — a boon. Drive onto one pad and you're whisked to its linked partner across the map, **keeping all your speed and heading**, so a well-placed pair is a real shortcut; the linked pads glow in a matching colour so you can tell which goes where. It's not instant — you commit on contact and ride a brief warp: the camera **pulls back and sweeps across to the exit**, then you emerge there (invulnerable while you travel, so you can't be knocked out of the portal). The trip is longer for a longer hop, so a cross-map jump really feels like a journey. The catch: the exit throws you out facing whatever way you came in, and an author can aim a partner's mouth right at lava — so punch a rival onto a pad whose far end opens over the fire and let the portal finish the job. Stepping in plays a rising "vwoop" and popping out a bright chime, and the combat feed logs who warped. You won't bounce straight back — a pad won't grab you again until you've rolled off it. Authors place them as a **pair** (click pad A, then pad B) from the **boons** palette, on solid ground (not over lava, a hole, or a locked door); the editor and the next-map preview draw each pair in its in-game colour so the preview is accurate. Rival AI racers understand the link and route THROUGH a pad pair when it genuinely shortens their way to the goal — but the warp's travel time means they'll skip a pair that barely helps.
+- **Map balance check now catches bad teleports.** A Warp Pad whose far mouth sits right on the natural racing line is a *trap* — a racer driving the line straight hits it and gets flung all the way back toward the start, even though the map's "best" time looks fine. The fairness/balance score now measures that setback (using the real warp travel times) and docks the map hard for it (a catastrophic one fails outright), so the editor's balance overlay shows a `warptrap` deduction and the map drops out of Featured until you move the exit mouth off the racing line (a side pocket is safe). Place teleports as genuine shortcuts, not line-of-fire traps.
 
 ## v0.46.2 — 2026-06-16
 

@@ -228,7 +228,9 @@ var HAZARD_CLEARANCE = 40;    // px a drawn racing line keeps from a bumper poin
 function hazardAvoidance(map, config) {
     var boons = boonIdSet(config);
     var hazards = (Array.isArray(map.hazards) ? map.hazards : []).filter(function (hz) {
-        return hz != null && !boons[hz.id]; // boons aid the player — never route around them
+        // Boons aid the player — never route around them. This covers the Warp Pad (a
+        // boon): it's a SHORTCUT the cellGraph adds to the par route, not an obstacle.
+        return hz != null && !boons[hz.id];
     });
     if (hazards.length === 0) { return { penalty: null, points: [] }; }
     var cells = map.cells;
@@ -439,6 +441,99 @@ function edgeParTimes(map, config) {
         result.push({ edge: edges[e], par: par, times: times, draw: spreadPick(drawPool, nDraw) });
     }
     return { edges: result, avoid: avoid };
+}
+
+// Warp pads can RUIN a map even when the optimal par looks fine. The optimal route takes a
+// pair from its START side (a shortcut), so par never sees that the SAME pair's goal-side
+// mouth — when it sits on the natural drive to the goal — flings a naive racer who just drives
+// the line straight BACK toward the start. This measures that hazard. For each pair: the
+// goal-side pad (the one with the smaller DRIVE-only time to goal) is the trap mouth; its
+// SETBACK is how much longer your race gets if you hit it head-on (the far pad's drive time
+// minus the goal-side's, plus the transit). It only counts if the goal-side pad actually sits
+// within warpTrapRadius of a no-warp racing line — an off-line mouth (a side-pocket exit) is
+// harmless because nobody drives over it. Returns { worst: seconds, count }. O(0) on warp-free
+// maps (early return), and only runs the extra pathfinding when a map actually has pairs.
+function warpTrapSeverity(map, config) {
+    var warpId = (config.boons && config.boons.warpPad) ? config.boons.warpPad.id : null;
+    if (warpId == null || !Array.isArray(map.hazards) || !Array.isArray(map.cells)) { return { worst: 0, count: 0 }; }
+    var byPair = {};
+    for (var i = 0; i < map.hazards.length; i++) {
+        var hz = map.hazards[i];
+        if (hz == null || hz.id !== warpId || typeof hz.pair !== "number" || !isFinite(hz.pair)) { continue; }
+        (byPair[hz.pair] || (byPair[hz.pair] = [])).push(hz);
+    }
+    var pairs = [];
+    for (var pk in byPair) { if (byPair[pk].length === 2) { pairs.push(byPair[pk]); } }
+    if (pairs.length === 0) { return { worst: 0, count: 0 }; }
+
+    var idToCell = {};
+    for (var ci = 0; ci < map.cells.length; ci++) {
+        var s = map.cells[ci] && map.cells[ci].site;
+        if (s != null) { idToCell[s.voronoiId] = map.cells[ci]; }
+    }
+    function driveTime(x, y) {
+        var r = cellGraph.findPathToNearestGoal(map, { x: x, y: y }, { noWarp: true });
+        if (r == null) { return Infinity; }
+        var t = cellGraph.estimatePathTime(map, r.path, true); // true => price as PURE DRIVING
+        return (t > 0) ? t : 0;
+    }
+    // No-warp racing lines from every gate sample, as polyline SEGMENT lists (consecutive
+    // cell sites) — a pad on a long straight run between two waypoints is still "on the line"
+    // even when it's far from either endpoint, so test point-to-SEGMENT distance, not just to
+    // the cell centres.
+    var lineSegs = [];
+    var edges = startEdgesOf(map);
+    for (var e = 0; e < edges.length; e++) {
+        var samples = cellGraph.edgeSampleOrigins(edges[e]);
+        for (var s2 = 0; s2 < samples.length; s2++) {
+            var rr = cellGraph.findPathToNearestGoal(map, samples[s2], { noWarp: true });
+            if (rr == null) { continue; }
+            var pts = [];
+            for (var pi = 0; pi < rr.path.length; pi++) {
+                var cell = idToCell[rr.path[pi]];
+                if (cell != null && cell.site != null) { pts.push(cell.site); }
+            }
+            for (var pj = 0; pj + 1 < pts.length; pj++) { lineSegs.push([pts[pj], pts[pj + 1]]); }
+        }
+    }
+    function distToSegSq(px, py, a, b) {
+        var abx = b.x - a.x, aby = b.y - a.y;
+        var len2 = abx * abx + aby * aby;
+        var t = (len2 < 1e-6) ? 0 : (((px - a.x) * abx + (py - a.y) * aby) / len2);
+        if (t < 0) { t = 0; } else if (t > 1) { t = 1; }
+        var cx = a.x + abx * t, cy = a.y + aby * t;
+        var dx = px - cx, dy = py - cy;
+        return dx * dx + dy * dy;
+    }
+    function onRacingLine(x, y, radius) {
+        var r2 = radius * radius;
+        for (var si = 0; si < lineSegs.length; si++) {
+            if (distToSegSq(x, y, lineSegs[si][0], lineSegs[si][1]) <= r2) { return true; }
+        }
+        return false;
+    }
+    var trapRadius = bal(config, 'warpTrapRadius', 100);
+    var lateralSec = bal(config, 'warpTrapLateralSec', 1.5);
+    var worst = 0, count = 0;
+    for (var pr = 0; pr < pairs.length; pr++) {
+        var A = pairs[pr][0], B = pairs[pr][1];
+        var tA = driveTime(A.x, A.y), tB = driveTime(B.x, B.y);
+        if (!isFinite(tA) || !isFinite(tB)) { continue; }
+        // A LATERAL pair (both pads ~equidistant from the goal) doesn't fling you backward —
+        // it moves you sideways. Skip it: there's no meaningful goal-side mouth, and which pad
+        // `tA <= tB` would pick is just hazard-order noise (Codex P2). Only a pair with a real
+        // forward/backward asymmetry is a trap.
+        if (Math.abs(tA - tB) < lateralSec) { continue; }
+        var dxp = A.x - B.x, dyp = A.y - B.y;
+        var transit = cellGraph.warpTransitMs(Math.sqrt(dxp * dxp + dyp * dyp)) / 1000;
+        var goalSide = (tA <= tB) ? A : B;        // the mouth a forward racer drives into
+        var setback = Math.abs(tA - tB) + transit; // far drive time - goal-side drive time + transit
+        if (onRacingLine(goalSide.x, goalSide.y, trapRadius)) {
+            if (setback > worst) { worst = setback; }
+            count++;
+        }
+    }
+    return { worst: worst, count: count };
 }
 
 // Up to n items evenly spaced across the list by INDEX (gate position), always
@@ -701,6 +796,24 @@ function classify(map, config) {
         var perSec = bal(config, 'fairnessPerSec', 8);
         var fairnessMax = bal(config, 'fairnessMax', 20);
         deduct(Math.min(fairnessMax, Math.round(Math.max(0, fairnessGap - tol) * perSec)), 'fairness');
+    }
+    // WARP-PAD TRAP: a teleport whose goal-side mouth sits on the racing line flings a naive
+    // racer backward — invisible to the optimal-path par/fairness above (the optimal route
+    // takes the pair from its start side). Strong soft deduction (so a bad teleport clearly
+    // drops out of Featured and shows the author a 'warptrap' line), plus a hard-fail for a
+    // catastrophic one (a setback that effectively resets the race). Zero cost on warp-free maps.
+    {
+        var warpTrap = warpTrapSeverity(map, config);
+        if (warpTrap.worst > 0) {
+            var wtTol = bal(config, 'warpTrapTolSec', 1.0);
+            var wtPerSec = bal(config, 'warpTrapPerSec', 6);
+            var wtMax = bal(config, 'warpTrapMax', 45);
+            deduct(Math.min(wtMax, Math.round(Math.max(0, warpTrap.worst - wtTol) * wtPerSec)), 'warptrap');
+            var wtHard = bal(config, 'warpTrapHardSec', 22);
+            if (warpTrap.worst > wtHard) {
+                hardFail.push('a warp pad on the racing line flings racers ~' + warpTrap.worst.toFixed(0) + 's backward (a trap)');
+            }
+        }
     }
     // hazard sanity: heavy lava and bumper-walls punish; near-zero hazard is bland
     var hd = 0;

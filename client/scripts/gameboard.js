@@ -655,6 +655,15 @@ function checkGameState(payload) {
 	}
 	payload = JSON.parse(payload);
 	currentState = payload[0];
+	// Leaving racing/collapsing ends any warp-pad transit visuals (a stale frozen/hidden
+	// kart or a held camera pan must not bleed into the next round). The server clears the
+	// server-side transit on round reset; mirror it here.
+	if (currentState != config.stateMap.racing && currentState != config.stateMap.collapsing) {
+		if (typeof warpCam !== "undefined") { warpCam = null; }
+		for (var wid in playerList) {
+			if (playerList[wid] != null && playerList[wid].warping) { playerList[wid].warping = false; playerList[wid].warpHideUntil = 0; }
+		}
+	}
 	if (currentState == config.stateMap.waiting) {
 		lobbyStartButton = null;
 	}
@@ -761,10 +770,11 @@ function drawThumbnailBoonGlyph(ctx, hz) {
 	var x = hz.x, y = hz.y;
 	ctx.save();
 	ctx.translate(x, y);
-	// Disc footprint in the boon colour.
+	// Disc footprint in the boon colour — warp pads colour by their PAIR (matching the
+	// in-game per-pair portals) so the preview reads which pads are linked.
 	ctx.beginPath();
 	ctx.arc(0, 0, r, 0, 2 * Math.PI);
-	ctx.fillStyle = cfg.color;
+	ctx.fillStyle = (kind === "warpPad" && typeof warpPairColor === "function") ? warpPairColor(hz.pair) : cfg.color;
 	ctx.globalAlpha = 0.85;
 	ctx.fill();
 	ctx.globalAlpha = 1;
@@ -834,6 +844,23 @@ function drawThumbnailBoonGlyph(ctx, hz) {
 		ctx.beginPath();
 		ctx.ellipse(0, 0, s * 0.4, s * 0.9, 0, 0, 2 * Math.PI);
 		ctx.stroke();
+	} else if (kind === "warpPad") {
+		// Portal: a small white inward swirl + bright core, reading as a teleporter (the
+		// disc is already the pair's colour).
+		ctx.lineWidth = 3;
+		ctx.lineCap = "round";
+		ctx.beginPath();
+		var first = true;
+		for (var t = 0; t <= 1.001; t += 0.12) {
+			var rr = s * 0.7 * (1 - t) + s * 0.12 * t;
+			var ang = t * Math.PI * 1.6;
+			var px = Math.cos(ang) * rr, py = Math.sin(ang) * rr;
+			if (first) { ctx.moveTo(px, py); first = false; } else { ctx.lineTo(px, py); }
+		}
+		ctx.stroke();
+		ctx.beginPath();
+		ctx.arc(0, 0, s * 0.22, 0, 2 * Math.PI);
+		ctx.fill();
 	} else {
 		// Generic boon dot.
 		ctx.beginPath();

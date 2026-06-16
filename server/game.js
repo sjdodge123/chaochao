@@ -436,8 +436,8 @@ class Game {
 				var p = this.playerList[id];
 				// A sleeping/AFK kart is already treated as out of the round by
 				// checkForWinners/aliveTeamCount — it must not bank a point by resting on an orb.
-				if (p == null || !p.alive || !p.awake || p.isSpectator || p.isZombie || p.reachedGoal || p.teamId == null) {
-					continue;
+				if (p == null || !p.alive || !p.awake || p.isSpectator || p.isZombie || p.reachedGoal || p.teamId == null || p.warping != null) {
+					continue; // a racer frozen mid warp-pad transit is out of play — can't bank an orb
 				}
 				var dx = p.x - orb.x;
 				var dy = p.y - orb.y;
@@ -470,6 +470,10 @@ class Game {
 			if (key.used || key.consumed) { continue; }
 			if (key.carriedBy != null) {
 				var carrier = this.playerList[key.carriedBy];
+				// A carrier frozen mid warp-pad transit SUSPENDS the key: don't drop it, don't
+				// unlock, don't move it (the carrier is out of play for ~2s, then emerges with
+				// the key still in hand). Skip this key until the carrier is back.
+				if (carrier != null && carrier.warping != null) { continue; }
 				// Same eligibility as a bonus-orb collector: a dead / infected / finished /
 				// AFK / departed carrier can't keep the key — it drops.
 				var ok = carrier != null && carrier.alive && carrier.awake && !carrier.isSpectator && !carrier.isZombie && !carrier.reachedGoal;
@@ -511,7 +515,7 @@ class Game {
 			// Loose key: first eligible empty-handed racer to touch it carries it.
 			for (var id in this.playerList) {
 				var p = this.playerList[id];
-				if (p == null || !p.alive || !p.awake || p.isSpectator || p.isZombie || p.reachedGoal || p.heldKey != null) { continue; }
+				if (p == null || !p.alive || !p.awake || p.isSpectator || p.isZombie || p.reachedGoal || p.heldKey != null || p.warping != null) { continue; }
 				var dx = p.x - key.x, dy = p.y - key.y;
 				var reach = pickupR + (p.radius || 0);
 				if (dx * dx + dy * dy <= reach * reach) {
@@ -1158,7 +1162,12 @@ class Game {
 			return false;
 		}
 		var map = this.gameBoard.currentMap;
-		var route = cellGraph.findPathToNearestGoal(map, { x: player.x, y: player.y });
+		// If the sole survivor is mid warp-pad transit, route the collapse from where it
+		// will EMERGE (the exit), not its frozen entrance — otherwise the front would be
+		// staged from the wrong spot for the ~2s until it pops out.
+		var srcX = (player.warping != null) ? player.warping.exitX : player.x;
+		var srcY = (player.warping != null) ? player.warping.exitY : player.y;
+		var route = cellGraph.findPathToNearestGoal(map, { x: srcX, y: srcY });
 		if (route == null) {
 			// No goal reachable without crossing lava from where the player is.
 			// Flag it and let the lenient legacy collapse run so the room never

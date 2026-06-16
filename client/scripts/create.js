@@ -997,6 +997,7 @@ function drawEditor(dt) {
     renderBarriers();
     renderHazards();
     drawDoorsKeys();
+    drawWarpPadLinks(mousex, mousey);
     drawSelectedObject();
     drawBalanceOverlay();
     drawPointerCircle();
@@ -1405,13 +1406,15 @@ function drawBalanceOverlay() {
     ctx.restore();
 }
 
-function drawMyObject(x, y, myObject, angle, radius) {
+function drawMyObject(x, y, myObject, angle, radius, pair) {
     if (angle == null) {
         angle = 0;
     }
     var kind = editorHazardKindById(myObject);
     if (kind != null) {
-        (kind.paint || paintHazardShape)(createContext, kind, x, y, angle, "red", radius);
+        // `pair` (warp pads) flows through so the editor draws each pad in its in-game
+        // per-pair colour — the map preview then matches the live game exactly.
+        (kind.paint || paintHazardShape)(createContext, kind, x, y, angle, "red", radius, pair);
     }
 }
 // A placed object's config lives in config.hazards OR config.boons — boons reuse
@@ -2161,6 +2164,61 @@ function paintSentryTurretShape(ctx, kind, x, y, angle, ringColor) {
     ctx.fill();
     ctx.restore();
 }
+// Per-pair portal colour — MUST match the in-game palette (draw.js warpPairColor) so the
+// editor and the live game (and the map preview) colour each pad pair identically.
+var WARP_PAIR_COLORS = ["#C24DFF", "#36C5F0", "#F45D9C", "#7C6BFF", "#33D6C0", "#FF8A3D"];
+function warpPairColor(pair) {
+    var i = (typeof pair === "number" && isFinite(pair)) ? (((pair | 0) % WARP_PAIR_COLORS.length) + WARP_PAIR_COLORS.length) % WARP_PAIR_COLORS.length : 0;
+    return WARP_PAIR_COLORS[i];
+}
+// A warp pad (editor): a glowing portal disc with an inward swirl + bright core, drawn in
+// its PAIR's colour (warpPairColor(pair)) so the editor render matches the in-game look
+// exactly — the map preview is then accurate. The dashed tether (drawWarpPadLinks) shows
+// which pads are partnered. Static (no angle). A not-yet-placed ghost (no pair) uses the
+// default colour.
+function paintWarpPadShape(ctx, kind, x, y, angle, ringColor, radius, pair) {
+    var cfg = config.boons.warpPad;
+    if (cfg == null) { return; }
+    var R = cfg.radius;
+    var col = warpPairColor(pair);
+    ctx.save();
+    // Reach ring.
+    ctx.beginPath();
+    ctx.arc(x, y, R, 0, 2 * Math.PI);
+    ctx.strokeStyle = col;
+    ctx.globalAlpha = 0.35;
+    ctx.lineWidth = 5;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    // Inward swirl arms.
+    ctx.lineCap = "round";
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = col;
+    for (var s = 0; s < 3; s++) {
+        var ba = (s / 3) * Math.PI * 2;
+        ctx.beginPath();
+        var first = true;
+        for (var t = 0; t <= 1.001; t += 0.1) {
+            var rr = R * 0.66 * (1 - t) + R * 0.12 * t;
+            var ang = ba + t * Math.PI * 1.4;
+            var px = x + Math.cos(ang) * rr, py = y + Math.sin(ang) * rr;
+            if (first) { ctx.moveTo(px, py); first = false; } else { ctx.lineTo(px, py); }
+        }
+        ctx.stroke();
+    }
+    // Bright core.
+    ctx.beginPath();
+    ctx.arc(x, y, R * 0.2, 0, 2 * Math.PI);
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x, y, R * 0.32, 0, 2 * Math.PI);
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.restore();
+}
+
 // Shared per-kind hazard painter for the editor canvas (placement preview +
 // placed hazards) and the load-list thumbnails — the default `paint` hook.
 // Railed kinds draw their rail bar from (x,y) along `angle`; every kind draws
@@ -2243,6 +2301,9 @@ function handleClick(event) {
             if (activeTool.kind === "barrier") { handleBarrierClick(mousex, mousey); break; }
             if (activeTool.kind === "door") { placeDoorOrKey(mousex, mousey); break; }
             if (drawBrushAimer) { brushing = true; beginStroke(); break; }
+            // Warp pads place as a linked PAIR (two clicks) — route to the pairing flow
+            // instead of the generic single-drop.
+            if (drawObject != null && drawObject === warpPadId()) { placeWarpPad(mousex, mousey); break; }
             if (drawObject != null) { addObjectToMap(mousex, mousey, drawObject); break; }
             // Mouse/Select tool: grab a barrier (endpoint to drag, or its segment to
             // select), then a placed key, before falling through to hazard selection.
@@ -2384,6 +2445,12 @@ function setTool(tool) {
     // so doors:keys can't desync.
     if (tool.kind !== "door" && typeof pendingDoorIndex !== "undefined" && pendingDoorIndex != null) {
         discardPendingDoor();
+    }
+    // Leaving the warp-pad tool mid-pair drops the dangling pad A (so warp pads can't
+    // desync to an odd count). "Leaving" = any tool that isn't the warp-pad tool again.
+    var stillWarpTool = (tool.kind === "hazard" && tool.id === warpPadId());
+    if (!stillWarpTool && typeof pendingWarpPad !== "undefined" && pendingWarpPad != null) {
+        discardPendingWarp();
     }
     // Dropping the select tool clears any held key selection.
     if (tool.kind !== "select") { selectedKeyIndex = null; draggingKey = false; }
@@ -2797,6 +2864,137 @@ function discardPendingDoor() {
     }
     pendingDoorIndex = null;
     dirty = true;
+}
+
+// --- warp pads (paired teleporters) -------------------------------------------
+// Warp pads are hazards (in vMap.hazards) but authored as a PAIR via a two-click
+// flow modelled on the locked door/key: first click drops pad A, second drops its
+// linked pad B. Each entry carries a `pair` integer; the two sharing a value are
+// linked. pendingWarpPad holds the placed-but-unpaired pad A entry (by REFERENCE, not
+// index — an undo of an unrelated command between the two clicks can splice the hazards
+// array and shift indices, so a stored index would go stale; a reference never does).
+var pendingWarpPad = null;
+function warpPadId() { return (config != null && config.boons.warpPad != null) ? config.boons.warpPad.id : -1; }
+function isWarpPadEntry(hz) { return hz != null && hz.id === warpPadId(); }
+// Next free pair id: one past the highest in use, so it survives deletes/undo/load.
+function nextWarpPair() {
+    var max = 0, hz = vMap.hazards || [];
+    for (var i = 0; i < hz.length; i++) {
+        if (isWarpPadEntry(hz[i]) && typeof hz[i].pair === "number" && hz[i].pair > max) { max = hz[i].pair; }
+    }
+    return max + 1;
+}
+// Two-click placement. Snap to the cell SITE (like locked doors) so the pad center is
+// its cell — the AI cellGraph links the pad's own cell to its partner's, and a kart
+// pathing to that cell site drives right onto the pad. Pad A is STAGED with no undo
+// entry; only when pad B completes the pair is ONE atomic add command pushed (so an
+// undo can never strand a lone half, and redo restores BOTH together).
+function placeWarpPad(x, y) {
+    if (outsideMapBounds(x, y, config.boons.warpPad.radius)) { return; }
+    if (vMap.hazards == undefined) { vMap.hazards = []; }
+    var cell = doorCellAt(x, y);
+    var px = (cell != null && cell.site != null) ? cell.site.x : x;
+    var py = (cell != null && cell.site != null) ? cell.site.y : y;
+    if (pendingWarpPad == null) {
+        // Stage pad A — no undo entry yet (it isn't a committed pair until B lands).
+        var pad = { id: warpPadId(), x: px, y: py, pair: nextWarpPair() };
+        vMap.hazards.push(pad);
+        pendingWarpPad = pad;
+    } else {
+        var padA = pendingWarpPad;
+        var pairId = (typeof padA.pair === "number") ? padA.pair : nextWarpPair();
+        var padB = { id: warpPadId(), x: px, y: py, pair: pairId };
+        vMap.hazards.push(padB);
+        pendingWarpPad = null;
+        // One atomic command for the whole pair: undo removes both (and clears any pending
+        // state), redo re-adds both.
+        pushCommand({
+            undo: function () {
+                pendingWarpPad = null;
+                var ib = vMap.hazards.indexOf(padB); if (ib >= 0) { vMap.hazards.splice(ib, 1); }
+                var ia = vMap.hazards.indexOf(padA); if (ia >= 0) { vMap.hazards.splice(ia, 1); }
+            },
+            redo: function () {
+                if (vMap.hazards.indexOf(padA) < 0) { vMap.hazards.push(padA); }
+                if (vMap.hazards.indexOf(padB) < 0) { vMap.hazards.push(padB); }
+            }
+        });
+    }
+    dirty = true;
+}
+// Leaving the warp-pad tool with pad A placed but no pad B yet — drop the dangling
+// pad so the map can't carry a lone, unlinked warp pad. Pad A was never pushed onto the
+// undo stack, so there's no history to clean. Removed by REFERENCE (its index may have
+// shifted under an unrelated undo since it was placed).
+function discardPendingWarp() {
+    if (pendingWarpPad == null) { return; }
+    var i = vMap.hazards.indexOf(pendingWarpPad);
+    if (i >= 0) { vMap.hazards.splice(i, 1); }
+    pendingWarpPad = null;
+    dirty = true;
+}
+// Index of `index`'s partner pad (same pair id), or -1.
+function warpPartnerIndex(index) {
+    var hz = vMap.hazards[index];
+    if (!isWarpPadEntry(hz)) { return -1; }
+    for (var i = 0; i < vMap.hazards.length; i++) {
+        if (i !== index && isWarpPadEntry(vMap.hazards[i]) && vMap.hazards[i].pair === hz.pair) { return i; }
+    }
+    return -1;
+}
+// Remove a warp pad AND its partner atomically (one undo step) so a lone pad can't be
+// left behind. Returns true if it handled a warp pad (caller then skips the single
+// remove). Any pending pad-A is invalidated by the splice, so clear it.
+function removeWarpPairAt(index) {
+    if (!isWarpPadEntry(vMap.hazards[index])) { return false; }
+    var partner = warpPartnerIndex(index);
+    var idxs = (partner >= 0) ? [index, partner] : [index];
+    idxs.sort(function (a, b) { return b - a; }); // splice high index first so the low stays valid
+    var removed = [];
+    for (var k = 0; k < idxs.length; k++) { removed.push({ hz: vMap.hazards[idxs[k]], index: idxs[k] }); }
+    for (var r = 0; r < idxs.length; r++) { vMap.hazards.splice(idxs[r], 1); }
+    pushCommand({
+        undo: function () { for (var i = removed.length - 1; i >= 0; i--) { vMap.hazards.splice(Math.min(removed[i].index, vMap.hazards.length), 0, removed[i].hz); } },
+        redo: function () { for (var i = 0; i < removed.length; i++) { var j = vMap.hazards.indexOf(removed[i].hz); if (j >= 0) { vMap.hazards.splice(j, 1); } } }
+    });
+    pendingWarpPad = null;
+    setSelectedObject(null);
+    dirty = true;
+    return true;
+}
+// Dashed tethers between every completed warp pair + the pending pad-A → cursor line
+// while placing pad B (mirrors drawDoorsKeys / drawDoorKeyPreview).
+function drawWarpPadLinks(cursorX, cursorY) {
+    var ctx = createContext;
+    var hz = vMap.hazards || [];
+    ctx.save();
+    ctx.setLineDash([6, 6]);
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.7;
+    var drawn = {};
+    for (var i = 0; i < hz.length; i++) {
+        if (!isWarpPadEntry(hz[i]) || hz[i] === pendingWarpPad) { continue; }
+        var j = warpPartnerIndex(i);
+        if (j < 0 || drawn[j]) { continue; }
+        drawn[i] = true;
+        ctx.strokeStyle = warpPairColor(hz[i].pair); // tether in the pair's colour
+        ctx.beginPath();
+        ctx.moveTo(hz[i].x, hz[i].y);
+        ctx.lineTo(hz[j].x, hz[j].y);
+        ctx.stroke();
+    }
+    // Pending pad-A → cursor preview (in that pair's colour).
+    if (pendingWarpPad != null) {
+        ctx.globalAlpha = 0.85;
+        ctx.strokeStyle = warpPairColor(pendingWarpPad.pair);
+        ctx.beginPath();
+        ctx.moveTo(pendingWarpPad.x, pendingWarpPad.y);
+        ctx.lineTo(cursorX, cursorY);
+        ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.setLineDash([]);
+    ctx.restore();
 }
 // Index of a placed key under (x,y), or -1 — for the select tool's grab/drag.
 function keyIndexUnderPoint(x, y) {
@@ -3334,6 +3532,38 @@ var EDITOR_HAZARD_KINDS = [
         }
     },
     {
+        // Paired teleporter — a BOON (config.boons.warpPad), so group:"boon" files it under
+        // the Boons palette. pairFlow routes placement through placeWarpPad (two clicks: pad
+        // A, then its linked pad B) instead of the generic single-drop addObjectToMap.
+        key: "warpPad", label: "Warp Pads", shortcut: "z", railed: false, directional: false,
+        group: "boon", pairFlow: true, paint: paintWarpPadShape,
+        swatchPaint: function (ctx, size) {
+            // Two linked portal rings with a dashed tether — "step in here, pop out there".
+            var col = "#C24DFF";
+            var pts = [[size * 0.32, size * 0.4], [size * 0.7, size * 0.64]];
+            ctx.strokeStyle = col;
+            ctx.setLineDash([4, 4]);
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(pts[0][0], pts[0][1]);
+            ctx.lineTo(pts[1][0], pts[1][1]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            for (var p = 0; p < 2; p++) {
+                var cx = pts[p][0], cy = pts[p][1];
+                ctx.beginPath();
+                ctx.arc(cx, cy, 11, 0, 2 * Math.PI);
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = col;
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.arc(cx, cy, 3.5, 0, 2 * Math.PI);
+                ctx.fillStyle = "#FFFFFF";
+                ctx.fill();
+            }
+        }
+    },
+    {
         key: "dashArrows", label: "Dash Arrows", shortcut: "d", railed: false, directional: true,
         group: "boon", paint: paintDashArrowsShape,
         swatchPaint: function (ctx, size) {
@@ -3666,6 +3896,7 @@ function hazardUnderPoint(x, y) { return hazardIndexUnderPoint(x, y) >= 0; }
 function removeHazardUnderPoint(x, y) {
     var i = hazardIndexUnderPoint(x, y);
     if (i < 0) { return; }
+    if (removeWarpPairAt(i)) { return; } // warp pads delete as a pair (both halves)
     var removed = vMap.hazards[i];
     vMap.hazards.splice(i, 1);
     pushHazardRemoveCommand(removed, i);
@@ -3999,6 +4230,7 @@ function updateSelectedPosition() {
 function removeSelectedObject() {
     var i = selectedHazardIndex();
     if (i < 0 || vMap.hazards[i] == null) { return; }
+    if (removeWarpPairAt(i)) { return; } // warp pads delete as a pair (both halves)
     var removed = vMap.hazards[i];
     vMap.hazards.splice(i, 1);
     pushHazardRemoveCommand(removed, i);
@@ -4148,7 +4380,7 @@ function renderHazards() {
     var hazards = vMap.hazards;
     for (var i = 0; i < hazards.length; i++) {
         var hazard = hazards[i];
-        drawMyObject(hazard.x, hazard.y, hazard.id, hazard.angle, hazard.radius);
+        drawMyObject(hazard.x, hazard.y, hazard.id, hazard.angle, hazard.radius, hazard.pair);
     }
 }
 
@@ -4458,6 +4690,44 @@ function validateMap(map) {
             if (hzKind != null && hzKind.directional &&
                 typeof hazard.angle !== "number") {
                 return { valid: false, reason: "Map has a directional hazard with no direction." };
+            }
+        }
+        // Warp pads are PAIRED: each needs a finite integer `pair`, and every pair id
+        // must appear EXACTLY twice. (Server mirror: utils.validateMap.)
+        var warpId = (config.boons.warpPad != null) ? config.boons.warpPad.id : null;
+        if (warpId != null) {
+            var tm = config.tileMap;
+            var nonDrivable = {};
+            if (tm.empty != null) { nonDrivable[tm.empty.id] = true; }
+            if (tm.door != null) { nonDrivable[tm.door.id] = true; }
+            if (tm.background != null) { nonDrivable[tm.background.id] = true; }
+            if (tm.lava != null) { nonDrivable[tm.lava.id] = true; }
+            var doorCells = {};
+            var doorsForWarp = Array.isArray(map.doors) ? map.doors : [];
+            for (var dw = 0; dw < doorsForWarp.length; dw++) {
+                var dcl = (doorsForWarp[dw] != null) ? nearestCellInMap(map, doorsForWarp[dw].x, doorsForWarp[dw].y) : null;
+                if (dcl != null && dcl.site != null) { doorCells[dcl.site.voronoiId] = true; }
+            }
+            var warpCounts = {};
+            for (var wp = 0; wp < map.hazards.length; wp++) {
+                var whz = map.hazards[wp];
+                if (whz == null || whz.id !== warpId) { continue; }
+                if (!Number.isInteger(whz.pair)) {
+                    return { valid: false, reason: "Map has a warp pad with no pair id." };
+                }
+                var wc = nearestCellInMap(map, whz.x, whz.y);
+                if (wc != null && nonDrivable[wc.id]) {
+                    return { valid: false, reason: "A warp pad must sit on drivable ground (not lava / a hole / a door)." };
+                }
+                if (wc != null && wc.site != null && doorCells[wc.site.voronoiId]) {
+                    return { valid: false, reason: "A warp pad can't sit on a locked-door cell." };
+                }
+                warpCounts[whz.pair] = (warpCounts[whz.pair] || 0) + 1;
+            }
+            for (var pk in warpCounts) {
+                if (warpCounts[pk] !== 2) {
+                    return { valid: false, reason: "Each warp pad needs exactly one partner (pairs of 2)." };
+                }
             }
         }
     }

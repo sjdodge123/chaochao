@@ -47,6 +47,12 @@ var server = null,
     // { fromX, fromY, toX, toY, ms, startedAt }. Set by the secondWindPending handler
     // (local + solo only), cleared when the pan completes or on a new round.
     secondWindCam = null,
+    // Warp pad camera pan: when the LOCAL player drives onto a warp pad, the camera
+    // slow-pans from the entrance to the exit over the transit, then HOLDS on the exit
+    // until the emerge (warpEnd) releases it. { fromX, fromY, toX, toY, ms, startedAt,
+    // endAt }. Set by the warpStart handler (local only), cleared on warpEnd / failsafe /
+    // new round. (computeWorldViewTarget in draw.js consumes it.)
+    warpCam = null,
     // Second Wind flag claim: localPlayerId -> the flag (hazard ownerId) that local
     // player is CURRENTLY anchored to. A flag draws in a local player's colour only
     // while it's that player's active anchor, so re-anchoring to a new flag repaints the
@@ -110,6 +116,10 @@ var server = null,
     // (0.82 => ~22% wider FOV) with a slow breathing wobble on top; the
     // WORLD_ZOOM_TAU smoothing curves it gently in and back out.
     STAR_ZOOM_OUT_FACTOR = 0.82,
+    // Warp-pad camera pan: how far to pull the zoom OUT at the midpoint of the journey
+    // (a sine bump, 0 at the ends) so you can see the ground between the two pads. 0.35 =>
+    // ~35% wider FOV at the middle of the sweep, easing back to tight on the exit.
+    WARP_ZOOM_OUT = 0.35,
     maps = [],
     oldNotches = {},
     camera,

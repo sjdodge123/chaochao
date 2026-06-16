@@ -202,6 +202,66 @@ function getBarrierBlockedEdges(map) {
     return result;
 }
 
+// Warp pads (a BOON, config.boons.warpPad, id 958) are PAIRED TELEPORTERS: driving
+// onto pad A starts a (distance-based) transit to its partner pad B (and vice-versa),
+// preserving velocity. Unlike a barrier (which BLOCKS an adjacency edge), a warp
+// pair CREATES a new edge between two arbitrary, normally-unconnected cells — so a
+// bot routes THROUGH a pad pair as a shortcut when it shortens the drive to goal,
+// and never treats a pad as a dead end. Modelled as a cellIndex -> partnerCellIndex
+// map (bidirectional): the teleport covers no ground (geo unchanged) but COSTS the
+// transit freeze (transitMs of being stopped), so the edge carries a cost equal to
+// the distance the kart could have driven in that time — the warp is only worth
+// taking when it saves MORE driving than the freeze costs. Computed once per map
+// object and cached (non-enumerable), like barriers.
+// The transit freezes the kart for transitMs (distance-based — see warpTransitMs), so price
+// the edge at the equivalent grass distance it could have driven in that time (tileWeight 1):
+// cost = transitSecs·cruise. Dijkstra then routes through a pair only when the detour it skips
+// is longer than that freeze. ~83 px/s is the measured cruise speed (the camera-zoom notes).
+var WARP_CRUISE_PX_PER_S = 83;
+// Transit duration (ms) for a warp of `dist` px: the kart/camera "travels" the gap at a
+// constant warpSpeed px/s, clamped to [minTransitMs, maxTransitMs] — so a long hop reads as a
+// longer journey and a short one is quick. This is the SINGLE source of the formula: the
+// runtime (hazards.linkWarpPads), the AI edge cost (below), the par estimate (estimatePathTime),
+// and the fairness trap check (mapClassifier) all call this, so they can never drift apart.
+function warpTransitMs(dist) {
+    var cfg = (c.boons && c.boons.warpPad) ? c.boons.warpPad : {};
+    var ms = (dist / (cfg.warpSpeed || 380)) * 1000;
+    var min = cfg.minTransitMs || 1000, max = cfg.maxTransitMs || 3200;
+    return Math.max(min, Math.min(max, ms));
+}
+function getWarpLinks(map) {
+    if (!map || !Array.isArray(map.cells)) { return null; }
+    if (map._warpLinks !== undefined) { return map._warpLinks; }
+    var result = null;
+    var WARP = (c.boons && c.boons.warpPad != null) ? c.boons.warpPad.id : -99999;
+    var hazards = Array.isArray(map.hazards) ? map.hazards : [];
+    var byPair = {};
+    for (var i = 0; i < hazards.length; i++) {
+        var hz = hazards[i];
+        if (hz == null || hz.id !== WARP) { continue; }
+        if (typeof hz.x !== "number" || typeof hz.y !== "number") { continue; }
+        // Integer pair ids only (matches WarpPad/linkWarpPads/validateMap) — a malformed
+        // fractional pair (1.2 vs 1.8) must NOT truncate into a spurious link.
+        if (!Number.isInteger(hz.pair)) { continue; }
+        (byPair[hz.pair] || (byPair[hz.pair] = [])).push(hz);
+    }
+    var cells = map.cells;
+    var links = null;
+    for (var p in byPair) {
+        var pads = byPair[p];
+        if (pads.length !== 2) { continue; } // malformed pair (validateMap rejects) — no edge
+        var a = nearestCellIndex(cells, pads[0]);
+        var b = nearestCellIndex(cells, pads[1]);
+        if (a === b) { continue; } // both pads snap to one cell — degenerate, no shortcut
+        if (links == null) { links = {}; }
+        if (links[a] == null) { links[a] = b; } // first link wins if two pairs overlap a cell
+        if (links[b] == null) { links[b] = a; }
+    }
+    if (links != null) { result = links; }
+    Object.defineProperty(map, '_warpLinks', { value: result, enumerable: false, writable: true, configurable: true });
+    return result;
+}
+
 // Minimal binary min-heap of { node, cost }. A* / Dijkstra over ~250 cells is
 // cheap, but bots re-path repeatedly so a heap keeps it linearithmic.
 function Heap() {
@@ -282,6 +342,10 @@ function findPathToNearestGoal(map, point, options) {
     var adj = getAdjacency(map);
     var neighbors = adj.neighbors;
     var doorways = adj.doorways;
+    // options.noWarp disables the warp-pad shortcut edges, so the route is the pure DRIVING
+    // path — used by the fairness layer to measure each pad's drive-distance to goal (and
+    // hence whether a warp is a backward TRAP) without the warp shortening it circularly.
+    var warpLinks = options.noWarp ? null : getWarpLinks(map);
     var LAVA = c.tileMap.lava.id;
     var GOAL = c.tileMap.goal.id;
     var EMPTY = c.tileMap.empty.id;
@@ -463,6 +527,27 @@ function findPathToNearestGoal(map, point, options) {
                 heap.push(v, nc);
             }
         }
+        // Warp pad shortcut: if `u` holds a pad, its partner pad's cell is reachable by
+        // teleport — an edge that covers no ground (geo unchanged) and preserves speed, but
+        // COSTS the transit freeze (transitMs of being stopped, distance-based on the gap).
+        // Price it at the grass distance the kart could have driven in that time, so Dijkstra
+        // threads the pair only when the detour it skips is longer. Respect the destination's
+        // passability (a pad on lava/empty/door, or a caller-blocked cell, isn't a valid exit).
+        if (warpLinks != null && warpLinks[u] != null) {
+            var wv = warpLinks[u];
+            if (!done[wv] && cells[wv] != null && cells[wv].site != null &&
+                !((cells[wv].id === LAVA || cells[wv].id === EMPTY || cells[wv].id === DOOR) && cells[wv].id !== GOAL) &&
+                !(blocked && blocked[cells[wv].site.voronoiId])) {
+                var warpCost = warpTransitMs(dist(cells[u].site, cells[wv].site)) / 1000 * WARP_CRUISE_PX_PER_S;
+                var wnc = cost[u] + warpCost;
+                if (wnc < cost[wv]) {
+                    cost[wv] = wnc;
+                    geo[wv] = geo[u]; // teleport covers no geometric ground
+                    prev[wv] = u;
+                    heap.push(wv, wnc);
+                }
+            }
+        }
     }
 
     if (goalIndex === -1) {
@@ -506,11 +591,15 @@ function tilePhysics(id) {
 // server/game.js startRacing), and a cornering brake (a momentum car must slow
 // for sharp turns). This is the honest "walk the A* path with the player's
 // physics" par-time, replacing distance / a flat assumed speed.
-function estimatePathTime(map, path) {
+function estimatePathTime(map, path, noWarp) {
     if (!map || !Array.isArray(map.cells) || !Array.isArray(path) || path.length < 2) {
         return 0;
     }
     var cells = map.cells;
+    // noWarp: price the path as PURE DRIVING (no warp-hop credit). The fairness layer's
+    // drive-time measurement passes this so two naturally-ADJACENT partner-pad cells on a
+    // no-warp route can't be mistaken for a teleport hop (which would sneak transit time in).
+    var warpLinks = noWarp ? null : getWarpLinks(map); // padA->padB hops, not driven
     // Reuse the adjacency cache's voronoiId->index table instead of rebuilding it per call
     // (this runs in the AI's per-re-path shortcut hot path on door maps).
     var idToIndex = getAdjacency(map).idToIndex;
@@ -520,7 +609,7 @@ function estimatePathTime(map, path) {
         if (ci == null) { continue; }
         var cell = cells[ci];
         var ph = tilePhysics(cell.id);
-        pts.push({ x: cell.site.x, y: cell.site.y, acel: ph.acel, drag: ph.drag });
+        pts.push({ x: cell.site.x, y: cell.site.y, acel: ph.acel, drag: ph.drag, idx: ci });
     }
     if (pts.length < 2) { return 0; }
     var dt = c.serverTickSpeed / 1000;
@@ -528,10 +617,32 @@ function estimatePathTime(map, path) {
     var v = 0, t = 0;
     for (var seg = 0; seg < pts.length - 1; seg++) {
         var a = pts[seg], b = pts[seg + 1];
-        if (seg > 0) {
-            // Brake for the turn at waypoint `seg`: keep less speed the sharper it is.
-            var px = pts[seg - 1];
-            var inx = a.x - px.x, iny = a.y - px.y;
+        // A warp-pad hop (padA -> partner padB) covers no ground and preserves velocity,
+        // but it COSTS the transit freeze: the kart is stopped for the (distance-based)
+        // transit, then emerges at its pre-warp speed. So add the transit seconds to par
+        // (no distance, v unchanged) and don't brake for it.
+        if (warpLinks != null && a.idx != null && warpLinks[a.idx] === b.idx) {
+            var hopDist = Math.sqrt((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y));
+            t += warpTransitMs(hopDist) / 1000;
+            continue;
+        }
+        // Brake for the turn at waypoint `seg`: keep less speed the sharper it is. When
+        // the kart ARRIVED at `seg` via a warp (pts[seg-1] -> a was a teleport), its
+        // velocity is the PRE-warp heading (pts[seg-2] -> pts[seg-1]), preserved through
+        // the portal — not the teleport vector — so the turn to brake for is that heading
+        // vs the outgoing one. If the warp was the very first segment there's no prior
+        // driven heading (the kart is at rest), so skip the brake. And if the PRE-warp
+        // segment was ITSELF a warp (two pads sharing a cell → a back-to-back hop), there's
+        // no driven heading to recover, so skip the brake there too rather than mis-use a
+        // teleport endpoint.
+        var incomingWarp = (seg > 0 && warpLinks != null && pts[seg - 1].idx != null && warpLinks[pts[seg - 1].idx] === a.idx);
+        var prevSegWarp = (incomingWarp && seg >= 2 && warpLinks != null && pts[seg - 2].idx != null && warpLinks[pts[seg - 2].idx] === pts[seg - 1].idx);
+        var doBrake = (seg > 0) && (!incomingWarp || (seg >= 2 && !prevSegWarp));
+        if (doBrake) {
+            var px = incomingWarp ? pts[seg - 2] : pts[seg - 1];
+            var hx = incomingWarp ? pts[seg - 1].x : a.x;  // head point the incoming vector ends at
+            var hy = incomingWarp ? pts[seg - 1].y : a.y;
+            var inx = hx - px.x, iny = hy - px.y;
             var oux = b.x - a.x, ouy = b.y - a.y;
             var im = Math.sqrt(inx * inx + iny * iny) || 1;
             var om = Math.sqrt(oux * oux + ouy * ouy) || 1;
@@ -623,6 +734,8 @@ module.exports = {
     getAdjacency: getAdjacency,
     buildAdjacency: buildAdjacency,
     getBarrierBlockedEdges: getBarrierBlockedEdges,
+    getWarpLinks: getWarpLinks,
+    warpTransitMs: warpTransitMs,
     nearestCellIndex: nearestCellIndex,
     edgeSampleOrigins: edgeSampleOrigins,
     KART_WIDTH: KART_WIDTH,

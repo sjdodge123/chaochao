@@ -1928,6 +1928,10 @@ class Player extends Circle {
 		if (packet.isAloft()) {
 			return;
 		}
+		// A death cancels any warp-pad transit (e.g. an infection kill-timer firing while the
+		// racer is mid-warp): drop the frozen/in-transit state so updateWarpPads never relocates
+		// a dead racer to the exit or emits a ghost "emerge". (Also covers a Second Wind revive.)
+		packet.warping = null;
 		// Second Wind Totem (boon): a death does NOT end the run if the racer has an
 		// attuned, still-standing flag. Instead it starts the death-beat — the racer
 		// freezes for respawnDelayMs while the client pans to the flag, then revives there
@@ -2117,6 +2121,10 @@ class Player extends Circle {
 		this.onSanctuary = false;
 		this.lobbyRespawnPending = null;
 		this.starPowerUntil = 0;
+		// Warp-pad transit is per-round transient state (a racer mid-warp when the round
+		// ends must emerge un-frozen and re-armed next round, never stuck warping).
+		this.warping = null;
+		this.warpArmed = true;
 		if (currentState == c.stateMap.gameOver) {
 			this.survivalist = 0;
 			this.brutalist = 0;
