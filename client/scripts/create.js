@@ -47,6 +47,13 @@ var rotateStartAngle = 0;
 var resizingHandle = false;
 var resizeStartRadius = 0;
 var resizeGrabDist = 0; // cursor distance from centre at grab — the drag is relative to it
+// On-canvas RAIL-END handle (railResizable kinds, e.g. the magpie drone): dragging it
+// "draws" the patrol rail — the endpoint follows the cursor, setting BOTH the rail's angle
+// (anchor->cursor direction) and its length (distance, clamped to the kind's bounds) in one
+// gesture. railStartAngle/railStartLength keep the pre-drag values for one undo command.
+var resizingRail = false;
+var railStartAngle = 0;
+var railStartLength = 0;
 // On-canvas MOVE/grab handle (every selected object): while dragging it the object's
 // (x,y) tracks the cursor; moveStartX/Y keep the pre-drag position, and moveStartIndex
 // the dragged hazard's array index, so the undo command can be recorded on release even
@@ -945,6 +952,22 @@ function animloop() {
         updateSelectedRadius();
         dirty = true;
     }
+    if (resizingRail && selectedObject != null) {
+        // Dragging the rail-end handle: the endpoint follows the cursor, setting the rail's
+        // angle (anchor->cursor) AND length (distance) at once. Clamp the END to the map so the
+        // rail can reach the far edge but never run off the map; length is then bounded by the
+        // kind's [min, map-wide max].
+        var rb = railBoundsFor(hazardConfigById(selectedObject.id));
+        var rex = Math.max(0, Math.min(world.width, mousex));
+        var rey = Math.max(0, Math.min(world.height, mousey));
+        var rdx = rex - selectedObject.x, rdy = rey - selectedObject.y;
+        var rlen = Math.sqrt(rdx * rdx + rdy * rdy);
+        if (rlen < rb.min) { rlen = rb.min; } else if (rlen > rb.max) { rlen = rb.max; }
+        selectedObject.angle = Math.atan2(rdy, rdx) * (180 / Math.PI);
+        selectedObject.railLength = Math.round(rlen);
+        updateSelectedRail();
+        dirty = true;
+    }
     if (barrierDragEnd != null && selectedBarrierIndex >= 0 && vMap.barriers && vMap.barriers[selectedBarrierIndex]) {
         // Dragging a barrier endpoint: it tracks the cursor (clamped to the world).
         var bDrag = vMap.barriers[selectedBarrierIndex];
@@ -1053,6 +1076,9 @@ function placedDefaultRadius(id) {
     var kind = editorHazardKindById(id);
     var cfg = hazardConfigById(id);
     if (kind != null && kind.resizable && cfg != null) { return defaultResizableRadius(cfg); }
+    // railResizable kinds (magpie drone) pass their default rail length through the same
+    // paint "size" arg so the cursor ghost shows the rail it'll place at.
+    if (kind != null && kind.railResizable && cfg != null) { return defaultRailLength(cfg); }
     return undefined;
 }
 function drawBackground() {
@@ -2245,6 +2271,36 @@ function paintCrusherShape(ctx, kind, x, y, angle, ringColor) {
     }
     ctx.restore();
 }
+// Magpie-drone painter (magpieDrone's `paint` hook). Shows the patrol RAIL along the authored
+// angle + a static magpie bird at the placement point, so authors see the path it patrols and
+// what it is (matches the in-game drawMagpieDrone art).
+function paintMagpieDroneShape(ctx, kind, x, y, angle, ringColor, railLength) {
+    var cfg = config.hazards[kind.key];
+    if (cfg == null) { return; }
+    var rad = (angle || 0) * (Math.PI / 180);
+    var R = cfg.radius;
+    var len = (railLength != null && railLength > 0) ? railLength : cfg.railLength; // per-instance, author-sized
+    ctx.save();
+    ctx.strokeStyle = "rgba(91,108,196,0.45)";
+    ctx.lineWidth = 3;
+    ctx.setLineDash([8, 8]);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(rad) * len, y + Math.sin(rad) * len);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+    ctx.save();
+    ctx.translate(x, y);
+    paintStaticMagpie(ctx, R);
+    ctx.restore();
+}
+// A static, resting magpie (wings slightly spread, tail down) — the editor/swatch version of
+// the in-game drone. Delegates to the shared magpieBirdShape (barrierArt.js, in both bundles)
+// with zeroed animation phase, so the editor and the live render can never drift.
+function paintStaticMagpie(ctx, R) {
+    magpieBirdShape(ctx, R, 0.2, 0, 0.05, function (s) { return s < 0 ? "#2f6df0" : "#1f8f7a"; });
+}
 // Sentry-turret painter (sentryTurret's `paint` hook). Shows the body + barrel at the
 // authored MOUNT angle, plus a faint wedge for the firing arc out to the threat range —
 // so authors see exactly the cone the turret covers (the AI penalizes the same wedge).
@@ -2415,8 +2471,17 @@ function handleClick(event) {
                     moveStartIndex = selectedHazardIndex();
                     break;
                 }
-                // Resizable kinds expose a resize handle in place of the rotate knob.
-                if (selectedResizable()) {
+                // railResizable kinds (magpie drone) expose a single rail-end handle that aims
+                // AND sizes the rail, in place of the rotate knob.
+                if (selectedRailResizable()) {
+                    if (overRailEndHandle(mousex, mousey)) {
+                        resizingRail = true;
+                        railStartAngle = selectedObject.angle || 0;
+                        railStartLength = selectedRailLength();
+                        break;
+                    }
+                } else if (selectedResizable()) {
+                    // Resizable kinds expose a resize handle in place of the rotate knob.
                     if (overResizeHandle(mousex, mousey)) {
                         resizingHandle = true;
                         resizeStartRadius = selectedObject.radius || 0;
@@ -2451,7 +2516,7 @@ function handleClick(event) {
             break;
         }
         case 3: {
-            if (brushing || rotatingHandle || resizingHandle) { break; } // don't erase while painting/rotating/resizing
+            if (brushing || rotatingHandle || resizingHandle || resizingRail) { break; } // don't erase while painting/rotating/resizing
             // Right button while mid-barrier abandons the in-progress segment first.
             if (barrierStart != null) { barrierStart = null; dirty = true; break; }
             // Right button: delete a barrier / door-key pair / hazard under the cursor,
@@ -2499,6 +2564,13 @@ function handleUnClick(event) {
                 resizingHandle = false;
                 if (selectedObject != null) {
                     pushResizeCommand(selectedHazardIndex(), resizeStartRadius, selectedObject.radius || 0);
+                }
+                break;
+            }
+            if (resizingRail) {
+                resizingRail = false;
+                if (selectedObject != null) {
+                    pushRailCommand(selectedHazardIndex(), railStartAngle, railStartLength, selectedObject.angle || 0, selectedRailLength());
                 }
                 break;
             }
@@ -3750,6 +3822,21 @@ var EDITOR_HAZARD_KINDS = [
         }
     },
     {
+        // Magpie drone — railed like the moving bumper (rail along the authored angle). On
+        // contact it STEALS the racer's held ability and carries it; punch it to make it drop.
+        key: "magpieDrone", label: "Magpie Drone", shortcut: "a", railed: true, directional: true,
+        railResizable: true, // drag the rail-end handle to aim + size the patrol rail
+        paint: paintMagpieDroneShape,
+        swatchPaint: function (ctx, size) {
+            var cx = size / 2, cy = size / 2 - 4, R = 11;
+            ctx.strokeStyle = "rgba(91,108,196,0.5)";
+            ctx.lineWidth = 4; ctx.setLineDash([6, 6]);
+            ctx.beginPath(); ctx.moveTo(8, size - 10); ctx.lineTo(size - 8, size - 10); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.save(); ctx.translate(cx, cy); paintStaticMagpie(ctx, R); ctx.restore();
+        }
+    },
+    {
         // Paired teleporter — a BOON (config.boons.warpPad), so group:"boon" files it under
         // the Boons palette. pairFlow routes placement through placeWarpPad (two clicks: pad
         // A, then its linked pad B) instead of the generic single-drop addObjectToMap.
@@ -4208,6 +4295,16 @@ function pushResizeCommand(index, from, to) {
         redo: function () { hz.radius = to; }
     });
 }
+// Rail-end drag changes angle AND length together — one undo command restores both.
+function pushRailCommand(index, fromAngle, fromLen, toAngle, toLen) {
+    if (fromAngle === toAngle && fromLen === toLen) { return; }
+    var hz = (index >= 0 && vMap.hazards[index]) ? vMap.hazards[index] : null;
+    if (hz == null) { return; }
+    pushCommand({
+        undo: function () { hz.angle = fromAngle; hz.railLength = fromLen; },
+        redo: function () { hz.angle = toAngle; hz.railLength = toLen; }
+    });
+}
 function pushMoveCommand(index, fromX, fromY, toX, toY) {
     if (fromX === toX && fromY === toY) { return; }
     var hz = (index >= 0 && vMap.hazards[index]) ? vMap.hazards[index] : null;
@@ -4234,6 +4331,37 @@ function selectedResizable() {
 function resizeBounds() {
     return sizeBoundsFor(hazardConfigById(selectedObject.id));
 }
+// Is the current selection a railResizable kind (magpie drone)? Drives the rail-end handle
+// (aim + length in one drag) in place of the rotate knob.
+function selectedRailResizable() {
+    if (selectedObject == null) { return false; }
+    var k = editorHazardKindById(selectedObject.id);
+    return k != null && k.railResizable === true;
+}
+// Rail-length drag bounds: min from config, max is MAP-WIDE (the world diagonal) so a rail can
+// span the whole map in any direction — config `maxRailLength` overrides it if ever set. The
+// drag also clamps the rail END to the map bounds (see the resizingRail branch), so the rail
+// can reach the far edge without running off the map.
+function railBoundsFor(cfg) {
+    var max = (cfg != null && cfg.maxRailLength != null) ? cfg.maxRailLength : Math.round(Math.hypot(world.width, world.height));
+    var min = (cfg != null && cfg.minRailLength != null) ? cfg.minRailLength : 80;
+    return { min: min, max: max };
+}
+// Default rail length for a fresh placement: the config default (within [min,max]).
+function defaultRailLength(cfg) {
+    return (cfg != null && cfg.railLength) || Math.round((railBoundsFor(cfg).min + railBoundsFor(cfg).max) / 2);
+}
+// The current selection's effective rail length (authored, default if unset).
+function selectedRailLength() {
+    return Number.isFinite(selectedObject.railLength) ? selectedObject.railLength : defaultRailLength(hazardConfigById(selectedObject.id));
+}
+// Write the selection's live angle + rail length back to its hazard (rail-end drag).
+function updateSelectedRail() {
+    var i = selectedHazardIndex();
+    if (i < 0 || vMap.hazards[i] == null) { return; }
+    vMap.hazards[i].angle = selectedObject.angle;
+    vMap.hazards[i].railLength = selectedObject.railLength;
+}
 
 // --- on-canvas hazard handles -------------------------------------------------
 function rotateHandlePos() {
@@ -4256,6 +4384,19 @@ function resizeHandlePos() {
 function overResizeHandle(x, y) {
     if (selectedObject == null) { return false; }
     var p = resizeHandlePos();
+    return getMagSq(x, y, p.x, p.y) < 18 * 18;
+}
+// Rail-end handle: sits at the FAR end of the patrol rail (anchor + railLength along angle).
+// Dragging it draws the rail — sets both angle and length. Clamped inside the canvas so it
+// stays grabbable even when the rail end runs near an edge.
+function railEndHandlePos() {
+    var m = 14;
+    var p = pos({ x: selectedObject.x, y: selectedObject.y }, selectedRailLength(), selectedObject.angle || 0);
+    return { x: Math.max(m, Math.min(createCanvas.width - m, p.x)), y: Math.max(m, Math.min(createCanvas.height - m, p.y)) };
+}
+function overRailEndHandle(x, y) {
+    if (selectedObject == null) { return false; }
+    var p = railEndHandlePos();
     return getMagSq(x, y, p.x, p.y) < 18 * 18;
 }
 function deleteHandlePos() {
@@ -4299,7 +4440,28 @@ function drawHandleKnob(p, r, fill) {
     createContext.restore();
 }
 function drawHazardHandles() {
-    if (selectedResizable()) {
+    if (selectedRailResizable()) {
+        // Rail-end handle: draw the patrol rail from the anchor to its far end + a knob there.
+        // Dragging it draws the rail (aim + length). No separate rotate/resize knob.
+        var ep = railEndHandlePos();
+        createContext.save();
+        createContext.strokeStyle = "rgba(91,108,196,0.85)";
+        createContext.lineWidth = 3;
+        createContext.setLineDash([8, 8]);
+        createContext.beginPath();
+        createContext.moveTo(selectedObject.x, selectedObject.y);
+        createContext.lineTo(ep.x, ep.y);
+        createContext.stroke();
+        createContext.setLineDash([]);
+        createContext.restore();
+        drawHandleKnob(ep, 12, "#5B6CC4");
+        // a small 4-dot "drag" glyph
+        createContext.save();
+        createContext.fillStyle = "white";
+        var dd = [[-4, 0], [4, 0], [0, -4], [0, 4]];
+        for (var di = 0; di < dd.length; di++) { createContext.beginPath(); createContext.arc(ep.x + dd[di][0], ep.y + dd[di][1], 1.5, 0, 2 * Math.PI); createContext.fill(); }
+        createContext.restore();
+    } else if (selectedResizable()) {
         // Resize handle: a knob sitting a gap BEYOND the rim with a ↔ glyph, instead of the
         // rotate knob. A faint stem connects the rim to the handle so the pushed-out knob still
         // reads as "drag this to resize".
@@ -4466,6 +4628,11 @@ function addObjectToMap(x, y, obj) {
     if (config.boons != null && config.boons.lilyPad != null && obj === config.boons.lilyPad.id) {
         hazard.angle = Math.round(Math.random() * 360);
     }
+    // railResizable kinds (magpie drone) carry a per-instance rail LENGTH; place a fresh one
+    // at the config default, then the author drags the rail-end handle to aim + size it.
+    if (kind != null && kind.railResizable && cfg != null) {
+        hazard.railLength = defaultRailLength(cfg);
+    }
     vMap.hazards.push(hazard);
     pushHazardAddCommand(hazard);
     // Drop straight into the cursor tool with the just-placed object selected, so its
@@ -4476,7 +4643,7 @@ function addObjectToMap(x, y, obj) {
     // selection — only switching AWAY from select does — so set the tool first, then
     // the selection sticks.) Pick the palette tool again to place the next one.
     setTool({ kind: "select" });
-    setSelectedObject({ index: vMap.hazards.length - 1, id: hazard.id, x: hazard.x, y: hazard.y, angle: hazard.angle, radius: hazardSelectRadius(hazard) });
+    setSelectedObject({ index: vMap.hazards.length - 1, id: hazard.id, x: hazard.x, y: hazard.y, angle: hazard.angle, radius: hazardSelectRadius(hazard), railLength: hazard.railLength });
     dirty = true;
 }
 // Drag-resize bounds for a kind's config: [minRadius, radius(max)], with a
@@ -4514,7 +4681,7 @@ function locateObject(x, y) {
         return;
     }
     var hz = vMap.hazards[i];
-    setSelectedObject({ index: i, id: hz.id, x: hz.x, y: hz.y, angle: hz.angle, radius: hazardSelectRadius(hz) });
+    setSelectedObject({ index: i, id: hz.id, x: hz.x, y: hz.y, angle: hz.angle, radius: hazardSelectRadius(hz), railLength: hz.railLength });
 }
 
 // Write the selection's live angle back to its hazard (selection tracks the array
@@ -4685,7 +4852,11 @@ function renderHazards() {
     var hazards = vMap.hazards;
     for (var i = 0; i < hazards.length; i++) {
         var hazard = hazards[i];
-        drawMyObject(hazard.x, hazard.y, hazard.id, hazard.angle, hazard.radius, hazard.pair, hazard.length);
+        // The paint "size" arg [5] is the per-instance radius for resizable kinds OR the rail
+        // length for railResizable kinds (the magpie drone) — a kind carries only one. The
+        // Zipline's author-set cable span rides the separate `length` arg [7].
+        var sizeArg = (hazard.railLength != null) ? hazard.railLength : hazard.radius;
+        drawMyObject(hazard.x, hazard.y, hazard.id, hazard.angle, sizeArg, hazard.pair, hazard.length);
     }
 }
 

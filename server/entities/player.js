@@ -131,6 +131,10 @@ class Player extends Circle {
 		//Attack
 		this.acquiredAbility = null;
 		this.ability = null;
+		// Earliest time (Date.now ms) the held ability may be FIRED. Set when re-grabbing a
+		// magpie-dropped ability, so a player still spam-punching to knock it off the drone
+		// doesn't fire it the instant they pick it back up. 0 = ready now (normal pickups).
+		this.abilityReadyAt = 0;
 		// Locked-door key currently carried (like a held ability, but does NOT block
 		// abilities/punch): { keyIndex, doorIndex, shape } or null. Set/cleared by the
 		// room's checkLockedDoors pass; dropped on death/infection/finish.
@@ -428,6 +432,17 @@ class Player extends Circle {
 	checkAttack(currentState) {
 		var playState = (currentState == c.stateMap.racing || currentState == c.stateMap.collapsing
 			|| currentState == c.stateMap.lobby || currentState == c.stateMap.gated);
+		// A freshly RE-GRABBED magpie-stolen ability has a brief arm delay (abilityReadyAt):
+		// a player still spam-punching to knock it off the drone shouldn't fire it the instant
+		// they grab it back. Swallow the attack until it's armed — no fire, and no punch either
+		// (you're holding an ability), just like a normal held-ability press that doesn't fire.
+		if (this.attack && this.ability != null && Date.now() < this.abilityReadyAt
+			&& (currentState == c.stateMap.racing || currentState == c.stateMap.collapsing || currentState == c.stateMap.lobby)) {
+			this.cancelCharge();
+			this.attack = false;
+			this.attackQueued = false; // also swallow a queued sub-tick tap (no fire, no punch)
+			return;
+		}
 		// Holding attack while carrying an ability fires it instantly (no charge).
 		if (this.attack && this.ability != null
 			&& (currentState == c.stateMap.racing || currentState == c.stateMap.collapsing || currentState == c.stateMap.lobby)) {
@@ -2061,6 +2076,10 @@ class Player extends Circle {
 		}
 		this.ability = new Ctor(this.id, this.roomSig);
 		this.acquiredAbility = { mapID: object.voronoiId };
+		// A freshly-acquired ability is READY to fire by default; clear any stale arm window
+		// from a prior magpie re-grab (the magpie path re-stamps abilityReadyAt in
+		// gameBoard.updatePlayers AFTER this, for the re-grab case only).
+		this.abilityReadyAt = 0;
 		// Broadcast the GRANTED ability's id (not the tile id) so the client-side
 		// holding state matches what use() will actually fire.
 		messenger.messageRoomBySig(this.roomSig, "abilityAcquired", { owner: this.id, ability: this.ability.id, voronoiId: object.voronoiId });
@@ -2265,6 +2284,7 @@ class Player extends Circle {
 		this.openMultiKillWindow = false;
 		this.multiKillCount = 0;
 		this.acquiredAbility = null;
+		this.abilityReadyAt = 0;
 		this.angle = 315;
 		// Boons are per-round: a shield carried into a new round + a spent/armed Second
 		// Wind must not bleed across. The client player object persists across rounds, so

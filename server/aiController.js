@@ -46,6 +46,11 @@ var RAIL_STRIKE = c.hazards.movingBumper.attackRadius + c.playerBaseRadius + 4; 
 var RAIL_WAIT_GAP = 16;         // px: staging standoff outside the strike band while the gap is closed
 var RAIL_WAIT_STRENGTH = 2.5;   // closed-gap wall: holds the equilibrium just outside the band
 var RAIL_END_SLIDE = 0.35;      // tangential drift toward the nearer rail end while waiting
+// Magpie drone: a bot CARRYING an ability gives an empty (still-hungry) drone a wider berth
+// (losing the held ability is the cost); an empty-handed bot has nothing to lose and just
+// times the rail gap like a moving bumper (the generic moveable+rail branch).
+var MAGPIE_GUARD_PAD = 40;      // px: extra avoid radius an ability-holding bot keeps off a hungry drone
+var MAGPIE_GUARD_STRENGTH = 1.4;// weight of that extra radial push
 var RAIL_CROSS_SPEED = 48;      // px/s: dash-speed fallback when the tile under the bot is unknown
 var RAIL_CROSS_MARGIN = 1.05;   // safety factor on the predicted exposure time
 var RAIL_SAMPLE_STEP = 0.06;    // s: resolution of the predicted bumper walk
@@ -418,6 +423,26 @@ function hazardRepulsion(bot, ctx, desiredX, desiredY, dt) {
                 }
             }
             // fall through to the generic radial field (body avoidance)
+        }
+        // A magpie drone steals your HELD ABILITY on contact (and carries it off). It's
+        // railed, so the generic moveable+rail branch below already makes every bot time its
+        // gap and skirt its body. On top of that, a bot CARRYING an ability gives an EMPTY
+        // (still-hungry) drone a WIDE berth — losing the ability is the real cost — while an
+        // empty-handed bot has nothing to lose and just times the gap normally. A drone
+        // already carrying loot is harmless, so no extra avoidance. Bots don't CHASE a
+        // loot-laden drone (the re-grab is opportunistic). Gated on isMagpie + bot.ability, so
+        // it's inert on drone-free maps and for empty bots. Added to (not replacing) the
+        // rail-crossing handling below.
+        if (h.isMagpie && bot.ability != null && !h.loot) {
+            var mdx = bot.x - h.x, mdy = bot.y - h.y;
+            var md = mag(mdx, mdy);
+            var mrange = HAZARD_AVOID_RADIUS + (h.radius || 0) + MAGPIE_GUARD_PAD;
+            if (md > 0.0001 && md < mrange) {
+                var mw = (mrange - md) / mrange; mw = mw * mw;
+                rx += (mdx / md) * mw * MAGPIE_GUARD_STRENGTH;
+                ry += (mdy / md) * mw * MAGPIE_GUARD_STRENGTH;
+            }
+            // fall through to the rail-crossing timing + generic body avoidance
         }
         if (h.moveable && h.rail != null) {
             var seg = bumperSegment(h);

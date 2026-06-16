@@ -819,6 +819,75 @@ class Turret extends Hazard {
 	}
 }
 
+// A magpie drone: a thieving drone that patrols a rail (railed like the moving bumper) and
+// STEALS a racer's HELD ABILITY on contact, then carries it off — the FIRST hazard to reach
+// into the ability ECONOMY (every prior kind only shoved/teleported/blocked, never touched a
+// player's inventory). PUNCH it (a real player swing) and it DROPS the loot onto the nearest
+// drivable cell as a re-grabbable ability PAD — reusing the normal ability-tile pickup path,
+// not a parallel pickup system. A racer holding NO ability instead gets a STAMINA chunk
+// drained (immediate; nothing to carry). A drone is "FULL" while carrying — a full drone is
+// harmless and won't steal again until it drops or is punched — so the steal/punch/regrab
+// loop reads cleanly.
+//
+// Railed, so motion + AI are FREE: the engine steps it along its HazardRail (like the moving
+// bumper) and aiController's moving-bumper rail-crossing logic times its gap. It carries no
+// CONTACT FORCE — the "damage" is the theft, resolved NOT in handleHit (the collision system
+// fires handleHit up to 2x per pair) but in a once-per-tick gameBoard.serveMagpieDrone pass:
+// handleHit only RECORDS the contact/punch as a request, and the pass does the inventory
+// mutation (it owns abilityList + the broadcasts + the racing/collapsing gate). The carried
+// ability TILE id rides the netState wire (0 = empty) so the client can draw the loot — note
+// ability.id IS the ability TILE id (100-110), so it round-trips straight back to a Ctor.
+class MagpieDrone extends Hazard {
+	constructor(x, y, rail, ownerId, roomSig) {
+		super(x, y, c.hazards.magpieDrone.radius, c.hazards.magpieDrone.color, ownerId, roomSig, rail);
+		this.id = c.hazards.magpieDrone.id;
+		this.isMagpie = true;       // AI: a bot CARRYING an ability gives it a wide berth (aiController)
+		// Author-sized rail: ship rail.width on wire slot [9] — the SAME slot the Zipline uses
+		// (railLengthAuthored), so the client decodes it into .railLength for the rail track.
+		this.railLengthAuthored = true;
+		// Patrol at a CONSTANT LINEAR speed (patrolSpeed px/s) regardless of rail length, so the
+		// bird sweeps the WHOLE rail at a steady pace whether the author drew a short hover or a
+		// map-wide patrol. We deliberately ride the engine's SHARED rail step (linear px/s =
+		// speed*dt) rather than a custom advance(): aiController.railCrossingOpen predicts a
+		// railed hazard's motion from `h.speed` on that exact model, so staying on it keeps the
+		// bot gap-timing correct (a bespoke advance would read undefined h.speed and mis-time).
+		// Back `speed` out of the desired px/s and the tick dt so both the motion AND the AI
+		// prediction land on patrolSpeed.
+		this.speed = c.hazards.magpieDrone.patrolSpeed / (c.serverTickSpeed / 1000);
+		this.angle = rail.angle;    // the engine rail step overloads .angle to track direction
+		this.loot = 0;              // carried ability TILE id (100-110); 0 = empty-handed
+		this.netState = 0;          // ship loot on the wire (client draws the carried-ability icon)
+		this.stealVictimId = null;  // set by handleHit on body contact; resolved in serveMagpieDrone
+		this.dropRequest = false;   // set by handleHit on a real player punch while carrying
+		this.nextStealTime = 0;     // per-drone cooldown (Date.now ms) after a steal / stamina zap
+	}
+	// Lightning speeds moving hazards up — scale the along-rail patrol speed (the rail
+	// bumper pattern). See gameBoard.generateHazards.
+	scaleSpeed(mod) { this.speed *= mod; }
+	// Contact does NOT punch/shove — it RECORDS a request the gameBoard pass resolves (which
+	// owns abilityList + the racing gate). A real player PUNCH while carrying loot requests a
+	// DROP (map-owned shoves / clashed punches don't count — the turret-break guard). Body
+	// contact with an eligible racer requests a STEAL, but only when the drone is EMPTY and
+	// off cooldown (a full drone is harmless). Idempotent under the up-to-2x handleHit (guarded
+	// by loot / an already-queued request).
+	handleHit(object) {
+		if (this.alive === false || object == null) { return; }
+		if (object.isPunch) {
+			if (this.loot && !object.mapOwned && !object.clashed) {
+				this.dropRequest = true;
+				object.landed = true; // the punch connected — keep it out of the clash pass
+			}
+			return;
+		}
+		if (this.loot || this.stealVictimId != null) { return; } // full, or a steal is already queued this tick
+		if (!object.isPlayer || object.alive === false || object.reachedGoal) { return; }
+		if (object.isProtected && object.isProtected()) { return; }
+		if (object.hasStarPower && object.hasStarPower()) { return; }
+		if (Date.now() < this.nextStealTime) { return; }
+		this.stealVictimId = object.id;
+	}
+}
+
 // A warp pad: one half of a PAIRED TELEPORTER. Registered as a BOON (config.boons.warpPad,
 // id 958 — see boons.js) though the class lives here with its cross-cutting machinery. A
 // racer driving onto this pad is whisked to its partner pad, KEEPING its velocity — so the
@@ -1040,6 +1109,29 @@ registerHazardKind("sentryTurret", {
 		return new Turret(entry.x, entry.y, entry.angle, mapID, roomSig);
 	}
 });
+registerHazardKind("magpieDrone", {
+	railed: true, // rides a HazardRail like the moving bumper; ships the rail origin/angle on the wire
+	directional: true,
+	build: function (entry, mapID, roomSig) {
+		// The rail LENGTH is author-sized per instance (drag the rail-end handle in the
+		// editor), clamped server-side to [minRailLength, maxRailLength] so a crafted map
+		// can't ship a rail spanning the world. Falls back to the config default.
+		var rail = new HazardRail(entry.x, entry.y, magpieRailLength(entry), c.hazards.magpieDrone.height, entry.angle, c.hazards.magpieDrone.color, mapID, roomSig);
+		return new MagpieDrone(entry.x, entry.y, rail, mapID, roomSig);
+	}
+});
+// Resolve a magpie drone's per-instance rail length from its map entry: clamp the authored
+// value to [minRailLength, max], where the max is MAP-WIDE — the world diagonal, so a rail can
+// span the whole map in any direction (config `maxRailLength` overrides it if ever set). A
+// missing/non-finite value (legacy entries, tests) falls back to the config default railLength.
+function magpieRailLength(entry) {
+	var cfg = c.hazards.magpieDrone;
+	var min = cfg.minRailLength != null ? cfg.minRailLength : 80;
+	var max = cfg.maxRailLength != null ? cfg.maxRailLength : Math.hypot(c.worldWidth, c.worldHeight);
+	var v = (entry != null && Number.isFinite(entry.railLength)) ? entry.railLength : cfg.railLength;
+	if (v < min) { v = min; } else if (v > max) { v = max; }
+	return v;
+}
 
 // Antlion (brutal round 1014): a sand-dwelling chaser. It is NOT moveable in the
 // engine's sense — engine.updateHazards is rail-only and zeroes velocity for
@@ -1109,7 +1201,7 @@ class Thumper extends Hazard {
 }
 
 
-module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, Mine, VortexWell, vortexWellRadius, LaserGate, Crusher, Turret, WarpPad, linkWarpPads, Antlion, Thumper, HAZARD_KINDS, BOON_KINDS, hazardKindById, registerHazardKind, registerBoonKind };
+module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, Mine, VortexWell, vortexWellRadius, LaserGate, Crusher, Turret, MagpieDrone, magpieRailLength, WarpPad, linkWarpPads, Antlion, Thumper, HAZARD_KINDS, BOON_KINDS, hazardKindById, registerHazardKind, registerBoonKind };
 
 // Load the boon kinds AFTER module.exports is assigned: boons.js requires this
 // module for the Hazard base class + registerBoonKind, so it must see the fully

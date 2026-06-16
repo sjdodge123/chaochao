@@ -592,6 +592,19 @@
             "shotRadius": 16,
             "shotSpeed": 9000,
             "shotLifetime": 1.4
+        },
+        "magpieDrone": {
+            "_doc": "A drone patrolling a rail (railed like the moving bumper) that STEALS a racer's held ability on contact and carries it off — the first hazard to touch the ability economy. While carrying loot it's 'full' and harmless; punch it (a real player swing) to make it DROP the ability onto the nearest drivable cell as a re-grabbable ability pad (the normal ability-tile pickup). A racer with NO held ability gets a stamina chunk drained instead (immediate, nothing to carry). netState ships the carried ability tile id (0=empty) so the client draws the loot.",
+            "id": 912,
+            "color": "#5B6CC4",
+            "railLength": 170,
+            "minRailLength": 80,
+            "height": 5,
+            "patrolSpeed": 160,
+            "radius": 16,
+            "staminaSteal": 35,
+            "stealCooldownMs": 1400,
+            "regrabArmMs": 450
         }
     },
     "boons": {

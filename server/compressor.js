@@ -273,9 +273,9 @@ exports.newHazards = function (hazardList) {
 			rail != null ? rail.x : hazard.x,
 			rail != null ? rail.y : hazard.y,
 			hazard.netState != null ? hazard.netState : null,
-			// [8] per-instance radius — opt-in for `sizable` kinds (the vortex well's
-			// authored size), like streamAngle/netState. null for every other kind so
-			// the slot's payload matches its contract.
+			// [8] per-instance RADIUS — opt-in for `sizable` kinds (the vortex well, lily pad),
+			// like streamAngle/netState. null for every other kind so the slot's payload matches
+			// its contract. (An author-set rail LENGTH rides slot [9] instead — see below.)
 			hazard.sizable ? hazard.radius : null
 		];
 		// [9] author-set rail LENGTH — APPENDED only for railed kinds whose span is
