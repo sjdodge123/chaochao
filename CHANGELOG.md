@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.49.0 — 2026-06-16
+
 ### Map editor
 
 - **New hazard: Magpie Drone.** A thieving drone that patrols a rail and **snatches the ability you're holding** the moment it touches you — then flies off carrying your loot in plain sight (you'll see the stolen ability bobbing above it). Get it back by **punching the drone**: a solid hit makes it drop the ability onto the ground as a pad anyone can grab — so a stolen Bomb or Star can change hands mid-race. A re-grabbed ability arms after a brief beat, so mashing punch to free it won't fire it off by accident the instant you scoop it back up. Catch it while you're **empty-handed** and there's nothing to steal, so it just zaps a chunk of your stamina instead. A drone that's already carrying loot is harmless until someone frees it, so the steal → punch → grab-it-back scramble is the whole game. It rides its rail like a Moving Bumper, so you can time your dash through the gap — but if you're holding something good, give it a wide berth. Authors place it from the hazards palette and **draw its patrol rail by dragging the rail-end handle** — aim it and set how far it ranges in one motion, from a short hover to a long sweeping patrol. Rival AI racers carrying an ability now keep their distance from a hungry drone.
