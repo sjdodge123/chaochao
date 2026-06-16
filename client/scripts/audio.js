@@ -617,7 +617,7 @@ function stopAllSounds() {
     stopAllDriftSounds();
     stopFireWalkSound();
     stopHeatwaveDrone();
-    stopBarrelFuse();
+    stopAllBarrelFuses();
 }
 
 // ----------------------------------------------------------------------------
@@ -674,13 +674,16 @@ function playBunkerDoorHiss() {
 // assets), through sfxBus so the master toggle + lobby dampen apply. The fuse loop lives
 // OUTSIDE activeVoices (drift-skid pattern) so it must be stopped explicitly (on launch +
 // stopAllSounds). Volumes set for MID-RACE listening (the lobby damps all SFX to 10%).
-var barrelFuseVoice = null;
+// Keyed by player id (NOT a singleton) so couch co-op — two local racers loaded in
+// barrels at once — each gets its own fuse voice instead of clobbering one global voice.
+var barrelFuseVoices = {};
 
-function startBarrelFuse(ms) {
+function startBarrelFuse(id, ms) {
     var ctx = getCtx();
     if (!ctx || ctx.state !== "running") { return; }
     if (gameMuted || masterVolume === 0) { return; }
-    if (barrelFuseVoice != null) { stopBarrelFuse(); }
+    if (id == null) { id = "__local__"; }
+    if (barrelFuseVoices[id] != null) { stopBarrelFuse(id); }
     var now = ctx.currentTime;
     var dur = Math.max(0.2, (ms || 1600) / 1000);
     // Filtered-noise sizzle that BUILDS as the fuse burns down (more urgent near launch).
@@ -701,13 +704,14 @@ function startBarrelFuse(ms) {
     noise.connect(filt); filt.connect(g); g.connect(sfxBus);
     try { noise.start(now); lfo.start(now); }
     catch (e) { try { g.disconnect(); } catch (e2) {} return; }
-    barrelFuseVoice = { noise: noise, lfo: lfo, gain: g };
+    barrelFuseVoices[id] = { noise: noise, lfo: lfo, gain: g };
 }
 
-function stopBarrelFuse() {
-    var v = barrelFuseVoice;
+function stopBarrelFuse(id) {
+    if (id == null) { id = "__local__"; }
+    var v = barrelFuseVoices[id];
     if (v == null) { return; }
-    barrelFuseVoice = null;
+    delete barrelFuseVoices[id];
     var ctx = getCtx();
     if (!ctx) { try { v.noise.stop(); v.lfo.stop(); } catch (e) {} return; }
     var now = ctx.currentTime;
@@ -716,6 +720,11 @@ function stopBarrelFuse() {
         v.gain.gain.setTargetAtTime(0.0001, now, 0.05);
         v.noise.stop(now + 0.2); v.lfo.stop(now + 0.2);
     } catch (e) {}
+}
+
+function stopAllBarrelFuses() {
+    var ids = Object.keys(barrelFuseVoices);
+    for (var i = 0; i < ids.length; i++) { stopBarrelFuse(ids[i]); }
 }
 
 // One-shot cannon EXPLOSION on a Barrel Cannon launch: a sharp broadband crack (the bang),

@@ -662,6 +662,7 @@
             "pulse": 120,
             "pulseCap": 360,
             "chainWindowMs": 900,
+            "chainMinGapMs": 120,
             "chainBonus": 60,
             "chainMax": 3
         }

@@ -1292,6 +1292,15 @@ class GameBoard {
 			messenger.messageRoomBySig(gameBoard.roomSig, "fizzle", packet.owner);
 			return;
 		}
+		// The OWNER can become untouchable between casting the swap and this delayed
+		// resolution (warnTime + 1-4s) — e.g. they drove onto a Launch Pad / into a Barrel
+		// Cannon and are mid-flight (isAloft), or fell on a Second Wind flag (isReviving).
+		// Swapping their position now would be clobbered next tick by tickAirborne (a
+		// one-sided swap / desync), so fizzle instead. (Targets are already excluded above.)
+		if (ownerPlayer.isAloft() || ownerPlayer.isReviving()) {
+			messenger.messageRoomBySig(gameBoard.roomSig, "fizzle", packet.owner);
+			return;
+		}
 		var tempVars = { x: randomPlayer.x, y: randomPlayer.y, newX: randomPlayer.newX, newY: randomPlayer.newY, velX: randomPlayer.velX, velY: randomPlayer.velY, dragCoeff: randomPlayer.dragCoeff, brakeCoeff: randomPlayer.brakeCoeff, acel: randomPlayer.acel };
 		for (var prop in tempVars) {
 			randomPlayer[prop] = ownerPlayer[prop];

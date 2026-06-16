@@ -412,6 +412,7 @@ class SlingshotRings extends Boon {
 		this.pulse = c.boons.slingshotRings.pulse;
 		this.pulseCap = c.boons.slingshotRings.pulseCap;
 		this.chainWindowMs = c.boons.slingshotRings.chainWindowMs;
+		this.chainMinGapMs = c.boons.slingshotRings.chainMinGapMs;
 		this.chainBonus = c.boons.slingshotRings.chainBonus;
 		this.chainMax = c.boons.slingshotRings.chainMax;
 	}
@@ -435,12 +436,22 @@ class SlingshotRings extends Boon {
 			return;
 		}
 		// Chain: consecutive rings within chainWindowMs stack a cap bonus (up to chainMax),
-		// so a row of rings launches harder than one. The window re-arms on every ring.
+		// so a row of rings launches harder than one. The window re-arms on every ring. A
+		// link only counts if at least chainMinGapMs has passed since the last one, so a
+		// kart overlapping two tightly-packed rings in a single tick (or a dense cluster)
+		// can't multi-increment the chain — it has to be SEPARATE passes through a line.
 		var now = Date.now();
-		if (object.slingChainUntil != null && object.slingChainUntil > 0 && now <= object.slingChainUntil) {
-			object.slingChainCount = Math.min(this.chainMax, (object.slingChainCount || 0) + 1);
+		var withinWindow = object.slingChainUntil != null && object.slingChainUntil > 0 && now <= object.slingChainUntil;
+		var gapOk = object.slingChainAt == null || (now - object.slingChainAt) >= this.chainMinGapMs;
+		if (withinWindow) {
+			if (gapOk) {
+				object.slingChainCount = Math.min(this.chainMax, (object.slingChainCount || 0) + 1);
+				object.slingChainAt = now;
+			}
+			// within the window but too soon (same tick / cluster) → keep the current count
 		} else {
 			object.slingChainCount = 0;
+			object.slingChainAt = now;
 		}
 		object.slingChainUntil = now + this.chainWindowMs;
 		// Capped-add toward the (chain-raised) cap, scaled by how centred the pass is.

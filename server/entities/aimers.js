@@ -86,7 +86,15 @@ class SwapAimer extends Circle {
 		this.y = owner.y;
 	}
 	handleHit(object) {
-		if (object.isPlayer && object.id != this.ownerId && object.isZombie == false && this.alive) {
+		// Skip karts that can't be a valid swap target at enrollment (mirrors the reject
+		// loop in GameBoard.swapOwnerWithRandomPlayer): a zombie, or one that's in an
+		// untouchable limbo — aloft on a Launch Pad / Barrel Cannon, or in a Second Wind
+		// revive. Filtering here avoids the resolver burning its retry budget (and possibly
+		// fizzling) on candidates it would only reject.
+		var skip = object.isZombie
+			|| (typeof object.isAloft === "function" && object.isAloft())
+			|| (typeof object.isReviving === "function" && object.isReviving());
+		if (object.isPlayer && object.id != this.ownerId && !skip && this.alive) {
 			if (this.targetList[object.id] == null) {
 				this.targetList[object.id] = object;
 				this.targetListAry.push(object.id);
