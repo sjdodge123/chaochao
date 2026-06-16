@@ -414,6 +414,7 @@ var gameStart = makeSound("./assets/sounds/gamestart.mp3");
 var slowstride = makeSound("./assets/sounds/slowstride.mp3", { bus: "music" });
 var slowpipes = makeSound("./assets/sounds/slow-pipes.mp3", { bus: "music" });
 var eightBitAction1 = makeSound("./assets/sounds/8bit-action-1.mp3", { bus: "music" });
+var synthIdea = makeSound("./assets/sounds/synth-idea.mp3", { bus: "music" });
 
 var therush = makeSound("./assets/sounds/the-rush.mp3", { bus: "music" });
 var beastv2 = makeSound("./assets/sounds/beastv2.mp3", { bus: "music" });
@@ -443,6 +444,7 @@ function registerBackgroundTrack(playlist, mood, name, sound) {
 registerBackgroundTrack(calmBackgroundMusicList, "calm", "slowstride", slowstride);
 registerBackgroundTrack(calmBackgroundMusicList, "calm", "slow-pipes", slowpipes);
 registerBackgroundTrack(calmBackgroundMusicList, "calm", "8bit-action-1", eightBitAction1);
+registerBackgroundTrack(calmBackgroundMusicList, "calm", "synth-idea", synthIdea);
 
 registerBackgroundTrack(excitingBackgroundMusicList, "exciting", "mind_in_motion", mindInMotion);
 registerBackgroundTrack(excitingBackgroundMusicList, "exciting", "the-rush", therush);
@@ -529,6 +531,7 @@ function volumeChange() {
     slowpipes.volume = .015 * music;
     eightBitAction1.volume = .075 * music;  // operator-tuned by ear mid-race (.015 -> .025 -> .075); the calm slot wants real presence
     slowstride.volume = .05 * music;
+    synthIdea.volume = .03 * music;  // hot master (mean ~-11.6 dB) — coeff measured to land near slowstride's level; ear-tune mid-race if it wants more presence
     therush.volume = .025 * music;
     beastv2.volume = .035 * music;
     mindInMotion.volume = .035 * music;
