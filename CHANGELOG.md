@@ -10,6 +10,10 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
+(none yet)
+
+## v0.45.0 — 2026-06-16
+
 ### General
 
 - **Sentry Turrets can now be punched out.** That fixed gun emplacement isn't invincible anymore — land a solid punch on it and it's smashed offline for the rest of the round (a grey debris burst and a metallic crunch, leaving a cracked, dead wreck). The charge-up is your opening: rush it while it's locking on, or pick it off from outside its firing arc where it can't shoot back. Rival AI stops avoiding a turret once it's been knocked out.

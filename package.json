@@ -1,6 +1,6 @@
 {
     "name": "chaochao",
-    "version": "0.44.0",
+    "version": "0.45.0",
     "description": "Multiplayer web based slow paced racing game",
     "dependencies": {
         "@octokit/core": "^7.0.6",
