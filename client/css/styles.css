@@ -1422,6 +1422,28 @@ body.osk-open .gamepad-prompts {
     color: var(--text);
     cursor: pointer;
 }
+/* Short landscape (phone on its side): the single column of ~7 setting rows is
+   taller than the screen, so the top row and the Done button clip off. Lay the
+   rows out in two columns (roughly halves the height) and tighten them, and cap
+   the dialog to the viewport with an internal scroll as a final safety net. */
+@media screen and (max-height: 540px) and (min-width: 640px) {
+    .settings-dialog {
+        max-height: 94vh;
+        overflow-y: auto;
+    }
+    .settings-rows {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.4rem 0.6rem;
+    }
+    .settings-row {
+        padding: 0.4rem 0.7rem;
+        font-size: 0.9rem;
+    }
+    .settings-foot {
+        margin-top: 0.55rem;
+    }
+}
 /* Translucent settings (gear) button — shown only on touch while in fullscreen,
    where the navbar (and its settings controls) is hidden and there's no pad
    Start button. Sits above the settings modal so it can also toggle it closed.
