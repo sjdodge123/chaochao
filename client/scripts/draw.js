@@ -9641,6 +9641,11 @@ function buildHazardDrawers() {
             drawWarpPad(h.x, h.y, h.state); // h.state = the pair id (netState) → per-pair colour
         };
     }
+    if (config.hazards.magpieDrone != null) {
+        hazardDrawers[config.hazards.magpieDrone.id] = function (h) {
+            drawMagpieDrone(h); // reads x/y, rail origin/angle, state (carried ability tile id, 0=empty), and tx for facing
+        };
+    }
     // Boons share the hazard drawer registry (they live in the same client
     // hazardList). Their visual language is teal/helpful, the inverse of the
     // bumper-orange "this flings you" rule.
@@ -9753,6 +9758,68 @@ function drawMovingBumper(x, y, railX, railY, angle) {
     gameContext.fillStyle = config.hazards.movingBumper.color;
     gameContext.fill();
     gameContext.restore();
+}
+// A magpie drone: a thieving BIRD patrolling its rail — a stylized magpie (black body, white
+// breast, long iridescent blue-green tail, flapping wings). When carrying a stolen ability
+// (state = the ability TILE id, 0 = empty) it clutches the loot in its beak + a gold "rob me"
+// glow ring pulses behind it (punch it to drop the loot). It flips to face its travel
+// direction along the rail (from the smoothed position target tx). Railed, so it draws its
+// patrol track from the rail origin like the moving bumper.
+function drawMagpieDrone(h) {
+    var cfg = config.hazards.magpieDrone;
+    var R = cfg.radius;
+    var x = h.x, y = h.y;
+    // Patrol rail (faint dashed indigo line from the rail origin along its angle). The rail
+    // length is author-sized per instance, shipped on wire slot [9] (decoded into h.railLength,
+    // the same slot the Zipline uses); fall back to the config default.
+    var railLen = (h.railLength != null && h.railLength > 0) ? h.railLength : cfg.railLength;
+    if (h.railX != null && h.railY != null) {
+        var rad = (h.angle || 0) * (Math.PI / 180);
+        gameContext.save();
+        gameContext.strokeStyle = "rgba(91,108,196,0.30)";
+        gameContext.lineWidth = 3;
+        gameContext.setLineDash([8, 8]);
+        gameContext.beginPath();
+        gameContext.moveTo(h.railX, h.railY);
+        gameContext.lineTo(h.railX + Math.cos(rad) * railLen, h.railY + Math.sin(rad) * railLen);
+        gameContext.stroke();
+        gameContext.setLineDash([]);
+        gameContext.restore();
+    }
+    var t = Date.now() / 1000;
+    var carrying = (h.state != null && h.state >= 100);
+    var bob = Math.sin(t * 2.2) * R * 0.06;
+    // Face travel direction (the bird flies where it's headed). tx is the smoothed position
+    // target; a horizontal delta flips the sprite. Falls back to facing right.
+    var face = (h.tx != null && h.tx < x - 0.4) ? -1 : 1;
+    // Gold "rob me / punch me" glow ring behind the bird while it carries loot.
+    if (carrying) {
+        var pulse = 0.5 + 0.5 * Math.sin(t * 6);
+        gameContext.beginPath();
+        gameContext.arc(x, y + bob, R + 6 + pulse * 3, 0, Math.PI * 2);
+        gameContext.strokeStyle = "rgba(255,210,90," + (0.30 + 0.30 * pulse).toFixed(3) + ")";
+        gameContext.lineWidth = 2.5;
+        gameContext.stroke();
+    }
+    gameContext.save();
+    gameContext.translate(x, y + bob);
+    gameContext.scale(face, 1);
+    drawMagpieBird(R, t, carrying);
+    gameContext.restore();
+    // Loot = the actual stolen ability icon, clutched at the beak tip (world space, so the
+    // wing flap / sprite mirror don't distort the token).
+    if (carrying) {
+        drawAbilityIconToken(abilityIconFor(h.state), x + face * R * 1.5, y + bob - R * 0.7, R * 0.55);
+    }
+}
+// The magpie body, drawn centered at the current origin facing +x (caller handles the
+// translate/bob/mirror). Delegates to the shared magpieBirdShape (barrierArt.js) — the same
+// shape the editor draws — passing the live animation phase (wing flap, tail sway, beak gape,
+// shifting blue-green tail shimmer).
+function drawMagpieBird(R, t, carrying) {
+    magpieBirdShape(gameContext, R, Math.sin(t * 9) * 0.55, Math.sin(t * 2.2) * 0.05, carrying ? 0.16 : 0.05, function (s) {
+        return (Math.sin(t * 1.5 + s) > 0.5) ? "#2f6df0" : "#1f8f7a";
+    });
 }
 // A pinball slingshot wall: a rounded band from its anchor along `angle` for the
 // configured length — red rim over the bumper-orange core, matching the round

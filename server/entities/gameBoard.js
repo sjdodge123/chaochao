@@ -86,6 +86,11 @@ class GameBoard {
 		this.lockedDoors = [];
 		this.lockedKeys = [];
 		this.hasLockedDoors = false;
+		// Voronoi cell ids the magpie drone has DROPPED a stolen ability onto. A racer that
+		// re-grabs one of these gets a brief ability ARM delay (so spam-punching the drone to
+		// free the loot doesn't fire it the instant it's picked back up). See serveMagpieDrone
+		// + updatePlayers (the arm stamp) + Player.checkAttack (the swallow).
+		this.magpieDropVids = {};
 
 		this.lobbyStartButton;
 		this.alivePlayerCount = 0;
@@ -533,7 +538,22 @@ class GameBoard {
 				}
 				if (player.acquiredAbility.mapID != null) {
 					var consumedVid = player.acquiredAbility.mapID;
-					this.changeTile(consumedVid, c.tileMap.normal.id);
+					// A GENUINE magpie re-grab = the cell is a recorded drop AND the ability just
+					// picked up is the one that was dropped there. Then arm the brief use delay
+					// (so spam-punching the drone doesn't insta-fire it) and restore the cell's
+					// ORIGINAL terrain — reverting to plain `normal` would erase a slow/fast/ice
+					// lane the drop happened to land on. A stale/mismatched entry (the cell was
+					// over-painted, or an unrelated tile reappeared there) is simply discarded.
+					var magDrop = this.magpieDropVids[consumedVid];
+					var revertId = c.tileMap.normal.id;
+					if (magDrop != null && player.ability != null && player.ability.id === magDrop.ability) {
+						player.abilityReadyAt = Date.now() + (c.hazards.magpieDrone.regrabArmMs || 0);
+						revertId = magDrop.tileId;
+						delete this.magpieDropVids[consumedVid];
+					} else if (magDrop != null) {
+						delete this.magpieDropVids[consumedVid];
+					}
+					this.changeTile(consumedVid, revertId);
 					// Lobby-only: the curated ability tile is one-shot (rewritten to normal
 					// on pickup). Restore it to its pristine ability id after a short delay
 					// so every player gets to learn it, not just the first per cycle.
@@ -689,6 +709,12 @@ class GameBoard {
 				hazard.destroyedRequest = false;
 				messenger.messageRoomBySig(this.roomSig, "turretDestroyed", { owner: hazard.ownerId, x: hazard.x, y: hazard.y });
 			}
+			// Magpie drone: resolve the steal/drop its handleHit recorded this tick. The
+			// inventory mutation lives HERE (not in handleHit, fired up to 2x/pair) — this
+			// pass owns abilityList, the racing gate, and the broadcasts.
+			if (hazard.isMagpie) {
+				this.serveMagpieDrone(hazard, forceZonesLive);
+			}
 			if (hazard.punch != null && this.punchList[hazard.ownerId] == null) {
 				this.punchList[hazard.ownerId] = hazard.punch;
 				messenger.messageRoomBySig(this.roomSig, "punch", compressor.sendPunch(hazard.punch));
@@ -769,6 +795,109 @@ class GameBoard {
 		}
 	}
 
+	// Magpie drone: resolve the steal/drop requests its handleHit recorded this tick. The
+	// mutation lives here, not in handleHit (the collision system fires handleHit up to 2x
+	// per pair), and this pass owns abilityList + the broadcasts + the racing gate. Off the
+	// race it just clears any stale request (karts are penned — nothing to rob).
+	serveMagpieDrone(drone, live) {
+		if (!live) { drone.stealVictimId = null; drone.dropRequest = false; return; }
+		// Punched while carrying → DROP the loot onto the nearest drivable cell as a normal
+		// re-grabbable ability pad (reuses the ability-tile pickup path); then it's empty
+		// and hungry again. The cooldown keeps it from instantly re-robbing the puncher.
+		if (drone.dropRequest) {
+			drone.dropRequest = false;
+			if (drone.loot) {
+				var dropped = drone.loot;
+				var cell = this.dropAbilityNear(drone.x, drone.y, dropped);
+				// Only release the loot if it actually landed on a re-grabbable cell. If no
+				// drivable cell exists (e.g. a near-total collapse), keep carrying it rather
+				// than vanish the ability — a later punch retries once the drone is over good
+				// ground.
+				if (cell != null) {
+					drone.loot = 0;
+					drone.netState = 0;
+					drone.nextStealTime = Date.now() + c.hazards.magpieDrone.stealCooldownMs;
+					// FX at the PAD (where the loot actually landed), not the drone — the nearest
+					// drivable cell can be offset when the drone is punched over lava/water.
+					messenger.messageRoomBySig(this.roomSig, "magpieDrop", { ability: dropped, x: cell.site.x, y: cell.site.y, voronoiId: cell.site.voronoiId });
+				}
+			}
+		}
+		// Body contact recorded a victim → STEAL the held ability, or drain a stamina chunk if
+		// the racer is empty-handed. The held ability INSTANCE is discarded; on re-grab a fresh
+		// one is created by the normal pickup, so there's no owner-reassignment or duplication.
+		if (drone.stealVictimId != null) {
+			var victim = this.playerList[drone.stealVictimId];
+			drone.stealVictimId = null;
+			if (victim == null || victim.alive === false || victim.reachedGoal || drone.loot) { return; }
+			// Only steal an ability the drone can later DROP as a re-grabbable pad (a spawnable
+			// ability tile — see stealableAbilityIds). A non-droppable held ability (the
+			// BombTrigger, a mid-action state with no pickup tile) falls through to the stamina
+			// zap, so the bomb-holder keeps their trigger and the ability is never destroyed.
+			if (victim.ability != null && this.stealableAbilityIds()[victim.ability.id] === true) {
+				var stolen = victim.ability.id;
+				drone.loot = stolen;
+				drone.netState = stolen;
+				victim.ability = null;
+				victim.acquiredAbility = null; // cancel a same-tick pickup mid-registration
+				delete this.abilityList[victim.id];
+				drone.nextStealTime = Date.now() + c.hazards.magpieDrone.stealCooldownMs;
+				messenger.messageRoomBySig(this.roomSig, "magpieSteal", { victim: victim.id, ability: stolen, x: drone.x, y: drone.y });
+			} else if (typeof victim.stamina === "number") {
+				victim.stamina = Math.max(0, victim.stamina - c.hazards.magpieDrone.staminaSteal);
+				drone.nextStealTime = Date.now() + c.hazards.magpieDrone.stealCooldownMs;
+				messenger.messageRoomBySig(this.roomSig, "magpieSteal", { victim: victim.id, ability: null, x: drone.x, y: drone.y });
+			}
+		}
+	}
+	// Ability tile ids the magpie drone can STEAL — i.e. ones it can later DROP as a
+	// re-grabbable ability pad via the normal ability-tile pickup (ABILITY_TILE_CTORS, which
+	// covers every spawnable ability). Notably EXCLUDES the BombTrigger (id 103,
+	// spawnable:false) — a mid-action state with no pickup tile, so stealing it would strand
+	// a placed bomb AND destroy the ability on drop (no Ctor for it). A held ability not in
+	// this set falls through to the stamina zap. Cached (config is static).
+	stealableAbilityIds() {
+		if (this._stealableAbilityIds == null) {
+			var s = {};
+			for (var k in c.tileMap.abilities) {
+				var a = c.tileMap.abilities[k];
+				if (a != null && a.spawnable === true && Number.isFinite(a.id)) { s[a.id] = true; }
+			}
+			this._stealableAbilityIds = s;
+		}
+		return this._stealableAbilityIds;
+	}
+	// Nearest walkable (slow/normal/fast/ice) cell to (x,y), or null. Shared by the magpie
+	// ability-drop and the locked-key drop so both pick a drivable landing spot by one rule.
+	nearestWalkableCell(x, y) {
+		var map = this.currentMap;
+		if (map == null || !Array.isArray(map.cells)) { return null; }
+		var walkable = this.walkableGroundIds();
+		var best = Infinity, target = null;
+		for (var i = 0; i < map.cells.length; i++) {
+			var cell = map.cells[i];
+			if (cell == null || cell.site == null || walkable[cell.id] !== true) { continue; }
+			var dx = cell.site.x - x, dy = cell.site.y - y, d = dx * dx + dy * dy;
+			if (d < best) { best = d; target = cell; }
+		}
+		return target;
+	}
+	// Drop a stolen ability onto the nearest DRIVABLE cell to (x,y) by painting it with the
+	// ability TILE id, so any empty-handed racer picks it up via the normal ability-tile path
+	// (engine ability pickup) — no parallel pickup system. walkableGroundIds excludes
+	// lava/water/empty/goal/door AND existing ability pads (ids 100+), so a drop never stacks
+	// onto a pad or lands on a hole. Records the cell's ORIGINAL terrain id + the dropped
+	// ability in magpieDropVids so a genuine re-grab restores the original ground (not plain
+	// normal) and a stale/unrelated pickup on the cell can't spoof the arm delay. Returns the
+	// painted CELL (for the FX position), or null if no spot.
+	dropAbilityNear(x, y, tileId) {
+		var target = this.nearestWalkableCell(x, y);
+		if (target == null) { return null; }
+		var vid = target.site.voronoiId;
+		this.magpieDropVids[vid] = { tileId: target.id, ability: tileId }; // original terrain + dropped ability
+		this.changeTile(vid, tileId);
+		return target;
+	}
 	// Keep every tile-safety-tracking boon's `safe`/netState fresh (called right after
 	// collapseMap so a same-tick revive reads current lava). Only runs in racing/
 	// collapsing (no lava spreads before that), and a flag is monotonic — once it's
@@ -2743,6 +2872,7 @@ class GameBoard {
 		this.lockedKeys = [];
 		this.hasLockedDoors = false;
 		this.pendingBeams = {}; // drop any telegraph whose strike timer this reset cancels
+		this.magpieDropVids = {}; // drop any un-grabbed magpie loot cells from the previous round
 		this.pendingAbilityTimers = []; // bound growth; lobby ones are canceled in clearLobbyAbilities
 		// AI vision-fairness state, reset each round.
 		this.visionBlockedUntil = 0;
@@ -3178,15 +3308,8 @@ class GameBoard {
 		var walkable = this.walkableGroundIds();
 		var here = _engine.cellAtPoint(x, y, map);
 		if (here != null && walkable[here.id] === true) { return { x: x, y: y }; }
-		if (map == null || !Array.isArray(map.cells)) { return { x: x, y: y }; }
-		var best = Infinity, bx = x, by = y;
-		for (var i = 0; i < map.cells.length; i++) {
-			var cell = map.cells[i];
-			if (cell == null || cell.site == null || walkable[cell.id] !== true) { continue; }
-			var dx = cell.site.x - x, dy = cell.site.y - y, d = dx * dx + dy * dy;
-			if (d < best) { best = d; bx = cell.site.x; by = cell.site.y; }
-		}
-		return { x: bx, y: by };
+		var target = this.nearestWalkableCell(x, y);
+		return target != null ? { x: target.site.x, y: target.site.y } : { x: x, y: y };
 	}
 	// Flip an unlocked door's home cell back to passable terrain. Guarded so a collapse
 	// that already turned the barrier to lava is never reverted to safe ground.

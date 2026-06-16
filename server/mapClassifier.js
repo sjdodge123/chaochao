@@ -265,6 +265,10 @@ function hazardAvoidance(map, config) {
     var gateLen = (config.hazards && config.hazards.laserGate && config.hazards.laserGate.width) || 150;
     var crusherId = (config.hazards && config.hazards.crusher) ? config.hazards.crusher.id : null;
     var crusherLen = (config.hazards && config.hazards.crusher && config.hazards.crusher.railLength) || 150;
+    // Magpie drone (railed, like the moving bumper) sweeps its rail from the anchor along
+    // `angle` for the rail length — penalize the whole lane, matching the live AI's railCells.
+    var magpieId = (config.hazards && config.hazards.magpieDrone) ? config.hazards.magpieDrone.id : null;
+    var magpieLen = (config.hazards && config.hazards.magpieDrone && config.hazards.magpieDrone.railLength) || 170;
     // Vortex well: keep the overlay/par estimate in lockstep with the live AI
     // (aiController) — routed around at its strong-pull core (radius * coreFraction),
     // not just a 40px ring at the anchor. coreFraction is shared via config so the
@@ -282,14 +286,15 @@ function hazardAvoidance(map, config) {
         var hz = hazards[h];
         if (hz == null || typeof hz.x !== "number" || typeof hz.y !== "number") { continue; }
         addAround(hz.x, hz.y);
-        if (hz.id === movingId || hz.id === wallId || hz.id === gateId || hz.id === crusherId) {
-            // A railed bumper / crusher sweeps from its anchor along `angle` for the
-            // rail length (engine.js confines it parametrically), and a bumper wall /
+        if (hz.id === movingId || hz.id === wallId || hz.id === gateId || hz.id === crusherId || hz.id === magpieId) {
+            // A railed bumper / crusher / magpie drone sweeps from its anchor along `angle`
+            // for the rail length (engine.js confines it parametrically), and a bumper wall /
             // laser gate stands along the same anchor->angle line — penalize the lane.
             var len = railLen;
             if (hz.id === wallId) { len = wallLen; }
             else if (hz.id === gateId) { len = gateLen; }
             else if (hz.id === crusherId) { len = crusherLen; }
+            else if (hz.id === magpieId) { len = Number.isFinite(hz.railLength) ? hz.railLength : magpieLen; }
             var rad = (hz.angle || 0) * Math.PI / 180;
             for (var t = 25; t <= len; t += 25) {
                 addAround(hz.x + Math.cos(rad) * t, hz.y + Math.sin(rad) * t);

@@ -1717,6 +1717,36 @@ function registerCombatHandlers(server) {
 			playTurretBreak(antlionSfxLevel(payload.x, payload.y));
 		}
 	});
+	server.on("magpieSteal", function (payload) {
+		// A magpie drone robbed a racer — its HELD ABILITY (payload.ability = the tile id) or,
+		// if empty-handed, a chunk of STAMINA (payload.ability null). Clear the victim's
+		// held-ability HUD and pop a feathery indigo burst + pickup chirp. The drone draws the
+		// stolen ability via its netState; punch it to drop the loot as a re-grabbable pad.
+		if (payload == null || payload.victim == null) { return; }
+		if (payload.ability != null && typeof playerAbilityUsed === "function" && playerList[payload.victim] != null) {
+			playerAbilityUsed(payload.victim);
+		}
+		if (payload.x != null) {
+			spawnExplosion(payload.x, payload.y, 34, "#5B6CC4");
+			if (typeof recapMarkEffect === "function") { recapMarkEffect("explosion", payload.x, payload.y, { radius: 34, color: "#5B6CC4" }); }
+		}
+		playSoundVaried(collectItem, 0.07);
+	});
+	server.on("magpieDrop", function (payload) {
+		// A punched drone dropped its loot — the ability lands on a cell as a re-grabbable pad.
+		// The server's changeTile only updates the late-joiner snapshot (no per-tick tile
+		// broadcast), so paint the ability cell on already-connected clients HERE from the
+		// event's voronoiId. Then pop a gold burst + chime at the pad so the drop reads as
+		// "grab it back!".
+		if (payload == null || payload.x == null) { return; }
+		if (payload.voronoiId != null && typeof changeTilesBulk === "function") {
+			var delta = {}; delta[payload.voronoiId] = payload.ability;
+			changeTilesBulk(delta);
+		}
+		spawnExplosion(payload.x, payload.y, 30, "#FFD25A");
+		if (typeof recapMarkEffect === "function") { recapMarkEffect("explosion", payload.x, payload.y, { radius: 30, color: "#FFD25A" }); }
+		playSoundVaried(collectItem, 0.1);
+	});
 	server.on("warpStart", function (payload) {
 		// A racer drove onto a warp pad and COMMITTED: it's frozen + invisible in transit
 		// (server-side) for durationMs, then emerges at the exit. Hide its kart, play the

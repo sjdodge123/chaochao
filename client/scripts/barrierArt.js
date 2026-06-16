@@ -219,3 +219,65 @@ function drawBarrierConcChip(ctx, x0, half, rng) {
     ctx.closePath();
     ctx.fill();
 }
+
+// Shared MAGPIE-DRONE bird shape, drawn centered at the current origin facing +x. Used by the
+// in-game drawer (draw.js, animated) AND the editor preview/swatch (create.js, static) so the
+// two never drift — same idiom as the barrier art above. The caller passes the animation phase:
+// `flap` (wing-beat, added to the base 0.5 spread), `tailSway` (radians added to each tail
+// feather), `beakOpen` (R-fraction the beak gapes), and `shimmer(side)` -> the mid-gradient
+// colour for each tail feather (side = -1 | +1).
+function magpieWingShape(ctx, R, side, flap) {
+    ctx.save();
+    ctx.translate(0, -R * 0.1);
+    ctx.rotate(side * (0.5 + (flap || 0)));
+    var grd = ctx.createLinearGradient(0, 0, side * R * 1.7, R * 0.4);
+    grd.addColorStop(0, "#23262f"); grd.addColorStop(1, "#0d0f15");
+    ctx.fillStyle = grd;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(side * R * 1.3, -R * 0.5, side * R * 1.75, R * 0.15);
+    ctx.quadraticCurveTo(side * R * 1.2, R * 0.55, 0, R * 0.45);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#eef1f7"; // white primary tips
+    ctx.beginPath();
+    ctx.moveTo(side * R * 1.1, R * 0.05);
+    ctx.quadraticCurveTo(side * R * 1.6, R * 0.1, side * R * 1.75, R * 0.15);
+    ctx.quadraticCurveTo(side * R * 1.3, R * 0.45, side * R * 1.0, R * 0.4);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+}
+function magpieBirdShape(ctx, R, flap, tailSway, beakOpen, shimmer) {
+    for (var s = -1; s <= 1; s += 2) { // iridescent tail — two long feathers
+        ctx.save();
+        ctx.translate(0, R * 0.2);
+        ctx.rotate(s * 0.18 + (tailSway || 0));
+        var tl = R * 1.9, grd = ctx.createLinearGradient(0, 0, 0, tl);
+        grd.addColorStop(0, "#1b2030");
+        grd.addColorStop(0.5, shimmer(s));
+        grd.addColorStop(1, "#0c1018");
+        ctx.fillStyle = grd;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(R * 0.5 * s, tl * 0.6, R * 0.18 * s, tl);
+        ctx.quadraticCurveTo(-R * 0.18 * s, tl * 0.7, 0, 0);
+        ctx.closePath(); ctx.fill();
+        ctx.restore();
+    }
+    magpieWingShape(ctx, R, -1, flap); // far wing
+    ctx.fillStyle = "#15171f"; // body
+    ctx.beginPath(); ctx.ellipse(0, R * 0.1, R * 0.82, R * 1.0, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#eef1f7"; // white breast
+    ctx.beginPath(); ctx.ellipse(0, R * 0.35, R * 0.5, R * 0.62, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#15171f"; // head
+    ctx.beginPath(); ctx.arc(0, -R * 0.7, R * 0.62, 0, Math.PI * 2); ctx.fill();
+    var open = (beakOpen || 0) * R; // orange beak (gapes while carrying)
+    ctx.fillStyle = "#f0a23a";
+    ctx.beginPath();
+    ctx.moveTo(R * 0.55, -R * 0.78 - open);
+    ctx.lineTo(R * 1.15, -R * 0.72);
+    ctx.lineTo(R * 0.55, -R * 0.62 + open);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(R * 0.28, -R * 0.82, R * 0.17, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#101218"; ctx.beginPath(); ctx.arc(R * 0.33, -R * 0.82, R * 0.09, 0, Math.PI * 2); ctx.fill();
+    magpieWingShape(ctx, R, 1, flap); // near wing
+}

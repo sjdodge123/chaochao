@@ -229,6 +229,9 @@ jobs:
       - name: "Headless warp-pads test (paired teleporter: velocity-preserving warp, cooldown, AI cellGraph shortcut)"
         run: node .github/scripts/warp-pads-test.js
 
+      - name: "Headless magpie-drone test (ability theft: steal/carry on netState, punch-to-drop repaint + re-grab, stamina zap)"
+        run: node .github/scripts/magpie-drone-test.js
+
       - name: "Headless boons test (Dash Arrows: registry/handleHit, live boost, AI blind to boons)"
         run: node .github/scripts/boons-test.js
 
