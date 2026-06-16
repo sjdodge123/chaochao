@@ -37,3 +37,12 @@ Stage 1, Stage 3, and Stage 6 tracks from the **"8Bit Action Soundtrack"** by
 Attribution as required by the license: music by Bogart VGM (CC-BY-SA 4.0).
 The tracks themselves remain under CC-BY-SA 4.0; this notice plus the source
 link satisfies the attribution and license-indication requirements.
+
+`synth-idea.mp3` is the track **"02 idea"** from the **"Experimental Synth
+Beats"** set by **vandalorum**.
+
+- Source: https://opengameart.org/content/experimental-synth-beats
+- License: Creative Commons Attribution 4.0 (CC-BY 4.0) — https://creativecommons.org/licenses/by/4.0/
+- Changes: re-encoded to 128 kbps MP3, metadata stripped.
+
+Attribution as required by the license: music by vandalorum (CC-BY 4.0).

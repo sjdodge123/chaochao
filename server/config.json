@@ -149,7 +149,7 @@
         "unlockAnimMs": 900
     },
     "music": {
-        "calm": ["slowstride", "slow-pipes", "8bit-action-1"],
+        "calm": ["slowstride", "slow-pipes", "8bit-action-1", "synth-idea"],
         "exciting": ["mind_in_motion", "the-rush", "beastv2", "bumpinbits1", "bumpinbits2", "bumpinbits3", "bumpinbits4", "bumpinbits5", "8bit-action-3", "8bit-action-6"],
         "brutal": ["depthOfDespair", "HorrorLoop", "DesperationSetsIn", "heavyfabric"]
     },

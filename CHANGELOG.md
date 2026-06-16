@@ -10,7 +10,9 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- **New chill track.** Added a dreamy synth tune to the calm music rotation, so the laid-back maps have a fresh backing track in the mix.
 
 ## v0.46.0 — 2026-06-16
 
