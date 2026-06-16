@@ -633,6 +633,8 @@ try {
         bot.reset(config.stateMap.racing); bot.currentState = config.stateMap.racing;
         bot.x = bot.newX = PAD_X; bot.y = bot.newY = ROWS[2]; bot.velX = 90; bot.velY = 0;
         const fromX = bot.x, fromY = bot.y;
+        // An ability held BEFORE the launch must survive the flight (not be consumed).
+        bot.ability = { id: 99, use: function () {} };
         let since = events.length;
         pad.handleHit(bot);
         check(bot.isAirborne() && bot.isAloft() && bot.enabled === false,
@@ -661,6 +663,8 @@ try {
         check(!bot.isAloft() && bot.enabled === true, 'after the duration the racer lands + regains control');
         check(Math.abs(bot.x - toX0) < 0.001 && bot.velX === 0, 'landed exactly at the arc end with momentum zeroed');
         check(emittedSince('airborneLand', since), 'an airborneLand event fired on touchdown');
+        check(bot.ability != null && bot.ability.id === 99, 'a held ability survives the launch (not consumed)');
+        bot.ability = null;
 
         // Racers only: a non-player and a zombie are ignored.
         const proj = { isProjectile: true };
@@ -693,10 +697,13 @@ try {
         // LOAD: driving in captures the racer at the mouth (frozen, aiming at the author angle).
         bot.reset(config.stateMap.racing); bot.currentState = config.stateMap.racing;
         bot.x = bot.newX = PAD_X - 40; bot.y = bot.newY = ROWS[2]; bot.velX = 120; bot.velY = 30;
+        // An ability picked up BEFORE entering must survive the barrel (not be consumed).
+        bot.ability = { id: 99, use: function () {} };
         let since = events.length;
         barrel.handleHit(bot);
         check(bot.isBarreled() && bot.isAloft() && !bot.isAirborne() && bot.enabled === false,
             'driving in LOADS the racer (held in the barrel, not yet airborne)');
+        check(bot.ability != null, 'loading into the barrel keeps the held ability');
         check(bot.x === PAD_X && bot.y === ROWS[2] && bot.velX === 0,
             'the loaded racer is pinned at the barrel mouth, momentum zeroed');
         check(bot.barrelAimAngle === 0 && bot.angle === 0,
@@ -734,6 +741,8 @@ try {
         bot.attack = false;
         clock += BARREL.flightDurationMs + 10; bot.update(config.stateMap.racing, DT);
         check(!bot.isAloft(), 'the fired racer lands');
+        check(bot.ability != null && bot.ability.id === 99, 'the held ability survives firing out of the barrel');
+        bot.ability = null;
 
         // FIRE on fuse auto-timeout: load again, never punch, advance past autoFireMs.
         bot.reset(config.stateMap.racing); bot.currentState = config.stateMap.racing;
