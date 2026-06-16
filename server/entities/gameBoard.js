@@ -3685,7 +3685,9 @@ class GameBoard {
 			return;
 		}
 		// Build through the hazard-kind registry (entities/hazards.js) — unknown ids
-		// are skipped (validateMap already rejects them at the submit boundary).
+		// are skipped here as a belt-and-suspenders guard; validateMap rejects an
+		// unregistered-kind id (e.g. antlion/thumper, which have a config entry but
+		// no registerHazardKind) at the submit boundary, so a vetted map has none.
 		for (var i = 0; i < this.currentMap.hazards.length; i++) {
 			var entry = this.currentMap.hazards[i];
 			var kind = hazardKindById(entry.id);

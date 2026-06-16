@@ -1140,6 +1140,34 @@ try {
     }
 
     // ----------------------------------------------------------------------
+    console.log('\n[O2] Launch Pad fairness: a BACKWARD-facing pad on the line is a trap; a forward one is not');
+    {
+        const mapClassifier = require(path.join(repoRoot, 'server', 'mapClassifier.js'));
+        const PAD = config.boons.launchPad; // id 955, fixed `distance`
+        const TC = [80, 300, 520, 740, 960, 1180, 1400], TR = [260, 460, 660];
+        function lmap(haz) {
+            const s = [];
+            for (let ci = 0; ci < TC.length; ci++) for (let ri = 0; ri < TR.length; ri++) {
+                let id = EMPTY;
+                if (ri === 1) { id = (ci === TC.length - 1) ? GOAL : GRASS; }
+                s.push({ x: TC[ci], y: TR[ri], id: id });
+            }
+            return mapFormat.reconstruct({ bbox: { xl: 0, xr: config.worldWidth, yt: 0, yb: config.worldHeight }, sites: s, hazards: haz, startEdges: ['left'], name: 'lf', author: 'test', id: 'launchfair-' + Math.random() });
+        }
+        const hasLaunchTrap = (cls) => (cls.deductions || []).some(d => d.indexOf('launchtrap') === 0);
+        const base = mapClassifier.classify(lmap([]), config).balanceScore;
+        // TRAP: a pad mid-line (goal is the right edge) facing 180° flings a forward racer the
+        // pad's fixed `distance` BACKWARD on an un-steerable arc — pure setback, no shortcut.
+        const trap = mapClassifier.classify(lmap([{ id: PAD.id, x: TC[3], y: TR[1], angle: 180 }]), config);
+        check(hasLaunchTrap(trap), 'a launch pad on the line facing AWAY from goal is penalised (launchtrap deduction)');
+        check(trap.balanceScore < base, 'the launchtrap drops the balance score (' + base + ' -> ' + trap.balanceScore + ')');
+        // NOT a trap: the same pad facing 0° (toward the goal) flings you FORWARD — a shortcut,
+        // not a setback — so it earns no deduction.
+        const fwd = mapClassifier.classify(lmap([{ id: PAD.id, x: TC[3], y: TR[1], angle: 0 }]), config);
+        check(!hasLaunchTrap(fwd), 'a launch pad facing TOWARD the goal is NOT penalised (score ' + fwd.balanceScore + ')');
+    }
+
+    // ----------------------------------------------------------------------
     console.log('\n[P] Lily Pad AI + validation: bots skim a pad path across water; a pad must sit on water');
     {
         const LILY = config.boons.lilyPad; // id 960
