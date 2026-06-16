@@ -12,7 +12,7 @@ After each release the same workflow also rolls every `vX.Y.Z` from the current 
 
 ### Bug fixes
 
-- **Phone layout fixes.** On phones the map list and the map editor no longer run off the side of the screen — the map browser fits the screen instead of scrolling sideways with its header clipped, and the editor's action buttons (Preview, Copy, Upload…) all stay on-screen and reachable. The in-game settings gear has also moved out from under the lobby info banner (it now tucks beside the fullscreen button), so they no longer overlap in landscape.
+- **Phone layout fixes.** On phones the map list and the map editor no longer run off the side of the screen — the map browser fits the screen instead of scrolling sideways with its header clipped, and the editor's action buttons (Preview, Copy, Upload…) all stay on-screen and reachable. Editing in **landscape** now shows a much bigger map: the toolbar packs into a single row instead of stacking, freeing the space for the canvas. The in-game settings gear has also moved out from under the lobby info banner (it now tucks beside the fullscreen button), so they no longer overlap in landscape.
 
 ## v0.45.0 — 2026-06-16
 
