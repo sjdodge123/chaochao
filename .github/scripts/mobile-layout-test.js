@@ -56,10 +56,13 @@ const SCAN = (tol) => {
     const els = document.querySelectorAll('body *');
     for (const el of els) {
         const cs = getComputedStyle(el);
-        if (cs.display === 'none' || cs.visibility === 'hidden' || cs.position === 'fixed') continue;
+        if (cs.display === 'none' || cs.visibility === 'hidden') continue;
         const r = el.getBoundingClientRect();
         if (r.width < 8 || r.height < 4) continue;        // decoys / hairlines
         if (r.left > vw || r.right < 0) continue;         // fully off-screen trap
+        // NB: position:fixed elements are NOT skipped — a fixed bar/banner that runs
+        // off the right edge is exactly the kind of regression to catch. The size +
+        // off-screen filters above already exclude the off-screen anti-bot decoy.
         if (r.right > vw + tol) {
             // Skip if an ancestor is an intentional horizontal scroller (the element
             // is reachable by scrolling that strip, not by scrolling the page).
@@ -78,7 +81,13 @@ async function checkOverflow(ctx, pageLabel, url, prep) {
         await p.setViewportSize(vp);
         await p.goto(url, { waitUntil: 'domcontentloaded' }).catch(() => {});
         await p.waitForTimeout(500);
-        if (prep) { await prep(p); await p.waitForTimeout(300); }
+        if (prep) {
+            const prepOk = await prep(p);
+            await p.waitForTimeout(300);
+            // prep returns false when it already recorded a failure (e.g. the editor
+            // never opened) — don't scan the wrong page and report a misleading "ok".
+            if (prepOk === false) { await p.close(); continue; }
+        }
         const offenders = await p.evaluate(SCAN, TOL);
         const docOverflow = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
         if (offenders.length) {
@@ -154,11 +163,15 @@ async function checkLobbyHudOverlap(browser) {
             // and sizes the drawing canvas to the viewport — toggling classes alone
             // leaves #createCanvas at its unsized intrinsic width (a false positive).
             await p.click('#createNew').catch(() => {});
-            await p.waitForFunction(() => {
+            const opened = await p.waitForFunction(() => {
                 const cw = document.getElementById('createWindow');
                 return cw && !cw.classList.contains('editor-hidden');
-            }, { timeout: 8000 }).catch(() => {});
+            }, { timeout: 8000 }).then(() => true).catch(() => false);
+            // Don't let a failed editor-enter silently fall back to scanning the map
+            // list (which would report a false "ok") — fail loudly instead.
+            if (!opened) { fail('create.html editor never opened (#createNew) — cannot verify editor overflow'); return false; }
             await p.evaluate(() => window.dispatchEvent(new Event('resize')));
+            return true;
         });
         await ctx.close();
 
