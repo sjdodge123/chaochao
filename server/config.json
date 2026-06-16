@@ -648,7 +648,8 @@
             "radius": 30,
             "autoFireMs": 3000,
             "minAimMs": 250,
-            "sweepSpeed": 160,
+            "idleSpeed": 40,
+            "sweepSpeed": 220,
             "flightDistance": 210,
             "flightDurationMs": 540
         },

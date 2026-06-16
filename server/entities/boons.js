@@ -360,17 +360,30 @@ class BarrelCannon extends Boon {
 		// (compressor.sendHazardUpdates) ships it each tick so the client barrel spins
 		// (eased like the rotor) instead of drawing a separate aim arrow.
 		this.streamAngle = true;
+		this.idleSpeed = c.boons.barrelCannon.idleSpeed;
 		this.autoFireMs = c.boons.barrelCannon.autoFireMs;
 		this.minAimMs = c.boons.barrelCannon.minAimMs;
 		this.sweepSpeed = c.boons.barrelCannon.sweepSpeed;
 		this.flightDistance = c.boons.barrelCannon.flightDistance;
 		this.flightDurationMs = c.boons.barrelCannon.flightDurationMs;
+		// While a racer is loaded, their tickBarrel drives this.angle (the fast aim spin)
+		// and refreshes occupiedUntil; otherwise update() idle-spins the empty barrel slowly.
+		// A timestamp (not a flag) so a vanished occupant can't strand it "occupied".
+		this.occupiedUntil = 0;
 	}
 	handleHit(object) {
 		if (!this.isEligiblePlayer(object) || typeof object.loadIntoBarrel !== "function") {
 			return;
 		}
 		object.loadIntoBarrel(this);
+	}
+	// Idle spin: an empty barrel turns slowly on its own (streamAngle ships it). While a
+	// racer is loaded (occupiedUntil in the future) their tickBarrel owns the angle instead.
+	update(dt) {
+		if (Date.now() < this.occupiedUntil) {
+			return;
+		}
+		this.angle = (this.angle + this.idleSpeed * (dt || 0)) % 360;
 	}
 }
 
