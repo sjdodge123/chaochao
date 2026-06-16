@@ -1022,7 +1022,8 @@ class Player extends Circle {
 		this.cancelCharge();
 		this.attack = false;
 		this.attackQueued = false;
-		this.ability = null;
+		// Keep this.ability — a launch must NOT consume an ability the racer is holding (it's
+		// usable again after landing; checkAttack is skipped while aloft so it can't fire mid-flight).
 		this.moveForward = false;
 		this.moveBackward = false;
 		this.turnLeft = false;
@@ -1105,7 +1106,8 @@ class Player extends Circle {
 		this.cancelCharge();
 		this.attack = false;
 		this.attackQueued = false;
-		this.ability = null;
+		// Keep this.ability — loading into the barrel must NOT consume an ability the racer
+		// picked up before entering; it's usable again after they're launched + land.
 		this.moveForward = false;
 		this.moveBackward = false;
 		this.turnLeft = false;
