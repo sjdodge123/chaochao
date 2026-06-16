@@ -10268,6 +10268,44 @@ function drawSentryTurret(x, y, angle, state) {
     var cfg = config.hazards.sentryTurret;
     var rad = (angle || 0) * (Math.PI / 180);
     gameContext.save();
+    // Destroyed (state 3): a smashed, dead emplacement — a charred broken-off barrel
+    // stub and a cracked grey dome with no red glow, so it reads instantly as "this
+    // one's been knocked out". No telegraph ring, no muzzle.
+    if (state === 3) {
+        // snapped barrel stub, drooped off its mount facing
+        var stubLen = cfg.barrelLength * 0.45;
+        var sx = x + Math.cos(rad) * stubLen, sy = y + Math.sin(rad) * stubLen;
+        gameContext.lineCap = "round";
+        gameContext.strokeStyle = "#23262a";
+        gameContext.lineWidth = 9;
+        gameContext.beginPath();
+        gameContext.moveTo(x, y);
+        gameContext.lineTo(sx, sy);
+        gameContext.stroke();
+        // dead body: dim grey base, scorched dark dome (no hazard-red)
+        gameContext.fillStyle = "#3f444a";
+        gameContext.beginPath();
+        gameContext.arc(x, y, cfg.radius, 0, 2 * Math.PI);
+        gameContext.fill();
+        gameContext.lineWidth = 3;
+        gameContext.strokeStyle = "#202327";
+        gameContext.stroke();
+        gameContext.fillStyle = "#2a2d31";
+        gameContext.beginPath();
+        gameContext.arc(x, y, cfg.radius * 0.55, 0, 2 * Math.PI);
+        gameContext.fill();
+        // a couple of crack lines across the dome
+        gameContext.strokeStyle = "#15171a";
+        gameContext.lineWidth = 1.5;
+        gameContext.beginPath();
+        gameContext.moveTo(x - cfg.radius * 0.6, y - cfg.radius * 0.2);
+        gameContext.lineTo(x + cfg.radius * 0.3, y + cfg.radius * 0.5);
+        gameContext.moveTo(x - cfg.radius * 0.1, y - cfg.radius * 0.6);
+        gameContext.lineTo(x + cfg.radius * 0.2, y + cfg.radius * 0.1);
+        gameContext.stroke();
+        gameContext.restore();
+        return;
+    }
     // Charging: a pulsing red telegraph ring around the body — "it's locking on".
     if (state === 1) {
         var pulse = 0.35 + 0.4 * (0.5 + 0.5 * Math.sin(Date.now() / 70));

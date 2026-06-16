@@ -975,6 +975,40 @@ function playTurretImpact(level) {
     catch (e) { try { osc.disconnect(); src.disconnect(); } catch (e2) {} }
 }
 
+// Sentry-turret SMASH: a player's punch knocking the emplacement offline. A heavier,
+// longer crunch than the shot impact — a low metallic clunk (descending square) with a
+// scrape of broad noise debris over it and a short bright shatter tick. Distinct from
+// playTurretImpact (the shot bursting) so a kill reads as a kill. level (0..1) by distance.
+function playTurretBreak(level) {
+    var ctx = getCtx();
+    if (!ctx || ctx.state !== "running") { return; }
+    if (gameMuted || masterVolume === 0) { return; }
+    var lvl = (level == null) ? 1 : Math.max(0, Math.min(1, level));
+    if (lvl <= 0.02) { return; }
+    var now = ctx.currentTime;
+    // heavy low clunk: square 180 -> 50 Hz, slower decay than the shot thunk
+    var osc = ctx.createOscillator();
+    osc.type = "square";
+    osc.frequency.setValueAtTime(180, now);
+    osc.frequency.exponentialRampToValueAtTime(50, now + 0.16);
+    var og = ctx.createGain();
+    var oPeak = Math.max(0.0002, 0.16 * lvl * masterVolume * sfxVolumeScalar);
+    og.gain.setValueAtTime(0.0001, now);
+    og.gain.exponentialRampToValueAtTime(oPeak, now + 0.008);
+    og.gain.exponentialRampToValueAtTime(0.0001, now + 0.26);
+    osc.connect(og); og.connect(sfxBus);
+    // broad debris scrape: noise sweeping down across the crunch
+    var src = noiseSweepSource(ctx, now, lvl, {
+        q: 0.9, freqs: [[2600, 0], [700, 0.06], [300, 0.22]], peakCoeff: 0.13, attackT: 0.004, releaseT: 0.24
+    });
+    // bright shatter tick on the hit
+    var tick = noiseSweepSource(ctx, now, lvl, {
+        q: 2.2, freqs: [[3800, 0], [2200, 0.04]], peakCoeff: 0.08, attackT: 0.003, releaseT: 0.05
+    });
+    try { osc.start(now); osc.stop(now + 0.28); src.start(now); src.stop(now + 0.26); tick.start(now); tick.stop(now + 0.06); }
+    catch (e) { try { osc.disconnect(); src.disconnect(); tick.disconnect(); } catch (e2) {} }
+}
+
 // Land-lunge dash: a quick airy "fwoosh" — a bandpassed noise sweep that rises then
 // settles, with a short rising thrust tone under it. level (0..1) attenuates by
 // distance like the other positional synth SFX. Distinct from the melee thwack the
