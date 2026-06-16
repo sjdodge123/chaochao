@@ -1054,6 +1054,10 @@ function registerScoreHandlers(server) {
 			playerList[id].recapState = RECAP_DIED; // recap: vanish with a death poof, not hover the lava
 			playerList[id].onFire = 0;
 			playerList[id].deathMessage = '💀';
+			// A death cancels any warp-pad transit visual (the server dropped the transit too):
+			// clear the hidden flag + release the camera so the death skull shows.
+			if (playerList[id].warping) { playerList[id].warping = false; playerList[id].warpHideUntil = 0; }
+			if (typeof warpCam !== "undefined" && warpCam != null && typeof isLocalId === "function" && isLocalId(id)) { warpCam = null; }
 			// Remember where/when they fell: a dead local player can press attack
 			// to ping every dead player's spot, and the floating skull fades from
 			// deathAt — see updateDeathPings()/drawDeathMessage() in draw.js.
@@ -1710,6 +1714,53 @@ function registerCombatHandlers(server) {
 		if (typeof recapMarkEffect === "function") { recapMarkEffect("explosion", payload.x, payload.y, { radius: 50, color: "#9aa0a6" }); }
 		if (typeof playTurretBreak === "function" && typeof antlionSfxLevel === "function") {
 			playTurretBreak(antlionSfxLevel(payload.x, payload.y));
+		}
+	});
+	server.on("warpStart", function (payload) {
+		// A racer drove onto a warp pad and COMMITTED: it's frozen + invisible in transit
+		// (server-side) for durationMs, then emerges at the exit. Hide its kart, play the
+		// enter "vwoop", and — for the LOCAL solo player — slow-pan the camera to the exit.
+		if (payload == null || payload.id == null) { return; }
+		var wp = playerList[payload.id];
+		if (wp != null) {
+			wp.warping = true;
+			// Failsafe reveal: if warpEnd is ever lost, don't hide the kart forever.
+			wp.warpHideUntil = Date.now() + (payload.durationMs || 2000) + 2000;
+		}
+		if (typeof playWarpEnter === "function" && typeof antlionSfxLevel === "function") {
+			playWarpEnter(antlionSfxLevel(payload.enterX, payload.enterY));
+		}
+		if (typeof combatLogWarp === "function") { combatLogWarp(payload.id); }
+		// Local + solo only (a shared co-op camera mustn't yank off a still-racing partner).
+		var nLocalSeats = (typeof localPlayers !== "undefined" && localPlayers != null)
+			? localPlayers.filter(function (lp) { return lp; }).length : 1;
+		if (typeof isLocalId === "function" && isLocalId(payload.id) && nLocalSeats <= 1) {
+			var ms = payload.durationMs || 2000;
+			warpCam = {
+				fromX: payload.enterX, fromY: payload.enterY,
+				toX: payload.exitX, toY: payload.exitY,
+				ms: ms, startedAt: Date.now(), endAt: Date.now() + ms + 2000
+			};
+		}
+	});
+	server.on("warpEnd", function (payload) {
+		// The racer emerged at the exit: reveal its kart (snapped to the exit so it doesn't
+		// slide from the frozen entrance), play the exit "pop", and release the camera.
+		if (payload == null || payload.id == null) { return; }
+		var we = playerList[payload.id];
+		if (we != null) {
+			we.warping = false;
+			we.warpHideUntil = 0;
+			if (payload.x != null && payload.y != null) {
+				we.x = we.tx = payload.x;
+				we.y = we.ty = payload.y;
+			}
+		}
+		if (typeof playWarpExit === "function" && typeof antlionSfxLevel === "function") {
+			playWarpExit(antlionSfxLevel(payload.x, payload.y));
+		}
+		if (typeof warpCam !== "undefined" && warpCam != null && isLocalId(payload.id)) {
+			warpCam = null;
 		}
 	});
 	server.on("spawnClouds", function (packet) {

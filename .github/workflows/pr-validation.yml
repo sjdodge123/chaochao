@@ -226,6 +226,9 @@ jobs:
       - name: "Headless sentry-turret test (aim/state machine, streamAngle+netState wire, fire+shove vs no terrain freeze)"
         run: node .github/scripts/sentry-turret-test.js
 
+      - name: "Headless warp-pads test (paired teleporter: velocity-preserving warp, cooldown, AI cellGraph shortcut)"
+        run: node .github/scripts/warp-pads-test.js
+
       - name: "Headless boons test (Dash Arrows: registry/handleHit, live boost, AI blind to boons)"
         run: node .github/scripts/boons-test.js
 

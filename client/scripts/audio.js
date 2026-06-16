@@ -1143,6 +1143,85 @@ function playTurretBreak(level) {
     catch (e) { try { osc.disconnect(); src.disconnect(); tick.disconnect(); } catch (e2) {} }
 }
 
+// Warp pad ENTER: a kart being whisked into the portal — a rising "vwoop" (sine sweeping
+// UP) under a shimmer of noise that climbs, reading as "sucked in". level (0..1) by
+// distance to the local kart.
+function playWarpEnter(level) {
+    var ctx = getCtx();
+    if (!ctx || ctx.state !== "running") { return; }
+    if (gameMuted || masterVolume === 0) { return; }
+    var lvl = (level == null) ? 1 : Math.max(0, Math.min(1, level));
+    if (lvl <= 0.02) { return; }
+    var now = ctx.currentTime;
+    // rising portal tone: sine 220 -> 880 Hz
+    var osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(220, now);
+    osc.frequency.exponentialRampToValueAtTime(880, now + 0.22);
+    var og = ctx.createGain();
+    var oPeak = Math.max(0.0002, 0.15 * lvl * masterVolume * sfxVolumeScalar);
+    og.gain.setValueAtTime(0.0001, now);
+    og.gain.exponentialRampToValueAtTime(oPeak, now + 0.02);
+    og.gain.exponentialRampToValueAtTime(0.0001, now + 0.26);
+    osc.connect(og); og.connect(sfxBus);
+    // a triangle harmonic a fifth up for sparkle
+    var harm = ctx.createOscillator();
+    harm.type = "triangle";
+    harm.frequency.setValueAtTime(330, now);
+    harm.frequency.exponentialRampToValueAtTime(1320, now + 0.22);
+    var hg = ctx.createGain();
+    var hPeak = Math.max(0.0002, 0.07 * lvl * masterVolume * sfxVolumeScalar);
+    hg.gain.setValueAtTime(0.0001, now);
+    hg.gain.exponentialRampToValueAtTime(hPeak, now + 0.03);
+    hg.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
+    harm.connect(hg); hg.connect(sfxBus);
+    // climbing shimmer (noise sweeping up = "drawn in")
+    var src = noiseSweepSource(ctx, now, lvl, {
+        q: 2.2, freqs: [[600, 0], [2600, 0.2]], peakCoeff: 0.05, attackT: 0.04, releaseT: 0.24
+    });
+    try { osc.start(now); osc.stop(now + 0.28); harm.start(now); harm.stop(now + 0.26); src.start(now); src.stop(now + 0.26); }
+    catch (e) { try { osc.disconnect(); harm.disconnect(); src.disconnect(); } catch (e2) {} }
+}
+
+// Warp pad EXIT: emerging at the other end — a bright "pop out" (sine sweeping DOWN from
+// high) plus a quick noise burst, the mirror of the enter. level (0..1) by distance.
+function playWarpExit(level) {
+    var ctx = getCtx();
+    if (!ctx || ctx.state !== "running") { return; }
+    if (gameMuted || masterVolume === 0) { return; }
+    var lvl = (level == null) ? 1 : Math.max(0, Math.min(1, level));
+    if (lvl <= 0.02) { return; }
+    var now = ctx.currentTime;
+    // bright descending "pop": sine 1320 -> 440 Hz, snappy
+    var osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(1320, now);
+    osc.frequency.exponentialRampToValueAtTime(440, now + 0.16);
+    var og = ctx.createGain();
+    var oPeak = Math.max(0.0002, 0.16 * lvl * masterVolume * sfxVolumeScalar);
+    og.gain.setValueAtTime(0.0001, now);
+    og.gain.exponentialRampToValueAtTime(oPeak, now + 0.006);
+    og.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+    osc.connect(og); og.connect(sfxBus);
+    // a soft body sine for weight
+    var sub = ctx.createOscillator();
+    sub.type = "triangle";
+    sub.frequency.setValueAtTime(520, now);
+    sub.frequency.exponentialRampToValueAtTime(180, now + 0.16);
+    var sg = ctx.createGain();
+    var sPeak = Math.max(0.0002, 0.08 * lvl * masterVolume * sfxVolumeScalar);
+    sg.gain.setValueAtTime(0.0001, now);
+    sg.gain.exponentialRampToValueAtTime(sPeak, now + 0.008);
+    sg.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+    sub.connect(sg); sg.connect(sfxBus);
+    // a quick descending shimmer burst (the "pop")
+    var src = noiseSweepSource(ctx, now, lvl, {
+        q: 2.0, freqs: [[2400, 0], [700, 0.12]], peakCoeff: 0.07, attackT: 0.004, releaseT: 0.14
+    });
+    try { osc.start(now); osc.stop(now + 0.22); sub.start(now); sub.stop(now + 0.2); src.start(now); src.stop(now + 0.15); }
+    catch (e) { try { osc.disconnect(); sub.disconnect(); src.disconnect(); } catch (e2) {} }
+}
+
 // Land-lunge dash: a quick airy "fwoosh" — a bandpassed noise sweep that rises then
 // settles, with a short rising thrust tone under it. level (0..1) attenuates by
 // distance like the other positional synth SFX. Distinct from the melee thwack the

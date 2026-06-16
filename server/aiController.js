@@ -2345,7 +2345,7 @@ function steerGatedPhase(gameBoard) {
     }
     for (var pid in playerList) {
         var bot = playerList[pid];
-        if (!bot.isAI || !bot.alive || bot.isSpectator) { continue; }
+        if (!bot.isAI || !bot.alive || bot.isSpectator || bot.warping != null) { continue; }
         var idx = bot.gateIndex || 0;
         if (idx < 0 || idx >= gateCtxs.length) { idx = 0; }
         steerGated(bot, gateCtxs[idx]);
@@ -2414,8 +2414,10 @@ function update(gameBoard, currentState, dt) {
     for (var hkey in hazardList) {
         var hz = hazardList[hkey];
         if (!hz || hz.alive === false) { continue; }
-        // Boons aid the player — don't price their cells into the route (no reason
-        // to path AROUND a boost). Keeps A* from treating a speed pad as an obstacle.
+        // Boons aid the player — don't price their cells into the route (no reason to
+        // path AROUND a boost). This also covers the Warp Pad (a boon): it's a SHORTCUT,
+        // not an obstacle — the cellGraph adds the linked-cell edge (getWarpLinks) so bots
+        // route THROUGH the pair; penalizing its cell would make them avoid it.
         if (hz.helpful) { continue; }
         if (hz.moveable && hz.rail != null) {
             var seg = bumperSegment(hz);
@@ -2674,9 +2676,10 @@ function update(gameBoard, currentState, dt) {
 
     for (var pid in playerList) {
         var bot = playerList[pid];
-        // A bot frozen in the Second Wind death-beat, or aloft / loaded in a barrel (alive
-        // but inert, on a committed arc), must not be steered.
-        if (!bot.isAI || !bot.alive || bot.reachedGoal || bot.isSpectator || bot.isReviving() || bot.isAloft()) { continue; }
+        // A bot frozen in the Second Wind death-beat, aloft / loaded in a barrel (on a
+        // committed arc), OR mid warp-pad transit (alive but inert) must not be steered —
+        // steering a frozen bot would trip its stuck-probe.
+        if (!bot.isAI || !bot.alive || bot.reachedGoal || bot.isSpectator || bot.isReviving() || bot.isAloft() || bot.warping != null) { continue; }
         steerBot(bot, ctx, dt);
     }
 }

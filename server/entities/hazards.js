@@ -3,6 +3,10 @@ var utils = require('../utils.js');
 var c = utils.loadConfig();
 var { Rect, Circle } = require('./shapes.js');
 var { Punch } = require('./punch.js');
+// cellGraph is already loaded (utils requires it above); reuse its warpTransitMs as the
+// SINGLE source of the distance->transit formula so the AI cost, the par estimate, and the
+// runtime transit can never drift apart.
+var cellGraph = require('../cellGraph.js');
 
 // --- shared rotated-rect + segment geometry -----------------------------------
 // One home for the math the rotated-rect hazards (bumper wall, laser gate, crusher)
@@ -815,6 +819,101 @@ class Turret extends Hazard {
 	}
 }
 
+// A warp pad: one half of a PAIRED TELEPORTER. Registered as a BOON (config.boons.warpPad,
+// id 958 — see boons.js) though the class lives here with its cross-cutting machinery. A
+// racer driving onto this pad is whisked to its partner pad, KEEPING its velocity — so the
+// exit heading is whatever you arrived with, and an author can aim a partner's exit at lava.
+// Pads are authored as a pair: each map entry carries a `pair` integer and the two entries
+// sharing a value link to each other (gameBoard.linkWarpPads resolves `partner` after
+// generateHazards builds them all). STATIC — the pair id rides the netState wire so the
+// client can colour-match the two halves.
+//
+// The warp is NOT instant and NOT done in handleHit (the collision system fires handleHit up
+// to twice per overlapping pair). Instead gameBoard.updateWarpPads runs ONE pass per tick as
+// a 2-stage TRANSIT: on contact the racer COMMITS (frozen in place + invulnerable for
+// transitMs, skipped by the engine/collision/AI), then EMERGES at the partner with velocity
+// restored — `warpTo` does the relocate at emerge time. The client pans its camera to the
+// exit during the transit. Ping-pong is prevented by a per-PLAYER "armed" latch
+// (player.warpArmed): a racer is disarmed the moment it warps and only RE-ARMS once it has
+// left every pad's trigger radius — so it can never warp again while still sitting on the pad
+// (covers both an immediate bounce-back AND a kart parked dead-still on a pad).
+//
+// The genuinely hard part is the AI, which lives elsewhere: cellGraph.getWarpLinks adds a
+// graph edge between the two linked cells WEIGHTED by the transit cost (≈cruise·transitMs px)
+// so bots route THROUGH a pad pair only when it shortens the trip by more than the freeze,
+// and `helpful` (it's a boon) makes aiController/mapClassifier skip the pad entirely (it is
+// NOT an obstacle to route around).
+class WarpPad extends Hazard {
+	constructor(x, y, ownerId, roomSig, pair) {
+		super(x, y, c.boons.warpPad.radius, c.boons.warpPad.color, ownerId, roomSig);
+		this.id = c.boons.warpPad.id;
+		this.helpful = true;        // it's a BOON — AI/classifier treat it as helpful (no dodge)
+		this.moveable = false;      // stationary — no engine motion hook
+		this.isWarpPad = true;      // the cellGraph shortcut keys off this (not a hazard to route around)
+		// Pairing id from the map entry; two pads sharing it are linked. Keep it only if
+		// it's a valid integer (validateMap enforces exactly-two-per-pair of integer ids
+		// at the submit boundary; a crafted/hand-edited map with a missing or fractional
+		// pair leaves this null → the pad never links → inert, never a half-formed link).
+		this.pair = Number.isInteger(pair) ? pair : null;
+		this.partner = null;        // the linked WarpPad (set by gameBoard via linkWarpPads)
+		// Ship the pair id on the netState wire slot (static — never changes) so the
+		// client can colour-match the two halves of a pair. Reuses an already-pinned
+		// slot; no new wire field. A malformed (null) pair ships 0 — it won't link anyway.
+		this.netState = (this.pair != null) ? this.pair : 0;
+	}
+	update() {
+		if (this.alive === false) { return; }
+	}
+	// Is `object` a racer standing on this (linked) pad right now? The membership test
+	// gameBoard.updateWarpPads uses to decide on-pad vs off-pad. Players only — pucks,
+	// antlions and other hazards pass through; dead/finished racers are ignored.
+	contains(object) {
+		if (this.partner == null || this.alive === false) { return false; }
+		if (!object.isPlayer || object.alive === false || object.reachedGoal) { return false; }
+		var ox = object.newX != null ? object.newX : object.x;
+		var oy = object.newY != null ? object.newY : object.y;
+		var dx = ox - this.x, dy = oy - this.y;
+		return dx * dx + dy * dy <= this.radius * this.radius;
+	}
+	// Relocate `object` onto the partner pad, KEEPING velocity (a discontinuous jump —
+	// the client's smoothEntities snaps it because it exceeds SMOOTH_SNAP_DIST, like the
+	// swap ability's teleport). Sets BOTH x and newX/newY: the warp pass runs after the
+	// engine committed this tick's position, so next tick integrates from the exit.
+	warpTo(object) {
+		if (this.partner == null) { return false; }
+		object.x = object.newX = this.partner.x;
+		object.y = object.newY = this.partner.y;
+		return true;
+	}
+	handleHit(object) { } // teleport runs in gameBoard.updateWarpPads, not on contact
+}
+// Link freshly-built warp pads into pairs: every pad's `partner` is set to the OTHER
+// pad sharing its `pair` id, and its `transitMs` is computed from the pair's separation.
+// Called once at map load from gameBoard.generateHazards (after the whole hazardList is
+// built — a pad's partner may be constructed later in the build loop, so linking can't
+// happen in build()). Only integer pair ids group (a malformed pad with a null pair is left
+// unlinked → inert), and a pair without exactly two members (a map that slipped past
+// validateMap) stays unlinked, never throwing.
+function linkWarpPads(hazardList) {
+	var byPair = {};
+	for (var id in hazardList) {
+		var hz = hazardList[id];
+		if (hz == null || !hz.isWarpPad || !Number.isInteger(hz.pair)) { continue; }
+		(byPair[hz.pair] || (byPair[hz.pair] = [])).push(hz);
+	}
+	for (var p in byPair) {
+		var pads = byPair[p];
+		if (pads.length === 2) {
+			pads[0].partner = pads[1];
+			pads[1].partner = pads[0];
+			var dx = pads[0].x - pads[1].x, dy = pads[0].y - pads[1].y;
+			var tms = cellGraph.warpTransitMs(Math.sqrt(dx * dx + dy * dy));
+			pads[0].transitMs = tms;
+			pads[1].transitMs = tms;
+		}
+	}
+}
+
 // --- hazard-kind registry ------------------------------------------------------
 // Single source of truth for the map-authorable hazard kinds. Everything with
 // per-kind behavior keys off this: gameBoard.generateHazards builds via
@@ -1010,7 +1109,7 @@ class Thumper extends Hazard {
 }
 
 
-module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, Mine, VortexWell, vortexWellRadius, LaserGate, Crusher, Turret, Antlion, Thumper, HAZARD_KINDS, BOON_KINDS, hazardKindById, registerHazardKind, registerBoonKind };
+module.exports = { HazardRail, Hazard, Bumper, BumperWall, Rotor, Geyser, Mine, VortexWell, vortexWellRadius, LaserGate, Crusher, Turret, WarpPad, linkWarpPads, Antlion, Thumper, HAZARD_KINDS, BOON_KINDS, hazardKindById, registerHazardKind, registerBoonKind };
 
 // Load the boon kinds AFTER module.exports is assigned: boons.js requires this
 // module for the Hazard base class + registerBoonKind, so it must see the fully

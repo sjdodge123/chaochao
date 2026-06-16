@@ -729,6 +729,22 @@ function getKnownIdSets(config) {
     return _knownIdSetsCache;
 }
 
+// The cell whose site is nearest to (x,y) — the Voronoi region containing the point.
+// Used by validateMap's warp-pad drivable-ground + door-overlap checks. Returns null if
+// there are no usable cells. (A standalone scan, not cellGraph.nearestCellIndex, to
+// avoid a utils<->cellGraph require cycle inside the validation path.)
+function nearestCell(cells, x, y) {
+    if (!Array.isArray(cells)) { return null; }
+    var best = Infinity, cell = null;
+    for (var i = 0; i < cells.length; i++) {
+        var s = cells[i] && cells[i].site;
+        if (s == null) { continue; }
+        var dx = s.x - x, dy = s.y - y, d = dx * dx + dy * dy;
+        if (d < best) { best = d; cell = cells[i]; }
+    }
+    return cell;
+}
+
 exports.validateMap = function (vMap, config) {
     if (vMap == null) {
         return { valid: false, reason: "No map data." };
@@ -798,6 +814,53 @@ exports.validateMap = function (vMap, config) {
             if (hazardKind != null && hazardKind.directional &&
                 !Number.isFinite(hazard.angle)) {
                 return { valid: false, reason: "Map has a directional hazard with no direction." };
+            }
+        }
+        // Warp pads are PAIRED teleporters: each carries a finite integer `pair`, and
+        // every pair id must appear EXACTLY twice (one pad teleports to the other). A
+        // lone or triple pad has no/ambiguous partner (linkWarpPads leaves it inert,
+        // and the cellGraph shortcut wouldn't form).
+        var warpId = (config.boons.warpPad != null) ? config.boons.warpPad.id : null;
+        if (warpId != null) {
+            var tm = config.tileMap;
+            var nonDrivable = {};
+            if (tm.empty != null) { nonDrivable[tm.empty.id] = true; }
+            if (tm.door != null) { nonDrivable[tm.door.id] = true; }
+            if (tm.background != null) { nonDrivable[tm.background.id] = true; }
+            if (tm.lava != null) { nonDrivable[tm.lava.id] = true; }
+            // Cells holding an authored locked door — stamped to a wall (tileMap.door.id)
+            // only at runtime, so they're NOT yet door-tiles here; match by cell identity.
+            var doorCells = {};
+            var doorsForWarp = Array.isArray(vMap.doors) ? vMap.doors : [];
+            for (var dw = 0; dw < doorsForWarp.length; dw++) {
+                var dcl = (doorsForWarp[dw] != null) ? nearestCell(vMap.cells, doorsForWarp[dw].x, doorsForWarp[dw].y) : null;
+                if (dcl != null && dcl.site != null) { doorCells[dcl.site.voronoiId] = true; }
+            }
+            var warpCounts = {};
+            for (var wp = 0; wp < vMap.hazards.length; wp++) {
+                var whz = vMap.hazards[wp];
+                if (whz == null || whz.id !== warpId) { continue; }
+                if (!Number.isInteger(whz.pair)) {
+                    return { valid: false, reason: "Map has a warp pad with no pair id." };
+                }
+                // A pad must sit on DRIVABLE ground: its source must be reachable and its
+                // exit safe to land on (a kart warped onto an empty hole / shut door / lava
+                // would be ejected or insta-killed). The "exit faces lava" danger comes from
+                // the exit DIRECTION carrying you into adjacent lava, not the pad's own tile.
+                var wcell = nearestCell(vMap.cells, whz.x, whz.y);
+                if (wcell != null && nonDrivable[wcell.id]) {
+                    return { valid: false, reason: "A warp pad must sit on drivable ground (not lava / a hole / a door)." };
+                }
+                // ...and not on a locked-door cell (which becomes a wall at runtime).
+                if (wcell != null && wcell.site != null && doorCells[wcell.site.voronoiId]) {
+                    return { valid: false, reason: "A warp pad can't sit on a locked-door cell." };
+                }
+                warpCounts[whz.pair] = (warpCounts[whz.pair] || 0) + 1;
+            }
+            for (var pk in warpCounts) {
+                if (warpCounts[pk] !== 2) {
+                    return { valid: false, reason: "Each warp pad needs exactly one partner (pairs of 2)." };
+                }
             }
         }
     }

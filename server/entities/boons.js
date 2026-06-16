@@ -15,7 +15,7 @@
 // add-a-kind checklist in ARCHITECTURE.md.
 var utils = require('../utils.js');
 var c = utils.loadConfig();
-var { Hazard, registerBoonKind } = require('./hazards.js');
+var { Hazard, WarpPad, registerBoonKind } = require('./hazards.js');
 
 // Base class for boons. Extends the circular Hazard so a boon rides the existing
 // engine tick, quadtree collision, compressor wire, and client drawer dispatch
@@ -472,6 +472,20 @@ registerBoonKind("slingshotRings", {
 	directional: true,
 	build: function (entry, mapID, roomSig) {
 		return new SlingshotRings(entry.x, entry.y, entry.angle, mapID, roomSig);
+	}
+});
+
+// Warp Pad — a paired teleporter (the WarpPad class lives in hazards.js with the other
+// placeable machinery — linkWarpPads, the cellGraph shortcut, gameBoard.updateWarpPads —
+// since it predates the boon reclassification and is cross-cutting; here we just register
+// it as a BOON, so config.boons.warpPad supplies its id and the editor files it under
+// Boons). Authored as a PAIR (two-click); the genuinely hard part is the AI cellGraph
+// shortcut, not the teleport. See WarpPad / linkWarpPads in hazards.js.
+registerBoonKind("warpPad", {
+	railed: false,
+	directional: false, // symmetric portal — the exit heading is your preserved velocity, not an angle
+	build: function (entry, mapID, roomSig) {
+		return new WarpPad(entry.x, entry.y, mapID, roomSig, entry.pair);
 	}
 });
 

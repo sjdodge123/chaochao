@@ -4369,6 +4369,28 @@ function computeWorldViewTarget(dt) {
             return clampViewToWorld(swcx, swcy, racingScale);
         }
     }
+    // Warp pad transit: when the LOCAL player drives onto a warp pad it commits and goes
+    // invisible (frozen in transit server-side); slow-pan from the entrance pad to the exit
+    // over the transit, then HOLD on the exit until the emerge event (warpEnd) releases the
+    // camera back to the follow — so the kart pops in right where the camera already is.
+    // (Set by the warpStart handler; only for a local warp.) Same priority/shape as the
+    // Second Wind beat.
+    if (warpCam != null) {
+        if (Date.now() > warpCam.endAt) {
+            warpCam = null; // failsafe: the warpEnd event was lost — don't strand the camera
+        } else {
+            var wRaw = Math.max(0, Math.min(1, (Date.now() - warpCam.startedAt) / Math.max(1, warpCam.ms)));
+            var wE = smoothstep(wRaw);
+            var wcx = warpCam.fromX + (warpCam.toX - warpCam.fromX) * wE;
+            var wcy = warpCam.fromY + (warpCam.toY - warpCam.fromY) * wE;
+            // Pull the camera OUT mid-journey (a sine bump: normal at the ends, widest at the
+            // midpoint) so you see the ground you're crossing, then ease back in to arrive
+            // tight on the exit. updateWorldCamera follows the warp target DIRECTLY (a=1), so
+            // this pan+zoom isn't damped by the usual exponential filter — it reads crisply.
+            var warpScale = Math.max(1, racingScale * (1 - WARP_ZOOM_OUT * Math.sin(wRaw * Math.PI)));
+            return clampViewToWorld(wcx, wcy, warpScale);
+        }
+    }
     // Back the camera off while aiming/throwing an aimed ability (bomb/ice) so
     // it's easier to aim and follow the shot; the smoothing eases it out and back.
     if (localAimedAbilityActive()) {
@@ -4466,10 +4488,13 @@ function updateWorldCamera(dt) {
         // wherever the previous state left it before the pan-out could begin.
         worldView.cx = target.cx; worldView.cy = target.cy; worldView.scale = target.scale;
     }
-    // While the intro arc runs, the target is a precise, eased time-ramp — follow
-    // it directly (a=1) so it finishes exactly as the gate opens. Everywhere else
-    // (racing, lobby, and a mid-countdown camera re-enable) smooth exponentially.
-    var a = followArc ? 1 : (1 - Math.exp(-cdt / WORLD_ZOOM_TAU));
+    // While the intro arc runs — OR a local warp-pad pan is active — the target is already a
+    // precise, eased time-ramp (the gate arc / the warpCam smoothstep), so follow it DIRECTLY
+    // (a=1): the usual exponential filter would lag the pan ~WORLD_ZOOM_TAU behind, making the
+    // sweep feel sluggish. Everywhere else (racing, lobby, mid-countdown re-enable) smooth
+    // exponentially.
+    var warpFollow = (typeof warpCam !== "undefined" && warpCam != null);
+    var a = (followArc || warpFollow) ? 1 : (1 - Math.exp(-cdt / WORLD_ZOOM_TAU));
     worldView.cx += (target.cx - worldView.cx) * a;
     worldView.cy += (target.cy - worldView.cy) * a;
     if (followArc) {
@@ -6175,6 +6200,16 @@ function drawPlayers(dt) {
 function checkDrawPlayer(player, dt) {
     if (player == null) {
         return;
+    }
+    // A racer mid warp-pad transit is invisible — it's been whisked into the portal and
+    // emerges at the exit on warpEnd. Skip drawing its kart (+ trail/FX). The failsafe
+    // clears a stuck flag if the warpEnd event was ever lost, so a kart can't vanish forever.
+    if (player.warping === true) {
+        if (player.warpHideUntil != null && Date.now() >= player.warpHideUntil) {
+            player.warping = false;
+        } else {
+            return;
+        }
     }
     // Phantom-entry guard: inactive players are parked at (-100,-100) so
     // camera.inBounds skips them, but a stale entry sitting at the exact origin
@@ -9522,6 +9557,11 @@ function buildHazardDrawers() {
             drawSentryTurret(h.x, h.y, h.angle, h.state);
         };
     }
+    if (config.boons.warpPad != null) {
+        hazardDrawers[config.boons.warpPad.id] = function (h) {
+            drawWarpPad(h.x, h.y, h.state); // h.state = the pair id (netState) → per-pair colour
+        };
+    }
     // Boons share the hazard drawer registry (they live in the same client
     // hazardList). Their visual language is teal/helpful, the inverse of the
     // bumper-orange "this flings you" rule.
@@ -10248,6 +10288,72 @@ function drawVortexWell(x, y, radius) {
     gameContext.fill();
     gameContext.strokeStyle = cfg.color;
     gameContext.lineWidth = 2;
+    gameContext.stroke();
+    gameContext.restore();
+}
+
+// Per-pair portal colour: the two halves of a warp pair share a hue so a player can
+// see at a glance which pad sends where. `pair` is the netState the server ships
+// (the map entry's pairing id); index a fixed palette of cool "portal" hues by it.
+var WARP_PAIR_COLORS = ["#C24DFF", "#36C5F0", "#F45D9C", "#7C6BFF", "#33D6C0", "#FF8A3D"];
+function warpPairColor(pair) {
+    var i = (typeof pair === "number" && isFinite(pair)) ? (((pair | 0) % WARP_PAIR_COLORS.length) + WARP_PAIR_COLORS.length) % WARP_PAIR_COLORS.length : 0;
+    return WARP_PAIR_COLORS[i];
+}
+// A warp pad: one half of a paired teleporter. A glowing portal ring in the pair's
+// hue with a rotating energy swirl and a bright core — reads as "step here and you're
+// whisked away", distinct from the vortex well's violet pull-haze (which sucks you to
+// a dark centre; this one is a clean, spinning gateway). `pair` is the netState the
+// server ships so both halves match colour. No timed state — static portal.
+function drawWarpPad(x, y, pair) {
+    var R = config.boons.warpPad.radius;
+    var col = warpPairColor(pair);
+    var spin = (Date.now() / 700) % (Math.PI * 2);
+    gameContext.save();
+    // Soft outer glow ring (the portal's reach).
+    gameContext.beginPath();
+    gameContext.arc(x, y, R, 0, 2 * Math.PI);
+    gameContext.strokeStyle = col;
+    gameContext.globalAlpha = 0.25;
+    gameContext.lineWidth = 6;
+    gameContext.stroke();
+    gameContext.globalAlpha = 1;
+    // Two counter-rotating energy arcs (the "active gateway" cue).
+    gameContext.lineCap = "round";
+    gameContext.lineWidth = 3;
+    gameContext.strokeStyle = col;
+    for (var a = 0; a < 2; a++) {
+        var dir = a === 0 ? 1 : -1;
+        var base = spin * dir + a * Math.PI;
+        gameContext.beginPath();
+        gameContext.arc(x, y, R * 0.7, base, base + Math.PI * 1.1);
+        gameContext.stroke();
+    }
+    // Inward swirl toward the core (a few arms) — the "whisk away" read.
+    gameContext.globalAlpha = 0.55;
+    gameContext.lineWidth = 2;
+    for (var s = 0; s < 3; s++) {
+        var ba = spin + (s / 3) * Math.PI * 2;
+        gameContext.beginPath();
+        var first = true;
+        for (var t = 0; t <= 1.001; t += 0.1) {
+            var rr = R * 0.62 * (1 - t) + R * 0.12 * t;
+            var ang = ba + t * Math.PI * 1.4;
+            var px = x + Math.cos(ang) * rr, py = y + Math.sin(ang) * rr;
+            if (first) { gameContext.moveTo(px, py); first = false; } else { gameContext.lineTo(px, py); }
+        }
+        gameContext.stroke();
+    }
+    gameContext.globalAlpha = 1;
+    // Bright core.
+    gameContext.beginPath();
+    gameContext.arc(x, y, R * 0.2, 0, 2 * Math.PI);
+    gameContext.fillStyle = "#FFFFFF";
+    gameContext.fill();
+    gameContext.beginPath();
+    gameContext.arc(x, y, R * 0.32, 0, 2 * Math.PI);
+    gameContext.strokeStyle = col;
+    gameContext.lineWidth = 2.5;
     gameContext.stroke();
     gameContext.restore();
 }
@@ -11868,7 +11974,7 @@ function drawBrutalBadges() {
 // Sits below the race timer + brutal badges, screen-space (drawn inside drawHUD).
 var combatLog = []; // newest first
 var COMBAT_LOG_MAX = 6;
-var COMBAT_LOG_LIFE_MS = { kill: 6500, death: 6500, ability: 4500, score: 7500, orb: 6500, keyPickup: 5000, keyDrop: 5000, doorUnlock: 7000 };
+var COMBAT_LOG_LIFE_MS = { kill: 6500, death: 6500, ability: 4500, score: 7500, orb: 6500, keyPickup: 5000, keyDrop: 5000, doorUnlock: 7000, warp: 4500 };
 var _combatAbilityLabels = null;
 var _combatAbilityIcons = null;
 
@@ -11993,6 +12099,12 @@ function combatLogKeyDrop(ownerId, shape) {
 }
 function combatLogDoorUnlock(ownerId, shape) {
     pushCombatEntry({ type: "doorUnlock", ownerId: ownerId, ownerName: (ownerId != null) ? combatNameOf(ownerId) : "", shape: shape });
+}
+// A racer used a Warp Pad (boon): logged on the warpStart edge so the feed shows the warp
+// even though the kart vanishes for the transit.
+function combatLogWarp(playerId) {
+    if (playerId == null) { return; }
+    pushCombatEntry({ type: "warp", playerId: playerId, playerName: combatNameOf(playerId) });
 }
 
 // Scoring finishes. firstPlaceWinner / secondPlaceWinner / playerConcluded all
@@ -12139,6 +12251,12 @@ function combatRowSegments(entry) {
         segs.push({ k: "thumb", id: entry.ownerId });
         segs.push({ k: "text", text: entry.ownerName, color: combatColorOf(entry.ownerId, "#ffffff"), bold: false });
         segs.push({ k: "text", text: "opened door", color: "#ffd54a", bold: true, small: true });
+    } else if (entry.type === "warp") {
+        // Warp Pad (boon) used — the 🌀 portal marker + who took the shortcut.
+        segs.push({ k: "glyph", emoji: "🌀" });
+        segs.push({ k: "thumb", id: entry.playerId });
+        segs.push({ k: "text", text: entry.playerName, color: combatColorOf(entry.playerId, "#ffffff"), bold: false });
+        segs.push({ k: "text", text: "warped", color: "#cbd3da", bold: false, small: true });
     } else { // score — 🥇/🥈/🏁 marker conveys the placement
         segs.push({ k: "glyph", emoji: combatScoreEmoji(entry.rankLabel) });
         segs.push({ k: "thumb", id: entry.playerId });
