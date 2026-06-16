@@ -766,7 +766,9 @@ function drawThumbnailBoonGlyph(ctx, hz) {
 		if (B[key] != null && B[key].id === hz.id) { cfg = B[key]; kind = key; break; }
 	}
 	if (cfg == null) { return false; }
-	var r = cfg.radius || 24;
+	// Resizable boons (lily pad) carry a per-instance radius on the entry — draw the glyph at
+	// the author-set size, not the config max.
+	var r = (typeof hz.radius === "number" && hz.radius > 0) ? hz.radius : (cfg.radius || 24);
 	var x = hz.x, y = hz.y;
 	ctx.save();
 	ctx.translate(x, y);
@@ -844,6 +846,36 @@ function drawThumbnailBoonGlyph(ctx, hz) {
 		ctx.beginPath();
 		ctx.ellipse(0, 0, s * 0.4, s * 0.9, 0, 0, 2 * Math.PI);
 		ctx.stroke();
+	} else if (kind === "zipline") {
+		// The cable: a line from this START post along the facing for the author-set
+		// length, with a far post stub — so the preview shows the whole run, not a dot.
+		ctx.save();
+		ctx.rotate((hz.angle || 0) * Math.PI / 180);
+		var zl = (typeof hz.length === "number" && hz.length > 0) ? hz.length : (cfg.minLength || 140);
+		ctx.lineWidth = 4;
+		ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(zl, 0); ctx.stroke();
+		ctx.beginPath(); ctx.moveTo(zl, -s * 0.8); ctx.lineTo(zl, s * 0.8); ctx.stroke();
+		ctx.restore();
+	} else if (kind === "lilyPad") {
+		// Rotated by the pad's baked random angle to match the in-game look. Flowered pads
+		// (~30%, keyed off the angle) show a little pink lotus; the rest show leaf veins. Reuse
+		// draw.js's lilyHasFlower (same play.bundle) so the thumbnail can't drift from the game.
+		ctx.rotate((hz.angle || 0) * Math.PI / 180);
+		if (typeof lilyHasFlower === "function" && lilyHasFlower(hz.angle)) {
+			var pr = r * 0.5;
+			ctx.fillStyle = "#f6b0cb";
+			for (var fp = 0; fp < 6; fp++) { ctx.save(); ctx.rotate(fp / 6 * Math.PI * 2); ctx.beginPath(); ctx.ellipse(0, -pr * 0.55, pr * 0.34, pr * 0.62, 0, 0, 2 * Math.PI); ctx.fill(); ctx.restore(); }
+			ctx.fillStyle = "#ffd24a"; ctx.beginPath(); ctx.arc(0, 0, pr * 0.34, 0, 2 * Math.PI); ctx.fill();
+		} else {
+			ctx.lineWidth = 2.5;
+			for (var lv = -1; lv <= 1; lv++) {
+				var la = lv * 0.55;
+				ctx.beginPath();
+				ctx.moveTo(0, 0);
+				ctx.lineTo(Math.cos(la) * s * 1.5, Math.sin(la) * s * 1.5);
+				ctx.stroke();
+			}
+		}
 	} else if (kind === "warpPad") {
 		// Portal: a small white inward swirl + bright core, reading as a teleporter (the
 		// disc is already the pair's colour).
@@ -983,6 +1015,9 @@ function applyHazards(payload) {
 		// [8] per-instance radius (sizable kinds — the vortex well's authored size).
 		// Only kinds whose drawer reads it use it; null for everything else.
 		hazardList[hazard[0]].radius = hazard.length > 8 && hazard[8] != null ? hazard[8] : null;
+		// [9] author-set rail length (the Zipline cable's span). Lets the drawer render
+		// the full cable + far post from railX/railY + angle + length. null otherwise.
+		hazardList[hazard[0]].railLength = hazard.length > 9 && hazard[9] != null ? hazard[9] : null;
 
 		// NOTE: antlions arriving HERE come from a snapshot (newMap payload or a
 		// late-join sync), so they're created silently — no emergence animation or

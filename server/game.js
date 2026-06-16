@@ -608,6 +608,7 @@ class Game {
 				var lobbyMapID = (this.gameBoard.currentMap != null && this.gameBoard.currentMap.cells != null) ? this.gameBoard.currentMap.id : null;
 				client.emit("startLobby", compressor.sendLobbyStart(this.gameBoard.lobbyStartButton, lobbyMapID));
 				client.emit("applyHazards", compressor.newHazards(this.gameBoard.hazardList));
+				this.replayZiplineRides(client);
 				client.emit("tileChanges", JSON.stringify(this.gameBoard.gatherTileChanges()));
 				// So the late joiner sees ability indicators for players already holding one.
 				client.emit("allAbilityHoldings", JSON.stringify(this.gameBoard.gatherAbilities()));
@@ -660,6 +661,22 @@ class Game {
 		// — without this, a mid-race joiner is blind to anything spawned after
 		// the round began. Mirrors the lobby branch above.
 		client.emit("applyHazards", compressor.newHazards(this.gameBoard.hazardList));
+		this.replayZiplineRides(client);
+	}
+	// Late-join replay: a racer currently RIDING a zipline got their ziplineBoard as a one-shot
+	// event before this client connected, so the joiner would draw them as a plain kart sliding
+	// on the cable with no trolley rig. Replay the board just to them, with the REMAINING ride
+	// time as the self-clear backstop. Mirrors the bunkerStart / lobbyInvulnStates replays.
+	replayZiplineRides(client) {
+		for (var pid in this.playerList) {
+			var rp = this.playerList[pid];
+			if (rp == null || typeof rp.isZiplined !== "function" || !rp.isZiplined() || rp.ziplineRail == null) {
+				continue;
+			}
+			var rr = rp.ziplineRail;
+			var remainMs = (rp.zipSpeed > 0 ? Math.max(0, rr.width - rp.zipT) / rp.zipSpeed * 1000 : 1000) + 1000;
+			client.emit("ziplineBoard", { id: rp.id, x1: rr.x, y1: rr.y, angle: rr.angle, length: rr.width, ms: remainMs });
+		}
 	}
 	checkLobbyStart() {
 		debug.log("checkLobbyStart: playerCount=", this.playerCount, " min=", c.minPlayersToStart, " state=", this.currentState);

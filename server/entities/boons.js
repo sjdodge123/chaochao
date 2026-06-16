@@ -15,7 +15,7 @@
 // add-a-kind checklist in ARCHITECTURE.md.
 var utils = require('../utils.js');
 var c = utils.loadConfig();
-var { Hazard, WarpPad, registerBoonKind } = require('./hazards.js');
+var { Hazard, HazardRail, WarpPad, registerBoonKind } = require('./hazards.js');
 
 // Base class for boons. Extends the circular Hazard so a boon rides the existing
 // engine tick, quadtree collision, compressor wire, and client drawer dispatch
@@ -475,6 +475,124 @@ registerBoonKind("slingshotRings", {
 	}
 });
 
+// Zipline — a two-post cable (a RAILED boon). The collidable disc is the START post (the
+// rail origin); drive onto it to be CARRIED fast along the cable toward the far post.
+// Like the moving bumper it rides a HazardRail and ships the rail's origin/angle on the
+// wire — but its LENGTH is author-set (railLengthAuthored ships rail.width too), so a
+// longer line carries you further. It is ONE-WAY/directional: rotation + length are the
+// authoring lever. The ride itself lives on the shared "aloft" player state
+// (Player.boardZipline → tickZipline → finishZipline): untouchable + tile/lava-immune
+// while carried (the isAloft guards), holding drains stamina (run dry = auto-drop), punch
+// drops off early, and any drop-off keeps the along-rail speed as real velocity. The boon
+// is STATIC (the player moves, not the cable), so it never moves and needs no per-tick
+// update. (Racers only — see isEligiblePlayer; boardZipline guards re-entry so the engine
+// double-dispatch + an already-aloft kart are both no-ops.)
+class Zipline extends Boon {
+	constructor(x, y, rail, ownerId, roomSig) {
+		super(x, y, c.boons.zipline.radius, c.boons.zipline.color, ownerId, roomSig);
+		this.id = c.boons.zipline.id;
+		// Hold the rail directly (NOT via the Hazard rail param, which would set moveable
+		// and try to Hazard.move() undefined newX) so the boon stays static at the origin
+		// post while still shipping the rail's geometry on the wire (compressor.newHazards).
+		this.rail = rail;
+		this.railLengthAuthored = true; // ship rail.width (the author-set span) on wire slot [9]
+		this.angle = rail.angle;        // origin-post facing (also drawn by the editor/HUD)
+		this.speed = c.boons.zipline.speed;
+		this.staminaDrainPerSec = c.boons.zipline.staminaDrainPerSec;
+	}
+	handleHit(object) {
+		if (!this.isEligiblePlayer(object) || typeof object.boardZipline !== "function") {
+			return;
+		}
+		object.boardZipline(this.rail, this.speed, this.staminaDrainPerSec);
+	}
+}
+
+registerBoonKind("zipline", {
+	railed: true,
+	directional: true,
+	build: function (entry, mapID, roomSig) {
+		// Author-set span: the rail length comes from the map entry (entry.length), clamped
+		// to the config bounds. Falls back to minLength for a legacy/malformed entry.
+		var z = c.boons.zipline;
+		var len = (typeof entry.length === "number" && isFinite(entry.length)) ? entry.length : z.minLength;
+		len = Math.max(z.minLength, Math.min(z.maxLength, len));
+		var rail = new HazardRail(entry.x, entry.y, len, z.height, entry.angle, z.color, mapID, roomSig);
+		return new Zipline(entry.x, entry.y, rail, mapID, roomSig);
+	}
+});
+
+// Lily Pads — drivable stepping-stones over water. While a racer overlaps a NOT-fully-sunk
+// pad, its handleHit stamps the racer's onLilyPadUntil for this tick (checkCollisions runs
+// before updatePlayers), and Player.handleMapCellHit's water branch reads it to give solid
+// footing — you skim across instead of swimming. But the pad SINKS while stood on: netState
+// climbs to 100 (fully submerged) over sinkMs, at which point it stops granting footing and
+// the racer drops into the punch-swim water below. Step off and it REFLOATS over refloatMs.
+// netState (the sink %) rides the wire so the client draws the pad settling. Occupancy is a
+// timestamp (occupiedUntil, refreshed each overlap tick with a little grace) so a one-tick
+// gap between overlaps doesn't flicker it back to floating. (Racers only — see
+// isEligiblePlayer; a zombie can't enter water and never stands on a pad.)
+class LilyPad extends Boon {
+	constructor(x, y, radius, angle, ownerId, roomSig) {
+		super(x, y, radius, c.boons.lilyPad.color, ownerId, roomSig);
+		this.id = c.boons.lilyPad.id;
+		// Cosmetic per-pad random rotation (baked by the editor) — shipped on the angle wire
+		// slot so the in-game leaf rotation + the ~30% lotus-bloom roll (keyed off the angle)
+		// MATCH the editor. Without this the wire would ship the Hazard default 0 and every
+		// pad would render unrotated + identical in-game.
+		this.angle = (typeof angle === "number" && isFinite(angle)) ? angle : 0;
+		this.sizable = true;      // ship the per-instance (author-resized) radius on the wire ([8])
+		this.sinkMs = c.boons.lilyPad.sinkMs;
+		this.refloatMs = c.boons.lilyPad.refloatMs;
+		this.netState = 0;        // wire slot: sink %, 0 = floating .. 100 = fully sunk
+		this.occupiedUntil = 0;   // refreshed each overlap tick; sink rises while in the future
+	}
+	handleHit(object) {
+		if (!this.isEligiblePlayer(object)) {
+			return;
+		}
+		// A fully-sunk pad gives no footing — the racer is left to the swim below.
+		if (this.netState >= 100) {
+			return;
+		}
+		// Solid this tick: handleMapCellHit reads onLilyPadUntil (set with a tick's grace so
+		// brief non-overlap between ticks doesn't refloat-flicker). occupiedUntil drives the
+		// sink in update() (same grace).
+		var now = Date.now();
+		object.onLilyPadUntil = now + 60;
+		this.occupiedUntil = now + 60;
+	}
+	// Per tick (gameBoard.updateHazards): climb the sink while occupied, otherwise refloat.
+	update(dt) {
+		var step = (dt || 0) * 1000;
+		if (Date.now() < this.occupiedUntil) {
+			this.netState = Math.min(100, this.netState + step / this.sinkMs * 100);
+		} else {
+			this.netState = Math.max(0, this.netState - step / this.refloatMs * 100);
+		}
+	}
+}
+
+// Resolve a lily pad's per-instance radius from its map entry: clamp the author-resized value
+// to [minRadius, radius] (config = the editor's drag bounds) so a crafted/legacy map can't ship
+// an over-sized pad; a missing/non-finite value falls back to the DEFAULT — the midpoint of the
+// range, matching the size the editor places a fresh pad at. Mirrors vortexWellRadius.
+function lilyPadRadius(entry) {
+	var cfg = c.boons.lilyPad;
+	var min = cfg.minRadius, max = cfg.radius;
+	var r = (entry != null && Number.isFinite(entry.radius)) ? entry.radius : (min + max) / 2;
+	if (r < min) { r = min; } else if (r > max) { r = max; }
+	return r;
+}
+
+registerBoonKind("lilyPad", {
+	railed: false,
+	directional: false,
+	build: function (entry, mapID, roomSig) {
+		return new LilyPad(entry.x, entry.y, lilyPadRadius(entry), entry.angle, mapID, roomSig);
+	}
+});
+
 // Warp Pad — a paired teleporter (the WarpPad class lives in hazards.js with the other
 // placeable machinery — linkWarpPads, the cellGraph shortcut, gameBoard.updateWarpPads —
 // since it predates the boon reclassification and is cross-cutting; here we just register
@@ -489,4 +607,4 @@ registerBoonKind("warpPad", {
 	}
 });
 
-module.exports = { Boon, DashArrows, RechargeSpring, Slipstream, GuardHalo, SecondWindTotem, LaunchPad, BarrelCannon, SlingshotRings };
+module.exports = { Boon, DashArrows, RechargeSpring, Slipstream, GuardHalo, SecondWindTotem, LaunchPad, BarrelCannon, SlingshotRings, Zipline, LilyPad };

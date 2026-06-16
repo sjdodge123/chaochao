@@ -46,6 +46,7 @@ var rotateStartAngle = 0;
 // resizeStartRadius keeps the pre-drag value to record one undo command on release.
 var resizingHandle = false;
 var resizeStartRadius = 0;
+var resizeGrabDist = 0; // cursor distance from centre at grab — the drag is relative to it
 // On-canvas MOVE/grab handle (every selected object): while dragging it the object's
 // (x,y) tracks the cursor; moveStartX/Y keep the pre-drag position, and moveStartIndex
 // the dragged hazard's array index, so the undo command can be recorded on release even
@@ -933,10 +934,12 @@ function animloop() {
         dirty = true;
     }
     if (resizingHandle && selectedObject != null) {
-        // Dragging the on-canvas resize handle: radius tracks the cursor distance
-        // from the hazard centre, clamped to the kind's [min, max] size.
+        // Dragging the on-canvas resize handle: the radius moves RELATIVE to the grab — by how
+        // far the cursor has moved from where it grabbed, added to the radius at grab time. This
+        // is robust to the handle's display gap AND to the canvas-edge clamp (which shifts where
+        // the handle is drawn), so grabbing it never jumps the size. Clamped to [min, max].
         var b = resizeBounds();
-        var d = Math.sqrt(getMagSq(mousex, mousey, selectedObject.x, selectedObject.y));
+        var d = resizeStartRadius + (Math.sqrt(getMagSq(mousex, mousey, selectedObject.x, selectedObject.y)) - resizeGrabDist);
         if (d < b.min) { d = b.min; } else if (d > b.max) { d = b.max; }
         selectedObject.radius = Math.round(d);
         updateSelectedRadius();
@@ -998,11 +1001,41 @@ function drawEditor(dt) {
     renderHazards();
     drawDoorsKeys();
     drawWarpPadLinks(mousex, mousey);
+    drawZiplinePreview(mousex, mousey);
     drawSelectedObject();
     drawBalanceOverlay();
     drawPointerCircle();
-    if (drawObject != null) {
+    // The zipline places via a two-click rubber-band; once the start post is staged
+    // (pendingZipline) drawZiplinePreview owns the cursor, so skip the generic ghost then.
+    if (drawObject != null && !(drawObject === ziplineId() && pendingZipline != null)) {
         drawMyObject(mousex, mousey, drawObject, null, placedDefaultRadius(drawObject));
+    }
+    // Zipline brush "in hand": before the first post is placed, show a sample cable at the
+    // cursor + an anchor dot (mirrors the barrier brush ghost) so it's clear the zipline
+    // brush is active and where the start post will drop. The rubber-band takes over after.
+    if (activeTool.kind === "hazard" && drawObject === ziplineId() && pendingZipline == null) {
+        createContext.save();
+        createContext.fillStyle = "#ffffff";
+        createContext.strokeStyle = "rgba(0,0,0,0.55)";
+        createContext.lineWidth = 1;
+        createContext.beginPath(); createContext.arc(mousex, mousey, 2.5, 0, 2 * Math.PI);
+        createContext.fill(); createContext.stroke();
+        createContext.restore();
+    }
+    // Lily Pads only place on water — when the brush hovers dry ground, overlay a red
+    // "no" ring so it's clear the drop will be rejected (placement is gated in addObjectToMap).
+    if (activeTool.kind === "hazard" && config.boons != null && config.boons.lilyPad != null
+        && drawObject === config.boons.lilyPad.id && !editorBoonOnWater(mousex, mousey)) {
+        var lr = config.boons.lilyPad.radius;
+        createContext.save();
+        createContext.strokeStyle = "rgba(230,60,60,0.9)";
+        createContext.lineWidth = 3;
+        createContext.beginPath(); createContext.arc(mousex, mousey, lr, 0, 2 * Math.PI); createContext.stroke();
+        createContext.beginPath();
+        createContext.moveTo(mousex - lr * 0.7, mousey - lr * 0.7);
+        createContext.lineTo(mousex + lr * 0.7, mousey + lr * 0.7);
+        createContext.stroke();
+        createContext.restore();
     }
     // Barrier brush "in hand": before the first point is placed, show a sample of
     // the held barrier at the cursor (like the hazard ghost) so it's clear a brush
@@ -1406,15 +1439,16 @@ function drawBalanceOverlay() {
     ctx.restore();
 }
 
-function drawMyObject(x, y, myObject, angle, radius, pair) {
+function drawMyObject(x, y, myObject, angle, radius, pair, length) {
     if (angle == null) {
         angle = 0;
     }
     var kind = editorHazardKindById(myObject);
     if (kind != null) {
         // `pair` (warp pads) flows through so the editor draws each pad in its in-game
-        // per-pair colour — the map preview then matches the live game exactly.
-        (kind.paint || paintHazardShape)(createContext, kind, x, y, angle, "red", radius, pair);
+        // per-pair colour — the map preview then matches the live game exactly. `length`
+        // (the Zipline cable's author-set span) flows through the same way.
+        (kind.paint || paintHazardShape)(createContext, kind, x, y, angle, "red", radius, pair, length);
     }
 }
 // A placed object's config lives in config.hazards OR config.boons — boons reuse
@@ -1866,6 +1900,102 @@ function paintSlingshotRingsShape(ctx, kind, x, y, angle, ringColor) {
     }
     ctx.restore();
 }
+// Zipline painter (zipline's `paint` hook). Mirrors the in-game look (draw.js drawZipline /
+// paintZiplineLook): a "Rope & Wooden Poles" cable — two twisted golden strands over a dark
+// halo, a wooden pole at each end — with a "Parked Trolley" at the START post (a pulley wheel
+// on the rope + a hanging hook) as the mount marker (no disc). create.js is a separate bundle
+// from draw.js, so the look is replicated here. `length` flows in from drawMyObject (the map
+// entry's per-instance span); a not-yet-placed preview has none → fall back to minLength.
+var EDIT_ZIP_ROPE_DARK = "#C79A33", EDIT_ZIP_ROPE_DARK_W = "#E6CF95";
+var EDIT_ZIP_WOOD = "#6b4a26", EDIT_ZIP_WOOD_DARK = "#4a3119", EDIT_ZIP_STEEL = "#2a2018", EDIT_ZIP_STRAP = "#2a2e33";
+function paintZiplineShape(ctx, kind, x, y, angle, ringColor, radius, pair, length) {
+    var cfg = objCfgByKey(kind.key);
+    if (cfg == null) { return; }
+    var len = (typeof length === "number" && isFinite(length) && length > 0) ? length : cfg.minLength;
+    var rad = (angle || 0) * (Math.PI / 180);
+    var dirX = Math.cos(rad), dirY = Math.sin(rad);
+    var ex = x + dirX * len, ey = y + dirY * len;
+    var perpX = -dirY, perpY = dirX;
+    var onWater = editorBoonOnWater(x, y);
+    var accent = onWater ? cfg.colorWater : cfg.color;
+    var ropeDark = onWater ? EDIT_ZIP_ROPE_DARK_W : EDIT_ZIP_ROPE_DARK;
+    ctx.save();
+    ctx.lineCap = "round";
+    // Rope cable: slight droop, dark halo, then two offset golden strands (the twist).
+    var sag = Math.min(20, len * 0.07);
+    var mx = (x + ex) / 2 + perpX * sag, my = (y + ey) / 2 + perpY * sag;
+    ctx.beginPath();
+    ctx.moveTo(x, y); ctx.quadraticCurveTo(mx, my, ex, ey);
+    ctx.strokeStyle = EDITOR_BOON_HALO; ctx.lineWidth = 9; ctx.stroke();
+    for (var o = -1; o <= 1; o += 2) {
+        ctx.beginPath();
+        ctx.moveTo(x + perpX * o * 2, y + perpY * o * 2);
+        ctx.quadraticCurveTo(mx + perpX * o * 2, my + perpY * o * 2, ex + perpX * o * 2, ey + perpY * o * 2);
+        ctx.strokeStyle = o < 0 ? accent : ropeDark; ctx.lineWidth = 2.5; ctx.stroke();
+    }
+    // Wooden poles at each end (a stub across the cable + a darker cap segment).
+    for (var p = 0; p < 2; p++) {
+        var px = p === 0 ? x : ex, py = p === 0 ? y : ey;
+        ctx.strokeStyle = EDIT_ZIP_WOOD; ctx.lineWidth = 8;
+        ctx.beginPath();
+        ctx.moveTo(px - perpX * 16, py - perpY * 16); ctx.lineTo(px + perpX * 16, py + perpY * 16); ctx.stroke();
+        ctx.strokeStyle = EDIT_ZIP_WOOD_DARK; ctx.lineWidth = 8;
+        ctx.beginPath();
+        ctx.moveTo(px + perpX * 16, py + perpY * 16); ctx.lineTo(px + perpX * 22, py + perpY * 22); ctx.stroke();
+    }
+    // Parked trolley at the START (the mount marker): a pulley wheel on the rope + a hook.
+    ctx.beginPath(); ctx.arc(x, y, 6, 0, 2 * Math.PI); ctx.fillStyle = EDIT_ZIP_STEEL; ctx.fill();
+    ctx.strokeStyle = "#e9eef2"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, y, 2, 0, 2 * Math.PI); ctx.fillStyle = accent; ctx.fill();
+    var hx = x + perpX * 12, hy = y + perpY * 12;
+    ctx.strokeStyle = EDIT_ZIP_STRAP; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(hx, hy); ctx.stroke();
+    ctx.strokeStyle = accent; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(hx, hy, 4, 0.5, 5.6); ctx.stroke();
+    ctx.restore();
+}
+// Lily Pad painter (lilyPad's `paint` hook). Mirrors the in-game look (draw.js drawLilyPad):
+// the "Cartoon Pop" leaf — saturated green, thick dark outline, rim-light crescent + gloss dot
+// — rotated by the baked per-pad random angle, with the ~30% lotus bloom on flowered pads.
+// create.js is a separate bundle from draw.js, so the look is replicated here.
+// MUST stay identical to draw.js `lilyHasFlower` (the game render) — they're in separate bundles
+// (editor vs play) so they can't share the symbol; if you change the ~30% rule, change both.
+function lilyHasFlowerEditor(angle) { return (Math.round(angle || 0) % 10 + 10) % 10 < 3; }
+function paintLilyPadShape(ctx, kind, x, y, angle, ringColor, radius) {
+    var cfg = objCfgByKey(kind.key);
+    if (cfg == null) { return; }
+    // Resizable: drawMyObject passes the entry's per-instance radius; fall back to the config
+    // max for a not-yet-sized preview.
+    var r = (typeof radius === "number" && isFinite(radius) && radius > 0) ? radius : cfg.radius;
+    ctx.save();
+    ctx.translate(x, y);
+    // Soft contact shadow (unrotated — symmetric).
+    ctx.beginPath(); ctx.arc(0, 0, r + 2, 0, 2 * Math.PI); ctx.fillStyle = "rgba(8,35,26,0.20)"; ctx.fill();
+    ctx.rotate((angle || 0) * (Math.PI / 180)); // baked per-pad random rotation (cosmetic variety)
+    // Notched leaf silhouette.
+    function leaf() { ctx.beginPath(); ctx.arc(0, 0, r, 0.42, 2 * Math.PI - 0.42); ctx.lineTo(0, 0); ctx.closePath(); }
+    leaf(); ctx.fillStyle = cfg.color; ctx.fill();
+    // Rim-light crescent, then the thick dark cartoon outline.
+    ctx.save(); ctx.globalAlpha = 0.5; ctx.strokeStyle = "#c8ffce"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(0, 0, r * 0.86, Math.PI * 1.05, Math.PI * 1.7); ctx.stroke(); ctx.restore();
+    leaf(); ctx.strokeStyle = "#16331d"; ctx.lineWidth = 4; ctx.stroke();
+    // Gloss dot + a bold vein.
+    ctx.fillStyle = "rgba(255,255,255,0.7)"; ctx.beginPath(); ctx.arc(-r * 0.32, -r * 0.34, r * 0.16, 0, 2 * Math.PI); ctx.fill();
+    ctx.strokeStyle = "rgba(20,60,30,0.5)"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(r * 0.8, r * 0.1); ctx.stroke();
+    // ~30% of pads carry a pink lotus bloom (keyed off the baked angle, like the game).
+    if (lilyHasFlowerEditor(angle)) {
+        var pr = r * 0.42;
+        ctx.fillStyle = "#f6b0cb";
+        for (var p = 0; p < 6; p++) {
+            ctx.save(); ctx.rotate(p / 6 * Math.PI * 2);
+            ctx.beginPath(); ctx.ellipse(0, -pr * 0.55, pr * 0.34, pr * 0.62, 0, 0, 2 * Math.PI); ctx.fill();
+            ctx.restore();
+        }
+        ctx.fillStyle = "#ffd24a"; ctx.beginPath(); ctx.arc(0, 0, pr * 0.34, 0, 2 * Math.PI); ctx.fill();
+    }
+    ctx.restore();
+}
 // Wall-band painter (bumperWall's `paint` hook). Mirrors the in-game look
 // (draw.js drawBumperWall): rim band over the bumper-orange core, anchored at
 // (x,y) and extending `width` along `angle`.
@@ -2290,6 +2420,9 @@ function handleClick(event) {
                     if (overResizeHandle(mousex, mousey)) {
                         resizingHandle = true;
                         resizeStartRadius = selectedObject.radius || 0;
+                        // Cursor distance from centre at grab time — the resize drag is relative to
+                        // this, so it never jumps even when the handle is edge-clamped (see drag).
+                        resizeGrabDist = Math.sqrt(getMagSq(mousex, mousey, selectedObject.x, selectedObject.y));
                         break;
                     }
                 } else if (overRotateHandle(mousex, mousey)) {
@@ -2304,6 +2437,9 @@ function handleClick(event) {
             // Warp pads place as a linked PAIR (two clicks) — route to the pairing flow
             // instead of the generic single-drop.
             if (drawObject != null && drawObject === warpPadId()) { placeWarpPad(mousex, mousey); break; }
+            // Ziplines place as a two-post cable (two clicks: start post, then far post) —
+            // route to the pairing flow instead of the generic single-drop.
+            if (drawObject != null && drawObject === ziplineId()) { placeZipline(mousex, mousey); break; }
             if (drawObject != null) { addObjectToMap(mousex, mousey, drawObject); break; }
             // Mouse/Select tool: grab a barrier (endpoint to drag, or its segment to
             // select), then a placed key, before falling through to hazard selection.
@@ -2451,6 +2587,12 @@ function setTool(tool) {
     var stillWarpTool = (tool.kind === "hazard" && tool.id === warpPadId());
     if (!stillWarpTool && typeof pendingWarpPad !== "undefined" && pendingWarpPad != null) {
         discardPendingWarp();
+    }
+    // Same for the zipline tool: leaving it mid-placement drops the staged start post so a
+    // half-placed cable can't linger.
+    var stillZiplineTool = (tool.kind === "hazard" && tool.id === ziplineId());
+    if (!stillZiplineTool && typeof pendingZipline !== "undefined" && pendingZipline != null) {
+        discardPendingZipline();
     }
     // Dropping the select tool clears any held key selection.
     if (tool.kind !== "select") { selectedKeyIndex = null; draggingKey = false; }
@@ -2932,6 +3074,82 @@ function discardPendingWarp() {
     if (i >= 0) { vMap.hazards.splice(i, 1); }
     pendingWarpPad = null;
     dirty = true;
+}
+// Zipline two-click placement (mirrors the warp-pad pair flow). pendingZipline holds the
+// staged START post {x,y} (a plain object, NOT yet pushed to vMap.hazards) until the
+// second click sets the FAR post — only then is ONE entry committed with the cable's
+// author-set angle + length, so an undo can never strand a half-placed zipline.
+var pendingZipline = null;
+function ziplineId() { return (config != null && config.boons.zipline != null) ? config.boons.zipline.id : -1; }
+// Snap a clicked point to its cell SITE (like the warp-pad placement) so a zipline post sits
+// at a cell centre: the AI cellGraph links the post's own cell, and a bot pathing to that cell
+// drives right onto the post (boards reliably); validation/fairness read the same cells.
+function ziplineSnap(x, y) {
+    var cell = doorCellAt(x, y);
+    if (cell != null && cell.site != null) { return { x: cell.site.x, y: cell.site.y }; }
+    return { x: x, y: y };
+}
+function placeZipline(x, y) {
+    var z = config.boons.zipline;
+    if (vMap.hazards == undefined) { vMap.hazards = []; }
+    if (pendingZipline == null) {
+        // Stage the START post (snapped to its cell site) — not committed until the far post lands.
+        // Bounds-check the SNAPPED point (not the raw click): snapping can shift the post toward
+        // the edge, so a post that committed at the cell site could otherwise sit past the margin.
+        var startPt = ziplineSnap(x, y);
+        if (outsideMapBounds(startPt.x, startPt.y, z.radius)) { return; }
+        pendingZipline = startPt;
+        dirty = true;
+        return;
+    }
+    // Second click = the FAR post (also snapped). Direction + length come from the two snapped
+    // points; a too-short drag (below minLength) is rejected so a stray double-click can't make
+    // a zero-length cable.
+    var ax = pendingZipline.x, ay = pendingZipline.y;
+    var far = ziplineSnap(x, y);
+    if (outsideMapBounds(far.x, far.y, z.radius)) { return; } // keep the pending start; retry far
+    var dx = far.x - ax, dy = far.y - ay;
+    var len = Math.sqrt(dx * dx + dy * dy);
+    if (len < z.minLength) { return; } // keep the pending start; author retries the far post
+    // The committed length is clamped to maxLength, so the stored far point can be CLOSER to the
+    // start than the click — recompute it from the clamped length so the landing the engine/AI
+    // see (start + angle*length) is the same in-bounds point the editor drew.
+    len = Math.min(z.maxLength, len);
+    var angle = Math.atan2(dy, dx) * (180 / Math.PI);
+    var hazard = { id: ziplineId(), x: ax, y: ay, angle: angle, length: len };
+    vMap.hazards.push(hazard);
+    pendingZipline = null;
+    pushHazardAddCommand(hazard);
+    dirty = true;
+}
+function discardPendingZipline() {
+    // The start post was never pushed to vMap.hazards (staged as a plain {x,y}); just drop it.
+    if (pendingZipline == null) { return; }
+    pendingZipline = null;
+    dirty = true;
+}
+// Pending START → cursor rubber-band while placing the far post (mirrors drawWarpPadLinks'
+// pending line) so the author sees the cable they're about to commit.
+function drawZiplinePreview(cursorX, cursorY) {
+    if (pendingZipline == null) { return; }
+    var ctx = createContext;
+    ctx.save();
+    ctx.setLineDash([6, 6]);
+    ctx.lineWidth = 3;
+    ctx.globalAlpha = 0.85;
+    ctx.strokeStyle = config.boons.zipline.color;
+    ctx.beginPath();
+    ctx.moveTo(pendingZipline.x, pendingZipline.y);
+    ctx.lineTo(cursorX, cursorY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+    // Small start-post marker (a pulley-wheel dot, not a big disc) where post A will land.
+    ctx.beginPath();
+    ctx.arc(pendingZipline.x, pendingZipline.y, 6, 0, 2 * Math.PI);
+    ctx.fillStyle = "#2a2018"; ctx.fill();
+    ctx.strokeStyle = "#e9eef2"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.restore();
 }
 // Index of `index`'s partner pad (same pair id), or -1.
 function warpPartnerIndex(index) {
@@ -3781,6 +3999,63 @@ var EDITOR_HAZARD_KINDS = [
                 ctx.stroke();
             }
         }
+    },
+    {
+        // Zipline — a two-post cable (railed, config.boons.zipline). twoPoint routes placement
+        // through placeZipline (click the START post, then the FAR post — the two clicks set the
+        // cable's direction AND length) instead of the generic single-drop. The author-set length
+        // lives on the map entry (entry.length) and is drawn by paintZiplineShape.
+        key: "zipline", label: "Zipline", shortcut: "x", railed: true, directional: true,
+        group: "boon", twoPoint: true, paint: paintZiplineShape,
+        swatchPaint: function (ctx, size) {
+            // Rope cable on a diagonal between two wooden poles, with a pulley trolley parked
+            // at the near (lower-left) post — "grab the trolley, ride the line".
+            ctx.lineCap = "round";
+            // rope
+            ctx.strokeStyle = "#F2C14E"; ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(size * 0.24, size * 0.7);
+            ctx.lineTo(size * 0.78, size * 0.3);
+            ctx.stroke();
+            // wooden poles
+            ctx.strokeStyle = "#6b4a26"; ctx.lineWidth = 5;
+            for (var p = 0; p < 2; p++) {
+                var px = p === 0 ? size * 0.24 : size * 0.78;
+                var py = p === 0 ? size * 0.7 : size * 0.3;
+                ctx.beginPath();
+                ctx.moveTo(px, py - size * 0.13); ctx.lineTo(px, py + size * 0.13);
+                ctx.stroke();
+            }
+            // parked trolley wheel + hook at the near post
+            ctx.fillStyle = "#2a2018";
+            ctx.beginPath(); ctx.arc(size * 0.24, size * 0.7, size * 0.1, 0, 2 * Math.PI); ctx.fill();
+            ctx.strokeStyle = "#e9eef2"; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(size * 0.24, size * 0.7, size * 0.1, 0, 2 * Math.PI); ctx.stroke();
+            ctx.strokeStyle = "#F2C14E"; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(size * 0.24, size * 0.84, size * 0.06, 0.5, 5.6); ctx.stroke();
+        }
+    },
+    {
+        // Lily Pads — drivable stepping-stones over water (config.boons.lilyPad). A single-drop
+        // boon; cluster a few across deep water to make a path. RESIZABLE: the leaf is symmetric
+        // so there's no direction to rotate — the on-canvas handle drags the pad's per-instance
+        // radius in [minRadius, radius] instead (like the vortex well), so authors can lay big
+        // stable stones or tight skip-stones. paintLilyPadShape draws the notched leaf at that size.
+        key: "lilyPad", label: "Lily Pads", shortcut: "y", railed: false, directional: false,
+        group: "boon", resizable: true, paint: paintLilyPadShape,
+        swatchPaint: function (ctx, size) {
+            // Cartoon-pop lily leaf (bright green, thick dark outline) with a little lotus bloom.
+            var cx = size / 2, cy = size / 2, r = size * 0.36;
+            ctx.save(); ctx.translate(cx, cy);
+            ctx.beginPath(); ctx.arc(0, 0, r, 0.42, 2 * Math.PI - 0.42); ctx.lineTo(0, 0); ctx.closePath();
+            ctx.fillStyle = "#56D06A"; ctx.fill();
+            ctx.strokeStyle = "#16331d"; ctx.lineWidth = 2.5; ctx.stroke();
+            var pr = r * 0.42;
+            ctx.fillStyle = "#f6b0cb";
+            for (var p = 0; p < 6; p++) { ctx.save(); ctx.rotate(p / 6 * Math.PI * 2); ctx.beginPath(); ctx.ellipse(0, -pr * 0.55, pr * 0.34, pr * 0.62, 0, 0, 2 * Math.PI); ctx.fill(); ctx.restore(); }
+            ctx.fillStyle = "#ffd24a"; ctx.beginPath(); ctx.arc(0, 0, pr * 0.34, 0, 2 * Math.PI); ctx.fill();
+            ctx.restore();
+        }
     }
 ];
 function editorHazardKindById(id) {
@@ -3965,11 +4240,16 @@ function rotateHandlePos() {
     var r = selectedObject.radius + 50;
     return pos({ x: selectedObject.x, y: selectedObject.y }, r, selectedObject.angle || 0);
 }
-// Resize handle: sits on the rim to the RIGHT of the centre, so dragging it
-// outward/inward grows/shrinks the radius. Clamped inside the canvas like delete.
+// Extra room between the pad rim and the resize handle so the handle never crowds the
+// centre move knob — even on the SMALLEST resizable object (the radius constraints are
+// unchanged; only the handle is pushed out). The resize DRAG subtracts this same gap, so
+// grabbing the handle never snaps the size.
+var RESIZE_HANDLE_GAP = 30;
+// Resize handle: sits a fixed gap BEYOND the rim to the RIGHT of the centre, so dragging it
+// outward/inward grows/shrinks the radius with room to spare. Clamped inside the canvas like delete.
 function resizeHandlePos() {
     var m = 16;
-    var x = Math.max(m, Math.min(createCanvas.width - m, selectedObject.x + selectedObject.radius));
+    var x = Math.max(m, Math.min(createCanvas.width - m, selectedObject.x + selectedObject.radius + RESIZE_HANDLE_GAP));
     var y = Math.max(m, Math.min(createCanvas.height - m, selectedObject.y));
     return { x: x, y: y };
 }
@@ -4020,8 +4300,20 @@ function drawHandleKnob(p, r, fill) {
 }
 function drawHazardHandles() {
     if (selectedResizable()) {
-        // Resize handle: a knob on the rim with a ↔ glyph, instead of the rotate knob.
+        // Resize handle: a knob sitting a gap BEYOND the rim with a ↔ glyph, instead of the
+        // rotate knob. A faint stem connects the rim to the handle so the pushed-out knob still
+        // reads as "drag this to resize".
         var sp = resizeHandlePos();
+        var rimX = selectedObject.x + selectedObject.radius;
+        createContext.save();
+        createContext.strokeStyle = "rgba(167,123,255,0.7)";
+        createContext.lineWidth = 2;
+        createContext.setLineDash([3, 3]);
+        createContext.beginPath();
+        createContext.moveTo(rimX, selectedObject.y);
+        createContext.lineTo(sp.x, sp.y);
+        createContext.stroke();
+        createContext.restore();
         drawHandleKnob(sp, 12, "#A77BFF");
         createContext.save();
         createContext.strokeStyle = "white";
@@ -4151,6 +4443,13 @@ function addObjectToMap(x, y, obj) {
     if (outsideMapBounds(x, y, radius)) {
         return;
     }
+    // Lily Pads are floating stepping-stones — they only make sense ON water. Reject a drop
+    // on dry ground (editorBoonOnWater reads the tile under the point) so an author can't
+    // place a pad that would never float on anything.
+    if (config.boons != null && config.boons.lilyPad != null && obj === config.boons.lilyPad.id
+        && !editorBoonOnWater(x, y)) {
+        return;
+    }
     if (vMap.hazards == undefined) {
         vMap.hazards = [];
     }
@@ -4160,6 +4459,12 @@ function addObjectToMap(x, y, obj) {
     var kind = editorHazardKindById(obj);
     if (kind != null && kind.resizable && cfg != null) {
         hazard.radius = defaultResizableRadius(cfg);
+    }
+    // Lily pads are a symmetric leaf with no gameplay direction — bake a random cosmetic
+    // rotation per pad so a cluster doesn't look stamped from one mould (the drawers rotate
+    // the leaf by this angle; it rides the existing angle wire slot, no extra storage).
+    if (config.boons != null && config.boons.lilyPad != null && obj === config.boons.lilyPad.id) {
+        hazard.angle = Math.round(Math.random() * 360);
     }
     vMap.hazards.push(hazard);
     pushHazardAddCommand(hazard);
@@ -4380,7 +4685,7 @@ function renderHazards() {
     var hazards = vMap.hazards;
     for (var i = 0; i < hazards.length; i++) {
         var hazard = hazards[i];
-        drawMyObject(hazard.x, hazard.y, hazard.id, hazard.angle, hazard.radius, hazard.pair);
+        drawMyObject(hazard.x, hazard.y, hazard.id, hazard.angle, hazard.radius, hazard.pair, hazard.length);
     }
 }
 

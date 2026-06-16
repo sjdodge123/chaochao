@@ -262,6 +262,91 @@ function getWarpLinks(map) {
     return result;
 }
 
+// Ziplines (a BOON, config.boons.zipline, id 959) are ONE-WAY carried cables: driving onto
+// the START post carries you SLOWLY (config.boons.zipline.speed px/s — deliberately slower
+// than driving) but UNTOUCHABLE + lava-immune to the FAR post, then drops you there with the
+// rail-direction momentum. Like a warp pad it CREATES an edge between two normally-unconnected
+// cells (so a bot routes THROUGH it as a shortcut, never a dead end), but it is DIRECTIONAL
+// (start -> far only) and the edge COSTS the RIDE TIME (length/speed seconds) — large because
+// the ride is slow — so Dijkstra only threads a zip when the driving detour it skips (e.g. the
+// long way around a lava chasm the cable spans) is even longer. Modelled as
+// startCellIndex -> { to: farCellIndex, rideSec }. Computed once per map and cached (non-enum).
+var ZIP_CRUISE_PX_PER_S = 83; // same measured cruise as warp — converts ride seconds into the
+// equivalent grass distance a kart could have driven in that time, so the edge cost is in the
+// same units as Dijkstra's geo cost and compares apples-to-apples with the driving detour.
+function ziplineRideSec(length) {
+    var cfg = (c.boons && c.boons.zipline) ? c.boons.zipline : {};
+    var speed = cfg.speed || 30;
+    return (speed > 0 ? (length || 0) / speed : 0);
+}
+function ziplineFarPoint(hz) {
+    var rad = (hz.angle || 0) * (Math.PI / 180);
+    return { x: hz.x + Math.cos(rad) * hz.length, y: hz.y + Math.sin(rad) * hz.length };
+}
+// A point is "in world" if it's finite and inside the playfield bounds. nearestCellIndex snaps
+// EVERY point to a real cell (even one far off-map → a bogus nearest), so off-world boon ends
+// must be rejected by bounds, not by a nearestCellIndex sentinel (it never returns one).
+function inWorld(x, y) {
+    return Number.isFinite(x) && Number.isFinite(y) && x >= 0 && x <= c.worldWidth && y >= 0 && y <= c.worldHeight;
+}
+function getZiplineLinks(map) {
+    if (!map || !Array.isArray(map.cells)) { return null; }
+    if (map._ziplineLinks !== undefined) { return map._ziplineLinks; }
+    var ZIP = (c.boons && c.boons.zipline != null) ? c.boons.zipline.id : -99999;
+    var hazards = Array.isArray(map.hazards) ? map.hazards : [];
+    var cells = map.cells;
+    var links = null;
+    for (var i = 0; i < hazards.length; i++) {
+        var hz = hazards[i];
+        if (hz == null || hz.id !== ZIP) { continue; }
+        if (typeof hz.x !== "number" || typeof hz.y !== "number") { continue; }
+        if (typeof hz.length !== "number" || !isFinite(hz.length) || hz.length <= 0) { continue; }
+        if (!Number.isFinite(hz.angle)) { continue; }
+        var far = ziplineFarPoint(hz);
+        // nearestCellIndex SNAPS any point (even one off the map) to its closest cell — for an
+        // off-world end that's a bogus cell, so reject an end outside the world explicitly here
+        // (validateMap also rejects authored ones; this guards the fairness/non-validated paths).
+        if (!inWorld(hz.x, hz.y) || !inWorld(far.x, far.y)) { continue; }
+        var a = nearestCellIndex(cells, { x: hz.x, y: hz.y });
+        var b = nearestCellIndex(cells, far);
+        if (a === b) { continue; } // both ends snap to one cell — no shortcut edge
+        if (links == null) { links = {}; }
+        if (links[a] == null) { links[a] = { to: b, rideSec: ziplineRideSec(hz.length) }; } // first wins
+    }
+    Object.defineProperty(map, '_ziplineLinks', { value: links, enumerable: false, writable: true, configurable: true });
+    return links;
+}
+
+// Lily pads (a BOON, config.boons.lilyPad, id 960) sit OVER water cells and make them SOLID to
+// SKIM across (the swim physics are suppressed while you're on a pad) — so a chain of pads is a
+// fast crossing of water that's otherwise a slow swim. Unlike a warp/zip they create NO new edge;
+// they just make their own water cell much cheaper to drive. Modelled as a set of water cell
+// INDICES that carry a pad, so both the Dijkstra weight and the par-time physics treat a padded
+// cell as ~ground instead of deep water — and bots route ACROSS a pad path instead of avoiding
+// the water. Cached non-enumerably. (A pad placed off water does nothing, so it's ignored here.)
+var LILY_PADDED_WEIGHT = 2.0; // padded water ≈ dirt: far cheaper than open water (tileWeight 6.5),
+// a touch above grass (1.0) because the pad sinks so you must keep moving — no camping a stone.
+function getLilyPaddedCells(map) {
+    if (!map || !Array.isArray(map.cells)) { return null; }
+    if (map._lilyPaddedCells !== undefined) { return map._lilyPaddedCells; }
+    var result = null;
+    var LILY = (c.boons && c.boons.lilyPad != null) ? c.boons.lilyPad.id : -99999;
+    var WATER = (c.tileMap.water != null) ? c.tileMap.water.id : -99999;
+    var hazards = Array.isArray(map.hazards) ? map.hazards : [];
+    var cells = map.cells;
+    for (var i = 0; i < hazards.length; i++) {
+        var hz = hazards[i];
+        if (hz == null || hz.id !== LILY) { continue; }
+        if (typeof hz.x !== "number" || typeof hz.y !== "number" || !inWorld(hz.x, hz.y)) { continue; }
+        var ci = nearestCellIndex(cells, { x: hz.x, y: hz.y });
+        if (cells[ci] == null || cells[ci].id !== WATER) { continue; } // off-water pad = inert
+        if (result == null) { result = {}; }
+        result[ci] = true;
+    }
+    Object.defineProperty(map, '_lilyPaddedCells', { value: result, enumerable: false, writable: true, configurable: true });
+    return result;
+}
+
 // Minimal binary min-heap of { node, cost }. A* / Dijkstra over ~250 cells is
 // cheap, but bots re-path repeatedly so a heap keeps it linearithmic.
 function Heap() {
@@ -346,6 +431,12 @@ function findPathToNearestGoal(map, point, options) {
     // path — used by the fairness layer to measure each pad's drive-distance to goal (and
     // hence whether a warp is a backward TRAP) without the warp shortening it circularly.
     var warpLinks = options.noWarp ? null : getWarpLinks(map);
+    // options.noZip disables the zipline shortcut edges (same role as noWarp) so the fairness
+    // layer can measure the pure-driving route a racer would take WITHOUT a cable.
+    var zipLinks = options.noZip ? null : getZiplineLinks(map);
+    // Lily pads make their water cell cheap to skim — always on (a pad is better FOOTING, not a
+    // shortcut edge, so it's part of the honest driving route even in the no-shortcut measure).
+    var lilyCells = getLilyPaddedCells(map);
     var LAVA = c.tileMap.lava.id;
     var GOAL = c.tileMap.goal.id;
     var EMPTY = c.tileMap.empty.id;
@@ -519,7 +610,10 @@ function findPathToNearestGoal(map, point, options) {
             // Crossing a solid barrier between these two cells: heavy soft penalty so
             // the route prefers going around the barrier's ends.
             var barr = (barrierMult > 1 && barrierEdges != null && barrierEdges.has(u + "|" + v)) ? barrierMult : 1;
-            var nc = cost[u] + step * tileWeight(cells[v].id) * cellJitter(cells[v].site.voronoiId) * pen * tight * barr;
+            // A lily pad over this water cell makes it solid to skim — price it like ~ground
+            // instead of deep water so bots route ACROSS a pad path rather than around the water.
+            var tw = (lilyCells != null && lilyCells[v]) ? LILY_PADDED_WEIGHT : tileWeight(cells[v].id);
+            var nc = cost[u] + step * tw * cellJitter(cells[v].site.voronoiId) * pen * tight * barr;
             if (nc < cost[v]) {
                 cost[v] = nc;
                 geo[v] = geo[u] + step;
@@ -545,6 +639,27 @@ function findPathToNearestGoal(map, point, options) {
                     geo[wv] = geo[u]; // teleport covers no geometric ground
                     prev[wv] = u;
                     heap.push(wv, wnc);
+                }
+            }
+        }
+        // Zipline shortcut: a ONE-WAY slow carried edge from this start-post cell to the far-
+        // post cell. Covers no ground (geo unchanged) but COSTS the ride time (length/speed),
+        // priced at the grass distance the kart could have driven in that time — so Dijkstra
+        // threads it only when the driving detour it skips is even longer. The ride is lava-
+        // immune (the span between can be anything), but the LANDING (far cell) must be a valid
+        // exit, just like a warp.
+        if (zipLinks != null && zipLinks[u] != null) {
+            var zv = zipLinks[u].to;
+            if (!done[zv] && cells[zv] != null && cells[zv].site != null &&
+                !((cells[zv].id === LAVA || cells[zv].id === EMPTY || cells[zv].id === DOOR) && cells[zv].id !== GOAL) &&
+                !(blocked && blocked[cells[zv].site.voronoiId])) {
+                var zipCost = zipLinks[u].rideSec * ZIP_CRUISE_PX_PER_S;
+                var znc = cost[u] + zipCost;
+                if (znc < cost[zv]) {
+                    cost[zv] = znc;
+                    geo[zv] = geo[u]; // the cable covers no geometric ground in the graph
+                    prev[zv] = u;
+                    heap.push(zv, znc);
                 }
             }
         }
@@ -591,7 +706,7 @@ function tilePhysics(id) {
 // server/game.js startRacing), and a cornering brake (a momentum car must slow
 // for sharp turns). This is the honest "walk the A* path with the player's
 // physics" par-time, replacing distance / a flat assumed speed.
-function estimatePathTime(map, path, noWarp) {
+function estimatePathTime(map, path, noWarp, noZip) {
     if (!map || !Array.isArray(map.cells) || !Array.isArray(path) || path.length < 2) {
         return 0;
     }
@@ -600,6 +715,13 @@ function estimatePathTime(map, path, noWarp) {
     // drive-time measurement passes this so two naturally-ADJACENT partner-pad cells on a
     // no-warp route can't be mistaken for a teleport hop (which would sneak transit time in).
     var warpLinks = noWarp ? null : getWarpLinks(map); // padA->padB hops, not driven
+    // noZip: same, for the one-way zipline hops (so the pure-driving measurement never credits
+    // a cable's slow carry as covered ground).
+    var zipLinks = noZip ? null : getZiplineLinks(map);
+    var zipSpeed = (c.boons && c.boons.zipline ? c.boons.zipline.speed : 30) || 30;
+    // Lily-padded water cells are driven as ~ground (skim), not deep water — so par reflects the
+    // faster crossing, matching the cheaper Dijkstra weight + the engine's solid-footing override.
+    var lilyCells = getLilyPaddedCells(map);
     // Reuse the adjacency cache's voronoiId->index table instead of rebuilding it per call
     // (this runs in the AI's per-re-path shortcut hot path on door maps).
     var idToIndex = getAdjacency(map).idToIndex;
@@ -608,7 +730,7 @@ function estimatePathTime(map, path, noWarp) {
         var ci = idToIndex[path[p]];
         if (ci == null) { continue; }
         var cell = cells[ci];
-        var ph = tilePhysics(cell.id);
+        var ph = (lilyCells != null && lilyCells[ci]) ? tilePhysics(c.tileMap.normal.id) : tilePhysics(cell.id);
         pts.push({ x: cell.site.x, y: cell.site.y, acel: ph.acel, drag: ph.drag, idx: ci });
     }
     if (pts.length < 2) { return 0; }
@@ -624,6 +746,14 @@ function estimatePathTime(map, path, noWarp) {
         if (warpLinks != null && a.idx != null && warpLinks[a.idx] === b.idx) {
             var hopDist = Math.sqrt((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y));
             t += warpTransitMs(hopDist) / 1000;
+            continue;
+        }
+        // A zipline hop (start cell -> far cell) covers no driven ground but COSTS the slow
+        // ride (length/speed = rideSec); the racer emerges at the slow carried speed, then
+        // re-accelerates on the next segment. No braking into it (boarding zeroes velocity).
+        if (zipLinks != null && a.idx != null && zipLinks[a.idx] != null && zipLinks[a.idx].to === b.idx) {
+            t += zipLinks[a.idx].rideSec;
+            v = zipSpeed;
             continue;
         }
         // Brake for the turn at waypoint `seg`: keep less speed the sharper it is. When
@@ -736,6 +866,10 @@ module.exports = {
     getBarrierBlockedEdges: getBarrierBlockedEdges,
     getWarpLinks: getWarpLinks,
     warpTransitMs: warpTransitMs,
+    getZiplineLinks: getZiplineLinks,
+    ziplineRideSec: ziplineRideSec,
+    ziplineFarPoint: ziplineFarPoint,
+    getLilyPaddedCells: getLilyPaddedCells,
     nearestCellIndex: nearestCellIndex,
     edgeSampleOrigins: edgeSampleOrigins,
     KART_WIDTH: KART_WIDTH,
