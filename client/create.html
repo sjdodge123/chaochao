@@ -436,6 +436,10 @@
       max-width: 1280px;
       margin: 0 auto;
       align-content: start;
+      /* Neutralise the legacy `float: left` from styles.css — a *floated* grid
+         container shrink-wraps to max-content, so on a phone it laid every card
+         out in one wide row (5 columns @ 1212px) and the page scrolled sideways. */
+      float: none;
     }
     #loadWindow.editor-hidden,
     #createWindow.editor-hidden {
@@ -630,6 +634,14 @@
         border-top: thin solid var(--border);
         justify-content: center;
         padding-bottom: calc(8px + var(--safe-bottom));
+      }
+      /* Let the groups themselves wrap. #editorTopbar wraps *groups*, but the
+         6-button action group is a single non-wrapping flex item — its 518px
+         min-content forced the whole editor wider than the phone, pushing
+         Copy/Upload off-screen. Wrapping per-group keeps every button reachable. */
+      #editorTopbar .ed-bar-group {
+        flex-wrap: wrap;
+        justify-content: center;
       }
       .ed-bar-spacer {
         display: none;

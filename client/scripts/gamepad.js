@@ -1410,7 +1410,41 @@ function updateTouchSettingsButtonVisibility() {
         return;
     }
     var touch = (typeof isTouchScreen !== "undefined" && isTouchScreen);
-    touchSettingsBtnEl.classList.toggle("visible", !!(touch && inFullscreen()));
+    var show = !!(touch && inFullscreen());
+    // Position BEFORE revealing so the gear never flashes at the 0,0 CSS fallback.
+    if (show) {
+        positionTouchSettingsButton();
+    }
+    touchSettingsBtnEl.classList.toggle("visible", show);
+}
+
+// Anchor the gear to the LETTERBOXED game canvas's top-right corner, stacked just
+// below the Fullscreen/Exit touch button (drawn in drawTouchControls). The gear was
+// previously pinned to screen-centre (left:50%), which collided with the centred
+// lobby status/sign-in banner. Screen-edge anchoring won't work either — the canvas
+// is letterboxed, so the screen corners fall in the black bars — hence we measure
+// the live canvas rect each layout. The offsets mirror layoutTouchControls()'s
+// top-right corner button (topInset 16 + hit zone 72 ≈ 88px tall, in CSS px).
+function positionTouchSettingsButton() {
+    if (!touchSettingsBtnEl) {
+        return;
+    }
+    var cv = (typeof gameCanvas !== "undefined" && gameCanvas) ||
+        (typeof document !== "undefined" ? document.getElementById("gameCanvas") : null);
+    if (!cv || !cv.getBoundingClientRect) {
+        return;
+    }
+    var r = cv.getBoundingClientRect();
+    if (!r.width || !r.height) {
+        return;
+    }
+    var SIZE = 48;          // matches the CSS width/height
+    var RIGHT_MARGIN = 16;  // layoutTouchControls' `margin`
+    var EXIT_ZONE_H = 88;   // topInset(16) + corner hit zone(72)
+    var GAP = 10;
+    touchSettingsBtnEl.style.left = Math.round(r.right - RIGHT_MARGIN - SIZE) + "px";
+    touchSettingsBtnEl.style.top = Math.round(r.top + EXIT_ZONE_H + GAP) + "px";
+    touchSettingsBtnEl.style.transform = "none";
 }
 
 function toggleTouchSettings() {

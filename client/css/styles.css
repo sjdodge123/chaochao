@@ -1424,12 +1424,15 @@ body.osk-open .gamepad-prompts {
 }
 /* Translucent settings (gear) button — shown only on touch while in fullscreen,
    where the navbar (and its settings controls) is hidden and there's no pad
-   Start button. Sits above the settings modal so it can also toggle it closed. */
+   Start button. Sits above the settings modal so it can also toggle it closed.
+   Top/left are set in JS (positionTouchSettingsButton) so the gear tracks the
+   LETTERBOXED game canvas's top-right corner — stacked under the Fullscreen/Exit
+   touch button and clear of the centred lobby status banner. The 0,0 fallback is
+   never seen: positioning runs before the `.visible` class is toggled on. */
 #touchSettingsBtn {
     position: fixed;
-    top: max(8px, env(safe-area-inset-top));
-    left: 50%;
-    transform: translateX(-50%);
+    top: 0;
+    left: 0;
     width: 48px;
     height: 48px;
     display: none;

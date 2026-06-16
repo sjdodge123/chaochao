@@ -33,6 +33,7 @@
         "test:perf-tick": "node .github/scripts/perf-tick-budget.js",
         "test:perf-client": "node .github/scripts/perf-client.js",
         "test:lint-buttons": "node .github/scripts/lint-button-input.js",
-        "test:button-gate": "node .github/scripts/button-gate.js"
+        "test:button-gate": "node .github/scripts/button-gate.js",
+        "test:mobile-layout": "node .github/scripts/mobile-layout-test.js"
     }
 }
