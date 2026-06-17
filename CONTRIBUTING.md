@@ -45,6 +45,20 @@ Without branch protection a direct push to `main` will still get a red check on 
 
 Note: if you enable "require a PR before merging" for `main`, the `sync-package-version` workflow won't be able to push its bump commit directly — swap its push step for `peter-evans/create-pull-request` or similar so it opens a PR instead.
 
+## Game mechanic changes must update the in-game Codex
+
+The Learn page (`learn.html` → `client/scripts/learn.js`, with its animations in `client/scripts/learnScenes.js`) is the in-game **Codex** — a player reference *and* the canonical plain-English description of how every mechanic behaves. It must not fall behind the game.
+
+For any player-facing mechanic change to `server/config.json` / `server/game.js` / `server/engine.js`, in the same PR:
+
+- **New mechanic** (a new hazard, boon, ability, brutal round, tile, or medal) → add a matching Codex **card** (`learn.js`) *and* its **scene** (`learnScenes.js`). Card ids follow `hazard-<key>` / `boon-<key>` / `ability-<key>` / `brutal-<key>` / `tile-<key>` / `medal-<key>`, key lower-cased.
+- **Changed mechanic** (an existing one retuned or reworked) → refresh the prose of its existing card so the description stays accurate.
+
+Two CI levers back this up:
+
+- **Coverage gate (required).** `.github/scripts/codex-coverage.js` (run in the `validate-content` job) fails the build if a new `config.hazards` / `config.boons` / ability / brutal / tile / medal entry has no card, or if any card's `anim` doesn't resolve to a real scene. A new mechanic without a card simply won't merge.
+- **Drift nudge (warn-only).** `Mechanic changes should update the Codex` (`.github/workflows/codex-drift-check.yml`) emits a `::warning::` when a mechanic file changes but neither `learn.js` nor `learnScenes.js` was touched — the case the static gate can't see (an existing mechanic reworked, no new key). It shares the release-notes gate's conventional-commit exemption and **does not fail the build** today; it can be promoted to required later.
+
 ## What doesn't need release notes
 
 Bug fixes that don't change observable behaviour, perf work, UI/CSS tweaks, build/CI changes, map JSON submissions through the editor, and refactors are exempt. If you're unsure, write the note — it's cheap, and players appreciate the changelog.

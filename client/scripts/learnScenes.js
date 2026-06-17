@@ -1091,6 +1091,308 @@ var LearnAnim = (function () {
             ctx.beginPath(); ctx.arc(W / 2 + Math.cos(i * 1.7) * 46, H / 2 + Math.sin(i * 2.3) * 34, 2 + a * 2, 0, 2 * Math.PI); ctx.fill(); ctx.globalAlpha = 1; }
     };
 
+    // ========================= HAZARDS =========================
+    // (hazard-bumper reuses SCENES["bumper"]; hazard-antlion reuses SCENES["antlion"].)
+
+    SCENES["movingBumper"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        var ctx = s.ctx, railY = H * 0.5, x0 = W * 0.2, x1 = W * 0.8;
+        var bx = lerp(x0, x1, ping(s.t, 2600));
+        ctx.save(); ctx.strokeStyle = "rgba(0,0,0,0.3)"; ctx.setLineDash([6, 6]); ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(x0, railY); ctx.lineTo(x1, railY); ctx.stroke(); ctx.restore();
+        var p = s.p; p.radius = 11; p.surface = "normal"; p.alive = true;
+        p.x = W * 0.5; p.y = lerp(H + 20, -20, loop(s.t, 2600)); p.velX = 0; p.velY = -MAXSPEED * 0.5;
+        updateMovementParticles(p, s.dt);
+        kart(ctx, p.x, p.y, p.radius, BLUE);
+        bumper(ctx, bx, railY, 11);
+    };
+
+    SCENES["bumperWall"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        var ctx = s.ctx, wallY = H * 0.5, x0 = W * 0.22, x1 = W * 0.78;
+        ctx.save(); ctx.strokeStyle = "#E5392B"; ctx.lineWidth = 6; ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(x0, wallY); ctx.lineTo(x1, wallY); ctx.stroke();
+        ctx.fillStyle = "orange";
+        for (var bx = x0; bx <= x1; bx += 24) { ctx.beginPath(); ctx.arc(bx, wallY, 6, 0, 2 * Math.PI); ctx.fill(); }
+        ctx.restore();
+        var ph = ping(s.t, 2200), p = s.p; p.radius = 11;
+        kart(ctx, W * 0.5, lerp(H - 16, wallY + 18, ease(ph)), p.radius, BLUE);
+        onCycle(s.mem, s.t - 1100, 2200, "kick", function () { spawnPunchEffect(W * 0.5, wallY + 14, 14, "#E5392B"); });
+    };
+
+    SCENES["rotor"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        var ctx = s.ctx, cx = W * 0.5, cy = H * 0.5, R = 44, a = s.t / 600;
+        var ex = cx + Math.cos(a) * R, ey = cy + Math.sin(a) * R;
+        ctx.save(); ctx.strokeStyle = "#7a7a7a"; ctx.lineWidth = 5; ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey); ctx.stroke();
+        ctx.fillStyle = "#555"; ctx.beginPath(); ctx.arc(cx, cy, 5, 0, 2 * Math.PI); ctx.fill(); ctx.restore();
+        bumper(ctx, ex, ey, 10);
+        var op = a + Math.PI;       // a kart waiting safely opposite the swinging arm
+        kart(ctx, cx + Math.cos(op) * R, cy + Math.sin(op) * R, 10, BLUE);
+    };
+
+    SCENES["geyser"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        var ctx = s.ctx, gx = W * 0.5, gy = H * 0.58, ph = loop(s.t, 3000);
+        ctx.save(); ctx.fillStyle = "#3a4750"; ctx.beginPath(); ctx.arc(gx, gy, 12, 0, 2 * Math.PI); ctx.fill();
+        ctx.strokeStyle = "#222"; ctx.lineWidth = 2; ctx.stroke(); ctx.restore();
+        if (ph > 0.5 && ph < 0.72) { var c = (ph - 0.5) / 0.22; ctx.save(); ctx.globalAlpha = 0.6 * c; ctx.strokeStyle = "#9fdcff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(gx, gy, 8 + c * 16, 0, 2 * Math.PI); ctx.stroke(); ctx.restore(); }
+        var p = s.p; p.radius = 11; var erupt = ph >= 0.72;
+        kart(ctx, gx, erupt ? gy - ease(clamp((ph - 0.72) / 0.28, 0, 1)) * 60 : gy - 16, p.radius, BLUE);
+        onCycle(s.mem, s.t - 0.72 * 3000, 3000, "erupt", function () { spawnExplosion(gx, gy, 40, "#9fe8ff"); });
+    };
+
+    SCENES["mine"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        var ctx = s.ctx, mx = W * 0.6, my = H * 0.5, ph = loop(s.t, 3200);
+        ctx.save(); ctx.strokeStyle = "rgba(229,57,43,0.4)"; ctx.setLineDash([4, 4]); ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(mx, my, 34, 0, 2 * Math.PI); ctx.stroke(); ctx.restore();
+        var armed = ph > 0.4 && ph < 0.62, blink = armed && (Math.floor(s.t / 120) % 2 === 0);
+        ctx.save(); ctx.fillStyle = blink ? "#ff4030" : "#7a2018"; ctx.beginPath(); ctx.arc(mx, my, 9, 0, 2 * Math.PI); ctx.fill();
+        ctx.strokeStyle = "#2a0c08"; ctx.lineWidth = 2; ctx.stroke(); ctx.restore();
+        var p = s.p; p.radius = 11; var kx, ky = my;
+        if (ph < 0.62) { kx = lerp(W * 0.1, mx - 22, ease(clamp(ph / 0.62, 0, 1))); }
+        else { var e = ease(clamp((ph - 0.62) / 0.38, 0, 1)); kx = lerp(mx - 22, W * 0.05, e); ky = my - e * 30; }
+        kart(ctx, kx, ky, p.radius, BLUE);
+        onCycle(s.mem, s.t - 0.62 * 3200, 3200, "boom", function () { spawnExplosion(mx, my, 56, "#ff7a18"); });
+    };
+
+    SCENES["thumper"] = function (s) {
+        floor(s.ctx, "sand.png", 60);
+        var ctx = s.ctx, tx = W * 0.5, ty = H * 0.52, ringR = 46, slam = Math.max(0, 1 - loop(s.t, 950) * 4);
+        ctx.save(); ctx.setLineDash([5, 5]); ctx.strokeStyle = "#c9a23a"; ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.25 + 0.5 * slam; ctx.beginPath(); ctx.arc(tx, ty, ringR, 0, 2 * Math.PI); ctx.stroke(); ctx.restore();
+        ctx.save(); ctx.fillStyle = "#6b6e72"; ctx.fillRect(tx - 14, ty - 14, 28, 28);
+        ctx.fillStyle = "#767e88"; ctx.beginPath(); ctx.arc(tx, ty, 8 + slam * 4, 0, 2 * Math.PI); ctx.fill();
+        ctx.strokeStyle = "#454c55"; ctx.lineWidth = 2; ctx.stroke(); ctx.restore();
+        kart(ctx, tx + 24, ty, 10, BLUE);       // a kart sheltering inside the ring
+        onCycle(s.mem, s.t, 950, "thump", function () { spawnPunchEffect(tx, ty, 16, "#c9a23a"); });
+    };
+
+    SCENES["vortexWell"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        var ctx = s.ctx, cx = W * 0.5, cy = H * 0.5, R = 50;
+        ctx.save(); ctx.strokeStyle = "#A77BFF"; ctx.globalAlpha = 0.5; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(cx, cy, R, 0, 2 * Math.PI); ctx.stroke();
+        for (var i = 0; i < 10; i++) { var a = i * 0.9 + s.t / 500, rr = R * (1 - loop(s.t / 1000 + i * 0.1, 1));
+            ctx.globalAlpha = 0.8 * (rr / R); ctx.fillStyle = "#C9A9FF";
+            ctx.beginPath(); ctx.arc(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr, 2, 0, 2 * Math.PI); ctx.fill(); }
+        ctx.globalAlpha = 0.6; ctx.fillStyle = "rgba(40,20,70,0.6)"; ctx.beginPath(); ctx.arc(cx, cy, 12, 0, 2 * Math.PI); ctx.fill(); ctx.restore();
+        kart(ctx, lerp(-20, W + 20, loop(s.t, 2400)), cy - R - 6, 11, BLUE);  // slingshots safely past the rim
+    };
+
+    SCENES["laserGate"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        var ctx = s.ctx, gx = W * 0.5, y0 = 16, y1 = H - 16, ph = loop(s.t, 2800);
+        var warn = ph > 0.42 && ph <= 0.55, solid = ph > 0.55;
+        ctx.save(); ctx.fillStyle = "#2a6b78"; ctx.fillRect(gx - 6, y0 - 8, 12, 12); ctx.fillRect(gx - 6, y1 - 4, 12, 12);
+        if (warn || solid) {
+            ctx.globalAlpha = solid ? 0.95 : (0.35 + 0.4 * Math.abs(Math.sin(s.t / 55)));
+            ctx.strokeStyle = solid ? "#42E0FF" : "#bff4ff"; ctx.lineWidth = solid ? 5 : 2;
+            ctx.lineCap = "round"; ctx.shadowColor = "#42E0FF"; ctx.shadowBlur = solid ? 10 : 0;
+            ctx.beginPath(); ctx.moveTo(gx, y0); ctx.lineTo(gx, y1); ctx.stroke();
+        }
+        ctx.restore();
+        var p = s.p; p.radius = 11; var kx = ph < 0.4 ? lerp(-22, W + 22, ease(ph / 0.4)) : W + 40;  // darts through the open gap
+        if (kx <= W + 20) { p.x = kx; p.y = H * 0.5; p.velX = MAXSPEED * 0.6; p.velY = 0; updateMovementParticles(p, s.dt); kart(ctx, kx, H * 0.5, p.radius, BLUE); }
+    };
+
+    SCENES["crusher"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        var ctx = s.ctx, cy = H * 0.5, ph = ping(s.t, 2000), slabX = lerp(W * 0.3, W * 0.7, ease(ph));
+        ctx.save(); ctx.fillStyle = "#9AA0A6"; ctx.fillRect(slabX - 22, cy - 16, 44, 32);
+        ctx.strokeStyle = "#5a5e64"; ctx.lineWidth = 2; ctx.strokeRect(slabX - 22, cy - 16, 44, 32);
+        ctx.fillStyle = "#e8b800"; for (var i = 0; i < 4; i++) { ctx.fillRect(slabX - 18 + i * 11, cy - 16, 6, 5); }
+        ctx.restore();
+        var p = s.p; p.radius = 10; var safeX = slabX < W * 0.5 ? W * 0.72 : W * 0.28;  // slips through the side the slab vacated
+        kart(ctx, safeX, lerp(-18, H + 18, loop(s.t, 2000)), p.radius, BLUE);
+        onCycle(s.mem, s.t - 1000, 2000, "slam", function () { spawnPunchEffect(W * 0.7, cy, 14, "#9AA0A6"); });
+    };
+
+    SCENES["sentryTurret"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        var ctx = s.ctx, tx = W * 0.3, ty = H * 0.5, ph = loop(s.t, 2800);
+        var p = s.p; p.radius = 11; var kx = lerp(W * 0.55, W * 0.92, ping(s.t, 4000)), ky = H * 0.5 + Math.sin(s.t / 600) * 22;
+        var ang = Math.atan2(ky - ty, kx - tx), charging = ph > 0.45 && ph < 0.62;
+        ctx.save(); ctx.fillStyle = "#5a2222"; ctx.beginPath(); ctx.arc(tx, ty, 14, 0, 2 * Math.PI); ctx.fill();
+        ctx.translate(tx, ty); ctx.rotate(ang);
+        ctx.fillStyle = charging ? "#ff8a3a" : "#FF5C5C"; ctx.fillRect(0, -4, 26, 8);
+        if (charging) { ctx.globalAlpha = 0.6; ctx.fillStyle = "#ffd24a"; ctx.beginPath(); ctx.arc(26, 0, 4 + (ph - 0.45) / 0.17 * 5, 0, 2 * Math.PI); ctx.fill(); }
+        ctx.restore();
+        kart(ctx, kx, ky, p.radius, BLUE);
+        onCycle(s.mem, s.t - 0.62 * 2800, 2800, "fire", function () { spawnMuzzleFlash(tx + Math.cos(ang) * 26, ty + Math.sin(ang) * 26, ang * 180 / Math.PI, "#ffd24a"); spawnHitEffect(kx, ky, "#ff8a3a"); });
+    };
+
+    SCENES["magpieDrone"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        var ctx = s.ctx, ph = loop(s.t, 4000), railY = H * 0.32, dx = lerp(W * 0.2, W * 0.8, ping(s.t, 4000));
+        ctx.save(); ctx.strokeStyle = "rgba(0,0,0,0.3)"; ctx.setLineDash([6, 6]); ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(W * 0.2, railY); ctx.lineTo(W * 0.8, railY); ctx.stroke(); ctx.restore();
+        var stolen = ph > 0.5, p = s.p; p.radius = 11; var kx = W * 0.5, ky = H * 0.7;
+        kart(ctx, kx, ky, p.radius, BLUE);
+        if (!stolen) { var bob = Math.sin(s.t / 300) * 3; ctx.save(); ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.beginPath(); ctx.arc(kx, ky - 22 + bob, 10, 0, 2 * Math.PI); ctx.fill();
+            var bi = img("bomb.svg"); if (ready(bi)) { ctx.drawImage(bi, kx - 7, ky - 29 + bob, 14, 14); } ctx.restore(); }
+        ctx.save(); ctx.translate(dx, railY); ctx.fillStyle = "#5B6CC4"; ctx.beginPath(); ctx.ellipse(0, 0, 14, 9, 0, 0, 2 * Math.PI); ctx.fill();
+        ctx.strokeStyle = "#2e386e"; ctx.lineWidth = 2; ctx.stroke();
+        ctx.strokeStyle = "#9aa6e0"; ctx.beginPath(); ctx.moveTo(-16, -9); ctx.lineTo(-8, -9); ctx.moveTo(8, -9); ctx.lineTo(16, -9); ctx.stroke(); ctx.restore();
+        if (stolen) { var bi2 = img("bomb.svg"), lb = Math.sin(s.t / 220) * 3; if (ready(bi2)) { ctx.drawImage(bi2, dx - 8, railY - 24 + lb, 16, 16); } }
+        onCycle(s.mem, s.t - 0.5 * 4000, 4000, "steal", function () { spawnTeleportPuff(kx, ky - 22, "#5B6CC4"); });
+    };
+
+    // ========================= BOONS =========================
+
+    SCENES["dashArrows"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        var ctx = s.ctx, cy = H * 0.5;
+        for (var i = 0; i < 4; i++) { var ax = W * 0.32 + i * 26, glow = 0.4 + 0.6 * Math.max(0, Math.sin(s.t / 200 - i * 0.6));
+            ctx.save(); ctx.globalAlpha = glow; ctx.strokeStyle = "#3FC1C9"; ctx.lineWidth = 4; ctx.lineCap = "round"; ctx.lineJoin = "round";
+            ctx.beginPath(); ctx.moveTo(ax - 8, cy - 9); ctx.lineTo(ax + 8, cy); ctx.lineTo(ax - 8, cy + 9); ctx.stroke(); ctx.restore(); }
+        var p = s.p; p.radius = 11; p.surface = "normal"; p.alive = true; p.speedBuffUntil = 1e15;
+        if (p.x == null || p.x > W + 30) { p.x = -30; p.y = cy; }
+        drive(p, 1, 0, MAXSPEED * 0.85, 140, s.dt);
+        updateMovementParticles(p, s.dt); drawSpeedFx(ctx, p, s.t);
+        kart(ctx, p.x, p.y, p.radius, BLUE);
+    };
+
+    SCENES["rechargeSpring"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        var ctx = s.ctx, gx = W * 0.5, gy = H * 0.5, ph = loop(s.t, 3200);
+        ctx.save(); ctx.fillStyle = "#1d6b4a"; ctx.beginPath(); ctx.arc(gx, gy, 24, 0, 2 * Math.PI); ctx.fill();
+        var fill = ph < 0.5 ? 1 : clamp((ph - 0.5) / 0.4, 0, 1);     // drained on claim, refills to ready
+        ctx.strokeStyle = "#5BE3A0"; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(gx, gy, 24, -Math.PI / 2, -Math.PI / 2 + fill * 2 * Math.PI); ctx.stroke();
+        if (fill >= 1) { ctx.globalAlpha = 0.4 * (0.5 + 0.5 * Math.sin(s.t / 200)); ctx.beginPath(); ctx.arc(gx, gy, 28, 0, 2 * Math.PI); ctx.stroke(); }
+        ctx.restore();
+        kart(ctx, lerp(-20, W + 20, loop(s.t, 3200)), gy, 11, BLUE);
+        onCycle(s.mem, s.t - 0.5 * 3200, 3200, "claim", function () { spawnTeleportPuff(gx, gy, "#5BE3A0"); });
+    };
+
+    SCENES["slipstream"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        var ctx = s.ctx, cy = H * 0.5, x0 = W * 0.18, x1 = W * 0.82, half = 26;
+        ctx.save(); ctx.fillStyle = "rgba(127,216,255,0.12)"; ctx.fillRect(x0, cy - half, x1 - x0, half * 2);
+        ctx.strokeStyle = "#7FD8FF"; ctx.lineCap = "round"; ctx.lineWidth = 2; ctx.globalAlpha = 0.7;
+        for (var i = 0; i < 4; i++) { var sy = cy - half + 10 + i * 12, sx = lerp(x0, x1 - 30, loop(s.t / 900 + i * 0.2, 1));
+            ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + 22, sy); ctx.stroke(); }
+        ctx.restore();
+        var p = s.p; p.radius = 11; p.surface = "normal"; p.alive = true;
+        if (p.x == null || p.x > x1) { p.x = x0; p.y = cy; }
+        drive(p, 1, 0, MAXSPEED * 0.5, 75, s.dt);
+        updateMovementParticles(p, s.dt);
+        kart(ctx, p.x, p.y, p.radius, BLUE);
+    };
+
+    SCENES["guardHalo"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        var ctx = s.ctx, hx = W * 0.4, hy = H * 0.5, ph = loop(s.t, 3600), taken = ph > 0.4, popped = ph > 0.8;
+        if (!taken) { ctx.save(); ctx.strokeStyle = "#FFD166"; ctx.lineWidth = 4; ctx.globalAlpha = 0.5 + 0.4 * Math.sin(s.t / 220);
+            ctx.beginPath(); ctx.arc(hx, hy, 16 + Math.sin(s.t / 300) * 2, 0, 2 * Math.PI); ctx.stroke(); ctx.restore(); }
+        var p = s.p; p.radius = 11; var kx = lerp(W * 0.15, W * 0.85, ease(ph)), ky = hy;
+        kart(ctx, kx, ky, p.radius, BLUE);
+        if (taken && !popped) { ctx.save(); ctx.strokeStyle = "#FFE08A"; ctx.lineWidth = 2; ctx.globalAlpha = 0.7;
+            ctx.beginPath(); ctx.arc(kx, ky, p.radius + 5, 0, 2 * Math.PI); ctx.stroke();
+            ctx.globalAlpha = 0.15; ctx.fillStyle = "#FFD166"; ctx.beginPath(); ctx.arc(kx, ky, p.radius + 5, 0, 2 * Math.PI); ctx.fill(); ctx.restore(); }
+        onCycle(s.mem, s.t - 0.8 * 3600, 3600, "pop", function () { spawnHitEffect(W * 0.78, hy, "#FFD166"); });
+    };
+
+    SCENES["secondWindTotem"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        var ctx = s.ctx, fx = W * 0.7, fy = H * 0.5, ph = loop(s.t, 4200), attuned = ph > 0.25;
+        ctx.save(); ctx.strokeStyle = "#8a8f98"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(fx, fy - 26); ctx.lineTo(fx, fy + 18); ctx.stroke();
+        ctx.fillStyle = attuned ? BLUE : "#CBD2DC"; var wav = Math.sin(s.t / 200) * 3;
+        ctx.beginPath(); ctx.moveTo(fx, fy - 26); ctx.lineTo(fx + 22, fy - 21 + wav); ctx.lineTo(fx, fy - 12); ctx.closePath(); ctx.fill(); ctx.restore();
+        var p = s.p; p.radius = 11; var kx, ky = fy, dead = ph > 0.55 && ph < 0.7;
+        if (ph < 0.45) { kx = lerp(W * 0.1, fx - 20, ease(ph / 0.45)); }
+        else if (ph < 0.55) { kx = lerp(fx - 20, W * 0.2, ease((ph - 0.45) / 0.1)); }
+        else if (dead) { kx = null; }
+        else { kx = fx - 20; }
+        if (kx != null) { kart(ctx, kx, ky, p.radius, BLUE); }
+        onCycle(s.mem, s.t - 0.55 * 4200, 4200, "die", function () { spawnExplosion(W * 0.2, fy, 36, "#cf1020"); });
+        onCycle(s.mem, s.t - 0.7 * 4200, 4200, "respawn", function () { spawnTeleportPuff(fx - 20, fy, BLUE); });
+    };
+
+    SCENES["launchPad"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        var ctx = s.ctx, px = W * 0.25, py = H * 0.7, ph = loop(s.t, 3000), ex = W * 0.85, ey = H * 0.35;
+        ctx.save(); ctx.translate(px, py); ctx.rotate(-Math.PI / 4); ctx.fillStyle = "#FF8C42"; ctx.globalAlpha = 0.85;
+        for (var i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(-10, -14 + i * 9); ctx.lineTo(0, -8 + i * 9); ctx.lineTo(10, -14 + i * 9); ctx.lineTo(10, -11 + i * 9); ctx.lineTo(0, -5 + i * 9); ctx.lineTo(-10, -11 + i * 9); ctx.closePath(); ctx.fill(); }
+        ctx.restore();
+        var p = s.p; p.radius = 11; var aloft = ph >= 0.4, kx, ky;
+        if (!aloft) { kx = lerp(W * 0.05, px, ease(ph / 0.4)); ky = py; }
+        else { var t = clamp((ph - 0.4) / 0.45, 0, 1); kx = lerp(px, ex, t); ky = lerp(py, ey, t) - Math.sin(t * Math.PI) * 40; }
+        if (aloft && ph < 0.85) { ctx.save(); ctx.globalAlpha = 0.3; ctx.fillStyle = "#FFB870"; ctx.beginPath(); ctx.arc(kx, ky, p.radius + 6, 0, 2 * Math.PI); ctx.fill(); ctx.restore(); }
+        kart(ctx, kx, ky, p.radius, BLUE);
+        onCycle(s.mem, s.t - 0.4 * 3000, 3000, "launch", function () { spawnPunchEffect(px, py, 16, "#FF8C42"); });
+    };
+
+    SCENES["barrelCannon"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        var ctx = s.ctx, bx = W * 0.35, by = H * 0.5, ph = loop(s.t, 3400);
+        var loaded = ph > 0.3 && ph < 0.78, fired = ph >= 0.78;
+        var aim = loaded ? (-Math.PI / 2 + Math.sin(s.t / 300) * 1.2) : -Math.PI / 4;
+        ctx.save(); ctx.translate(bx, by); ctx.rotate(aim + Math.PI / 2);
+        ctx.fillStyle = "#C8743C"; ctx.fillRect(-12, -26, 24, 34);
+        ctx.strokeStyle = "#7a431f"; ctx.lineWidth = 2; ctx.strokeRect(-12, -26, 24, 34);
+        ctx.strokeStyle = "#a55a2c"; ctx.beginPath(); ctx.moveTo(-12, -10); ctx.lineTo(12, -10); ctx.moveTo(-12, 2); ctx.lineTo(12, 2); ctx.stroke(); ctx.restore();
+        var p = s.p; p.radius = 11;
+        if (!loaded && !fired) { kart(ctx, lerp(W * 0.05, bx, ease(clamp(ph / 0.3, 0, 1))), by, p.radius, BLUE); }
+        else if (loaded) { ctx.save(); ctx.fillStyle = "#ffd24a"; ctx.globalAlpha = 0.6 + 0.4 * Math.sin(s.t / 80); ctx.beginPath(); ctx.arc(bx, by, 4, 0, 2 * Math.PI); ctx.fill(); ctx.restore(); }
+        else { var t = clamp((ph - 0.78) / 0.22, 0, 1); kart(ctx, bx + Math.cos(aim) * 120 * t, by + Math.sin(aim) * 120 * t - Math.sin(t * Math.PI) * 20, p.radius, BLUE); }
+        onCycle(s.mem, s.t - 0.78 * 3400, 3400, "fire", function () { spawnMuzzleFlash(bx, by, aim * 180 / Math.PI, "#ffd24a"); });
+    };
+
+    SCENES["slingshotRings"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        var ctx = s.ctx, cy = H * 0.5, rings = [W * 0.45, W * 0.62];
+        for (var i = 0; i < rings.length; i++) { ctx.save(); ctx.strokeStyle = "#C77DFF"; ctx.lineWidth = 3; ctx.globalAlpha = 0.85;
+            ctx.beginPath(); ctx.ellipse(rings[i], cy, 9, 20, 0, 0, 2 * Math.PI); ctx.stroke(); ctx.restore(); }
+        var p = s.p; p.radius = 11; p.surface = "normal"; p.alive = true; p.speedBuffUntil = 1e15;
+        if (p.x == null || p.x > W + 30) { p.x = -30; p.y = cy; p.prevX = null; }
+        drive(p, 1, 0, MAXSPEED * 0.8, 130, s.dt);
+        updateMovementParticles(p, s.dt); drawSpeedFx(ctx, p, s.t);
+        for (var j = 0; j < rings.length; j++) { if (p.prevX != null && p.prevX < rings[j] && p.x >= rings[j]) { spawnTeleportPuff(rings[j], cy, "#C77DFF"); } }
+        p.prevX = p.x;
+        kart(ctx, p.x, p.y, p.radius, BLUE);
+    };
+
+    SCENES["warpPad"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        var ctx = s.ctx, ax = W * 0.25, ay = H * 0.65, bx = W * 0.78, by = H * 0.35, ph = loop(s.t, 3600);
+        function portal(x, y) { ctx.save(); var sw = 0.6 + 0.4 * Math.sin(s.t / 200);
+            var g = ctx.createRadialGradient(x, y, 2, x, y, 18); g.addColorStop(0, "#E9C8FF"); g.addColorStop(1, "#C24DFF");
+            ctx.globalAlpha = 0.5 + 0.3 * sw; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 18, 0, 2 * Math.PI); ctx.fill();
+            ctx.globalAlpha = 0.9; ctx.strokeStyle = "#C24DFF"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 18, 0, 2 * Math.PI); ctx.stroke(); ctx.restore(); }
+        portal(ax, ay); portal(bx, by);
+        var p = s.p; p.radius = 11; var inTransit = ph > 0.4 && ph < 0.62;
+        if (ph <= 0.4) { kart(ctx, lerp(W * 0.05, ax, ease(ph / 0.4)), ay, p.radius, BLUE); }
+        else if (!inTransit) { kart(ctx, lerp(bx, W * 0.95, ease(clamp((ph - 0.62) / 0.38, 0, 1))), by, p.radius, BLUE); }
+        onCycle(s.mem, s.t - 0.4 * 3600, 3600, "in", function () { spawnTeleportPuff(ax, ay, "#C24DFF"); });
+        onCycle(s.mem, s.t - 0.62 * 3600, 3600, "out", function () { spawnTeleportPuff(bx, by, "#C24DFF"); });
+    };
+
+    SCENES["zipline"] = function (s) {
+        floor(s.ctx, "dirt.png", 60);
+        var ctx = s.ctx, x0 = W * 0.18, y0 = H * 0.32, x1 = W * 0.82, y1 = H * 0.6, ph = loop(s.t, 3600);
+        ctx.save(); ctx.strokeStyle = "#7a5a1f"; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(x0, y0 + 20); ctx.lineTo(x0, y0 - 6); ctx.moveTo(x1, y1 + 20); ctx.lineTo(x1, y1 - 6); ctx.stroke();
+        ctx.strokeStyle = "#F2C14E"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); ctx.restore();
+        var p = s.p; p.radius = 11; var t = ease(ph), cableY = lerp(y0, y1, t), kx = lerp(x0, x1, t), ky = cableY + 12;
+        ctx.save(); ctx.strokeStyle = "#caa"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(kx, cableY); ctx.lineTo(kx, ky - p.radius); ctx.stroke(); ctx.restore();
+        kart(ctx, kx, ky, p.radius, BLUE);
+    };
+
+    SCENES["lilyPad"] = function (s) {
+        var ctx = s.ctx; ctx.fillStyle = "#2f6fb0"; ctx.fillRect(0, 0, W, H);
+        var pads = [W * 0.25, W * 0.5, W * 0.75], cy = H * 0.5, p = s.p; p.radius = 11;
+        var kx = lerp(W * 0.1, W * 0.9, loop(s.t, 3000)), ky = cy;
+        for (var i = 0; i < pads.length; i++) { var px = pads[i], on = Math.abs(kx - px) < 22;
+            var sink = on ? clamp(1 - Math.abs(kx - px) / 22, 0, 1) * 0.45 : 0, r = 20 * (1 - sink * 0.3);
+            ctx.save(); ctx.globalAlpha = 1 - sink; ctx.fillStyle = "#56D06A"; ctx.beginPath(); ctx.arc(px, cy, r, 0, 2 * Math.PI); ctx.fill();
+            ctx.strokeStyle = "#2f8a40"; ctx.lineWidth = 2; ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(px, cy); ctx.lineTo(px + r * 0.7, cy - 6); ctx.stroke(); ctx.restore(); }
+        kart(ctx, kx, ky, p.radius, BLUE);
+    };
+
     SCENES["_blank"] = function (s) { floor(s.ctx, "dirt.png", 60); };
 
     // ========================= engine =========================
