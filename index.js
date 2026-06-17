@@ -143,7 +143,7 @@ function loadWeeklyNews() {
         var weekMonday = null;     // week of the topmost release section
         var inWeek = false;        // currently scanning a section in that week
         var headline = null;       // [headline]-marked bullet (first wins)
-        var firstBullet = null;    // fallback: first bullet of the week
+        var firstLead = null;      // fallback: first bullet's bold lead-in
         // Accepts "[headline]" and "[headline:Short Name]" (the optional name
         // only labels the digest title; the banner shows the bullet text). Keep
         // in lockstep with HEADLINE_RE in .github/scripts/changelog-lib.mjs.
@@ -163,12 +163,20 @@ function loadWeeklyNews() {
                 return t.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1') // [text](url) -> text
                     .replace(/[*`_]/g, '').trim();              // strip emphasis/code
             };
-            if (firstBullet === null) firstBullet = clean(line.slice(2));
+            // Fallback when no bullet is flagged: show the first bullet's BOLD
+            // lead-in (e.g. "New hazard: Magpie Drone") rather than the whole
+            // paragraph truncated mid-sentence. Falls back to the full text when
+            // a bullet has no bold lead-in.
+            if (firstLead === null) {
+                var raw = line.slice(2);
+                var bold = raw.match(/\*\*(.+?)\*\*/);
+                firstLead = clean(bold ? bold[1] : raw);
+            }
             if (headline === null && headlineRe.test(line)) {
                 headline = clean(line.replace(headlineRe, ''));
             }
         }
-        var text = headline || firstBullet;
+        var text = headline || firstLead;
         if (!text || !weekMonday) return null;
         return { headline: truncateHeadline(text), weekTag: 'week-' + weekMonday };
     } catch (e) {
