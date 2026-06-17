@@ -434,18 +434,20 @@ var LearnAnim = (function () {
         sentryTurret: { barrelLength: 28, radius: 18, color: "#FF5C5C" },
         magpieDrone: { radius: 16, railLength: 170 }
     };
+    // colorWater (the on-water palette) is intentionally omitted: the Codex always
+    // draws on land (boonOnWater is hard-false), so no drawer reads it here.
     var BN = {
         warpPad: { radius: 30 },
         dashArrows: { width: 70, height: 46, color: "#3FC1C9" },
-        rechargeSpring: { radius: 28, color: "#5BE3A0", colorWater: "#EAFBFF" },
-        slipstream: { width: 110, height: 70, color: "#7FD8FF", colorWater: "#EAF8FF" },
-        launchPad: { radius: 26, color: "#FF8C42", colorWater: "#FFD8A8" },
-        barrelCannon: { radius: 30, color: "#C8743C", colorWater: "#E6B88A" },
-        slingshotRings: { radius: 34, color: "#C77DFF", colorWater: "#E9D4FF" },
-        zipline: { minLength: 140, color: "#F2C14E", colorWater: "#FBE8B0" },
+        rechargeSpring: { radius: 28, color: "#5BE3A0" },
+        slipstream: { width: 110, height: 70, color: "#7FD8FF" },
+        launchPad: { radius: 26, color: "#FF8C42" },
+        barrelCannon: { radius: 30, color: "#C8743C" },
+        slingshotRings: { radius: 34, color: "#C77DFF" },
+        zipline: { minLength: 140, color: "#F2C14E" },
         lilyPad: { radius: 46, color: "#56D06A" },
-        guardHalo: { radius: 26, color: "#FFD166", colorWater: "#FFF3C4" },
-        secondWindTotem: { radius: 28, color: "#CBD2DC", colorWater: "#EAF1FA" }
+        guardHalo: { radius: 26, color: "#FFD166" },
+        secondWindTotem: { radius: 28, color: "#CBD2DC" }
     };
 
     // ---- Hazards (PORT: draw.js) ----
@@ -839,10 +841,11 @@ var LearnAnim = (function () {
     }
 
     // ---- Thumper (PORT: draw.js buildThumperSprites + drawThumperHazard). The
-    //      slam-cycle/repel values are baked (config.brutalRounds.antlion). ----
+    //      slam-cycle/repel values mirror config.brutalRounds.antlion
+    //      (thumperPeriod/repelRadius) so the card's cadence + ring match the game. ----
     var THUMPER_SPAN = 122, THUMPER_WORLD_SPAN = 100, THUMPER_BULK = 1.22, THUMPER_HEAD_PX = 128;
     var THUMPER_PAL = { pad: "#6b6e72", padDark: "#44474b", metal: "#767e88", metalDark: "#454c55", slab: "#5f6873", stripe: "#c9a23a", stripeDark: "#26262a", rust: "#704832", light: "#ff7030", dust: "#a8a298", glow: "#ffb060" };
-    var THUMP_CFG = { thumperPeriod: 1.0, repelRadius: 70 };
+    var THUMP_CFG = { thumperPeriod: 1.9, repelRadius: 110 };
     var thumperPadSprite = null, thumperHeadSprite = null;
     function buildThumperSprites() {
         var P = THUMPER_PAL, B = THUMPER_BULK, E = 22 * B, PI = Math.PI;
@@ -1665,8 +1668,7 @@ var LearnAnim = (function () {
         var c = s.ctx; c.save(); c.translate(120, 70); c.scale(0.62, 0.62);
         var ph = loop(s.t, 2800), state = ph < 0.5 ? 0 : ph < 0.62 ? 1 : 2;
         pl_laserGate(0, -75, 90, state);
-        var kx = ph < 0.4 ? lerp(-110, 110, ease(ph / 0.4)) : 999;
-        if (kx <= 130) { kart(c, kx, 0, 7.5, BLUE); }
+        if (ph < 0.4) { kart(c, lerp(-110, 110, ease(ph / 0.4)), 0, 7.5, BLUE); }   // darts through while open
         c.restore();
     };
 
