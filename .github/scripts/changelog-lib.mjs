@@ -147,19 +147,31 @@ function plainText(t) {
 }
 
 // Short name for a headline bullet used in the digest title. Prefers an
-// explicit "[headline:Name]" override; otherwise derives it from the bullet's
-// bold lead-in: the text after the first ":" up to the first ".", e.g.
-// "**New hazard: Magpie Drone.** …" -> "Magpie Drone". Falls back to the first
-// few words when there's no colon.
+// explicit "[headline:Name]" override, then the bullet's bold lead-in
+// ("**Orbital Beam**" -> "Orbital Beam"), else the bullet text. From that it
+// pulls a short label: a "New <kind>: Name" / "New <kind> — Name" lead keeps
+// the Name; otherwise it takes the first clause (up to sentence/colon/dash
+// punctuation), capped to six words. Authors wanting a precise title should set
+// "[headline:Short Name]" — this is a best-effort fallback.
+const MAX_NAME_WORDS = 6;
 function headlineName(line) {
     const m = line.match(HEADLINE_RE);
     if (m && m[2]) return m[2].trim();
-    const p = plainText(bulletText(line));
-    const periodIdx = p.indexOf('.');
-    const lead = (periodIdx >= 0 ? p.slice(0, periodIdx) : p).trim();
-    const colonIdx = lead.indexOf(':');
-    if (colonIdx >= 0) return lead.slice(colonIdx + 1).trim();
-    return lead.split(/\s+/).slice(0, 5).join(' ');
+
+    const raw = bulletText(line);
+    const bold = raw.match(/\*\*(.+?)\*\*/);
+    let s = plainText(bold ? bold[1] : raw);
+
+    // "New hazard: Magpie Drone" / "New ability — Orbital Beam" -> the Name.
+    const newKind = s.match(/^New\s+\w+\s*[:—–-]\s*(.+)$/i);
+    if (newKind) s = newKind[1];
+
+    // First clause: stop at sentence/colon/semicolon or a spaced dash (keeps
+    // hyphenated words intact).
+    s = s.split(/[.!?:;]|\s[—–-]\s/)[0].replace(/[.!?]+$/, '').trim();
+
+    const words = s.split(/\s+/);
+    return words.length > MAX_NAME_WORDS ? words.slice(0, MAX_NAME_WORDS).join(' ') : s;
 }
 
 // Join names with serial "&": ["A"] -> "A", ["A","B"] -> "A & B",
