@@ -26,6 +26,10 @@ CI (`.github/workflows/pr-validation.yml`) runs `.github/scripts/smoke-test.js` 
 
 Any change that touches `server/config.json`, `server/game.js`, or `server/engine.js` is a "game mechanic" change and MUST add a player-facing bullet under `## Unreleased` in `CHANGELOG.md` in the same commit. The `.github/workflows/release-notes-check.yml` workflow enforces this on PRs and pushes to `main`. Write the entry the way a player would describe what they noticed, not what the code does — see existing GitHub releases (https://github.com/sjdodge123/chaochao/releases) and `CONTRIBUTING.md` for the format. Refactors, perf work, UI/CSS, build/CI changes, and map JSON submissions are exempt.
 
+## Keep the in-game Codex current with every mechanic change
+
+The Learn page (`client/scripts/learn.js`, animations in `client/scripts/learnScenes.js`) is the in-game **Codex** — a player reference *and* the canonical plain-English mechanic description. A game-mechanic change (same files as above) must update it in the same PR: a **new** mechanic gets a new card (`learn.js`) + scene (`learnScenes.js`) — card id `hazard-<key>`/`boon-<key>`/`ability-<key>`/`brutal-<key>`/`tile-<key>`/`medal-<key>`, key lower-cased; a **changed** mechanic gets its existing card's prose refreshed. Two CI levers enforce this: `.github/scripts/codex-coverage.js` (required, in `validate-content`) fails if a new registry entry has no card or a card's `anim` has no scene; `.github/workflows/codex-drift-check.yml` (warn-only) nudges when a mechanic file changes but no Codex file was touched — the stale-prose case the static gate can't see. The drift gate shares the release-notes conventional-commit exemption and doesn't block today; flip its `exit 0` to `exit 1` to make it required later. See the `learn-codex-page` memory and `CONTRIBUTING.md`.
+
 ## Architecture
 
 This is a multiplayer top-down racing/arena game. A single Node process hosts both the static client and the Socket.IO server; gameplay is fully authoritative on the server, and the client only renders state and forwards input.

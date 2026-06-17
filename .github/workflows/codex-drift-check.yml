@@ -1,0 +1,99 @@
+name: Mechanic changes should update the Codex
+
+# Sibling of release-notes-check.yml. The static coverage gate
+# (.github/scripts/codex-coverage.js, run in pr-validation) catches a NEW
+# hazard/boon/ability/etc. shipped without a card. It cannot catch an EXISTING
+# mechanic being retuned/reworked while its Codex prose goes stale (no new key
+# appears). This gate nudges for that case: when a game-mechanic file changes
+# but neither learn.js nor learnScenes.js was touched, it emits a ::warning::
+# pointing at the Codex.
+#
+# WARN-ONLY for now: it ALWAYS exits 0, so it never blocks a merge. Once the
+# Codex is caught up and this proves low-noise, promote it to required by
+# flipping the `exit 0` near the end to `exit 1` (and, optionally, marking the
+# job a required status check in branch protection) — a later, separate call.
+
+on:
+  pull_request:
+    branches: [main]
+    # Map JSON never carries mechanic logic, same as the release-notes gate.
+    paths-ignore:
+      - 'client/maps/**'
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'client/maps/**'
+
+jobs:
+  check-codex-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Determine diff range
+        id: range
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "base=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+            echo "head=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            before='${{ github.event.before }}'
+            if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
+              before="${{ github.sha }}^"
+            fi
+            echo "base=$before" >> "$GITHUB_OUTPUT"
+            echo "head=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Warn if the Codex was not updated alongside a mechanic change
+        run: |
+          base='${{ steps.range.outputs.base }}'
+          head='${{ steps.range.outputs.head }}'
+          mechanic_paths='server/config.json server/game.js server/engine.js'
+          codex_paths='client/scripts/learn.js client/scripts/learnScenes.js'
+
+          changed=$(git diff --name-only "$base" "$head" -- $mechanic_paths || true)
+          if [ -z "$changed" ]; then
+            echo "Touched no game mechanic files. Nothing to check."
+            exit 0
+          fi
+
+          # Same conventional-commit exemption as the release-notes gate: if
+          # EVERY commit in the range that touches a mechanic file is a
+          # non-feature type (refactor/perf/build/ci/docs/style/test/chore), the
+          # change isn't player-facing, so the Codex needn't move. A single
+          # feat/fix-type touch flips it back to "should update the Codex".
+          exempt_regex='^(refactor|perf|build|ci|docs|style|test|chore)(\(.+\))?!?:'
+          player_facing=0
+          for sha in $(git rev-list "$base".."$head"); do
+            if git diff-tree --no-commit-id --name-only -r "$sha" -- $mechanic_paths | grep -q .; then
+              subject=$(git log -1 --format=%s "$sha")
+              if printf '%s' "$subject" | grep -qiE "$exempt_regex"; then
+                echo "exempt (non-feature): $sha $subject"
+              else
+                echo "player-facing: $sha $subject"
+                player_facing=1
+              fi
+            fi
+          done
+
+          if [ "$player_facing" -eq 0 ]; then
+            echo "All mechanic-touching commits are non-feature type; Codex update not expected."
+            exit 0
+          fi
+
+          codex_changed=$(git diff --name-only "$base" "$head" -- $codex_paths || true)
+          if [ -n "$codex_changed" ]; then
+            echo "Codex was updated alongside the mechanic change:"
+            echo "$codex_changed"
+            exit 0
+          fi
+
+          # Player-facing mechanic change with no Codex edit: nudge, don't block.
+          echo "::warning::This change touches a game mechanic file but the Codex (client/scripts/learn.js / learnScenes.js) was not updated. Player-facing mechanic changes should refresh the matching Codex card + scene in the same PR (see CLAUDE.md / CONTRIBUTING.md). New mechanics are hard-gated by .github/scripts/codex-coverage.js; this nudge covers retunes/reworks of EXISTING mechanics."
+          echo "::warning::Changed mechanic files: ${changed}"
+          # WARN-ONLY: exit 0 keeps this advisory. Flip to `exit 1` to require it.
+          exit 0

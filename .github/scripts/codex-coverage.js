@@ -68,6 +68,21 @@ for (const key in c.tileMap) {
     check(cardIds.has(id), 'tile type "' + key + '" has Codex card ' + id);
 }
 
+// --- Hazards (config.hazards, ids 900+). The `_doc` siblings are plain strings,
+//     not objects — the typeof guard skips them. ---
+for (const key in c.hazards) {
+    const def = c.hazards[key];
+    if (def == null || typeof def !== 'object') { continue; }
+    check(cardIds.has('hazard-' + key.toLowerCase()), 'hazard "' + key + '" has Codex card hazard-' + key.toLowerCase());
+}
+
+// --- Boons (config.boons, ids 950+). Same `_doc` string guard as hazards. ---
+for (const key in c.boons) {
+    const def = c.boons[key];
+    if (def == null || typeof def !== 'object') { continue; }
+    check(cardIds.has('boon-' + key.toLowerCase()), 'boon "' + key + '" has Codex card boon-' + key.toLowerCase());
+}
+
 // --- Medals. Most map 1:1 to "medal-<key>"; the aliases cover cards whose
 //     names differ from the stat key or that cover a family of keys. ---
 const MEDAL_ALIAS = {
