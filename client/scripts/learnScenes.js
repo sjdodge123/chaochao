@@ -742,6 +742,7 @@ var LearnAnim = (function () {
         gameContext.save(); gameContext.translate(x, y); gameContext.rotate(rad); drawKickerRamp(gameContext, r, accent, light, mid, dark, bounce); gameContext.restore();
     }
     function barrelTones(cfg) { return { mid: cfg.color, light: "#e8a866", dark: "#7c4a25", bore: "#ffc24a" }; }
+    var BARREL_TONES = barrelTones(BN.barrelCannon);   // invariant on this page — built once
     function drawBarrelBody(ctx, r, tones, glow) {
         var ironHi = "#7a5e44", ironDk = "#22160b", iron = "#3a2614", bodyLen = r * 2.2, bodyW = r * 1.7, hx = bodyLen / 2, hy = bodyW / 2;
         function capsule(ax, ay) { var rr = ay; ctx.beginPath(); ctx.moveTo(-ax + rr, -ay); ctx.lineTo(ax - rr, -ay); ctx.arc(ax - rr, 0, rr, -Math.PI / 2, Math.PI / 2); ctx.lineTo(-ax + rr, ay); ctx.arc(-ax + rr, 0, rr, Math.PI / 2, -Math.PI / 2); ctx.closePath(); }
@@ -757,7 +758,7 @@ var LearnAnim = (function () {
         ctx.globalAlpha = g * 0.55; ctx.beginPath(); ctx.ellipse(mx, 0, hy * 0.07, hy * 0.28, 0, 0, 2 * Math.PI); ctx.fillStyle = "#fff3c8"; ctx.fill(); ctx.globalAlpha = 1;
     }
     function pl_barrelCannon(x, y, angle) {
-        var cfg = BN.barrelCannon, r = cfg.radius, rad = (angle || 0) * (Math.PI / 180), tones = barrelTones(cfg);
+        var cfg = BN.barrelCannon, r = cfg.radius, rad = (angle || 0) * (Math.PI / 180), tones = BARREL_TONES;
         gameContext.save(); gameContext.translate(x, y);
         gameContext.globalAlpha = 0.2; gameContext.fillStyle = "#000"; gameContext.beginPath(); gameContext.ellipse(0, r * 0.32, r * 1.2, r * 0.85, 0, 0, 2 * Math.PI); gameContext.fill(); gameContext.globalAlpha = 1;
         gameContext.rotate(rad); var glow = 0.55 + 0.3 * (0.5 + 0.5 * Math.sin(Date.now() / 320)); drawBarrelBody(gameContext, r, tones, glow); gameContext.restore();
@@ -829,15 +830,15 @@ var LearnAnim = (function () {
         gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 7; gameContext.stroke(); gameContext.strokeStyle = cfg.color; gameContext.lineWidth = 4; gameContext.stroke(); gameContext.globalAlpha = 1;
         gameContext.restore();
     }
-    function drawFlagShape(x, y, clothColor, bend, consumed) {
-        var poleTopY = -30; gameContext.save(); gameContext.translate(x, y);
-        gameContext.beginPath(); gameContext.ellipse(0, 4, 9, 4, 0, 0, 2 * Math.PI); gameContext.fillStyle = "rgba(18,28,42,0.30)"; gameContext.fill();
-        gameContext.lineCap = "round"; gameContext.lineJoin = "round";
-        if (consumed) { gameContext.strokeStyle = "rgba(45,32,30,0.75)"; gameContext.lineWidth = 3; gameContext.beginPath(); gameContext.moveTo(0, 4); gameContext.lineTo(0, -11); gameContext.stroke(); gameContext.restore(); return; }
-        gameContext.strokeStyle = "rgba(28,34,46,0.92)"; gameContext.lineWidth = 3; gameContext.beginPath(); gameContext.moveTo(0, 4); gameContext.lineTo(0, poleTopY); gameContext.stroke();
+    function drawFlagShape(ctx, x, y, clothColor, bend, consumed) {
+        var poleTopY = -30; ctx.save(); ctx.translate(x, y);
+        ctx.beginPath(); ctx.ellipse(0, 4, 9, 4, 0, 0, 2 * Math.PI); ctx.fillStyle = "rgba(18,28,42,0.30)"; ctx.fill();
+        ctx.lineCap = "round"; ctx.lineJoin = "round";
+        if (consumed) { ctx.strokeStyle = "rgba(45,32,30,0.75)"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(0, 4); ctx.lineTo(0, -11); ctx.stroke(); ctx.restore(); return; }
+        ctx.strokeStyle = "rgba(28,34,46,0.92)"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(0, 4); ctx.lineTo(0, poleTopY); ctx.stroke();
         var len = 22, hgt = 13, tipX = len + bend, tipY = poleTopY + hgt * 0.5;
-        gameContext.beginPath(); gameContext.moveTo(0, poleTopY); gameContext.quadraticCurveTo(len * 0.5 + bend * 0.6, poleTopY - 2, tipX, tipY); gameContext.lineTo(0, poleTopY + hgt); gameContext.closePath();
-        gameContext.fillStyle = clothColor; gameContext.fill(); gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 1.5; gameContext.stroke(); gameContext.restore();
+        ctx.beginPath(); ctx.moveTo(0, poleTopY); ctx.quadraticCurveTo(len * 0.5 + bend * 0.6, poleTopY - 2, tipX, tipY); ctx.lineTo(0, poleTopY + hgt); ctx.closePath();
+        ctx.fillStyle = clothColor; ctx.fill(); ctx.strokeStyle = BOON_HALO; ctx.lineWidth = 1.5; ctx.stroke(); ctx.restore();
     }
 
     // ---- Thumper (PORT: draw.js buildThumperSprites + drawThumperHazard). The
@@ -1738,7 +1739,7 @@ var LearnAnim = (function () {
     SCENES["secondWindTotem"] = function (s) {
         floor(s.ctx, "dirt.png", 60); gameContext = s.ctx;
         var c = s.ctx; c.save(); c.translate(120, 84); c.scale(1.6, 1.6);
-        drawFlagShape(0, 0, BN.secondWindTotem.color, Math.sin(s.t / 300) * 2.5, false);
+        drawFlagShape(c, 0, 0, BN.secondWindTotem.color, Math.sin(s.t / 300) * 2.5, false);
         kart(c, lerp(-42, -8, ease(ping(s.t, 4000))), 0, 7.5, BLUE);
         c.restore();
     };
@@ -1853,43 +1854,46 @@ var LearnAnim = (function () {
         if (io) { io.observe(canvas); } else { it.visible = true; if (!reduceMotion) { ensureLoop(); } }
     }
 
-    // Static list icons. The placeable icons render the REAL art (the ported
-    // pl_* drawers), centred + scaled into the 40px chip — so the icon matches
-    // the card animation and the in-game object.
+    // Static list icons: a single static frame of the same real art the card
+    // animates (the ported pl_* drawers), centred + scaled into the 40px chip.
+    // It's a snapshot, not the live animation — the defining shape always renders;
+    // only self-driven pulses (drawn off Date.now) are frozen at an arbitrary phase.
     function iconArt(ctx, c, scl, fn) { gameContext = ctx; ctx.save(); ctx.translate(c, c); ctx.scale(scl, scl); fn(); ctx.restore(); }
+    // name -> draw(ctx, c, t). Built once at module load (not per call).
+    var ROTOR_ICON_A = 0.9;
+    var ICON_ART = {
+        bumper: function (ctx, c) { iconArt(ctx, c, 1.0, function () { pl_bumper(0, 0); }); },
+        movingBumper: function (ctx, c) { iconArt(ctx, c, 1.0, function () { pl_bumper(0, 0); }); },
+        bumperWall: function (ctx, c) { iconArt(ctx, c, 0.3, function () { pl_bumperWall(-60, 0, 0); }); },
+        rotor: function (ctx, c) { var rr = HZ.rotor.orbitRadius; iconArt(ctx, c, 0.24, function () { pl_rotor(Math.cos(ROTOR_ICON_A) * rr, Math.sin(ROTOR_ICON_A) * rr, ROTOR_ICON_A * 180 / Math.PI); }); },
+        geyser: function (ctx, c) { iconArt(ctx, c, 0.4, function () { pl_geyser(0, 0, 2); }); },
+        mine: function (ctx, c) { iconArt(ctx, c, 0.9, function () { pl_mine(0, 0, 0); }); },
+        thumper: function (ctx, c) { iconArt(ctx, c, 0.2, function () { pl_thumper(0, 0, {}); }); },
+        vortexWell: function (ctx, c) { iconArt(ctx, c, 0.1, function () { pl_vortexWell(0, 0, HZ.vortexWell.radius); }); },
+        laserGate: function (ctx, c) { iconArt(ctx, c, 0.22, function () { pl_laserGate(0, -75, 90, 2); }); },
+        crusher: function (ctx, c) { iconArt(ctx, c, 0.3, function () { pl_crusher(0, 0, -40, 0, 0); }); },
+        sentryTurret: function (ctx, c) { iconArt(ctx, c, 0.5, function () { pl_sentryTurret(0, 0, 0, 0); }); },
+        magpieDrone: function (ctx, c, t) { iconArt(ctx, c, 0.7, function () { drawMagpieBird(HZ.magpieDrone.radius, t, true); }); },
+        dashArrows: function (ctx, c) { iconArt(ctx, c, 0.4, function () { pl_dashArrows(0, 0, 0); }); },
+        rechargeSpring: function (ctx, c) { iconArt(ctx, c, 0.5, function () { pl_rechargeSpring(0, 0, 100); }); },
+        slipstream: function (ctx, c) { iconArt(ctx, c, 0.3, function () { pl_slipstream(0, 0, 0); }); },
+        guardHalo: function (ctx, c) { iconArt(ctx, c, 0.52, function () { pl_guardHalo(0, 0, 100); }); },
+        secondWindTotem: function (ctx, c, t) { iconArt(ctx, c, 0.55, function () { drawFlagShape(ctx, 0, 12, BN.secondWindTotem.color, Math.sin(t * 3) * 2, false); }); },
+        launchPad: function (ctx, c) { iconArt(ctx, c, 0.52, function () { pl_launchPad(0, 0, -30); }); },
+        barrelCannon: function (ctx, c) { iconArt(ctx, c, 0.4, function () { pl_barrelCannon(0, 0, -90); }); },
+        slingshotRings: function (ctx, c) { iconArt(ctx, c, 0.42, function () { pl_slingshotRings(0, 0, 0); }); },
+        warpPad: function (ctx, c) { iconArt(ctx, c, 0.5, function () { pl_warpPad(0, 0, 0); }); },
+        zipline: function (ctx, c) { iconArt(ctx, c, 0.5, function () { pl_zipline(-30, -10, 18, 60); }); },
+        lilyPad: function (ctx, c) { iconArt(ctx, c, 0.32, function () { pl_lilyPad(0, 0, 0, 46, 10); }); }
+    };
     function staticIcon(canvas, name) {
         if (!canvas) { return; }
         var dpr = Math.min(2, window.devicePixelRatio || 1), size = 40;
         canvas.width = Math.round(size * dpr); canvas.height = Math.round(size * dpr);
         var ctx = canvas.getContext("2d"); ctx.scale(dpr, dpr); ctx.clearRect(0, 0, size, size);
         var c = size / 2, t = (window.performance ? performance.now() : 0) / 1000;
-        var rrad = HZ.rotor.orbitRadius, ra = 0.9;
-        var A = {
-            bumper: function () { iconArt(ctx, c, 1.0, function () { pl_bumper(0, 0); }); },
-            movingBumper: function () { iconArt(ctx, c, 1.0, function () { pl_bumper(0, 0); }); },
-            bumperWall: function () { iconArt(ctx, c, 0.3, function () { pl_bumperWall(-60, 0, 0); }); },
-            rotor: function () { iconArt(ctx, c, 0.24, function () { pl_rotor(Math.cos(ra) * rrad, Math.sin(ra) * rrad, ra * 180 / Math.PI); }); },
-            geyser: function () { iconArt(ctx, c, 0.4, function () { pl_geyser(0, 0, 2); }); },
-            mine: function () { iconArt(ctx, c, 0.9, function () { pl_mine(0, 0, 0); }); },
-            thumper: function () { iconArt(ctx, c, 0.2, function () { pl_thumper(0, 0, {}); }); },
-            vortexWell: function () { iconArt(ctx, c, 0.1, function () { pl_vortexWell(0, 0, HZ.vortexWell.radius); }); },
-            laserGate: function () { iconArt(ctx, c, 0.22, function () { pl_laserGate(0, -75, 90, 2); }); },
-            crusher: function () { iconArt(ctx, c, 0.3, function () { pl_crusher(0, 0, -40, 0, 0); }); },
-            sentryTurret: function () { iconArt(ctx, c, 0.5, function () { pl_sentryTurret(0, 0, 0, 0); }); },
-            magpieDrone: function () { iconArt(ctx, c, 0.7, function () { drawMagpieBird(HZ.magpieDrone.radius, t, true); }); },
-            dashArrows: function () { iconArt(ctx, c, 0.4, function () { pl_dashArrows(0, 0, 0); }); },
-            rechargeSpring: function () { iconArt(ctx, c, 0.5, function () { pl_rechargeSpring(0, 0, 100); }); },
-            slipstream: function () { iconArt(ctx, c, 0.3, function () { pl_slipstream(0, 0, 0); }); },
-            guardHalo: function () { iconArt(ctx, c, 0.52, function () { pl_guardHalo(0, 0, 100); }); },
-            secondWindTotem: function () { iconArt(ctx, c, 0.55, function () { drawFlagShape(0, 12, BN.secondWindTotem.color, Math.sin(t * 3) * 2, false); }); },
-            launchPad: function () { iconArt(ctx, c, 0.52, function () { pl_launchPad(0, 0, -30); }); },
-            barrelCannon: function () { iconArt(ctx, c, 0.4, function () { pl_barrelCannon(0, 0, -90); }); },
-            slingshotRings: function () { iconArt(ctx, c, 0.42, function () { pl_slingshotRings(0, 0, 0); }); },
-            warpPad: function () { iconArt(ctx, c, 0.5, function () { pl_warpPad(0, 0, 0); }); },
-            zipline: function () { iconArt(ctx, c, 0.5, function () { pl_zipline(-30, -10, 18, 60); }); },
-            lilyPad: function () { iconArt(ctx, c, 0.32, function () { pl_lilyPad(0, 0, 0, 46, 10); }); }
-        };
-        if (A[name]) { try { A[name](); } catch (e) { /* image/sprite not ready — icon fills in on next build */ } }
+        var fn = ICON_ART[name];
+        if (fn) { try { fn(ctx, c, t); } catch (e) { /* image/sprite not ready — icon fills in on next build */ } }
     }
 
     return { attach: attach, staticIcon: staticIcon, SCENES: SCENES, W: W, H: H };
