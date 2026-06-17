@@ -12,7 +12,7 @@
 // Inputs (env): VERSION (e.g. "0.1.3"), RELEASE_DATE (e.g. "2026-05-23").
 
 import fs from 'node:fs';
-import { stripHeadlineMarkers } from './changelog-lib.mjs';
+import { renderPerReleaseBody } from './changelog-lib.mjs';
 
 const version = process.env.VERSION;
 const date = process.env.RELEASE_DATE;
@@ -74,9 +74,11 @@ const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 pkg.version = version;
 fs.writeFileSync('package.json', JSON.stringify(pkg, null, 4) + '\n');
 
-// The "[headline]" marker stays in CHANGELOG.md (the weekly digest reads it),
-// but the per-PR GitHub release body shouldn't show it.
-fs.writeFileSync('RELEASE_NOTES.md', stripHeadlineMarkers(body) + '\n');
+// Render the per-PR body through the shared renderer: headings normalised to
+// the category taxonomy + ordered, bullets de-duplicated, "[headline]" markers
+// stripped, and a feedback footer appended. (The raw markers stay in
+// CHANGELOG.md so the weekly digest can still read them.)
+fs.writeFileSync('RELEASE_NOTES.md', renderPerReleaseBody(body, version, date));
 
 console.log(`Prepared release v${version} (${date}).`);
 setOutput('released', 'true');

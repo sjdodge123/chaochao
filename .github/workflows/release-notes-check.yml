@@ -135,7 +135,7 @@ jobs:
             # Measure what players actually see on the banner: marker stripped,
             # [text](url) collapsed to text, emphasis/code markers removed.
             text=$(printf '%s' "$line" \
-              | sed -E 's/^\+[[:space:]]*-[[:space:]]+\[[Hh][Ee][Aa][Dd][Ll][Ii][Nn][Ee]\][[:space:]]*//' \
+              | sed -E 's/^\+[[:space:]]*-[[:space:]]+\[[Hh][Ee][Aa][Dd][Ll][Ii][Nn][Ee](:[^]]*)?\][[:space:]]*//' \
               | sed -E 's/\[([^]]+)\]\([^)]*\)/\1/g' \
               | sed -E 's/[*`_]//g' \
               | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
@@ -147,5 +147,16 @@ jobs:
             else
               echo "headline ok (${len}/${max} chars): ${text}"
             fi
-          done < <(git diff "$base" "$head" -- CHANGELOG.md | grep -iE '^\+[[:space:]]*-[[:space:]]+\[headline\]' || true)
+          done < <(git diff "$base" "$head" -- CHANGELOG.md | grep -iE '^\+[[:space:]]*-[[:space:]]+\[headline(:[^]]*)?\]' || true)
           exit "$fail"
+
+      # Nudge (warn-only) when a "### Heading" under ## Unreleased isn't in the
+      # release-notes taxonomy. Unknown headings still render (kept verbatim,
+      # sorted before Bug Fixes); this just keeps the generated notes tidy. The
+      # known set lives in .github/scripts/changelog-lib.mjs.
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+      - name: Warn on unrecognised release-notes headings
+        run: node .github/scripts/check-headings.mjs

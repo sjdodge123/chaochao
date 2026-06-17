@@ -144,7 +144,10 @@ function loadWeeklyNews() {
         var inWeek = false;        // currently scanning a section in that week
         var headline = null;       // [headline]-marked bullet (first wins)
         var firstBullet = null;    // fallback: first bullet of the week
-        var headlineRe = /^-\s+\[headline\]\s*/i;
+        // Accepts "[headline]" and "[headline:Short Name]" (the optional name
+        // only labels the digest title; the banner shows the bullet text). Keep
+        // in lockstep with HEADLINE_RE in .github/scripts/changelog-lib.mjs.
+        var headlineRe = /^-\s+\[headline(?::[^\]]*)?\]\s*/i;
         for (var i = 0; i < lines.length; i++) {
             var line = lines[i].trim();
             var ver = line.match(/^##\s+v\d+\.\d+\.\d+\s+—\s+(\d{4}-\d{2}-\d{2})/);
