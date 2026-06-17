@@ -3961,7 +3961,7 @@ var EDITOR_HAZARD_KINDS = [
         }
     },
     {
-        key: "secondWindTotem", label: "Second Wind Totem", shortcut: "n", railed: false, directional: false,
+        key: "secondWindTotem", label: "Checkpoint", shortcut: "n", railed: false, directional: false,
         group: "boon", paint: paintSecondWindTotemShape,
         swatchPaint: function (ctx, size) {
             // A flag — "respawn here when you'd die, until lava eats it".
