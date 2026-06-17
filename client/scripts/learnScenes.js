@@ -403,6 +403,508 @@ var LearnAnim = (function () {
         if (mem[k] !== c) { mem[k] = c; fn(); }
     }
 
+    // ========================================================================
+    // REAL PLACEABLE ART (PORT: draw.js hazard/boon drawers). The hazard/boon
+    // cards must show the ACTUAL in-game art, not stand-ins — so the procedural
+    // renderers from draw.js are ported here near-verbatim. Adaptations: the
+    // game's `gameContext` global is aliased to a module var set per draw; the
+    // config numbers/colours are baked into HZ/BN below (the learn page has no
+    // live config); `boonOnWater(x,y)` is hard-false (Codex draws on land).
+    // KEEP IN SYNC: if a drawer changes in draw.js, update the port here.
+    // ========================================================================
+    var gameContext = null;            // alias set to the active scene ctx per draw
+    var bumperRingColor = "#E5392B";
+    var BOON_HALO = "rgba(10,40,55,0.6)";
+    var WARP_PAIR_COLORS = ["#C24DFF", "#36C5F0", "#F45D9C", "#7C6BFF", "#33D6C0", "#FF8A3D"];
+    var ZIP_ROPE_DARK = "#C79A33", ZIP_ROPE_DARK_W = "#E6CF95";
+    var ZIP_WOOD = "#6b4a26", ZIP_WOOD_DARK = "#4a3119", ZIP_STEEL = "#2a2018", ZIP_STRAP = "#2a2e33";
+    var LILY_OUTLINE = "#16331d", LILY_RIMLIGHT = "#c8ffce", LILY_VEIN = "rgba(20,60,30,0.5)";
+    var LILY_PETAL = "#f6b0cb", LILY_CENTER = "#ffd24a";
+    // Baked config (mirrors server/config.json hazards/boons — art fields only).
+    var HZ = {
+        bumper: { attackRadius: 15, radius: 10, color: "#F07B36" },
+        movingBumper: { height: 5, width: 100, attackRadius: 15, radius: 10, color: "#F07B36" },
+        bumperWall: { width: 120, height: 10, color: "#F07B36" },
+        rotor: { orbitRadius: 70, armWidth: 6, attackRadius: 15, radius: 10, color: "#F07B36" },
+        geyser: { radius: 22, attackRadius: 40, color: "#F07B36" },
+        mine: { bodyRadius: 11, color: "#F07B36" },
+        vortexWell: { radius: 150, coreRadius: 18, color: "#A77BFF" },
+        laserGate: { width: 150, height: 9, color: "#42E0FF" },
+        crusher: { width: 92, height: 22, railLength: 150, color: "#9AA0A6" },
+        sentryTurret: { barrelLength: 28, radius: 18, color: "#FF5C5C" },
+        magpieDrone: { radius: 16, railLength: 170 }
+    };
+    var BN = {
+        warpPad: { radius: 30 },
+        dashArrows: { width: 70, height: 46, color: "#3FC1C9" },
+        rechargeSpring: { radius: 28, color: "#5BE3A0", colorWater: "#EAFBFF" },
+        slipstream: { width: 110, height: 70, color: "#7FD8FF", colorWater: "#EAF8FF" },
+        launchPad: { radius: 26, color: "#FF8C42", colorWater: "#FFD8A8" },
+        barrelCannon: { radius: 30, color: "#C8743C", colorWater: "#E6B88A" },
+        slingshotRings: { radius: 34, color: "#C77DFF", colorWater: "#E9D4FF" },
+        zipline: { minLength: 140, color: "#F2C14E", colorWater: "#FBE8B0" },
+        lilyPad: { radius: 46, color: "#56D06A" },
+        guardHalo: { radius: 26, color: "#FFD166", colorWater: "#FFF3C4" },
+        secondWindTotem: { radius: 28, color: "#CBD2DC", colorWater: "#EAF1FA" }
+    };
+
+    // ---- Hazards (PORT: draw.js) ----
+    function pl_bumper(x, y) {
+        gameContext.save();
+        gameContext.beginPath(); gameContext.strokeStyle = bumperRingColor; gameContext.lineWidth = 3;
+        gameContext.arc(x, y, HZ.bumper.attackRadius, 0, 2 * Math.PI); gameContext.stroke();
+        gameContext.beginPath(); gameContext.arc(x, y, HZ.bumper.radius, 0, 2 * Math.PI);
+        gameContext.fillStyle = HZ.bumper.color; gameContext.fill();
+        gameContext.restore();
+    }
+    function pl_movingBumper(x, y, railX, railY, angle) {
+        gameContext.save();
+        gameContext.beginPath(); gameContext.translate(railX, railY); gameContext.rotate(angle * (Math.PI / 180));
+        gameContext.rect(0, -HZ.movingBumper.height / 2, HZ.movingBumper.width, HZ.movingBumper.height);
+        gameContext.fillStyle = "black"; gameContext.fill(); gameContext.restore();
+        gameContext.save();
+        gameContext.beginPath(); gameContext.strokeStyle = bumperRingColor; gameContext.lineWidth = 3;
+        gameContext.arc(x, y, HZ.movingBumper.attackRadius, 0, 2 * Math.PI); gameContext.stroke();
+        gameContext.beginPath(); gameContext.arc(x, y, HZ.movingBumper.radius, 0, 2 * Math.PI);
+        gameContext.fillStyle = HZ.movingBumper.color; gameContext.fill(); gameContext.restore();
+    }
+    function pl_bumperWall(x, y, angle) {
+        var rad = (angle || 0) * (Math.PI / 180);
+        var bx = x + Math.cos(rad) * HZ.bumperWall.width, by = y + Math.sin(rad) * HZ.bumperWall.width;
+        gameContext.save(); gameContext.lineCap = "round";
+        gameContext.beginPath(); gameContext.moveTo(x, y); gameContext.lineTo(bx, by);
+        gameContext.strokeStyle = bumperRingColor; gameContext.lineWidth = HZ.bumperWall.height + 6; gameContext.stroke();
+        gameContext.beginPath(); gameContext.moveTo(x, y); gameContext.lineTo(bx, by);
+        gameContext.strokeStyle = HZ.bumperWall.color; gameContext.lineWidth = HZ.bumperWall.height; gameContext.stroke();
+        gameContext.restore();
+    }
+    function pl_rotor(x, y, angle) {
+        var rad = (angle || 0) * (Math.PI / 180);
+        var px = x - Math.cos(rad) * HZ.rotor.orbitRadius, py = y - Math.sin(rad) * HZ.rotor.orbitRadius;
+        gameContext.save(); gameContext.lineCap = "round";
+        gameContext.beginPath(); gameContext.moveTo(px, py); gameContext.lineTo(x, y);
+        gameContext.strokeStyle = "#222"; gameContext.lineWidth = HZ.rotor.armWidth; gameContext.stroke();
+        gameContext.beginPath(); gameContext.arc(px, py, HZ.rotor.armWidth, 0, 2 * Math.PI); gameContext.fillStyle = "#222"; gameContext.fill();
+        gameContext.beginPath(); gameContext.strokeStyle = bumperRingColor; gameContext.lineWidth = 3;
+        gameContext.arc(x, y, HZ.rotor.attackRadius, 0, 2 * Math.PI); gameContext.stroke();
+        gameContext.beginPath(); gameContext.arc(x, y, HZ.rotor.radius, 0, 2 * Math.PI); gameContext.fillStyle = HZ.rotor.color; gameContext.fill();
+        gameContext.restore();
+    }
+    function pl_geyser(x, y, state) {
+        var cfg = HZ.geyser, r = cfg.radius;
+        gameContext.save();
+        gameContext.beginPath(); gameContext.arc(x, y, r, 0, 2 * Math.PI); gameContext.fillStyle = "#3a2f2a"; gameContext.fill();
+        gameContext.lineWidth = 3; gameContext.strokeStyle = "#6b5546"; gameContext.stroke();
+        gameContext.beginPath(); gameContext.arc(x, y, r * 0.6, 0, 2 * Math.PI); gameContext.fillStyle = "#241c18"; gameContext.fill();
+        if (state === 2) {
+            gameContext.globalAlpha = 0.85; gameContext.fillStyle = cfg.color;
+            gameContext.beginPath(); gameContext.arc(x, y, cfg.attackRadius, 0, 2 * Math.PI); gameContext.fill();
+            gameContext.globalAlpha = 1; gameContext.fillStyle = "#FFD27B";
+            for (var s = 0; s < 8; s++) { var a = (s / 8) * 2 * Math.PI;
+                gameContext.beginPath(); gameContext.arc(x + Math.cos(a) * cfg.attackRadius, y + Math.sin(a) * cfg.attackRadius, 5, 0, 2 * Math.PI); gameContext.fill(); }
+        } else if (state === 1) {
+            var t = (Date.now() % 700) / 700, ringR = r + t * (cfg.attackRadius - r);
+            gameContext.globalAlpha = 0.7 * (1 - t); gameContext.lineWidth = 4; gameContext.strokeStyle = cfg.color;
+            gameContext.beginPath(); gameContext.arc(x, y, ringR, 0, 2 * Math.PI); gameContext.stroke();
+            gameContext.globalAlpha = 0.9; gameContext.fillStyle = "#FFD27B";
+            gameContext.beginPath(); gameContext.arc(x + (t - 0.5) * 6, y - t * r, 2.5, 0, 2 * Math.PI); gameContext.fill();
+            gameContext.globalAlpha = 1;
+        }
+        gameContext.restore();
+    }
+    function pl_mine(x, y, state) {
+        var r = HZ.mine.bodyRadius;
+        gameContext.save();
+        if (state === 2) { gameContext.beginPath(); gameContext.arc(x, y, r * 1.4, 0, 2 * Math.PI); gameContext.fillStyle = "rgba(20,16,14,0.55)"; gameContext.fill(); gameContext.restore(); return; }
+        gameContext.strokeStyle = "#222"; gameContext.lineWidth = 3;
+        for (var s = 0; s < 8; s++) { var a = (s / 8) * 2 * Math.PI;
+            gameContext.beginPath(); gameContext.moveTo(x + Math.cos(a) * r, y + Math.sin(a) * r); gameContext.lineTo(x + Math.cos(a) * (r + 5), y + Math.sin(a) * (r + 5)); gameContext.stroke(); }
+        gameContext.beginPath(); gameContext.arc(x, y, r, 0, 2 * Math.PI); gameContext.fillStyle = "#2b2b2b"; gameContext.fill();
+        var lit = (state === 1) ? ((Date.now() % 360) < 200) : true;
+        if (lit) { gameContext.beginPath(); gameContext.arc(x, y, r * 0.4, 0, 2 * Math.PI); gameContext.fillStyle = (state === 1) ? "#ff2e2e" : "#ffc24b"; gameContext.fill(); }
+        gameContext.restore();
+    }
+    var vortexHazeSprite = null;
+    function getVortexHazeSprite() {
+        if (vortexHazeSprite != null) { return vortexHazeSprite; }
+        var cfg = HZ.vortexWell, R = cfg.radius, blurPx = Math.max(6, Math.round(R * 0.14)), pad = blurPx + 6, size = (R + pad) * 2;
+        var cv = document.createElement("canvas"); cv.width = size; cv.height = size;
+        var ctx = cv.getContext("2d"), cx = size / 2, cy = size / 2;
+        ctx.filter = "blur(" + blurPx + "px)"; ctx.lineCap = "round"; ctx.strokeStyle = cfg.color; ctx.globalAlpha = 0.5;
+        for (var a = 0; a < 3; a++) { var base = (a / 3) * Math.PI * 2; ctx.beginPath(); var first = true;
+            for (var t = 0; t <= 1.001; t += 0.05) { var rr = R * (1 - t) + cfg.coreRadius * t, ang = base + t * Math.PI * 1.9, px = cx + Math.cos(ang) * rr, py = cy + Math.sin(ang) * rr;
+                if (first) { ctx.moveTo(px, py); first = false; } else { ctx.lineTo(px, py); } }
+            ctx.lineWidth = 16; ctx.stroke(); }
+        ctx.globalAlpha = 1;
+        var g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
+        g.addColorStop(0, "rgba(167,123,255,0.42)"); g.addColorStop(0.55, "rgba(150,110,235,0.16)"); g.addColorStop(1, "rgba(167,123,255,0)");
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, R, 0, 2 * Math.PI); ctx.fill();
+        vortexHazeSprite = cv; return cv;
+    }
+    function pl_vortexWell(x, y, radius) {
+        var cfg = HZ.vortexWell, maxR = cfg.radius, R = (radius != null && radius > 0) ? radius : maxR, coreR = cfg.coreRadius * (R / maxR);
+        var spin = (Date.now() / 1100) % (Math.PI * 2);
+        gameContext.save();
+        var sprite = getVortexHazeSprite();
+        if (sprite != null) { var s = R / maxR; gameContext.save(); gameContext.translate(x, y); gameContext.rotate(spin); gameContext.scale(s, s); gameContext.drawImage(sprite, -sprite.width / 2, -sprite.height / 2); gameContext.restore(); }
+        gameContext.beginPath(); gameContext.arc(x, y, R, 0, 2 * Math.PI); gameContext.strokeStyle = "rgba(167,123,255,0.22)"; gameContext.lineWidth = 2; gameContext.stroke();
+        gameContext.lineCap = "round"; gameContext.globalAlpha = 0.6; gameContext.strokeStyle = cfg.color; gameContext.lineWidth = 2.5;
+        for (var a = 0; a < 2; a++) { var base = spin + (a / 2) * Math.PI * 2; gameContext.beginPath(); var first = true;
+            for (var t = 0; t <= 1.001; t += 0.08) { var rr = R * (1 - t) + coreR * t, ang = base + t * Math.PI * 1.6, px = x + Math.cos(ang) * rr, py = y + Math.sin(ang) * rr;
+                if (first) { gameContext.moveTo(px, py); first = false; } else { gameContext.lineTo(px, py); } }
+            gameContext.stroke(); }
+        gameContext.globalAlpha = 1;
+        gameContext.beginPath(); gameContext.arc(x, y, coreR, 0, 2 * Math.PI); gameContext.fillStyle = "#2a1f44"; gameContext.fill();
+        gameContext.strokeStyle = cfg.color; gameContext.lineWidth = 2; gameContext.stroke();
+        gameContext.restore();
+    }
+    function pl_laserGate(x, y, angle, state) {
+        var cfg = HZ.laserGate, rad = (angle || 0) * (Math.PI / 180), bx = x + Math.cos(rad) * cfg.width, by = y + Math.sin(rad) * cfg.width;
+        gameContext.save(); gameContext.lineCap = "round";
+        for (var p = 0; p < 2; p++) { var px = p === 0 ? x : bx, py = p === 0 ? y : by;
+            gameContext.beginPath(); gameContext.arc(px, py, 7, 0, 2 * Math.PI); gameContext.fillStyle = "#1d3a44"; gameContext.fill();
+            gameContext.lineWidth = 2.5; gameContext.strokeStyle = cfg.color; gameContext.stroke(); }
+        if (state === 2) {
+            gameContext.globalAlpha = 0.35; gameContext.strokeStyle = cfg.color; gameContext.lineWidth = cfg.height + 8;
+            gameContext.beginPath(); gameContext.moveTo(x, y); gameContext.lineTo(bx, by); gameContext.stroke();
+            gameContext.globalAlpha = 1; gameContext.strokeStyle = "#EAFBFF"; gameContext.lineWidth = cfg.height;
+            gameContext.beginPath(); gameContext.moveTo(x, y); gameContext.lineTo(bx, by); gameContext.stroke();
+        } else if (state === 1) {
+            var flick = 0.3 + 0.45 * (0.5 + 0.5 * Math.sin(Date.now() / 60));
+            gameContext.globalAlpha = flick; gameContext.setLineDash([10, 8]); gameContext.lineDashOffset = -(Date.now() / 40) % 18;
+            gameContext.strokeStyle = cfg.color; gameContext.lineWidth = cfg.height;
+            gameContext.beginPath(); gameContext.moveTo(x, y); gameContext.lineTo(bx, by); gameContext.stroke(); gameContext.setLineDash([]); gameContext.globalAlpha = 1;
+        } else {
+            gameContext.globalAlpha = 0.22; gameContext.setLineDash([3, 11]); gameContext.strokeStyle = cfg.color; gameContext.lineWidth = 2;
+            gameContext.beginPath(); gameContext.moveTo(x, y); gameContext.lineTo(bx, by); gameContext.stroke(); gameContext.setLineDash([]); gameContext.globalAlpha = 1;
+        }
+        gameContext.restore();
+    }
+    function pl_crusher(x, y, railX, railY, angle) {
+        var cfg = HZ.crusher, rad = (angle || 0) * (Math.PI / 180), dirX = Math.cos(rad), dirY = Math.sin(rad), hw = cfg.width / 2, hh = cfg.height / 2;
+        gameContext.save(); gameContext.lineCap = "butt";
+        gameContext.strokeStyle = "rgba(58,61,64,0.55)"; gameContext.lineWidth = 7;
+        gameContext.beginPath(); gameContext.moveTo(railX, railY); gameContext.lineTo(railX + dirX * cfg.railLength, railY + dirY * cfg.railLength); gameContext.stroke();
+        gameContext.strokeStyle = "rgba(120,126,132,0.5)"; gameContext.lineWidth = 1.5;
+        gameContext.beginPath(); gameContext.moveTo(railX, railY); gameContext.lineTo(railX + dirX * cfg.railLength, railY + dirY * cfg.railLength); gameContext.stroke();
+        gameContext.translate(railX, railY); gameContext.rotate(rad + Math.PI / 2); gameContext.fillStyle = "#33363a"; gameContext.fillRect(-hw - 4, -8, cfg.width + 8, 16);
+        gameContext.restore();
+        gameContext.save(); gameContext.translate(x, y); gameContext.rotate(rad + Math.PI / 2);
+        gameContext.fillStyle = "#6c7176"; var teeth = 7, tw = cfg.width / teeth, tooth = 6;
+        for (var ti = 0; ti < teeth; ti++) { var tx0 = -hw + ti * tw;
+            gameContext.beginPath(); gameContext.moveTo(tx0, -hh); gameContext.lineTo(tx0 + tw, -hh); gameContext.lineTo(tx0 + tw / 2, -hh - tooth); gameContext.closePath(); gameContext.fill();
+            gameContext.beginPath(); gameContext.moveTo(tx0, hh); gameContext.lineTo(tx0 + tw, hh); gameContext.lineTo(tx0 + tw / 2, hh + tooth); gameContext.closePath(); gameContext.fill(); }
+        var grad = gameContext.createLinearGradient(0, -hh, 0, hh); grad.addColorStop(0, "#c4c9ce"); grad.addColorStop(0.45, cfg.color); grad.addColorStop(1, "#54585d");
+        gameContext.fillStyle = grad; gameContext.fillRect(-hw, -hh, cfg.width, cfg.height);
+        gameContext.strokeStyle = "#303336"; gameContext.lineWidth = 2; gameContext.strokeRect(-hw, -hh, cfg.width, cfg.height);
+        gameContext.strokeStyle = "rgba(48,51,54,0.6)"; gameContext.lineWidth = 1; gameContext.strokeRect(-hw + 4, -hh + 4, cfg.width - 8, cfg.height - 8);
+        gameContext.fillStyle = "#3c4044"; var rvx = hw - 6, rvy = hh - 5, corners = [[-rvx, -rvy], [rvx, -rvy], [rvx, rvy], [-rvx, rvy]];
+        for (var ci = 0; ci < 4; ci++) { gameContext.beginPath(); gameContext.arc(corners[ci][0], corners[ci][1], 2.2, 0, 2 * Math.PI); gameContext.fill(); }
+        gameContext.restore();
+    }
+    function pl_sentryTurret(x, y, angle, state) {
+        var cfg = HZ.sentryTurret, rad = (angle || 0) * (Math.PI / 180);
+        gameContext.save();
+        if (state === 1) { var pulse = 0.35 + 0.4 * (0.5 + 0.5 * Math.sin(Date.now() / 70));
+            gameContext.globalAlpha = pulse; gameContext.strokeStyle = cfg.color; gameContext.lineWidth = 3;
+            gameContext.beginPath(); gameContext.arc(x, y, cfg.radius + 7, 0, 2 * Math.PI); gameContext.stroke(); gameContext.globalAlpha = 1; }
+        var bx = x + Math.cos(rad) * cfg.barrelLength, by = y + Math.sin(rad) * cfg.barrelLength;
+        gameContext.lineCap = "round"; gameContext.strokeStyle = "#34383d"; gameContext.lineWidth = 9;
+        gameContext.beginPath(); gameContext.moveTo(x, y); gameContext.lineTo(bx, by); gameContext.stroke();
+        if (state === 2) { gameContext.globalAlpha = 0.6; gameContext.fillStyle = cfg.color; gameContext.beginPath(); gameContext.arc(bx, by, 12, 0, 2 * Math.PI); gameContext.fill();
+            gameContext.globalAlpha = 1; gameContext.fillStyle = "#fff2c8"; gameContext.beginPath(); gameContext.arc(bx, by, 6, 0, 2 * Math.PI); gameContext.fill(); }
+        gameContext.fillStyle = "#5a6066"; gameContext.beginPath(); gameContext.arc(x, y, cfg.radius, 0, 2 * Math.PI); gameContext.fill();
+        gameContext.lineWidth = 3; gameContext.strokeStyle = "#2b2f33"; gameContext.stroke();
+        gameContext.fillStyle = cfg.color; gameContext.beginPath(); gameContext.arc(x, y, cfg.radius * 0.55, 0, 2 * Math.PI); gameContext.fill();
+        gameContext.restore();
+    }
+    // Magpie bird shape (PORT: barrierArt.js magpieBirdShape/magpieWingShape).
+    function magpieWingShape(ctx, R, side, flap) {
+        ctx.save(); ctx.translate(0, -R * 0.1); ctx.rotate(side * (0.5 + (flap || 0)));
+        var grd = ctx.createLinearGradient(0, 0, side * R * 1.7, R * 0.4); grd.addColorStop(0, "#23262f"); grd.addColorStop(1, "#0d0f15");
+        ctx.fillStyle = grd; ctx.beginPath(); ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(side * R * 1.3, -R * 0.5, side * R * 1.75, R * 0.15); ctx.quadraticCurveTo(side * R * 1.2, R * 0.55, 0, R * 0.45); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = "#eef1f7"; ctx.beginPath(); ctx.moveTo(side * R * 1.1, R * 0.05);
+        ctx.quadraticCurveTo(side * R * 1.6, R * 0.1, side * R * 1.75, R * 0.15); ctx.quadraticCurveTo(side * R * 1.3, R * 0.45, side * R * 1.0, R * 0.4); ctx.closePath(); ctx.fill();
+        ctx.restore();
+    }
+    function magpieBirdShape(ctx, R, flap, tailSway, beakOpen, shimmer) {
+        for (var s = -1; s <= 1; s += 2) { ctx.save(); ctx.translate(0, R * 0.2); ctx.rotate(s * 0.18 + (tailSway || 0));
+            var tl = R * 1.9, grd = ctx.createLinearGradient(0, 0, 0, tl); grd.addColorStop(0, "#1b2030"); grd.addColorStop(0.5, shimmer(s)); grd.addColorStop(1, "#0c1018");
+            ctx.fillStyle = grd; ctx.beginPath(); ctx.moveTo(0, 0); ctx.quadraticCurveTo(R * 0.5 * s, tl * 0.6, R * 0.18 * s, tl); ctx.quadraticCurveTo(-R * 0.18 * s, tl * 0.7, 0, 0); ctx.closePath(); ctx.fill(); ctx.restore(); }
+        magpieWingShape(ctx, R, -1, flap);
+        ctx.fillStyle = "#15171f"; ctx.beginPath(); ctx.ellipse(0, R * 0.1, R * 0.82, R * 1.0, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#eef1f7"; ctx.beginPath(); ctx.ellipse(0, R * 0.35, R * 0.5, R * 0.62, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#15171f"; ctx.beginPath(); ctx.arc(0, -R * 0.7, R * 0.62, 0, Math.PI * 2); ctx.fill();
+        var open = (beakOpen || 0) * R; ctx.fillStyle = "#f0a23a";
+        ctx.beginPath(); ctx.moveTo(R * 0.55, -R * 0.78 - open); ctx.lineTo(R * 1.15, -R * 0.72); ctx.lineTo(R * 0.55, -R * 0.62 + open); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(R * 0.28, -R * 0.82, R * 0.17, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#101218"; ctx.beginPath(); ctx.arc(R * 0.33, -R * 0.82, R * 0.09, 0, Math.PI * 2); ctx.fill();
+        magpieWingShape(ctx, R, 1, flap);
+    }
+    function drawMagpieBird(R, t, carrying) {
+        magpieBirdShape(gameContext, R, Math.sin(t * 9) * 0.55, Math.sin(t * 2.2) * 0.05, carrying ? 0.16 : 0.05, function (s) { return (Math.sin(t * 1.5 + s) > 0.5) ? "#2f6df0" : "#1f8f7a"; });
+    }
+    // Magpie drone (PORT: draw.js drawMagpieDrone) — loot token simplified to a
+    // white disc + bomb glyph (the real ability-icon Images aren't on this page).
+    function pl_magpieDrone(x, y, railX, railY, angle, carrying, faceLeft, t) {
+        var R = HZ.magpieDrone.radius, railLen = HZ.magpieDrone.railLength, rad = (angle || 0) * (Math.PI / 180);
+        gameContext.save(); gameContext.strokeStyle = "rgba(91,108,196,0.30)"; gameContext.lineWidth = 3; gameContext.setLineDash([8, 8]);
+        gameContext.beginPath(); gameContext.moveTo(railX, railY); gameContext.lineTo(railX + Math.cos(rad) * railLen, railY + Math.sin(rad) * railLen); gameContext.stroke(); gameContext.setLineDash([]); gameContext.restore();
+        var bob = Math.sin(t * 2.2) * R * 0.06, face = faceLeft ? -1 : 1;
+        if (carrying) { var pulse = 0.5 + 0.5 * Math.sin(t * 6);
+            gameContext.beginPath(); gameContext.arc(x, y + bob, R + 6 + pulse * 3, 0, Math.PI * 2);
+            gameContext.strokeStyle = "rgba(255,210,90," + (0.30 + 0.30 * pulse).toFixed(3) + ")"; gameContext.lineWidth = 2.5; gameContext.stroke(); }
+        gameContext.save(); gameContext.translate(x, y + bob); gameContext.scale(face, 1); drawMagpieBird(R, t, carrying); gameContext.restore();
+        if (carrying) { var lx = x + face * R * 1.5, ly = y + bob - R * 0.7, lr = R * 0.55;
+            gameContext.beginPath(); gameContext.arc(lx, ly, lr, 0, Math.PI * 2); gameContext.fillStyle = "rgba(255,255,255,0.92)"; gameContext.fill();
+            gameContext.lineWidth = 1.2; gameContext.strokeStyle = "rgba(0,0,0,0.35)"; gameContext.stroke();
+            var bi = img("bomb.svg"); if (ready(bi)) { gameContext.drawImage(bi, lx - lr * 0.7, ly - lr * 0.7, lr * 1.4, lr * 1.4); } }
+    }
+
+    // ---- Boons (PORT: draw.js). boonOnWater() is hard-false on the Codex. ----
+    function warpPairColor(pair) { var i = (typeof pair === "number" && isFinite(pair)) ? (((pair | 0) % WARP_PAIR_COLORS.length) + WARP_PAIR_COLORS.length) % WARP_PAIR_COLORS.length : 0; return WARP_PAIR_COLORS[i]; }
+    function pl_warpPad(x, y, pair) {
+        var R = BN.warpPad.radius, col = warpPairColor(pair), spin = (Date.now() / 700) % (Math.PI * 2);
+        gameContext.save();
+        gameContext.beginPath(); gameContext.arc(x, y, R, 0, 2 * Math.PI); gameContext.strokeStyle = col; gameContext.globalAlpha = 0.25; gameContext.lineWidth = 6; gameContext.stroke(); gameContext.globalAlpha = 1;
+        gameContext.lineCap = "round"; gameContext.lineWidth = 3; gameContext.strokeStyle = col;
+        for (var a = 0; a < 2; a++) { var dir = a === 0 ? 1 : -1, base = spin * dir + a * Math.PI; gameContext.beginPath(); gameContext.arc(x, y, R * 0.7, base, base + Math.PI * 1.1); gameContext.stroke(); }
+        gameContext.globalAlpha = 0.55; gameContext.lineWidth = 2;
+        for (var s = 0; s < 3; s++) { var ba = spin + (s / 3) * Math.PI * 2; gameContext.beginPath(); var first = true;
+            for (var t = 0; t <= 1.001; t += 0.1) { var rr = R * 0.62 * (1 - t) + R * 0.12 * t, ang = ba + t * Math.PI * 1.4, px = x + Math.cos(ang) * rr, py = y + Math.sin(ang) * rr;
+                if (first) { gameContext.moveTo(px, py); first = false; } else { gameContext.lineTo(px, py); } } gameContext.stroke(); }
+        gameContext.globalAlpha = 1;
+        gameContext.beginPath(); gameContext.arc(x, y, R * 0.2, 0, 2 * Math.PI); gameContext.fillStyle = "#FFFFFF"; gameContext.fill();
+        gameContext.beginPath(); gameContext.arc(x, y, R * 0.32, 0, 2 * Math.PI); gameContext.strokeStyle = col; gameContext.lineWidth = 2.5; gameContext.stroke();
+        gameContext.restore();
+    }
+    function pl_dashArrows(x, y, angle) {
+        var cfg = BN.dashArrows, rad = (angle || 0) * (Math.PI / 180), w = cfg.width, hgt = cfg.height;
+        gameContext.save(); gameContext.translate(x, y); gameContext.rotate(rad);
+        gameContext.beginPath(); gameContext.rect(-w / 2, -hgt / 2, w, hgt); gameContext.fillStyle = "rgba(63,193,201,0.06)"; gameContext.fill();
+        gameContext.strokeStyle = "rgba(63,193,201,0.12)"; gameContext.lineWidth = 1; gameContext.stroke();
+        gameContext.lineCap = "round"; gameContext.lineJoin = "round"; var ch = hgt * 0.32;
+        for (var i = 0; i < 2; i++) { var cx = -w * 0.16 + i * (w * 0.30);
+            gameContext.beginPath(); gameContext.moveTo(cx - 8, -ch); gameContext.lineTo(cx + 8, 0); gameContext.lineTo(cx - 8, ch);
+            gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 8; gameContext.stroke();
+            gameContext.strokeStyle = cfg.color; gameContext.lineWidth = 5; gameContext.stroke(); }
+        gameContext.restore();
+    }
+    function pl_rechargeSpring(x, y, state) {
+        var cfg = BN.rechargeSpring, r = cfg.radius, ready2 = (state == null || state >= 100), accent = cfg.color;
+        gameContext.save(); gameContext.translate(x, y);
+        gameContext.beginPath(); gameContext.arc(0, 0, r, 0, 2 * Math.PI); gameContext.fillStyle = "rgba(91,227,160,0.04)"; gameContext.fill();
+        if (!ready2) {
+            var frac = Math.max(0, Math.min(1, state / 100));
+            gameContext.lineWidth = 3; gameContext.beginPath(); gameContext.arc(0, 0, r * 0.78, 0, 2 * Math.PI); gameContext.strokeStyle = accent; gameContext.globalAlpha = 0.18; gameContext.stroke();
+            gameContext.beginPath(); gameContext.arc(0, 0, r * 0.78, -Math.PI / 2, -Math.PI / 2 + frac * 2 * Math.PI); gameContext.globalAlpha = 0.9; gameContext.lineCap = "round";
+            gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 5; gameContext.stroke(); gameContext.strokeStyle = accent; gameContext.lineWidth = 3; gameContext.stroke(); gameContext.globalAlpha = 1;
+        } else {
+            var pulse = 0.5 + 0.5 * Math.sin(Date.now() / 320);
+            gameContext.beginPath(); gameContext.arc(0, 0, r * (0.62 + 0.28 * pulse), 0, 2 * Math.PI); gameContext.strokeStyle = accent; gameContext.globalAlpha = 0.35 + 0.45 * (1 - pulse); gameContext.lineWidth = 3; gameContext.stroke(); gameContext.globalAlpha = 1;
+        }
+        var arm = r * 0.42; gameContext.globalAlpha = ready2 ? 1 : 0.3; gameContext.lineCap = "round";
+        gameContext.beginPath(); gameContext.moveTo(-arm, 0); gameContext.lineTo(arm, 0); gameContext.moveTo(0, -arm); gameContext.lineTo(0, arm);
+        gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 8; gameContext.stroke(); gameContext.strokeStyle = cfg.color; gameContext.lineWidth = 5; gameContext.stroke(); gameContext.globalAlpha = 1;
+        gameContext.restore();
+    }
+    function pl_slipstream(x, y, angle) {
+        var cfg = BN.slipstream, rad = (angle || 0) * (Math.PI / 180), w = cfg.width, hgt = cfg.height, halo = BOON_HALO, flow = (Date.now() / 14) % 28;
+        gameContext.save(); gameContext.translate(x, y); gameContext.rotate(rad);
+        gameContext.beginPath(); gameContext.rect(-w / 2, -hgt / 2, w, hgt); gameContext.fillStyle = "rgba(127,216,255,0.03)"; gameContext.fill();
+        gameContext.strokeStyle = "rgba(127,216,255,0.05)"; gameContext.lineWidth = 1; gameContext.stroke();
+        var stroke = cfg.color; gameContext.lineCap = "round"; gameContext.lineJoin = "round"; var rows = [-hgt * 0.28, 0, hgt * 0.28], x0 = -w / 2 + 8, x1 = w / 2 - 16;
+        for (var i = 0; i < rows.length; i++) { var ly = rows[i];
+            gameContext.setLineDash([18, 10]); gameContext.lineDashOffset = -flow; gameContext.beginPath(); gameContext.moveTo(x0, ly); gameContext.lineTo(x1, ly);
+            gameContext.strokeStyle = halo; gameContext.lineWidth = 6; gameContext.stroke(); gameContext.strokeStyle = stroke; gameContext.lineWidth = 3; gameContext.stroke(); gameContext.setLineDash([]);
+            gameContext.beginPath(); gameContext.moveTo(w / 2 - 22, ly - 7); gameContext.lineTo(w / 2 - 10, ly); gameContext.lineTo(w / 2 - 22, ly + 7);
+            gameContext.strokeStyle = halo; gameContext.lineWidth = 6; gameContext.stroke(); gameContext.strokeStyle = stroke; gameContext.lineWidth = 3; gameContext.stroke(); }
+        gameContext.restore();
+    }
+    function drawKickerRamp(ctx, r, accent, light, mid, dark, bounce) {
+        var hwBack = r * 0.5, hwFront = r * 0.82, frontX = r * 0.92;
+        function rampPath() { ctx.beginPath(); ctx.moveTo(-r, -hwBack); ctx.lineTo(frontX, -hwFront); ctx.lineTo(frontX, hwFront); ctx.lineTo(-r, hwBack); ctx.closePath(); }
+        rampPath(); var g = ctx.createLinearGradient(-r, 0, r, 0); g.addColorStop(0, dark); g.addColorStop(0.6, mid); g.addColorStop(1, light);
+        ctx.fillStyle = g; ctx.fill(); ctx.strokeStyle = BOON_HALO; ctx.lineWidth = 2.5; ctx.stroke();
+        ctx.lineCap = "round"; ctx.lineJoin = "round"; var cw1 = r * 0.2, cw2 = r * 0.15;
+        for (var i = 0; i < 3; i++) { var cx = -r * 0.4 + i * r * 0.42, ch = r * (0.34 + i * 0.08);
+            ctx.globalAlpha = 0.45 + 0.55 * bounce * ((i + 1) / 3); ctx.beginPath(); ctx.moveTo(cx - cw1, ch); ctx.lineTo(cx + cw2, 0); ctx.lineTo(cx - cw1, -ch);
+            ctx.strokeStyle = accent; ctx.lineWidth = Math.max(3, r * 0.16); ctx.stroke(); }
+        ctx.globalAlpha = 1; var lift = bounce * r * 0.06;
+        ctx.beginPath(); ctx.moveTo(frontX, -hwFront - lift); ctx.lineTo(frontX, hwFront + lift);
+        ctx.strokeStyle = BOON_HALO; ctx.lineWidth = 7; ctx.stroke(); ctx.strokeStyle = light; ctx.lineWidth = 4; ctx.stroke();
+    }
+    function pl_launchPad(x, y, angle) {
+        var cfg = BN.launchPad, r = cfg.radius, rad = (angle || 0) * (Math.PI / 180), accent = cfg.color, light = "#ffc890", mid = "#c0651f", dark = "#7e3d14", bounce = 0.5 + 0.5 * Math.sin(Date.now() / 230);
+        gameContext.save(); gameContext.translate(x, y); gameContext.rotate(rad); drawKickerRamp(gameContext, r, accent, light, mid, dark, bounce); gameContext.restore();
+    }
+    function barrelTones(cfg) { return { mid: cfg.color, light: "#e8a866", dark: "#7c4a25", bore: "#ffc24a" }; }
+    function drawBarrelBody(ctx, r, tones, glow) {
+        var ironHi = "#7a5e44", ironDk = "#22160b", iron = "#3a2614", bodyLen = r * 2.2, bodyW = r * 1.7, hx = bodyLen / 2, hy = bodyW / 2;
+        function capsule(ax, ay) { var rr = ay; ctx.beginPath(); ctx.moveTo(-ax + rr, -ay); ctx.lineTo(ax - rr, -ay); ctx.arc(ax - rr, 0, rr, -Math.PI / 2, Math.PI / 2); ctx.lineTo(-ax + rr, ay); ctx.arc(-ax + rr, 0, rr, Math.PI / 2, -Math.PI / 2); ctx.closePath(); }
+        capsule(hx, hy); var grad = ctx.createLinearGradient(0, -hy, 0, hy); grad.addColorStop(0, tones.light); grad.addColorStop(0.42, tones.mid); grad.addColorStop(1, tones.dark);
+        ctx.fillStyle = grad; ctx.fill(); ctx.strokeStyle = ironDk; ctx.lineWidth = 2.5; ctx.stroke();
+        var bands = [-bodyLen * 0.16, bodyLen * 0.0];
+        for (var b = 0; b < bands.length; b++) { var bxh = bands[b];
+            ctx.strokeStyle = ironDk; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(bxh, -hy + 1); ctx.lineTo(bxh, hy - 1); ctx.stroke();
+            ctx.strokeStyle = ironHi; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(bxh - 1.4, -hy * 0.66); ctx.lineTo(bxh - 1.4, hy * 0.66); ctx.stroke();
+            ctx.fillStyle = ironHi; for (var rv = -1; rv <= 1; rv += 2) { ctx.beginPath(); ctx.arc(bxh, rv * hy * 0.62, 1.6, 0, 2 * Math.PI); ctx.fill(); } }
+        var mx = hx - hy * 0.28; ctx.beginPath(); ctx.ellipse(mx, 0, hy * 0.34, hy * 0.98, 0, 0, 2 * Math.PI); ctx.fillStyle = iron; ctx.fill(); ctx.strokeStyle = ironHi; ctx.lineWidth = 1.4; ctx.stroke();
+        var g = (glow == null) ? 0.6 : glow; ctx.globalAlpha = g; ctx.beginPath(); ctx.ellipse(mx, 0, hy * 0.16, hy * 0.55, 0, 0, 2 * Math.PI); ctx.fillStyle = tones.bore; ctx.fill();
+        ctx.globalAlpha = g * 0.55; ctx.beginPath(); ctx.ellipse(mx, 0, hy * 0.07, hy * 0.28, 0, 0, 2 * Math.PI); ctx.fillStyle = "#fff3c8"; ctx.fill(); ctx.globalAlpha = 1;
+    }
+    function pl_barrelCannon(x, y, angle) {
+        var cfg = BN.barrelCannon, r = cfg.radius, rad = (angle || 0) * (Math.PI / 180), tones = barrelTones(cfg);
+        gameContext.save(); gameContext.translate(x, y);
+        gameContext.globalAlpha = 0.2; gameContext.fillStyle = "#000"; gameContext.beginPath(); gameContext.ellipse(0, r * 0.32, r * 1.2, r * 0.85, 0, 0, 2 * Math.PI); gameContext.fill(); gameContext.globalAlpha = 1;
+        gameContext.rotate(rad); var glow = 0.55 + 0.3 * (0.5 + 0.5 * Math.sin(Date.now() / 320)); drawBarrelBody(gameContext, r, tones, glow); gameContext.restore();
+    }
+    function pl_slingshotRings(x, y, angle) {
+        var cfg = BN.slingshotRings, r = cfg.radius, rad = (angle || 0) * (Math.PI / 180), accent = cfg.color, pulse = 0.5 + 0.5 * Math.sin(Date.now() / 300);
+        gameContext.save(); gameContext.translate(x, y); gameContext.rotate(rad);
+        var rx = r * 0.42, ry = r * 0.95; gameContext.beginPath(); gameContext.ellipse(0, 0, rx, ry, 0, 0, 2 * Math.PI);
+        gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 8; gameContext.stroke(); gameContext.strokeStyle = accent; gameContext.lineWidth = 4 + 1.5 * pulse; gameContext.stroke();
+        gameContext.globalAlpha = 0.35 + 0.3 * pulse; gameContext.beginPath(); gameContext.ellipse(0, 0, rx * 0.5, ry * 0.66, 0, 0, 2 * Math.PI); gameContext.strokeStyle = accent; gameContext.lineWidth = 2; gameContext.stroke(); gameContext.globalAlpha = 1;
+        gameContext.lineCap = "round"; gameContext.lineJoin = "round";
+        for (var s = -1; s <= 1; s += 2) { var ax = s * r * 1.05; gameContext.beginPath(); gameContext.moveTo(ax - s * 7, -6); gameContext.lineTo(ax, 0); gameContext.lineTo(ax - s * 7, 6);
+            gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 6; gameContext.stroke(); gameContext.strokeStyle = accent; gameContext.lineWidth = 3; gameContext.stroke(); }
+        gameContext.restore();
+    }
+    function paintZiplineLook(cap, x, y, angle, length, accent, ropeDark) {
+        var rad = (angle || 0) * (Math.PI / 180), dirX = Math.cos(rad), dirY = Math.sin(rad), ex = x + dirX * length, ey = y + dirY * length, perpX = -dirY, perpY = dirX;
+        cap.save(); cap.lineCap = "round"; var sag = Math.min(20, length * 0.07), mx = (x + ex) / 2 + perpX * sag, my = (y + ey) / 2 + perpY * sag;
+        cap.beginPath(); cap.moveTo(x, y); cap.quadraticCurveTo(mx, my, ex, ey); cap.strokeStyle = BOON_HALO; cap.lineWidth = 9; cap.stroke();
+        for (var o = -1; o <= 1; o += 2) { cap.beginPath(); cap.moveTo(x + perpX * o * 2, y + perpY * o * 2); cap.quadraticCurveTo(mx + perpX * o * 2, my + perpY * o * 2, ex + perpX * o * 2, ey + perpY * o * 2); cap.strokeStyle = o < 0 ? accent : ropeDark; cap.lineWidth = 2.5; cap.stroke(); }
+        for (var p = 0; p < 2; p++) { var px = p === 0 ? x : ex, py = p === 0 ? y : ey;
+            cap.strokeStyle = ZIP_WOOD; cap.lineWidth = 8; cap.beginPath(); cap.moveTo(px - perpX * 16, py - perpY * 16); cap.lineTo(px + perpX * 16, py + perpY * 16); cap.stroke();
+            cap.strokeStyle = ZIP_WOOD_DARK; cap.lineWidth = 8; cap.beginPath(); cap.moveTo(px + perpX * 16, py + perpY * 16); cap.lineTo(px + perpX * 22, py + perpY * 22); cap.stroke(); }
+        cap.beginPath(); cap.arc(x, y, 6, 0, 2 * Math.PI); cap.fillStyle = ZIP_STEEL; cap.fill(); cap.strokeStyle = "#e9eef2"; cap.lineWidth = 2; cap.stroke();
+        cap.beginPath(); cap.arc(x, y, 2, 0, 2 * Math.PI); cap.fillStyle = accent; cap.fill();
+        var hx = x + perpX * 12, hy = y + perpY * 12; cap.strokeStyle = ZIP_STRAP; cap.lineWidth = 3; cap.beginPath(); cap.moveTo(x, y); cap.lineTo(hx, hy); cap.stroke();
+        cap.strokeStyle = accent; cap.lineWidth = 2.5; cap.beginPath(); cap.arc(hx, hy, 4, 0.5, 5.6); cap.stroke(); cap.restore();
+    }
+    function pl_zipline(x, y, angle, length) {
+        var cfg = BN.zipline, len = (typeof length === "number" && isFinite(length) && length > 0) ? length : cfg.minLength;
+        paintZiplineLook(gameContext, x, y, angle, len, cfg.color, ZIP_ROPE_DARK);
+    }
+    function lilyLeafPath(cap, r) { cap.beginPath(); cap.arc(0, 0, r, 0.42, 2 * Math.PI - 0.42); cap.lineTo(0, 0); cap.closePath(); }
+    function lilyHasFlower(angle) { return (Math.round(angle || 0) % 10 + 10) % 10 < 3; }
+    function drawLilyBloom(cap, r, alpha) {
+        if (alpha <= 0) { return; } cap.save(); cap.globalAlpha = alpha; var pr = r * 0.42; cap.fillStyle = LILY_PETAL;
+        for (var p = 0; p < 6; p++) { cap.save(); cap.rotate(p / 6 * Math.PI * 2); cap.beginPath(); cap.ellipse(0, -pr * 0.55, pr * 0.34, pr * 0.62, 0, 0, 2 * Math.PI); cap.fill(); cap.restore(); }
+        cap.fillStyle = LILY_CENTER; cap.beginPath(); cap.arc(0, 0, pr * 0.34, 0, 2 * Math.PI); cap.fill(); cap.restore();
+    }
+    function pl_lilyPad(x, y, state, radius, angle) {
+        var cfg = BN.lilyPad, sink = Math.max(0, Math.min(100, state == null ? 0 : state)) / 100, baseR = (typeof radius === "number" && isFinite(radius) && radius > 0) ? radius : cfg.radius, r = baseR * (1 - 0.16 * sink);
+        gameContext.save(); gameContext.translate(x, y);
+        gameContext.beginPath(); gameContext.arc(0, 0, r + 2, 0, 2 * Math.PI); gameContext.fillStyle = "rgba(8,35,26,0.20)"; gameContext.fill();
+        gameContext.rotate((angle || 0) * (Math.PI / 180));
+        lilyLeafPath(gameContext, r); gameContext.fillStyle = cfg.color; gameContext.fill();
+        gameContext.save(); gameContext.globalAlpha = 0.5; gameContext.strokeStyle = LILY_RIMLIGHT; gameContext.lineWidth = 3; gameContext.beginPath(); gameContext.arc(0, 0, r * 0.86, Math.PI * 1.05, Math.PI * 1.7); gameContext.stroke(); gameContext.restore();
+        lilyLeafPath(gameContext, r); gameContext.strokeStyle = LILY_OUTLINE; gameContext.lineWidth = 4; gameContext.stroke();
+        gameContext.fillStyle = "rgba(255,255,255,0.7)"; gameContext.beginPath(); gameContext.arc(-r * 0.32, -r * 0.34, r * 0.16, 0, 2 * Math.PI); gameContext.fill();
+        gameContext.strokeStyle = LILY_VEIN; gameContext.lineWidth = 2; gameContext.beginPath(); gameContext.moveTo(0, 0); gameContext.lineTo(r * 0.8, r * 0.1); gameContext.stroke();
+        if (lilyHasFlower(angle)) { drawLilyBloom(gameContext, r, Math.max(0, 1 - sink)); }
+        if (sink > 0.5) { gameContext.globalAlpha = 0.55 * ((sink - 0.5) * 2); gameContext.beginPath(); gameContext.arc(0, 0, r, 0, 2 * Math.PI); gameContext.fillStyle = "#2f6fb0"; gameContext.fill(); gameContext.globalAlpha = 1; }
+        gameContext.restore();
+    }
+    function pl_guardHalo(x, y, state) {
+        var cfg = BN.guardHalo, r = cfg.radius, ready2 = (state == null || state >= 100), accent = cfg.color;
+        gameContext.save(); gameContext.translate(x, y);
+        gameContext.beginPath(); gameContext.arc(0, 0, r, 0, 2 * Math.PI); gameContext.fillStyle = "rgba(255,209,102,0.05)"; gameContext.fill();
+        if (!ready2) {
+            var frac = Math.max(0, Math.min(1, state / 100));
+            gameContext.beginPath(); gameContext.arc(0, 0, r * 0.78, 0, 2 * Math.PI); gameContext.strokeStyle = accent; gameContext.globalAlpha = 0.18; gameContext.lineWidth = 3; gameContext.stroke();
+            gameContext.beginPath(); gameContext.arc(0, 0, r * 0.78, -Math.PI / 2, -Math.PI / 2 + frac * 2 * Math.PI); gameContext.globalAlpha = 0.9; gameContext.lineCap = "round";
+            gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 5; gameContext.stroke(); gameContext.strokeStyle = accent; gameContext.lineWidth = 3; gameContext.stroke(); gameContext.globalAlpha = 1;
+        } else {
+            var pulse = 0.5 + 0.5 * Math.sin(Date.now() / 340);
+            gameContext.beginPath(); gameContext.arc(0, 0, r * (0.6 + 0.3 * pulse), 0, 2 * Math.PI); gameContext.strokeStyle = accent; gameContext.globalAlpha = 0.35 + 0.45 * (1 - pulse); gameContext.lineWidth = 3; gameContext.stroke(); gameContext.globalAlpha = 1;
+        }
+        var s = r * 0.5; gameContext.globalAlpha = ready2 ? 1 : 0.3; gameContext.lineCap = "round"; gameContext.lineJoin = "round";
+        gameContext.beginPath(); gameContext.moveTo(0, -s); gameContext.lineTo(s * 0.8, -s * 0.45); gameContext.lineTo(s * 0.8, s * 0.2); gameContext.lineTo(0, s); gameContext.lineTo(-s * 0.8, s * 0.2); gameContext.lineTo(-s * 0.8, -s * 0.45); gameContext.closePath();
+        gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 7; gameContext.stroke(); gameContext.strokeStyle = cfg.color; gameContext.lineWidth = 4; gameContext.stroke(); gameContext.globalAlpha = 1;
+        gameContext.restore();
+    }
+    function drawFlagShape(x, y, clothColor, bend, consumed) {
+        var poleTopY = -30; gameContext.save(); gameContext.translate(x, y);
+        gameContext.beginPath(); gameContext.ellipse(0, 4, 9, 4, 0, 0, 2 * Math.PI); gameContext.fillStyle = "rgba(18,28,42,0.30)"; gameContext.fill();
+        gameContext.lineCap = "round"; gameContext.lineJoin = "round";
+        if (consumed) { gameContext.strokeStyle = "rgba(45,32,30,0.75)"; gameContext.lineWidth = 3; gameContext.beginPath(); gameContext.moveTo(0, 4); gameContext.lineTo(0, -11); gameContext.stroke(); gameContext.restore(); return; }
+        gameContext.strokeStyle = "rgba(28,34,46,0.92)"; gameContext.lineWidth = 3; gameContext.beginPath(); gameContext.moveTo(0, 4); gameContext.lineTo(0, poleTopY); gameContext.stroke();
+        var len = 22, hgt = 13, tipX = len + bend, tipY = poleTopY + hgt * 0.5;
+        gameContext.beginPath(); gameContext.moveTo(0, poleTopY); gameContext.quadraticCurveTo(len * 0.5 + bend * 0.6, poleTopY - 2, tipX, tipY); gameContext.lineTo(0, poleTopY + hgt); gameContext.closePath();
+        gameContext.fillStyle = clothColor; gameContext.fill(); gameContext.strokeStyle = BOON_HALO; gameContext.lineWidth = 1.5; gameContext.stroke(); gameContext.restore();
+    }
+
+    // ---- Thumper (PORT: draw.js buildThumperSprites + drawThumperHazard). The
+    //      slam-cycle/repel values are baked (config.brutalRounds.antlion). ----
+    var THUMPER_SPAN = 122, THUMPER_WORLD_SPAN = 100, THUMPER_BULK = 1.22, THUMPER_HEAD_PX = 128;
+    var THUMPER_PAL = { pad: "#6b6e72", padDark: "#44474b", metal: "#767e88", metalDark: "#454c55", slab: "#5f6873", stripe: "#c9a23a", stripeDark: "#26262a", rust: "#704832", light: "#ff7030", dust: "#a8a298", glow: "#ffb060" };
+    var THUMP_CFG = { thumperPeriod: 1.0, repelRadius: 70 };
+    var thumperPadSprite = null, thumperHeadSprite = null;
+    function buildThumperSprites() {
+        var P = THUMPER_PAL, B = THUMPER_BULK, E = 22 * B, PI = Math.PI;
+        thumperPadSprite = document.createElement("canvas"); thumperPadSprite.width = THUMPER_HEAD_PX; thumperPadSprite.height = THUMPER_HEAD_PX;
+        var ctx = thumperPadSprite.getContext("2d"); ctx.save(); ctx.translate(THUMPER_HEAD_PX / 2, THUMPER_HEAD_PX / 2); ctx.scale(THUMPER_HEAD_PX / THUMPER_SPAN, THUMPER_HEAD_PX / THUMPER_SPAN); ctx.lineJoin = "round"; ctx.lineCap = "round";
+        var pg = ctx.createLinearGradient(0, -E, 0, E); pg.addColorStop(0, P.pad); pg.addColorStop(1, P.padDark); ctx.fillStyle = pg; ctx.strokeStyle = P.padDark; ctx.lineWidth = 1.2;
+        ctx.beginPath(); if (ctx.roundRect) { ctx.roundRect(-E, -E, E * 2, E * 2, 7 * B); } else { ctx.rect(-E, -E, E * 2, E * 2); } ctx.fill(); ctx.stroke();
+        ctx.save(); ctx.beginPath(); if (ctx.roundRect) { ctx.roundRect(-E + 2, -E + 2, E * 2 - 4, E * 2 - 4, 5 * B); } else { ctx.rect(-E + 2, -E + 2, E * 2 - 4, E * 2 - 4); } ctx.clip();
+        var eys = [-E + 4, E - 8];
+        for (var c = 0; c < 2; c++) { var ey = eys[c]; for (var i = 0; i < 9; i++) { var x = -E + 3 + i * (E * 2 - 6) / 9; ctx.fillStyle = (i % 2 === 0) ? P.stripe : P.stripeDark;
+            ctx.beginPath(); ctx.moveTo(x, ey + 4); ctx.lineTo(x + 3, ey); ctx.lineTo(x + 8, ey); ctx.lineTo(x + 5, ey + 4); ctx.closePath(); ctx.fill(); } }
+        ctx.restore();
+        var signs = [1, -1];
+        for (var sx = 0; sx < 2; sx++) { for (var sy = 0; sy < 2; sy++) { var kx = signs[sx], ky = signs[sy];
+            ctx.strokeStyle = P.metalDark; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(kx * (E - 5), ky * (E - 5)); ctx.lineTo(kx * 8 * B, ky * 8 * B); ctx.stroke();
+            ctx.strokeStyle = P.metal; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(kx * (E - 5), ky * (E - 5)); ctx.lineTo(kx * 8 * B, ky * 8 * B); ctx.stroke();
+            ctx.fillStyle = P.metalDark; ctx.beginPath(); ctx.arc(kx * (E - 4), ky * (E - 4), 1.6, 0, PI * 2); ctx.fill(); } }
+        ctx.strokeStyle = P.rust; ctx.globalAlpha = 0.5; ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.moveTo(-10 * B, 10 * B); ctx.quadraticCurveTo(-14 * B, 15 * B, -12 * B, E - 3); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(12 * B, 8 * B); ctx.quadraticCurveTo(15 * B, 13 * B, 14 * B, E - 5); ctx.stroke(); ctx.globalAlpha = 1;
+        ctx.strokeStyle = P.metalDark; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.arc(0, 0, 10 * B, 0, PI * 2); ctx.stroke(); ctx.restore();
+        var R = 16 * B; thumperHeadSprite = document.createElement("canvas"); thumperHeadSprite.width = THUMPER_HEAD_PX; thumperHeadSprite.height = THUMPER_HEAD_PX;
+        ctx = thumperHeadSprite.getContext("2d"); ctx.save(); ctx.translate(THUMPER_HEAD_PX / 2, THUMPER_HEAD_PX / 2); var headScale = THUMPER_HEAD_PX / (R * 2 + 14); ctx.scale(headScale, headScale);
+        var hg = ctx.createRadialGradient(-R * 0.3, -R * 0.3, R * 0.15, 0, 0, R * 1.05); hg.addColorStop(0, P.metal); hg.addColorStop(1, P.metalDark); ctx.fillStyle = hg; ctx.strokeStyle = P.metalDark; ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.arc(0, 0, R, 0, PI * 2); ctx.fill(); ctx.stroke();
+        ctx.strokeStyle = P.metalDark; ctx.lineWidth = 1.1; ctx.beginPath(); ctx.arc(0, 0, R - 2.6, 0, PI * 2); ctx.stroke();
+        ctx.fillStyle = P.slab; ctx.beginPath(); ctx.arc(0, 0, R * 0.66, 0, PI * 2); ctx.fill(); ctx.strokeStyle = P.metalDark; ctx.beginPath(); ctx.arc(0, 0, R * 0.66, 0, PI * 2); ctx.stroke();
+        var cg = ctx.createRadialGradient(-2, -2, 1, 0, 0, R * 0.36); cg.addColorStop(0, P.metal); cg.addColorStop(1, P.metalDark); ctx.fillStyle = cg; ctx.beginPath(); ctx.arc(0, 0, R * 0.36, 0, PI * 2); ctx.fill();
+        ctx.fillStyle = P.metalDark; ctx.beginPath(); ctx.arc(0, 0, 2.2, 0, PI * 2); ctx.fill();
+        ctx.strokeStyle = P.metal; ctx.lineWidth = 0.9; ctx.beginPath(); ctx.moveTo(-1.4, 0); ctx.lineTo(1.4, 0); ctx.stroke();
+        ctx.fillStyle = P.metalDark; for (var rb = 0; rb < 6; rb++) { var ra = rb * PI / 3 + 0.26; ctx.beginPath(); ctx.arc(Math.cos(ra) * (R - 5), Math.sin(ra) * (R - 5), 1.3, 0, PI * 2); ctx.fill(); }
+        ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 1.1; for (var tk = 0; tk < 3; tk++) { ctx.beginPath(); ctx.moveTo(-R * 0.52 + tk * 3.4, -R * 0.78); ctx.lineTo(-R * 0.52 + tk * 3.4 + 1.6, -R * 0.62); ctx.stroke(); } ctx.restore();
+    }
+    // Static slam phase fed from a wall clock; mem carries the per-card slam timer.
+    function pl_thumper(x, y, mem) {
+        if (thumperPadSprite == null) { buildThumperSprites(); }
+        var ctx = gameContext, now = Date.now(), cfg = THUMP_CFG, period = cfg.thumperPeriod * 1000;
+        if (mem.nextSlamAt == null) { mem.nextSlamAt = now + period; mem.lastSlamAt = 0; }
+        if (now - mem.nextSlamAt > period) { mem.nextSlamAt += Math.ceil((now - mem.nextSlamAt) / period) * period; }
+        if (now >= mem.nextSlamAt) { mem.lastSlamAt = mem.nextSlamAt; mem.nextSlamAt += period; }
+        var u = 1 - (mem.nextSlamAt - now) / period; if (u < 0) { u = 0; }
+        var h; if (u < 0.82) { var k = u / 0.82; h = k * k * (3 - 2 * k); } else if (u < 0.93) { h = 1; } else { h = 1 - (u - 0.93) / 0.07; }
+        var s2 = (mem.lastSlamAt > 0) ? (now - mem.lastSlamAt) / 1000 : 9, worldScale = THUMPER_WORLD_SPAN / THUMPER_SPAN, B = THUMPER_BULK, R = 16 * B * worldScale, E = 22 * B * worldScale;
+        ctx.save(); ctx.translate(x, y);
+        ctx.save(); ctx.setLineDash([6, 6]); ctx.strokeStyle = THUMPER_PAL.stripe; ctx.globalAlpha = 0.10 + 0.30 * Math.exp(-s2 * 3); ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(0, 0, cfg.repelRadius, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+        for (var w = 0; w < 2; w++) { var wr = 18 * B * worldScale + (s2 + w * 0.06) * 170; if (wr > cfg.repelRadius * 1.25) { continue; } var wa = Math.max(0, 0.5 * Math.exp(-s2 * 2.2) - w * 0.12); if (wa <= 0.01) { continue; }
+            ctx.strokeStyle = "rgba(230,225,210," + wa.toFixed(3) + ")"; ctx.lineWidth = 2.5 - w; ctx.beginPath(); ctx.arc(0, 0, wr, 0, Math.PI * 2); ctx.stroke(); }
+        var dustA = 0.35 * Math.exp(-s2 * 3.5);
+        if (dustA > 0.02) { ctx.fillStyle = THUMPER_PAL.dust; for (var dp = 0; dp < 8; dp++) { var dpa = dp * Math.PI / 4 + 0.3, dpd = 19 * B * worldScale + s2 * 60; ctx.globalAlpha = dustA; ctx.beginPath(); ctx.arc(Math.cos(dpa) * dpd, Math.sin(dpa) * dpd, 2.2 + s2 * 3, 0, Math.PI * 2); ctx.fill(); } ctx.globalAlpha = 1; }
+        var j = Math.exp(-s2 * 9) * 1.4; ctx.translate(Math.sin(s2 * 70) * j, Math.cos(s2 * 55) * j);
+        ctx.drawImage(thumperPadSprite, -THUMPER_WORLD_SPAN / 2, -THUMPER_WORLD_SPAN / 2, THUMPER_WORLD_SPAN, THUMPER_WORLD_SPAN);
+        var animT = now / 1000;
+        for (var li = 0; li < 2; li++) { var ls = (li === 0) ? 1 : -1, on = Math.sin(animT * (4 + h * 6) + ls) > 0; ctx.fillStyle = THUMPER_PAL.light; ctx.globalAlpha = on ? 1 : 0.22; ctx.beginPath(); ctx.arc(ls * (E - 4 * worldScale * B), E - 4 * worldScale * B, 1.7, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; }
+        ctx.fillStyle = "rgba(0,0,0," + (0.18 + h * 0.14).toFixed(3) + ")"; ctx.beginPath(); ctx.ellipse(h * 6, h * 8, R * (1 + 0.1 * h), R * (0.92 + 0.1 * h), 0, 0, Math.PI * 2); ctx.fill();
+        var headSpan = (R * 2 + 14 * worldScale) * (1 + 0.22 * h); ctx.drawImage(thumperHeadSprite, -headSpan / 2, -headSpan / 2, headSpan, headSpan);
+        ctx.strokeStyle = THUMPER_PAL.metalDark; ctx.lineWidth = 2.6; ctx.beginPath(); ctx.arc(0, 0, R + 4.5, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = THUMPER_PAL.metal; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(0, 0, R + 4.5, 0, Math.PI * 2); ctx.stroke();
+        var cageAngles = [Math.PI / 4, 3 * Math.PI / 4, 5 * Math.PI / 4, 7 * Math.PI / 4]; ctx.strokeStyle = THUMPER_PAL.metalDark; ctx.lineWidth = 2.2;
+        for (var ca = 0; ca < 4; ca++) { var a = cageAngles[ca], den = Math.max(Math.abs(Math.cos(a)), Math.abs(Math.sin(a))); ctx.beginPath(); ctx.moveTo(Math.cos(a) * (R + 4.5), Math.sin(a) * (R + 4.5)); ctx.lineTo(Math.cos(a) * (E - 4 * worldScale) / den, Math.sin(a) * (E - 4 * worldScale) / den); ctx.stroke(); }
+        ctx.restore();
+    }
+
     // ========================= SCENES =========================
     // s = { ctx, t, dt, mem, opts, p }. Background already cleared. Effects in
     // s' card list are advanced + drawn ON TOP after the scene returns.
@@ -1092,305 +1594,206 @@ var LearnAnim = (function () {
     };
 
     // ========================= HAZARDS =========================
+    // These scenes render the REAL in-game art via the ported pl_* drawers above
+    // (world units), scaled to fit the card, with a world-space kart (radius 7.5,
+    // the game's playerBaseRadius) so proportions match the live game.
     // (hazard-bumper reuses SCENES["bumper"]; hazard-antlion reuses SCENES["antlion"].)
 
     SCENES["movingBumper"] = function (s) {
-        floor(s.ctx, "dirt.png", 60);
-        var ctx = s.ctx, railY = H * 0.5, x0 = W * 0.2, x1 = W * 0.8;
-        var bx = lerp(x0, x1, ping(s.t, 2600));
-        ctx.save(); ctx.strokeStyle = "rgba(0,0,0,0.3)"; ctx.setLineDash([6, 6]); ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(x0, railY); ctx.lineTo(x1, railY); ctx.stroke(); ctx.restore();
-        var p = s.p; p.radius = 11; p.surface = "normal"; p.alive = true;
-        p.x = W * 0.5; p.y = lerp(H + 20, -20, loop(s.t, 2600)); p.velX = 0; p.velY = -MAXSPEED * 0.5;
-        updateMovementParticles(p, s.dt);
-        kart(ctx, p.x, p.y, p.radius, BLUE);
-        bumper(ctx, bx, railY, 11);
+        floor(s.ctx, "dirt.png", 60); gameContext = s.ctx;
+        var c = s.ctx; c.save(); c.translate(120, 70); c.scale(1.5, 1.5);
+        kart(c, 0, lerp(45, -45, loop(s.t, 2600)), 7.5, BLUE);
+        pl_movingBumper(-50 + 100 * ping(s.t, 2600), 0, -50, 0, 0);
+        c.restore();
     };
 
     SCENES["bumperWall"] = function (s) {
-        floor(s.ctx, "dirt.png", 60);
-        var ctx = s.ctx, wallY = H * 0.5, x0 = W * 0.22, x1 = W * 0.78;
-        ctx.save(); ctx.strokeStyle = "#E5392B"; ctx.lineWidth = 6; ctx.lineCap = "round";
-        ctx.beginPath(); ctx.moveTo(x0, wallY); ctx.lineTo(x1, wallY); ctx.stroke();
-        ctx.fillStyle = "orange";
-        for (var bx = x0; bx <= x1; bx += 24) { ctx.beginPath(); ctx.arc(bx, wallY, 6, 0, 2 * Math.PI); ctx.fill(); }
-        ctx.restore();
-        var ph = ping(s.t, 2200), p = s.p; p.radius = 11;
-        kart(ctx, W * 0.5, lerp(H - 16, wallY + 18, ease(ph)), p.radius, BLUE);
-        onCycle(s.mem, s.t - 1100, 2200, "kick", function () { spawnPunchEffect(W * 0.5, wallY + 14, 14, "#E5392B"); });
+        floor(s.ctx, "dirt.png", 60); gameContext = s.ctx;
+        var c = s.ctx; c.save(); c.translate(120, 70); c.scale(1.3, 1.3);
+        pl_bumperWall(-60, 0, 0);
+        kart(c, lerp(-30, 30, ping(s.t, 3000)), lerp(42, 13, ease(ping(s.t, 2200))), 7.5, BLUE);
+        c.restore();
     };
 
     SCENES["rotor"] = function (s) {
-        floor(s.ctx, "dirt.png", 60);
-        var ctx = s.ctx, cx = W * 0.5, cy = H * 0.5, R = 44, a = s.t / 600;
-        var ex = cx + Math.cos(a) * R, ey = cy + Math.sin(a) * R;
-        ctx.save(); ctx.strokeStyle = "#7a7a7a"; ctx.lineWidth = 5; ctx.lineCap = "round";
-        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey); ctx.stroke();
-        ctx.fillStyle = "#555"; ctx.beginPath(); ctx.arc(cx, cy, 5, 0, 2 * Math.PI); ctx.fill(); ctx.restore();
-        bumper(ctx, ex, ey, 10);
-        var op = a + Math.PI;       // a kart waiting safely opposite the swinging arm
-        kart(ctx, cx + Math.cos(op) * R, cy + Math.sin(op) * R, 10, BLUE);
+        floor(s.ctx, "dirt.png", 60); gameContext = s.ctx;
+        var c = s.ctx; c.save(); c.translate(120, 70); c.scale(0.72, 0.72);
+        var deg = (s.t / 12) % 360, rad = deg * Math.PI / 180, R = HZ.rotor.orbitRadius;
+        kart(c, Math.cos(rad + Math.PI) * R, Math.sin(rad + Math.PI) * R, 7.5, BLUE);
+        pl_rotor(Math.cos(rad) * R, Math.sin(rad) * R, deg);
+        c.restore();
     };
 
     SCENES["geyser"] = function (s) {
-        floor(s.ctx, "dirt.png", 60);
-        var ctx = s.ctx, gx = W * 0.5, gy = H * 0.58, ph = loop(s.t, 3000);
-        ctx.save(); ctx.fillStyle = "#3a4750"; ctx.beginPath(); ctx.arc(gx, gy, 12, 0, 2 * Math.PI); ctx.fill();
-        ctx.strokeStyle = "#222"; ctx.lineWidth = 2; ctx.stroke(); ctx.restore();
-        if (ph > 0.5 && ph < 0.72) { var c = (ph - 0.5) / 0.22; ctx.save(); ctx.globalAlpha = 0.6 * c; ctx.strokeStyle = "#9fdcff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(gx, gy, 8 + c * 16, 0, 2 * Math.PI); ctx.stroke(); ctx.restore(); }
-        var p = s.p; p.radius = 11; var erupt = ph >= 0.72;
-        kart(ctx, gx, erupt ? gy - ease(clamp((ph - 0.72) / 0.28, 0, 1)) * 60 : gy - 16, p.radius, BLUE);
-        onCycle(s.mem, s.t - 0.72 * 3000, 3000, "erupt", function () { spawnExplosion(gx, gy, 40, "#9fe8ff"); });
+        floor(s.ctx, "dirt.png", 60); gameContext = s.ctx;
+        var c = s.ctx; c.save(); c.translate(120, 84); c.scale(1.3, 1.3);
+        var ph = loop(s.t, 3000), state = ph < 0.5 ? 0 : ph < 0.72 ? 1 : ph < 0.85 ? 2 : 0;
+        var ky = state === 2 ? -ease(clamp((ph - 0.72) / 0.13, 0, 1)) * 42 : -HZ.geyser.radius - 6;
+        kart(c, 0, ky, 7.5, BLUE);
+        pl_geyser(0, 0, state);
+        c.restore();
     };
 
     SCENES["mine"] = function (s) {
-        floor(s.ctx, "dirt.png", 60);
-        var ctx = s.ctx, mx = W * 0.6, my = H * 0.5, ph = loop(s.t, 3200);
-        ctx.save(); ctx.strokeStyle = "rgba(229,57,43,0.4)"; ctx.setLineDash([4, 4]); ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.arc(mx, my, 34, 0, 2 * Math.PI); ctx.stroke(); ctx.restore();
-        var armed = ph > 0.4 && ph < 0.62, blink = armed && (Math.floor(s.t / 120) % 2 === 0);
-        ctx.save(); ctx.fillStyle = blink ? "#ff4030" : "#7a2018"; ctx.beginPath(); ctx.arc(mx, my, 9, 0, 2 * Math.PI); ctx.fill();
-        ctx.strokeStyle = "#2a0c08"; ctx.lineWidth = 2; ctx.stroke(); ctx.restore();
-        var p = s.p; p.radius = 11; var kx, ky = my;
-        if (ph < 0.62) { kx = lerp(W * 0.1, mx - 22, ease(clamp(ph / 0.62, 0, 1))); }
-        else { var e = ease(clamp((ph - 0.62) / 0.38, 0, 1)); kx = lerp(mx - 22, W * 0.05, e); ky = my - e * 30; }
-        kart(ctx, kx, ky, p.radius, BLUE);
-        onCycle(s.mem, s.t - 0.62 * 3200, 3200, "boom", function () { spawnExplosion(mx, my, 56, "#ff7a18"); });
+        floor(s.ctx, "dirt.png", 60); gameContext = s.ctx;
+        var c = s.ctx; c.save(); c.translate(120, 70); c.scale(1.7, 1.7);
+        var ph = loop(s.t, 3200), state = ph < 0.45 ? 0 : ph < 0.62 ? 1 : ph < 0.72 ? 2 : 0;
+        var kx = ph < 0.62 ? lerp(-46, -18, ease(clamp(ph / 0.62, 0, 1))) : lerp(-18, -52, ease(clamp((ph - 0.62) / 0.38, 0, 1)));
+        kart(c, kx, ph >= 0.62 && ph < 0.72 ? -10 : 0, 7.5, BLUE);
+        pl_mine(0, 0, state);
+        c.restore();
     };
 
     SCENES["thumper"] = function (s) {
-        floor(s.ctx, "sand.png", 60);
-        var ctx = s.ctx, tx = W * 0.5, ty = H * 0.52, ringR = 46, slam = Math.max(0, 1 - loop(s.t, 950) * 4);
-        ctx.save(); ctx.setLineDash([5, 5]); ctx.strokeStyle = "#c9a23a"; ctx.lineWidth = 2;
-        ctx.globalAlpha = 0.25 + 0.5 * slam; ctx.beginPath(); ctx.arc(tx, ty, ringR, 0, 2 * Math.PI); ctx.stroke(); ctx.restore();
-        ctx.save(); ctx.fillStyle = "#6b6e72"; ctx.fillRect(tx - 14, ty - 14, 28, 28);
-        ctx.fillStyle = "#767e88"; ctx.beginPath(); ctx.arc(tx, ty, 8 + slam * 4, 0, 2 * Math.PI); ctx.fill();
-        ctx.strokeStyle = "#454c55"; ctx.lineWidth = 2; ctx.stroke(); ctx.restore();
-        kart(ctx, tx + 24, ty, 10, BLUE);       // a kart sheltering inside the ring
-        onCycle(s.mem, s.t, 950, "thump", function () { spawnPunchEffect(tx, ty, 16, "#c9a23a"); });
+        floor(s.ctx, "sand.png", 60); gameContext = s.ctx;
+        var c = s.ctx; c.save(); c.translate(120, 70); c.scale(0.82, 0.82);
+        kart(c, 50, 0, 7.5, BLUE);          // a kart sheltering inside the repel ring
+        pl_thumper(0, 0, s.mem);
+        c.restore();
     };
 
     SCENES["vortexWell"] = function (s) {
-        floor(s.ctx, "dirt.png", 60);
-        var ctx = s.ctx, cx = W * 0.5, cy = H * 0.5, R = 50;
-        ctx.save(); ctx.strokeStyle = "#A77BFF"; ctx.globalAlpha = 0.5; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(cx, cy, R, 0, 2 * Math.PI); ctx.stroke();
-        for (var i = 0; i < 10; i++) { var a = i * 0.9 + s.t / 500, rr = R * (1 - loop(s.t / 1000 + i * 0.1, 1));
-            ctx.globalAlpha = 0.8 * (rr / R); ctx.fillStyle = "#C9A9FF";
-            ctx.beginPath(); ctx.arc(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr, 2, 0, 2 * Math.PI); ctx.fill(); }
-        ctx.globalAlpha = 0.6; ctx.fillStyle = "rgba(40,20,70,0.6)"; ctx.beginPath(); ctx.arc(cx, cy, 12, 0, 2 * Math.PI); ctx.fill(); ctx.restore();
-        kart(ctx, lerp(-20, W + 20, loop(s.t, 2400)), cy - R - 6, 11, BLUE);  // slingshots safely past the rim
+        floor(s.ctx, "dirt.png", 60); gameContext = s.ctx;
+        var c = s.ctx; c.save(); c.translate(120, 70); c.scale(0.34, 0.34);
+        pl_vortexWell(0, 0, HZ.vortexWell.radius);
+        kart(c, lerp(-360, 360, loop(s.t, 2600)), -HZ.vortexWell.radius - 18, 9, BLUE);  // slingshots past the rim
+        c.restore();
     };
 
     SCENES["laserGate"] = function (s) {
-        floor(s.ctx, "dirt.png", 60);
-        var ctx = s.ctx, gx = W * 0.5, y0 = 16, y1 = H - 16, ph = loop(s.t, 2800);
-        var warn = ph > 0.42 && ph <= 0.55, solid = ph > 0.55;
-        ctx.save(); ctx.fillStyle = "#2a6b78"; ctx.fillRect(gx - 6, y0 - 8, 12, 12); ctx.fillRect(gx - 6, y1 - 4, 12, 12);
-        if (warn || solid) {
-            ctx.globalAlpha = solid ? 0.95 : (0.35 + 0.4 * Math.abs(Math.sin(s.t / 55)));
-            ctx.strokeStyle = solid ? "#42E0FF" : "#bff4ff"; ctx.lineWidth = solid ? 5 : 2;
-            ctx.lineCap = "round"; ctx.shadowColor = "#42E0FF"; ctx.shadowBlur = solid ? 10 : 0;
-            ctx.beginPath(); ctx.moveTo(gx, y0); ctx.lineTo(gx, y1); ctx.stroke();
-        }
-        ctx.restore();
-        var p = s.p; p.radius = 11; var kx = ph < 0.4 ? lerp(-22, W + 22, ease(ph / 0.4)) : W + 40;  // darts through the open gap
-        if (kx <= W + 20) { p.x = kx; p.y = H * 0.5; p.velX = MAXSPEED * 0.6; p.velY = 0; updateMovementParticles(p, s.dt); kart(ctx, kx, H * 0.5, p.radius, BLUE); }
+        floor(s.ctx, "dirt.png", 60); gameContext = s.ctx;
+        var c = s.ctx; c.save(); c.translate(120, 70); c.scale(0.62, 0.62);
+        var ph = loop(s.t, 2800), state = ph < 0.5 ? 0 : ph < 0.62 ? 1 : 2;
+        pl_laserGate(0, -75, 90, state);
+        var kx = ph < 0.4 ? lerp(-110, 110, ease(ph / 0.4)) : 999;
+        if (kx <= 130) { kart(c, kx, 0, 7.5, BLUE); }
+        c.restore();
     };
 
     SCENES["crusher"] = function (s) {
-        floor(s.ctx, "dirt.png", 60);
-        var ctx = s.ctx, cy = H * 0.5, ph = ping(s.t, 2000), slabX = lerp(W * 0.3, W * 0.7, ease(ph));
-        ctx.save(); ctx.fillStyle = "#9AA0A6"; ctx.fillRect(slabX - 22, cy - 16, 44, 32);
-        ctx.strokeStyle = "#5a5e64"; ctx.lineWidth = 2; ctx.strokeRect(slabX - 22, cy - 16, 44, 32);
-        ctx.fillStyle = "#e8b800"; for (var i = 0; i < 4; i++) { ctx.fillRect(slabX - 18 + i * 11, cy - 16, 6, 5); }
-        ctx.restore();
-        var p = s.p; p.radius = 10; var safeX = slabX < W * 0.5 ? W * 0.72 : W * 0.28;  // slips through the side the slab vacated
-        kart(ctx, safeX, lerp(-18, H + 18, loop(s.t, 2000)), p.radius, BLUE);
-        onCycle(s.mem, s.t - 1000, 2000, "slam", function () { spawnPunchEffect(W * 0.7, cy, 14, "#9AA0A6"); });
+        floor(s.ctx, "dirt.png", 60); gameContext = s.ctx;
+        var c = s.ctx; c.save(); c.translate(120, 70); c.scale(0.62, 0.62);
+        pl_crusher(-75 + 150 * ease(ping(s.t, 2000)), 0, -75, 0, 0);
+        c.restore();
     };
 
     SCENES["sentryTurret"] = function (s) {
-        floor(s.ctx, "dirt.png", 60);
-        var ctx = s.ctx, tx = W * 0.3, ty = H * 0.5, ph = loop(s.t, 2800);
-        var p = s.p; p.radius = 11; var kx = lerp(W * 0.55, W * 0.92, ping(s.t, 4000)), ky = H * 0.5 + Math.sin(s.t / 600) * 22;
-        var ang = Math.atan2(ky - ty, kx - tx), charging = ph > 0.45 && ph < 0.62;
-        ctx.save(); ctx.fillStyle = "#5a2222"; ctx.beginPath(); ctx.arc(tx, ty, 14, 0, 2 * Math.PI); ctx.fill();
-        ctx.translate(tx, ty); ctx.rotate(ang);
-        ctx.fillStyle = charging ? "#ff8a3a" : "#FF5C5C"; ctx.fillRect(0, -4, 26, 8);
-        if (charging) { ctx.globalAlpha = 0.6; ctx.fillStyle = "#ffd24a"; ctx.beginPath(); ctx.arc(26, 0, 4 + (ph - 0.45) / 0.17 * 5, 0, 2 * Math.PI); ctx.fill(); }
-        ctx.restore();
-        kart(ctx, kx, ky, p.radius, BLUE);
-        onCycle(s.mem, s.t - 0.62 * 2800, 2800, "fire", function () { spawnMuzzleFlash(tx + Math.cos(ang) * 26, ty + Math.sin(ang) * 26, ang * 180 / Math.PI, "#ffd24a"); spawnHitEffect(kx, ky, "#ff8a3a"); });
+        floor(s.ctx, "dirt.png", 60); gameContext = s.ctx;
+        var c = s.ctx; c.save(); c.translate(78, 70); c.scale(1.2, 1.2);
+        var ph = loop(s.t, 2800), kx = lerp(40, 120, ping(s.t, 4000)), ky = Math.sin(s.t / 600) * 30;
+        var ang = Math.atan2(ky, kx) * 180 / Math.PI, state = ph < 0.45 ? 0 : ph < 0.62 ? 1 : ph < 0.7 ? 2 : 0;
+        pl_sentryTurret(0, 0, ang, state);
+        kart(c, kx, ky, 7.5, BLUE);
+        c.restore();
     };
 
     SCENES["magpieDrone"] = function (s) {
-        floor(s.ctx, "dirt.png", 60);
-        var ctx = s.ctx, ph = loop(s.t, 4000), railY = H * 0.32, dx = lerp(W * 0.2, W * 0.8, ping(s.t, 4000));
-        ctx.save(); ctx.strokeStyle = "rgba(0,0,0,0.3)"; ctx.setLineDash([6, 6]); ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(W * 0.2, railY); ctx.lineTo(W * 0.8, railY); ctx.stroke(); ctx.restore();
-        var stolen = ph > 0.5, p = s.p; p.radius = 11; var kx = W * 0.5, ky = H * 0.7;
-        kart(ctx, kx, ky, p.radius, BLUE);
-        if (!stolen) { var bob = Math.sin(s.t / 300) * 3; ctx.save(); ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.beginPath(); ctx.arc(kx, ky - 22 + bob, 10, 0, 2 * Math.PI); ctx.fill();
-            var bi = img("bomb.svg"); if (ready(bi)) { ctx.drawImage(bi, kx - 7, ky - 29 + bob, 14, 14); } ctx.restore(); }
-        ctx.save(); ctx.translate(dx, railY); ctx.fillStyle = "#5B6CC4"; ctx.beginPath(); ctx.ellipse(0, 0, 14, 9, 0, 0, 2 * Math.PI); ctx.fill();
-        ctx.strokeStyle = "#2e386e"; ctx.lineWidth = 2; ctx.stroke();
-        ctx.strokeStyle = "#9aa6e0"; ctx.beginPath(); ctx.moveTo(-16, -9); ctx.lineTo(-8, -9); ctx.moveTo(8, -9); ctx.lineTo(16, -9); ctx.stroke(); ctx.restore();
-        if (stolen) { var bi2 = img("bomb.svg"), lb = Math.sin(s.t / 220) * 3; if (ready(bi2)) { ctx.drawImage(bi2, dx - 8, railY - 24 + lb, 16, 16); } }
-        onCycle(s.mem, s.t - 0.5 * 4000, 4000, "steal", function () { spawnTeleportPuff(kx, ky - 22, "#5B6CC4"); });
+        floor(s.ctx, "dirt.png", 60); gameContext = s.ctx;
+        var c = s.ctx; c.save(); c.translate(120, 70); c.scale(1.35, 1.35);
+        var t = s.t / 1000, carrying = loop(s.t, 4000) > 0.5;
+        var dx = lerp(-55, 55, ping(s.t, 4000)), faceLeft = dx < lerp(-55, 55, ping(s.t - 16, 4000));
+        kart(c, 0, 24, 7.5, BLUE);
+        if (!carrying) { var bi = img("bomb.svg"); c.save(); c.beginPath(); c.arc(0, 8, 6, 0, 2 * Math.PI); c.fillStyle = "rgba(255,255,255,0.9)"; c.fill(); if (ready(bi)) { c.drawImage(bi, -4.5, 3.5, 9, 9); } c.restore(); }
+        pl_magpieDrone(dx, -22, -55, -22, 0, carrying, faceLeft, t);
+        c.restore();
     };
 
     // ========================= BOONS =========================
 
     SCENES["dashArrows"] = function (s) {
-        floor(s.ctx, "dirt.png", 60);
-        var ctx = s.ctx, cy = H * 0.5;
-        for (var i = 0; i < 4; i++) { var ax = W * 0.32 + i * 26, glow = 0.4 + 0.6 * Math.max(0, Math.sin(s.t / 200 - i * 0.6));
-            ctx.save(); ctx.globalAlpha = glow; ctx.strokeStyle = "#3FC1C9"; ctx.lineWidth = 4; ctx.lineCap = "round"; ctx.lineJoin = "round";
-            ctx.beginPath(); ctx.moveTo(ax - 8, cy - 9); ctx.lineTo(ax + 8, cy); ctx.lineTo(ax - 8, cy + 9); ctx.stroke(); ctx.restore(); }
-        var p = s.p; p.radius = 11; p.surface = "normal"; p.alive = true; p.speedBuffUntil = 1e15;
-        if (p.x == null || p.x > W + 30) { p.x = -30; p.y = cy; }
-        drive(p, 1, 0, MAXSPEED * 0.85, 140, s.dt);
-        updateMovementParticles(p, s.dt); drawSpeedFx(ctx, p, s.t);
-        kart(ctx, p.x, p.y, p.radius, BLUE);
+        floor(s.ctx, "dirt.png", 60); gameContext = s.ctx;
+        var c = s.ctx; c.save(); c.translate(120, 70); c.scale(1.3, 1.3);
+        pl_dashArrows(0, 0, 0);
+        kart(c, lerp(-80, 80, loop(s.t, 1800)), 0, 7.5, BLUE);
+        c.restore();
     };
 
     SCENES["rechargeSpring"] = function (s) {
-        floor(s.ctx, "dirt.png", 60);
-        var ctx = s.ctx, gx = W * 0.5, gy = H * 0.5, ph = loop(s.t, 3200);
-        ctx.save(); ctx.fillStyle = "#1d6b4a"; ctx.beginPath(); ctx.arc(gx, gy, 24, 0, 2 * Math.PI); ctx.fill();
-        var fill = ph < 0.5 ? 1 : clamp((ph - 0.5) / 0.4, 0, 1);     // drained on claim, refills to ready
-        ctx.strokeStyle = "#5BE3A0"; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(gx, gy, 24, -Math.PI / 2, -Math.PI / 2 + fill * 2 * Math.PI); ctx.stroke();
-        if (fill >= 1) { ctx.globalAlpha = 0.4 * (0.5 + 0.5 * Math.sin(s.t / 200)); ctx.beginPath(); ctx.arc(gx, gy, 28, 0, 2 * Math.PI); ctx.stroke(); }
-        ctx.restore();
-        kart(ctx, lerp(-20, W + 20, loop(s.t, 3200)), gy, 11, BLUE);
-        onCycle(s.mem, s.t - 0.5 * 3200, 3200, "claim", function () { spawnTeleportPuff(gx, gy, "#5BE3A0"); });
+        floor(s.ctx, "dirt.png", 60); gameContext = s.ctx;
+        var c = s.ctx; c.save(); c.translate(120, 70); c.scale(1.4, 1.4);
+        var ph = loop(s.t, 3600), state = ph < 0.45 ? 100 : Math.floor(clamp((ph - 0.45) / 0.5, 0, 1) * 100);
+        pl_rechargeSpring(0, 0, state);
+        kart(c, lerp(-80, 80, loop(s.t, 3600)), 0, 7.5, BLUE);
+        c.restore();
     };
 
     SCENES["slipstream"] = function (s) {
-        floor(s.ctx, "dirt.png", 60);
-        var ctx = s.ctx, cy = H * 0.5, x0 = W * 0.18, x1 = W * 0.82, half = 26;
-        ctx.save(); ctx.fillStyle = "rgba(127,216,255,0.12)"; ctx.fillRect(x0, cy - half, x1 - x0, half * 2);
-        ctx.strokeStyle = "#7FD8FF"; ctx.lineCap = "round"; ctx.lineWidth = 2; ctx.globalAlpha = 0.7;
-        for (var i = 0; i < 4; i++) { var sy = cy - half + 10 + i * 12, sx = lerp(x0, x1 - 30, loop(s.t / 900 + i * 0.2, 1));
-            ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + 22, sy); ctx.stroke(); }
-        ctx.restore();
-        var p = s.p; p.radius = 11; p.surface = "normal"; p.alive = true;
-        if (p.x == null || p.x > x1) { p.x = x0; p.y = cy; }
-        drive(p, 1, 0, MAXSPEED * 0.5, 75, s.dt);
-        updateMovementParticles(p, s.dt);
-        kart(ctx, p.x, p.y, p.radius, BLUE);
+        floor(s.ctx, "dirt.png", 60); gameContext = s.ctx;
+        var c = s.ctx; c.save(); c.translate(120, 70); c.scale(1.2, 1.2);
+        pl_slipstream(0, 0, 0);
+        kart(c, lerp(-46, 46, loop(s.t, 2600)), 0, 7.5, BLUE);
+        c.restore();
     };
 
     SCENES["guardHalo"] = function (s) {
-        floor(s.ctx, "dirt.png", 60);
-        var ctx = s.ctx, hx = W * 0.4, hy = H * 0.5, ph = loop(s.t, 3600), taken = ph > 0.4, popped = ph > 0.8;
-        if (!taken) { ctx.save(); ctx.strokeStyle = "#FFD166"; ctx.lineWidth = 4; ctx.globalAlpha = 0.5 + 0.4 * Math.sin(s.t / 220);
-            ctx.beginPath(); ctx.arc(hx, hy, 16 + Math.sin(s.t / 300) * 2, 0, 2 * Math.PI); ctx.stroke(); ctx.restore(); }
-        var p = s.p; p.radius = 11; var kx = lerp(W * 0.15, W * 0.85, ease(ph)), ky = hy;
-        kart(ctx, kx, ky, p.radius, BLUE);
-        if (taken && !popped) { ctx.save(); ctx.strokeStyle = "#FFE08A"; ctx.lineWidth = 2; ctx.globalAlpha = 0.7;
-            ctx.beginPath(); ctx.arc(kx, ky, p.radius + 5, 0, 2 * Math.PI); ctx.stroke();
-            ctx.globalAlpha = 0.15; ctx.fillStyle = "#FFD166"; ctx.beginPath(); ctx.arc(kx, ky, p.radius + 5, 0, 2 * Math.PI); ctx.fill(); ctx.restore(); }
-        onCycle(s.mem, s.t - 0.8 * 3600, 3600, "pop", function () { spawnHitEffect(W * 0.78, hy, "#FFD166"); });
+        floor(s.ctx, "dirt.png", 60); gameContext = s.ctx;
+        var c = s.ctx; c.save(); c.translate(120, 70); c.scale(1.4, 1.4);
+        pl_guardHalo(0, 0, 100);
+        kart(c, lerp(-80, 80, loop(s.t, 3600)), 0, 7.5, BLUE);
+        c.restore();
     };
 
     SCENES["secondWindTotem"] = function (s) {
-        floor(s.ctx, "dirt.png", 60);
-        var ctx = s.ctx, fx = W * 0.7, fy = H * 0.5, ph = loop(s.t, 4200), attuned = ph > 0.25;
-        ctx.save(); ctx.strokeStyle = "#8a8f98"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(fx, fy - 26); ctx.lineTo(fx, fy + 18); ctx.stroke();
-        ctx.fillStyle = attuned ? BLUE : "#CBD2DC"; var wav = Math.sin(s.t / 200) * 3;
-        ctx.beginPath(); ctx.moveTo(fx, fy - 26); ctx.lineTo(fx + 22, fy - 21 + wav); ctx.lineTo(fx, fy - 12); ctx.closePath(); ctx.fill(); ctx.restore();
-        var p = s.p; p.radius = 11; var kx, ky = fy, dead = ph > 0.55 && ph < 0.7;
-        if (ph < 0.45) { kx = lerp(W * 0.1, fx - 20, ease(ph / 0.45)); }
-        else if (ph < 0.55) { kx = lerp(fx - 20, W * 0.2, ease((ph - 0.45) / 0.1)); }
-        else if (dead) { kx = null; }
-        else { kx = fx - 20; }
-        if (kx != null) { kart(ctx, kx, ky, p.radius, BLUE); }
-        onCycle(s.mem, s.t - 0.55 * 4200, 4200, "die", function () { spawnExplosion(W * 0.2, fy, 36, "#cf1020"); });
-        onCycle(s.mem, s.t - 0.7 * 4200, 4200, "respawn", function () { spawnTeleportPuff(fx - 20, fy, BLUE); });
+        floor(s.ctx, "dirt.png", 60); gameContext = s.ctx;
+        var c = s.ctx; c.save(); c.translate(120, 84); c.scale(1.6, 1.6);
+        drawFlagShape(0, 0, BN.secondWindTotem.color, Math.sin(s.t / 300) * 2.5, false);
+        kart(c, lerp(-42, -8, ease(ping(s.t, 4000))), 0, 7.5, BLUE);
+        c.restore();
     };
 
     SCENES["launchPad"] = function (s) {
-        floor(s.ctx, "dirt.png", 60);
-        var ctx = s.ctx, px = W * 0.25, py = H * 0.7, ph = loop(s.t, 3000), ex = W * 0.85, ey = H * 0.35;
-        ctx.save(); ctx.translate(px, py); ctx.rotate(-Math.PI / 4); ctx.fillStyle = "#FF8C42"; ctx.globalAlpha = 0.85;
-        for (var i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(-10, -14 + i * 9); ctx.lineTo(0, -8 + i * 9); ctx.lineTo(10, -14 + i * 9); ctx.lineTo(10, -11 + i * 9); ctx.lineTo(0, -5 + i * 9); ctx.lineTo(-10, -11 + i * 9); ctx.closePath(); ctx.fill(); }
-        ctx.restore();
-        var p = s.p; p.radius = 11; var aloft = ph >= 0.4, kx, ky;
-        if (!aloft) { kx = lerp(W * 0.05, px, ease(ph / 0.4)); ky = py; }
-        else { var t = clamp((ph - 0.4) / 0.45, 0, 1); kx = lerp(px, ex, t); ky = lerp(py, ey, t) - Math.sin(t * Math.PI) * 40; }
-        if (aloft && ph < 0.85) { ctx.save(); ctx.globalAlpha = 0.3; ctx.fillStyle = "#FFB870"; ctx.beginPath(); ctx.arc(kx, ky, p.radius + 6, 0, 2 * Math.PI); ctx.fill(); ctx.restore(); }
-        kart(ctx, kx, ky, p.radius, BLUE);
-        onCycle(s.mem, s.t - 0.4 * 3000, 3000, "launch", function () { spawnPunchEffect(px, py, 16, "#FF8C42"); });
+        floor(s.ctx, "dirt.png", 60); gameContext = s.ctx;
+        var c = s.ctx; c.save(); c.translate(70, 92); c.scale(1.5, 1.5);
+        pl_launchPad(0, 0, -40);
+        var ph = loop(s.t, 3000), ang = -40 * Math.PI / 180, t = clamp((ph - 0.35) / 0.5, 0, 1), dist = ph < 0.35 ? 0 : t * 120;
+        var kx = ph < 0.35 ? lerp(-42, 0, ease(ph / 0.35)) : Math.cos(ang) * dist;
+        var ky = ph < 0.35 ? 0 : Math.sin(ang) * dist - Math.sin(t * Math.PI) * 12;
+        kart(c, kx, ky, 7.5, BLUE);
+        c.restore();
     };
 
     SCENES["barrelCannon"] = function (s) {
-        floor(s.ctx, "dirt.png", 60);
-        var ctx = s.ctx, bx = W * 0.35, by = H * 0.5, ph = loop(s.t, 3400);
-        var loaded = ph > 0.3 && ph < 0.78, fired = ph >= 0.78;
-        var aim = loaded ? (-Math.PI / 2 + Math.sin(s.t / 300) * 1.2) : -Math.PI / 4;
-        ctx.save(); ctx.translate(bx, by); ctx.rotate(aim + Math.PI / 2);
-        ctx.fillStyle = "#C8743C"; ctx.fillRect(-12, -26, 24, 34);
-        ctx.strokeStyle = "#7a431f"; ctx.lineWidth = 2; ctx.strokeRect(-12, -26, 24, 34);
-        ctx.strokeStyle = "#a55a2c"; ctx.beginPath(); ctx.moveTo(-12, -10); ctx.lineTo(12, -10); ctx.moveTo(-12, 2); ctx.lineTo(12, 2); ctx.stroke(); ctx.restore();
-        var p = s.p; p.radius = 11;
-        if (!loaded && !fired) { kart(ctx, lerp(W * 0.05, bx, ease(clamp(ph / 0.3, 0, 1))), by, p.radius, BLUE); }
-        else if (loaded) { ctx.save(); ctx.fillStyle = "#ffd24a"; ctx.globalAlpha = 0.6 + 0.4 * Math.sin(s.t / 80); ctx.beginPath(); ctx.arc(bx, by, 4, 0, 2 * Math.PI); ctx.fill(); ctx.restore(); }
-        else { var t = clamp((ph - 0.78) / 0.22, 0, 1); kart(ctx, bx + Math.cos(aim) * 120 * t, by + Math.sin(aim) * 120 * t - Math.sin(t * Math.PI) * 20, p.radius, BLUE); }
-        onCycle(s.mem, s.t - 0.78 * 3400, 3400, "fire", function () { spawnMuzzleFlash(bx, by, aim * 180 / Math.PI, "#ffd24a"); });
+        floor(s.ctx, "dirt.png", 60); gameContext = s.ctx;
+        var c = s.ctx; c.save(); c.translate(120, 70); c.scale(1.4, 1.4);
+        pl_barrelCannon(0, 0, (s.t / 9) % 360);
+        c.restore();
     };
 
     SCENES["slingshotRings"] = function (s) {
-        floor(s.ctx, "dirt.png", 60);
-        var ctx = s.ctx, cy = H * 0.5, rings = [W * 0.45, W * 0.62];
-        for (var i = 0; i < rings.length; i++) { ctx.save(); ctx.strokeStyle = "#C77DFF"; ctx.lineWidth = 3; ctx.globalAlpha = 0.85;
-            ctx.beginPath(); ctx.ellipse(rings[i], cy, 9, 20, 0, 0, 2 * Math.PI); ctx.stroke(); ctx.restore(); }
-        var p = s.p; p.radius = 11; p.surface = "normal"; p.alive = true; p.speedBuffUntil = 1e15;
-        if (p.x == null || p.x > W + 30) { p.x = -30; p.y = cy; p.prevX = null; }
-        drive(p, 1, 0, MAXSPEED * 0.8, 130, s.dt);
-        updateMovementParticles(p, s.dt); drawSpeedFx(ctx, p, s.t);
-        for (var j = 0; j < rings.length; j++) { if (p.prevX != null && p.prevX < rings[j] && p.x >= rings[j]) { spawnTeleportPuff(rings[j], cy, "#C77DFF"); } }
-        p.prevX = p.x;
-        kart(ctx, p.x, p.y, p.radius, BLUE);
+        floor(s.ctx, "dirt.png", 60); gameContext = s.ctx;
+        var c = s.ctx; c.save(); c.translate(120, 70); c.scale(1.0, 1.0);
+        pl_slingshotRings(-34, 0, 0); pl_slingshotRings(34, 0, 0);
+        kart(c, lerp(-100, 100, loop(s.t, 2600)), 0, 7.5, BLUE);
+        c.restore();
     };
 
     SCENES["warpPad"] = function (s) {
-        floor(s.ctx, "dirt.png", 60);
-        var ctx = s.ctx, ax = W * 0.25, ay = H * 0.65, bx = W * 0.78, by = H * 0.35, ph = loop(s.t, 3600);
-        function portal(x, y) { ctx.save(); var sw = 0.6 + 0.4 * Math.sin(s.t / 200);
-            var g = ctx.createRadialGradient(x, y, 2, x, y, 18); g.addColorStop(0, "#E9C8FF"); g.addColorStop(1, "#C24DFF");
-            ctx.globalAlpha = 0.5 + 0.3 * sw; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 18, 0, 2 * Math.PI); ctx.fill();
-            ctx.globalAlpha = 0.9; ctx.strokeStyle = "#C24DFF"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 18, 0, 2 * Math.PI); ctx.stroke(); ctx.restore(); }
-        portal(ax, ay); portal(bx, by);
-        var p = s.p; p.radius = 11; var inTransit = ph > 0.4 && ph < 0.62;
-        if (ph <= 0.4) { kart(ctx, lerp(W * 0.05, ax, ease(ph / 0.4)), ay, p.radius, BLUE); }
-        else if (!inTransit) { kart(ctx, lerp(bx, W * 0.95, ease(clamp((ph - 0.62) / 0.38, 0, 1))), by, p.radius, BLUE); }
-        onCycle(s.mem, s.t - 0.4 * 3600, 3600, "in", function () { spawnTeleportPuff(ax, ay, "#C24DFF"); });
-        onCycle(s.mem, s.t - 0.62 * 3600, 3600, "out", function () { spawnTeleportPuff(bx, by, "#C24DFF"); });
+        floor(s.ctx, "dirt.png", 60); gameContext = s.ctx;
+        var c = s.ctx; c.save(); c.translate(120, 70); c.scale(1.1, 1.1);
+        pl_warpPad(-60, 18, 0); pl_warpPad(60, -18, 0);
+        var ph = loop(s.t, 3600), inT = ph > 0.4 && ph < 0.62;
+        if (ph <= 0.4) { kart(c, lerp(-100, -60, ease(ph / 0.4)), 18, 7.5, BLUE); }
+        else if (!inT) { kart(c, lerp(60, 100, ease(clamp((ph - 0.62) / 0.38, 0, 1))), -18, 7.5, BLUE); }
+        c.restore();
     };
 
     SCENES["zipline"] = function (s) {
-        floor(s.ctx, "dirt.png", 60);
-        var ctx = s.ctx, x0 = W * 0.18, y0 = H * 0.32, x1 = W * 0.82, y1 = H * 0.6, ph = loop(s.t, 3600);
-        ctx.save(); ctx.strokeStyle = "#7a5a1f"; ctx.lineWidth = 4;
-        ctx.beginPath(); ctx.moveTo(x0, y0 + 20); ctx.lineTo(x0, y0 - 6); ctx.moveTo(x1, y1 + 20); ctx.lineTo(x1, y1 - 6); ctx.stroke();
-        ctx.strokeStyle = "#F2C14E"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); ctx.restore();
-        var p = s.p; p.radius = 11; var t = ease(ph), cableY = lerp(y0, y1, t), kx = lerp(x0, x1, t), ky = cableY + 12;
-        ctx.save(); ctx.strokeStyle = "#caa"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(kx, cableY); ctx.lineTo(kx, ky - p.radius); ctx.stroke(); ctx.restore();
-        kart(ctx, kx, ky, p.radius, BLUE);
+        floor(s.ctx, "dirt.png", 60); gameContext = s.ctx;
+        var c = s.ctx; c.save(); c.translate(120, 70); c.scale(0.8, 0.8);
+        var len = BN.zipline.minLength, ang = 18 * Math.PI / 180, t = ease(loop(s.t, 3600));
+        pl_zipline(-70, -22, 18, len);
+        kart(c, -70 + Math.cos(ang) * len * t, -22 + Math.sin(ang) * len * t + 9, 7.5, BLUE);
+        c.restore();
     };
 
     SCENES["lilyPad"] = function (s) {
-        var ctx = s.ctx; ctx.fillStyle = "#2f6fb0"; ctx.fillRect(0, 0, W, H);
-        var pads = [W * 0.25, W * 0.5, W * 0.75], cy = H * 0.5, p = s.p; p.radius = 11;
-        var kx = lerp(W * 0.1, W * 0.9, loop(s.t, 3000)), ky = cy;
-        for (var i = 0; i < pads.length; i++) { var px = pads[i], on = Math.abs(kx - px) < 22;
-            var sink = on ? clamp(1 - Math.abs(kx - px) / 22, 0, 1) * 0.45 : 0, r = 20 * (1 - sink * 0.3);
-            ctx.save(); ctx.globalAlpha = 1 - sink; ctx.fillStyle = "#56D06A"; ctx.beginPath(); ctx.arc(px, cy, r, 0, 2 * Math.PI); ctx.fill();
-            ctx.strokeStyle = "#2f8a40"; ctx.lineWidth = 2; ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(px, cy); ctx.lineTo(px + r * 0.7, cy - 6); ctx.stroke(); ctx.restore(); }
-        kart(ctx, kx, ky, p.radius, BLUE);
+        var c = s.ctx; c.fillStyle = "#2f6fb0"; c.fillRect(0, 0, W, H); gameContext = s.ctx;
+        c.save(); c.translate(120, 70); c.scale(0.7, 0.7);
+        var pads = [-90, 0, 90], kx = lerp(-120, 120, loop(s.t, 3000));
+        for (var i = 0; i < pads.length; i++) { var on = Math.abs(kx - pads[i]) < 46, sink = on ? clamp(1 - Math.abs(kx - pads[i]) / 46, 0, 1) * 70 : 0;
+            pl_lilyPad(pads[i], 0, sink, 46, pads[i] * 0.3 + 10); }
+        kart(c, kx, 0, 7.5, BLUE);
+        c.restore();
     };
 
     SCENES["_blank"] = function (s) { floor(s.ctx, "dirt.png", 60); };
@@ -1448,16 +1851,43 @@ var LearnAnim = (function () {
         if (io) { io.observe(canvas); } else { it.visible = true; if (!reduceMotion) { ensureLoop(); } }
     }
 
+    // Static list icons. The placeable icons render the REAL art (the ported
+    // pl_* drawers), centred + scaled into the 40px chip — so the icon matches
+    // the card animation and the in-game object.
+    function iconArt(ctx, c, scl, fn) { gameContext = ctx; ctx.save(); ctx.translate(c, c); ctx.scale(scl, scl); fn(); ctx.restore(); }
     function staticIcon(canvas, name) {
         if (!canvas) { return; }
         var dpr = Math.min(2, window.devicePixelRatio || 1), size = 40;
         canvas.width = Math.round(size * dpr); canvas.height = Math.round(size * dpr);
         var ctx = canvas.getContext("2d"); ctx.scale(dpr, dpr); ctx.clearRect(0, 0, size, size);
-        var c = size / 2;
-        if (name === "bumper") {
-            ctx.beginPath(); ctx.arc(c, c, 15, 0, 2 * Math.PI); ctx.strokeStyle = "#E5392B"; ctx.lineWidth = 3; ctx.stroke();
-            ctx.beginPath(); ctx.arc(c, c, 9, 0, 2 * Math.PI); ctx.fillStyle = "orange"; ctx.fill();
-        }
+        var c = size / 2, t = (window.performance ? performance.now() : 0) / 1000;
+        var rrad = HZ.rotor.orbitRadius, ra = 0.9;
+        var A = {
+            bumper: function () { iconArt(ctx, c, 1.0, function () { pl_bumper(0, 0); }); },
+            movingBumper: function () { iconArt(ctx, c, 1.0, function () { pl_bumper(0, 0); }); },
+            bumperWall: function () { iconArt(ctx, c, 0.3, function () { pl_bumperWall(-60, 0, 0); }); },
+            rotor: function () { iconArt(ctx, c, 0.24, function () { pl_rotor(Math.cos(ra) * rrad, Math.sin(ra) * rrad, ra * 180 / Math.PI); }); },
+            geyser: function () { iconArt(ctx, c, 0.4, function () { pl_geyser(0, 0, 2); }); },
+            mine: function () { iconArt(ctx, c, 0.9, function () { pl_mine(0, 0, 0); }); },
+            thumper: function () { iconArt(ctx, c, 0.2, function () { pl_thumper(0, 0, {}); }); },
+            vortexWell: function () { iconArt(ctx, c, 0.1, function () { pl_vortexWell(0, 0, HZ.vortexWell.radius); }); },
+            laserGate: function () { iconArt(ctx, c, 0.22, function () { pl_laserGate(0, -75, 90, 2); }); },
+            crusher: function () { iconArt(ctx, c, 0.3, function () { pl_crusher(0, 0, -40, 0, 0); }); },
+            sentryTurret: function () { iconArt(ctx, c, 0.5, function () { pl_sentryTurret(0, 0, 0, 0); }); },
+            magpieDrone: function () { iconArt(ctx, c, 0.7, function () { drawMagpieBird(HZ.magpieDrone.radius, t, true); }); },
+            dashArrows: function () { iconArt(ctx, c, 0.4, function () { pl_dashArrows(0, 0, 0); }); },
+            rechargeSpring: function () { iconArt(ctx, c, 0.5, function () { pl_rechargeSpring(0, 0, 100); }); },
+            slipstream: function () { iconArt(ctx, c, 0.3, function () { pl_slipstream(0, 0, 0); }); },
+            guardHalo: function () { iconArt(ctx, c, 0.52, function () { pl_guardHalo(0, 0, 100); }); },
+            secondWindTotem: function () { iconArt(ctx, c, 0.55, function () { drawFlagShape(0, 12, BN.secondWindTotem.color, Math.sin(t * 3) * 2, false); }); },
+            launchPad: function () { iconArt(ctx, c, 0.52, function () { pl_launchPad(0, 0, -30); }); },
+            barrelCannon: function () { iconArt(ctx, c, 0.4, function () { pl_barrelCannon(0, 0, -90); }); },
+            slingshotRings: function () { iconArt(ctx, c, 0.42, function () { pl_slingshotRings(0, 0, 0); }); },
+            warpPad: function () { iconArt(ctx, c, 0.5, function () { pl_warpPad(0, 0, 0); }); },
+            zipline: function () { iconArt(ctx, c, 0.5, function () { pl_zipline(-30, -10, 18, 60); }); },
+            lilyPad: function () { iconArt(ctx, c, 0.32, function () { pl_lilyPad(0, 0, 0, 46, 10); }); }
+        };
+        if (A[name]) { try { A[name](); } catch (e) { /* image/sprite not ready — icon fills in on next build */ } }
     }
 
     return { attach: attach, staticIcon: staticIcon, SCENES: SCENES, W: W, H: H };
