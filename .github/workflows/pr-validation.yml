@@ -62,6 +62,9 @@ jobs:
       - name: Build client bundles
         run: npm run build
 
+      - name: Release-notes library unit tests
+        run: node --test .github/scripts/changelog-lib.test.mjs
+
   validate-content:
     # Catches broken game data — a malformed map JSON (the in-browser editor
     # opens PRs that add these) or a config.json missing keys the engine reads.

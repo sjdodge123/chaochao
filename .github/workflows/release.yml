@@ -27,6 +27,13 @@ on:
         type: choice
         options: [patch, minor, major]
         default: patch
+      week:
+        description: >-
+          Backfill only: any YYYY-MM-DD in a past week. Re-renders that week's
+          digest release with the current formatting and exits (no new version
+          is cut). Leave blank for a normal release.
+        type: string
+        default: ''
 
 # Serialize releases so two quick merges can't race on version/tag.
 concurrency:
@@ -38,8 +45,9 @@ permissions:
 
 jobs:
   release:
-    # Manual runs always proceed; PR runs only when the PR was actually merged.
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    # Manual runs proceed (unless they're a digest-backfill, handled by the
+    # backfill-digest job below); PR runs only when the PR was actually merged.
+    if: (github.event_name == 'workflow_dispatch' && github.event.inputs.week == '') || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
       - name: Check token
@@ -151,6 +159,56 @@ jobs:
           # later PR in the same week), otherwise create it (gh anchors the new
           # week-* tag at the release commit on main). The week-* tag matches no
           # other workflow trigger, so this publishes nothing downstream.
+          if gh release view "$WEEK_TAG" >/dev/null 2>&1; then
+            gh release edit "$WEEK_TAG" \
+              --title "$WEEK_TITLE" \
+              --notes-file WEEKLY_NOTES.md
+          else
+            gh release create "$WEEK_TAG" \
+              --title "$WEEK_TITLE" \
+              --notes-file WEEKLY_NOTES.md \
+              --latest=false
+          fi
+
+  # Manual digest backfill: re-render a PAST week's "week-YYYY-MM-DD" release
+  # with the current formatting, without cutting a new version. Triggered by a
+  # workflow_dispatch with the `week` input set (any date in the target week).
+  # The week's vX.Y.Z sections must still exist in CHANGELOG.md (append-only,
+  # so they do). Note: if that week's digest release doesn't already exist, the
+  # new week-* tag anchors at the current main HEAD — the notes are correct, but
+  # the release's "commits since" link won't point into that past week.
+  backfill-digest:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.week != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check token
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_TOKEN" ]; then
+            echo "::error::Missing the RELEASE_TOKEN secret (needed to edit the release)."
+            exit 1
+          fi
+
+      - name: Check out main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Build weekly digest for the requested week
+        id: digest
+        env:
+          WEEK: ${{ github.event.inputs.week }}
+        run: node .github/scripts/build-weekly-digest.mjs --week "$WEEK"
+
+      - name: Upsert the backfilled digest release
+        if: steps.digest.outputs.built == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          WEEK_TAG: ${{ steps.digest.outputs.week_tag }}
+          WEEK_TITLE: ${{ steps.digest.outputs.week_title }}
+        run: |
           if gh release view "$WEEK_TAG" >/dev/null 2>&1; then
             gh release edit "$WEEK_TAG" \
               --title "$WEEK_TITLE" \
