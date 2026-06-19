@@ -714,7 +714,9 @@ function routePolyline(map, config, route, penaltyLookup, avoid) {
     var pts = pathPoints(map, route.path);
     pts.unshift({ x: Math.round(route.origin.x), y: Math.round(route.origin.y) });
     var smoothed = smoothRoute(map, config, pts, penaltyLookup, avoid.points);
-    return cellGraph.detourBarriers(map, smoothed);
+    // Keep the smoothed/origin-led line off the wall bars too (smoothRoute can straighten
+    // a leg back toward a wall), then skirt any residual crossing.
+    return cellGraph.detourBarriers(map, cellGraph.pushOffBarriers(map, smoothed));
 }
 
 // Overlay geometry for the editor's "looks unbalanced" nudge: the representative

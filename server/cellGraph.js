@@ -390,15 +390,67 @@ function getNavGraph(map) {
     return nav;
 }
 
-// True if segment a->b clears every author barrier (doesn't cut a solid wall).
+// A barrier draws as a 14px bar (barrierArt bandHalf = 7), so a drawn/steered line that
+// merely doesn't CROSS the centre line can still overlap the bar. Keep this much off the
+// centre line — half the bar plus a hair for the line's own width — so the line clears
+// the bar visually (and the bot steers through the gap, not along the wall). Matches the
+// engine's barrier collision keeping a kart off the wall.
+var BARRIER_DRAW_CLEAR = 9;
+
+// Closest point on segment (x1,y1)-(x2,y2) to (px,py): { d, cx, cy }.
+function ptSegDist(px, py, x1, y1, x2, y2) {
+    var dx = x2 - x1, dy = y2 - y1, l2 = dx * dx + dy * dy || 1;
+    var t = ((px - x1) * dx + (py - y1) * dy) / l2;
+    if (t < 0) { t = 0; } else if (t > 1) { t = 1; }
+    var cx = x1 + dx * t, cy = y1 + dy * t;
+    return { d: Math.hypot(px - cx, py - cy), cx: cx, cy: cy };
+}
+function segSegDist(ax, ay, bx, by, cx, cy, dx, dy) {
+    if (segmentsCross(ax, ay, bx, by, cx, cy, dx, dy)) { return 0; }
+    return Math.min(
+        ptSegDist(ax, ay, cx, cy, dx, dy).d, ptSegDist(bx, by, cx, cy, dx, dy).d,
+        ptSegDist(cx, cy, ax, ay, bx, by).d, ptSegDist(dx, dy, ax, ay, bx, by).d
+    );
+}
+
+// True if segment a->b keeps clear of every author barrier — not just doesn't cut one,
+// but stays the bar's half-width off it, so the drawn line never overlaps a wall.
 function legClearsBarriers(a, b, barriers) {
     if (!barriers || barriers.length === 0) { return true; }
     for (var i = 0; i < barriers.length; i++) {
         var bar = barriers[i];
         if (bar == null) { continue; }
-        if (segmentsCross(a.x, a.y, b.x, b.y, bar.x1, bar.y1, bar.x2, bar.y2)) { return false; }
+        if (segSegDist(a.x, a.y, b.x, b.y, bar.x1, bar.y1, bar.x2, bar.y2) < BARRIER_DRAW_CLEAR) { return false; }
     }
     return true;
+}
+
+// Nudge any route point sitting on/over a wall out to the bar's edge: push it to
+// BARRIER_DRAW_CLEAR off the nearest barrier centre line, but only onto drivable ground
+// (don't shove the line into lava to clear a wall). Leaves the gate origin + goal in
+// place. The detour pass then fixes any crossing the nudge might introduce.
+function pushOffBarriers(map, pts) {
+    var barriers = map.barriers;
+    if (!barriers || barriers.length === 0 || pts.length < 3) { return pts; }
+    var out = [pts[0]];
+    for (var i = 1; i < pts.length - 1; i++) {
+        var p = pts[i];
+        var best = null, bestD = Infinity;
+        for (var b = 0; b < barriers.length; b++) {
+            var bar = barriers[b];
+            if (bar == null) { continue; }
+            var r = ptSegDist(p.x, p.y, bar.x1, bar.y1, bar.x2, bar.y2);
+            if (r.d < bestD) { bestD = r.d; best = r; }
+        }
+        if (best != null && bestD < BARRIER_DRAW_CLEAR && bestD > 1e-3) {
+            var nx = (p.x - best.cx) / bestD, ny = (p.y - best.cy) / bestD;
+            var np = { x: Math.round(best.cx + nx * BARRIER_DRAW_CLEAR), y: Math.round(best.cy + ny * BARRIER_DRAW_CLEAR) };
+            if (pointDrivable(map, np.x, np.y)) { p = np; }
+        }
+        out.push(p);
+    }
+    out.push(pts[pts.length - 1]);
+    return out;
 }
 
 // Is point (x,y) on ground a kart can actually sit on? A detour waypoint must land on
@@ -412,63 +464,71 @@ function pointDrivable(map, x, y) {
     return cell.id !== c.tileMap.lava.id && cell.id !== c.tileMap.empty.id && cell.id !== DOOR;
 }
 
-// A waypoint that skirts the FIRST barrier a leg a->b crosses, by routing around the
-// wall's nearer FREE END: extend a short way PAST that endpoint along the wall's own
-// axis (a wall doesn't reach beyond its endpoints), growing the reach until a->wp and
-// wp->b clear EVERY barrier AND wp lands on drivable ground. Catches the sub-cell case
-// where a wall END juts INTO a traversed cell — the kart drives around the open end, but
-// a straight leg through the cell clips the solid part. Trying the endpoints nearest-
-// first means a wall that ends in lava is skirted at its OTHER (walkable) end. null when
-// no reach cleanly skirts it on solid ground (keep the straight leg — clipping a wall is
-// the lesser evil vs. drawing the line into lava).
-function barrierEndDetour(a, b, map) {
+// A waypoint that gets leg a->b clear of the FIRST barrier it isn't clear of — whether it
+// CROSSES the wall or merely grazes within the bar's half-width. Crossing: route around
+// the wall's nearer FREE END (extend past it along the wall axis, with a perpendicular
+// off-step for tight clusters). Grazing: push the leg's closest-approach point straight
+// out to the clearance off the wall. Either way the waypoint is accepted only if it lands
+// on drivable ground and makes both new sub-legs clear of EVERY barrier — so a wall ending
+// in lava is skirted at its WALKABLE end, never into the lava. null when nothing clean
+// works (keep the straight leg as the lesser evil).
+function barrierDetourPoint(a, b, map) {
     var barriers = map.barriers;
     for (var i = 0; i < barriers.length; i++) {
         var bar = barriers[i];
         if (bar == null) { continue; }
-        if (!segmentsCross(a.x, a.y, b.x, b.y, bar.x1, bar.y1, bar.x2, bar.y2)) { continue; }
-        var ends = [{ x: bar.x1, y: bar.y1 }, { x: bar.x2, y: bar.y2 }];
-        var mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-        ends.sort(function (p, q) {
-            return Math.hypot(p.x - mid.x, p.y - mid.y) - Math.hypot(q.x - mid.x, q.y - mid.y);
-        });
-        var REACH = [6, 10, 14, 20, 28, 40, 56];
-        for (var e = 0; e < ends.length; e++) {
-            var end = ends[e], other = ends[1 - e];
-            var ax = end.x - other.x, ay = end.y - other.y;
-            var al = Math.hypot(ax, ay) || 1;
-            var ux = ax / al, uy = ay / al;
-            // Perpendicular to the wall, so we can also step the waypoint OFF to the open
-            // side (not just straight past the end) — needed when the end sits in a tight
-            // cluster where the pure axial extension clips a neighbouring wall.
-            var px = -uy, py = ux;
-            for (var r = 0; r < REACH.length; r++) {
-                for (var pp = 0; pp <= 2; pp++) {
-                    var perp = pp === 0 ? 0 : (pp === 1 ? REACH[r] : -REACH[r]);
-                    var wp = {
-                        x: Math.round(end.x + ux * REACH[r] + px * perp),
-                        y: Math.round(end.y + uy * REACH[r] + py * perp)
-                    };
-                    if (legClearsBarriers(a, wp, barriers) && legClearsBarriers(wp, b, barriers) && pointDrivable(map, wp.x, wp.y)) { return wp; }
+        var crosses = segmentsCross(a.x, a.y, b.x, b.y, bar.x1, bar.y1, bar.x2, bar.y2);
+        if (!crosses && segSegDist(a.x, a.y, b.x, b.y, bar.x1, bar.y1, bar.x2, bar.y2) >= BARRIER_DRAW_CLEAR) { continue; }
+        var cands = [];
+        if (crosses) {
+            var ends = [{ x: bar.x1, y: bar.y1 }, { x: bar.x2, y: bar.y2 }];
+            var mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+            ends.sort(function (p, q) { return Math.hypot(p.x - mid.x, p.y - mid.y) - Math.hypot(q.x - mid.x, q.y - mid.y); });
+            var REACH = [6, 10, 14, 20, 28, 40, 56];
+            for (var e = 0; e < ends.length; e++) {
+                var end = ends[e], other = ends[1 - e];
+                var dxe = end.x - other.x, dye = end.y - other.y, le = Math.hypot(dxe, dye) || 1;
+                var ux = dxe / le, uy = dye / le, ppx = -uy, ppy = ux;
+                for (var r = 0; r < REACH.length; r++) {
+                    for (var pp = 0; pp <= 2; pp++) {
+                        var perp = pp === 0 ? 0 : (pp === 1 ? REACH[r] : -REACH[r]);
+                        cands.push({ x: Math.round(end.x + ux * REACH[r] + ppx * perp), y: Math.round(end.y + uy * REACH[r] + ppy * perp) });
+                    }
                 }
             }
+        } else {
+            // Graze: lift the leg's closest-approach point off the wall, both normal signs.
+            var t = ((((a.x + b.x) / 2) - bar.x1) * (bar.x2 - bar.x1) + (((a.y + b.y) / 2) - bar.y1) * (bar.y2 - bar.y1));
+            var cp = ptSegDist((a.x + b.x) / 2, (a.y + b.y) / 2, bar.x1, bar.y1, bar.x2, bar.y2);
+            var wlen = Math.hypot(bar.x2 - bar.x1, bar.y2 - bar.y1) || 1;
+            var nlx = -(bar.y2 - bar.y1) / wlen, nly = (bar.x2 - bar.x1) / wlen;
+            for (var sgn = -1; sgn <= 1; sgn += 2) {
+                cands.push({ x: Math.round(cp.cx + nlx * sgn * (BARRIER_DRAW_CLEAR + 2)), y: Math.round(cp.cy + nly * sgn * (BARRIER_DRAW_CLEAR + 2)) });
+            }
+        }
+        for (var ci2 = 0; ci2 < cands.length; ci2++) {
+            var wp = cands[ci2];
+            if (legClearsBarriers(a, wp, barriers) && legClearsBarriers(wp, b, barriers) && pointDrivable(map, wp.x, wp.y)) { return wp; }
         }
         return null;
     }
     return null;
 }
 
-// Insert a skirt waypoint for any leg that still cuts a wall (kept only when it cleanly
-// removes the crossing on drivable ground without adding one).
+// Insert skirt waypoints so every leg clears the walls (around a crossing, off a graze),
+// kept only when they cleanly fix it on drivable ground. Bounded re-try per leg resolves
+// a leg that violates more than one wall.
 function detourBarriers(map, pts) {
     var barriers = (map && Array.isArray(map.barriers)) ? map.barriers : null;
     if (!barriers || barriers.length === 0 || pts.length < 2) { return pts; }
     var out = [pts[0]];
     for (var i = 1; i < pts.length; i++) {
-        var a = out[out.length - 1], b = pts[i];
-        if (!legClearsBarriers(a, b, barriers)) {
-            var wp = barrierEndDetour(a, b, map);
-            if (wp != null) { out.push(wp); }
+        var b = pts[i];
+        var guard = 0;
+        while (!legClearsBarriers(out[out.length - 1], b, barriers) && guard++ < 4) {
+            var wp = barrierDetourPoint(out[out.length - 1], b, map);
+            if (wp == null) { break; }
+            out.push(wp);
         }
         out.push(b);
     }
@@ -503,7 +563,9 @@ function pathWaypoints(map, path) {
     if (last != null && cells[last] && cells[last].site) {
         pts.push({ x: Math.round(cells[last].site.x), y: Math.round(cells[last].site.y) });
     }
-    return (Array.isArray(map.barriers) && map.barriers.length > 0) ? detourBarriers(map, pts) : pts;
+    if (!Array.isArray(map.barriers) || map.barriers.length === 0) { return pts; }
+    // Lift any point off a wall it overlaps, then skirt any leg that still cuts one.
+    return detourBarriers(map, pushOffBarriers(map, pts));
 }
 
 // Warp pads (a BOON, config.boons.warpPad, id 958) are PAIRED TELEPORTERS: driving
@@ -1219,6 +1281,7 @@ module.exports = {
     firstUnreachableStartEdge: firstUnreachableStartEdge,
     pathWaypoints: pathWaypoints,
     detourBarriers: detourBarriers,
+    pushOffBarriers: pushOffBarriers,
     tileWeight: tileWeight,
     BALANCE_WEIGHTED_TILES: BALANCE_WEIGHTED_TILES,
     estimatePathTime: estimatePathTime,
