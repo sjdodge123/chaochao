@@ -242,6 +242,154 @@ function getBarrierBlockedEdges(map) {
     return result;
 }
 
+// The shared border segment {va,vb} between two cells (cellA's halfedge facing cellB).
+function sharedBorderSeg(cellA, cellB) {
+    if (!cellA || !cellB || !cellB.site || !Array.isArray(cellA.halfedges)) { return null; }
+    var other = cellB.site.voronoiId;
+    for (var h = 0; h < cellA.halfedges.length; h++) {
+        var e = cellA.halfedges[h] && cellA.halfedges[h].edge;
+        if (!e || !e.va || !e.vb) { continue; }
+        if ((e.lSite && e.lSite.voronoiId === other) || (e.rSite && e.rSite.voronoiId === other)) {
+            return e;
+        }
+    }
+    return null;
+}
+
+// Per-cell transit model (navigation graph). A barrier that runs THROUGH a cell's
+// interior — entering and leaving across its boundary — splits that cell into two
+// pieces a kart can't drive between, even though neither the shared border with a
+// neighbour nor the site-to-site line is cut. That's a property of transiting THROUGH
+// a cell, not of any single doorway, so the per-edge block test (getBarrierBlockedEdges)
+// can't express it. Here we model it directly: a split cell becomes multiple REGION
+// nodes (one per piece), and a doorway connects the region of one cell to the region of
+// its neighbour it actually touches. Doorways a wall cuts outright are dropped. Cells no
+// barrier passes through stay a single node, so a barrier-free map yields a graph
+// identical to the raw cell adjacency (findPathToNearestGoal behaves exactly as before).
+// Result: { count, cellOf[node]->cellIdx (null = identity), regionsOfCell[cellIdx]->[node],
+// neighbors[node]->[node], doorways[node]->[width], regionForPoint(cellIdx,x,y)->node }.
+// Cached on the map object (non-enumerable), like adjacency.
+function getNavGraph(map) {
+    if (map._navGraph !== undefined) { return map._navGraph; }
+    var adj = getAdjacency(map);
+    var cells = map.cells;
+    var bars = (Array.isArray(map.barriers) && map.barriers.length > 0) ? map.barriers : null;
+    var nav;
+
+    // Fast path: no barriers -> regions ARE cells, 1:1 (identity; allocation-free).
+    if (bars == null) {
+        nav = {
+            count: cells.length, cellOf: null, regionsOfCell: null,
+            neighbors: adj.neighbors, doorways: adj.doorways,
+            regionForPoint: function (ci) { return ci; }
+        };
+        Object.defineProperty(map, '_navGraph', { value: nav, enumerable: false, writable: true, configurable: true });
+        return nav;
+    }
+
+    // Which barriers SPLIT each cell (cross its boundary >= 2 times). A barrier that only
+    // clips the boundary once has a free end inside the cell, so a kart drives around it —
+    // not a split.
+    var splitBars = new Array(cells.length);
+    for (var ci = 0; ci < cells.length; ci++) {
+        var cell = cells[ci];
+        var list = [];
+        if (cell && Array.isArray(cell.halfedges)) {
+            for (var bi = 0; bi < bars.length; bi++) {
+                var bar = bars[bi];
+                if (bar == null) { continue; }
+                var hits = 0;
+                for (var h = 0; h < cell.halfedges.length; h++) {
+                    var e = cell.halfedges[h] && cell.halfedges[h].edge;
+                    if (!e || !e.va || !e.vb) { continue; }
+                    if (barrierTouchesBorder(e.va.x, e.va.y, e.vb.x, e.vb.y, bar.x1, bar.y1, bar.x2, bar.y2)) {
+                        if (++hits >= 2) { break; }
+                    }
+                }
+                if (hits >= 2) { list.push(bi); }
+            }
+        }
+        splitBars[ci] = list;
+    }
+
+    // Side-label of a point within a cell: a sign string over the cell's splitting
+    // barriers. Two points with the same label are in the same piece.
+    function labelOf(ci, x, y) {
+        var sb = splitBars[ci];
+        if (sb.length === 0) { return ""; }
+        var key = "";
+        for (var i = 0; i < sb.length; i++) {
+            var bar = bars[sb[i]];
+            key += (sideOf(bar.x1, bar.y1, bar.x2, bar.y2, x, y) >= 0) ? "1" : "0";
+        }
+        return key;
+    }
+
+    var regionsOfCell = new Array(cells.length);
+    var cellOf = [];
+    var labelToRegion = new Array(cells.length); // ci -> { label -> nodeId }
+    function regionId(ci, label) {
+        var m = labelToRegion[ci];
+        if (m == null) { m = labelToRegion[ci] = {}; }
+        if (m[label] == null) {
+            m[label] = cellOf.length;
+            cellOf.push(ci);
+            if (regionsOfCell[ci] == null) { regionsOfCell[ci] = []; }
+            regionsOfCell[ci].push(m[label]);
+        }
+        return m[label];
+    }
+    // Every cell gets at least its site-region, so an unsplit cell maps cleanly and a
+    // seed at the site always resolves.
+    for (var cs = 0; cs < cells.length; cs++) {
+        var s = cells[cs] && cells[cs].site;
+        regionId(cs, s ? labelOf(cs, s.x, s.y) : "");
+    }
+
+    var neighbors = adj.neighbors, doorways = adj.doorways;
+    var rNeighbors = [], rDoorways = [];
+    function ensureNode(n) { while (rNeighbors.length <= n) { rNeighbors.push([]); rDoorways.push([]); } }
+    for (var ca = 0; ca < cells.length; ca++) {
+        var cellA = cells[ca];
+        if (!cellA || !cellA.site) { continue; }
+        var nbA = neighbors[ca], dwA = doorways[ca];
+        for (var k = 0; k < nbA.length; k++) {
+            var cb = nbA[k];
+            var border = sharedBorderSeg(cellA, cells[cb]);
+            if (border == null) { continue; }
+            // Doorway cut outright by a wall -> no edge between these pieces.
+            var cut = false;
+            for (var bj = 0; bj < bars.length; bj++) {
+                var br = bars[bj];
+                if (br != null && barrierTouchesBorder(border.va.x, border.va.y, border.vb.x, border.vb.y, br.x1, br.y1, br.x2, br.y2)) { cut = true; break; }
+            }
+            if (cut) { continue; }
+            var mx = (border.va.x + border.vb.x) / 2, my = (border.va.y + border.vb.y) / 2;
+            var rA = regionId(ca, labelOf(ca, mx, my));
+            var rB = regionId(cb, labelOf(cb, mx, my));
+            ensureNode(rA); ensureNode(rB);
+            rNeighbors[rA].push(rB);
+            rDoorways[rA].push(dwA[k]);
+        }
+    }
+    ensureNode(cellOf.length - 1); // pad arrays for any site-only region with no doorways
+
+    function regionForPoint(ci, x, y) {
+        var m = labelToRegion[ci];
+        var label = labelOf(ci, x, y);
+        if (m != null && m[label] != null) { return m[label]; }
+        var sp = cells[ci] && cells[ci].site; // pocket with no doorway: fall back to site-region
+        return regionId(ci, sp ? labelOf(ci, sp.x, sp.y) : "");
+    }
+
+    nav = {
+        count: cellOf.length, cellOf: cellOf, regionsOfCell: regionsOfCell,
+        neighbors: rNeighbors, doorways: rDoorways, regionForPoint: regionForPoint
+    };
+    Object.defineProperty(map, '_navGraph', { value: nav, enumerable: false, writable: true, configurable: true });
+    return nav;
+}
+
 // Warp pads (a BOON, config.boons.warpPad, id 958) are PAIRED TELEPORTERS: driving
 // onto pad A starts a (distance-based) transit to its partner pad B (and vice-versa),
 // preserving velocity. Unlike a barrier (which BLOCKS an adjacency edge), a warp
@@ -464,9 +612,17 @@ function findPathToNearestGoal(map, point, options) {
         return null;
     }
     var cells = map.cells;
-    var adj = getAdjacency(map);
-    var neighbors = adj.neighbors;
-    var doorways = adj.doorways;
+    // Navigation graph: cells, but with any cell a barrier runs THROUGH split into
+    // region-nodes so a wall bisecting a cell blocks transit across it (see getNavGraph).
+    // Barrier-free maps return an identity (node === cell index), so behaviour is
+    // unchanged there. cellOf=null means identity; cellAt/navCell handle both.
+    var nav = getNavGraph(map);
+    var neighbors = nav.neighbors;
+    var doorways = nav.doorways;
+    var navCellOf = nav.cellOf;
+    function navCell(n) { return navCellOf ? navCellOf[n] : n; }
+    function cellAt(n) { return cells[navCell(n)]; }
+    function firstRegionOf(c) { return nav.regionsOfCell ? nav.regionsOfCell[c][0] : c; }
     // options.noWarp disables the warp-pad shortcut edges, so the route is the pure DRIVING
     // path — used by the fairness layer to measure each pad's drive-distance to goal (and
     // hence whether a warp is a backward TRAP) without the warp shortening it circularly.
@@ -550,15 +706,13 @@ function findPathToNearestGoal(map, point, options) {
     addPenalties(options.penaltySet, options.penaltyMult || 1);
     addPenalties(options.penaltySet2, options.penaltyMult2 || 1);
 
-    // Solid author barriers cut specific ADJACENCY EDGES (not cells): see
-    // getBarrierBlockedEdges. options.barrierEdges is that Set of "u|v" pairs and
-    // options.barrierMult the heavy soft penalty applied to crossing one (bot
-    // routing). options.barrierBlockEdges is the same Set treated as a HARD wall
-    // (impassable) — used by reachability/validation so a barrier that seals every
-    // route to the goal correctly reads as unreachable.
+    // Author barriers are modelled structurally by the nav graph (getNavGraph): cut
+    // doorways are absent and bisected cells are split, so reachability/validation are
+    // correct without any per-edge option. options.barrierEdges/barrierMult remain a
+    // purely OPTIONAL soft route-shaping hint (cell-index keyed "u|v" pairs) — keep a
+    // passable edge near a wall a touch costlier so a route prefers open ground.
     var barrierEdges = options.barrierEdges || null;
     var barrierMult = (options.barrierMult > 1) ? options.barrierMult : 1;
-    var barrierBlock = options.barrierBlockEdges || null;
 
     // Optional explicit goal cells (voronoiId set/array). When given, the search
     // homes on THESE cells instead of GOAL-id tiles — used by the Bunker round,
@@ -576,18 +730,19 @@ function findPathToNearestGoal(map, point, options) {
         }
     }
 
-    var start = nearestCellIndex(cells, point);
+    var startCell = nearestCellIndex(cells, point);
 
     // An empty hole is a hard no-go surface (players bounce off it), so a route can't
     // originate inside one. Unlike lava — where a start gate may legitimately sit and
     // the seed is allowed — seeding Dijkstra from a hole would falsely "reach" the goal
     // via adjacent ground even though racers can't launch through that lane (a start
     // edge sampled into a hole must read as unreachable, not pathable).
-    if (cells[start] != null && cells[start].id === EMPTY) {
+    if (cells[startCell] != null && cells[startCell].id === EMPTY) {
         return null;
     }
+    var start = nav.regionForPoint(startCell, point.x, point.y);
 
-    var N = cells.length;
+    var N = nav.count;
     var cost = new Array(N).fill(Infinity);
     var geo = new Array(N).fill(Infinity);
     var prev = new Array(N).fill(-1);
@@ -609,7 +764,7 @@ function findPathToNearestGoal(map, point, options) {
         // Goal found: Dijkstra pops nodes in cost order, so this is the
         // cheapest-cost reachable goal. An explicit goalSet (Bunker) overrides the
         // GOAL-id test, since the buried goal has no goal tiles to find.
-        if (goalSet ? goalSet[cells[u].site.voronoiId] : cells[u].id === GOAL) {
+        if (goalSet ? goalSet[cellAt(u).site.voronoiId] : cellAt(u).id === GOAL) {
             goalIndex = u;
             break;
         }
@@ -620,6 +775,7 @@ function findPathToNearestGoal(map, point, options) {
             if (done[v]) {
                 continue;
             }
+            var cellV = cellAt(v);
             // A pin-point doorway (shared border narrower than the kart itself)
             // is a wall: nobody can physically thread it, so routes — and goal
             // reachability — must not depend on it.
@@ -630,30 +786,27 @@ function findPathToNearestGoal(map, point, options) {
             // goal is always enterable. The start cell is allowed even if it sits on
             // lava. A door cell is a wall unless passableDoors opens all of them, or this
             // specific door is in openDoorIds.
-            var doorOpen = allowDoors || (openDoorSet != null && openDoorSet[cells[v].site.voronoiId]);
-            if ((cells[v].id === LAVA || cells[v].id === EMPTY || (cells[v].id === DOOR && !doorOpen)) && cells[v].id !== GOAL) {
+            var doorOpen = allowDoors || (openDoorSet != null && openDoorSet[cellV.site.voronoiId]);
+            if ((cellV.id === LAVA || cellV.id === EMPTY || (cellV.id === DOOR && !doorOpen)) && cellV.id !== GOAL) {
                 continue;
             }
-            if (blocked && blocked[cells[v].site.voronoiId]) {
+            if (blocked && blocked[cellV.site.voronoiId]) {
                 continue;
             }
-            // A solid barrier sealing this edge is a hard wall for reachability —
-            // skip it entirely so a barrier across the only route makes the goal
-            // unreachable (validation rejects such maps).
-            if (barrierBlock != null && barrierBlock.has(u + "|" + v)) {
-                continue;
-            }
-            var step = dist(cells[u].site, cells[v].site);
-            var pen = (penalty && penalty[cells[v].site.voronoiId]) || 1;
+            // Author barriers are handled structurally by the nav graph (getNavGraph):
+            // edges a wall cuts are absent, and a cell a wall bisects is split, so an
+            // edge that survives here is genuinely traversable. No per-edge block needed.
+            var step = dist(cellAt(u).site, cellV.site);
+            var pen = (penalty && penalty[cellV.site.voronoiId]) || 1;
             // Kart fits but it's a squeeze: take it only when no wider lane exists.
             var tight = (doors[k] < MIN_DOORWAY) ? TIGHT_DOORWAY_PENALTY : 1;
-            // Crossing a solid barrier between these two cells: heavy soft penalty so
-            // the route prefers going around the barrier's ends.
-            var barr = (barrierMult > 1 && barrierEdges != null && barrierEdges.has(u + "|" + v)) ? barrierMult : 1;
+            // Optional soft route-shaping hint: prefer to keep clear of a wall even on a
+            // passable edge (cell-index keyed; harmless when unset).
+            var barr = (barrierMult > 1 && barrierEdges != null && barrierEdges.has(navCell(u) + "|" + navCell(v))) ? barrierMult : 1;
             // A lily pad over this water cell makes it solid to skim — price it like ~ground
             // instead of deep water so bots route ACROSS a pad path rather than around the water.
-            var tw = (lilyCells != null && lilyCells[v]) ? LILY_PADDED_WEIGHT : tileWeight(cells[v].id);
-            var nc = cost[u] + step * tw * cellJitter(cells[v].site.voronoiId) * pen * tight * barr;
+            var tw = (lilyCells != null && lilyCells[navCell(v)]) ? LILY_PADDED_WEIGHT : tileWeight(cellV.id);
+            var nc = cost[u] + step * tw * cellJitter(cellV.site.voronoiId) * pen * tight * barr;
             if (nc < cost[v]) {
                 cost[v] = nc;
                 geo[v] = geo[u] + step;
@@ -667,12 +820,13 @@ function findPathToNearestGoal(map, point, options) {
         // Price it at the grass distance the kart could have driven in that time, so Dijkstra
         // threads the pair only when the detour it skips is longer. Respect the destination's
         // passability (a pad on lava/empty/door, or a caller-blocked cell, isn't a valid exit).
-        if (warpLinks != null && warpLinks[u] != null) {
-            var wv = warpLinks[u];
-            if (!done[wv] && cells[wv] != null && cells[wv].site != null &&
-                !((cells[wv].id === LAVA || cells[wv].id === EMPTY || cells[wv].id === DOOR) && cells[wv].id !== GOAL) &&
-                !(blocked && blocked[cells[wv].site.voronoiId])) {
-                var warpCost = warpTransitMs(dist(cells[u].site, cells[wv].site)) / 1000 * WARP_CRUISE_PX_PER_S;
+        if (warpLinks != null && warpLinks[navCell(u)] != null) {
+            var wv = firstRegionOf(warpLinks[navCell(u)]);
+            var cellW = cellAt(wv);
+            if (!done[wv] && cellW != null && cellW.site != null &&
+                !((cellW.id === LAVA || cellW.id === EMPTY || cellW.id === DOOR) && cellW.id !== GOAL) &&
+                !(blocked && blocked[cellW.site.voronoiId])) {
+                var warpCost = warpTransitMs(dist(cellAt(u).site, cellW.site)) / 1000 * WARP_CRUISE_PX_PER_S;
                 var wnc = cost[u] + warpCost;
                 if (wnc < cost[wv]) {
                     cost[wv] = wnc;
@@ -688,12 +842,13 @@ function findPathToNearestGoal(map, point, options) {
         // threads it only when the driving detour it skips is even longer. The ride is lava-
         // immune (the span between can be anything), but the LANDING (far cell) must be a valid
         // exit, just like a warp.
-        if (zipLinks != null && zipLinks[u] != null) {
-            var zv = zipLinks[u].to;
-            if (!done[zv] && cells[zv] != null && cells[zv].site != null &&
-                !((cells[zv].id === LAVA || cells[zv].id === EMPTY || cells[zv].id === DOOR) && cells[zv].id !== GOAL) &&
-                !(blocked && blocked[cells[zv].site.voronoiId])) {
-                var zipCost = zipLinks[u].rideSec * ZIP_CRUISE_PX_PER_S;
+        if (zipLinks != null && zipLinks[navCell(u)] != null) {
+            var zv = firstRegionOf(zipLinks[navCell(u)].to);
+            var cellZ = cellAt(zv);
+            if (!done[zv] && cellZ != null && cellZ.site != null &&
+                !((cellZ.id === LAVA || cellZ.id === EMPTY || cellZ.id === DOOR) && cellZ.id !== GOAL) &&
+                !(blocked && blocked[cellZ.site.voronoiId])) {
+                var zipCost = zipLinks[navCell(u)].rideSec * ZIP_CRUISE_PX_PER_S;
                 var znc = cost[u] + zipCost;
                 if (znc < cost[zv]) {
                     cost[zv] = znc;
@@ -709,18 +864,22 @@ function findPathToNearestGoal(map, point, options) {
         return null;
     }
 
+    // Resolve region-nodes back to cell voronoiIds, dropping any consecutive repeat
+    // (a route can pass two pieces of one cell only via a detour through other cells,
+    // never back-to-back — but guard anyway so downstream sees a clean cell path).
     var path = [];
     for (var node = goalIndex; node !== -1; node = prev[node]) {
-        path.push(cells[node].site.voronoiId);
+        var vid = cellAt(node).site.voronoiId;
+        if (path.length === 0 || path[path.length - 1] !== vid) { path.push(vid); }
     }
     path.reverse();
 
     return {
         path: path,
         distance: geo[goalIndex],
-        goal: { x: cells[goalIndex].site.x, y: cells[goalIndex].site.y },
-        goalIndex: goalIndex,
-        startIndex: start
+        goal: { x: cellAt(goalIndex).site.x, y: cellAt(goalIndex).site.y },
+        goalIndex: navCell(goalIndex),
+        startIndex: navCell(start)
     };
 }
 
@@ -868,10 +1027,11 @@ function edgeSampleOrigins(edge) {
 // sealed off by a solid barrier (barriers are hard-blocked here).
 function reachableFromEdge(map, edge) {
     var samples = edgeSampleOrigins(edge);
-    var barrierBlock = getBarrierBlockedEdges(map);
-    var opts = barrierBlock != null ? { barrierBlockEdges: barrierBlock } : undefined;
+    // findPathToNearestGoal routes on the nav graph, which already drops wall-cut
+    // doorways and splits cells a wall bisects — so a barrier that seals every route
+    // to the goal makes this return false (validation rejects such maps).
     for (var s = 0; s < samples.length; s++) {
-        if (findPathToNearestGoal(map, samples[s], opts) != null) { return true; }
+        if (findPathToNearestGoal(map, samples[s]) != null) { return true; }
     }
     return false;
 }

@@ -89,10 +89,9 @@ function racingLineContext(map, config, pathOpts) {
         if (s != null) { idToCell[s.voronoiId] = map.cells[ci]; }
     }
     var noZip = !!pathOpts.noZip;
-    // Solid author barriers must hard-block these routes too (same as the par/draw
-    // overlay and reachability), so trap-line geometry never threads a wall.
-    var barrierBlock = cellGraph.getBarrierBlockedEdges(map);
-    var opts = barrierBlock ? Object.assign({}, pathOpts, { barrierBlockEdges: barrierBlock }) : pathOpts;
+    // Author barriers are respected automatically via the nav graph (findPathToNearestGoal),
+    // so trap-line geometry already weaves around walls — no extra options needed.
+    var opts = pathOpts;
     function driveTime(x, y) {
         var r = cellGraph.findPathToNearestGoal(map, { x: x, y: y }, opts);
         if (r == null) { return Infinity; }
@@ -546,16 +545,11 @@ function edgeParTimes(map, config) {
     var edges = startEdgesOf(map);
     var lavaId = tileId(config, 'lava');
     var avoid = hazardAvoidance(map, config);
-    // Author barriers are solid walls. The overlay routes must respect them the
-    // same way reachability/validation does (cellGraph hard-blocks barrier-crossed
-    // edges) — otherwise the drawn racing lines blast straight through walls and the
-    // balance score disagrees with the "no goal reachable" verdict on the same map.
-    var barrierBlock = cellGraph.getBarrierBlockedEdges(map);
-    var routeOpts = (avoid.penalty || barrierBlock) ? {} : undefined;
-    if (routeOpts) {
-        if (avoid.penalty) { routeOpts.penaltySet = avoid.penalty; routeOpts.penaltyMult = HAZARD_PATH_PENALTY; }
-        if (barrierBlock) { routeOpts.barrierBlockEdges = barrierBlock; }
-    }
+    // Author barriers are respected automatically: findPathToNearestGoal routes on the
+    // nav graph, which drops wall-cut doorways and splits bisected cells — so these
+    // overlay routes weave through the gaps instead of blasting through walls, matching
+    // the validator. (Hazard penalties still need to be passed explicitly.)
+    var routeOpts = avoid.penalty ? { penaltySet: avoid.penalty, penaltyMult: HAZARD_PATH_PENALTY } : undefined;
     var nDraw = bal(config, 'fairnessRoutesPerEdge', 4);
     var result = [];
     for (var e = 0; e < edges.length; e++) {
