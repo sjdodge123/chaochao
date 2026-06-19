@@ -714,7 +714,7 @@ function routePolyline(map, config, route, penaltyLookup, avoid) {
     var pts = pathPoints(map, route.path);
     pts.unshift({ x: Math.round(route.origin.x), y: Math.round(route.origin.y) });
     var smoothed = smoothRoute(map, config, pts, penaltyLookup, avoid.points);
-    return cellGraph.detourBarriers(Array.isArray(map.barriers) ? map.barriers : null, smoothed);
+    return cellGraph.detourBarriers(map, smoothed);
 }
 
 // Overlay geometry for the editor's "looks unbalanced" nudge: the representative
