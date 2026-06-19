@@ -17,7 +17,15 @@ To re-render a past week's digest with the current formatting, run the `Release 
 ### Map editor
 
 - **Barriers now block exactly where a kart can't drive.** The fairness check used to seal a map off the moment a wall *visually* crossed the straight line between two regions — even when you'd left a clear lane to drive through — so maps got a false "No goal is reachable" rejection. It now traces the actual gaps a kart drives through: weaving wall mazes with real lanes pass, while a wall that genuinely **divides the map** (even one running straight through the middle of a region) is still correctly rejected as unfinishable.
-- **Estimated racing lines respect your walls.** The fairness overlay's routes used to draw straight through solid barriers; they now thread the gaps and route around walls, matching what the validator and AI racers see.
+- **Estimated racing lines respect your walls.** The fairness overlay's routes used to draw straight through solid barriers; they now thread the gaps and route around walls — the exact same path the AI racers steer, so the preview line and the bots agree.
+
+### AI Racers
+
+- **Bots steer around barriers.** AI racers used to aim at cell centres and try to drive straight through a wall; they now thread the doorways between walls, following the same line the fairness preview draws.
+
+### Gameplay & Balance
+
+- **Walls have real thickness.** Barriers are 14px-wide bars, so you now stop with your kart's edge against the wall instead of sliding to its centre line — no more parking in the middle of a wall.
 
 ## v0.49.0 — 2026-06-16
 

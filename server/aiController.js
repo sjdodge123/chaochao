@@ -1917,10 +1917,19 @@ function steerBot(bot, ctx, dt) {
             route = cellGraph.findPathToNearestGoal(ctx.map, { x: bot.x, y: bot.y }, { noiseSeed: ai.pathSeed, noiseAmount: pathOpts.noiseAmount, penaltySet: ctx.staticHazardCells, penaltyMult: HAZARD_PATH_PENALTY, penaltySet2: ctx.railCells, penaltyMult2: RAIL_PATH_PENALTY, barrierEdges: ctx.barrierEdges, barrierMult: BARRIER_PATH_PENALTY, goalSet: pathOpts.goalSet });
         }
         if (route != null) {
-            var pts = [];
-            for (var p = 0; p < route.path.length; p++) {
-                var site = ctx.siteById[route.path[p]];
-                if (site) { pts.push(site); }
+            // Author barriers: steer DOORWAY-to-doorway (the shared cellGraph.pathWaypoints
+            // the fairness overlay also draws) so the carrot never aims at a cell centre
+            // sitting on the far side of a wall the route skirts. Barrier-free maps keep the
+            // cell-centre line (unchanged racing behaviour — no committed map has barriers).
+            var pts;
+            if (ctx.barrierEdges != null) {
+                pts = cellGraph.pathWaypoints(ctx.map, route.path);
+            } else {
+                pts = [];
+                for (var p = 0; p < route.path.length; p++) {
+                    var site = ctx.siteById[route.path[p]];
+                    if (site) { pts.push(site); }
+                }
             }
             ai.path = route.path;
             ai.waypoints = pts;
@@ -1929,8 +1938,10 @@ function steerBot(bot, ctx, dt) {
             // timing still read true race position (else a far key-detour reads as a rank flip).
             ai.goal = (ai.doorMode != null && ctx.goalTiles && ctx.goalTiles.length > 0)
                 ? nearestGoalPoint(bot.x, bot.y, ctx.goalTiles) : route.goal;
-            // Skip the start cell (≈ current position) so the carrot looks ahead.
-            ai.wpIndex = pts.length > 1 ? 1 : 0;
+            // Cell-centre waypoints lead with the start cell (≈ current position), so skip
+            // it; doorway waypoints (barrier maps) already start at the first gate AHEAD, so
+            // keep index 0.
+            ai.wpIndex = (ctx.barrierEdges == null && pts.length > 1) ? 1 : 0;
         } else {
             ai.waypoints = null;
             ai.goal = null;

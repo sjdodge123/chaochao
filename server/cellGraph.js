@@ -390,6 +390,97 @@ function getNavGraph(map) {
     return nav;
 }
 
+// True if segment a->b clears every author barrier (doesn't cut a solid wall).
+function legClearsBarriers(a, b, barriers) {
+    if (!barriers || barriers.length === 0) { return true; }
+    for (var i = 0; i < barriers.length; i++) {
+        var bar = barriers[i];
+        if (bar == null) { continue; }
+        if (segmentsCross(a.x, a.y, b.x, b.y, bar.x1, bar.y1, bar.x2, bar.y2)) { return false; }
+    }
+    return true;
+}
+
+// A waypoint that skirts the FIRST barrier a leg a->b crosses, by routing around the
+// wall's nearer FREE END: extend a short way PAST that endpoint along the wall's own
+// axis (a wall doesn't reach beyond its endpoints), growing the reach until a->wp and
+// wp->b both clear EVERY barrier. Catches the sub-cell case where a wall END juts INTO
+// a traversed cell — the kart drives around the open end, but a straight leg through the
+// cell clips the solid part. null when no reach cleanly skirts it (a genuine knot).
+function barrierEndDetour(a, b, barriers) {
+    for (var i = 0; i < barriers.length; i++) {
+        var bar = barriers[i];
+        if (bar == null) { continue; }
+        if (!segmentsCross(a.x, a.y, b.x, b.y, bar.x1, bar.y1, bar.x2, bar.y2)) { continue; }
+        var ends = [{ x: bar.x1, y: bar.y1 }, { x: bar.x2, y: bar.y2 }];
+        var mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        ends.sort(function (p, q) {
+            return Math.hypot(p.x - mid.x, p.y - mid.y) - Math.hypot(q.x - mid.x, q.y - mid.y);
+        });
+        var REACH = [14, 22, 32, 46, 64];
+        for (var e = 0; e < ends.length; e++) {
+            var end = ends[e], other = ends[1 - e];
+            var ax = end.x - other.x, ay = end.y - other.y;
+            var al = Math.hypot(ax, ay) || 1;
+            var ux = ax / al, uy = ay / al;
+            for (var r = 0; r < REACH.length; r++) {
+                var wp = { x: Math.round(end.x + ux * REACH[r]), y: Math.round(end.y + uy * REACH[r]) };
+                if (legClearsBarriers(a, wp, barriers) && legClearsBarriers(wp, b, barriers)) { return wp; }
+            }
+        }
+        return null;
+    }
+    return null;
+}
+
+// Insert a skirt waypoint for any leg that still cuts a wall (kept only when it cleanly
+// removes the crossing without adding one).
+function detourBarriers(barriers, pts) {
+    if (!barriers || barriers.length === 0 || pts.length < 2) { return pts; }
+    var out = [pts[0]];
+    for (var i = 1; i < pts.length; i++) {
+        var a = out[out.length - 1], b = pts[i];
+        if (!legClearsBarriers(a, b, barriers)) {
+            var wp = barrierEndDetour(a, b, barriers);
+            if (wp != null) { out.push(wp); }
+        }
+        out.push(b);
+    }
+    return out;
+}
+
+// Resolve a route's cell-id path to drivable WAYPOINTS — the SINGLE geometry both the
+// AI steering (aiController) and the fairness/CI overlay (mapClassifier) follow, so the
+// estimated racing line and the bots take the same line through a map. The waypoints are
+// the DOORWAY crossings (shared-border midpoints) between consecutive cells, then the
+// goal centre — NOT the intermediate cell centres, which can sit on the far side of a
+// wall the route legitimately skirts. The route runs on the nav graph (barrier-aware),
+// so consecutive doorways of a shared cell lie in one convex piece — the segment between
+// them can't cross a wall — and a final detour pass skirts any wall END that juts into a
+// traversed cell. Net: no leg crosses a barrier. (A barrier-free map has no doorway it
+// needs to dodge, so this is just the corner-cutting apex line through the gates.)
+function pathWaypoints(map, path) {
+    if (!map || !Array.isArray(map.cells) || !Array.isArray(path) || path.length === 0) { return []; }
+    var cells = map.cells;
+    var idToIndex = getAdjacency(map).idToIndex;
+    var pts = [];
+    for (var p = 0; p + 1 < path.length; p++) {
+        var ci = idToIndex[path[p]];
+        var cn = idToIndex[path[p + 1]];
+        if (ci == null || cn == null) { continue; }
+        var seg = sharedBorderSeg(cells[ci], cells[cn]);
+        if (seg != null && seg.va && seg.vb) {
+            pts.push({ x: Math.round((seg.va.x + seg.vb.x) / 2), y: Math.round((seg.va.y + seg.vb.y) / 2) });
+        }
+    }
+    var last = idToIndex[path[path.length - 1]];
+    if (last != null && cells[last] && cells[last].site) {
+        pts.push({ x: Math.round(cells[last].site.x), y: Math.round(cells[last].site.y) });
+    }
+    var barriers = Array.isArray(map.barriers) ? map.barriers : null;
+    return barriers ? detourBarriers(barriers, pts) : pts;
+}
+
 // Warp pads (a BOON, config.boons.warpPad, id 958) are PAIRED TELEPORTERS: driving
 // onto pad A starts a (distance-based) transit to its partner pad B (and vice-versa),
 // preserving velocity. Unlike a barrier (which BLOCKS an adjacency edge), a warp
@@ -1101,6 +1192,8 @@ module.exports = {
     reachableFromEdge: reachableFromEdge,
     effectiveStartEdges: effectiveStartEdges,
     firstUnreachableStartEdge: firstUnreachableStartEdge,
+    pathWaypoints: pathWaypoints,
+    detourBarriers: detourBarriers,
     tileWeight: tileWeight,
     BALANCE_WEIGHTED_TILES: BALANCE_WEIGHTED_TILES,
     estimatePathTime: estimatePathTime,

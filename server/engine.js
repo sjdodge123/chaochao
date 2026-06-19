@@ -1147,7 +1147,7 @@ function ensureBarrierEdges(map) {
 				var ex = bx - ax, ey = by - ay;
 				var el = Math.sqrt(ex * ex + ey * ey);
 				if (el < 1e-9) { continue; } // zero-length segment can't wall anything
-				edges.push({ ax: ax, ay: ay, bx: bx, by: by, tanX: ex / el, tanY: ey / el });
+				edges.push({ ax: ax, ay: ay, bx: bx, by: by, tanX: ex / el, tanY: ey / el, len: el });
 			}
 		}
 		Object.defineProperty(map, '_barrierEdges', { value: edges, enumerable: false, writable: true, configurable: true });
@@ -1173,13 +1173,44 @@ function barrierCrossing(x1, y1, x2, y2, map) {
 	}
 	return best;
 }
+// A barrier is drawn as a 14px-wide bar (barrierArt.js bandHalf = 7), not a hairline,
+// so collision gives it that THICKNESS: the kart is held a half-bar plus its own radius
+// off the centre line, so its rim rests against the visual edge instead of sliding to
+// the middle of the wall.
+var BARRIER_HALF_WIDTH = 7;
 function bounceOffBarriers(player, map) {
 	if (!mapHasBarriers(map)) {
 		return; // no barriers on this map — skip the per-tick test entirely
 	}
-	// Barriers are static, always-active walls (no live re-validation) — slide the
-	// same way the water/lava seam does, blocking crossing from either side.
-	slideAlongSegmentWalls(player, map._barrierEdges, null);
+	var edges = map._barrierEdges;
+	var clear = BARRIER_HALF_WIDTH + (player.radius || 0);
+	// Treat each wall as a capsule of radius `clear`: keep the kart centre at least that
+	// far from the segment, sliding along it (drop the inward velocity, keep tangential).
+	// The swept-crossing test also catches a fast kart that would tunnel fully through in
+	// one tick, pushing it back to the side it came from. First wall hit wins (same as the
+	// stone-seam slide) — good enough at a corner, where the next tick resolves the rest.
+	for (var i = 0; i < edges.length; i++) {
+		var e = edges[i];
+		// Closest point on the segment to the kart's intended position.
+		var projN = (player.newX - e.ax) * e.tanX + (player.newY - e.ay) * e.tanY;
+		var pcN = projN < 0 ? 0 : (projN > e.len ? e.len : projN);
+		var baseX = e.ax + e.tanX * pcN, baseY = e.ay + e.tanY * pcN;
+		var dx = player.newX - baseX, dy = player.newY - baseY;
+		var d = Math.sqrt(dx * dx + dy * dy);
+		var crossed = segmentsCross(player.x, player.y, player.newX, player.newY, e.ax, e.ay, e.bx, e.by);
+		if (d >= clear && !crossed) { continue; }
+		// Push out along the normal on the side the kart APPROACHED from (its pre-step side),
+		// so a tunnelling kart is sent back rather than punched through.
+		var perpOld = (player.x - e.ax) * (-e.tanY) + (player.y - e.ay) * e.tanX;
+		var s = perpOld >= 0 ? 1 : -1;
+		var nx = -e.tanY * s, ny = e.tanX * s;
+		player.newX = baseX + nx * clear;
+		player.newY = baseY + ny * clear;
+		var vn = player.velX * nx + player.velY * ny;
+		if (vn < 0) { player.velX -= vn * nx; player.velY -= vn * ny; }
+		player.bounced = true;
+		return;
+	}
 }
 function pointIntersection(x, y, cell) {
 	{
