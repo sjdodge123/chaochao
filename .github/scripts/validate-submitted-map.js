@@ -99,16 +99,6 @@ for (const entry of parsed) {
 messenger.build({ to() { return { emit() { } }; }, sockets: { emit() { } } });
 
 // --- helpers ----------------------------------------------------------------
-function effectiveStartEdges(map) {
-    // The edges to check reachability / sample origins from. deepValidate runs
-    // utils.validateMap FIRST and gates this on v.valid, so any malformed startEdges
-    // (bad length, unknown edge, repeat, non-opposite pair) has already been rejected
-    // by validateStartEdges — we only apply the absent/empty => ["left"] default that
-    // the engine's resolveStartEdges also applies. (We deliberately don't re-run the
-    // engine's sanitisation here; by this point the array is already known-valid.)
-    return (Array.isArray(map.startEdges) && map.startEdges.length > 0) ? map.startEdges : ['left'];
-}
-
 function isFiniteNum(n) { return typeof n === 'number' && isFinite(n); }
 
 // A few DISTINCT competing lines a racer would take. Delegated to
@@ -135,23 +125,14 @@ function deepValidate(map) {
     const errors = [];
     const warnings = [];
 
-    // Boundary check the live submit path runs (cells / goal tile / hazards, plus
-    // start-edge reachability *when startEdges is set*).
+    // Boundary check the live submit path runs (cells / goal tile / hazards). This
+    // is the SAME engine the in-editor submit/preview reject on and the fairness
+    // overlay routes through: utils.validateMap → cellGraph.firstUnreachableStartEdge
+    // already proves a goal is reachable from every EFFECTIVE start edge (declared
+    // startEdges, or the left gate when none are set), barrier-aware. So there is no
+    // separate reachability pass here any more — the three surfaces share one check.
     const v = utils.validateMap(map, config);
     if (!v.valid) { errors.push(v.reason); }
-
-    // Reachability for the effective start edge(s). validateMap skips this when
-    // startEdges is absent (every legacy map defaults to left), so a goal walled
-    // off by lava from the left gate would otherwise pass. reachableFromEdge is
-    // the same graph check the engine trusts for par time.
-    if (v.valid && Array.isArray(map.cells)) {
-        for (const edge of effectiveStartEdges(map)) {
-            const reason = 'No goal is reachable from the ' + edge + ' start.';
-            if (!cellGraph.reachableFromEdge(map, edge) && errors.indexOf(reason) === -1) {
-                errors.push(reason);
-            }
-        }
-    }
 
     // Bounds + finiteness + cell cap (only meaningful once we know cells exist).
     if (Array.isArray(map.cells)) {

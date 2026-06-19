@@ -168,8 +168,13 @@ console.log('[D] AI cell-graph routes around barriers');
         }
     }
     const bbox = { xl: 0, xr: W, yt: 0, yb: H };
-    // Vertical wall across the middle band at x=W/2, gaps top + bottom.
-    const wallX = W / 2;
+    // Vertical wall across the middle band, gaps top + bottom. Placed on the column
+    // BORDER (between col 4 and col 5), not on the column centres at x=W/2: barriers
+    // block an adjacency edge by cutting the cells' shared BORDER (the doorway), so a
+    // wall laid through cell centres parallel to the borders wouldn't model as a
+    // routable block (and no real editor map puts a wall exactly on a cell centre).
+    const step = (W - 120) / (cols - 1);
+    const wallX = 60 + 4.5 * step; // midpoint between column 4 and column 5 sites
     const wall = { x1: wallX, y1: H * 0.25, x2: wallX, y2: H * 0.75, style: 'wall' };
 
     function freshMap(withBarrier) {

@@ -19,6 +19,28 @@ var c = require('./config.json');
 // Required lazily-safe: cellGraph only calls these at query time, so even under the
 // utils<->cellGraph circular require, geometry is fully loaded before first use.
 var segmentsCross = require('./geometry.js').segmentsCross;
+var sideOf = require('./geometry.js').sideOf;
+
+// Does a barrier touch a cell-border segment? Proper crossing PLUS the collinear-
+// overlap case segmentsCross misses — a wall laid exactly ALONG a doorway (e.g. an
+// axis-aligned wall over an axis-aligned grid border) covers it without "crossing,"
+// yet still seals it. Used only by the barrier-block test (drawing wants proper
+// crossings, so it keeps plain segmentsCross).
+function barrierTouchesBorder(ax, ay, bx, by, cx, cy, dx, dy) {
+    if (segmentsCross(ax, ay, bx, by, cx, cy, dx, dy)) { return true; }
+    var EPS = 1e-6;
+    function collinearOn(px, py, x1, y1, x2, y2) {
+        var area = sideOf(x1, y1, x2, y2, px, py);
+        var scale = Math.max(1, Math.abs(x2 - x1) + Math.abs(y2 - y1));
+        if (area > EPS * scale || area < -EPS * scale) { return false; } // not collinear
+        return px >= Math.min(x1, x2) - EPS && px <= Math.max(x1, x2) + EPS &&
+               py >= Math.min(y1, y2) - EPS && py <= Math.max(y1, y2) + EPS;
+    }
+    // Overlap (or touch) iff an endpoint of either segment lies on the other.
+    return collinearOn(cx, cy, ax, ay, bx, by) || collinearOn(dx, dy, ax, ay, bx, by) ||
+           collinearOn(ax, ay, cx, cy, dx, dy) || collinearOn(bx, by, cx, cy, dx, dy);
+}
+
 
 // Cache adjacency (arrays of neighbor cell indices) keyed by map id + cell count.
 // currentMap is a JSON deep-copy per round (server/game.js determineNextMap), so
@@ -159,38 +181,56 @@ function getAdjacency(map) {
 // Author-placed barriers (engine.bounceOffBarriers) are solid segments the cell
 // graph doesn't otherwise know about — they block travel ACROSS a cell boundary,
 // not occupancy of a cell, so they're modelled as blocked adjacency EDGES, not
-// penalized cells. An edge u<->v is "barrier-crossed" when the straight line
-// between the two cell sites (the move the router prices and the bot drives) is
-// cut by a barrier segment. Bot routes apply a heavy SOFT penalty to those edges
-// (steer around the open ends); validation/reachability HARD-blocks them (a wall
-// that seals every route makes the goal unreachable). Computed once per map object
-// and cached on it (non-enumerable) — barriers never change within a loaded map,
-// and currentMap is a fresh per-round copy, so no signature/global cache is needed.
+// penalized cells. An edge u<->v is "barrier-crossed" when a barrier segment cuts
+// the SHARED VORONOI BORDER between the two cells (edge.va–edge.vb) — the doorway
+// the kart actually drives through. (It used to test the site-to-site centroid
+// line, which a barrier can cross while leaving the real border wide open — a
+// false seal that wrongly rejected maps whose author left lane-gaps between wall
+// segments — confirmed against a free-space flood-fill: the centroid test sealed
+// maps a kart can physically drive through.) `barrierTouchesBorder` also catches the
+// collinear case a wall laid exactly ALONG a doorway (axis-aligned wall over an
+// axis-aligned border) where a proper crossing test reads "no cross." Sub-kart-width
+// gaps are handled by the KART_WIDTH pin-point gate in findPathToNearestGoal. Bot
+// routes apply a heavy SOFT penalty to these edges (steer around the open ends);
+// validation/reachability HARD-blocks them (a wall that seals every route makes the
+// goal unreachable). Computed once per map object and cached on it (non-enumerable) —
+// barriers never change within a loaded map, and currentMap is a fresh per-round
+// copy, so no signature/global cache is needed. (Limitation: a wall running through a
+// cell PARALLEL to its borders blocks transit the per-edge border test can't see;
+// real editor maps don't place walls exactly on cell centres, and the engine's
+// bounceOffBarriers stops a bot physically regardless, so routing self-corrects.)
 function getBarrierBlockedEdges(map) {
     if (!map || !Array.isArray(map.cells)) { return null; }
     if (map._barrierBlockedEdges !== undefined) { return map._barrierBlockedEdges; }
     var result = null;
     if (Array.isArray(map.barriers) && map.barriers.length > 0) {
         var adj = getAdjacency(map);
-        var neighbors = adj.neighbors;
+        var idToIndex = adj.idToIndex;
         var cells = map.cells;
         var bars = map.barriers;
         var blocked = new Set();
-        for (var u = 0; u < neighbors.length; u++) {
-            var su = cells[u] && cells[u].site;
-            if (su == null) { continue; }
-            var nb = neighbors[u];
-            for (var k = 0; k < nb.length; k++) {
-                var v = nb[k];
-                if (v < u) { continue; } // each undirected pair once
-                var sv = cells[v] && cells[v].site;
-                if (sv == null) { continue; }
+        for (var ci = 0; ci < cells.length; ci++) {
+            var cell = cells[ci];
+            if (!cell || !cell.site || !Array.isArray(cell.halfedges)) { continue; }
+            var own = cell.site.voronoiId;
+            for (var h = 0; h < cell.halfedges.length; h++) {
+                var he = cell.halfedges[h];
+                var edge = he && he.edge;
+                // Need the shared-border segment (va–vb) to test against; skip
+                // boundary edges (one null site) and degenerate ones (no verts).
+                if (!edge || !edge.va || !edge.vb) { continue; }
+                var otherId = null;
+                if (edge.lSite && edge.lSite.voronoiId !== own) { otherId = edge.lSite.voronoiId; }
+                else if (edge.rSite && edge.rSite.voronoiId !== own) { otherId = edge.rSite.voronoiId; }
+                if (otherId == null) { continue; }
+                var ni = idToIndex[otherId];
+                if (ni == null || ni === ci || ni < ci) { continue; } // each undirected pair once
                 for (var bi = 0; bi < bars.length; bi++) {
                     var bar = bars[bi];
                     if (bar == null) { continue; }
-                    if (segmentsCross(su.x, su.y, sv.x, sv.y, bar.x1, bar.y1, bar.x2, bar.y2)) {
-                        blocked.add(u + "|" + v);
-                        blocked.add(v + "|" + u);
+                    if (barrierTouchesBorder(edge.va.x, edge.va.y, edge.vb.x, edge.vb.y, bar.x1, bar.y1, bar.x2, bar.y2)) {
+                        blocked.add(ci + "|" + ni);
+                        blocked.add(ni + "|" + ci);
                         break;
                     }
                 }
@@ -836,6 +876,28 @@ function reachableFromEdge(map, edge) {
     return false;
 }
 
+// The start edge(s) a map actually launches from: its declared startEdges, or the
+// left gate when none are set (gameBoard.resolveStartEdges' runtime default, the
+// same fallback computeMapParTime uses). The SINGLE source of this rule so every
+// validation surface — live submit (utils.validateMap), the map-submission CI gate
+// (validate-submitted-map.js), and the fairness routes (mapClassifier) — resolves
+// start edges identically.
+function effectiveStartEdges(map) {
+    return (Array.isArray(map.startEdges) && map.startEdges.length > 0) ? map.startEdges : ["left"];
+}
+
+// First effective start edge with NO goal reachable from it (a map that would
+// leave that side's racers unable to finish), or null when every start edge can
+// reach a goal. Barrier-aware via reachableFromEdge. This is the one reachability
+// gate all three validation surfaces call, so they can never disagree.
+function firstUnreachableStartEdge(map) {
+    var edges = effectiveStartEdges(map);
+    for (var i = 0; i < edges.length; i++) {
+        if (!reachableFromEdge(map, edges[i])) { return edges[i]; }
+    }
+    return null;
+}
+
 function computeMapParTime(map) {
     if (!map || !Array.isArray(map.cells) || map.cells.length === 0) {
         return 0;
@@ -877,6 +939,8 @@ module.exports = {
     findPathToNearestGoal: findPathToNearestGoal,
     reachableGoalExists: reachableGoalExists,
     reachableFromEdge: reachableFromEdge,
+    effectiveStartEdges: effectiveStartEdges,
+    firstUnreachableStartEdge: firstUnreachableStartEdge,
     tileWeight: tileWeight,
     BALANCE_WEIGHTED_TILES: BALANCE_WEIGHTED_TILES,
     estimatePathTime: estimatePathTime,

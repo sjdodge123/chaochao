@@ -14,7 +14,10 @@ To re-render a past week's digest with the current formatting, run the `Release 
 
 ## Unreleased
 
-(none yet)
+### Map editor
+
+- **Barriers no longer wrongly block your map.** The fairness check used to seal a map off the moment a wall *visually* crossed the straight line between two regions — even when you'd left a clear lane to drive through — so maps got a false "No goal is reachable" rejection. It now blocks a route only when a wall actually closes the **gap a kart drives through**, so your weaving wall mazes pass.
+- **Estimated racing lines respect your walls.** The fairness overlay's routes used to draw straight through solid barriers; they now thread the gaps and route around walls, matching what the validator and AI racers see.
 
 ## v0.49.0 — 2026-06-16
 

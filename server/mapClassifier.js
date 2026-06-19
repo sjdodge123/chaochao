@@ -17,6 +17,7 @@
 // classifies. See docs/spikes/map-playlists-and-ratings.md for the rationale.
 
 var cellGraph = require('./cellGraph.js');
+var segmentsCross = require('./geometry.js').segmentsCross;
 var mapDifficulty = require('./mapDifficulty.json');
 
 // Resolve a tileMap name -> numeric id from the live config (don't hardcode).
@@ -88,8 +89,12 @@ function racingLineContext(map, config, pathOpts) {
         if (s != null) { idToCell[s.voronoiId] = map.cells[ci]; }
     }
     var noZip = !!pathOpts.noZip;
+    // Solid author barriers must hard-block these routes too (same as the par/draw
+    // overlay and reachability), so trap-line geometry never threads a wall.
+    var barrierBlock = cellGraph.getBarrierBlockedEdges(map);
+    var opts = barrierBlock ? Object.assign({}, pathOpts, { barrierBlockEdges: barrierBlock }) : pathOpts;
     function driveTime(x, y) {
-        var r = cellGraph.findPathToNearestGoal(map, { x: x, y: y }, pathOpts);
+        var r = cellGraph.findPathToNearestGoal(map, { x: x, y: y }, opts);
         if (r == null) { return Infinity; }
         var t = noZip ? cellGraph.estimatePathTime(map, r.path, true, true)
                       : cellGraph.estimatePathTime(map, r.path, true);
@@ -100,7 +105,7 @@ function racingLineContext(map, config, pathOpts) {
     for (var e = 0; e < edges.length; e++) {
         var samples = cellGraph.edgeSampleOrigins(edges[e]);
         for (var s2 = 0; s2 < samples.length; s2++) {
-            var rr = cellGraph.findPathToNearestGoal(map, samples[s2], pathOpts);
+            var rr = cellGraph.findPathToNearestGoal(map, samples[s2], opts);
             if (rr == null) { continue; }
             var pts = [];
             for (var pi = 0; pi < rr.path.length; pi++) {
@@ -232,39 +237,86 @@ function goalCentrality(map, edges, config) {
     return (c < 0) ? 0 : (c > 1 ? 1 : c);
 }
 
-// Midpoint of the boundary cellA shares with the cell whose voronoiId is bId, or
-// null when no shared edge with usable vertices exists.
-function sharedEdgeMidpoint(cellA, bId) {
+// The boundary segment {va, vb} that cellA shares with the cell whose voronoiId is
+// bId, or null when no shared edge with usable vertices exists.
+function sharedEdgeSegment(cellA, bId) {
     if (cellA == null || !Array.isArray(cellA.halfedges)) { return null; }
     for (var h = 0; h < cellA.halfedges.length; h++) {
         var edge = cellA.halfedges[h] && cellA.halfedges[h].edge;
         if (!edge || !edge.va || !edge.vb) { continue; }
         if ((edge.lSite && edge.lSite.voronoiId === bId) || (edge.rSite && edge.rSite.voronoiId === bId)) {
-            return { x: Math.round((edge.va.x + edge.vb.x) / 2), y: Math.round((edge.va.y + edge.vb.y) / 2) };
+            return { va: edge.va, vb: edge.vb };
         }
     }
     return null;
 }
 
+// True if segment a->b clears every author barrier (doesn't cut a solid wall).
+function legClearsBarriers(a, b, barriers) {
+    if (!barriers || barriers.length === 0) { return true; }
+    for (var i = 0; i < barriers.length; i++) {
+        var bar = barriers[i];
+        if (bar == null) { continue; }
+        if (segmentsCross(a.x, a.y, b.x, b.y, bar.x1, bar.y1, bar.x2, bar.y2)) { return false; }
+    }
+    return true;
+}
+
+// Pick the point on the shared border (va..vb) the drawn line should cross between
+// two cell centres. Defaults to the midpoint, but a barrier can jut INTO a cell the
+// route legitimately passes through (its border with the neighbour is open, so the
+// cells are connected, yet a straight centre->midpoint leg clips the wall). The
+// border itself is barrier-free, so scan along it for a crossing point whose legs to
+// BOTH adjoining centres clear every barrier; fall back to the midpoint when none
+// does (degenerate geometry — the smoother/segmentSafe still guards straightenings).
+function borderCrossing(prevCentre, nextCentre, seg, barriers) {
+    var mid = { x: Math.round((seg.va.x + seg.vb.x) / 2), y: Math.round((seg.va.y + seg.vb.y) / 2) };
+    if (!barriers || barriers.length === 0) { return mid; }
+    if (legClearsBarriers(prevCentre, mid, barriers) &&
+        (nextCentre == null || legClearsBarriers(mid, nextCentre, barriers))) {
+        return mid;
+    }
+    // Sample inward from the border ends (keep off the exact vertices, where cells
+    // pinch): t in (0,1), nearest-to-centre first so the line stays natural.
+    var SAMPLES = [0.5, 0.35, 0.65, 0.2, 0.8, 0.1, 0.9];
+    for (var si = 0; si < SAMPLES.length; si++) {
+        var t = SAMPLES[si];
+        var pt = { x: Math.round(seg.va.x + (seg.vb.x - seg.va.x) * t), y: Math.round(seg.va.y + (seg.vb.y - seg.va.y) * t) };
+        if (legClearsBarriers(prevCentre, pt, barriers) &&
+            (nextCentre == null || legClearsBarriers(pt, nextCentre, barriers))) {
+            return pt;
+        }
+    }
+    return mid;
+}
+
 // Resolve a route's voronoiIds back to drawable points (rounded — these go over
 // the wire to the editor overlay, so keep the payload compact). The polyline runs
-// centre -> shared-border midpoint -> next centre rather than centre -> centre:
+// centre -> shared-border crossing -> next centre rather than centre -> centre:
 // Voronoi cells are convex, so each leg provably stays inside its own (safe) cell,
 // where a straight centre-to-centre segment can visually clip across a lava
-// neighbour's polygon even though the route never enters it.
+// neighbour's polygon even though the route never enters it. The border crossing is
+// chosen barrier-aware (borderCrossing) so the drawn line threads the open gap a
+// wall leaves rather than clipping the wall.
 function pathPoints(map, path) {
     var cells = map.cells, idToIndex = {};
     for (var i = 0; i < cells.length; i++) {
         if (cells[i] && cells[i].site) { idToIndex[cells[i].site.voronoiId] = i; }
     }
+    var barriers = Array.isArray(map.barriers) ? map.barriers : null;
     var pts = [];
     for (var p = 0; p < path.length; p++) {
         var ci = idToIndex[path[p]];
         if (ci == null) { continue; }
-        pts.push({ x: Math.round(cells[ci].site.x), y: Math.round(cells[ci].site.y) });
+        var centre = { x: Math.round(cells[ci].site.x), y: Math.round(cells[ci].site.y) };
+        pts.push(centre);
         if (p + 1 < path.length) {
-            var mid = sharedEdgeMidpoint(cells[ci], path[p + 1]);
-            if (mid != null) { pts.push(mid); }
+            var seg = sharedEdgeSegment(cells[ci], path[p + 1]);
+            if (seg != null) {
+                var nci = idToIndex[path[p + 1]];
+                var nextCentre = (nci != null && cells[nci] && cells[nci].site) ? cells[nci].site : null;
+                pts.push(borderCrossing(centre, nextCentre, seg, barriers));
+            }
         }
     }
     return pts;
@@ -432,8 +484,23 @@ function smoothRoute(map, config, pts, penaltyLookup, hazardPoints) {
         }
         return true;
     }
+    // A straightened leg must not cut through a solid author barrier — the
+    // underlying Dijkstra route already goes around (barrier edges are hard-blocked),
+    // but collapsing cell-centre dog-legs into one straight line could re-cross a
+    // wall the route had skirted. Reuse the engine's segment-crossing test.
+    var barriers = Array.isArray(map.barriers) ? map.barriers : null;
+    function segClearsBarriers(a, b) {
+        if (!barriers || barriers.length === 0) { return true; }
+        for (var i = 0; i < barriers.length; i++) {
+            var bar = barriers[i];
+            if (bar == null) { continue; }
+            if (segmentsCross(a.x, a.y, b.x, b.y, bar.x1, bar.y1, bar.x2, bar.y2)) { return false; }
+        }
+        return true;
+    }
     function segmentSafe(a, b) {
         if (!segClearsHazards(a, b)) { return false; }
+        if (!segClearsBarriers(a, b)) { return false; }
         var dx = b.x - a.x, dy = b.y - a.y;
         var len = Math.sqrt(dx * dx + dy * dy) || 1;
         // Perpendicular half-tube: the leg must keep a kart's half-width (plus a
@@ -479,7 +546,16 @@ function edgeParTimes(map, config) {
     var edges = startEdgesOf(map);
     var lavaId = tileId(config, 'lava');
     var avoid = hazardAvoidance(map, config);
-    var routeOpts = avoid.penalty ? { penaltySet: avoid.penalty, penaltyMult: HAZARD_PATH_PENALTY } : undefined;
+    // Author barriers are solid walls. The overlay routes must respect them the
+    // same way reachability/validation does (cellGraph hard-blocks barrier-crossed
+    // edges) — otherwise the drawn racing lines blast straight through walls and the
+    // balance score disagrees with the "no goal reachable" verdict on the same map.
+    var barrierBlock = cellGraph.getBarrierBlockedEdges(map);
+    var routeOpts = (avoid.penalty || barrierBlock) ? {} : undefined;
+    if (routeOpts) {
+        if (avoid.penalty) { routeOpts.penaltySet = avoid.penalty; routeOpts.penaltyMult = HAZARD_PATH_PENALTY; }
+        if (barrierBlock) { routeOpts.barrierBlockEdges = barrierBlock; }
+    }
     var nDraw = bal(config, 'fairnessRoutesPerEdge', 4);
     var result = [];
     for (var e = 0; e < edges.length; e++) {
@@ -713,10 +789,68 @@ function penaltyLookupFrom(avoid) {
 // straightened racing line: gate-side origin first, then the smoothed line. The ONE
 // place this geometry is built, so the editor overlay (balanceDebug) and the CI
 // "competing lines" artifact (competingLines) stay byte-identical.
+// Final safety net: route any leg that still cuts a solid barrier AROUND the wall's
+// nearer endpoint. Catches the sub-cell case borderCrossing can't — a barrier END
+// juts INTO a traversed cell, walling its centre off from the whole shared border,
+// so the kart squeezes past the wall's open end but a straight drawn leg clips it.
+// Insert a waypoint just past that endpoint (offset outward from the leg). Bounded,
+// and only kept when it actually removes the crossing without adding a new one — so
+// a wall it can't cleanly skirt is left as the lesser-evil straight leg.
+function detourBarriers(map, pts) {
+    var barriers = Array.isArray(map.barriers) ? map.barriers : null;
+    if (!barriers || barriers.length === 0 || pts.length < 2) { return pts; }
+    var CLEAR = 16; // push the waypoint a kart-radius past the wall end
+    var out = [pts[0]];
+    for (var i = 1; i < pts.length; i++) {
+        var a = out[out.length - 1], b = pts[i];
+        if (!legClearsBarriers(a, b, barriers)) {
+            var wp = barrierEndDetour(a, b, barriers, CLEAR);
+            if (wp != null) { out.push(wp); }
+        }
+        out.push(b);
+    }
+    return out;
+}
+
+// Pick a waypoint that skirts the FIRST barrier leg a->b crosses, by going just past
+// whichever of that barrier's endpoints is nearer the crossing, nudged perpendicular-
+// away from the wall. Returns the waypoint only if a->wp and wp->b both clear ALL
+// barriers; otherwise null (caller keeps the straight leg).
+function barrierEndDetour(a, b, barriers, clear) {
+    for (var i = 0; i < barriers.length; i++) {
+        var bar = barriers[i];
+        if (bar == null) { continue; }
+        if (!segmentsCross(a.x, a.y, b.x, b.y, bar.x1, bar.y1, bar.x2, bar.y2)) { continue; }
+        var ends = [{ x: bar.x1, y: bar.y1 }, { x: bar.x2, y: bar.y2 }];
+        // Outward normal of the wall, oriented away from the leg's start.
+        var wx = bar.x2 - bar.x1, wy = bar.y2 - bar.y1;
+        var wlen = Math.sqrt(wx * wx + wy * wy) || 1;
+        var nx = -wy / wlen, ny = wx / wlen;
+        for (var e = 0; e < ends.length; e++) {
+            var end = ends[e];
+            // Push past the wall end ALONG the wall, then out along the normal, both
+            // signs — first combination that clears wins.
+            var alongx = (wx / wlen) * (e === 0 ? -clear : clear);
+            var alongy = (wy / wlen) * (e === 0 ? -clear : clear);
+            for (var s = -1; s <= 1; s += 2) {
+                var wp = {
+                    x: Math.round(end.x + alongx + nx * clear * s),
+                    y: Math.round(end.y + alongy + ny * clear * s)
+                };
+                if (legClearsBarriers(a, wp, barriers) && legClearsBarriers(wp, b, barriers)) {
+                    return wp;
+                }
+            }
+        }
+        return null; // crossed a wall we can't cleanly skirt — keep the straight leg
+    }
+    return null;
+}
+
 function routePolyline(map, config, route, penaltyLookup, avoid) {
     var pts = pathPoints(map, route.path);
     pts.unshift({ x: Math.round(route.origin.x), y: Math.round(route.origin.y) });
-    return smoothRoute(map, config, pts, penaltyLookup, avoid.points);
+    return detourBarriers(map, smoothRoute(map, config, pts, penaltyLookup, avoid.points));
 }
 
 // Overlay geometry for the editor's "looks unbalanced" nudge: the representative
