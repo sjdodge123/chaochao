@@ -347,33 +347,48 @@ function kartDiscHitsBlocked(map, x, y, allowDoor) {
 // kart-fit, which is the point: a short border with open space is NOT tight, and a wall body
 // eating into a wide border IS. (Lava only seals — width 0 when no rim-clear sample exists;
 // it doesn't otherwise shrink the width, since lava is already a cell-level block in routing.)
-function doorwayCrossing(map, border) {
+// Returns the LIST of passable INTERVALS along the border — each a maximal run of kart-fitting,
+// lava-clear samples, reported as that run's widest point { width, x, y }. A wall crossing the
+// border splits it into several intervals (a kart-wide gap on each side), and EACH is its own
+// region-to-region doorway: returning only the single widest crossing would drop the other gap,
+// leaving a physically-open route with no edge (false-unreachable) — and, on a split goal cell,
+// could let Dijkstra stop in the wrong piece and call a sealed goal reachable. Empty array = the
+// wall/lava seals the whole border (no kart fits anywhere). A sample is "open" when its kart disc
+// clears lava (allowDoor — a shut door is a temporary wall kept as an edge, blocked per-query in
+// Dijkstra) AND it sits a full kart-radius clear of the wall body (barrierMinDist >= clear).
+function doorwayCrossings(map, border) {
     var barriers = map.barriers;
     var ax = border.va.x, ay = border.va.y, bx = border.vb.x, by = border.vb.y;
     var mx = (ax + bx) / 2, my = (ay + by) / 2;
     var len = Math.hypot(bx - ax, by - ay);
-    // Fast path: when the WHOLE border sits well clear of every wall (the nearest barrier to
-    // the midpoint is farther than half the border plus a comfortable doorway), no wall
-    // constrains any point of it — every point is wide-open, so the midpoint is a valid widest
-    // crossing and one lava-disc test there is enough. Skips the per-sample sweep (the costly
-    // 9x-nearestCell-per-step part) for the many open doorways far from any author wall.
-    // allowDoor=true: a shut door is a TEMPORARY wall — keep the doorway edge in the cached nav
-    // graph (the Dijkstra blocks/opens it per-query), or a barrier+door map could never route
-    // through a door that opens. Only lava/empty (permanent) seal the crossing here.
+    var R = c.playerBaseRadius || 7.5; // kart fits where clearance (barrierMinDist - BHW) >= R
+    // Fast path: when the WHOLE border sits well clear of every wall (nearest barrier to the
+    // midpoint is farther than half the border plus a comfortable doorway), no wall constrains
+    // any point — it's a single wide-open interval, so the midpoint is its widest crossing and
+    // one lava-disc test there is enough. Skips the per-sample sweep for the many open doorways
+    // far from any author wall. (No wall near => no wall split; a rare lava-clipped end is the
+    // same minor limitation the old single-crossing code had.)
     if (barrierMinDist(mx, my, barriers) - len / 2 > BARRIER_HALF_WIDTH + MIN_DOORWAY / 2 && !kartDiscHitsBlocked(map, mx, my, true)) {
-        return { width: 2 * (barrierMinDist(mx, my, barriers) - BARRIER_HALF_WIDTH), x: Math.round(mx), y: Math.round(my) };
+        return [{ width: 2 * (barrierMinDist(mx, my, barriers) - BARRIER_HALF_WIDTH), x: Math.round(mx), y: Math.round(my) }];
     }
     var steps = Math.max(2, Math.ceil(len / 2));
-    var best = -Infinity, bcx = mx, bcy = my;
+    var out = [];
+    var best = -Infinity, bcx = mx, bcy = my, inRun = false;
     for (var s = 0; s <= steps; s++) {
         var t = s / steps;
         var px = ax + (bx - ax) * t, py = ay + (by - ay) * t;
-        if (kartDiscHitsBlocked(map, px, py, true)) { continue; }
         var clr = barrierMinDist(px, py, barriers) - BARRIER_HALF_WIDTH;
-        if (clr > best) { best = clr; bcx = px; bcy = py; }
+        var open = clr >= R && !kartDiscHitsBlocked(map, px, py, true); // kart fits here AND clears lava
+        if (open) {
+            if (!inRun) { inRun = true; best = clr; bcx = px; bcy = py; }
+            else if (clr > best) { best = clr; bcx = px; bcy = py; }
+        } else if (inRun) { // run ended (wall body or lava) -> close this interval
+            out.push({ width: 2 * best, x: Math.round(bcx), y: Math.round(bcy) });
+            inRun = false; best = -Infinity;
+        }
     }
-    if (best === -Infinity) { return { width: 0, x: Math.round(bcx), y: Math.round(bcy) }; }
-    return { width: best * 2, x: Math.round(bcx), y: Math.round(bcy) };
+    if (inRun) { out.push({ width: 2 * best, x: Math.round(bcx), y: Math.round(bcy) }); }
+    return out;
 }
 
 // Per-cell transit model (navigation graph). A barrier that runs THROUGH a cell's
@@ -496,24 +511,32 @@ function getNavGraph(map) {
             var cb = nbA[k];
             var border = sharedBorderSeg(cellA, cells[cb]);
             if (border == null) { continue; }
-            // Thickness-aware passability: a wall (or lava) leaving no kart-wide gap on the
-            // shared border SEALS the doorway (no edge between these pieces); otherwise the
-            // kart threads the widest kart-clear point, which becomes this edge's crossing.
-            // The crossing is a property of the undirected border, so compute it once and
-            // reuse it for the reverse direction (cb->ca) instead of re-sampling.
+            // Thickness-aware passability: every kart-wide INTERVAL of the shared border is its
+            // own doorway. A wall crossing the border yields a gap on each side, each connecting
+            // the region pair its own crossing point touches — so add an edge PER interval (not
+            // just the widest), or a physically-open route is dropped / a split goal reads
+            // reachable through the wrong piece. No interval = wall/lava seals the border.
+            // The intervals are a property of the undirected border: compute once, reuse for cb->ca.
             var pairKey = (ca < cb) ? (ca + "|" + cb) : (cb + "|" + ca);
-            var cross = crossCache[pairKey];
-            if (cross === undefined) { cross = crossCache[pairKey] = doorwayCrossing(map, border); }
-            if (cross.width < KART_WIDTH) { continue; }
-            // Label each piece by the side of its splitting walls the CROSSING POINT lies on
-            // (not the border midpoint, which can fall on the wrong side of a partial wall).
-            var rA = regionId(ca, labelOf(ca, cross.x, cross.y));
-            var rB = regionId(cb, labelOf(cb, cross.x, cross.y));
-            ensureNode(rA); ensureNode(rB);
-            rNeighbors[rA].push(rB);
-            rDoorways[rA].push(cross.width);
-            var key = ca + "|" + cb, had = cellPairCrossing[key];
-            if (had == null || cross.width > had.width) { cellPairCrossing[key] = { x: cross.x, y: cross.y, width: cross.width }; }
+            var crossList = crossCache[pairKey];
+            if (crossList === undefined) { crossList = crossCache[pairKey] = doorwayCrossings(map, border); }
+            var addedPairs = null; // dedup region pairs (two intervals can share a pair)
+            for (var xi = 0; xi < crossList.length; xi++) {
+                var cross = crossList[xi];
+                if (cross.width < KART_WIDTH) { continue; }
+                // Label each piece by the side of its splitting walls THIS crossing point lies on
+                // (not the border midpoint, which can fall on the wrong side of a partial wall).
+                var rA = regionId(ca, labelOf(ca, cross.x, cross.y));
+                var rB = regionId(cb, labelOf(cb, cross.x, cross.y));
+                var dkey = rA + "|" + rB;
+                if (addedPairs != null && addedPairs[dkey]) { continue; }
+                (addedPairs || (addedPairs = {}))[dkey] = true;
+                ensureNode(rA); ensureNode(rB);
+                rNeighbors[rA].push(rB);
+                rDoorways[rA].push(cross.width);
+                var key = ca + "|" + cb, had = cellPairCrossing[key];
+                if (had == null || cross.width > had.width) { cellPairCrossing[key] = { x: cross.x, y: cross.y, width: cross.width }; }
+            }
         }
     }
     ensureNode(cellOf.length - 1); // pad arrays for any site-only region with no doorways
@@ -611,6 +634,10 @@ function pushOffBarriers(map, pts) {
 // or a barrier+door map could never path through a door that later opens. Drawing/detour
 // callers leave allowDoor off (a shut door is a wall to skirt).
 function pointDrivable(map, x, y, allowDoor) {
+    // Outside the world is solid wall (engine.bounceOffBoundry holds the kart >= radius from the
+    // edge). nearestCellIndex would otherwise SNAP an out-of-bounds point to its nearest cell and
+    // call it drivable — so a doorway rim point clipped past the boundary would falsely read open.
+    if (x < 0 || y < 0 || x > c.worldWidth || y > c.worldHeight) { return false; }
     var ci = nearestCellIndex(map.cells, { x: x, y: y });
     var cell = map.cells[ci];
     if (cell == null) { return false; }
