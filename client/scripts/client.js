@@ -14,6 +14,20 @@ var config,
 	// so the game-over screen celebrates Crimson/Jade. null in FFA matches.
 	gameOverTeam = null;
 
+// In a Discord Activity the game is reached via play.html?discord=1, and the
+// marketing landing page (index.html) is a DEAD END there — its Play/Join/Create
+// links don't carry the ?discord=1 the sandbox build needs, so a kick/leave that
+// navigates to index.html strands the player on a page they can't get back from.
+// Detect the Activity by that query flag and send menu-exit navigations back into
+// a fresh game instead. Other embed hosts (CrazyGames/Poki/itch) embed index.html
+// fine, so they keep the normal destination.
+function isDiscordActivity() {
+	try { return /[?&]discord=1(?:&|$)/.test(window.location.search); } catch (e) { return false; }
+}
+function menuExitHref() {
+	return isDiscordActivity() ? "play.html?discord=1" : "./index.html";
+}
+
 // Set true when a match-over (startGameover) fires; consumed by the next startLobby
 // to gate the between-matches interstitial. An explicit flag is required because the
 // server emits startWaiting (currentState -> waiting) BETWEEN startGameover and the
@@ -2805,7 +2819,7 @@ function dropLocalPlayer(slot) {
 			return;
 		}
 		try { server.disconnect(); } catch (e) { /* ignore */ }
-		window.location.href = "./index.html";
+		window.location.href = menuExitHref();
 		return;
 	}
 	if (typeof onLocalPlayersChanged === "function") {
@@ -2849,7 +2863,7 @@ function handlePrimaryLost() {
 	if (survivor == null) {
 		// Last local player gone — behave as today and leave.
 		try { server.disconnect(); } catch (e) { /* ignore */ }
-		window.location.href = "./index.html";
+		window.location.href = menuExitHref();
 		return;
 	}
 	promoteToPrimary(survivor);
