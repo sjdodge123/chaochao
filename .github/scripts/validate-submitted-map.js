@@ -99,16 +99,6 @@ for (const entry of parsed) {
 messenger.build({ to() { return { emit() { } }; }, sockets: { emit() { } } });
 
 // --- helpers ----------------------------------------------------------------
-function effectiveStartEdges(map) {
-    // The edges to check reachability / sample origins from. deepValidate runs
-    // utils.validateMap FIRST and gates this on v.valid, so any malformed startEdges
-    // (bad length, unknown edge, repeat, non-opposite pair) has already been rejected
-    // by validateStartEdges — we only apply the absent/empty => ["left"] default that
-    // the engine's resolveStartEdges also applies. (We deliberately don't re-run the
-    // engine's sanitisation here; by this point the array is already known-valid.)
-    return (Array.isArray(map.startEdges) && map.startEdges.length > 0) ? map.startEdges : ['left'];
-}
-
 function isFiniteNum(n) { return typeof n === 'number' && isFinite(n); }
 
 // A few DISTINCT competing lines a racer would take. Delegated to
@@ -135,23 +125,14 @@ function deepValidate(map) {
     const errors = [];
     const warnings = [];
 
-    // Boundary check the live submit path runs (cells / goal tile / hazards, plus
-    // start-edge reachability *when startEdges is set*).
+    // Boundary check the live submit path runs (cells / goal tile / hazards). This
+    // is the SAME engine the in-editor submit/preview reject on and the fairness
+    // overlay routes through: utils.validateMap → cellGraph.firstUnreachableStartEdge
+    // already proves a goal is reachable from every EFFECTIVE start edge (declared
+    // startEdges, or the left gate when none are set), barrier-aware. So there is no
+    // separate reachability pass here any more — the three surfaces share one check.
     const v = utils.validateMap(map, config);
     if (!v.valid) { errors.push(v.reason); }
-
-    // Reachability for the effective start edge(s). validateMap skips this when
-    // startEdges is absent (every legacy map defaults to left), so a goal walled
-    // off by lava from the left gate would otherwise pass. reachableFromEdge is
-    // the same graph check the engine trusts for par time.
-    if (v.valid && Array.isArray(map.cells)) {
-        for (const edge of effectiveStartEdges(map)) {
-            const reason = 'No goal is reachable from the ' + edge + ' start.';
-            if (!cellGraph.reachableFromEdge(map, edge) && errors.indexOf(reason) === -1) {
-                errors.push(reason);
-            }
-        }
-    }
 
     // Bounds + finiteness + cell cap (only meaningful once we know cells exist).
     if (Array.isArray(map.cells)) {
@@ -289,6 +270,63 @@ function safeName(file) {
     return path.basename(file).replace(/\.json$/i, '').replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
+// camelCase / lowerKey config name -> human Title Case ("movingBumper" -> "Moving Bumper").
+function prettyKind(key) {
+    return String(key).replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/^./, function (ch) { return ch.toUpperCase(); });
+}
+
+// A plain-English inventory of EVERYTHING a map places — tile mix, every hazard and boon by
+// kind, author barriers, locked doors/keys, start edges + goal count — so a human reviewer gets
+// an honest, scannable list of the submission's contents alongside the rendered image (which can
+// hide a small or subtle placeable). Built from the reconstructed map; tolerant of missing
+// arrays. Returns null only when the map has no cells (geometry never reconstructed).
+function buildInventory(map, config) {
+    if (!map || !Array.isArray(map.cells)) { return null; }
+    var nameOf = function (group) { var m = {}; for (var k in group) { if (group[k] && typeof group[k].id === 'number') { m[group[k].id] = k; } } return m; };
+    var tileName = nameOf(config.tileMap), hazName = nameOf(config.hazards), boonName = nameOf(config.boons);
+    var boonIds = {}; for (var bk in config.boons) { if (config.boons[bk] && typeof config.boons[bk].id === 'number') { boonIds[config.boons[bk].id] = true; } }
+    var goalId = config.tileMap.goal ? config.tileMap.goal.id : -1;
+    // Friendlier labels for the terrain tiles whose config keys aren't obvious to a reviewer.
+    var TILE_ALIAS = { fast: 'grass', normal: 'dirt', slow: 'sand' };
+
+    var tileCount = {}, total = 0, goalCells = 0;
+    for (var i = 0; i < map.cells.length; i++) {
+        var cell = map.cells[i];
+        if (!cell || typeof cell.id !== 'number') { continue; }
+        var tn = tileName[cell.id] || ('id' + cell.id);
+        tileCount[tn] = (tileCount[tn] || 0) + 1; total++;
+        if (cell.id === goalId) { goalCells++; }
+    }
+    var tiles = Object.keys(tileCount).map(function (n) {
+        return { name: TILE_ALIAS[n] || n, count: tileCount[n], pct: total ? Math.round(tileCount[n] / total * 100) : 0 };
+    }).sort(function (a, b) { return b.count - a.count; });
+
+    var hz = {}, bn = {}, placeables = Array.isArray(map.hazards) ? map.hazards : [];
+    for (var p = 0; p < placeables.length; p++) {
+        var pl = placeables[p];
+        if (!pl || typeof pl.id !== 'number') { continue; }
+        if (boonIds[pl.id]) { var bnm = prettyKind(boonName[pl.id] || ('boon' + pl.id)); bn[bnm] = (bn[bnm] || 0) + 1; }
+        else { var hnm = prettyKind(hazName[pl.id] || ('hazard' + pl.id)); hz[hnm] = (hz[hnm] || 0) + 1; }
+    }
+    var asList = function (obj) { return Object.keys(obj).map(function (n) { return { name: n, count: obj[n] }; }).sort(function (a, b) { return b.count - a.count; }); };
+
+    var bars = Array.isArray(map.barriers) ? map.barriers : [];
+    var barrierLen = 0;
+    for (var b2 = 0; b2 < bars.length; b2++) { var br = bars[b2]; if (br) { barrierLen += Math.hypot((br.x2 - br.x1) || 0, (br.y2 - br.y1) || 0); } }
+
+    return {
+        tiles: tiles,
+        hazards: asList(hz),
+        boons: asList(bn),
+        barriers: bars.length,
+        barrierLen: Math.round(barrierLen),
+        doors: Array.isArray(map.doors) ? map.doors.length : 0,
+        keys: Array.isArray(map.keys) ? map.keys.length : 0,
+        startEdges: Array.isArray(map.startEdges) ? map.startEdges.slice() : [],
+        goalCells: goalCells,
+    };
+}
+
 // --- run --------------------------------------------------------------------
 ensureDir(OUTPUT_DIR);
 const results = [];
@@ -300,7 +338,7 @@ for (const entry of parsed) {
     // image files instead of silently overwriting each other.
     const name = results.length + '-' + safeName(entry.file);
     const outBase = path.join(OUTPUT_DIR, name);
-    const result = { file: entry.file, mapName: null, verdict: 'reject', errors: [], warnings: [], parTime: 0, sim: null, serverImage: null, routes: [], routeImage: null };
+    const result = { file: entry.file, mapName: null, verdict: 'reject', errors: [], warnings: [], parTime: 0, sim: null, serverImage: null, routes: [], routeImage: null, inventory: null };
 
     if (entry.fatal) {
         result.errors.push(entry.fatal);
@@ -316,6 +354,12 @@ for (const entry of parsed) {
     result.errors = dv.errors;
     result.warnings = dv.warnings;
     result.parTime = dv.parTime;
+
+    // Plain-English inventory of the submission's contents (tiles, hazards, boons, barriers,
+    // doors/keys, starts/goal) — surfaced in the review comment so a human gets an honest look
+    // even when the rendered image hides a small placeable. Built even for a rejected map.
+    // AFTER result.warnings = dv.warnings, so a thrown-inventory warning is kept, not clobbered.
+    try { result.inventory = buildInventory(map, config); } catch (e) { result.warnings.push('Inventory build failed: ' + e.message); }
 
     // Authoritative map image, rendered even on failure — the reviewer wants to
     // SEE a rejected map (e.g. to confirm it's spam/abuse, not a near-miss).
