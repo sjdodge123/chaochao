@@ -1060,6 +1060,14 @@ function decideBrutalPunch(bot, ctx) {
             facePunch(bot, ctx.puck.x, ctx.puck.y); botPunch(bot, 0); return true; // clear the puck off us
         }
     }
+    // Antlions (brutal round): a real swing knocks an adjacent antlion back into
+    // the sand (it burrows away — the player counterplay, see Antlion.handleHit).
+    // Punch the one on top of us; the maybeLandLunge dodge handles antlions still
+    // bearing down. nearestMatch stores the matched hazard in `.player`.
+    var ant = nearestMatch(bot, ctx.hazardList, isAntlionH);
+    if (ant != null && ant.dist < c.punchRadius + bot.radius + (ant.player.radius || 0) + 8) {
+        facePunch(bot, ant.player.x, ant.player.y); botPunch(bot, 0); return true; // rout the antlion
+    }
     return false;
 }
 
@@ -1441,7 +1449,7 @@ function decideAttack(bot, ctx, nav) {
         botPunch(bot, 0);
         return;
     }
-    if (decideBrutalPunch(bot, ctx)) { return; } // zombies / puck / zombie-defense first
+    if (decideBrutalPunch(bot, ctx)) { return; } // zombies / puck / zombie-defense / antlion-rout first
     if (bot.ability != null) {
         // Track how long this ability has been held so it gets used within the
         // round (strategically when possible, but never hoarded indefinitely).
@@ -2737,5 +2745,6 @@ module.exports._test = {
     lavaNear: lavaNear,
     blindfoldWorthIt: blindfoldWorthIt,
     decideLunge: decideLunge,
-    lungeLandsSafe: lungeLandsSafe
+    lungeLandsSafe: lungeLandsSafe,
+    decideBrutalPunch: decideBrutalPunch
 };

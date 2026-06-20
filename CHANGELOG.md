@@ -14,7 +14,14 @@ To re-render a past week's digest with the current formatting, run the `Release 
 
 ## Unreleased
 
-(none yet)
+### Gameplay & Balance
+
+- **You can fight back against antlions now — punch them.** A solid swing knocks an antlion back into the sand and it burrows away, so a well-timed lunge clears a path through the swarm (and a wide swing can scatter a whole cluster at once). Antlion rounds were brutal on sand-heavy maps where there was nowhere to run; now the swarm has a real answer.
+- **Antlion rounds eased up.** Their shove hits softer (so a bump is far less likely to launch you straight into the lava), fewer of them turn up at once, they jab a little slower, and you get a longer grace period on the sand before one erupts. The mode should be survivable on maps where the route forces you across the dunes.
+
+### AI Racers
+
+- **Bots fight off antlions too.** The racing bots now swing at an antlion that's right on top of them — knocking it back into the sand — instead of only trying to dodge away, so they no longer get helplessly herded into the lava on sand-heavy maps.
 
 ## v0.49.1 — 2026-06-20
 
