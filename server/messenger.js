@@ -811,6 +811,38 @@ function checkForMail(client) {
 		messageRoomBySig(room.sig, "playerAvatarChanged", { id: client.id, avatarUrl: player.avatarUrl, name: player.name });
 	});
 
+	// Discord voice (Phase 5b): a Discord-Activity client reports its own Discord user
+	// snowflake so every client can map an SDK SPEAKING event (keyed by Discord user_id)
+	// to this player's kart and pulse a speaking ring. COSMETIC-ONLY and client-supplied
+	// — never a trust boundary (worst-case spoof just lights the wrong kart's ring, no
+	// gameplay effect), which is exactly the trust model Phase 5 set for presence data.
+	// Allowed in any state (voice matters mid-race); stamped on the player so it ships in
+	// the spawn/append packet to late joiners (compressor newPlayerPacket[18]) AND
+	// broadcast live here for ids that resolve after spawn (the usual case — the Discord
+	// authenticate() that yields the snowflake settles after enterGame).
+	client.on('setVoiceId', function (payload) {
+		var room = hostess.getRoomBySig(roomMailList[client.id]);
+		if (room == undefined) {
+			return;
+		}
+		var player = room.playerList[client.id];
+		if (player == null) {
+			return;
+		}
+		var uid = payload && payload.discordUserId;
+		// Discord snowflakes are numeric strings (<= 20 digits). Bound + validate; "" / null clears.
+		if (uid === "" || uid == null) {
+			player.discordUserId = null;
+			messageRoomBySig(room.sig, "playerVoiceId", { id: client.id, discordUserId: null });
+			return;
+		}
+		if (typeof uid !== "string" || !/^[0-9]{1,20}$/.test(uid)) {
+			return;
+		}
+		player.discordUserId = uid;
+		messageRoomBySig(room.sig, "playerVoiceId", { id: client.id, discordUserId: uid });
+	});
+
 	// Equip one of the three independent cosmetic slots (cart / pattern / trail). Each
 	// slot is set independently — equipping one NEVER clears another, and it's all
 	// independent of color/avatar. Server-authoritative unlock gating: an id must exist

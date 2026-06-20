@@ -464,6 +464,19 @@ function registerLobbyHubHandlers(server) {
 			p[field] = payload.value || null;
 		}
 	});
+	// Discord voice (Phase 5b): a player's Discord snowflake resolved after spawn (the
+	// usual case — Discord authenticate() settles after enterGame), so the spawn packet
+	// carried null. Stamp it live so the speaking-ring can map this kart. Cosmetic-only.
+	server.on("playerVoiceId", function (payload) {
+		if (payload == null) {
+			return;
+		}
+		var p = playerList[payload.id];
+		if (p == null) {
+			return;
+		}
+		p.discordUserId = payload.discordUserId || null;
+	});
 	// The primary's skin request was rejected (color taken). Flash the picker.
 	server.on("skinRejected", function (payload) {
 		if (typeof flagSkinRejected === "function") {
@@ -516,6 +529,29 @@ function maybeDefaultDiscordAvatar() {
 		server.emit("setAvatarSkin", { url: profile.avatarUrl, name: profile.name });
 	}
 }
+
+// Discord voice (Phase 5b): report our own Discord snowflake to the server so every
+// peer can map our kart and pulse a speaking ring when we talk. The id comes from the
+// re-initialised in-frame SDK (discordPresence.localUser); we (re)send it whenever we
+// (re)join a room (a reconnect gets a fresh socket id the server must re-stamp).
+// Cosmetic-only and idempotent — the server just re-stamps the same value.
+var myDiscordUserId = null;
+function sendDiscordVoiceId() {
+	if (!myDiscordUserId) { return; }
+	if (typeof server !== "undefined" && server) {
+		server.emit("setVoiceId", { discordUserId: myDiscordUserId });
+	}
+}
+(function initDiscordVoiceId() {
+	if (typeof isDiscordActivity !== "function" || !isDiscordActivity()) { return; }
+	var p = window.discordPresence;
+	if (!p || !p.localUser) { return; }
+	p.localUser.then(function (uid) {
+		if (!uid) { return; }
+		myDiscordUserId = uid;
+		sendDiscordVoiceId(); // emit now if we're already in a room (else gameState will)
+	}).catch(function () { /* presence disabled — no voice id */ });
+})();
 
 // --- Progression celebration toasts (shown on lobby arrival) -----------------
 // A sequenced queue: one toast at a time, auto-advancing, so a match that earned
@@ -892,6 +928,10 @@ function registerConnectionHandlers(server) {
 		if (playerList[myID] != null) {
 			myPlayer = playerList[myID];
 		}
+		// Discord voice (Phase 5b): now that we're in a room, (re)send our Discord
+		// snowflake so peers can voice-map our kart. No-op off Discord / before the SDK
+		// identifies us (initDiscordVoiceId re-fires it when localUser resolves).
+		sendDiscordVoiceId();
 		// Joined a match already racing/collapsing? The server spawned this player as
 		// a temp spectator (parked off-arena, not alive) who races from the next
 		// round — flag the slot so drawSpectatorBanner explains the wait. The server

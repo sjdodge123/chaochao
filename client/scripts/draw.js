@@ -3306,6 +3306,11 @@ function drawPlayer(player, dt) {
     // telegraph and OUTSIDE the dim/immune alpha scopes, so team identity stays
     // readable even on dimmed rival karts. Camera offset applied per convention.
     drawTeamUnderglow(player, player.x + camera.getCameraX(), player.y + camera.getCameraY());
+    // Discord voice (Phase 5b): pulse a green ring beneath a kart whose Discord user is
+    // talking. No-op off Discord / for web players. Same camera-offset coords + scope.
+    if (typeof drawSpeakingIndicator === "function") {
+        drawSpeakingIndicator(player, player.x + camera.getCameraX(), player.y + camera.getCameraY());
+    }
     // Charge "fist": a telegraph on every winding-up kart (so you can see a haymaker
     // coming), plus a momentum self-preview on your own idle kart.
     drawPunchCharge(player);

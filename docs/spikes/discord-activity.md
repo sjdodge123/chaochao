@@ -204,6 +204,48 @@ per-kart speaking indicator. The kart bridge (Discord snowflake → which kart) 
 server to stamp each player's validated snowflake (Phase 4's `discordAuth` validates it but the
 profile sent to the client omits the id) — a small 5b addition.
 
+## Phase 5b as-built (voice-activity visual, 2026-06-20)
+
+Who's talking now shows in-game — a green **speaking ring** pulses beneath a kart whose
+Discord user is talking, and a **voice tray** (a vertical column of participant avatars
+down the left edge) glows the active speaker. Built on `worktree-discord-activity-spike`,
+headless-verified (voice-id relay e2e + `npm run build` + `smoke-test.js` all green);
+the SPEAKING visuals themselves need a real multi-user Discord voice channel to eyeball.
+
+**Speaking events.** `discordPresence.js` (the in-frame SDK from Phase 5) subscribes
+`SPEAKING_START`/`SPEAKING_STOP` on `sdk.channelId` (needs `rpc.voice.read`, already in the
+Phase-4 scopes) and maintains a speaking set keyed by Discord `user_id`. New presence API:
+`.isSpeaking(id)`, `.getSpeaking()`, `.onSpeaking(cb)`, plus `.localUser` (Promise resolving
+the local snowflake). Degrades silently if the scope is denied or there's no voice channel.
+
+**The snowflake→kart bridge (resolved: client-supplied, cosmetic).** SPEAKING events carry a
+Discord `user_id`; karts are keyed by socket id, so each client needs `user_id → kart`. The
+local SDK only knows the *local* user's snowflake, so the client reports its own snowflake to
+the server (`setVoiceId`), which stamps `player.discordUserId` and relays it to the room two
+ways: in the spawn/append packet (compressor `newPlayerPacket[18]`, decoded in lockstep in
+`gameboard.updatePlayerList`) for late joiners, and a live `playerVoiceId` broadcast for the
+common case where the id resolves *after* spawn (Discord `authenticate()` settles after
+`enterGame`). This is **client-supplied on purpose** — it's exactly the cosmetic, non-trust
+boundary Phase 5 set for presence data (worst-case spoof just lights the wrong kart's ring,
+no gameplay effect), so it needs no auth-token / `discordAuth` change. Server-validated
+(`/^[0-9]{1,20}$/`), allowed in any state (voice matters mid-race).
+
+**Render (both gated on `isDiscord`; web/portal builds untouched).** New
+`client/scripts/discordVoice.js` (normal play bundle — reads `window.discordPresence`, does
+NOT import the SDK): (a) `drawSpeakingIndicator(player, sx, sy)` — a cheap pulsing arc+stroke
+(no shadow/filter surfaces, per the cosmetic-perf notes), called next to `drawTeamUnderglow`
+in both kart paths (live `drawPlayer` + the `drawKartAppearance` chokepoint, so it also shows
+in the overview/reflection/recap); (b) a DOM voice tray (avoids tainting the canvas with
+remote `cdn.discordapp.com` avatars), rebuilt from `onParticipants` and class-toggled from
+`onSpeaking`.
+
+**Files:** `client/scripts/discordPresence.js` (SPEAKING sub + speaking API + `.localUser`),
+`client/scripts/discordVoice.js` (new — ring + tray), `server/compressor.js` (+field [18]),
+`client/scripts/gameboard.js` (decode [18]), `server/messenger.js` (`setVoiceId`→`playerVoiceId`),
+`client/scripts/client.js` (emit `setVoiceId` + handle `playerVoiceId`), `client/scripts/draw.js`
++ `draw_skins.js` (ring calls), `build.js` + `client/play.html` (bundle `discordVoice.js`). No
+`game.js`/`config.json`/`engine.js` change → no CHANGELOG/Codex entry (Discord-only cosmetic UI).
+
 ## Implementation plan (9 phases; ~7–8 dev-days to testable, +~1d voice-activity delighter, +listing prereqs & ~2–3d skin shop for public/monetized)
 
 ### Phase 0 — Portal & dev harness *(operator-gated; ~0.5d)*
@@ -224,7 +266,8 @@ Vendor jQuery + Bootstrap for the Discord build (hard deps); map/vendor supabase
 ### Phase 5 — Multiplayer/presence reconciliation *(~1–1.5d)* — **DONE (headless-verified), pending operator in-frame confirm**
 Scope rooms by Discord `instanceId`; subscribe `getInstanceConnectedParticipants()` + `ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE`; map onto the `hostess`/`Room` model so a voice group lands in one room. Anonymize identity by default for cross-server matchmaking. See "Phase 5 as-built" above for the as-shipped design (SDK re-init in the game frame, `window.discordPresence` map, instance-keyed private rooms).
 
-### Phase 5b — Voice-activity visual (Discord-only delighter) *(~1d; depends on Phase 4 scope + Phase 5 presence)*
+### Phase 5b — Voice-activity visual (Discord-only delighter) *(~1d; depends on Phase 4 scope + Phase 5 presence)* — **DONE (headless-verified), pending operator multi-user in-frame confirm**
+See "Phase 5b as-built" above for the as-shipped design (SPEAKING subscription, the client-supplied snowflake→kart bridge, the on-kart speaking ring + DOM voice tray).
 Show who's talking, in-game — the touch that makes the Activity feel genuinely Discord-native. The SDK emits `SPEAKING_START` / `SPEAKING_STOP` (payload `{channel_id, user_id}`) for the subscribed voice channel.
 
 - **Scope:** add `rpc.voice.read` to the `authorize()` scopes (wire in Phase 4).

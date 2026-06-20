@@ -26,6 +26,12 @@
 //                       connected-participant list, keyed for Phase 5b's speaking
 //                       indicator (Discord user_id -> kart). Empty until authed.
 //   .onParticipants(cb) subscribe to participant-list changes (cb gets the array).
+//   .localUser          Promise<string|null> — resolves the authenticated Discord
+//                       user's snowflake (null if auth unavailable). client.js sends
+//                       it to the server (setVoiceId) so every kart can be voice-mapped.
+//   .isSpeaking(userId) -> bool — is that Discord user talking right now (Phase 5b).
+//   .getSpeaking()      -> [userId] — snowflakes currently speaking.
+//   .onSpeaking(cb)     subscribe to speaking-set changes (cb gets the array).
 //   .sdk                the live DiscordSDK instance (Phase 5b voice commands).
 //
 // SECURITY NOTE: participant data here is client-supplied (SDK RPC) and is used ONLY
@@ -92,6 +98,9 @@ function normalizeParticipant(p, localUserId) {
     // immediately even though it resolves later); fields fill in as init proceeds.
     var participants = [];
     var listeners = [];
+    var speaking = {};        // snowflake -> true while talking
+    var speakingListeners = [];
+    var resolveLocalUser;
     var api = {
         instanceId: null,
         channelId: null,
@@ -106,6 +115,16 @@ function normalizeParticipant(p, localUserId) {
                 try { cb(participants.slice()); } catch (e) {}
             }
         },
+        // Resolves the local Discord snowflake (or null). Set after authenticate().
+        localUser: new Promise(function (res) { resolveLocalUser = res; }),
+        isSpeaking: function (userId) { return userId != null && speaking[userId] === true; },
+        getSpeaking: function () { return Object.keys(speaking); },
+        onSpeaking: function (cb) {
+            if (typeof cb === 'function') {
+                speakingListeners.push(cb);
+                try { cb(Object.keys(speaking)); } catch (e) {}
+            }
+        },
         ready: null // set below
     };
     window.discordPresence = api;
@@ -115,6 +134,23 @@ function normalizeParticipant(p, localUserId) {
         for (var i = 0; i < listeners.length; i++) {
             try { listeners[i](snapshot); } catch (e) {}
         }
+    }
+    function emitSpeaking() {
+        var snapshot = Object.keys(speaking);
+        for (var i = 0; i < speakingListeners.length; i++) {
+            try { speakingListeners[i](snapshot); } catch (e) {}
+        }
+    }
+    function setSpeaking(userId, on) {
+        if (!userId) { return; }
+        if (on) {
+            if (speaking[userId]) { return; }
+            speaking[userId] = true;
+        } else {
+            if (!speaking[userId]) { return; }
+            delete speaking[userId];
+        }
+        emitSpeaking();
     }
 
     function setParticipants(list, localUserId) {
@@ -128,6 +164,7 @@ function normalizeParticipant(p, localUserId) {
     if (!stash || !stash.clientId) {
         log('no Discord auth stash — presence disabled (normal matchmaking).');
         api.ready = Promise.resolve({ instanceId: null });
+        resolveLocalUser(null);
         return;
     }
 
@@ -168,6 +205,7 @@ function normalizeParticipant(p, localUserId) {
         // scope denied), room routing already works; only the 5b roster is lost.
         if (!stash.accessToken) {
             warn('no stashed access token — participant list unavailable (room routing still works).');
+            resolveLocalUser(null);
             return;
         }
         var authUser = null;
@@ -178,8 +216,10 @@ function normalizeParticipant(p, localUserId) {
             log('SDK re-authenticated as ' + (authUser && (authUser.global_name || authUser.username)) + ' (' + api.localUserId + ').');
         } catch (e) {
             warn('authenticate failed: ' + (e && e.message) + ' — participant list unavailable.');
+            resolveLocalUser(null);
             return;
         }
+        resolveLocalUser(api.localUserId);
 
         // Seed the participant list, then subscribe to keep it live as players join/
         // leave the instance. Discord delivers both as { participants: [...] }.
@@ -196,6 +236,23 @@ function normalizeParticipant(p, localUserId) {
             log('subscribed ' + PARTICIPANTS_UPDATE + '.');
         } catch (e) {
             warn('subscribe ' + PARTICIPANTS_UPDATE + ' failed: ' + (e && e.message));
+        }
+
+        // Phase 5b voice activity: light up who's talking. SPEAKING_START/STOP fire for
+        // the subscribed voice channel (needs `rpc.voice.read`, requested in Phase 4)
+        // and carry { user_id }. Both surfaces (the on-kart ring + the voice tray) read
+        // the resulting speaking set. Degrade SILENTLY if the scope was denied or there's
+        // no voice channel — the rest of the game is unaffected.
+        if (!api.channelId) {
+            log('no voice channel (channelId null) — speaking indicator inactive.');
+            return;
+        }
+        try {
+            await sdk.subscribe('SPEAKING_START', function (e) { setSpeaking(e && e.user_id, true); }, { channel_id: api.channelId });
+            await sdk.subscribe('SPEAKING_STOP', function (e) { setSpeaking(e && e.user_id, false); }, { channel_id: api.channelId });
+            log('subscribed SPEAKING_START/STOP for channel ' + api.channelId + '.');
+        } catch (e) {
+            warn('subscribe SPEAKING_* failed (scope denied?): ' + (e && e.message) + ' — speaking indicator inactive.');
         }
     })().catch(function (e) {
         warn('presence init error: ' + (e && e.message));

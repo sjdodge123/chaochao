@@ -326,6 +326,7 @@ function createPlayer(dataArray) {
 	playerList[index].trailFx = dataArray[15] || null;     // trail-effect id (renders in colour)
 	playerList[index].border = dataArray[16] || null;      // border (rim) id — independent 4th slot
 	playerList[index].teamId = (dataArray[17] != null) ? dataArray[17] : null; // 0/1 in teams modes, else null
+	playerList[index].discordUserId = dataArray[18] || null; // Discord snowflake for the voice speaking-ring (Phase 5b); null for web players
 	playerList[index].deathMessage = null;
 	playerList[index].trail = new Trail({ x: dataArray[1], y: dataArray[2] });
 	playerList[index].fizzle = function () {

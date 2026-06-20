@@ -11,6 +11,7 @@ const bundles = {
         'client/scripts/metrics.js',
         'client/scripts/ads.js',
         'client/scripts/client.js',
+        'client/scripts/discordVoice.js',
         'client/scripts/connectionHud.js',
         'client/scripts/audio.js',
         'client/scripts/input.js',
