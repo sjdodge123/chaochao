@@ -1,6 +1,6 @@
 # Spike: chaochao as a Discord Activity
 
-**Date:** 2026-06-20 · **Branch:** `worktree-discord-activity-spike` · **Status:** plan + Phase 0–2 scaffold (live verification operator-gated)
+**Date:** 2026-06-20 · **Branch:** `worktree-discord-activity-spike` · **Status:** Phase 0–2 **LIVE-VERIFIED** — a real match connects and ticks inside the Discord Activity on desktop (cloudflared tunnel, app `ChaoChao Dev` id `1509768531686723748`). See "Live bring-up results" below.
 
 ## Question
 
@@ -40,6 +40,52 @@ Can chaochao ship as a [Discord Activity](https://docs.discord.com/developers/ac
 5. **WebRTC is blocked** in the sandbox — irrelevant to chaochao (Socket.IO/WebSocket only), but noted.
 
 ---
+
+## Live bring-up results (Phase 0–2, verified 2026-06-20 desktop)
+
+A real chaochao match connects and **ticks** inside the Discord Activity iframe on
+desktop (Socket.IO over `/.proxy/` — `GAME …`, ~21 ms ping, terrain/stations/boons
+rendering, round timer running). Socket.IO over the proxy needed **no** transport
+change — the existing `["websocket","polling"]` + `tryAllTransports` config just
+works. The actual blockers were elsewhere; five fixes landed on this branch:
+
+1. **jQuery is a hard boot dep, and the sandbox CSP-blocks external `<script src>`.**
+   `game.js` wraps its whole boot in `$(function(){…})`, so with jQuery's googleapis
+   CDN blocked the page threw before connecting. `patchUrlMappings()` only reroutes
+   fetch/WS/XHR, **not** parser-loaded `<script>`/`<link>`. Fix: vendor jQuery 3.5.1 +
+   Bootstrap 4.1.3 under `client/vendor/`; the Discord handoff loads `play.html?discord=1`
+   and the server swaps those two CDN tags for the local copies + drops the gtag loader
+   for that request only (web build byte-identical). *(commit `a567025`)*
+2. **Discord loads the Activity at the mapped ROOT `/`**, which served the marketing
+   landing page, not the SDK bootstrap. The Discord client always appends launch params
+   (`frame_id` is required by the SDK), so serve `discord.html` at `/` when `frame_id` is
+   present; plain web `/` still gets the landing page. *(commit `525756b`)*
+3. **Iframe keyboard focus.** All key/mouse handlers bind on `window`, which only gets
+   keyboard events while the frame holds focus — so clicking Discord's chat stole WASD,
+   and the first click back into the cross-origin frame was eaten focusing it (making DOM
+   controls look dead). Fix: reclaim focus via `window.focus()` on pointer/touch when
+   `isEmbedded()` (also benefits the CrazyGames/Poki/itch embeds). *(commit `3e13a57`)*
+4. **AFK kick / leave navigated to `index.html`** — a dead end in-frame (its links lack
+   `?discord=1`). Re-enter a fresh game (`play.html?discord=1`) in the Activity context
+   instead. *(commit `1993e4b`)*
+5. **Inline `on*=""` handlers don't fire in the sandbox.** The emoji wheel's close-X and
+   emoji-send used inline `onclick=`; only real `addEventListener` handlers run in-frame
+   (which is why right-click closed but left-click didn't). Replaced with one delegated
+   `addEventListener` on `#emojiMenu` (`data-emoji-close` marks the X). This was the only
+   inline handler in `play.html`. *(commit `2c8d98c`)*
+
+**Operator setup that worked:** reused the existing OAuth app `ChaoChao Dev`; Activities
+can't be enabled until a URL Mapping exists, so the order is tunnel-first → set Root
+Mapping `/` → `<tunnel-host>` → enable Activities. `cloudflared tunnel --url
+http://localhost:3000` (no account); `DISCORD_CLIENT_ID` set in the server env;
+`DISCORD_MAPPING_TARGET` left unset (same-origin is correct for a root mapping). Quick
+tunnels are ephemeral — the URL changes on restart and must be re-pasted into the mapping.
+
+**Known follow-ups surfaced in-frame (not blockers):** AFK re-entry loops while idle (a
+proper fix suppresses the AFK kick in Activities or shows an in-frame "click to rejoin"
+panel); "Leave" can't truly exit (Discord closes the Activity via its own UI); the
+`discord.html → play.html` redirect drops the SDK instance, so Phase 4/5 (auth/presence)
+will want the game hosted in the Activity frame (or the SDK re-init'd) rather than redirected.
 
 ## Implementation plan (8 phases, ~7–8 dev-days to testable; +listing prereqs & ~2–3d skin shop for public/monetized)
 
