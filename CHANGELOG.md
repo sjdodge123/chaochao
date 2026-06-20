@@ -27,6 +27,11 @@ To re-render a past week's digest with the current formatting, run the `Release 
 
 - **Walls have real thickness.** Barriers are 14px-wide bars, so you now stop with your kart's edge against the wall instead of sliding to its centre line — no more parking in the middle of a wall.
 
+### Bug Fixes
+
+- **Barrier ends don't snag you anymore.** Grazing the tip of a wall — especially where two wall ends meet — used to wedge your kart in the notch. The rounded ends now behave like smooth caps, so you slide cleanly around them instead of getting stuck.
+- **Vortex wells: the calm eye is truly calm, and water sets you free.** The drawn centre of a well now has zero pull, so you can actually rest and wind up speed in the eye before powering out. And a well over deep water no longer traps you — its pull can't grip a swimming kart, so you swim straight through.
+
 ## v0.49.0 — 2026-06-16
 
 ### Map editor

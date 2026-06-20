@@ -136,6 +136,9 @@ try {
         check(mid > nearCentre && mid > nearRim, 'the pull peaks in the mid-ring (calm eye at the centre, calm at the rim)');
         check(nearCentre < mid * 0.6, 'the dead centre is a calm eye (much weaker pull than the ring)');
         check(mid <= VW.force + 1e-9, 'peak pull does not exceed force (stays escapable below kart thrust)');
+        // The drawn calm eye (coreRadius) is a TRUE dead zone — zero pull inside it, not just
+        // weaker — so a kart can rest and wind up there instead of being nudged off the centre.
+        check(pullMag(VW.coreRadius - 1) === 0 && pullMag(0.0001) === 0, 'inside the calm eye (< coreRadius) there is zero pull (a true dead spot)');
 
         // No pull past the rim.
         const out = { isPlayer: true, alive: true, reachedGoal: false, x: 500 + VW.radius + 30, y: 400, velX: 0, velY: 0 };
@@ -148,6 +151,10 @@ try {
         check(v.applyForce(star) === false && star.velX === 0, 'a Star Power kart is not pulled');
         const done = { isPlayer: true, alive: true, reachedGoal: true, x: 550, y: 400, velX: 0, velY: 0 };
         check(v.applyForce(done) === false && done.velX === 0, 'a finished kart is not pulled');
+        // A kart SWIMMING on water is exempt — water's high drag + stamina-gated strokes can't
+        // beat the pull, so the well would be an inescapable trap there. Let swimmers pass.
+        const swimmer = { isPlayer: true, alive: true, reachedGoal: false, x: 550, y: 400, velX: 0, velY: 0, onWater: true };
+        check(v.applyForce(swimmer) === false && swimmer.velX === 0, 'a kart swimming on water is not pulled (no water roach-motel)');
 
         // Brutal-round entity interactions:
         // - A ZOMBIE (infection round) is still an alive kart in playerList, so it is

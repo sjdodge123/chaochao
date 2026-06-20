@@ -1199,11 +1199,21 @@ function bounceOffBarriers(player, map) {
 		var d = Math.sqrt(dx * dx + dy * dy);
 		var crossed = segmentsCross(player.x, player.y, player.newX, player.newY, e.ax, e.ay, e.bx, e.by);
 		if (d >= clear && !crossed) { continue; }
-		// Push out along the normal on the side the kart APPROACHED from (its pre-step side),
-		// so a tunnelling kart is sent back rather than punched through.
-		var perpOld = (player.x - e.ax) * (-e.tanY) + (player.y - e.ay) * e.tanX;
-		var s = perpOld >= 0 ? 1 : -1;
-		var nx = -e.tanY * s, ny = e.tanX * s;
+		// Push out along the CAPSULE normal — the direction from the closest point to the kart.
+		// Along the body that's the wall's perpendicular; at a rounded END it points radially out
+		// of the endpoint cap, so a kart grazing a barrier's tip slides smoothly AROUND it instead
+		// of being shoved sideways into the next wall and wedging in the notch where two ends meet.
+		var nx, ny;
+		if (d > 1e-6 && !crossed) {
+			nx = dx / d; ny = dy / d;
+		} else {
+			// Degenerate (centre on the wall line) or a tunnelling kart that crossed to the far
+			// side: push to the side it APPROACHED from (its pre-step side) so it's sent back, not
+			// punched through (and not flung further across by a radial that now points the wrong way).
+			var perpOld = (player.x - e.ax) * (-e.tanY) + (player.y - e.ay) * e.tanX;
+			var s = perpOld >= 0 ? 1 : -1;
+			nx = -e.tanY * s; ny = e.tanX * s;
+		}
 		player.newX = baseX + nx * clear;
 		player.newY = baseY + ny * clear;
 		var vn = player.velX * nx + player.velY * ny;
