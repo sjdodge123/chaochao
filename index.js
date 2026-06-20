@@ -301,6 +301,14 @@ const HTML_PAGES = {
 };
 app.use(function (req, res, next) {
     var url = req.path === '/' ? '/index.html' : req.path;
+    // Discord loads the Activity at the mapped ROOT ('/'), which would serve the
+    // marketing landing page. The Discord client always appends launch params to
+    // the iframe URL (frame_id is REQUIRED by the Embedded App SDK), so when we see
+    // one at the root we serve the Activity bootstrap (discord.html) instead. Plain
+    // web visits to '/' (no frame_id) still get the landing page.
+    if (url === '/index.html' && req.query && req.query.frame_id) {
+        url = '/discord.html';
+    }
     if (!HTML_PAGES[url]) return next();
     fs.readFile(path.join(htmlPath, url), 'utf8', function (err, html) {
         if (err) return next();
