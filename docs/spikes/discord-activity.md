@@ -87,7 +87,7 @@ panel); "Leave" can't truly exit (Discord closes the Activity via its own UI); t
 `discord.html → play.html` redirect drops the SDK instance, so Phase 4/5 (auth/presence)
 will want the game hosted in the Activity frame (or the SDK re-init'd) rather than redirected.
 
-## Implementation plan (8 phases, ~7–8 dev-days to testable; +listing prereqs & ~2–3d skin shop for public/monetized)
+## Implementation plan (9 phases; ~7–8 dev-days to testable, +~1d voice-activity delighter, +listing prereqs & ~2–3d skin shop for public/monetized)
 
 ### Phase 0 — Portal & dev harness *(operator-gated; ~0.5d)*
 Create the Discord app, enable **Activities**, set **URL Mappings** (root `/` → tunnel host), stand up a `cloudflared`/`ngrok` tunnel to local `:3000`. See the operator recipe below.
@@ -106,6 +106,15 @@ Vendor jQuery + Bootstrap for the Discord build (hard deps); map/vendor supabase
 
 ### Phase 5 — Multiplayer/presence reconciliation *(~1–1.5d)*
 Scope rooms by Discord `instanceId`; subscribe `getInstanceConnectedParticipants()` + `ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE`; map onto the `hostess`/`Room` model so a voice group lands in one room. Anonymize identity by default for cross-server matchmaking.
+
+### Phase 5b — Voice-activity visual (Discord-only delighter) *(~1d; depends on Phase 4 scope + Phase 5 presence)*
+Show who's talking, in-game — the touch that makes the Activity feel genuinely Discord-native. The SDK emits `SPEAKING_START` / `SPEAKING_STOP` (payload `{channel_id, user_id}`) for the subscribed voice channel.
+
+- **Scope:** add `rpc.voice.read` to the `authorize()` scopes (wire in Phase 4).
+- **Subscribe:** after auth, get the voice channel id (`sdk.channelId`) and `sdk.subscribe('SPEAKING_START', {channel_id}, …)` / `'SPEAKING_STOP'`.
+- **Map:** Discord `user_id` → in-game kart via the Phase 5 participant↔player mapping; toggle an `isSpeaking` flag per player (server-broadcast so all clients render it, or client-local if the indicator is only for the local view).
+- **Render:** a speaking indicator on the kart — reuse an existing draw path (a pulsing underglow ring like the team glow, or a small mic glyph above the kart in `draw.js` / `draw_skins.js`). Gate on `isDiscord`; web/portal builds unaffected.
+- **Caveat:** events fire only for the subscribed channel and need scope consent — degrade silently if denied. Confirm `SPEAKING_*` is exposed by the current SDK during build (historically gated; supported for Activities now, but verify).
 
 ### Phase 6 — Mobile polish *(~1d; mobile enabled per operator choice)*
 Enable mobile in the portal; wire `--discord-safe-area-inset-*` (with `env()` fallback); re-check `innerWidth<900` Auto perf demotion under embed dims; optional thermal-state subscription → degrade rendering (chaochao already has perf tiers).
