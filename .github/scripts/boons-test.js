@@ -1244,10 +1244,16 @@ try {
         check(base != null, 'two-lane map: a route to the goal exists');
         const baseLane = base ? laneOf(plain, base) : 'top';
         const otherY = baseLane === 'top' ? 560 : 180; // the lane the bare route did NOT pick
-        const dashMap = twoLane([{ id: DASH.id, x: 660, y: otherY, angle: 0 }]);
+        const dashMap = twoLane([{ id: DASH.id, x: 660, y: otherY, angle: 0 }]); // faces +x toward the goal
         const dashRoute = cellGraph.findPathToNearestGoal(dashMap, { x: 120, y: 370 }, { noiseAmount: 0 });
         check(dashRoute != null && laneOf(dashMap, dashRoute) !== baseLane,
             'a Dash Arrows boon off the default lane steers the racing line onto the boost lane');
+        // Direction gate: a boon FACING AWAY from travel (a backward trap) must NOT pull the line —
+        // these boosts only help when you ride them the way they point.
+        const trapMap = twoLane([{ id: DASH.id, x: 660, y: otherY, angle: 180 }]); // faces -x, away from goal
+        const trapRoute = cellGraph.findPathToNearestGoal(trapMap, { x: 120, y: 370 }, { noiseAmount: 0 });
+        check(trapRoute != null && laneOf(trapMap, trapRoute) === baseLane,
+            'a backward-facing speed boon does NOT divert the line (direction gate — no trap)');
         const haloMap = twoLane([{ id: config.boons.guardHalo.id, x: 660, y: otherY }]);
         const haloRoute = cellGraph.findPathToNearestGoal(haloMap, { x: 120, y: 370 }, { noiseAmount: 0 });
         check(haloRoute != null && laneOf(haloMap, haloRoute) === baseLane,

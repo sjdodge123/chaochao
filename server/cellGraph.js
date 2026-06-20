@@ -878,6 +878,10 @@ function getLilyPaddedCells(map) {
 // physics, so a boon steers WHICH line par measures but never makes that line's par read
 // artificially fast. The discount is mild — 0.7/0.8 — so it only diverts onto a boost that is
 // barely a detour, keeping the par it then measures close to the bare line's.)
+// Min cos(angle) between travel direction and a boost's facing for the discount to apply — ~78°,
+// so a route only leans toward a pad it would actually ride WITH (a backward/sideways pad is a
+// trap, not a help). 0 would allow anything not facing backward; 0.2 also drops near-perpendicular.
+var BOON_DIR_DOT = 0.2;
 function boonRouteMult(id) {
     if (id == null) { return 1; } // malformed hazard with no id is not a boon
     var b = c.boons || {};
@@ -907,9 +911,14 @@ function getBoonRouteWeights(map) {
         if (cell.id === c.tileMap.lava.id || cell.id === c.tileMap.empty.id || cell.id === DOOR) { continue; }
         // Keep the boon's POINT, not just its cell: when a barrier SPLITS the cell, the discount
         // must reach only the region piece the boon actually sits in (getBoonRegionWeights resolves
-        // it), never the walled-off side.
+        // it), never the walled-off side. Also keep its FACING (these speed boons are DIRECTIONAL —
+        // they only help if you travel their way), so the route only leans toward one when its
+        // travel direction aligns with the boost (the direction gate in findPathToNearestGoal);
+        // attracting toward a backward/off-course pad would steer a bot into a trap.
+        var fx = null, fy = null;
+        if (Number.isFinite(hz.angle)) { var rad = hz.angle * Math.PI / 180; fx = Math.cos(rad); fy = Math.sin(rad); }
         if (result == null) { result = {}; }
-        (result[ci] || (result[ci] = [])).push({ m: m, x: hz.x, y: hz.y });
+        (result[ci] || (result[ci] = [])).push({ m: m, x: hz.x, y: hz.y, fx: fx, fy: fy });
     }
     Object.defineProperty(map, '_boonRouteWeights', { value: result, enumerable: false, writable: true, configurable: true });
     return result;
@@ -918,8 +927,10 @@ function getBoonRouteWeights(map) {
 // Speed-boon discounts keyed by nav-graph REGION NODE (not raw cell index): for a cell a
 // barrier splits into pieces, the boost reaches only the piece that actually holds the boon —
 // the kart on the walled-off side gets no pull toward a boost it can't reach. region node ->
-// strongest (smallest) multiplier; cached non-enumerably. On a barrier-free map regionForPoint
-// is the identity, so this is just the per-cell discount keyed by cell index.
+// { mult, fx, fy } (strongest/smallest mult and its boost FACING, fx/fy null if undirected);
+// cached non-enumerably. On a barrier-free map regionForPoint is the identity, so this is just
+// the per-cell discount keyed by cell index. The facing feeds the direction gate in
+// findPathToNearestGoal so a route only leans toward a boost it would actually travel WITH.
 function getBoonRegionWeights(map) {
     if (!map || !Array.isArray(map.cells)) { return null; }
     if (map._boonRegionWeights !== undefined) { return map._boonRegionWeights; }
@@ -933,7 +944,7 @@ function getBoonRegionWeights(map) {
                 var en = entries[j];
                 var node = nav.regionForPoint(+ci, en.x, en.y);
                 if (result == null) { result = {}; }
-                if (result[node] == null || en.m < result[node]) { result[node] = en.m; }
+                if (result[node] == null || en.m < result[node].mult) { result[node] = { mult: en.m, fx: en.fx, fy: en.fy }; }
             }
         }
     }
@@ -1220,8 +1231,20 @@ function findPathToNearestGoal(map, point, options) {
             // A lily pad over this water cell makes it solid to skim — price it like ~ground
             // instead of deep water so bots route ACROSS a pad path rather than around the water.
             var tw = (lilyCells != null && lilyCells[navCell(v)]) ? LILY_PADDED_WEIGHT : tileWeight(cellV.id);
-            // Speed boon in this cell -> discount its cost so the route leans toward the boost.
-            var bw = (boonW != null && boonW[v] != null) ? boonW[v] : 1; // v is the region node
+            // Speed boon in this cell -> discount its cost so the route leans toward the boost,
+            // but ONLY when the travel direction INTO it (u -> v) aligns with the boost's facing:
+            // these pads are directional, so a backward/off-course one is a trap, not a help, and
+            // shouldn't pull the route. Undirected entries (fx null) always apply. (v is the region node.)
+            var bw = 1;
+            if (boonW != null && boonW[v] != null) {
+                var be = boonW[v];
+                if (be.fx == null) { bw = be.mult; }
+                else {
+                    var eux = cellV.site.x - cellAt(u).site.x, euy = cellV.site.y - cellAt(u).site.y;
+                    var eum = Math.sqrt(eux * eux + euy * euy) || 1;
+                    if ((eux / eum) * be.fx + (euy / eum) * be.fy > BOON_DIR_DOT) { bw = be.mult; }
+                }
+            }
             // Caller attraction (e.g. AI pulling toward a Checkpoint): discount the cell so the
             // route leans through it when it isn't a big detour.
             var prf = (prefer != null && prefer[cellV.site.voronoiId] != null) ? prefer[cellV.site.voronoiId] : 1;

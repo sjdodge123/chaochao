@@ -350,15 +350,16 @@ for (const entry of parsed) {
     const map = entry.map;
     result.mapName = map.name || '(unnamed)';
 
-    // Plain-English inventory of the submission's contents (tiles, hazards, boons, barriers,
-    // doors/keys, starts/goal) — surfaced in the review comment so a human gets an honest look
-    // even when the rendered image hides a small placeable. Built even for a rejected map.
-    try { result.inventory = buildInventory(map, config); } catch (e) { result.warnings.push('Inventory build failed: ' + e.message); }
-
     const dv = deepValidate(map);
     result.errors = dv.errors;
     result.warnings = dv.warnings;
     result.parTime = dv.parTime;
+
+    // Plain-English inventory of the submission's contents (tiles, hazards, boons, barriers,
+    // doors/keys, starts/goal) — surfaced in the review comment so a human gets an honest look
+    // even when the rendered image hides a small placeable. Built even for a rejected map.
+    // AFTER result.warnings = dv.warnings, so a thrown-inventory warning is kept, not clobbered.
+    try { result.inventory = buildInventory(map, config); } catch (e) { result.warnings.push('Inventory build failed: ' + e.message); }
 
     // Authoritative map image, rendered even on failure — the reviewer wants to
     // SEE a rejected map (e.g. to confirm it's spam/abuse, not a near-miss).
