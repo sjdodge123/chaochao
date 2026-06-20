@@ -66,14 +66,99 @@ async function boot() {
     // Expose for the game/auth phases and mark the runtime as a Discord Activity.
     window.__DISCORD_SDK__ = sdk;
     window.isDiscord = function () { return true; };
-    setStatus('Connected (instanceId ' + sdk.instanceId + '). Launching game…');
+    setStatus('Connected (instanceId ' + sdk.instanceId + ').');
+
+    // Phase 4: in-frame auth. Identify the Discord user WITHOUT a full-page OAuth
+    // redirect (the iframe blocks those). This MUST happen here, where the SDK
+    // instance lives — the handoff below drops it. authorize() yields a one-time
+    // code; the server (POST /api/token) exchanges it with the client secret,
+    // re-validates the identity, and bridges it to a Supabase user, returning the
+    // Discord access token + a minted handshake token + the validated profile. We
+    // authenticate() the SDK with the Discord token (needed for the participant /
+    // voice phases) and stash the handshake token + profile in sessionStorage for
+    // play.html's socket connection. Every step degrades to guest on failure so the
+    // game still launches. rpc.voice.read is requested now so Phase 5b can light up
+    // the speaking indicator without re-consenting.
+    await establishDiscordAuth(sdk, cfg.clientId);
 
     // Phase 0–2 handoff: navigate to the real game. Same-origin, so it stays
     // inside the mapped sandbox. The `?discord=1` flag tells the server to serve a
     // sandbox-safe play.html — vendored jQuery/Bootstrap instead of CDN tags the
-    // proxy would CSP-block (jQuery is a hard boot dep). Auth + presence wiring
-    // replaces this redirect in later phases (game hosted in this frame instead).
+    // proxy would CSP-block (jQuery is a hard boot dep). The stashed token (above)
+    // is what makes the game recognize this player rather than a fresh guest.
     setTimeout(function () { window.location.href = 'play.html?discord=1'; }, 600);
+}
+
+var AUTH_SCOPES = ['identify', 'rpc.activities.write', 'guilds', 'rpc.voice.read'];
+var DISCORD_AUTH_KEY = 'chaochao.discordAuth';
+
+// authorize -> /api/token -> authenticate -> stash. Resolves whether or not auth
+// succeeds — a denied/cancelled authorize, a server without DISCORD_CLIENT_SECRET,
+// or an absent Supabase config all just mean "play as guest", never a dead frame.
+async function establishDiscordAuth(sdk, clientId) {
+    try {
+        setStatus('Authorizing with Discord…');
+        var authResult = await sdk.commands.authorize({
+            client_id: clientId,
+            response_type: 'code',
+            state: '',
+            prompt: 'none',
+            scope: AUTH_SCOPES
+        });
+        var code = authResult && authResult.code;
+        if (!code) {
+            setStatus('Continuing as guest. Launching game…');
+            return;
+        }
+        // patchUrlMappings (run in boot()) already routes this through /.proxy.
+        var resp = await fetch('/api/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code: code })
+        });
+        if (!resp.ok) {
+            console.warn('[discord-activity] /api/token HTTP ' + resp.status);
+            setStatus('Continuing as guest. Launching game…');
+            return;
+        }
+        var data = await resp.json();
+        // Authenticate the SDK with the Discord access token (unlocks the participant
+        // + voice RPC commands the later phases use). Non-fatal if it fails.
+        if (data && data.access_token) {
+            try {
+                await sdk.commands.authenticate({ access_token: data.access_token });
+            } catch (e) {
+                console.warn('[discord-activity] authenticate failed:', e && e.message);
+            }
+        }
+        // Stash the minted handshake token + validated profile for play.html. Same
+        // origin, so sessionStorage survives the navigation; not the URL, so the
+        // token never lands in history.
+        if (data && data.token) {
+            try {
+                window.sessionStorage.setItem(DISCORD_AUTH_KEY, JSON.stringify({
+                    token: data.token,
+                    profile: data.profile || null,
+                    // Kept for Phase 5: the redirect to play.html drops this SDK
+                    // instance, so presence/voice will re-init the SDK there and
+                    // re-authenticate with this token (the `code` is single-use).
+                    accessToken: data.access_token || null
+                }));
+            } catch (e) {
+                console.warn('[discord-activity] could not stash auth (guest):', e && e.message);
+            }
+            var who = (data.profile && data.profile.name) ? data.profile.name : 'Discord player';
+            setStatus('Signed in as ' + who + '. Launching game…');
+        } else {
+            // Identity validated but no handshake token (Supabase/JWT not configured
+            // server-side) — the SDK is authenticated, but the game joins as a guest.
+            setStatus('Connected (guest — server auth not configured). Launching game…');
+        }
+    } catch (e) {
+        // authorize() rejects on user denial/cancel; play as guest.
+        console.warn('[discord-activity] auth skipped:', e && e.message);
+        setStatus('Continuing as guest. Launching game…');
+    }
 }
 
 boot().catch(function (e) {

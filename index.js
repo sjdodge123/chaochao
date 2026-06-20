@@ -62,6 +62,11 @@ app.use(function (req, res, next) {
 // Supabase env vars are absent, so the server boots and everyone is a guest.
 const auth = require('./server/auth.js');
 
+// Discord Activity in-frame auth bridge (Phase 4). Owns the DISCORD_CLIENT_SECRET +
+// the OAuth code exchange; backs the POST /api/token route below. Disabled (route
+// 404s) when the secret is absent, so the normal web build is unaffected.
+const discordAuth = require('./server/discordAuth.js');
+
 // Browser-safe Supabase config (URL + anon key only) injected via the
 // <!-- SUPABASE_CONFIG --> placeholder. null when auth is disabled, in which
 // case the placeholder is stripped and the client also treats everyone as a
@@ -479,6 +484,34 @@ app.get('/ops/status', function (req, res) {
         maintenance: maintenance.getState()
     });
 });
+
+// Discord Activity in-frame auth (Phase 4). The Activity POSTs the one-time OAuth
+// `code` from sdk.commands.authorize() here; discordAuth exchanges it server-side
+// (the client secret never leaves the env), re-validates the Discord identity via
+// the Discord API, bridges it to a real Supabase user, and returns the token the
+// socket handshake uses. Mounted at BOTH /api/token and /.proxy/api/token: Discord's
+// sandbox forwards requests with a /.proxy prefix and may or may not strip it before
+// it reaches our origin, so accept either. 404s when Discord auth isn't configured,
+// so the route can't be probed on the normal web build. Rate-limited per IP (the
+// exchange hits Discord + Supabase) using the same trusted-proxy IP resolution as
+// /feedback. Body is tiny (just { code }).
+var discordTokenRateLimited = makeRateLimiter(60 * 1000, 30);
+function handleDiscordToken(req, res) {
+    if (!discordAuth.enabled) { return res.status(404).end(); }
+    var ip = botGuard.resolveClientIp(req.headers['x-forwarded-for'], req.ip) || 'unknown';
+    if (discordTokenRateLimited(ip)) {
+        return res.status(429).json({ error: 'rate_limited' });
+    }
+    var code = req.body && req.body.code;
+    discordAuth.authorize(code).then(function (out) {
+        res.json(out);
+    }).catch(function (e) {
+        console.log('[discord] token exchange failed:', e && e.message);
+        res.status(400).json({ error: 'exchange_failed' });
+    });
+}
+app.post('/api/token', express.json({ limit: '8kb' }), handleDiscordToken);
+app.post('/.proxy/api/token', express.json({ limit: '8kb' }), handleDiscordToken);
 
 // Dev-only render-perf harness sink (client/scripts/perfharness.js). Registered ONLY
 // when PERF_HARNESS is set (c.perfHarness) so prod never exposes the route. The page

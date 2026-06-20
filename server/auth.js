@@ -631,6 +631,129 @@ async function requeuePendingToasts(userId, toasts) {
     }
 }
 
+// --- Discord Activity bridge (Phase 4) -----------------------------------------
+// In-frame Discord auth identifies a player WITHOUT a full-page OAuth redirect, then
+// bridges that identity onto a REAL Supabase user so the existing cosmetic/progression
+// path (which keys on a verified user_id) works unchanged. server/discordAuth.js owns
+// the Discord HTTP exchange + the client secret; these two helpers own the Supabase
+// side (the admin client + JWT secret live here and are never re-exported).
+
+// mintAccessToken: sign a Supabase-COMPATIBLE access token (HS256 with the project's
+// JWT secret) for a resolved user id. verifyToken()'s local HS256 path accepts it
+// with NO Supabase round-trip — the server signs and verifies with the same secret —
+// so the socket handshake treats a Discord player exactly like a signed-in web player.
+// Requires the JWT secret + lib; returns null otherwise (then Discord auth degrades to
+// guest rather than minting a token the server can't verify). 12h TTL: an Activity
+// session can run long, and the token is reused across socket reconnects.
+function mintAccessToken(userId, opts) {
+    opts = opts || {};
+    if (!jwt || !JWT_SECRET || !userId) {
+        return null;
+    }
+    var ttl = opts.ttlSeconds || (12 * 60 * 60);
+    var nowSec = Math.floor(Date.now() / 1000);
+    var claims = {
+        sub: userId,
+        aud: 'authenticated',
+        role: 'authenticated',
+        iat: nowSec,
+        exp: nowSec + ttl,
+        app_metadata: { provider: 'discord', providers: ['discord'] },
+        user_metadata: {}
+    };
+    if (opts.name) { claims.user_metadata.full_name = opts.name; claims.user_metadata.name = opts.name; }
+    if (opts.avatarUrl) { claims.user_metadata.avatar_url = opts.avatarUrl; }
+    if (SUPABASE_URL) { claims.iss = SUPABASE_URL.replace(/\/$/, '') + '/auth/v1'; }
+    try {
+        return jwt.sign(claims, JWT_SECRET, { algorithm: 'HS256' });
+    } catch (e) {
+        console.log('[auth] mintAccessToken failed:', e.message);
+        return null;
+    }
+}
+
+// Resolve a VALIDATED Discord identity ({ id, name, avatarUrl }) to a Supabase user id,
+// reusing the existing account when one already owns this Discord snowflake (web login
+// OR a prior Activity launch) and creating + linking a fresh one otherwise. Returns
+// { userId, name, avatarUrl } or null (auth off / lookup+create both failed). Never
+// throws. A short snowflake->userId cache spares repeat launches the admin round-trip.
+var discordUserCache = new Map();
+var DISCORD_USER_TTL_MS = 10 * 60 * 1000;
+function cachePutDiscord(snowflake, userId) {
+    if (discordUserCache.size >= 5000) {
+        var oldest = discordUserCache.keys().next().value;
+        if (oldest !== undefined) { discordUserCache.delete(oldest); }
+    }
+    discordUserCache.set(snowflake, { userId: userId, expiresAt: Date.now() + DISCORD_USER_TTL_MS });
+}
+async function findOrCreateDiscordUser(discord) {
+    if (!enabled || !supabase || !discord || !discord.id) {
+        return null;
+    }
+    var snowflake = String(discord.id);
+    var name = sanitizeDisplayName(discord.name) || null;
+    var avatarUrl = (typeof discord.avatarUrl === 'string') ? discord.avatarUrl : null;
+
+    var cached = discordUserCache.get(snowflake);
+    if (cached && cached.expiresAt > Date.now()) {
+        return { userId: cached.userId, name: name, avatarUrl: avatarUrl };
+    }
+    try {
+        // Read side: an account already owns this Discord identity — reuse it so its
+        // cosmetics/progression are exactly what the player sees in the Activity.
+        var found = await supabase.rpc('find_user_by_discord_id', { p_discord_id: snowflake });
+        if (found.error) {
+            console.log('[auth] find_user_by_discord_id failed:', found.error.message);
+        } else if (found.data) {
+            cachePutDiscord(snowflake, found.data);
+            return { userId: found.data, name: name, avatarUrl: avatarUrl };
+        }
+
+        // No existing account: create one. The synthetic email + the discord_id stamped
+        // into user_metadata both make this user re-findable (the latter is the fallback
+        // the lookup uses if the identity link below didn't land).
+        var meta = { provider: 'discord', discord_id: snowflake };
+        if (name) { meta.full_name = name; meta.name = name; }
+        if (avatarUrl) { meta.avatar_url = avatarUrl; }
+        var created = await supabase.auth.admin.createUser({
+            email: 'discord_' + snowflake + '@discord.chaochao.local',
+            email_confirm: true,
+            user_metadata: meta,
+            app_metadata: { provider: 'discord', providers: ['discord'] }
+        });
+        if (created.error || !created.data || !created.data.user) {
+            // A concurrent first-launch may have created it (email collision) — re-resolve.
+            var retry = await supabase.rpc('find_user_by_discord_id', { p_discord_id: snowflake });
+            if (!retry.error && retry.data) {
+                cachePutDiscord(snowflake, retry.data);
+                return { userId: retry.data, name: name, avatarUrl: avatarUrl };
+            }
+            console.log('[auth] createUser(discord) failed:', created.error && created.error.message);
+            return null;
+        }
+        var userId = created.data.user.id;
+        // Best-effort: link a provider='discord' identity so a LATER web Discord login
+        // adopts this same account. A failure here doesn't block play (the metadata
+        // stamp above still makes the user re-findable from the Activity side).
+        var identityData = { sub: snowflake, provider_id: snowflake };
+        if (name) { identityData.name = name; identityData.full_name = name; }
+        if (avatarUrl) { identityData.avatar_url = avatarUrl; }
+        var linked = await supabase.rpc('link_discord_identity', {
+            p_user_id: userId, p_discord_id: snowflake, p_identity_data: identityData
+        });
+        if (linked.error) {
+            console.log('[auth] link_discord_identity (best-effort) failed:', linked.error.message);
+        }
+        cachePutDiscord(snowflake, userId);
+        return { userId: userId, name: name, avatarUrl: avatarUrl };
+    } catch (e) {
+        console.log('[auth] findOrCreateDiscordUser error:', e.message);
+        return null;
+    }
+}
+
+exports.mintAccessToken = mintAccessToken;
+exports.findOrCreateDiscordUser = findOrCreateDiscordUser;
 exports.requeuePendingToasts = requeuePendingToasts;
 exports.enabled = enabled;
 exports.writesEnabled = writesEnabled;

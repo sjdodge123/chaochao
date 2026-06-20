@@ -46,10 +46,24 @@
     var currentUser = null;
     var sb = null;
 
+    // Discord Activity in-frame session (Phase 4). discordActivity.js validated the
+    // player server-side and stashed a minted handshake token + profile here before
+    // handing off to play.html?discord=1. In that mode we DON'T build a Supabase
+    // client (its CDN is sandbox-blocked anyway): the handshake token and profile
+    // come straight from the stash, and the existing socket path treats this exactly
+    // like a signed-in web player (the server resolves the real user_id from the token).
+    var discordSession = null;
+    try {
+        var rawDiscord = window.sessionStorage.getItem('chaochao.discordAuth');
+        if (rawDiscord) { discordSession = JSON.parse(rawDiscord); }
+    } catch (e) { discordSession = null; }
+
     // Build the Supabase client only when both the injected public config and the
-    // CDN UMD global are present. Otherwise we stay in guest-only mode.
+    // CDN UMD global are present (and we're NOT in a Discord session). Otherwise we
+    // stay in guest-only mode.
     var publicConfig = window.__SUPABASE__ || null;
-    if (publicConfig && publicConfig.url && publicConfig.anonKey &&
+    if (!(discordSession && discordSession.token) &&
+        publicConfig && publicConfig.url && publicConfig.anonKey &&
         window.supabase && typeof window.supabase.createClient === 'function') {
         try {
             sb = window.supabase.createClient(publicConfig.url, publicConfig.anonKey);
@@ -57,6 +71,20 @@
             console.log('[auth] failed to init supabase client:', e.message);
             sb = null;
         }
+    }
+
+    // Adopt the Discord session synchronously so the very first socket handshake
+    // carries the token. A synthetic `currentUser` drives getProfile()/isSignedIn()/
+    // getAuthState() off the validated profile; the opaque id is never sent to the
+    // server (identity is resolved from the token), it only marks "signed in" locally.
+    if (discordSession && discordSession.token) {
+        accessToken = discordSession.token;
+        var dp = discordSession.profile || {};
+        currentUser = {
+            id: 'discord',
+            app_metadata: { provider: 'discord' },
+            user_metadata: { full_name: dp.name || null, avatar_url: dp.avatarUrl || null }
+        };
     }
 
     // A stable key for what the navbar actually shows (identity + name + avatar), so
