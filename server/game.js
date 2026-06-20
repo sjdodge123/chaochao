@@ -341,10 +341,22 @@ class Game {
 			var p = this.playerList[id];
 			// !awake matches FFA's accounting: checkForWinners counts asleep players
 			// as concluded, so an AFK kart must not keep its team "standing" either.
-			if (p == null || p.teamId == null || !p.alive || !p.awake || p.isSpectator || p.isZombie || p.reachedGoal) { continue; }
+			if (p == null || p.teamId == null || !p.alive || !p.awake || p.isSpectator || p.isZombie || p.reachedGoal || this.secondWindStalling(p)) { continue; }
 			if (!seen[p.teamId]) { seen[p.teamId] = true; n++; }
 		}
 		return n;
+	}
+	// A player who has actually RESPAWNED at a Second Wind totem (the "checkpoint"
+	// flag) and is still attuned to a flag the lava hasn't burned will keep reviving,
+	// so on their own they never conclude the round. For the LAST-STAND par collapse
+	// only, treat such a player like a dead rival: when everyone left is leaning on a
+	// checkpoint the round can't make progress, so the hurry-up collapse should still
+	// fire (it then burns the totems and resolves the round). Merely TOUCHING a flag
+	// isn't enough — a racer who grabbed one in passing but is still pushing for the
+	// goal stays a real rival. They are NOT counted as concluded for the
+	// overview/round-end, so they keep their shot at finishing or being last standing.
+	secondWindStalling(p) {
+		return p != null && p.secondWindRespawned && p.secondWind != null && p.secondWind.safe !== false;
 	}
 	// Credit a finisher's notches to their team's shared pool, mirroring addNotch's
 	// clamp-at-target semantics: the pool parks at the target and the NEXT first
@@ -780,6 +792,9 @@ class Game {
 	}
 	checkForWinners() {
 		var playersConcluded = 0;
+		// Alive racers parked on a still-safe checkpoint (Second Wind) totem. Tallied
+		// for the last-stand collapse trigger only — see secondWindStalling().
+		var secondWindCampers = 0;
 
 		for (var player in this.playerList) {
 			// A temp spectator (late joiner waiting for the next round) is alive=false
@@ -851,6 +866,11 @@ class Game {
 			if (this.playerList[player].isZombie) {
 				playersConcluded++;
 				continue;
+			}
+			// Alive-and-racing here. A checkpoint camper still counts as alive for the
+			// round-end below, but is discounted from the last-stand collapse trigger.
+			if (this.playerList[player].reachedGoal != true && this.secondWindStalling(this.playerList[player])) {
+				secondWindCampers++;
 			}
 			if (this.playerList[player].reachedGoal == true) {
 				playersConcluded++;
@@ -967,7 +987,12 @@ class Game {
 		// FFA, or — in a teams mode — only ONE TEAM still standing (teammates aren't
 		// rivals, so a surviving squad gets the same hurry-up pressure a lone
 		// survivor does, in bunker AND normal rounds alike).
-		var lastStand = this.isTeamsMode() ? (this.aliveTeamCount() <= 1) : (this.alivePlayerCount == 1);
+		// Discount checkpoint campers (see secondWindStalling): a board where every
+		// remaining racer is parked on a safe totem would never trip the lone-survivor
+		// trigger and the round would drag, so count them like dead rivals here. The
+		// scheduled collapse then burns the totems and the round resolves normally.
+		var aliveRivalCount = this.alivePlayerCount - secondWindCampers;
+		var lastStand = this.isTeamsMode() ? (this.aliveTeamCount() <= 1) : (aliveRivalCount <= 1);
 		if (lastStand) {
 			// Battle-royale endgame: the last player/team remains, so raise the buried
 			// goal for them to claim — then engage the SAME map-aware par collapse a

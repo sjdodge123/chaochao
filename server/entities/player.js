@@ -246,6 +246,12 @@ class Player extends Circle {
 		// slow-pan the camera from the death spot to the flag.
 		this.secondWindPendingUntil = 0;
 		this.secondWindDeathCause = null;
+		// Latched true once this racer has ACTUALLY respawned at a flag this round (not
+		// merely touched one). Drives the last-stand par collapse: a racer leaning on
+		// respawns never concludes on their own, so checkForWinners discounts them like
+		// a dead rival — but only after they've used the flag, so someone still pushing
+		// for the goal on a flag they grabbed in passing isn't penalised.
+		this.secondWindRespawned = false;
 		// Airborne (Launch Pad / Barrel Cannon flight): the shared "aloft" player state.
 		// While airborneUntil > 0 the racer is on a committed scripted arc — frozen input,
 		// tile/collision/punch-immune (the isAloft guards) — and Player.update lerps them
@@ -994,6 +1000,7 @@ class Player extends Circle {
 	reviveAtSecondWind() {
 		var totem = this.secondWind;
 		this.secondWindPendingUntil = 0;
+		this.secondWindRespawned = true; // they've now leaned on the flag (see secondWindStalling)
 		this.enabled = true; // beginSecondWind froze them; bring them back into play
 		this.x = totem.x;
 		this.y = totem.y;
@@ -2296,6 +2303,7 @@ class Player extends Circle {
 		this.secondWind = null;
 		this.secondWindPendingUntil = 0;
 		this.secondWindDeathCause = null;
+		this.secondWindRespawned = false;
 		// Airborne / barrel boons are per-round transient state — never bleed a mid-flight
 		// or loaded kart (or a stale slingshot chain) across a round boundary.
 		this.airborneUntil = 0;
