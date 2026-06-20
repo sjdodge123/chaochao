@@ -20,7 +20,7 @@
 // The client id is injected server-side via the <!-- DISCORD_CONFIG --> tag
 // (index.js, from the DISCORD_CLIENT_ID env var). No secret is ever exposed.
 
-import { DiscordSDK, patchUrlMappings } from '@discord/embedded-app-sdk';
+import { DiscordSDK } from '@discord/embedded-app-sdk';
 
 function setStatus(msg, isError) {
     var el = document.getElementById('discordStatus');
@@ -43,16 +43,14 @@ async function boot() {
         return;
     }
 
-    // Route ALL network traffic through the sandbox proxy. Doing this before the
-    // SDK constructs anything keeps dev and prod behaviour identical and is what
-    // lets the same-origin Socket.IO connection survive inside the iframe.
-    try {
-        patchUrlMappings([{ prefix: '/', target: cfg.mappingTarget || '' }]);
-    } catch (e) {
-        // patchUrlMappings is best-effort here; the authoritative routing is the
-        // URL Mappings configured in the Developer Portal. Don't hard-fail.
-        console.warn('[discord-activity] patchUrlMappings skipped:', e && e.message);
-    }
+    // NOTE: we deliberately do NOT call patchUrlMappings here. The Activity's root
+    // URL Mapping ('/' -> our host) already proxies EVERY same-origin path through the
+    // sandbox (that's why the game's Socket.IO on play.html — which never patches —
+    // connects fine). patchUrlMappings is for mapping EXTERNAL hosts; calling it with
+    // a root prefix '/' and an empty target monkey-patches fetch/XHR to rewrite every
+    // same-origin URL into a broken request, which silently killed the /api/token POST
+    // here (the page where the patch was active). Same-origin requests just use plain
+    // relative paths and ride the root mapping. (Phase 4 live-debug finding.)
 
     setStatus('Connecting to Discord…');
     var sdk = new DiscordSDK(cfg.clientId);
@@ -92,6 +90,30 @@ async function boot() {
 var AUTH_SCOPES = ['identify', 'rpc.activities.write', 'guilds', 'rpc.voice.read'];
 var DISCORD_AUTH_KEY = 'chaochao.discordAuth';
 
+// POST the OAuth code to the token endpoint, trying the proxy-correct path first.
+// Only a thrown fetch (network/CSP — request never reached the server) advances to
+// the next candidate; any HTTP response (even an error) is returned as-is, because
+// it means the server got the code and a retry would double-spend it. The server
+// registers BOTH paths, so whichever the sandbox delivers is handled.
+async function postCode(code) {
+    var paths = ['/api/token', '/.proxy/api/token'];
+    var errs = [];
+    for (var i = 0; i < paths.length; i++) {
+        try {
+            return await fetch(paths[i], {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code: code })
+            });
+        } catch (e) {
+            var msg = (e && e.message) ? e.message : 'fetch failed';
+            errs.push(paths[i] + ' → ' + msg);
+            console.warn('[discord-activity] POST ' + paths[i] + ' failed: ' + msg);
+        }
+    }
+    throw new Error(errs.join(' ; '));
+}
+
 // authorize -> /api/token -> authenticate -> stash. Resolves whether or not auth
 // succeeds — a denied/cancelled authorize, a server without DISCORD_CLIENT_SECRET,
 // or an absent Supabase config all just mean "play as guest", never a dead frame.
@@ -107,18 +129,19 @@ async function establishDiscordAuth(sdk, clientId) {
         });
         var code = authResult && authResult.code;
         if (!code) {
-            setStatus('Continuing as guest. Launching game…');
+            setStatus('No auth code returned by Discord — guest. Launching game…', true);
             return;
         }
-        // patchUrlMappings (run in boot()) already routes this through /.proxy.
-        var resp = await fetch('/api/token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ code: code })
-        });
+        setStatus('Exchanging code…');
+        // The Discord sandbox forces traffic through /.proxy; a bare relative
+        // fetch('/api/token') is NOT rewritten and gets CSP-blocked, so POST to the
+        // explicit /.proxy path first. Fall back to /api/token ONLY on a network/CSP
+        // failure (the request never reached the server, so the single-use code is
+        // unspent) — never after an HTTP response, which would double-spend the code.
+        var resp = await postCode(code);
         if (!resp.ok) {
             console.warn('[discord-activity] /api/token HTTP ' + resp.status);
-            setStatus('Continuing as guest. Launching game…');
+            setStatus('Token endpoint error ' + resp.status + ' — guest. Launching game…', true);
             return;
         }
         var data = await resp.json();
@@ -155,9 +178,10 @@ async function establishDiscordAuth(sdk, clientId) {
             setStatus('Connected (guest — server auth not configured). Launching game…');
         }
     } catch (e) {
-        // authorize() rejects on user denial/cancel; play as guest.
+        // authorize() rejects on user denial/cancel; postCode throws when every path
+        // is network/CSP-blocked. Surface the real reason so the frame is diagnostic.
         console.warn('[discord-activity] auth skipped:', e && e.message);
-        setStatus('Continuing as guest. Launching game…');
+        setStatus('Auth failed (' + (e && e.message ? e.message : 'unknown') + ') — guest. Launching game…', true);
     }
 }
 

@@ -332,6 +332,20 @@ app.use(function (req, res, next) {
         if (url === '/play.html' && req.query && req.query.discord) {
             modified = discordEmbedRewrite(modified);
         }
+        // Discord's sandbox caches the Activity's JS aggressively and the bundle
+        // filename is stable, so a rebuilt discord.bundle would otherwise keep serving
+        // stale code. Stamp the bundle URL with the dist file's mtime so every rebuild
+        // is a new URL the proxy/browser must refetch. discord.html itself is no-cache
+        // and reloaded per launch, so the fresh stamp always reaches the client.
+        if (url === '/discord.html') {
+            try {
+                var bundleStat = fs.statSync(path.join(htmlPath, 'scripts/dist/discord.bundle.min.js'));
+                modified = modified.replace(
+                    'scripts/dist/discord.bundle.min.js',
+                    'scripts/dist/discord.bundle.min.js?v=' + Math.floor(bundleStat.mtimeMs).toString(36)
+                );
+            } catch (e) { /* bundle not built yet — leave the plain tag */ }
+        }
         res.set('Content-Type', 'text/html');
         // HTML carries the injected version/news/bundle tags and must reflect a
         // fresh deploy immediately, so never let a browser/CDN serve it stale —
@@ -503,7 +517,10 @@ function handleDiscordToken(req, res) {
         return res.status(429).json({ error: 'rate_limited' });
     }
     var code = req.body && req.body.code;
+    console.log('[discord] /api/token hit (path ' + req.path + ', code ' + (code ? 'present' : 'MISSING') + ')');
     discordAuth.authorize(code).then(function (out) {
+        console.log('[discord] exchange OK -> name=' + (out.profile && out.profile.name) +
+            ', handshake token ' + (out.token ? 'minted' : 'NULL (player will be guest)'));
         res.json(out);
     }).catch(function (e) {
         console.log('[discord] token exchange failed:', e && e.message);
