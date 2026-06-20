@@ -5,17 +5,21 @@
 // the Embedded App SDK from node_modules and is bundled with esbuild `build()`
 // into client/scripts/dist/discord.bundle.min.js (an IIFE). See build.js.
 //
-// What it does (spike scope):
-//   1. patchUrlMappings() so fetch/WebSocket/XHR route through Discord's
-//      /.proxy/ sandbox identically in dev (un-sandboxed) and prod (sandboxed).
-//   2. Runs the SDK init handshake (new DiscordSDK(clientId) -> ready()).
-//   3. Surfaces status on the page so the operator can SEE it work inside the
-//      Discord frame, then hands off to the existing game (play.html).
+// What it does:
+//   1. Runs the SDK init handshake (new DiscordSDK(clientId) -> ready()).
+//   2. Phase 4 in-frame auth: authorize() -> POST /api/token (server-side code
+//      exchange + Supabase bridge) -> authenticate() -> stash the minted handshake
+//      token + profile in sessionStorage for play.html's socket connection.
+//   3. Surfaces status on the page, then hands off to the game (play.html?discord=1).
+//
+// NOTE: we deliberately do NOT call patchUrlMappings(). The Activity's root URL Mapping
+// already proxies every same-origin path, so plain relative requests (the /api/token
+// POST, Socket.IO) work as-is; patchUrlMappings with a root prefix + empty target
+// actually MANGLED the fetch (see the boot() comment + the Phase 4 spike notes).
 //
 // NOT yet implemented (later phases, see docs/spikes/discord-activity.md):
-//   - Auth: authorize -> POST /.proxy/api/token (server) -> authenticate,
-//     bridged to a Supabase session (Phase 4).
 //   - Participants/instance presence -> hostess rooms (Phase 5).
+//   - Voice-activity visual (Phase 5b; rpc.voice.read is already requested).
 //
 // The client id is injected server-side via the <!-- DISCORD_CONFIG --> tag
 // (index.js, from the DISCORD_CLIENT_ID env var). No secret is ever exposed.
@@ -120,11 +124,15 @@ async function postCode(code) {
 async function establishDiscordAuth(sdk, clientId) {
     try {
         setStatus('Authorizing with Discord…');
+        // No `prompt: 'none'`: that asks Discord to skip the consent UI, which only works
+        // if the user has ALREADY granted these exact scopes — a first-time player (or one
+        // hit after we add a scope, e.g. rpc.voice.read) would get a consent_required error
+        // and be silently demoted to guest instead of seeing the consent dialog. Omitting
+        // it shows consent when needed and is silent on repeat launches.
         var authResult = await sdk.commands.authorize({
             client_id: clientId,
             response_type: 'code',
             state: '',
-            prompt: 'none',
             scope: AUTH_SCOPES
         });
         var code = authResult && authResult.code;

@@ -109,22 +109,18 @@ function adsConfigTag() {
 
 // Browser-safe Discord Activity config (PUBLIC client id only) injected via the
 // <!-- DISCORD_CONFIG --> placeholder (discord.html only). The client SECRET is
-// never referenced here — token exchange is server-side in a later phase.
+// never referenced here — token exchange is server-side (POST /api/token).
 // Stripped to '' when DISCORD_CLIENT_ID is unset, so discord.html shows a clear
-// "not configured" message instead of failing the SDK handshake.
+// "not configured" message instead of failing the SDK handshake. (No mappingTarget:
+// we no longer call patchUrlMappings — same-origin requests ride the root URL Mapping.)
 function discordConfigTag() {
     if (!process.env.DISCORD_CLIENT_ID) {
         return '';
     }
-    var cfg = {
-        clientId: process.env.DISCORD_CLIENT_ID,
-        // Optional explicit proxy mapping target for patchUrlMappings; defaults
-        // to same-origin ('') which is correct for a same-host deploy.
-        mappingTarget: (process.env.DISCORD_MAPPING_TARGET || '')
-    };
+    var cfg = { clientId: process.env.DISCORD_CLIENT_ID };
     // Escape '<' so a value cannot terminate the inline <script> (defense-in-depth;
-    // the client id is a numeric snowflake and the target a host, so neither can
-    // carry the U+2028/U+2029 separators the other tags guard against).
+    // the client id is a numeric snowflake, so it can't carry the U+2028/U+2029
+    // separators the other tags guard against).
     var json = JSON.stringify(cfg).replace(/</g, '\\u003c');
     return '<script>window.__DISCORD__ = ' + json + ';<\/script>';
 }
@@ -341,19 +337,16 @@ app.use(function (req, res, next) {
         if (url === '/play.html' && req.query && req.query.discord) {
             modified = discordEmbedRewrite(modified);
         }
-        // Discord's sandbox caches the Activity's JS aggressively and the bundle
-        // filename is stable, so a rebuilt discord.bundle would otherwise keep serving
-        // stale code. Stamp the bundle URL with the dist file's mtime so every rebuild
-        // is a new URL the proxy/browser must refetch. discord.html itself is no-cache
-        // and reloaded per launch, so the fresh stamp always reaches the client.
+        // Discord's sandbox caches the Activity's JS aggressively and the filenames are
+        // stable, so stamp the in-frame scripts with BOOT_STAMP (the same id used for the
+        // play.html scripts in discordEmbedRewrite — ONE cache-bust mechanism). A
+        // restart/redeploy changes the stamp so the proxy/browser refetches; discord.html
+        // is no-cache and reloaded per launch, so the fresh stamp always reaches the client.
         if (url === '/discord.html') {
-            try {
-                var bundleStat = fs.statSync(path.join(htmlPath, 'scripts/dist/discord.bundle.min.js'));
-                modified = modified.replace(
-                    'scripts/dist/discord.bundle.min.js',
-                    'scripts/dist/discord.bundle.min.js?v=' + Math.floor(bundleStat.mtimeMs).toString(36)
-                );
-            } catch (e) { /* bundle not built yet — leave the plain tag */ }
+            modified = modified.replace(
+                'scripts/dist/discord.bundle.min.js',
+                'scripts/dist/discord.bundle.min.js?v=' + BOOT_STAMP
+            );
         }
         res.set('Content-Type', 'text/html');
         // HTML carries the injected version/news/bundle tags and must reflect a
@@ -519,8 +512,30 @@ app.get('/ops/status', function (req, res) {
 // exchange hits Discord + Supabase) using the same trusted-proxy IP resolution as
 // /feedback. Body is tiny (just { code }).
 var discordTokenRateLimited = makeRateLimiter(60 * 1000, 30);
+// Reject a token exchange whose browser Origin/Referer is a site OTHER than Discord's.
+// The legitimate caller is the in-frame fetch from discord(says).com; a malicious page
+// trying to replay a victim's one-time code would carry its own origin and be blocked.
+// LENIENT by design: the Discord proxy may strip Origin/Referer, so an ABSENT header is
+// allowed (we can't fingerprint a server-side replay anyway — the single-use, short-lived
+// code + rate limit are the backstop there). Only a PRESENT, non-Discord origin is refused.
+function discordOriginOk(req) {
+    var src = req.headers.origin || req.headers.referer || '';
+    if (!src) { return true; } // no header (proxy-stripped) — allow
+    try {
+        var host = new URL(src).hostname;
+        return host === 'discord.com' ||
+            host.slice(-12) === '.discord.com' ||
+            host.slice(-16) === '.discordsays.com';
+    } catch (e) {
+        return false; // a present-but-unparseable origin is suspicious — refuse
+    }
+}
 function handleDiscordToken(req, res) {
     if (!discordAuth.enabled) { return res.status(404).end(); }
+    if (!discordOriginOk(req)) {
+        console.log('[discord] /api/token refused: non-Discord origin ' + (req.headers.origin || req.headers.referer));
+        return res.status(403).json({ error: 'bad_origin' });
+    }
     var ip = botGuard.resolveClientIp(req.headers['x-forwarded-for'], req.ip) || 'unknown';
     if (discordTokenRateLimited(ip)) {
         return res.status(429).json({ error: 'rate_limited' });

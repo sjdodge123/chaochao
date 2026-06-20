@@ -37,12 +37,19 @@ try {
 // Supabase token (this project signs with asymmetric keys — there's no shared HS256
 // secret to reproduce; the server already falls back to network getUser). So instead
 // the bridge mints OUR OWN short-lived ticket, HS256-signed with this server-only
-// secret, and verifyToken() accepts it (issuer-scoped) before the Supabase paths. The
-// secret is DERIVED deterministically from the service-role key (server-only, stable
-// across restarts AND any future multi-instance deploy) so no new env var is required;
-// DISCORD_TICKET_SECRET overrides it. A random fallback covers guest-only dev (no key),
-// where the ticket is never minted anyway.
+// secret, and verifyToken() accepts it (issuer-scoped) before the Supabase paths.
+//
+// PREFER an explicit DISCORD_TICKET_SECRET — that decouples the ticket lifecycle from
+// any other credential. When it's unset we DERIVE one from the service-role key (so the
+// common deploy needs no new env var and the secret is stable across restarts), but that
+// couples two lifecycles: rotating the service-role key, or a multi-instance deploy with
+// any key skew, silently invalidates live tickets (Activity players drop to guest on
+// reconnect). We warn loudly in that case (below) so it's a known trade-off, not a
+// surprise. A random fallback covers guest-only dev (no key), where tickets are never
+// minted anyway.
 var TICKET_ISSUER = 'chaochao-activity';
+var TICKET_SECRET_EXPLICIT = !!process.env.DISCORD_TICKET_SECRET;
+var TICKET_SECRET_DERIVED = !TICKET_SECRET_EXPLICIT && !!SERVICE_ROLE_KEY;
 var TICKET_SECRET = process.env.DISCORD_TICKET_SECRET ||
     (SERVICE_ROLE_KEY
         ? crypto.createHash('sha256').update('chaochao-discord-ticket|' + SERVICE_ROLE_KEY).digest('hex')
@@ -85,6 +92,11 @@ if (enabled && !writesEnabled) {
 
 if (enabled) {
     console.log('[auth] Supabase auth ENABLED (' + (jwt && JWT_SECRET ? 'local JWT verify' : 'network verify') + '), writes ' + (writesEnabled ? 'ENABLED' : 'BLOCKED') + ' (target: ' + SUPABASE_URL + ').');
+    if (TICKET_SECRET_DERIVED) {
+        console.log('[auth] Discord ticket secret is DERIVED from the service-role key. ' +
+            'Set DISCORD_TICKET_SECRET to decouple it — otherwise rotating the service-role key ' +
+            '(or a multi-instance deploy with key skew) silently demotes active Activity players to guests.');
+    }
 } else {
     console.log('[auth] Supabase env vars absent — auth DISABLED, all clients are guests.');
 }
@@ -120,6 +132,18 @@ function tokenExpSeconds(token) {
     }
 }
 
+// Bounded-map insert shared by the token cache and the Discord snowflake cache: when at
+// capacity, drop the OLDEST entry (FIFO) rather than clearing the whole map (a full wipe
+// would force a thundering-herd re-verify of every live session). Overwriting an existing
+// key doesn't grow the map, so it never evicts in that case.
+function boundedMapSet(map, key, value, max) {
+    if (map.size >= max && !map.has(key)) {
+        var oldest = map.keys().next().value;
+        if (oldest !== undefined) { map.delete(oldest); }
+    }
+    map.set(key, value);
+}
+
 function cachePut(token, userId, ttl) {
     var expiresAt = Date.now() + ttl;
     if (userId) {
@@ -127,13 +151,7 @@ function cachePut(token, userId, ttl) {
         var exp = tokenExpSeconds(token);
         if (exp) { expiresAt = Math.min(expiresAt, exp * 1000); }
     }
-    // Bounded LRU-ish: drop the OLDEST entry rather than clearing the whole cache
-    // (a full wipe would force a thundering-herd re-verify of every live session).
-    if (tokenCache.size >= TOKEN_CACHE_MAX) {
-        var oldest = tokenCache.keys().next().value;
-        if (oldest !== undefined) { tokenCache.delete(oldest); }
-    }
-    tokenCache.set(token, { userId: userId, expiresAt: expiresAt });
+    boundedMapSet(tokenCache, token, { userId: userId, expiresAt: expiresAt }, TOKEN_CACHE_MAX);
     return userId;
 }
 
@@ -708,12 +726,9 @@ function mintAccessToken(userId, opts) {
 // throws. A short snowflake->userId cache spares repeat launches the admin round-trip.
 var discordUserCache = new Map();
 var DISCORD_USER_TTL_MS = 10 * 60 * 1000;
+var DISCORD_USER_CACHE_MAX = 5000;
 function cachePutDiscord(snowflake, userId) {
-    if (discordUserCache.size >= 5000) {
-        var oldest = discordUserCache.keys().next().value;
-        if (oldest !== undefined) { discordUserCache.delete(oldest); }
-    }
-    discordUserCache.set(snowflake, { userId: userId, expiresAt: Date.now() + DISCORD_USER_TTL_MS });
+    boundedMapSet(discordUserCache, snowflake, { userId: userId, expiresAt: Date.now() + DISCORD_USER_TTL_MS }, DISCORD_USER_CACHE_MAX);
 }
 async function findOrCreateDiscordUser(discord) {
     if (!enabled || !supabase || !discord || !discord.id) {
@@ -738,7 +753,18 @@ async function findOrCreateDiscordUser(discord) {
             return { userId: found.data, name: name, avatarUrl: avatarUrl };
         }
 
-        // No existing account: create one. The synthetic email + the discord_id stamped
+        // No existing account. Creating one is a WRITE (admin.createUser + the identity
+        // link), so it must honor the same writesEnabled tripwire as every progression
+        // write — otherwise a non-Heroku host accidentally pointed at the PROD project
+        // would create real auth.users/auth.identities rows in prod, the exact pollution
+        // writesEnabled exists to prevent. The read above still runs (an existing player
+        // resolves fine); we only refuse to WRITE a new account when writes are blocked.
+        if (!writesEnabled) {
+            console.log('[auth] findOrCreateDiscordUser: writes BLOCKED — not creating a new Supabase user for Discord id ' + snowflake + '.');
+            return null;
+        }
+
+        // Create one. The synthetic email + the discord_id stamped
         // into user_metadata both make this user re-findable (the latter is the fallback
         // the lookup uses if the identity link below didn't land).
         var meta = { provider: 'discord', discord_id: snowflake };

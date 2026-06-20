@@ -29,17 +29,26 @@ language sql
 security definer
 set search_path = ''
 as $$
-  select user_id
-  from auth.identities
-  where provider = 'discord'
-    and (identity_data->>'sub' = p_discord_id
-         or identity_data->>'provider_id' = p_discord_id
-         or provider_id = p_discord_id)
-  union all
-  select id
-  from auth.users
-  where raw_user_meta_data->>'discord_id' = p_discord_id
-  limit 1
+  -- DETERMINISTIC preference: a real GoTrue identity row wins over the metadata
+  -- fallback. (A bare UNION ALL + LIMIT 1 has no defined order, so if a stale/orphaned
+  -- identity and a metadata-stamped user ever pointed at DIFFERENT users, which one
+  -- resolved would be non-deterministic across calls.) The identity table is the
+  -- source of truth GoTrue itself uses for native Discord OAuth; the metadata stamp is
+  -- only our own re-findability fallback for an Activity-created user whose identity
+  -- link didn't land.
+  select coalesce(
+    (select user_id
+       from auth.identities
+      where provider = 'discord'
+        and (identity_data->>'sub' = p_discord_id
+             or identity_data->>'provider_id' = p_discord_id
+             or provider_id = p_discord_id)
+      limit 1),
+    (select id
+       from auth.users
+      where raw_user_meta_data->>'discord_id' = p_discord_id
+      limit 1)
+  )
 $$;
 
 create or replace function public.link_discord_identity(

@@ -502,8 +502,15 @@ function maybeDefaultDiscordAvatar() {
 	if (!profile || !profile.avatarUrl) { return; }
 	var me = (typeof myID !== "undefined" && typeof playerList !== "undefined" && playerList) ? playerList[myID] : null;
 	if (!me) { return; }
-	// Respect an explicit look: a persisted cart skin or an avatar already showing.
+	// Respect an explicit look: a persisted cart skin or an avatar already showing. That's
+	// a settled decision regardless of game state, so latch the one-shot and stop.
 	if (me.cart || me.avatarUrl) { discordAvatarDefaulted = true; return; }
+	// The server only APPLIES setAvatarSkin while the room is in the lobby. If we're
+	// mid-match (a join-in-progress launch), DON'T latch — the emit would be dropped and
+	// the one-shot wasted. progressionUpdate fires again on the next lobby arrival, which
+	// retries here. Only latch once we actually emit in a state the server will honor.
+	var inLobby = (typeof config !== "undefined" && config && config.stateMap && currentState === config.stateMap.lobby);
+	if (!inLobby) { return; }
 	discordAvatarDefaulted = true;
 	if (typeof server !== "undefined" && server) {
 		server.emit("setAvatarSkin", { url: profile.avatarUrl, name: profile.name });
