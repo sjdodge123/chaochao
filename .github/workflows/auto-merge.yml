@@ -1,0 +1,45 @@
+name: Auto-merge
+
+# Turns on GitHub's native auto-merge for every non-draft PR into main, so a PR
+# merges itself the moment all REQUIRED checks are satisfied — no manual "merge"
+# click for the common case.
+#
+# This is safe to apply blanket because the `merge-gate` required check (see
+# merge-gate.yml) is what actually decides mergeability:
+#   • Normal PR        -> merge-gate goes green when CI passes -> auto-merge fires.
+#   • deploy:prod / map -> merge-gate stays RED until @sjdodge123 approves, so
+#                          auto-merge is armed but parks until that explicit approval.
+# So enabling auto-merge everywhere can never merge a sensitive PR without approval.
+#
+# Squash to match the repo's existing one-commit-per-PR history.
+#
+# Requires the repo setting "Allow auto-merge" to be ON
+# (Settings ▸ General ▸ Pull Requests). If it's off, the enable step no-ops with a
+# warning rather than failing the workflow.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    # Never arm auto-merge on a draft.
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable auto-merge (squash)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          if gh pr merge "$PR" --repo "$REPO" --auto --squash; then
+            echo "Auto-merge armed for PR #$PR (will merge once required checks pass)."
+          else
+            echo "::warning::Could not enable auto-merge for PR #$PR. Most likely 'Allow auto-merge' is off in repo settings, or the PR is already mergeable/closed."
+          fi
