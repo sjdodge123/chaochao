@@ -318,13 +318,15 @@ function barrierMinDist(x, y, barriers) {
 
 // Does a kart (centre x,y, radius R) overlap any non-drivable cell (lava/empty/shut door)?
 // Tested on the rim, the way the engine keeps a kart's body out of lava — so a doorway's
-// crossing point can't sit where the kart would hang into the lava.
-function kartDiscHitsBlocked(map, x, y) {
-    if (!pointDrivable(map, x, y)) { return true; }
+// crossing point can't sit where the kart would hang into the lava. allowDoor forwards to
+// pointDrivable (the nav-graph build passes it so a temporary door doesn't permanently seal a
+// doorway — see pointDrivable).
+function kartDiscHitsBlocked(map, x, y, allowDoor) {
+    if (!pointDrivable(map, x, y, allowDoor)) { return true; }
     var R = c.playerBaseRadius || 7.5;
     for (var a = 0; a < 8; a++) {
         var ang = a / 8 * Math.PI * 2;
-        if (!pointDrivable(map, x + Math.cos(ang) * R, y + Math.sin(ang) * R)) { return true; }
+        if (!pointDrivable(map, x + Math.cos(ang) * R, y + Math.sin(ang) * R, allowDoor)) { return true; }
     }
     return false;
 }
@@ -355,7 +357,10 @@ function doorwayCrossing(map, border) {
     // constrains any point of it — every point is wide-open, so the midpoint is a valid widest
     // crossing and one lava-disc test there is enough. Skips the per-sample sweep (the costly
     // 9x-nearestCell-per-step part) for the many open doorways far from any author wall.
-    if (barrierMinDist(mx, my, barriers) - len / 2 > BARRIER_HALF_WIDTH + MIN_DOORWAY / 2 && !kartDiscHitsBlocked(map, mx, my)) {
+    // allowDoor=true: a shut door is a TEMPORARY wall — keep the doorway edge in the cached nav
+    // graph (the Dijkstra blocks/opens it per-query), or a barrier+door map could never route
+    // through a door that opens. Only lava/empty (permanent) seal the crossing here.
+    if (barrierMinDist(mx, my, barriers) - len / 2 > BARRIER_HALF_WIDTH + MIN_DOORWAY / 2 && !kartDiscHitsBlocked(map, mx, my, true)) {
         return { width: 2 * (barrierMinDist(mx, my, barriers) - BARRIER_HALF_WIDTH), x: Math.round(mx), y: Math.round(my) };
     }
     var steps = Math.max(2, Math.ceil(len / 2));
@@ -363,7 +368,7 @@ function doorwayCrossing(map, border) {
     for (var s = 0; s <= steps; s++) {
         var t = s / steps;
         var px = ax + (bx - ax) * t, py = ay + (by - ay) * t;
-        if (kartDiscHitsBlocked(map, px, py)) { continue; }
+        if (kartDiscHitsBlocked(map, px, py, true)) { continue; }
         var clr = barrierMinDist(px, py, barriers) - BARRIER_HALF_WIDTH;
         if (clr > best) { best = clr; bcx = px; bcy = py; }
     }
@@ -517,8 +522,12 @@ function getNavGraph(map) {
         var m = labelToRegion[ci];
         var label = labelOf(ci, x, y);
         if (m != null && m[label] != null) { return m[label]; }
-        var sp = cells[ci] && cells[ci].site; // pocket with no doorway: fall back to site-region
-        return regionId(ci, sp ? labelOf(ci, sp.x, sp.y) : "");
+        // The point sits in a split-cell PIECE no doorway touches — a sealed pocket (a wall
+        // walls it off from the cell's site + its only exit). Return -1 (unreachable), NOT the
+        // site's region: mapping it to the far, exit-bearing piece would falsely report a route
+        // the racer can't actually drive (it'd have to cross the wall). Callers treat <0 as no
+        // region. (Never grow the graph here — nav.count is fixed once the build finishes.)
+        return -1;
     }
 
     nav = {
@@ -596,12 +605,18 @@ function pushOffBarriers(map, pts) {
 // Is point (x,y) on ground a kart can actually sit on? A detour waypoint must land on
 // drivable terrain — never lava, an empty hole, or a (shut) door cell — so skirting a
 // wall whose END sits in lava doesn't route the line THROUGH the lava.
-function pointDrivable(map, x, y) {
+// allowDoor: treat a DOOR cell as drivable. A locked door is a TEMPORARY wall whose
+// passability the Dijkstra decides per-query (shut vs passableDoors/openDoorIds) — so the
+// cached nav graph must KEEP the door-adjacent doorway (doorwayCrossing passes allowDoor),
+// or a barrier+door map could never path through a door that later opens. Drawing/detour
+// callers leave allowDoor off (a shut door is a wall to skirt).
+function pointDrivable(map, x, y, allowDoor) {
     var ci = nearestCellIndex(map.cells, { x: x, y: y });
     var cell = map.cells[ci];
     if (cell == null) { return false; }
-    var DOOR = (c.tileMap.door != null) ? c.tileMap.door.id : -999;
-    return cell.id !== c.tileMap.lava.id && cell.id !== c.tileMap.empty.id && cell.id !== DOOR;
+    if (cell.id === c.tileMap.lava.id || cell.id === c.tileMap.empty.id) { return false; }
+    if (!allowDoor && cell.id === ((c.tileMap.door != null) ? c.tileMap.door.id : -999)) { return false; }
+    return true;
 }
 
 // A waypoint that gets leg a->b clear of the FIRST barrier it isn't clear of — whether it
@@ -1172,6 +1187,8 @@ function findPathToNearestGoal(map, point, options) {
         return null;
     }
     var start = nav.regionForPoint(startCell, point.x, point.y);
+    // <0 = the seed is in a sealed split-cell pocket (walled off with no doorway) -> unreachable.
+    if (start < 0) { return null; }
 
     var N = nav.count;
     var cost = new Array(N).fill(Infinity);
