@@ -41,7 +41,7 @@ Can chaochao ship as a [Discord Activity](https://docs.discord.com/developers/ac
 
 ---
 
-## Implementation plan (7 phases, ~7–8 dev-days to testable; +listing prereqs for public)
+## Implementation plan (8 phases, ~7–8 dev-days to testable; +listing prereqs & ~2–3d skin shop for public/monetized)
 
 ### Phase 0 — Portal & dev harness *(operator-gated; ~0.5d)*
 Create the Discord app, enable **Activities**, set **URL Mappings** (root `/` → tunnel host), stand up a `cloudflared`/`ngrok` tunnel to local `:3000`. See the operator recipe below.
@@ -66,6 +66,19 @@ Enable mobile in the portal; wire `--discord-safe-area-inset-*` (with `env()` fa
 
 ### Phase 7 — Listing prerequisites *(non-code; public-only)*
 Publish **Privacy Policy + ToS** (neither exists today — hard blocker for Discovery); app **verification** → fill Discovery settings → Enable Discovery; confirm content-policy compliance. No allowlist/partner gating remains.
+
+### Phase 8 — Skin shop (in-app purchases) *(~2–3d; depends on Phase 4)*
+Monetize cosmetics via Discord's Embedded App SDK IAP — the blessed model, a clean fit for the planned purchasable-skin catalogue (chaochao's native unlocks stay **gameplay rewards**; bought skins are a separate paid layer).
+
+- **Eligibility (operator, gating):** Enable Monetization for the app (verification + team/payout setup + age/region requirements — a stricter gate than running an Activity). Confirm the current revenue share when enabling — reported ~10% to Discord (you keep ~90%), but sources vary up to 30%, so verify.
+- **SKUs:** each purchasable skin = one **DURABLE** SKU (permanent entitlement). Reserve **CONSUMABLE** for any repeatable buys (none planned). Create SKUs in the portal (publish "Store and the API" or "API Only").
+- **Storefront:** build the shop UI inside the Activity (reuse the existing skin-hub/preview rendering — `skinRegistry.js`, recap/preview paths). List SKUs; on select call `discordSdk.commands.startPurchase(skuId)`.
+- **Grant flow:** subscribe to `ENTITLEMENT_CREATE`; **verify the entitlement server-side** via Discord's HTTP API ("trust the SDK, verify via API"), then write the unlock into the existing cosmetic-ownership store. The Discord entitlement → an unlock record for that player.
+- **Identity dependency:** entitlements exist only for Discord-authed players → requires Phase 4 (Discord token → Supabase session) so there's an account to attach ownership to. Honour [[cosmetic-persistence-invariant]]: signed-in = server-DB authoritative; never mirror paid unlocks through guest localStorage.
+- **Design guardrails:** prefer **Discord-exclusive** cosmetics over selling XP-unlockable skins (avoids pay-to-skip devaluing progression). Keep paid items purely cosmetic — no gameplay advantage.
+- **Caveat:** Activities are an additive revenue surface (thousands–tens-of-thousands of plays), not a primary funnel — size expectations accordingly.
+
+> **Advertising is NOT a Discord monetization path.** Third-party ad SDKs (chaochao's `ads.js` / gamemonetize) are CSP-blocked in the sandbox *and* off-policy; the only platform ad surface is Discord-run **Quests** (opt-in, Discord-controlled, not a dev lever). Gate ads off when `isDiscord` (Phase 3) and treat in-Activity ad revenue as zero. The skin shop is the monetization strategy for this build.
 
 ---
 
@@ -95,6 +108,7 @@ The scaffold can't be verified headlessly — it needs a real Discord app + a pu
 - **Auth bridge (Phase 4):** mint a Supabase session from the Discord token, or run Discord-authed players as a distinct lightweight identity? (Affects cross-device cosmetic persistence — see `cosmetic-persistence-invariant`.)
 - **Vendor vs. map (Phase 3):** vendor jQuery/Bootstrap locally (simplest, larger bundle) or add URL mappings (keeps CDNs). Recommend vendoring for the Discord build.
 - **Public listing:** decide whether/when to invest in Privacy Policy + ToS + verification.
+- **Skin shop (Phase 8):** Discord-exclusive cosmetics vs. selling XP-unlockable skins (recommend exclusive); confirm the live revenue share at monetization-enable time.
 
 ## Follow-up prompt (operator-injectable)
 
