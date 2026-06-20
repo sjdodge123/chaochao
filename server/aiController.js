@@ -18,6 +18,7 @@
 
 var c = require('./config.json');
 var cellGraph = require('./cellGraph.js');
+var segmentsCross = require('./geometry.js').segmentsCross; // barrier line-of-sight (checkpoint homing)
 var hazardsModule = require('./entities/hazards.js'); // for the MINE_SPENT phase constant
 
 // --- Tunables (Phase 6 will fold per-personality/difficulty scaling on top) ---
@@ -1502,6 +1503,17 @@ function decideAttack(bot, ctx, nav) {
 // skips !alive, so this just selects the antlion kind).
 function isAntlionH(h) { return h.isAntlion === true; }
 function isVortexH(h) { return h && h.isVortex === true && h.alive !== false; }
+// Does an author barrier cross the segment (ax,ay)->(bx,by)? Used to gate the checkpoint
+// homing so it never steers straight through a wall. No-op (false) on barrier-free maps.
+function barrierBetween(ctx, ax, ay, bx, by) {
+    var bars = ctx.map && ctx.map.barriers;
+    if (!Array.isArray(bars)) { return false; }
+    for (var i = 0; i < bars.length; i++) {
+        var w = bars[i];
+        if (w != null && segmentsCross(ax, ay, bx, by, w.x1, w.y1, w.x2, w.y2)) { return true; }
+    }
+    return false;
+}
 
 // Tactical land lunge: arm a double-tap dash (bot.lungePending) when the instant burst is
 // worth blowing the whole stamina bar. tryLandLunge (player.update, same tick) consumes the
@@ -2038,8 +2050,13 @@ function steerBot(bot, ctx, dt) {
         if (bot.secondWind == null && ai.doorFinalPoint == null && ctx.checkpoints != null) {
             var cpBest = null, cpBd = CHECKPOINT_HOME_RANGE;
             for (var cpi2 = 0; cpi2 < ctx.checkpoints.length; cpi2++) {
-                var cpd = mag(ctx.checkpoints[cpi2].x - bot.x, ctx.checkpoints[cpi2].y - bot.y);
-                if (cpd < cpBd) { cpBd = cpd; cpBest = ctx.checkpoints[cpi2]; }
+                var cpf = ctx.checkpoints[cpi2];
+                var cpd = mag(cpf.x - bot.x, cpf.y - bot.y);
+                // Only home onto a flag with clear LINE OF SIGHT — an author barrier between the
+                // bot and the flag means the straight homing vector would just jam it into the
+                // wall (the barrier-aware route already kept it on the reachable side; let that
+                // line carry it around until the flag is in the open).
+                if (cpd < cpBd && !barrierBetween(ctx, bot.x, bot.y, cpf.x, cpf.y)) { cpBd = cpd; cpBest = cpf; }
             }
             if (cpBest != null && cpBd > 0.001) {
                 desiredX = (cpBest.x - bot.x) / cpBd; desiredY = (cpBest.y - bot.y) / cpBd; sharpTurn = false;
