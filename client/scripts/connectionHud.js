@@ -25,8 +25,8 @@ var connHud = {
 	rtt: null,
 	pollingSince: 0,
 	pingTimer: null,
-	recoverTried: false,
-	recovering: false
+	recovering: false,
+	_boundEngine: null
 };
 
 var CONN_PING_MS = 2000;        // RTT sample cadence
@@ -73,12 +73,18 @@ function connectionHudBindTransport(sock) {
 		if (!eng) { return; }
 		connHud.transport = (eng.transport && eng.transport.name) || "connecting";
 		connectionHudMarkPolling();
-		// Fires when polling successfully upgrades to websocket.
-		eng.on("upgrade", function (t) {
-			connHud.transport = (t && t.name) || connHud.transport;
-			connectionHudMarkPolling();
-			connectionHudRender();
-		});
+		// One 'upgrade' listener per engine. bindTransport runs both directly from
+		// attach and again from the 'connect' handler, and the engine is recreated per
+		// (re)connect — so guard on the engine identity to avoid stacking listeners.
+		if (connHud._boundEngine !== eng) {
+			connHud._boundEngine = eng;
+			// Fires when polling successfully upgrades to websocket.
+			eng.on("upgrade", function (t) {
+				connHud.transport = (t && t.name) || connHud.transport;
+				connectionHudMarkPolling();
+				connectionHudRender();
+			});
+		}
 	} catch (e) { /* engine internals are best-effort */ }
 }
 
@@ -120,50 +126,59 @@ function connectionHudTick() {
 		connectionHudRender();
 		return;
 	}
-	// RTT sample via ack ping — independent of the gameplay stall watchdog.
+	// RTT sample via ack ping — independent of the gameplay stall watchdog. On an ack
+	// timeout (a half-open websocket whose pongs have stopped) blank the RTT rather than
+	// keep showing the last good value: a stale green latency would hide the very stall
+	// this badge exists to surface. Re-render on the ack so the change shows promptly.
 	var t0 = connHudNow();
 	try {
 		sock.timeout(CONN_PING_MS).emit("cc:netping", function (err) {
-			if (err) { return; } // ack timed out -> keep last rtt; render still flags polling
-			connHud.rtt = connHudNow() - t0;
+			connHud.rtt = err ? null : (connHudNow() - t0);
+			connectionHudRender();
 		});
 	} catch (e) { /* older client without .timeout(): skip RTT, transport still tracked */ }
 
 	connectionHudMarkPolling();
-	// Auto-recover: stuck on polling past the grace window, once per page session, and
-	// only when NOT racing (a reconnect blip mid-race is worse than the polling lag).
-	// During a race the badge stays tappable so the player can choose to recover.
+	// Auto-recover: stuck on polling past the grace window, at most once per tab session
+	// (the reload one-shot lives in connectionHudRecover), and only when NOT racing (a
+	// reload mid-race is worse than the polling lag). During a race the badge stays
+	// tappable so the player can choose to recover.
 	if (connHud.transport === "polling" && connHud.pollingSince &&
 		(connHudNow() - connHud.pollingSince) > CONN_POLL_STUCK_MS &&
-		!connHud.recoverTried && !connHud.recovering && !connectionHudIsRacing()) {
+		!connHud.recovering && !connectionHudIsRacing()) {
 		connectionHudRecover(false);
 	}
 	connectionHudRender();
 }
 
-// Force a WebSocket-first reconnect and re-join the room. The primary socket never
-// re-sends enterGame on its own (client.js's maintenance handler notes this), so we
-// re-emit it on the next connect — mirroring the pad-slot reconnect path.
-function connectionHudRecover() {
-	var sock = connHud.sock;
-	if (!sock || connHud.recovering) { return; }
-	connHud.recovering = true;
-	connHud.recoverTried = true;
-	var roomId = (typeof gameID !== "undefined") ? gameID : null;
-	sock.once("connect", function () {
-		connHud.recovering = false;
-		if (roomId != null) {
-			try { sock.emit("enterGame", roomId); } catch (e) { /* room re-join is best-effort */ }
-		}
-	});
-	// tryAllTransports keeps polling as a fallback, but the retry leads with websocket.
-	try { sock.io.opts.transports = ["websocket", "polling"]; } catch (e) { /* ignore */ }
-	try {
-		sock.disconnect();
-		sock.connect();
-	} catch (e) {
-		connHud.recovering = false;
+// Recover a degraded transport by reloading the page. A reload re-runs the whole
+// WebSocket-first connect + matchmake/join flow from scratch and preserves any
+// ?gameid= in the URL, so shared/private rooms re-join correctly — it's the same
+// recovery primitive the maintenance handler and the stall watchdog already use.
+//
+// We deliberately do NOT disconnect+reconnect the live socket: dropping the only
+// client in a room makes the server reap it (hostess.kickFromRoom deletes rooms at
+// clientCount 0), and the re-join would then bounce off roomNotFound to the join
+// page — kicking solo/private-room players out instead of repairing the transport.
+//
+// isManual = the player tapped the chip (always honoured). Automatic recovery runs
+// at most ONCE per tab session: if the reload lands us right back on long-polling the
+// network is simply blocking WebSocket, and reloading again every few seconds would
+// be a worse experience than living on polling with the warning shown.
+function connectionHudRecover(isManual) {
+	if (connHud.recovering) { return; }
+	if (!isManual) {
+		// Auto path needs the one-shot flag to avoid a reload loop on a WebSocket-blocked
+		// network. If storage is unreadable, don't auto-reload at all — under-recovering is
+		// safer than looping, and the player can still tap the chip to force a reload.
+		var alreadyRecovered = true;
+		try { alreadyRecovered = !!sessionStorage.getItem("connHudAutoRecovered"); } catch (e) { return; }
+		if (alreadyRecovered) { return; }
 	}
+	try { sessionStorage.setItem("connHudAutoRecovered", "1"); } catch (e) { /* best-effort */ }
+	connHud.recovering = true;
+	connectionHudRender();
+	try { window.location.reload(); } catch (e) { connHud.recovering = false; }
 }
 
 function connectionHudRender() {
