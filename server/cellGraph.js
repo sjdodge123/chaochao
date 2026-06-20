@@ -845,6 +845,44 @@ function getLilyPaddedCells(map) {
     return result;
 }
 
+// Speed boons — the config.boons that PROPEL a racer along the route (Dash Arrows, Launch
+// Pad, Barrel Cannon = a strong directed launch; Slipstream, Slingshot Rings = sustained
+// speed) — make their cell worth routing THROUGH, the mirror image of avoiding a hazard.
+// They don't change connectivity (unlike warp/zip's new edges or a lily pad turning water
+// solid); they just DISCOUNT their own cell's traversal cost (multiplier < 1), so Dijkstra
+// leans the racing line + bots toward a boost when it isn't a big detour. Defensive boons
+// (Guard Halo, Second Wind, Recharge Spring) don't speed the line and warp/zip/lily are
+// modelled elsewhere, so those stay neutral (weight 1, no entry). cellIndex -> multiplier,
+// cached non-enumerably. Applied structurally in findPathToNearestGoal so the fairness
+// overlay, the bots, and the par-time estimate all lean toward boosts identically.
+function boonRouteMult(id) {
+    var b = c.boons || {};
+    var DASH = b.dashArrows && b.dashArrows.id, LAUNCH = b.launchPad && b.launchPad.id, CANNON = b.barrelCannon && b.barrelCannon.id;
+    var SLIP = b.slipstream && b.slipstream.id, RINGS = b.slingshotRings && b.slingshotRings.id;
+    if (id === DASH || id === LAUNCH || id === CANNON) { return 0.7; } // strong directed launch
+    if (id === SLIP || id === RINGS) { return 0.8; }                   // sustained speed help
+    return 1;                                                          // defensive / shortcut / not a boon
+}
+function getBoonRouteWeights(map) {
+    if (!map || !Array.isArray(map.cells)) { return null; }
+    if (map._boonRouteWeights !== undefined) { return map._boonRouteWeights; }
+    var result = null;
+    var hazards = Array.isArray(map.hazards) ? map.hazards : [];
+    var cells = map.cells;
+    for (var i = 0; i < hazards.length; i++) {
+        var hz = hazards[i];
+        if (hz == null || typeof hz.x !== "number" || typeof hz.y !== "number" || !inWorld(hz.x, hz.y)) { continue; }
+        var m = boonRouteMult(hz.id);
+        if (m >= 1) { continue; }
+        var ci = nearestCellIndex(cells, { x: hz.x, y: hz.y });
+        if (cells[ci] == null) { continue; }
+        if (result == null) { result = {}; }
+        if (result[ci] == null || m < result[ci]) { result[ci] = m; } // strongest boost wins on overlap
+    }
+    Object.defineProperty(map, '_boonRouteWeights', { value: result, enumerable: false, writable: true, configurable: true });
+    return result;
+}
+
 // Minimal binary min-heap of { node, cost }. A* / Dijkstra over ~250 cells is
 // cheap, but bots re-path repeatedly so a heap keeps it linearithmic.
 function Heap() {
@@ -943,6 +981,7 @@ function findPathToNearestGoal(map, point, options) {
     // Lily pads make their water cell cheap to skim — always on (a pad is better FOOTING, not a
     // shortcut edge, so it's part of the honest driving route even in the no-shortcut measure).
     var lilyCells = getLilyPaddedCells(map);
+    var boonW = getBoonRouteWeights(map); // speed-boon cells the route should lean toward (mult < 1)
     var LAVA = c.tileMap.lava.id;
     var GOAL = c.tileMap.goal.id;
     var EMPTY = c.tileMap.empty.id;
@@ -1116,7 +1155,9 @@ function findPathToNearestGoal(map, point, options) {
             // A lily pad over this water cell makes it solid to skim — price it like ~ground
             // instead of deep water so bots route ACROSS a pad path rather than around the water.
             var tw = (lilyCells != null && lilyCells[navCell(v)]) ? LILY_PADDED_WEIGHT : tileWeight(cellV.id);
-            var nc = cost[u] + step * tw * cellJitter(cellV.site.voronoiId) * pen * tight * barr;
+            // Speed boon in this cell -> discount its cost so the route leans toward the boost.
+            var bw = (boonW != null && boonW[navCell(v)] != null) ? boonW[navCell(v)] : 1;
+            var nc = cost[u] + step * tw * bw * cellJitter(cellV.site.voronoiId) * pen * tight * barr;
             if (nc < cost[v]) {
                 cost[v] = nc;
                 geo[v] = geo[u] + step;

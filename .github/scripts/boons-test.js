@@ -1214,6 +1214,45 @@ try {
         const onGrass = utils.validateMap(vmap([{ id: LILY.id, x: COLS[1], y: ROWS[1], radius: 30 }]), config);
         check(onGrass.valid === false && /must sit on water/.test(onGrass.reason || ''), 'a lily pad on dry ground is rejected (must sit on water)');
     }
+
+    // --- [R] Route weight: a speed boon steers the shared racing line toward the boost ---
+    // cellGraph.getBoonRouteWeights discounts a speed boon's cell so the fairness overlay AND
+    // the bots (one shared route) lean toward the boost when it isn't a big detour — the mirror
+    // image of avoiding a hazard. Defensive boons carry no route weight and must NOT move it.
+    console.log('[R] speed boons weight the shared racing line');
+    {
+        const GRASS_ = config.tileMap.fast.id, LAVA_ = config.tileMap.lava.id, GOAL_ = config.tileMap.goal.id;
+        const xs = [120, 300, 480, 660, 840, 1020, 1200];
+        // Two grass lanes (y=180 top / y=560 bottom) split by a lava wall, joined only at the
+        // left start column and the right goal column — equal geometry, so the lane is a free
+        // choice the boon weight can tip.
+        function twoLane(haz) {
+            const s = [];
+            const push = (x, y, id) => s.push({ x: x, y: y, id: id });
+            push(120, 180, GRASS_); push(120, 370, GRASS_); push(120, 560, GRASS_);
+            for (let i = 1; i < xs.length - 1; i++) { push(xs[i], 180, GRASS_); push(xs[i], 560, GRASS_); push(xs[i], 370, LAVA_); }
+            push(1200, 180, GRASS_); push(1200, 370, GOAL_); push(1200, 560, GRASS_);
+            return mapFormat.reconstruct({ bbox: { xl: 0, xr: config.worldWidth, yt: 0, yb: config.worldHeight }, sites: s, hazards: haz || [], startEdges: ['left'], name: 'boonlane', author: 'test', id: 'boonlane-' + (haz && haz.length ? 'h' : 'p') });
+        }
+        function laneOf(map, r) {
+            const idx = cellGraph.getAdjacency(map).idToIndex;
+            const ys = r.path.map(v => map.cells[idx[v]].site.y);
+            return ys.filter(y => y < 300).length > ys.filter(y => y > 440).length ? 'top' : 'bottom';
+        }
+        const plain = twoLane();
+        const base = cellGraph.findPathToNearestGoal(plain, { x: 120, y: 370 }, { noiseAmount: 0 });
+        check(base != null, 'two-lane map: a route to the goal exists');
+        const baseLane = base ? laneOf(plain, base) : 'top';
+        const otherY = baseLane === 'top' ? 560 : 180; // the lane the bare route did NOT pick
+        const dashMap = twoLane([{ id: DASH.id, x: 660, y: otherY, angle: 0 }]);
+        const dashRoute = cellGraph.findPathToNearestGoal(dashMap, { x: 120, y: 370 }, { noiseAmount: 0 });
+        check(dashRoute != null && laneOf(dashMap, dashRoute) !== baseLane,
+            'a Dash Arrows boon off the default lane steers the racing line onto the boost lane');
+        const haloMap = twoLane([{ id: config.boons.guardHalo.id, x: 660, y: otherY }]);
+        const haloRoute = cellGraph.findPathToNearestGoal(haloMap, { x: 120, y: 370 }, { noiseAmount: 0 });
+        check(haloRoute != null && laneOf(haloMap, haloRoute) === baseLane,
+            'a defensive boon (Guard Halo) carries no route weight — the line does not move');
+    }
 } finally {
     Date.now = realNow;
     Math.random = realRandom;
