@@ -20,7 +20,12 @@ name: Auto-merge
 on:
   pull_request:
     branches: [main]
-    types: [opened, reopened, synchronize, ready_for_review]
+    types: [opened, reopened, synchronize, ready_for_review, labeled, unlabeled]
+  # Re-attempt arming when a review lands — covers a sensitive PR approved later and
+  # any transient failure to arm on the initial event. `gh pr merge --auto` is
+  # idempotent, so re-running on an already-armed PR is a harmless no-op.
+  pull_request_review:
+    types: [submitted]
 
 permissions:
   contents: write

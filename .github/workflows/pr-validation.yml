@@ -17,7 +17,9 @@ on:
     # ticks it through the real engine, so these code-oriented checks (bundle
     # build, JS syntax) add nothing. A mixed code+map PR still has non-map files,
     # so paths-ignore does NOT skip it and these checks run as normal. Safe to skip
-    # because main has no required status checks (only a code-owner review gates merge).
+    # for pure-map PRs because the single required status check on main is
+    # `merge-gate` (see merge-gate.yml), which waits for whichever CI workflow
+    # actually ran on the PR — map-submission.yml here — not for this one.
     paths-ignore:
       - 'client/maps/**'
 
@@ -390,8 +392,10 @@ jobs:
           echo "Changed files:"; echo "$files"
           # client/scripts/** = the render hot path; server/compressor.js = the
           # per-tick payload shape the client decodes; server/config.json = tile/FX
-          # tuning the client renders from. Any of these can move scripting ms/frame.
-          if echo "$files" | grep -qE '^(client/scripts/|server/compressor\.js$|server/config\.json$)'; then
+          # tuning the client renders from; the perf harness/compare scripts
+          # themselves must re-run the gate so changes to the measurement are
+          # exercised. Any of these can move (or change how we read) scripting ms/frame.
+          if echo "$files" | grep -qE '^(client/scripts/|server/compressor\.js$|server/config\.json$|\.github/scripts/perf-client\.js$|\.github/scripts/perf-compare\.js$)'; then
             echo "render=true" >> "$GITHUB_OUTPUT"
             echo "-> render-affecting changes detected; client-perf will run."
           else

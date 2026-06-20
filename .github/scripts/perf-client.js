@@ -119,12 +119,19 @@ function bootServer() {
             cwd: repoRoot,
             env: { ...process.env, PORT: String(PORT), NODE_ENV: 'development', CHAO_PERF_OVERRIDE: OVERRIDE },
         });
-        let out = '';
-        const onData = (d) => { out += d.toString(); if (/listening on/i.test(out)) resolve(srv); };
+        let out = '', settled = false;
+        const done = (fn, arg) => { if (settled) return; settled = true; clearTimeout(timer); fn(arg); };
+        const onData = (d) => { out += d.toString(); if (/listening on/i.test(out)) done(resolve, srv); };
         srv.stdout.on('data', onData);
         srv.stderr.on('data', onData);
-        srv.on('exit', (c) => reject(new Error(`server exited early (${c}):\n${out}`)));
-        setTimeout(() => reject(new Error(`server boot timeout:\n${out}`)), 20000);
+        srv.on('exit', (c) => done(reject, new Error(`server exited early (${c}):\n${out}`)));
+        // On timeout, kill the spawned server so it can't linger — the outer finally
+        // only kills `srv` once this promise RESOLVES, so a boot that never resolves
+        // would otherwise leak the child.
+        const timer = setTimeout(() => {
+            try { srv.kill('SIGKILL'); } catch (e) {}
+            done(reject, new Error(`server boot timeout:\n${out}`));
+        }, 20000);
     });
 }
 

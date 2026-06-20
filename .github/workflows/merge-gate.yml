@@ -59,9 +59,10 @@ jobs:
               'check-codex-drift',     // warn-only Codex drift nudge (job name)
               'codex-drift-check',     // …also match by workflow name, just in case
             ]);
-            // Precise: matches the advisory render gate and any codex-drift variant,
-            // but NOT the required `perf-tick-budget` server-budget test.
-            const ADVISORY_RE = /^client-perf$|codex-drift/i;
+            // Exact name match only — no broad pattern. (A regex like /codex-drift/
+            // would silently exclude a FUTURE required check that happened to contain
+            // that substring; the explicit set above is the single source of truth.)
+            const isAdvisory = (name) => ADVISORY.has(name);
 
             const pr = context.payload.pull_request;
             const { owner, repo } = context.repo;
@@ -77,13 +78,15 @@ jobs:
               owner, repo, pull_number: pr.number, per_page: 100,
             });
             const paths = files.map(f => f.filename);
+            const touchesMap = paths.some(p => p.startsWith('client/maps/'));
+            const touchesNonMap = paths.some(p => !p.startsWith('client/maps/'));
             // Server-created map PRs use a `mapchange-…` branch and an INSERT/UPDATE
-            // title; manual map adds touch only client/maps/*.json. Any of these = a
-            // map submission.
+            // title. But ANY PR that touches client/maps/** is treated as a map
+            // submission — a mixed map+code PR must NOT slip past the content gate
+            // just because it also changed a non-map file.
             const isMapBranch = /^mapchange-/.test(branch);
             const isMapTitle = /^(INSERT|UPDATE) - /.test(title);
-            const onlyMapFiles = paths.length > 0 && paths.every(p => p.startsWith('client/maps/'));
-            const isMap = isMapBranch || isMapTitle || onlyMapFiles;
+            const isMap = isMapBranch || isMapTitle || touchesMap;
 
             const sensitive = isProd || isMap;
             const reasons = [];
@@ -94,19 +97,20 @@ jobs:
               const reviews = await github.paginate(github.rest.pulls.listReviews, {
                 owner, repo, pull_number: pr.number, per_page: 100,
               });
-              // Latest review state per reviewer; an owner APPROVED that hasn't been
-              // dismissed/superseded satisfies the gate.
-              const latest = new Map();
-              for (const r of reviews) {
-                if (r.user && (r.state === 'APPROVED' || r.state === 'CHANGES_REQUESTED' || r.state === 'DISMISSED')) {
-                  latest.set(r.user.login, r.state);
-                }
-              }
-              const approved = OWNER_APPROVERS.some(u => latest.get(u) === 'APPROVED');
+              // The approval must be on the CURRENT head commit. GitHub does NOT
+              // auto-dismiss a review when new commits are pushed, so without the
+              // commit_id check an owner could approve, then more changes land, and a
+              // stale approval would still let the PR merge. Tying it to pr.head.sha
+              // forces a fresh approval after every push to a sensitive PR.
+              const approved = reviews.some(r =>
+                r.state === 'APPROVED' &&
+                r.commit_id === sha &&
+                r.user && OWNER_APPROVERS.includes(r.user.login)
+              );
               if (!approved) {
                 core.setFailed(
-                  `This PR requires explicit approval from @${OWNER_APPROVERS[0]} before it can merge ` +
-                  `— reason: ${reasons.join(' + ')}. Approve the PR (a review approval) and this gate turns green.`
+                  `This PR requires explicit approval from @${OWNER_APPROVERS[0]} on the latest commit before it can merge ` +
+                  `— reason: ${reasons.join(' + ')}. Approve the PR (a review approval on the current head) and this gate turns green.`
                 );
                 return;
               }
@@ -122,7 +126,22 @@ jobs:
             const MAX_WAIT_MS = 18 * 60 * 1000;
             const POLL_MS = 20 * 1000;
             const deadline = Date.now() + MAX_WAIT_MS;
-            const isAdvisory = (name) => ADVISORY.has(name) || ADVISORY_RE.test(name);
+
+            // EXPECTED-JOB GATE (not just "observed checks are all green"): we will not
+            // trust an all-complete reading until the jobs we KNOW must run on this PR
+            // have actually registered. Otherwise a poll in the sub-second window
+            // before a job posts its check run could see "0 pending" and pass early.
+            // The sentinels are the central, always-present job of each CI workflow:
+            //   • non-map files changed -> pr-validation runs -> expect `smoke-test`
+            //     (all pr-validation jobs are needs-free, so they register together;
+            //      smoke-test present => the whole suite registered)
+            //   • client/maps/** changed -> map-submission runs -> expect `review`
+            // If a sentinel is renamed the gate blocks (times out) rather than passing
+            // blind — fail-safe, not fail-open. Keep these in sync with the CI jobs.
+            const expectedSentinels = [];
+            if (touchesNonMap) expectedSentinels.push('smoke-test');
+            if (touchesMap) expectedSentinels.push('review');
+            core.info(`Expecting sentinel job(s) to register: [${expectedSentinels.join(', ') || '(none)'}].`);
 
             const collect = async () => {
               const runs = await github.paginate(github.rest.checks.listForRef, {
@@ -149,21 +168,27 @@ jobs:
             };
 
             let items = [];
-            let prevCount = -1; // require the completed set to be STABLE across two
-                                // polls before trusting it — guards the brief window
-                                // where not all jobs have registered as check runs yet,
-                                // so we can't "pass" before a still-unregistered job appears.
             while (true) {
               items = await collect();
+              const present = new Set(items.map(i => i.name));
+              const missingSentinels = expectedSentinels.filter(s => !present.has(s));
               const pending = items.filter(i => !i.done);
-              const settled = items.length > 0 && pending.length === 0 && items.length === prevCount;
-              if (settled) break;
-              prevCount = (pending.length === 0) ? items.length : -1;
+              // Ready ONLY when every expected sentinel has registered AND nothing is
+              // still running. Sentinels-present rules out the early-pass race; the
+              // pending check rules out passing while a job is in flight.
+              const ready = missingSentinels.length === 0 && pending.length === 0;
+              if (ready) break;
               if (Date.now() > deadline) {
-                core.setFailed(`Timed out waiting for CI checks to finish: still pending [${pending.map(i => i.name).join(', ') || '(none reported yet)'}].`);
+                const why = missingSentinels.length
+                  ? `expected job(s) never registered: [${missingSentinels.join(', ')}] (renamed? CI never triggered?)`
+                  : `still pending [${pending.map(i => i.name).join(', ') || '(none)'}]`;
+                core.setFailed(`Timed out waiting for CI: ${why}.`);
                 return;
               }
-              core.info(`Waiting on ${pending.length} pending / ${items.length} total check(s): [${pending.map(i => i.name).join(', ') || '(none reported yet)'}] — re-poll in ${POLL_MS / 1000}s`);
+              const waitingFor = missingSentinels.length
+                ? `sentinels not yet registered [${missingSentinels.join(', ')}]`
+                : `${pending.length} pending [${pending.map(i => i.name).join(', ')}]`;
+              core.info(`Waiting: ${waitingFor} (${items.length} non-advisory check(s) seen) — re-poll in ${POLL_MS / 1000}s`);
               await new Promise(r => setTimeout(r, POLL_MS));
             }
 
