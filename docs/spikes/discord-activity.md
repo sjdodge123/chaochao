@@ -113,7 +113,7 @@ Show who's talking, in-game — the touch that makes the Activity feel genuinely
 - **Scope:** add `rpc.voice.read` to the `authorize()` scopes (wire in Phase 4).
 - **Subscribe:** after auth, get the voice channel id (`sdk.channelId`) and `sdk.subscribe('SPEAKING_START', {channel_id}, …)` / `'SPEAKING_STOP'`.
 - **Map:** Discord `user_id` → in-game kart via the Phase 5 participant↔player mapping; toggle an `isSpeaking` flag per player (server-broadcast so all clients render it, or client-local if the indicator is only for the local view).
-- **Render:** a speaking indicator on the kart — reuse an existing draw path (a pulsing underglow ring like the team glow, or a small mic glyph above the kart in `draw.js` / `draw_skins.js`). Gate on `isDiscord`; web/portal builds unaffected.
+- **Render (two surfaces, like other Discord Activities):** (a) a speaking indicator **on the kart** — reuse an existing draw path (a pulsing underglow ring like the team glow, or a small mic glyph above the kart in `draw.js` / `draw_skins.js`); and (b) an optional **voice tray** — a small row of participant avatars (`cdn.discordapp.com`, already allowlisted) that highlight the active speaker. Both gate on `isDiscord`; web/portal builds unaffected.
 - **Caveat:** events fire only for the subscribed channel and need scope consent — degrade silently if denied. Confirm `SPEAKING_*` is exposed by the current SDK during build (historically gated; supported for Activities now, but verify).
 
 ### Phase 6 — Mobile polish *(~1d; mobile enabled per operator choice)*
