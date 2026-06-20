@@ -250,6 +250,61 @@ console.log('[E] validateMap rejects a goal sealed off by a barrier');
     check('full-height mid wall makes the goal unreachable -> rejected', utils.validateMap(build(wall), config).valid === false);
 }
 
+// --- [F] thickness-aware nav: the DRAWN waypoints never cross a wall ----------
+// INVARIANT guard for the shared racing line cellGraph.pathWaypoints(map, route.path) (fairness
+// overlay AND bots). Author barriers are handled STRUCTURALLY by the nav graph now (cut doorways
+// + split cells), so a plain findPathToNearestGoal (no barrierEdges hint) must route around a
+// wall AND the drawn doorway-to-doorway line must clear it — including a PARTIAL wall whose free
+// end terminates inside a cell. (A regular grid can't reproduce D Day's dense "wall-ends-in-lava"
+// cluster that motivated the rework — that needs the irregular under-connected geometry, exercised
+// by client/maps/DDay.json through validate-content — but this still locks the never-cross-a-wall
+// property against a future gross regression in the waypoint path.)
+console.log('[F] pathWaypoints never cross an author wall (structural nav)');
+{
+    const cellGraph = require(path.join(repoRoot, 'server', 'cellGraph.js'));
+    const segCross = require(path.join(repoRoot, 'server', 'geometry.js')).segmentsCross;
+    const W = config.worldWidth, H = config.worldHeight;
+    const cols = 7, rows = 5;
+    const sites = [];
+    for (let r = 0; r < rows; r++) {
+        for (let cc = 0; cc < cols; cc++) {
+            const isGoal = (cc === cols - 1 && r === (rows >> 1));
+            sites.push({ x: 60 + cc * ((W - 120) / (cols - 1)), y: 60 + r * ((H - 120) / (rows - 1)), id: isGoal ? config.tileMap.goal.id : config.tileMap.fast.id });
+        }
+    }
+    const bbox = { xl: 0, xr: W, yt: 0, yb: H };
+    const step = (W - 120) / (cols - 1);
+    const wallX = 60 + 3.5 * step; // on the border between the two middle columns (cuts doorways)
+    function freshMap(barriers) {
+        const m = mapFormat.reconstruct({ bbox: bbox, sites: sites.map(s => ({ x: s.x, y: s.y, id: s.id })) });
+        if (barriers) { m.barriers = barriers; }
+        return m;
+    }
+    function waypointWallCrossings(map, route) {
+        const wp = cellGraph.pathWaypoints(map, route.path);
+        let n = 0;
+        for (let i = 0; i + 1 < wp.length; i++) {
+            for (const b of (map.barriers || [])) {
+                if (segCross(wp[i].x, wp[i].y, wp[i + 1].x, wp[i + 1].y, b.x1, b.y1, b.x2, b.y2)) { n++; }
+            }
+        }
+        return n;
+    }
+    const start = { x: 60, y: H / 2 };
+    // (a) Full wall with a top + bottom gap: structural nav (NO barrierEdges option) detours and
+    //     the drawn waypoints clear the bar.
+    const gapped = freshMap([{ x1: wallX, y1: H * 0.22, x2: wallX, y2: H * 0.78, style: 'wall' }]);
+    const rGap = cellGraph.findPathToNearestGoal(gapped, start);
+    check('structural nav reaches the goal past a gapped wall', rGap != null);
+    check('drawn waypoints clear the gapped wall (0 crossings)', rGap != null && waypointWallCrossings(gapped, rGap) === 0);
+    // (b) PARTIAL wall: enters from the bottom edge and its free end terminates mid-map inside a
+    //     cell — the case that used to let the doorway-to-doorway line cut the bar on D Day.
+    const partial = freshMap([{ x1: wallX, y1: H * 0.78, x2: wallX, y2: H * 0.46, style: 'wall' }]);
+    const rPart = cellGraph.findPathToNearestGoal(partial, start);
+    check('structural nav reaches the goal past a partial wall', rPart != null);
+    check('drawn waypoints clear the partial wall (0 crossings)', rPart != null && waypointWallCrossings(partial, rPart) === 0);
+}
+
 if (failures > 0) {
     console.error('\nbarriers-test FAILED (' + failures + ' assertion(s)).');
     process.exit(1);

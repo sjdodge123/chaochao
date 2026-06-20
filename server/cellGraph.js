@@ -339,12 +339,27 @@ function kartDiscHitsBlocked(map, x, y) {
 // wall body). The argmax point {x,y} is the crossing the drawn line and the bot thread —
 // always kart-clear of the wall, so the leg through it never overlaps the bar. width 0 (no
 // kart-safe point) means a wall/lava seals the doorway.
+//
+// NOTE the returned `width` is a CLEARANCE-derived diameter, not the Voronoi border length —
+// so the downstream KART_WIDTH (cut) and MIN_DOORWAY (tight) gates read a doorway's real
+// kart-fit, which is the point: a short border with open space is NOT tight, and a wall body
+// eating into a wide border IS. (Lava only seals — width 0 when no rim-clear sample exists;
+// it doesn't otherwise shrink the width, since lava is already a cell-level block in routing.)
 function doorwayCrossing(map, border) {
     var barriers = map.barriers;
     var ax = border.va.x, ay = border.va.y, bx = border.vb.x, by = border.vb.y;
+    var mx = (ax + bx) / 2, my = (ay + by) / 2;
     var len = Math.hypot(bx - ax, by - ay);
+    // Fast path: when the WHOLE border sits well clear of every wall (the nearest barrier to
+    // the midpoint is farther than half the border plus a comfortable doorway), no wall
+    // constrains any point of it — every point is wide-open, so the midpoint is a valid widest
+    // crossing and one lava-disc test there is enough. Skips the per-sample sweep (the costly
+    // 9x-nearestCell-per-step part) for the many open doorways far from any author wall.
+    if (barrierMinDist(mx, my, barriers) - len / 2 > BARRIER_HALF_WIDTH + MIN_DOORWAY / 2 && !kartDiscHitsBlocked(map, mx, my)) {
+        return { width: 2 * (barrierMinDist(mx, my, barriers) - BARRIER_HALF_WIDTH), x: Math.round(mx), y: Math.round(my) };
+    }
     var steps = Math.max(2, Math.ceil(len / 2));
-    var best = -Infinity, bcx = (ax + bx) / 2, bcy = (ay + by) / 2;
+    var best = -Infinity, bcx = mx, bcy = my;
     for (var s = 0; s <= steps; s++) {
         var t = s / steps;
         var px = ax + (bx - ax) * t, py = ay + (by - ay) * t;
@@ -381,7 +396,7 @@ function getNavGraph(map) {
         nav = {
             count: cells.length, cellOf: null, regionsOfCell: null,
             neighbors: adj.neighbors, doorways: adj.doorways,
-            crossings: null, cellPairCrossing: null,
+            cellPairCrossing: null,
             regionForPoint: function (ci) { return ci; }
         };
         Object.defineProperty(map, '_navGraph', { value: nav, enumerable: false, writable: true, configurable: true });
@@ -464,9 +479,10 @@ function getNavGraph(map) {
     }
 
     var neighbors = adj.neighbors;
-    var rNeighbors = [], rDoorways = [], rCrossings = [];
+    var rNeighbors = [], rDoorways = [];
     var cellPairCrossing = {}; // "ca|cb" (cell indices) -> {x,y,width} widest kart-fitting crossing
-    function ensureNode(n) { while (rNeighbors.length <= n) { rNeighbors.push([]); rDoorways.push([]); rCrossings.push([]); } }
+    var crossCache = {};       // unordered pair "min|max" -> doorwayCrossing (one per border, both directions reuse)
+    function ensureNode(n) { while (rNeighbors.length <= n) { rNeighbors.push([]); rDoorways.push([]); } }
     for (var ca = 0; ca < cells.length; ca++) {
         var cellA = cells[ca];
         if (!cellA || !cellA.site) { continue; }
@@ -478,7 +494,11 @@ function getNavGraph(map) {
             // Thickness-aware passability: a wall (or lava) leaving no kart-wide gap on the
             // shared border SEALS the doorway (no edge between these pieces); otherwise the
             // kart threads the widest kart-clear point, which becomes this edge's crossing.
-            var cross = doorwayCrossing(map, border);
+            // The crossing is a property of the undirected border, so compute it once and
+            // reuse it for the reverse direction (cb->ca) instead of re-sampling.
+            var pairKey = (ca < cb) ? (ca + "|" + cb) : (cb + "|" + ca);
+            var cross = crossCache[pairKey];
+            if (cross === undefined) { cross = crossCache[pairKey] = doorwayCrossing(map, border); }
             if (cross.width < KART_WIDTH) { continue; }
             // Label each piece by the side of its splitting walls the CROSSING POINT lies on
             // (not the border midpoint, which can fall on the wrong side of a partial wall).
@@ -487,7 +507,6 @@ function getNavGraph(map) {
             ensureNode(rA); ensureNode(rB);
             rNeighbors[rA].push(rB);
             rDoorways[rA].push(cross.width);
-            rCrossings[rA].push({ x: cross.x, y: cross.y });
             var key = ca + "|" + cb, had = cellPairCrossing[key];
             if (had == null || cross.width > had.width) { cellPairCrossing[key] = { x: cross.x, y: cross.y, width: cross.width }; }
         }
@@ -504,7 +523,7 @@ function getNavGraph(map) {
 
     nav = {
         count: cellOf.length, cellOf: cellOf, regionsOfCell: regionsOfCell,
-        neighbors: rNeighbors, doorways: rDoorways, crossings: rCrossings,
+        neighbors: rNeighbors, doorways: rDoorways,
         cellPairCrossing: cellPairCrossing, regionForPoint: regionForPoint
     };
     Object.defineProperty(map, '_navGraph', { value: nav, enumerable: false, writable: true, configurable: true });
@@ -854,8 +873,13 @@ function getLilyPaddedCells(map) {
 // (Guard Halo, Second Wind, Recharge Spring) don't speed the line and warp/zip/lily are
 // modelled elsewhere, so those stay neutral (weight 1, no entry). cellIndex -> multiplier,
 // cached non-enumerably. Applied structurally in findPathToNearestGoal so the fairness
-// overlay, the bots, and the par-time estimate all lean toward boosts identically.
+// overlay AND the bots pick the same boost-leaning route. (estimatePathTime — the par clock —
+// deliberately does NOT credit the transient boost: it walks the chosen path with honest tile
+// physics, so a boon steers WHICH line par measures but never makes that line's par read
+// artificially fast. The discount is mild — 0.7/0.8 — so it only diverts onto a boost that is
+// barely a detour, keeping the par it then measures close to the bare line's.)
 function boonRouteMult(id) {
+    if (id == null) { return 1; } // malformed hazard with no id is not a boon
     var b = c.boons || {};
     var DASH = b.dashArrows && b.dashArrows.id, LAUNCH = b.launchPad && b.launchPad.id, CANNON = b.barrelCannon && b.barrelCannon.id;
     var SLIP = b.slipstream && b.slipstream.id, RINGS = b.slingshotRings && b.slingshotRings.id;
@@ -875,11 +899,45 @@ function getBoonRouteWeights(map) {
         var m = boonRouteMult(hz.id);
         if (m >= 1) { continue; }
         var ci = nearestCellIndex(cells, { x: hz.x, y: hz.y });
-        if (cells[ci] == null) { continue; }
+        var cell = cells[ci];
+        if (cell == null) { continue; }
+        // A boon over a non-drivable cell (lava/empty/shut door) is inert — the cell is never
+        // entered in routing — so don't record a (dead) discount for it (mirrors lily's water gate).
+        var DOOR = (c.tileMap.door != null) ? c.tileMap.door.id : -999;
+        if (cell.id === c.tileMap.lava.id || cell.id === c.tileMap.empty.id || cell.id === DOOR) { continue; }
+        // Keep the boon's POINT, not just its cell: when a barrier SPLITS the cell, the discount
+        // must reach only the region piece the boon actually sits in (getBoonRegionWeights resolves
+        // it), never the walled-off side.
         if (result == null) { result = {}; }
-        if (result[ci] == null || m < result[ci]) { result[ci] = m; } // strongest boost wins on overlap
+        (result[ci] || (result[ci] = [])).push({ m: m, x: hz.x, y: hz.y });
     }
     Object.defineProperty(map, '_boonRouteWeights', { value: result, enumerable: false, writable: true, configurable: true });
+    return result;
+}
+
+// Speed-boon discounts keyed by nav-graph REGION NODE (not raw cell index): for a cell a
+// barrier splits into pieces, the boost reaches only the piece that actually holds the boon —
+// the kart on the walled-off side gets no pull toward a boost it can't reach. region node ->
+// strongest (smallest) multiplier; cached non-enumerably. On a barrier-free map regionForPoint
+// is the identity, so this is just the per-cell discount keyed by cell index.
+function getBoonRegionWeights(map) {
+    if (!map || !Array.isArray(map.cells)) { return null; }
+    if (map._boonRegionWeights !== undefined) { return map._boonRegionWeights; }
+    var cellW = getBoonRouteWeights(map);
+    var result = null;
+    if (cellW != null) {
+        var nav = getNavGraph(map);
+        for (var ci in cellW) {
+            var entries = cellW[ci];
+            for (var j = 0; j < entries.length; j++) {
+                var en = entries[j];
+                var node = nav.regionForPoint(+ci, en.x, en.y);
+                if (result == null) { result = {}; }
+                if (result[node] == null || en.m < result[node]) { result[node] = en.m; }
+            }
+        }
+    }
+    Object.defineProperty(map, '_boonRegionWeights', { value: result, enumerable: false, writable: true, configurable: true });
     return result;
 }
 
@@ -981,7 +1039,7 @@ function findPathToNearestGoal(map, point, options) {
     // Lily pads make their water cell cheap to skim — always on (a pad is better FOOTING, not a
     // shortcut edge, so it's part of the honest driving route even in the no-shortcut measure).
     var lilyCells = getLilyPaddedCells(map);
-    var boonW = getBoonRouteWeights(map); // speed-boon cells the route should lean toward (mult < 1)
+    var boonW = getBoonRegionWeights(map); // region node -> speed-boon discount (< 1); split-cell aware
     var LAVA = c.tileMap.lava.id;
     var GOAL = c.tileMap.goal.id;
     var EMPTY = c.tileMap.empty.id;
@@ -1156,7 +1214,7 @@ function findPathToNearestGoal(map, point, options) {
             // instead of deep water so bots route ACROSS a pad path rather than around the water.
             var tw = (lilyCells != null && lilyCells[navCell(v)]) ? LILY_PADDED_WEIGHT : tileWeight(cellV.id);
             // Speed boon in this cell -> discount its cost so the route leans toward the boost.
-            var bw = (boonW != null && boonW[navCell(v)] != null) ? boonW[navCell(v)] : 1;
+            var bw = (boonW != null && boonW[v] != null) ? boonW[v] : 1; // v is the region node
             var nc = cost[u] + step * tw * bw * cellJitter(cellV.site.voronoiId) * pen * tight * barr;
             if (nc < cost[v]) {
                 cost[v] = nc;
