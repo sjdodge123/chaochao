@@ -137,6 +137,73 @@ to take. The server now stamps the `discord.bundle` URL with its mtime and every
 **`rpc.voice.read` note:** the app owner consented fine in dev; confirm it's permitted
 before relying on it for non-dev users (Phase 5b degrades silently if denied).
 
+## Phase 5 as-built (instance→room routing + participant presence, 2026-06-20)
+
+Everyone who launches the Activity in the same Discord voice channel now lands in the
+**same chaochao room**; a different voice channel / instance gets a separate room.
+Built on `worktree-discord-activity-spike`, headless-verified (instance-routing assertions
++ `npm run build` + `smoke-test.js` all green); **pending operator in-frame confirm**.
+
+**The SDK-instance-drop (the central problem) — solved with approach (a).** Auth runs in
+`discord.html`, then the redirect to `play.html?discord=1` *drops* the SDK instance — but
+room-grouping needs `sdk.instanceId` in the *game* frame. New `client/scripts/discordPresence.js`
+(a 2nd esbuild `build()` IIFE bundle, `discord-presence.bundle.min.js`, like discordActivity.js)
+**re-inits the SDK in the game frame** and silently re-authenticates with the access token
+already stashed in `sessionStorage` (Phase 4 kept it for exactly this; the one-time `code`
+is spent, but the access token is reusable). discordActivity.js now also stashes the
+`clientId` so presence can `new DiscordSDK(id)` without play.html needing a config tag.
+Chose (a) over hosting the game in-frame: far lighter, and the redirect architecture +
+the stashed token were already in place. index.js injects the presence bundle into
+`play.html?discord=1` only (the `<!-- DISCORD_PRESENCE -->` placeholder; web build
+byte-identical), before the game bundle so `window.discordPresence` exists in time.
+
+**`window.discordPresence` API (the clean map Phase 5b reuses):**
+- `.ready` → `Promise<{instanceId}>` — **never rejects**; resolves with `instanceId:null`
+  on any init failure (8s backstop) so the game still launches. Resolves right after
+  `sdk.ready()` (instanceId needs no auth), so room routing proceeds even if `authenticate()`
+  later fails.
+- `.instanceId` / `.channelId` / `.localUserId` — room key, voice channel (5b), local snowflake.
+- `.getParticipants()` → `[{ id, name, avatarUrl, isLocal, bot, raw }]` — the live
+  connected-participant list (Discord `user_id` → name/avatar), seeded from
+  `getInstanceConnectedParticipants()` and kept current via the `ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE`
+  subscription. `avatarUrl` is built the same way as the server (`avatarUrlFor`) so the 5b
+  voice tray matches kart avatar skins.
+- `.onParticipants(cb)` — subscribe to list changes (emits current state immediately). **This
+  is the participant↔player hook Phase 5b lights the speaking kart from.**
+- `.sdk` — the live instance for 5b's `subscribe('SPEAKING_START'/'SPEAKING_STOP', {channel_id})`.
+
+**Routing (server).** Client: `clientSendStart` defers `enterGame` until `discordPresence.ready`,
+then passes `{ discordInstanceId }` as a new 3rd opts arg (the legacy `coop` 2nd arg is
+untouched). Server: `messenger.enterGame` reads/sanitizes `opts.discordInstanceId` (untrusted
+grouping key — capped, char-filtered, never a trust boundary) and, when present, routes via
+new `hostess.findOrCreateRoomForInstance(instanceId)` — which **takes precedence over the
+matchmaking `id`** but still loses to the botGuard tarpit. The hostess keeps an
+`instanceRoomMap` (instanceId → sig), tags the room `room.discordInstanceId`, returns a
+started/locked room too (same voice group → late-join spectator, race next round), and spills
+into a fresh room if one fills. The mapping is forgotten when the room empties
+(`forgetInstanceRoom`, hooked into the existing `kickFromRoom` teardown — **integrates with
+the existing disconnect/AFK lifecycle rather than adding a parallel one**: participant-leave
+*is* the socket disconnect that already removes the player; couch co-op secondaries follow the
+primary's gameID into the same room). **The web path is unchanged when no instanceId is present.**
+
+**Identity anonymization (plan item).** Discord-keyed rooms are kept **private**: excluded from
+`getRooms()` (never on the public join page) and `findARoom()` (web players never matchmade in).
+So a Discord voice group is isolated — Discord players never mix with strangers — which
+*structurally satisfies* the "anonymize for cross-server matchmaking" requirement: there is no
+cross-server mixing to anonymize, and the only identity shown (the opt-in Discord avatar skin)
+stays within the same voice group and is purely cosmetic.
+
+**Files:** `client/scripts/discordPresence.js` (new), `discordActivity.js` (stash clientId),
+`build.js` (2nd discord bundle), `client/play.html` (placeholder), `index.js` (inject + cache-bust),
+`client/scripts/client.js` (`clientSendStart` defer+opts), `server/hostess.js` (instance map +
+isolation + cleanup), `server/messenger.js` (route on `opts.discordInstanceId`). No
+`game.js`/`config.json`/`engine.js` change → no CHANGELOG/Codex entry required (routing/infra).
+
+**Next (Phase 5b):** wire `discordPresence.onParticipants` + `sdk.subscribe('SPEAKING_*')` to a
+per-kart speaking indicator. The kart bridge (Discord snowflake → which kart) still needs the
+server to stamp each player's validated snowflake (Phase 4's `discordAuth` validates it but the
+profile sent to the client omits the id) — a small 5b addition.
+
 ## Implementation plan (9 phases; ~7–8 dev-days to testable, +~1d voice-activity delighter, +listing prereqs & ~2–3d skin shop for public/monetized)
 
 ### Phase 0 — Portal & dev harness *(operator-gated; ~0.5d)*
@@ -154,8 +221,8 @@ Vendor jQuery + Bootstrap for the Discord build (hard deps); map/vendor supabase
 ### Phase 4 — In-frame auth + token exchange *(~1.5d)* — **DONE, LIVE-VERIFIED**
 `POST /api/token` (client secret server-side) → `authorize` → `authenticate` → bridge to a real Supabase user via a server-minted session ticket so cosmetics/progression work unchanged. Re-validate identity server-side. See "Phase 4 live results" above for the as-built design + the `patchUrlMappings` fix.
 
-### Phase 5 — Multiplayer/presence reconciliation *(~1–1.5d)*
-Scope rooms by Discord `instanceId`; subscribe `getInstanceConnectedParticipants()` + `ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE`; map onto the `hostess`/`Room` model so a voice group lands in one room. Anonymize identity by default for cross-server matchmaking.
+### Phase 5 — Multiplayer/presence reconciliation *(~1–1.5d)* — **DONE (headless-verified), pending operator in-frame confirm**
+Scope rooms by Discord `instanceId`; subscribe `getInstanceConnectedParticipants()` + `ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE`; map onto the `hostess`/`Room` model so a voice group lands in one room. Anonymize identity by default for cross-server matchmaking. See "Phase 5 as-built" above for the as-shipped design (SDK re-init in the game frame, `window.discordPresence` map, instance-keyed private rooms).
 
 ### Phase 5b — Voice-activity visual (Discord-only delighter) *(~1d; depends on Phase 4 scope + Phase 5 presence)*
 Show who's talking, in-game — the touch that makes the Activity feel genuinely Discord-native. The SDK emits `SPEAKING_START` / `SPEAKING_STOP` (payload `{channel_id, user_id}`) for the subscribed voice channel.

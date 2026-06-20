@@ -54,12 +54,19 @@ const bundles = {
 
 const outDir = 'client/scripts/dist';
 
-// The Discord Activity entry is the one exception to the concat-globals model:
-// discordActivity.js IMPORTS the Embedded App SDK from node_modules, so it needs
-// a real module bundle (esbuild `build`, not `transform`) emitted as a self-
-// contained IIFE. See client/discord.html and docs/spikes/discord-activity.md.
-const discordEntry = 'client/scripts/discordActivity.js';
-const discordOut = 'discord.bundle.min.js';
+// The Discord Activity entries are the exception to the concat-globals model: they
+// IMPORT the Embedded App SDK from node_modules, so each needs a real module bundle
+// (esbuild `build`, not `transform`) emitted as a self-contained IIFE. See
+// client/discord.html and docs/spikes/discord-activity.md.
+//   - discordActivity.js  -> the discord.html bootstrap (Phase 4 auth + handoff).
+//   - discordPresence.js   -> loaded INTO play.html?discord=1 (Phase 5): re-inits the
+//                             SDK in the game frame for instance->room routing +
+//                             participant presence (the redirect drops the original
+//                             SDK instance).
+const discordBundles = {
+    'discord.bundle.min.js': 'client/scripts/discordActivity.js',
+    'discord-presence.bundle.min.js': 'client/scripts/discordPresence.js'
+};
 
 async function buildAll() {
     fs.mkdirSync(outDir, { recursive: true });
@@ -70,11 +77,12 @@ async function buildAll() {
         fs.writeFileSync(target, result.code);
         console.log(target + ' (' + result.code.length + ' bytes)');
     }
-    // Discord Activity bundle (module resolution + tree-shake of the SDK).
-    if (fs.existsSync(discordEntry)) {
-        const target = path.join(outDir, discordOut);
+    // Discord Activity bundles (module resolution + tree-shake of the SDK).
+    for (const [outFile, entry] of Object.entries(discordBundles)) {
+        if (!fs.existsSync(entry)) { continue; }
+        const target = path.join(outDir, outFile);
         await esbuild.build({
-            entryPoints: [discordEntry],
+            entryPoints: [entry],
             bundle: true,
             minify: true,
             format: 'iife',

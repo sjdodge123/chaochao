@@ -7,6 +7,18 @@ var botGuard = require('./botGuard.js');
 var roomList = {},
 	maxPlayersInRoom = c.maxPlayersInRoom;
 
+// Discord Activity instance -> room routing (Phase 5). Every player who launches the
+// Activity in the same Discord voice channel shares one `instanceId`; we key a room to
+// it so they all land in the SAME match. A different voice channel / instance gets a
+// different room. This map is the instanceId -> room sig index; entries are cleared
+// when the backing room is deleted (last client left), so a fresh launch into a
+// recycled instance id spins up a clean room. Discord-keyed rooms are tagged
+// `room.discordInstanceId` and are kept PRIVATE — never advertised on the join page
+// (getRooms) nor matchmade into by web players (findARoom) — which also keeps voice
+// groups isolated, so identity stays within the group (no cross-server mixing to
+// anonymize). Untrusted: instanceId is just a grouping key, never a trust boundary.
+var instanceRoomMap = {};
+
 
 exports.getRooms = function () {
 	var rooms = {};
@@ -21,6 +33,11 @@ exports.getRooms = function () {
 		}
 		// Tarpit is a dead room for flagged bots — never advertise it on the join page.
 		if (room.isTarpit) {
+			continue;
+		}
+		// Discord Activity rooms are private to one voice-channel instance — never
+		// list them on the public join page (a web player must never see/join one).
+		if (room.discordInstanceId) {
 			continue;
 		}
 		// Late-join: a started (locked) match is now joinable as long as it has
@@ -95,11 +112,34 @@ exports.findARoom = function (clientID) {
 		// hold several local-co-op players (capacity > 1), and they get unlocked at
 		// game-over (resetGame), so the old "locked + capacity 1" implicit guard no
 		// longer keeps them private — exclude them explicitly here.
-		if (roomList[sig2].hasSpace() && !roomList[sig2].isLocked() && !roomList[sig2].isPreview && !roomList[sig2].isTarpit) {
+		if (roomList[sig2].hasSpace() && !roomList[sig2].isLocked() && !roomList[sig2].isPreview && !roomList[sig2].isTarpit && !roomList[sig2].discordInstanceId) {
 			return sig2;
 		}
 	}
 	return generateNewRoom();
+}
+// Discord Activity routing (Phase 5): find (or create) the room for a Discord
+// `instanceId` so everyone who launched the Activity in the same voice channel shares
+// one match. Unlike findARoom this DOES return a started/locked room (the joiner lands
+// as a late-join spectator and races from the next round — same voice group, so we
+// want them together even mid-match), as long as it still has space. The room is
+// tagged so getRooms/findARoom keep it private to the instance. If the mapped room is
+// full, we spin up a fresh room and re-point the instance at it (a voice channel that
+// outgrows one room's capacity overflows into a second — rare; room cap is 25).
+exports.findOrCreateRoomForInstance = function (instanceId) {
+	var sig = instanceRoomMap[instanceId];
+	var room = (sig != null) ? roomList[sig] : null;
+	if (room != null && room.hasSpace()) {
+		return sig;
+	}
+	if (room != null && !room.hasSpace()) {
+		console.log("Discord instance " + instanceId + " room " + sig + " full; spilling into a new room.");
+	}
+	var newSig = generateNewRoom();
+	roomList[newSig].discordInstanceId = instanceId;
+	instanceRoomMap[instanceId] = newSig;
+	console.log("Discord instance " + instanceId + " -> room " + newSig);
+	return newSig;
 }
 // Explicit "Start a new game": always spin up a fresh room, never matchmake into an
 // existing one (that's findARoom's job). Used by enterGame's id == -2 sentinel.
@@ -114,8 +154,17 @@ exports.kickFromRoom = function (clientID) {
 		room.leave(clientID);
 		if (room.clientCount == 0) {
 			console.log("Deleting room");
+			forgetInstanceRoom(room);
 			delete roomList[room.sig];
 		}
+	}
+}
+// Drop the instanceId -> sig index entry when a Discord-keyed room is torn down, so a
+// later launch into a recycled instance id starts a clean room (and the map can't grow
+// unboundedly). No-op for non-Discord rooms.
+function forgetInstanceRoom(room) {
+	if (room && room.discordInstanceId && instanceRoomMap[room.discordInstanceId] === room.sig) {
+		delete instanceRoomMap[room.discordInstanceId];
 	}
 }
 exports.joinARoom = function (sig, clientID) {

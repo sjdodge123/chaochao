@@ -2948,9 +2948,27 @@ function promoteToPrimary(lp) {
 }
 
 function clientSendStart(id) {
-	if (id != null) {
-		server.emit('enterGame', id);
+	if (id == null) {
+		return;
 	}
+	// Discord Activity (Phase 5): route the whole voice-channel instance into one
+	// room. discordPresence.js re-inits the SDK in this game frame (the discord.html
+	// -> play.html redirect dropped the original instance) and resolves `.ready` with
+	// the instanceId. We DEFER the join until then so the player lands in the correct
+	// instance room first time rather than being matchmade and migrated. If presence
+	// init failed (instanceId null) or isn't present, we fall through to the normal
+	// web path unchanged. The `true` arg is the legacy/ignored coop flag; the
+	// instanceId rides the new 3rd opts arg.
+	if (isDiscordActivity() && window.discordPresence && window.discordPresence.ready) {
+		window.discordPresence.ready.then(function (info) {
+			var iid = info && info.instanceId;
+			server.emit('enterGame', id, true, iid ? { discordInstanceId: iid } : undefined);
+		}).catch(function () {
+			server.emit('enterGame', id);
+		});
+		return;
+	}
+	server.emit('enterGame', id);
 }
 
 // In a preview session, the round ends when a player dies or reaches the goal

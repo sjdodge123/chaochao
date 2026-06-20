@@ -139,6 +139,15 @@ function discordConfigTag() {
 // ?discord=1 query). Keep these strings in lockstep with client/play.html.
 function discordEmbedRewrite(html) {
     return html
+        // Phase 5 presence: inject the SDK-re-init bundle (instance->room routing +
+        // participant presence). Loaded into the game frame because the discord.html
+        // handoff drops the original SDK instance. Empty comment on the web build.
+        // Placed before the game bundle so window.discordPresence exists in time; the
+        // cache-bust replace below stamps its ?v= too (it matches the scripts/ regex).
+        .replace(
+            '<!-- DISCORD_PRESENCE -->',
+            '<script src="scripts/dist/discord-presence.bundle.min.js"></script>'
+        )
         // jQuery 3.5.1 (boot-critical) -> vendored same-origin copy.
         .replace(
             'https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js',

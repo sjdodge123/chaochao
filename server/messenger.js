@@ -518,9 +518,24 @@ function checkForMail(client) {
 		client.emit("previewRoomCreated", { gameID: sig });
 	});
 
-	client.on('enterGame', function (id, coop) {
+	client.on('enterGame', function (id, coop, opts) {
 		debug.log("enterGame: client=", client.id, " requestedId=", id, " coop=", coop);
 		var roomSig = '';
+		// Discord Activity instance routing (Phase 5): a Discord client passes its
+		// `instanceId` (the SDK launch-param shared by everyone who opened the Activity
+		// in the same voice channel). We key a room to it so the whole voice group lands
+		// in one match, regardless of the matchmaking `id`. Untrusted client-supplied
+		// string — used ONLY as a grouping key, never a trust boundary — so cap it.
+		// botGuard still wins (a flagged bot can't instance-route past the tarpit). When
+		// absent (every web client), the normal matchmaking path below is byte-for-byte
+		// unchanged.
+		var instanceId = (opts && typeof opts.discordInstanceId === "string") ? opts.discordInstanceId : null;
+		if (instanceId != null && instanceId.length > 0 && instanceId.length <= 128) {
+			// keep only the safe key chars Discord uses; defensive against odd payloads
+			instanceId = instanceId.replace(/[^A-Za-z0-9_.:-]/g, "");
+		} else {
+			instanceId = null;
+		}
 		// botGuard: divert a flagged client (datacenter connection in tarpit mode, or one
 		// that tripped the invisible honeypot) into the dead tarpit room — checked BEFORE
 		// matchmaking so findARoom() never spins up and then abandons an empty real room on a
@@ -528,6 +543,9 @@ function checkForMail(client) {
 		// bot can't pick its own way into a live room.
 		if (botGuard.shouldTarpit(client.id)) {
 			roomSig = hostess.getTarpitRoom();
+		} else if (instanceId != null) {
+			// Discord voice group -> shared room (takes precedence over matchmaking).
+			roomSig = hostess.findOrCreateRoomForInstance(instanceId);
 		} else if (id == -1) {
 			roomSig = hostess.findARoom(client.id);
 		} else if (id == -2) {

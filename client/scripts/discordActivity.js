@@ -175,10 +175,14 @@ async function establishDiscordAuth(sdk, clientId) {
                 window.sessionStorage.setItem(DISCORD_AUTH_KEY, JSON.stringify({
                     token: data.token,
                     profile: data.profile || null,
-                    // Kept for Phase 5: the redirect to play.html drops this SDK
-                    // instance, so presence/voice will re-init the SDK there and
-                    // re-authenticate with this token (the `code` is single-use).
-                    accessToken: data.access_token || null
+                    // Phase 5: the redirect to play.html drops this SDK instance, so
+                    // discordPresence.js re-inits the SDK in the game frame and
+                    // re-authenticates with this access token (the one-time `code`
+                    // is already spent; the access token is reusable). The clientId
+                    // is stashed too so presence can construct `new DiscordSDK(id)`
+                    // without play.html needing the <!-- DISCORD_CONFIG --> tag.
+                    accessToken: data.access_token || null,
+                    clientId: clientId
                 }));
             } catch (e) {
                 console.warn('[discord-activity] could not stash auth (guest):', e && e.message);

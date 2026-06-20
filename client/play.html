@@ -108,6 +108,14 @@
              from ADS_PROVIDER / ADS_PUBLISHER_ID env vars, stripped to provider
              'none' (no-op) locally. Must precede the bundle so ads.js sees it. -->
         <!-- ADS_CONFIG -->
+        <!-- Discord Activity presence (Phase 5): a separate esbuild bundle that
+             re-inits the Embedded App SDK in this game frame (the discord.html ->
+             play.html redirect drops the original instance) for instance->room
+             routing + participant presence. Injected server-side ONLY for
+             play.html?discord=1 (index.js discordEmbedRewrite); empty comment on the
+             web build. Must precede the game bundle so window.discordPresence exists
+             before clientConnect/enterGame. -->
+        <!-- DISCORD_PRESENCE -->
         <!-- BUILD: bundle-start -->
         <script src="scripts/rhill-voronoi-core.js"></script>
         <script src="scripts/barrierArt.js"></script>
