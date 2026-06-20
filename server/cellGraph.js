@@ -680,7 +680,6 @@ function barrierDetourPoint(a, b, map) {
             }
         } else {
             // Graze: lift the leg's closest-approach point off the wall, both normal signs.
-            var t = ((((a.x + b.x) / 2) - bar.x1) * (bar.x2 - bar.x1) + (((a.y + b.y) / 2) - bar.y1) * (bar.y2 - bar.y1));
             var cp = ptSegDist((a.x + b.x) / 2, (a.y + b.y) / 2, bar.x1, bar.y1, bar.x2, bar.y2);
             var wlen = Math.hypot(bar.x2 - bar.x1, bar.y2 - bar.y1) || 1;
             var nlx = -(bar.y2 - bar.y1) / wlen, nly = (bar.x2 - bar.x1) / wlen;
