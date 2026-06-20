@@ -14,7 +14,9 @@ To re-render a past week's digest with the current formatting, run the `Release 
 
 ## Unreleased
 
-(none yet)
+### Gameplay & Balance
+
+- **Checkpoint flags no longer drag rounds out.** When everyone still in the race is just respawning on checkpoint (Second Wind) flags and nobody's pushing for the goal, the round now triggers its hurry-up collapse instead of stalling — the closing lava burns the flags and forces a finish. A racer who's leaned on a respawn counts like a downed racer for the "last one standing" timer; touching a flag while still actually racing for the goal doesn't, so you keep your shot at the win.
 
 ## v0.49.0 — 2026-06-16
 
