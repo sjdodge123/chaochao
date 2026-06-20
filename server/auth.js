@@ -14,6 +14,8 @@
 var progression = require('./progression.js');
 var skinRegistry = require('./skinRegistry.js');
 
+var crypto = require('crypto');
+
 var SUPABASE_URL = process.env.SUPABASE_URL || null;
 var SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || null;
 var JWT_SECRET = process.env.SUPABASE_JWT_SECRET || null;
@@ -21,6 +23,30 @@ var JWT_SECRET = process.env.SUPABASE_JWT_SECRET || null;
 var supabase = null;
 var jwt = null;
 var enabled = false;
+
+// jsonwebtoken is needed for BOTH the legacy Supabase HS256 verify (when a JWT secret
+// is configured) AND the Discord Activity session ticket (below), so require it
+// unconditionally rather than only when SUPABASE_JWT_SECRET is set.
+try {
+    jwt = require('jsonwebtoken');
+} catch (e) {
+    console.log('[auth] jsonwebtoken unavailable:', e.message);
+}
+
+// Discord Activity session ticket secret. The Activity bridge can't mint a real
+// Supabase token (this project signs with asymmetric keys — there's no shared HS256
+// secret to reproduce; the server already falls back to network getUser). So instead
+// the bridge mints OUR OWN short-lived ticket, HS256-signed with this server-only
+// secret, and verifyToken() accepts it (issuer-scoped) before the Supabase paths. The
+// secret is DERIVED deterministically from the service-role key (server-only, stable
+// across restarts AND any future multi-instance deploy) so no new env var is required;
+// DISCORD_TICKET_SECRET overrides it. A random fallback covers guest-only dev (no key),
+// where the ticket is never minted anyway.
+var TICKET_ISSUER = 'chaochao-activity';
+var TICKET_SECRET = process.env.DISCORD_TICKET_SECRET ||
+    (SERVICE_ROLE_KEY
+        ? crypto.createHash('sha256').update('chaochao-discord-ticket|' + SERVICE_ROLE_KEY).digest('hex')
+        : crypto.randomBytes(32).toString('hex'));
 
 if (SUPABASE_URL && SERVICE_ROLE_KEY) {
     try {
@@ -55,14 +81,6 @@ var writesEnabled = resolveWritesEnabled(enabled, SUPABASE_URL, process.env);
 if (enabled && !writesEnabled) {
     console.log('[auth] WRITES BLOCKED: pointed at the PROD project from a non-Heroku host. ' +
         'Use the DEV project locally, or set ALLOW_PROD_WRITES=true to override.');
-}
-
-if (JWT_SECRET) {
-    try {
-        jwt = require('jsonwebtoken');
-    } catch (e) {
-        console.log('[auth] jsonwebtoken unavailable, will fall back to network verify:', e.message);
-    }
 }
 
 if (enabled) {
@@ -137,6 +155,21 @@ async function verifyToken(token) {
     var hit = tokenCache.get(token);
     if (hit && hit.expiresAt > Date.now()) {
         return hit.userId;
+    }
+    // Discord Activity session ticket (issuer-scoped, HS256 with our server secret).
+    // Checked first — it's a cheap local verify, and a ticket would never validate on
+    // the Supabase paths. A normal Supabase token has a different issuer/signature, so
+    // jwt.verify throws here and we fall through. The ticket's sub is the already-
+    // resolved Supabase user id, so it's a verified user id with no network hop.
+    if (jwt) {
+        try {
+            var ticket = jwt.verify(token, TICKET_SECRET, { algorithms: ['HS256'], issuer: TICKET_ISSUER });
+            if (ticket && ticket.sub) {
+                return cachePut(token, ticket.sub, VERIFY_OK_TTL_MS);
+            }
+        } catch (e) {
+            // Not our ticket (or expired/tampered) — fall through to the Supabase paths.
+        }
     }
     if (jwt && JWT_SECRET) {
         try {
@@ -638,34 +671,30 @@ async function requeuePendingToasts(userId, toasts) {
 // the Discord HTTP exchange + the client secret; these two helpers own the Supabase
 // side (the admin client + JWT secret live here and are never re-exported).
 
-// mintAccessToken: sign a Supabase-COMPATIBLE access token (HS256 with the project's
-// JWT secret) for a resolved user id. verifyToken()'s local HS256 path accepts it
-// with NO Supabase round-trip — the server signs and verifies with the same secret —
-// so the socket handshake treats a Discord player exactly like a signed-in web player.
-// Requires the JWT secret + lib; returns null otherwise (then Discord auth degrades to
-// guest rather than minting a token the server can't verify). 12h TTL: an Activity
-// session can run long, and the token is reused across socket reconnects.
+// mintAccessToken: sign a Discord Activity SESSION TICKET (HS256 with our server-only
+// TICKET_SECRET, issuer-scoped) for a resolved Supabase user id. verifyToken() accepts
+// it locally with NO Supabase round-trip — so the socket handshake treats a Discord
+// player exactly like a signed-in web player. We mint our own ticket rather than a
+// Supabase token because this project signs with asymmetric keys (no shared HS256
+// secret to reproduce). Requires the jwt lib; returns null otherwise (then Discord
+// auth degrades to guest rather than minting a ticket the server can't verify). 12h
+// TTL: an Activity session can run long, and the ticket is reused across reconnects.
 function mintAccessToken(userId, opts) {
     opts = opts || {};
-    if (!jwt || !JWT_SECRET || !userId) {
+    if (!jwt || !userId) {
         return null;
     }
     var ttl = opts.ttlSeconds || (12 * 60 * 60);
     var nowSec = Math.floor(Date.now() / 1000);
     var claims = {
         sub: userId,
-        aud: 'authenticated',
-        role: 'authenticated',
+        iss: TICKET_ISSUER,
+        src: 'discord',
         iat: nowSec,
-        exp: nowSec + ttl,
-        app_metadata: { provider: 'discord', providers: ['discord'] },
-        user_metadata: {}
+        exp: nowSec + ttl
     };
-    if (opts.name) { claims.user_metadata.full_name = opts.name; claims.user_metadata.name = opts.name; }
-    if (opts.avatarUrl) { claims.user_metadata.avatar_url = opts.avatarUrl; }
-    if (SUPABASE_URL) { claims.iss = SUPABASE_URL.replace(/\/$/, '') + '/auth/v1'; }
     try {
-        return jwt.sign(claims, JWT_SECRET, { algorithm: 'HS256' });
+        return jwt.sign(claims, TICKET_SECRET, { algorithm: 'HS256' });
     } catch (e) {
         console.log('[auth] mintAccessToken failed:', e.message);
         return null;
