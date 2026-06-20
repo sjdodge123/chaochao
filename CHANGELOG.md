@@ -23,6 +23,10 @@ To re-render a past week's digest with the current formatting, run the `Release 
 
 - **Bots fight off antlions too.** The racing bots now swing at an antlion that's right on top of them — knocking it back into the sand — instead of only trying to dodge away, so they no longer get helplessly herded into the lava on sand-heavy maps.
 
+### Quality of Life
+
+- **Connection indicator.** A small ping/latency badge now sits in the bottom-left corner so you can see your connection at a glance — green when it's healthy, amber/red as it climbs. If your connection ever drops onto the slow fallback mode (the cause of "only I was lagging" hitches), it turns into a red "Slow link — tap to fix" chip that reconnects you on the better path; out of a race it also tries to recover on its own.
+
 ## v0.49.1 — 2026-06-20
 
 ### Gameplay & Balance

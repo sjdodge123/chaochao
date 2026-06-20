@@ -647,6 +647,13 @@ function checkForMail(client) {
 	client.on('drip', function () {
 		client.emit('drop');
 	});
+	// Round-trip RTT probe for the client-side connection indicator (connectionHud.js).
+	// Ack-based and deliberately separate from 'drip'/'drop' and the gameUpdates stall
+	// watchdog — measuring latency must never feed the "is the game frozen" timer, or a
+	// client limping along on long-polling would look healthy. Just bounce the ack back.
+	client.on('cc:netping', function (cb) {
+		if (typeof cb === 'function') { cb(); }
+	});
 	client.on('sendEmoji', function (emoji) {
 		if (c.emojis.indexOf(emoji) == -1) {
 			return;
