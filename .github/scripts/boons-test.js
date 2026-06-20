@@ -1259,6 +1259,26 @@ try {
         check(haloRoute != null && laneOf(haloMap, haloRoute) === baseLane,
             'a defensive boon (Guard Halo) carries no route weight — the line does not move');
     }
+
+    // --- [S] Checkpoint homing: an un-attuned bot drives onto an OFF-CENTRE flag to attune ----
+    // The route pull only gets a bot to the flag's CELL; its 28px trigger needs the exact point.
+    // A flag placed 42px off the single lane's centre line is beyond that trigger from the
+    // straight cell-site line, so ONLY the steer-homing override (within CHECKPOINT_HOME_RANGE)
+    // gets the bot onto it — guards the off-centre-placement gap the Codex review flagged.
+    console.log('[S] bots home onto an off-centre Checkpoint flag to attune');
+    {
+        const SW = config.boons.secondWindTotem; // "Checkpoint"
+        const cpMap = buildMap('cphome', [{ id: SW.id, x: PAD_X, y: ROWS[2] + 42 }], [2]);
+        const { room, bot } = bootRoom('boon-cphome', cpMap, { id: 'r', name: 'R', title: '', skill: 0.85, aggression: 0.2, tempo: 0.5, risk: 0.3, focus: 'race' });
+        let attunedAt = -1;
+        for (let f = 0; f < 2400; f++) {
+            room.game.notchesToWin = 0;
+            room.update(DT); clock += config.serverTickSpeed; fireDueTimers();
+            if (attunedAt < 0 && bot.secondWind != null) { attunedAt = f; }
+            if (attunedAt >= 0 || room.game.currentState === config.stateMap.gameOver) { break; }
+        }
+        check(attunedAt >= 0, 'an un-attuned bot homed onto the off-centre flag and attuned (tick ' + attunedAt + ')');
+    }
 } finally {
     Date.now = realNow;
     Math.random = realRandom;

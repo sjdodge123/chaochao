@@ -674,6 +674,11 @@ var RAIL_PATH_PENALTY = 4;
 // flag (Second Wind Totem): a free revive is worth a modest detour, but not a cross-map
 // backtrack, so it's a soft pull — the bot grabs a flag roughly on its way and keeps racing.
 var CHECKPOINT_PULL = 0.4;
+// The route pull only attracts a bot to the flag's CELL; a flag off-centre in a big cell can be
+// missed (cell-site waypoints pass through without entering its 28px trigger). So once an
+// un-attuned bot is within this range of a live flag, home straight onto the exact point to
+// actually attune. A bit over a cell radius, so it engages when the route brings the bot in.
+var CHECKPOINT_HOME_RANGE = 110;
 // Solid author barriers are worse than a bumper (you can't pass at all, only slide),
 // so routing around them is almost always worth it — a heavier soft penalty than a
 // static hazard, but still soft so a barrier in the sole chokepoint never nulls the
@@ -2025,6 +2030,21 @@ function steerBot(bot, ctx, dt) {
                 desiredX = fpx / fpm; desiredY = fpy / fpm; sharpTurn = false;
             }
         }
+        // Checkpoint final approach: the route pull only gets an un-attuned bot to the flag's
+        // CELL, but the 28px trigger needs the exact point (a flag off-centre in a big cell is
+        // missed by cell-site waypoints). Once near a live flag, home straight onto it so it
+        // actually attunes. Skipped while homing a door (key delivery wins). Avoidance still
+        // applies (won't cut into flanking lava); clears on attune (bot.secondWind set).
+        if (bot.secondWind == null && ai.doorFinalPoint == null && ctx.checkpoints != null) {
+            var cpBest = null, cpBd = CHECKPOINT_HOME_RANGE;
+            for (var cpi2 = 0; cpi2 < ctx.checkpoints.length; cpi2++) {
+                var cpd = mag(ctx.checkpoints[cpi2].x - bot.x, ctx.checkpoints[cpi2].y - bot.y);
+                if (cpd < cpBd) { cpBd = cpd; cpBest = ctx.checkpoints[cpi2]; }
+            }
+            if (cpBest != null && cpBd > 0.001) {
+                desiredX = (cpBest.x - bot.x) / cpBd; desiredY = (cpBest.y - bot.y) / cpBd; sharpTurn = false;
+            }
+        }
     } else if (ctx.collapsing && ctx.collapseLoc != null) {
         // Walled off with no reachable goal during a collapse: the collapse closes
         // inward toward collapseLoc (the safe center / goal), so flee toward it.
@@ -2486,6 +2506,7 @@ function update(gameBoard, currentState, dt) {
     // a collapse — a flag the lava is about to consume isn't worth chasing, and the collapse
     // flee logic owns steering then.
     var checkpointCells = null;
+    var checkpoints = null; // the flag POINTS — an un-attuned bot homes onto the exact spot (28px trigger)
     var SECONDWIND = (c.boons && c.boons.secondWindTotem) ? c.boons.secondWindTotem.id : -99999;
     if (currentState !== c.stateMap.collapsing) {
         for (var cpk in hazardList) {
@@ -2494,8 +2515,9 @@ function update(gameBoard, currentState, dt) {
             if (cflag.netState === 0) { continue; } // a burned flag revives no one
             var cci = cellGraph.nearestCellIndex(map.cells, { x: cflag.x, y: cflag.y });
             if (map.cells[cci] != null && map.cells[cci].site != null) {
-                if (checkpointCells == null) { checkpointCells = []; }
+                if (checkpointCells == null) { checkpointCells = []; checkpoints = []; }
                 checkpointCells.push(map.cells[cci].site.voronoiId);
+                checkpoints.push({ x: cflag.x, y: cflag.y });
             }
         }
     }
@@ -2749,6 +2771,7 @@ function update(gameBoard, currentState, dt) {
         staticHazardCells: staticHazardCells, // static bumper cells (harsh path penalty)
         railCells: railCells, // moving-rail swept cells (mild path penalty — timeable)
         checkpointCells: checkpointCells, // live Checkpoint-flag cells (an un-attuned bot leans toward one)
+        checkpoints: checkpoints, // live Checkpoint-flag {x,y} points (home onto the exact spot to attune)
         barrierEdges: cellGraph.getBarrierBlockedEdges(map), // adjacency edges a solid barrier cuts (route around)
         players: playerList,
         projectileList: gameBoard.projectileList,

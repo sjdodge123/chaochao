@@ -864,20 +864,26 @@ function getLilyPaddedCells(map) {
     return result;
 }
 
-// Speed boons — the config.boons that PROPEL a racer along the route (Dash Arrows, Launch
-// Pad, Barrel Cannon = a strong directed launch; Slipstream, Slingshot Rings = sustained
-// speed) — make their cell worth routing THROUGH, the mirror image of avoiding a hazard.
-// They don't change connectivity (unlike warp/zip's new edges or a lily pad turning water
-// solid); they just DISCOUNT their own cell's traversal cost (multiplier < 1), so Dijkstra
-// leans the racing line + bots toward a boost when it isn't a big detour. Defensive boons
-// (Guard Halo, Second Wind, Recharge Spring) don't speed the line and warp/zip/lily are
-// modelled elsewhere, so those stay neutral (weight 1, no entry). cellIndex -> multiplier,
-// cached non-enumerably. Applied structurally in findPathToNearestGoal so the fairness
-// overlay AND the bots pick the same boost-leaning route. (estimatePathTime — the par clock —
-// deliberately does NOT credit the transient boost: it walks the chosen path with honest tile
-// physics, so a boon steers WHICH line par measures but never makes that line's par read
-// artificially fast. The discount is mild — 0.7/0.8 — so it only diverts onto a boost that is
-// barely a detour, keeping the par it then measures close to the bare line's.)
+// Speed boons that PROPEL a racer ALONG THE GROUND in a fixed direction — Dash Arrows, plus
+// Slipstream and Slingshot Rings (a sustained directional shove) — make their cell worth routing
+// THROUGH, the mirror image of avoiding a hazard. They DISCOUNT their own cell's traversal cost
+// (multiplier < 1), so Dijkstra leans the racing line + bots toward a boost when it isn't a big
+// detour. EXCLUDED on purpose: Launch Pad and Barrel Cannon — they FLING you on a committed
+// airborne arc to a land-where-you-land spot (and the barrel ROTATES, so its fire direction isn't
+// the authored angle), so neither the landing nor the real launch edge is modelled here; pulling
+// a route toward one would invite a trap (a launch into lava / off-route). Defensive boons (Guard
+// Halo, Second Wind, Recharge Spring) and warp/zip/lily (modelled elsewhere) also stay neutral
+// (weight 1, no entry). cellIndex -> multiplier, cached non-enumerably. Applied structurally in
+// findPathToNearestGoal so the fairness overlay AND the bots pick the same boost-leaning route,
+// and ONLY on an edge whose travel direction aligns with the boost's facing (the direction gate;
+// these pushes only help ridden their way). (estimatePathTime — the par clock — deliberately does
+// NOT credit the transient boost: it walks the chosen path with honest tile physics, so a boon
+// steers WHICH line par measures but never makes that line's par read artificially fast. The
+// discount is mild — 0.7/0.8 — so it only diverts onto a boost that is barely a detour.)
+// Min cos(angle) between travel direction and a boost's facing for the discount to apply — ~78°,
+// so a route only leans toward a pad it would actually ride WITH (a backward/sideways pad is a
+// trap, not a help). 0 would allow anything not facing backward; 0.2 also drops near-perpendicular.
+var BOON_DIR_DOT = 0.2;
 // Min cos(angle) between travel direction and a boost's facing for the discount to apply — ~78°,
 // so a route only leans toward a pad it would actually ride WITH (a backward/sideways pad is a
 // trap, not a help). 0 would allow anything not facing backward; 0.2 also drops near-perpendicular.
@@ -885,11 +891,11 @@ var BOON_DIR_DOT = 0.2;
 function boonRouteMult(id) {
     if (id == null) { return 1; } // malformed hazard with no id is not a boon
     var b = c.boons || {};
-    var DASH = b.dashArrows && b.dashArrows.id, LAUNCH = b.launchPad && b.launchPad.id, CANNON = b.barrelCannon && b.barrelCannon.id;
+    var DASH = b.dashArrows && b.dashArrows.id;
     var SLIP = b.slipstream && b.slipstream.id, RINGS = b.slingshotRings && b.slingshotRings.id;
-    if (id === DASH || id === LAUNCH || id === CANNON) { return 0.7; } // strong directed launch
-    if (id === SLIP || id === RINGS) { return 0.8; }                   // sustained speed help
-    return 1;                                                          // defensive / shortcut / not a boon
+    if (id === DASH) { return 0.7; }                 // brisk ground shove along the arrow
+    if (id === SLIP || id === RINGS) { return 0.8; } // sustained ground speed along the facing
+    return 1; // Launch Pad / Barrel Cannon (airborne launch, not modelled) + defensive / shortcut
 }
 function getBoonRouteWeights(map) {
     if (!map || !Array.isArray(map.cells)) { return null; }
