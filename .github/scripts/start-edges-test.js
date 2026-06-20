@@ -44,6 +44,17 @@ function ok(msg) { console.log('  ok: ' + msg); }
     };
 })(0xC0FFEE);
 
+// Deterministic monotonic clock, advanced exactly one tick per room.update below.
+// A tight synchronous tick loop otherwise leaves real Date.now frozen-then-jumpy,
+// so the AI decision/cooldown timers that read Date.now fired a VARIABLE number of
+// times run-to-run under CI contention — the root of this test's flaky
+// "only N/6 bots found a non-lava lane" failure. Fixing the clock makes the gated
+// lane-migration reproducible. 150 gated ticks = ~5s of mocked time, comfortably
+// under gatedWaitTime (9s), so this never trips the gated->racing timer early.
+const TICK_MS = config.serverTickSpeed;
+let clock = 1000000;
+Date.now = () => clock;
+
 // A socket.io io stand-in so messenger room broadcasts don't throw.
 require(path.join(repoRoot, 'server', 'messenger.js')).build({
     to() { return { emit() { } }; },
@@ -214,6 +225,7 @@ function runConfig(startEdges, lavaEdge, label) {
     for (let f = 0; f < 150; f++) {
         room.game.currentState = gated;
         room.update(DT);
+        clock += TICK_MS;
         const arrs = [
             compressor.sendPlayerUpdates(room.playerList),
             compressor.sendProjUpdates(room.projectileList),
@@ -269,10 +281,11 @@ function runConfig(startEdges, lavaEdge, label) {
     // ---- racing -> collapsing ----
     try {
         room.game.startRace();
-        for (let f = 0; f < 120; f++) { room.update(DT); }
+        for (let f = 0; f < 120; f++) { room.update(DT); clock += TICK_MS; }
         room.game.startCollapse(W / 2, H / 2);
         for (let f = 0; f < 120; f++) {
             room.update(DT);
+            clock += TICK_MS;
             const a = compressor.sendPlayerUpdates(room.playerList);
             if (!Array.isArray(a)) { fail(label + ': malformed player array while collapsing'); break; }
         }
