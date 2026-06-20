@@ -2510,13 +2510,40 @@ function setupEmojiWheel() {
 	// socket reconnect), keeping the static close button — otherwise the wheel
 	// accumulates duplicate emojis and positionEmojiSlots spreads them.
 	menu.find("a").filter(function () {
-		return (this.getAttribute("onclick") || "").indexOf("cancel") === -1;
+		return !this.hasAttribute("data-emoji-close");
 	}).remove();
 	for (var i = 0; i < config.emojis.length; i++) {
-		menu.append('<a onclick="closeEmojiWindow(this.innerHTML)" href="#">' + config.emojis[i] + '</a>');
+		menu.append('<a href="#">' + config.emojis[i] + '</a>');
 	}
 	emojiMenu.style.borderColor = playerList[myID].color;
 	positionEmojiSlots();
+	bindEmojiWheelClicks();
+}
+
+// Activate the wheel's anchors (the close X and each emoji) via a single
+// delegated listener instead of inline onclick="" attributes. Inline event-
+// handler attributes do NOT fire inside Discord's sandboxed Activity frame, so a
+// left-click on the X or an emoji did nothing there (right-click closed it only
+// because that path is a real addEventListener). Bound once; addEventListener
+// works in every context, web included.
+var emojiWheelClicksBound = false;
+function bindEmojiWheelClicks() {
+	if (emojiWheelClicksBound || typeof emojiMenu === "undefined" || !emojiMenu) {
+		return;
+	}
+	emojiWheelClicksBound = true;
+	emojiMenu.addEventListener("click", function (e) {
+		var a = (e.target && e.target.closest) ? e.target.closest("#emojiMenu a") : null;
+		if (!a) {
+			return;
+		}
+		e.preventDefault();
+		if (a.hasAttribute("data-emoji-close")) {
+			closeEmojiWindow("cancel");
+		} else {
+			closeEmojiWindow(a.textContent);
+		}
+	});
 }
 
 // Lay the emoji anchors out on a ring with JS-computed positions, expressed in

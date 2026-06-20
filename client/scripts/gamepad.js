@@ -769,15 +769,14 @@ function buttonPressedThisFrame(pad, idx, lp) {
 // --- in-game lobby: emoji wheel navigation ---
 
 function emojiItems() {
-    // #emojiMenu's first <a> is the static close button (onclick=...'cancel');
+    // #emojiMenu's first <a> is the static close button (marked data-emoji-close);
     // setupEmojiWheel appends the real emoji anchors after it. Exclude the close
     // button from navigation — it's reached with B, never selected — so index 0
     // is a real emoji and A can't broadcast the close-icon markup as an emoji.
     var all = document.querySelectorAll("#emojiMenu a");
     var out = [];
     for (var i = 0; i < all.length; i++) {
-        var onclick = all[i].getAttribute("onclick") || "";
-        if (onclick.indexOf("cancel") !== -1) {
+        if (all[i].hasAttribute("data-emoji-close")) {
             continue;
         }
         out.push(all[i]);
