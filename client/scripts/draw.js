@@ -3486,9 +3486,7 @@ function drawPlayer(player, dt) {
         drawHeldKey(player);
     }
     drawEmoji(player);
-    if (player.name != null) {
-        drawBotName(player);
-    }
+    drawBotName(player);
     if (player.awake == false) {
         gameContext.save();
         gameContext.drawImage(commentIconSolid, player.x, player.y - 40, commentIconSolid.width * 0.07, commentIconSolid.height * 0.07);
@@ -3992,10 +3990,13 @@ function drawAvatarSkin(player, sprite) {
     gameContext.restore();
 }
 
-// AI racers carry a visible name below the kart so each personality is
-// recognizable. Aligned with the sprite's camera convention (camera offset is 0
-// in the default desktop view). Humans have no name.
+// Every racer carries a visible name below the kart, Discord-style. AI racers
+// show their personality name; human players (name === null) are labelled by the
+// colour they're playing, via Colors.nameFor. Aligned with the sprite's camera
+// convention (camera offset is 0 in the default desktop view).
 function drawBotName(player) {
+    var label = (typeof Colors !== "undefined") ? Colors.nameFor(player) : player.name;
+    if (label == null) { return; }
     // Match the kart sprite / avatar / emote convention (player position + camera
     // offset) so the label stays attached to the kart in dynamic-camera/zoom mode
     // too. (getCameraX/Y is 0 in the default desktop view; non-zero on touch zoom.)
@@ -4009,8 +4010,8 @@ function drawBotName(player) {
     gameContext.strokeStyle = themeColor('inkOutline', 'white');
     gameContext.fillStyle = themeColor('ink', 'black');
     gameContext.font = '11px Times New Roman';
-    gameContext.strokeText(player.name, x, y);
-    gameContext.fillText(player.name, x, y);
+    gameContext.strokeText(label, x, y);
+    gameContext.fillText(label, x, y);
     gameContext.restore();
 }
 

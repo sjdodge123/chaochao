@@ -285,7 +285,7 @@ function combatLogReset() { combatLog.length = 0; }
 // who later leaves the room still reads correctly in the feed).
 function combatNameOf(id) {
     var p = (typeof playerList !== "undefined" && playerList) ? playerList[id] : null;
-    return (p != null && p.name) ? p.name : "Someone";
+    return (p != null && typeof Colors !== "undefined") ? Colors.nameFor(p) : "Someone";
 }
 
 // Live colour for a name/ring: team colour in teams modes, else the kart colour.
