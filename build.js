@@ -54,6 +54,13 @@ const bundles = {
 
 const outDir = 'client/scripts/dist';
 
+// The Discord Activity entry is the one exception to the concat-globals model:
+// discordActivity.js IMPORTS the Embedded App SDK from node_modules, so it needs
+// a real module bundle (esbuild `build`, not `transform`) emitted as a self-
+// contained IIFE. See client/discord.html and docs/spikes/discord-activity.md.
+const discordEntry = 'client/scripts/discordActivity.js';
+const discordOut = 'discord.bundle.min.js';
+
 async function buildAll() {
     fs.mkdirSync(outDir, { recursive: true });
     for (const [outFile, sources] of Object.entries(bundles)) {
@@ -62,6 +69,20 @@ async function buildAll() {
         const target = path.join(outDir, outFile);
         fs.writeFileSync(target, result.code);
         console.log(target + ' (' + result.code.length + ' bytes)');
+    }
+    // Discord Activity bundle (module resolution + tree-shake of the SDK).
+    if (fs.existsSync(discordEntry)) {
+        const target = path.join(outDir, discordOut);
+        await esbuild.build({
+            entryPoints: [discordEntry],
+            bundle: true,
+            minify: true,
+            format: 'iife',
+            target: ['es2018'],
+            outfile: target,
+            logLevel: 'silent'
+        });
+        console.log(target + ' (' + fs.statSync(target).size + ' bytes)');
     }
 }
 

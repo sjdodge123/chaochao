@@ -38,11 +38,17 @@ app.use(compression());
 // Outside production we ALSO allow localhost origins so the documented local
 // embed test (embed-test.html served from a different port, framing
 // localhost:3000) can load; prod stays locked to the portals only.
+// Discord Activities load the game inside an <iframe> hosted at
+// https://discord.com (and the iframe's own sandbox origin
+// <APPLICATION_ID>.discordsays.com). Both must be allowed to frame us, or the
+// Activity shows a blank/blocked frame. discordsays.com is included so a nested
+// reframe by the proxy is also permitted. Harmless for the normal web build.
 var FRAME_ANCESTORS =
     "frame-ancestors 'self' " +
     "https://crazygames.com https://*.crazygames.com " +
     "https://poki.com https://*.poki.com " +
-    "https://itch.io https://*.itch.io https://*.itch.zone" +
+    "https://itch.io https://*.itch.io https://*.itch.zone " +
+    "https://discord.com https://*.discord.com https://*.discordsays.com" +
     (process.env.NODE_ENV === 'production'
         ? ''
         : " http://localhost:* http://127.0.0.1:*");
@@ -94,6 +100,28 @@ function adsConfigTag() {
         .replace(/\u2028/g, '\\u2028')
         .replace(/\u2029/g, '\\u2029');
     return '<script>window.__ADS__ = ' + json + ';<\/script>';
+}
+
+// Browser-safe Discord Activity config (PUBLIC client id only) injected via the
+// <!-- DISCORD_CONFIG --> placeholder (discord.html only). The client SECRET is
+// never referenced here — token exchange is server-side in a later phase.
+// Stripped to '' when DISCORD_CLIENT_ID is unset, so discord.html shows a clear
+// "not configured" message instead of failing the SDK handshake.
+function discordConfigTag() {
+    if (!process.env.DISCORD_CLIENT_ID) {
+        return '';
+    }
+    var cfg = {
+        clientId: process.env.DISCORD_CLIENT_ID,
+        // Optional explicit proxy mapping target for patchUrlMappings; defaults
+        // to same-origin ('') which is correct for a same-host deploy.
+        mappingTarget: (process.env.DISCORD_MAPPING_TARGET || '')
+    };
+    // Escape '<' so a value cannot terminate the inline <script> (defense-in-depth;
+    // the client id is a numeric snowflake and the target a host, so neither can
+    // carry the U+2028/U+2029 separators the other tags guard against).
+    var json = JSON.stringify(cfg).replace(/</g, '\\u003c');
+    return '<script>window.__DISCORD__ = ' + json + ';<\/script>';
 }
 
 // Inject the running server's version and the latest release headline into
@@ -236,7 +264,8 @@ const HTML_PAGES = {
     '/index.html': true,
     '/play.html': true,
     '/create.html': true,
-    '/join.html': true
+    '/join.html': true,
+    '/discord.html': true
 };
 app.use(function (req, res, next) {
     var url = req.path === '/' ? '/index.html' : req.path;
@@ -247,7 +276,8 @@ app.use(function (req, res, next) {
             .replace(/<!-- VERSION -->/g, 'v' + APP_VERSION)
             .replace(/<!-- NEWS_BANNER -->/g, newsBannerHtml())
             .replace(/<!-- SUPABASE_CONFIG -->/g, supabaseConfigTag())
-            .replace(/<!-- ADS_CONFIG -->/g, adsConfigTag());
+            .replace(/<!-- ADS_CONFIG -->/g, adsConfigTag())
+            .replace(/<!-- DISCORD_CONFIG -->/g, discordConfigTag());
         if (process.env.NODE_ENV === 'production' && (url in bundleMap)) {
             var bundleTag = '<script src="' + bundleMap[url] + '"></script>';
             modified = modified.replace(/<!-- BUILD: bundle-start -->[\s\S]*?<!-- BUILD: bundle-end -->/g, bundleTag);
