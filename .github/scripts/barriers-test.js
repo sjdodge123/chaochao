@@ -255,10 +255,10 @@ console.log('[E] validateMap rejects a goal sealed off by a barrier');
 // overlay AND bots). Author barriers are handled STRUCTURALLY by the nav graph now (cut doorways
 // + split cells), so a plain findPathToNearestGoal (no barrierEdges hint) must route around a
 // wall AND the drawn doorway-to-doorway line must clear it — including a PARTIAL wall whose free
-// end terminates inside a cell. (A regular grid can't reproduce D Day's dense "wall-ends-in-lava"
-// cluster that motivated the rework — that needs the irregular under-connected geometry, exercised
-// by client/maps/DDay.json through validate-content — but this still locks the never-cross-a-wall
-// property against a future gross regression in the waypoint path.)
+// end terminates inside a cell. (A regular grid can't reproduce the dense "wall-ends-in-lava"
+// cluster that motivated the rework — that needs irregular, under-connected Voronoi geometry — but
+// this still locks the never-cross-a-wall property against a future gross regression in the
+// waypoint path.)
 console.log('[F] pathWaypoints never cross an author wall (structural nav)');
 {
     const cellGraph = require(path.join(repoRoot, 'server', 'cellGraph.js'));
