@@ -118,23 +118,28 @@ async function postCode(code) {
     throw new Error(errs.join(' ; '));
 }
 
+// Authorize for our scopes, returning { code }. Tries prompt:'none' FIRST so a player
+// who already granted these scopes is authorized SILENTLY — no consent dialog on every
+// relaunch (the once-only behavior other Activities have). prompt:'none' errors when
+// there's no existing grant (genuine first launch, or right after we add a scope), so we
+// fall back to a normal authorize() that shows the consent dialog exactly that once.
+async function authorizeForScopes(sdk, clientId) {
+    var base = { client_id: clientId, response_type: 'code', state: '', scope: AUTH_SCOPES };
+    try {
+        return await sdk.commands.authorize(Object.assign({ prompt: 'none' }, base));
+    } catch (e) {
+        console.warn('[discord-activity] silent authorize failed (' + (e && e.message) + ') — prompting consent');
+        return await sdk.commands.authorize(base);
+    }
+}
+
 // authorize -> /api/token -> authenticate -> stash. Resolves whether or not auth
 // succeeds — a denied/cancelled authorize, a server without DISCORD_CLIENT_SECRET,
 // or an absent Supabase config all just mean "play as guest", never a dead frame.
 async function establishDiscordAuth(sdk, clientId) {
     try {
         setStatus('Authorizing with Discord…');
-        // No `prompt: 'none'`: that asks Discord to skip the consent UI, which only works
-        // if the user has ALREADY granted these exact scopes — a first-time player (or one
-        // hit after we add a scope, e.g. rpc.voice.read) would get a consent_required error
-        // and be silently demoted to guest instead of seeing the consent dialog. Omitting
-        // it shows consent when needed and is silent on repeat launches.
-        var authResult = await sdk.commands.authorize({
-            client_id: clientId,
-            response_type: 'code',
-            state: '',
-            scope: AUTH_SCOPES
-        });
+        var authResult = await authorizeForScopes(sdk, clientId);
         var code = authResult && authResult.code;
         if (!code) {
             setStatus('No auth code returned by Discord — guest. Launching game…', true);
