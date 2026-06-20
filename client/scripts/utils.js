@@ -90,6 +90,16 @@ Colors.decode = function (input) {
     }
     return "A player";
 }
+// Display label for a player. AI racers keep their personality name; human
+// players (name === null) are labelled by the colour they're playing — decoded
+// from the authoritative server hex, since colour-blind assist may remap .color
+// off-palette (same convention as the "X won the game." headline).
+Colors.nameFor = function (player) {
+    if (player == null) { return "Someone"; }
+    if (player.name != null) { return player.name; }
+    var hex = (player._serverColor != null) ? player._serverColor : player.color;
+    return this.decode(hex);
+}
 
 function getColor() {
     return 'hsl(' + Math.floor(Math.random() * 360) + ', 100%, 50%)';
