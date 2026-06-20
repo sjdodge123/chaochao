@@ -172,8 +172,7 @@ try {
 
     // [4] Now they camp. checkForWinners (every tick) must trip the last-stand collapse.
     console.log('\n[4] Camping respawned racers trip the last-stand par collapse:');
-    let firstCollapseScheduledTick = -1;
-    for (let i = 0; i < 60 && !room.game.collapseInitated; i++) { tick(); if (room.game.collapseInitated) firstCollapseScheduledTick = i; }
+    for (let i = 0; i < 60 && !room.game.collapseInitated; i++) { tick(); }
     check(room.game.collapseInitated === true, 'last-stand collapse was scheduled while every racer is a respawn-camper');
 
     // [5] Drive the loop to resolution: the collapse engages, burns the totem, ends the round.
