@@ -483,6 +483,33 @@ function registerLobbyHubHandlers(server) {
 // Drives the lobby Lv/XP badge + the skin-unlock UI; never trusted for equips.
 var myProgression = null;
 
+// Discord Activity skin default: a player who signed in through the Activity should
+// wear their Discord picture by DEFAULT, unless they've equipped a kart skin. Done
+// once per session (so a later manual change isn't fought) and only when no cart skin
+// and no avatar are already set — a persisted cart skin (restored just before the
+// progressionUpdate that calls this) means they made an explicit choice we respect.
+// Reuses the existing opt-in avatar-skin path (setAvatarSkin), so the server validates
+// the URL (Discord CDN is allowlisted) and broadcasts it like any avatar pick.
+var discordAvatarDefaulted = false;
+function maybeDefaultDiscordAvatar() {
+	if (discordAvatarDefaulted) { return; }
+	var auth = window.chaochaoAuth;
+	// getAuthState() === 'discord' is the play.html-side signal that this session was
+	// established through the Activity (window.isDiscord from discord.html is lost on
+	// the redirect; the auth stash drives getAuthState instead).
+	if (!auth || typeof auth.getAuthState !== "function" || auth.getAuthState() !== "discord") { return; }
+	var profile = (typeof auth.getProfile === "function") ? auth.getProfile() : null;
+	if (!profile || !profile.avatarUrl) { return; }
+	var me = (typeof myID !== "undefined" && typeof playerList !== "undefined" && playerList) ? playerList[myID] : null;
+	if (!me) { return; }
+	// Respect an explicit look: a persisted cart skin or an avatar already showing.
+	if (me.cart || me.avatarUrl) { discordAvatarDefaulted = true; return; }
+	discordAvatarDefaulted = true;
+	if (typeof server !== "undefined" && server) {
+		server.emit("setAvatarSkin", { url: profile.avatarUrl, name: profile.name });
+	}
+}
+
 // --- Progression celebration toasts (shown on lobby arrival) -----------------
 // A sequenced queue: one toast at a time, auto-advancing, so a match that earned
 // XP + a level-up + a couple of skins reads as a short reward sequence rather than
@@ -635,6 +662,11 @@ function registerConnectionHandlers(server) {
 		// Refresh the player_level GA user property so a level change moves this
 		// player's cohort mid-session (and the first update fills it post-join).
 		if (typeof updateGAUserProperties === "function") { updateGAUserProperties(); }
+		// Discord Activity: default the kart to the player's Discord picture unless
+		// they've equipped a cart skin. Runs here because the persisted cart (if any)
+		// arrives via playerCosmeticChanged just BEFORE this event (ordered), so the
+		// gate below sees the accurate equipped state.
+		maybeDefaultDiscordAvatar();
 	});
 	// Celebration toasts earned in a prior match, delivered on lobby arrival (NOT on
 	// the game-over screen). Server sends an ordered batch; we sequence them as

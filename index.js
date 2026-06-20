@@ -158,7 +158,12 @@ function discordEmbedRewrite(html) {
         .replace(
             /<script async src="https:\/\/www\.googletagmanager\.com\/gtag\/js\?id=[^"]*"><\/script>/,
             '<!-- gtag loader disabled in Discord Activity -->'
-        );
+        )
+        // Discord's sandbox caches the in-frame JS aggressively, so stamp every
+        // same-origin script src with the server-boot id. A redeploy/restart changes
+        // the stamp -> the proxy/browser refetches; within a run the URL is stable.
+        // Only fires on play.html?discord=1, so the normal web build is untouched.
+        .replace(/(src="(?:scripts|vendor)\/[^"?]+\.js)"/g, '$1?v=' + BOOT_STAMP + '"');
 }
 
 // Inject the running server's version and the latest release headline into
@@ -166,6 +171,10 @@ function discordEmbedRewrite(html) {
 // Runs in both dev and prod; read once at startup so we don't hit disk on
 // every request.
 const APP_VERSION = require('./package.json').version;
+
+// Server-boot id, used to cache-bust the in-frame Activity scripts (Discord caches
+// JS hard and the filenames are stable). Changes every restart/deploy.
+const BOOT_STAMP = Date.now().toString(36);
 
 // The banner must never take more vertical room than three of the landing
 // menu buttons, so the headline is capped to this many characters (CSS also
