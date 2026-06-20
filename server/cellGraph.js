@@ -256,6 +256,106 @@ function sharedBorderSeg(cellA, cellB) {
     return null;
 }
 
+// A barrier draws/collides as a 14px bar (engine.bounceOffBarriers BARRIER_HALF_WIDTH = 7);
+// a kart's centre is held BARRIER_HALF_WIDTH + radius off the wall centre line. Topology
+// decisions here use that same half-width so the route only threads gaps a real kart fits.
+var BARRIER_HALF_WIDTH = 7;
+
+// Crossing-number point-in-cell test over the cell's halfedge boundary segments (va–vb).
+// Order-independent (works on the raw, unsorted halfedge list): true when (x,y) lies inside
+// the Voronoi polygon. Used to find a barrier's FREE END — the endpoint terminating inside a
+// cell.
+function pointInCell(cell, x, y) {
+    if (!cell || !Array.isArray(cell.halfedges)) { return false; }
+    var inside = false;
+    for (var h = 0; h < cell.halfedges.length; h++) {
+        var e = cell.halfedges[h] && cell.halfedges[h].edge;
+        if (!e || !e.va || !e.vb) { continue; }
+        var x1 = e.va.x, y1 = e.va.y, x2 = e.vb.x, y2 = e.vb.y;
+        if ((y1 > y) !== (y2 > y)) {
+            var xint = x1 + (y - y1) / (y2 - y1) * (x2 - x1);
+            if (x < xint) { inside = !inside; }
+        }
+    }
+    return inside;
+}
+
+// Clearance to "round" a barrier's free end F (the endpoint inside the cell): shoot a ray
+// from F continuing along the wall axis (away from the boundary it entered through, i.e.
+// F - otherEnd) and return the distance to the cell boundary it next hits — how much room a
+// kart has to slip PAST the tip and reach the wall's far side without leaving this cell. A
+// small gap means the wall nearly touches the far boundary, so a thick kart can't round it
+// inside the cell and it bisects the cell like a full crossing. Infinity if the ray exits no
+// edge (degenerate) — treated as roundable.
+function freeEndRoundGap(cell, fx, fy, ox, oy) {
+    var dx = fx - ox, dy = fy - oy, L = Math.hypot(dx, dy) || 1;
+    var ux = dx / L, uy = dy / L;
+    var best = Infinity;
+    for (var h = 0; h < cell.halfedges.length; h++) {
+        var e = cell.halfedges[h] && cell.halfedges[h].edge;
+        if (!e || !e.va || !e.vb) { continue; }
+        var sx = e.va.x, sy = e.va.y, sdx = e.vb.x - e.va.x, sdy = e.vb.y - e.va.y;
+        var den = ux * sdy - uy * sdx;
+        if (Math.abs(den) < 1e-9) { continue; } // ray parallel to this edge
+        var t = ((sx - fx) * sdy - (sy - fy) * sdx) / den; // distance along the ray
+        var u = ((sx - fx) * uy - (sy - fy) * ux) / den;   // param along the edge
+        if (t > 1e-6 && u >= -1e-6 && u <= 1 + 1e-6 && t < best) { best = t; }
+    }
+    return best;
+}
+
+// Min distance from (x,y) to any author barrier's centre line (Infinity if none).
+function barrierMinDist(x, y, barriers) {
+    var m = Infinity;
+    for (var i = 0; i < barriers.length; i++) {
+        var b = barriers[i];
+        if (b == null) { continue; }
+        var d = ptSegDist(x, y, b.x1, b.y1, b.x2, b.y2).d;
+        if (d < m) { m = d; }
+    }
+    return m;
+}
+
+// Does a kart (centre x,y, radius R) overlap any non-drivable cell (lava/empty/shut door)?
+// Tested on the rim, the way the engine keeps a kart's body out of lava — so a doorway's
+// crossing point can't sit where the kart would hang into the lava.
+function kartDiscHitsBlocked(map, x, y) {
+    if (!pointDrivable(map, x, y)) { return true; }
+    var R = c.playerBaseRadius || 7.5;
+    for (var a = 0; a < 8; a++) {
+        var ang = a / 8 * Math.PI * 2;
+        if (!pointDrivable(map, x + Math.cos(ang) * R, y + Math.sin(ang) * R)) { return true; }
+    }
+    return false;
+}
+
+// Effective passable doorway across a shared border {va,vb}, thickness-aware. The Voronoi
+// border LENGTH is the wrong gap measure once walls exist: it overstates a gap a wall
+// bisects, and UNDERSTATES one where two cells merely touch at a short edge while the free
+// space around it is open (so a real kart crosses through a "narrow" border). Instead sample
+// the border, keep the points whose kart disc clears lava, and take the one with the most
+// room to the nearest wall: width = 2*(clearance - BARRIER_HALF_WIDTH) is the kart diameter
+// that fits there (>= KART_WIDTH exactly when the kart centre sits a full radius clear of the
+// wall body). The argmax point {x,y} is the crossing the drawn line and the bot thread —
+// always kart-clear of the wall, so the leg through it never overlaps the bar. width 0 (no
+// kart-safe point) means a wall/lava seals the doorway.
+function doorwayCrossing(map, border) {
+    var barriers = map.barriers;
+    var ax = border.va.x, ay = border.va.y, bx = border.vb.x, by = border.vb.y;
+    var len = Math.hypot(bx - ax, by - ay);
+    var steps = Math.max(2, Math.ceil(len / 2));
+    var best = -Infinity, bcx = (ax + bx) / 2, bcy = (ay + by) / 2;
+    for (var s = 0; s <= steps; s++) {
+        var t = s / steps;
+        var px = ax + (bx - ax) * t, py = ay + (by - ay) * t;
+        if (kartDiscHitsBlocked(map, px, py)) { continue; }
+        var clr = barrierMinDist(px, py, barriers) - BARRIER_HALF_WIDTH;
+        if (clr > best) { best = clr; bcx = px; bcy = py; }
+    }
+    if (best === -Infinity) { return { width: 0, x: Math.round(bcx), y: Math.round(bcy) }; }
+    return { width: best * 2, x: Math.round(bcx), y: Math.round(bcy) };
+}
+
 // Per-cell transit model (navigation graph). A barrier that runs THROUGH a cell's
 // interior — entering and leaving across its boundary — splits that cell into two
 // pieces a kart can't drive between, even though neither the shared border with a
@@ -281,15 +381,21 @@ function getNavGraph(map) {
         nav = {
             count: cells.length, cellOf: null, regionsOfCell: null,
             neighbors: adj.neighbors, doorways: adj.doorways,
+            crossings: null, cellPairCrossing: null,
             regionForPoint: function (ci) { return ci; }
         };
         Object.defineProperty(map, '_navGraph', { value: nav, enumerable: false, writable: true, configurable: true });
         return nav;
     }
 
-    // Which barriers SPLIT each cell (cross its boundary >= 2 times). A barrier that only
-    // clips the boundary once has a free end inside the cell, so a kart drives around it —
-    // not a split.
+    // Which barriers SPLIT each cell into pieces a thick kart can't drive between:
+    //  - a barrier crossing the cell boundary >= 2 times runs clean through it; or
+    //  - a PARTIAL wall (one free end inside the cell) whose tip reaches within KART_WIDTH of
+    //    the far boundary — the gap to round the end is narrower than the kart, so it walls
+    //    the cell off just like a full crossing. A partial wall with room to spare around its
+    //    tip is NOT a split (the kart drives around it; the detour keeps the drawn line clear).
+    // Matching the engine's capsule collision closes D Day's wall-ends-in-lava cluster, where
+    // two doorways sat on opposite sides of a one-crossing wall and the straight line cut it.
     var splitBars = new Array(cells.length);
     for (var ci = 0; ci < cells.length; ci++) {
         var cell = cells[ci];
@@ -306,7 +412,18 @@ function getNavGraph(map) {
                         if (++hits >= 2) { break; }
                     }
                 }
-                if (hits >= 2) { list.push(bi); }
+                if (hits >= 2) {
+                    list.push(bi);
+                } else if (hits === 1) {
+                    // One crossing => exactly one endpoint sits inside the cell (the free end).
+                    var in1 = pointInCell(cell, bar.x1, bar.y1);
+                    var in2 = pointInCell(cell, bar.x2, bar.y2);
+                    if (in1 !== in2) {
+                        var fx = in1 ? bar.x1 : bar.x2, fy = in1 ? bar.y1 : bar.y2;
+                        var ox = in1 ? bar.x2 : bar.x1, oy = in1 ? bar.y2 : bar.y1;
+                        if (freeEndRoundGap(cell, fx, fy, ox, oy) < KART_WIDTH) { list.push(bi); }
+                    }
+                }
             }
         }
         splitBars[ci] = list;
@@ -346,30 +463,33 @@ function getNavGraph(map) {
         regionId(cs, s ? labelOf(cs, s.x, s.y) : "");
     }
 
-    var neighbors = adj.neighbors, doorways = adj.doorways;
-    var rNeighbors = [], rDoorways = [];
-    function ensureNode(n) { while (rNeighbors.length <= n) { rNeighbors.push([]); rDoorways.push([]); } }
+    var neighbors = adj.neighbors;
+    var rNeighbors = [], rDoorways = [], rCrossings = [];
+    var cellPairCrossing = {}; // "ca|cb" (cell indices) -> {x,y,width} widest kart-fitting crossing
+    function ensureNode(n) { while (rNeighbors.length <= n) { rNeighbors.push([]); rDoorways.push([]); rCrossings.push([]); } }
     for (var ca = 0; ca < cells.length; ca++) {
         var cellA = cells[ca];
         if (!cellA || !cellA.site) { continue; }
-        var nbA = neighbors[ca], dwA = doorways[ca];
+        var nbA = neighbors[ca];
         for (var k = 0; k < nbA.length; k++) {
             var cb = nbA[k];
             var border = sharedBorderSeg(cellA, cells[cb]);
             if (border == null) { continue; }
-            // Doorway cut outright by a wall -> no edge between these pieces.
-            var cut = false;
-            for (var bj = 0; bj < bars.length; bj++) {
-                var br = bars[bj];
-                if (br != null && barrierTouchesBorder(border.va.x, border.va.y, border.vb.x, border.vb.y, br.x1, br.y1, br.x2, br.y2)) { cut = true; break; }
-            }
-            if (cut) { continue; }
-            var mx = (border.va.x + border.vb.x) / 2, my = (border.va.y + border.vb.y) / 2;
-            var rA = regionId(ca, labelOf(ca, mx, my));
-            var rB = regionId(cb, labelOf(cb, mx, my));
+            // Thickness-aware passability: a wall (or lava) leaving no kart-wide gap on the
+            // shared border SEALS the doorway (no edge between these pieces); otherwise the
+            // kart threads the widest kart-clear point, which becomes this edge's crossing.
+            var cross = doorwayCrossing(map, border);
+            if (cross.width < KART_WIDTH) { continue; }
+            // Label each piece by the side of its splitting walls the CROSSING POINT lies on
+            // (not the border midpoint, which can fall on the wrong side of a partial wall).
+            var rA = regionId(ca, labelOf(ca, cross.x, cross.y));
+            var rB = regionId(cb, labelOf(cb, cross.x, cross.y));
             ensureNode(rA); ensureNode(rB);
             rNeighbors[rA].push(rB);
-            rDoorways[rA].push(dwA[k]);
+            rDoorways[rA].push(cross.width);
+            rCrossings[rA].push({ x: cross.x, y: cross.y });
+            var key = ca + "|" + cb, had = cellPairCrossing[key];
+            if (had == null || cross.width > had.width) { cellPairCrossing[key] = { x: cross.x, y: cross.y, width: cross.width }; }
         }
     }
     ensureNode(cellOf.length - 1); // pad arrays for any site-only region with no doorways
@@ -384,7 +504,8 @@ function getNavGraph(map) {
 
     nav = {
         count: cellOf.length, cellOf: cellOf, regionsOfCell: regionsOfCell,
-        neighbors: rNeighbors, doorways: rDoorways, regionForPoint: regionForPoint
+        neighbors: rNeighbors, doorways: rDoorways, crossings: rCrossings,
+        cellPairCrossing: cellPairCrossing, regionForPoint: regionForPoint
     };
     Object.defineProperty(map, '_navGraph', { value: nav, enumerable: false, writable: true, configurable: true });
     return nav;
@@ -538,22 +659,33 @@ function detourBarriers(map, pts) {
 // Resolve a route's cell-id path to drivable WAYPOINTS — the SINGLE geometry both the
 // AI steering (aiController) and the fairness/CI overlay (mapClassifier) follow, so the
 // estimated racing line and the bots take the same line through a map. The waypoints are
-// the DOORWAY crossings (shared-border midpoints) between consecutive cells, then the
-// goal centre — NOT the intermediate cell centres, which can sit on the far side of a
-// wall the route legitimately skirts. The route runs on the nav graph (barrier-aware),
-// so consecutive doorways of a shared cell lie in one convex piece — the segment between
-// them can't cross a wall — and a final detour pass skirts any wall END that juts into a
-// traversed cell. Net: no leg crosses a barrier. (A barrier-free map has no doorway it
-// needs to dodge, so this is just the corner-cutting apex line through the gates.)
+// the DOORWAY crossings between consecutive cells, then the goal centre — NOT the
+// intermediate cell centres, which can sit on the far side of a wall the route legitimately
+// skirts. On a barrier map the crossing is the kart-clear point the nav graph already picked
+// for that doorway (off any wall body, never the border midpoint, which can land on a wall);
+// on a barrier-free map it's just the shared-border midpoint. The route runs on the nav graph
+// (barrier-aware), so consecutive doorways of a shared region lie in one drivable piece, and a
+// final detour pass skirts any wall END that juts into a traversed cell. Net: no leg crosses a
+// barrier. (A barrier-free map has no doorway it needs to dodge, so this is just the
+// corner-cutting apex line through the gates.)
 function pathWaypoints(map, path) {
     if (!map || !Array.isArray(map.cells) || !Array.isArray(path) || path.length === 0) { return []; }
     var cells = map.cells;
     var idToIndex = getAdjacency(map).idToIndex;
+    var hasBarriers = Array.isArray(map.barriers) && map.barriers.length > 0;
+    var crossings = hasBarriers ? getNavGraph(map).cellPairCrossing : null;
     var pts = [];
     for (var p = 0; p + 1 < path.length; p++) {
         var ci = idToIndex[path[p]];
         var cn = idToIndex[path[p + 1]];
         if (ci == null || cn == null) { continue; }
+        // Barrier map: the doorway's kart-clear crossing point (so the leg threads the real
+        // gap, not a midpoint sitting over a wall). Fall back to the border midpoint.
+        var cross = crossings ? crossings[ci + "|" + cn] : null;
+        if (cross != null) {
+            pts.push({ x: cross.x, y: cross.y });
+            continue;
+        }
         var seg = sharedBorderSeg(cells[ci], cells[cn]);
         if (seg != null && seg.va && seg.vb) {
             pts.push({ x: Math.round((seg.va.x + seg.vb.x) / 2), y: Math.round((seg.va.y + seg.vb.y) / 2) });
