@@ -80,6 +80,25 @@ function initEventHandlers() {
             ev.preventDefault();
             return false;
         }, false);
+
+        // Inside an iframe (Discord Activity, or the CrazyGames/Poki/itch portals)
+        // the game window only receives keyboard events while it holds focus. If the
+        // player clicks the host UI around the frame — e.g. Discord's voice-channel
+        // chat box — focus leaves and WASD is captured by the host until the frame is
+        // refocused. Worse, the first click back into a cross-origin frame is often
+        // swallowed by the browser just to focus it, so a DOM control like the emoji
+        // wheel's X appears dead on that click. Reclaim focus on any pointer/touch
+        // interaction (capture phase, before the game's own handlers) so clicking the
+        // game always restores keyboard control. Gated to embeds so the standalone
+        // web build is untouched.
+        if (typeof window.isEmbedded === "function" && window.isEmbedded()) {
+            var reclaimFocus = function () { try { window.focus(); } catch (e) { } };
+            window.addEventListener("mousedown", reclaimFocus, true);
+            window.addEventListener("touchstart", reclaimFocus, { passive: true, capture: true });
+            // Best-effort focus on init too, so WASD works without a priming click
+            // when the frame loads already foregrounded.
+            reclaimFocus();
+        }
     }
     isTouchScreen = isTouchDevice();
     try { touchDebug = /[?&]debugtouch/.test(window.location.search); } catch (e) { touchDebug = false; }
