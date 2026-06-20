@@ -21,6 +21,9 @@
 //   4. shove           — contact fires a mapOwned punch of type "antlion"
 //   5. sand leash      — ~3s continuously off sand => burrow (removeHazards)
 //   6. thumper slam    — a slam knocks an antlion inside repelRadius outward
+//   8. punch rout      — a real player swing routs an antlion (burrow); a
+//                        map-owned shove does not (the counterplay)
+//   9. bot punch       — a bot swings at an in-reach antlion, ignores a far one
 //   7. cap             — camping sand never exceeds the global antlion cap
 //
 // Any throw or failed assertion exits 1.
@@ -37,6 +40,8 @@ const mapFormat = require(path.join(repoRoot, 'server', 'mapFormat.js'));
 
 const _engine = require(path.join(repoRoot, 'server', 'engine.js'));
 const { Antlion, VortexWell } = require(path.join(repoRoot, 'server', 'entities', 'hazards.js'));
+const { Punch } = require(path.join(repoRoot, 'server', 'entities', 'punch.js'));
+const aiController = require(path.join(repoRoot, 'server', 'aiController.js'));
 
 const DT = config.serverTickSpeed / 1000;
 const AL = config.brutalRounds.antlion;
@@ -421,6 +426,91 @@ function sessionThumperSlam() {
 }
 
 // -----------------------------------------------------------------------------
+// 8. Punch counterplay: a real player swing routs an antlion (knock-back +
+//    burrow) — the active defence to the swarm. A MAP-OWNED shove must not.
+// -----------------------------------------------------------------------------
+function sessionPunchRout() {
+    config.brutalTypesForce = [AL.id];
+    const map = loadMap('SandsOfTime.json');
+    const room = buildRoom(map);
+    const gb = room.game.gameBoard;
+    const ids = Object.keys(room.playerList);
+    const site = pickParkingSandSite(gb.currentMap);
+    assert(site != null, 'punch: no parkable sand site found');
+    if (failures > 0) { return; }
+    const puncher = room.playerList[ids[0]];
+    const holds = ids.map(id => ({ player: room.playerList[id], x: site.x, y: site.y }));
+    for (const h of holds) { pinPlayer(h.player, site.x, site.y); }
+
+    // An antlion right next to the puncher, ON SAND (so the off-sand leash can't
+    // be what removes it — only the punch can).
+    const ant = gb.spawnAntlion(puncher);
+    assert(ant != null, 'punch: spawnAntlion returned null');
+    if (failures > 0) { return; }
+    ant.x = site.x + 20; ant.y = site.y; ant.newX = ant.x; ant.newY = ant.y;
+    ant.offSandMs = 0;
+
+    // (8a) A MAP-OWNED punch overlapping it must NOT rout it (only real swings do —
+    // otherwise the antlion's own contact shove would delete its neighbours).
+    const mapPunch = new Punch(ant.x, ant.y, config.punchRadius, '#fff', 9e9, ant.roomSig, AL.punchBonus, false, null);
+    mapPunch.mapOwned = true;
+    gb.punchList['mapTest'] = mapPunch;
+    tick(room, holds);
+    assert(room.hazardList[ant.ownerId] != null,
+        'a map-owned punch wrongly routed the antlion (only real player swings should)');
+    delete gb.punchList['mapTest'];
+    if (failures > 0) { return; }
+
+    // (8b) A real player swing overlapping it routs it: burrow + removeHazards "burrow".
+    ant.offSandMs = 0;
+    const realPunch = new Punch(ant.x, ant.y, config.punchRadius, puncher.color, puncher.id, ant.roomSig, config.punchBonus || 1, false, null);
+    gb.punchList[puncher.id] = realPunch;
+    const mark = events.length;
+    tick(room, holds);
+    assert(room.hazardList[ant.ownerId] == null,
+        'a real player punch did not rout the antlion');
+    const removes = eventsSince(mark, 'removeHazards').map(p => JSON.parse(p));
+    assert(removes.some(batch => batch.some(e => e[0] === ant.ownerId && e[3] === 'burrow')),
+        'punch rout was not broadcast via removeHazards "burrow"');
+
+    config.brutalTypesForce = null;
+    if (failures === 0) {
+        console.log('Session 8 passed: a player punch routs an antlion (burrow); map-owned shoves do not.');
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 9. Bot counterplay: decideBrutalPunch makes a bot swing at an antlion that's
+//    within punch reach (which routs it), and ignore one out of reach.
+// -----------------------------------------------------------------------------
+function sessionBotPunch() {
+    const decideBrutalPunch = aiController._test.decideBrutalPunch;
+    function makeBot() {
+        return { ability: null, radius: 11, stamina: 1e9, punchedTimer: null,
+                 punchWaitTime: 0, x: 100, y: 100, angle: 0, attack: false, ai: {} };
+    }
+    function ctxWithAntlion(ax) {
+        return { infection: false, hockey: false, puck: null, players: {},
+                 hazardList: { a1: { isAntlion: true, alive: true, x: ax, y: 100, radius: config.hazards.antlion.radius } } };
+    }
+    // In reach (20u away): the bot throws a punch — sets attack, faces the antlion.
+    const near = makeBot();
+    const hitNear = decideBrutalPunch(near, ctxWithAntlion(120));
+    assert(hitNear === true, 'bot did not punch an antlion within reach');
+    assert(near.attack === true, 'bot punch at an antlion did not set attack');
+
+    // Out of reach (200u away): no punch (the dodge-lunge handles distant ones).
+    const far = makeBot();
+    const hitFar = decideBrutalPunch(far, ctxWithAntlion(300));
+    assert(hitFar === false, 'bot wrongly punched an antlion well out of reach');
+    assert(far.attack === false, 'bot set attack with no antlion in reach');
+
+    if (failures === 0) {
+        console.log('Session 9 passed: a bot swings at an in-reach antlion (routs it), ignores a distant one.');
+    }
+}
+
+// -----------------------------------------------------------------------------
 // 7. Global cap holds under indefinite camping.
 // -----------------------------------------------------------------------------
 function sessionCap() {
@@ -620,6 +710,8 @@ try {
     if (failures === 0) sessionSpawnChaseShove();
     if (failures === 0) sessionBurrow();
     if (failures === 0) sessionThumperSlam();
+    if (failures === 0) sessionPunchRout();
+    if (failures === 0) sessionBotPunch();
     if (failures === 0) sessionCap();
     if (failures === 0) sessionWaterBlock();
     if (failures === 0) sessionVortexPull();

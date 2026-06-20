@@ -205,16 +205,32 @@ function showLoadWindow() {
     document.getElementById('createWindow').classList.add('editor-hidden');
     document.body.classList.remove('editor-open');
     updateContinueTile();
-    // (Re)generate load-list thumbnails now that the window is open — by here
-    // config + textured patterns are loaded, so any card whose thumbnail was
-    // rendered blank/flat earlier (map fetched before config/patterns) upgrades
-    // to the textured version. renderMapThumbnail caches, so this is cheap.
+    refreshMapThumbnails();
+}
+
+// (Re)generate any load-list thumbnails that rendered blank or flat-coloured
+// earlier. Card creation (maplisting) races three async sources — the per-map
+// getJSON fetches, the `config` socket event, and the terrain texture images —
+// so a card built before config arrives gets `src=""` (a permanent blank box),
+// and one built before patterns decode gets flat colours (uncached). This walk
+// re-renders and upgrades both. It runs from showLoadWindow AND, crucially, from
+// tryStart() once config+patterns are ready — without that hook nothing ever
+// re-fired after the textures finished loading, leaving the early blanks forever.
+// renderMapThumbnail caches once patterns are ready, so repeat calls are cheap.
+function refreshMapThumbnails() {
+    if (config == null) { return; } // nothing renderable yet; tryStart re-fires us
     for (var i = 0; i < maps.length; i++) {
         var m = maps[i];
         if (m == null || m.id == null) { continue; }
         var btn = document.getElementById(m.id);
         var img = btn ? btn.querySelector('img') : null;
         if (img == null) { continue; }
+        // Retry any card still showing a blank/broken image (empty src, or an
+        // <img> that failed to decode → naturalWidth 0), and refresh flat-coloured
+        // ones to the textured cache. Skip cards already showing a good data URL.
+        var cur = img.getAttribute('src') || '';
+        var blank = cur === '' || img.naturalWidth === 0;
+        if (!blank && cur.indexOf('data:') === 0 && thumbnailCache[m.id] != null) { continue; }
         var url = renderMapThumbnail(m);
         if (url) { img.src = url; }
     }
@@ -432,6 +448,10 @@ function tryStart() {
     loadPatterns();
     gameRunning = true;
     init();
+    // Patterns are now decoded: upgrade any load-list cards that were built before
+    // config/textures arrived (blank or flat-coloured) to the textured thumbnail.
+    // This is the re-render hook the blank-thumbnail race was missing.
+    refreshMapThumbnails();
 }
 
 function loadPatterns() {

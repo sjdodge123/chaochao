@@ -17,7 +17,9 @@ on:
     # ticks it through the real engine, so these code-oriented checks (bundle
     # build, JS syntax) add nothing. A mixed code+map PR still has non-map files,
     # so paths-ignore does NOT skip it and these checks run as normal. Safe to skip
-    # because main has no required status checks (only a code-owner review gates merge).
+    # for pure-map PRs because the single required status check on main is
+    # `merge-gate` (see merge-gate.yml), which waits for whichever CI workflow
+    # actually ran on the PR — map-submission.yml here — not for this one.
     paths-ignore:
       - 'client/maps/**'
 
@@ -366,7 +368,44 @@ jobs:
       - name: Mobile layout gate
         run: node .github/scripts/mobile-layout-test.js
 
+  # Detect whether this PR touches client render-affecting code. The client-perf
+  # job is heavy (two checkouts, two npm ci, two Playwright runs ~ several minutes)
+  # and only meaningful when something that changes per-frame render/JS work moved.
+  # Server-only and content-only PRs (the common case) skip it entirely, so they no
+  # longer wait on the slowest job in the matrix. gh pr view reads the PR's changed
+  # file list directly (no full-history fetch / third-party action needed).
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      render: ${{ steps.filter.outputs.render }}
+    steps:
+      - name: Detect render-affecting changes
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files=$(gh pr view "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" --json files --jq '.files[].path')
+          echo "Changed files:"; echo "$files"
+          # client/scripts/** = the render hot path; server/compressor.js = the
+          # per-tick payload shape the client decodes; server/config.json = tile/FX
+          # tuning the client renders from; the perf harness/compare scripts
+          # themselves must re-run the gate so changes to the measurement are
+          # exercised. Any of these can move (or change how we read) scripting ms/frame.
+          if echo "$files" | grep -qE '^(client/scripts/|server/compressor\.js$|server/config\.json$|\.github/scripts/perf-client\.js$|\.github/scripts/perf-compare\.js$)'; then
+            echo "render=true" >> "$GITHUB_OUTPUT"
+            echo "-> render-affecting changes detected; client-perf will run."
+          else
+            echo "render=false" >> "$GITHUB_OUTPUT"
+            echo "-> no render-affecting changes; client-perf will be skipped."
+          fi
+
   client-perf:
+    needs: changes
+    if: needs.changes.outputs.render == 'true'
     # Client render-perf REGRESSION gate (relative, non-blocking). Measures the
     # 25-kart brutal scenario's scripting ms/frame for BOTH the PR head and its
     # merge base, ON THE SAME RUNNER, back to back — then gates on the delta. A

@@ -8,7 +8,15 @@ const app = express();
 const http = require('http');
 const server = http.createServer(app);
 const { Server } = require("socket.io");
-const io = new Server(server);
+// Heartbeat: ping a touch more often than the engine.io default (25s) but KEEP the
+// generous 20s pong timeout. A client whose WebSocket silently dies (a Cloudflare PoP
+// hiccup, a NAT/middlebox dropping the long-lived socket) is otherwise invisible for
+// up to ~45s before the server gives up and the client auto-reconnects — and that
+// reconnect is the only chance to get back onto WebSocket instead of limping along on
+// long-polling. At 15s/20s a dead socket is detected in ~35s. We do NOT shorten
+// pingTimeout: mobile browsers (iOS Safari especially) heavily throttle background
+// timers, so a tight timeout would drop players who merely glanced away for a moment.
+const io = new Server(server, { pingInterval: 15000, pingTimeout: 20000 });
 const path = require('path');
 const htmlPath = path.join(__dirname, 'client');
 

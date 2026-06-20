@@ -1,0 +1,201 @@
+name: Merge gate
+
+# The SINGLE required status check for merging into main. It exists so the merge
+# policy can be CONDITIONAL — something branch protection alone can't express:
+#
+#   • Normal PRs (code/docs/refactors)   -> merge freely once CI is green. No human
+#                                            approval required; auto-merge handles them.
+#   • deploy:prod-labelled PRs           -> HARD BLOCK until @sjdodge123 approves
+#                                            (these skip the nightly window and ship
+#                                            straight to prod, so a human must sign off).
+#   • Map submissions                    -> HARD BLOCK until @sjdodge123 approves
+#                                            (player-submitted content / new map JSON).
+#
+# Why one aggregator instead of requiring each CI job directly: the CI workflows are
+# path-filtered (pr-validation skips pure-map PRs; map-submission only runs on map
+# PRs), so no single CI job runs on EVERY PR. A required check that never runs on a
+# given PR is stuck "pending" forever and deadlocks the merge. This job runs on every
+# PR with no path filter, waits for whatever real checks DID run on this commit, and
+# fails if any of them failed — so it's the one context that's always present and
+# always correct to require. It also applies the human-approval gate above.
+#
+# Re-runs on review submit/dismiss so an approval immediately flips a blocked
+# sensitive PR green (and auto-merge, if enabled elsewhere, then fires).
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review, labeled, unlabeled]
+  pull_request_review:
+    types: [submitted, dismissed]
+
+# Cancel an in-flight gate run for the same PR when a newer event arrives (e.g. a
+# fresh push or an approval) so we don't sit waiting on stale CI.
+concurrency:
+  group: merge-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+  statuses: read
+
+jobs:
+  merge-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate merge policy
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const OWNER_APPROVERS = ['sjdodge123']; // CODEOWNERS for `*`
+            // Checks that are advisory / helpers — never block a merge, so the gate
+            // must not wait on or fail for them.
+            const ADVISORY = new Set([
+              'merge-gate',            // self
+              'client-perf',           // advisory render-perf gate (continue-on-error)
+              'changes',               // path-filter helper for client-perf
+              'check-codex-drift',     // warn-only Codex drift nudge (job name)
+              'codex-drift-check',     // …also match by workflow name, just in case
+            ]);
+            // Exact name match only — no broad pattern. (A regex like /codex-drift/
+            // would silently exclude a FUTURE required check that happened to contain
+            // that substring; the explicit set above is the single source of truth.)
+            const isAdvisory = (name) => ADVISORY.has(name);
+
+            const pr = context.payload.pull_request;
+            const { owner, repo } = context.repo;
+            const sha = pr.head.sha;
+
+            // ---- 1. Is this a "sensitive" PR that needs explicit owner approval? ----
+            const labels = (pr.labels || []).map(l => l.name);
+            const isProd = labels.includes('deploy:prod');
+
+            const branch = pr.head.ref || '';
+            const title = pr.title || '';
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner, repo, pull_number: pr.number, per_page: 100,
+            });
+            const paths = files.map(f => f.filename);
+            const touchesMap = paths.some(p => p.startsWith('client/maps/'));
+            const touchesNonMap = paths.some(p => !p.startsWith('client/maps/'));
+            // Server-created map PRs use a `mapchange-…` branch and an INSERT/UPDATE
+            // title. But ANY PR that touches client/maps/** is treated as a map
+            // submission — a mixed map+code PR must NOT slip past the content gate
+            // just because it also changed a non-map file.
+            const isMapBranch = /^mapchange-/.test(branch);
+            const isMapTitle = /^(INSERT|UPDATE) - /.test(title);
+            const isMap = isMapBranch || isMapTitle || touchesMap;
+
+            const sensitive = isProd || isMap;
+            const reasons = [];
+            if (isProd) reasons.push('`deploy:prod` (ships straight to prod)');
+            if (isMap) reasons.push('map submission (player content)');
+
+            if (sensitive) {
+              const reviews = await github.paginate(github.rest.pulls.listReviews, {
+                owner, repo, pull_number: pr.number, per_page: 100,
+              });
+              // The approval must be on the CURRENT head commit. GitHub does NOT
+              // auto-dismiss a review when new commits are pushed, so without the
+              // commit_id check an owner could approve, then more changes land, and a
+              // stale approval would still let the PR merge. Tying it to pr.head.sha
+              // forces a fresh approval after every push to a sensitive PR.
+              const approved = reviews.some(r =>
+                r.state === 'APPROVED' &&
+                r.commit_id === sha &&
+                r.user && OWNER_APPROVERS.includes(r.user.login)
+              );
+              if (!approved) {
+                core.setFailed(
+                  `This PR requires explicit approval from @${OWNER_APPROVERS[0]} on the latest commit before it can merge ` +
+                  `— reason: ${reasons.join(' + ')}. Approve the PR (a review approval on the current head) and this gate turns green.`
+                );
+                return;
+              }
+              core.info(`Sensitive PR (${reasons.join(' + ')}) — approved by an owner. ✔`);
+            } else {
+              core.info('Not a sensitive PR — no human approval required.');
+            }
+
+            // ---- 2. Wait for the real CI checks on this commit, then gate on them. ----
+            // Poll because this gate often starts before the CI jobs finish. A
+            // contended runner just means we wait a little longer; we cap the wait
+            // well under the old behaviour.
+            const MAX_WAIT_MS = 18 * 60 * 1000;
+            const POLL_MS = 20 * 1000;
+            const deadline = Date.now() + MAX_WAIT_MS;
+
+            // EXPECTED-JOB GATE (not just "observed checks are all green"): we will not
+            // trust an all-complete reading until the jobs we KNOW must run on this PR
+            // have actually registered. Otherwise a poll in the sub-second window
+            // before a job posts its check run could see "0 pending" and pass early.
+            // The sentinels are the central, always-present job of each CI workflow:
+            //   • non-map files changed -> pr-validation runs -> expect `smoke-test`
+            //     (all pr-validation jobs are needs-free, so they register together;
+            //      smoke-test present => the whole suite registered)
+            //   • client/maps/** changed -> map-submission runs -> expect `review`
+            // If a sentinel is renamed the gate blocks (times out) rather than passing
+            // blind — fail-safe, not fail-open. Keep these in sync with the CI jobs.
+            const expectedSentinels = [];
+            if (touchesNonMap) expectedSentinels.push('smoke-test');
+            if (touchesMap) expectedSentinels.push('review');
+            core.info(`Expecting sentinel job(s) to register: [${expectedSentinels.join(', ') || '(none)'}].`);
+
+            const collect = async () => {
+              const runs = await github.paginate(github.rest.checks.listForRef, {
+                owner, repo, ref: sha, per_page: 100,
+              });
+              // Commit statuses (older-style) too, in case any check posts as a status.
+              const statuses = await github.paginate(github.rest.repos.listCommitStatusesForRef, {
+                owner, repo, ref: sha, per_page: 100,
+              });
+              const items = [];
+              for (const r of runs) {
+                if (isAdvisory(r.name)) continue;
+                items.push({ name: r.name, done: r.status === 'completed', conclusion: r.conclusion });
+              }
+              // De-dupe statuses by context, keep the latest (API returns newest first).
+              const seen = new Set();
+              for (const s of statuses) {
+                if (isAdvisory(s.context) || seen.has(s.context)) continue;
+                seen.add(s.context);
+                const done = s.state !== 'pending';
+                items.push({ name: s.context, done, conclusion: s.state === 'success' ? 'success' : (done ? s.state : null) });
+              }
+              return items;
+            };
+
+            let items = [];
+            while (true) {
+              items = await collect();
+              const present = new Set(items.map(i => i.name));
+              const missingSentinels = expectedSentinels.filter(s => !present.has(s));
+              const pending = items.filter(i => !i.done);
+              // Ready ONLY when every expected sentinel has registered AND nothing is
+              // still running. Sentinels-present rules out the early-pass race; the
+              // pending check rules out passing while a job is in flight.
+              const ready = missingSentinels.length === 0 && pending.length === 0;
+              if (ready) break;
+              if (Date.now() > deadline) {
+                const why = missingSentinels.length
+                  ? `expected job(s) never registered: [${missingSentinels.join(', ')}] (renamed? CI never triggered?)`
+                  : `still pending [${pending.map(i => i.name).join(', ') || '(none)'}]`;
+                core.setFailed(`Timed out waiting for CI: ${why}.`);
+                return;
+              }
+              const waitingFor = missingSentinels.length
+                ? `sentinels not yet registered [${missingSentinels.join(', ')}]`
+                : `${pending.length} pending [${pending.map(i => i.name).join(', ')}]`;
+              core.info(`Waiting: ${waitingFor} (${items.length} non-advisory check(s) seen) — re-poll in ${POLL_MS / 1000}s`);
+              await new Promise(r => setTimeout(r, POLL_MS));
+            }
+
+            const BAD = new Set(['failure', 'cancelled', 'timed_out', 'action_required', 'startup_failure', 'stale', 'error']);
+            const failed = items.filter(i => BAD.has(i.conclusion));
+            if (failed.length) {
+              core.setFailed(`Required CI failed: ${failed.map(i => `${i.name}=${i.conclusion}`).join(', ')}.`);
+              return;
+            }
+            core.info(`All ${items.length} non-advisory check(s) passed: [${items.map(i => i.name).join(', ')}].`);

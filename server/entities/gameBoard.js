@@ -1082,6 +1082,13 @@ class GameBoard {
 		var burrowed = [];
 		for (var ai = 0; ai < antlions.length; ai++) {
 			var ant = antlions[ai];
+			// Punched this tick by a real player swing: knocked back into the sand —
+			// it burrows away. The active counterplay to the swarm (flag set in
+			// Antlion.handleHit). Skip all further steering for it.
+			if (ant.punchedAway) {
+				burrowed.push(ant);
+				continue;
+			}
 			var onSand = (this.currentMap != null && this.currentMap.cells != null)
 				&& _engine.isOnCellOfType(ant.x, ant.y, this.currentMap, c.tileMap.slow.id);
 			if (onSand) {

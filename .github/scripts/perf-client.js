@@ -95,7 +95,12 @@ const OUT_JSON = process.env.PERF_OUT_JSON || '';
 // on c.brutalTypesForce when this seam injects it).
 const FORCED_BRUTALS = [1007, 1010, 1008, 1009];
 const OVERRIDE = JSON.stringify({
-    aiRacers: { minGrid: 25, maxGrid: 25, testForceBots: 24 }, // testForceBots pins the auto-fill at 24 bots (1H+24=25 karts)
+    // previewBotCount pins the PREVIEW-room fill at 24 bots (1H+24=25 karts) — this
+    // harness reaches the race via the editor preview path (createPreviewRoom), which
+    // fills off c.aiRacers.previewBotCount, NOT testForceBots. testForceBots/minGrid/
+    // maxGrid are kept for the lobby/auto fill path in case it's ever used, but the
+    // preview path needs previewBotCount or the grid never clears the 20-kart floor.
+    aiRacers: { minGrid: 25, maxGrid: 25, testForceBots: 24, previewBotCount: 24 },
     maxPlayersInRoom: 25,                                   // room cap must allow the full grid
     chanceOfBrutalRound: 100,
     chanceForAdditionalBrutal: 100,
@@ -114,12 +119,19 @@ function bootServer() {
             cwd: repoRoot,
             env: { ...process.env, PORT: String(PORT), NODE_ENV: 'development', CHAO_PERF_OVERRIDE: OVERRIDE },
         });
-        let out = '';
-        const onData = (d) => { out += d.toString(); if (/listening on/i.test(out)) resolve(srv); };
+        let out = '', settled = false;
+        const done = (fn, arg) => { if (settled) return; settled = true; clearTimeout(timer); fn(arg); };
+        const onData = (d) => { out += d.toString(); if (/listening on/i.test(out)) done(resolve, srv); };
         srv.stdout.on('data', onData);
         srv.stderr.on('data', onData);
-        srv.on('exit', (c) => reject(new Error(`server exited early (${c}):\n${out}`)));
-        setTimeout(() => reject(new Error(`server boot timeout:\n${out}`)), 20000);
+        srv.on('exit', (c) => done(reject, new Error(`server exited early (${c}):\n${out}`)));
+        // On timeout, kill the spawned server so it can't linger — the outer finally
+        // only kills `srv` once this promise RESOLVES, so a boot that never resolves
+        // would otherwise leak the child.
+        const timer = setTimeout(() => {
+            try { srv.kill('SIGKILL'); } catch (e) {}
+            done(reject, new Error(`server boot timeout:\n${out}`));
+        }, 20000);
     });
 }
 
@@ -202,9 +214,25 @@ const NAV_RACE_RE = /Execution context was destroyed|Target closed|Navigation|de
         const windows = [];          // every scene-valid window: { scriptPerFrame, taskPerFrame, frames, fps, frameWorkP95, heapMB, brutal, karts }
         let tracedOne = false;
         let nearStall = 0, badWindow = 0;
+        // FAIL FAST when the scenario is broken. Each poll waits up to 45s for a
+        // full-grid race; a CONTENDED runner still reaches one (just slowly), but a
+        // BROKEN scenario (preview never fills the grid, a client throw kills the
+        // render loop, etc.) never will — so burning all MAX_ATTEMPTS (~21 min) only
+        // delays an inevitable failure. If we haven't reached a single race in the
+        // first few attempts, it's breakage not contention: stop and let the
+        // empty-windows path throw immediately.
+        const REACH_RACE_MAX_TRIES = Number(process.env.PERF_REACH_RACE_TRIES) || 3;
+        let reachTries = 0;
         for (let attempt = 1; attempt <= MAX_ATTEMPTS && windows.length < COLLECT; attempt++) {
             const reached = await poll(page, racingFn, 45000, `attempt ${attempt}`);
-            if (!reached) { console.log(`  attempt ${attempt}: no full-grid racing reached`); continue; }
+            if (!reached) {
+                console.log(`  attempt ${attempt}: no full-grid racing reached`);
+                if (!reachedRace && ++reachTries >= REACH_RACE_MAX_TRIES) {
+                    console.log(`  giving up after ${reachTries} attempts without ever reaching a full-grid race — the perf scenario is broken (not runner contention). Failing fast instead of grinding all ${MAX_ATTEMPTS} attempts.`);
+                    break;
+                }
+                continue;
+            }
             reachedRace = true;
             // Stop the preview auto-return so a round that ends mid-window cycles to the
             // next round (staying on play.html) rather than bouncing to the editor —

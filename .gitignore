@@ -124,3 +124,9 @@ changed_maps.txt
 # Local-only portal embed test (see docs/portal-submission-checklist.md)
 embed-test.html
 perf-harness-report.jsonl
+
+# Local-only agent/MCP tooling (machine-specific absolute paths + credentials;
+# must never be committed — see .mcp.json's hardcoded ~/.local and ~/.config paths)
+.mcp.json
+.agents/
+.claude/

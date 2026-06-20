@@ -24,15 +24,28 @@ To re-render a past week's digest with the current formatting, run the `Release 
 - **Bots steer around barriers.** AI racers used to aim at cell centres and try to drive straight through a wall; they now thread the doorways between walls, following the same line the fairness preview draws.
 - **Bots grab Checkpoints.** AI racers now detour to attune to a Checkpoint flag (Second Wind Totem) when one is roughly on their way — banking the free revive like a smart player would, then carrying on to the goal.
 - **Bots break out of vortex wells.** A bot pulled to a near-stop in a vortex's ring now double-taps a dash to burst free toward its route, instead of crawling against the pull.
+- **Bots fight off antlions too.** The racing bots now swing at an antlion that's right on top of them — knocking it back into the sand — instead of only trying to dodge away, so they no longer get helplessly herded into the lava on sand-heavy maps.
 
 ### Gameplay & Balance
 
 - **Walls have real thickness.** Barriers are 14px-wide bars, so you now stop with your kart's edge against the wall instead of sliding to its centre line — no more parking in the middle of a wall.
+- **You can fight back against antlions now — punch them.** A solid swing knocks an antlion back into the sand and it burrows away, so a well-timed lunge clears a path through the swarm (and a wide swing can scatter a whole cluster at once). Antlion rounds were brutal on sand-heavy maps where there was nowhere to run; now the swarm has a real answer.
+- **Antlion rounds eased up.** Their shove hits softer (so a bump is far less likely to launch you straight into the lava), fewer of them turn up at once, they jab a little slower, and you get a longer grace period on the sand before one erupts. The mode should be survivable on maps where the route forces you across the dunes.
+
+### Quality of Life
+
+- **Connection indicator.** A small ping/latency badge now sits in the bottom-left corner so you can see your connection at a glance — green when it's healthy, amber/red as it climbs. If your connection ever drops onto the slow fallback mode (the cause of "only I was lagging" hitches), it turns into a red "Slow link — tap to fix" chip that reconnects you on the better path; out of a race it also tries to recover on its own.
 
 ### Bug Fixes
 
 - **Barrier ends don't snag you anymore.** Grazing the tip of a wall — especially where two wall ends meet — used to wedge your kart in the notch. The rounded ends now behave like smooth caps, so you slide cleanly around them instead of getting stuck.
 - **Vortex wells: the calm eye is truly calm, and water sets you free.** The drawn centre of a well now has zero pull, so you can actually rest and wind up speed in the eye before powering out. And a well over deep water no longer traps you — its pull can't grip a swimming kart, so you swim straight through.
+
+## v0.49.1 — 2026-06-20
+
+### Gameplay & Balance
+
+- **Checkpoint flags no longer drag rounds out.** When everyone still in the race is just respawning on checkpoint (Second Wind) flags and nobody's pushing for the goal, the round now triggers its hurry-up collapse instead of stalling — the closing lava burns the flags and forces a finish. A racer who's leaned on a respawn counts like a downed racer for the "last one standing" timer; touching a flag while still actually racing for the goal doesn't, so you keep your shot at the win.
 
 ## v0.49.0 — 2026-06-16
 
