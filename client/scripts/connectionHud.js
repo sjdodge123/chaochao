@@ -171,9 +171,9 @@ function connectionHudRecover(isManual) {
 		// Auto path needs the one-shot flag to avoid a reload loop on a WebSocket-blocked
 		// network. If storage is unreadable, don't auto-reload at all — under-recovering is
 		// safer than looping, and the player can still tap the chip to force a reload.
-		var alreadyRecovered = true;
-		try { alreadyRecovered = !!sessionStorage.getItem("connHudAutoRecovered"); } catch (e) { return; }
-		if (alreadyRecovered) { return; }
+		try {
+			if (sessionStorage.getItem("connHudAutoRecovered")) { return; }
+		} catch (e) { return; }
 	}
 	try { sessionStorage.setItem("connHudAutoRecovered", "1"); } catch (e) { /* best-effort */ }
 	connHud.recovering = true;
