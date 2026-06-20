@@ -1158,8 +1158,23 @@ class Antlion extends Hazard {
 		// Continuous time spent off sand (ms). At offSandDespawnSeconds it burrows
 		// away (GameBoard despawns it with a removeHazards broadcast).
 		this.offSandMs = 0;
+		// Set by handleHit when a real player swing connects; updateAntlionRound
+		// resolves it (knock-back + burrow) — the active counterplay to the swarm.
+		this.punchedAway = false;
 	}
 	handleHit(object) {
+		if (object == null) { return; }
+		// A real player PUNCH routs the antlion: it's knocked back into the sand and
+		// burrows away (resolved in gameBoard.updateAntlionRound). Map-owned shoves
+		// (the antlion's own contact punch) and clashed punches don't count — the same
+		// guard the MagpieDrone uses. A swing's radius can clear a whole cluster.
+		if (object.isPunch) {
+			if (!object.mapOwned && !object.clashed) {
+				this.punchedAway = true;
+				object.landed = true; // the punch connected — keep it out of the clash pass
+			}
+			return;
+		}
 		if (!object.isPlayer || object.alive === false) {
 			return;
 		}
