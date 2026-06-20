@@ -599,6 +599,9 @@ var cosmeticsTrackedThisMatch = false;
 // (which also covers a mid-match join — their match starts at their first race).
 var matchStartedAt = null;
 function registerConnectionHandlers(server) {
+	// Live connection-quality badge + transport recovery. Idempotent, so it also
+	// re-points at a pad slot promoted to primary (registerPrimaryHandlers path).
+	if (typeof connectionHudAttach === "function") { connectionHudAttach(server); }
 	server.on('welcome', function (id) {
 		debugLog("welcome, myID=", id);
 		myID = id;
