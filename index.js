@@ -124,6 +124,38 @@ function discordConfigTag() {
     return '<script>window.__DISCORD__ = ' + json + ';<\/script>';
 }
 
+// Discord's iframe sandbox forces every request through https://<id>.discordsays.com
+// and CSP-blocks any unmapped external origin. URL Mappings / patchUrlMappings can
+// reroute fetch/WebSocket/XHR, but NOT resources the HTML parser loads via
+// <script src> / <link href>. play.html pulls jQuery (a HARD boot dep — game.js wraps
+// its entire boot in `$(function(){…})`) and Bootstrap CSS from external CDNs, so in
+// the Activity the page would throw before a match could ever connect. The Discord
+// handoff navigates to `play.html?discord=1`; for that request only we swap those two
+// CDN tags for local same-origin copies (proxied transparently through `/.proxy/`) and
+// drop the gtag loader (analytics is irrelevant in-frame and off-policy for Discord).
+// supabase-js is left as-is — it degrades to guest if blocked; real in-frame auth is a
+// later phase. The normal web build is served byte-identical (this only fires on the
+// ?discord=1 query). Keep these strings in lockstep with client/play.html.
+function discordEmbedRewrite(html) {
+    return html
+        // jQuery 3.5.1 (boot-critical) -> vendored same-origin copy.
+        .replace(
+            'https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js',
+            'vendor/jquery-3.5.1.min.js'
+        )
+        // Bootstrap 4.1.3 CSS -> vendored copy; drop SRI/crossorigin (same-origin now).
+        .replace(
+            /<link rel="stylesheet" href="https:\/\/stackpath\.bootstrapcdn\.com\/bootstrap\/4\.1\.3\/css\/bootstrap\.min\.css"[^>]*>/,
+            '<link rel="stylesheet" href="vendor/bootstrap-4.1.3.min.css">'
+        )
+        // Drop the external gtag loader; the inline `function gtag(){…}` fallback stays
+        // so trackEvent() calls remain harmless no-ops.
+        .replace(
+            /<script async src="https:\/\/www\.googletagmanager\.com\/gtag\/js\?id=[^"]*"><\/script>/,
+            '<!-- gtag loader disabled in Discord Activity -->'
+        );
+}
+
 // Inject the running server's version and the latest release headline into
 // index.html so the landing page always reflects what's actually deployed.
 // Runs in both dev and prod; read once at startup so we don't hit disk on
@@ -281,6 +313,11 @@ app.use(function (req, res, next) {
         if (process.env.NODE_ENV === 'production' && (url in bundleMap)) {
             var bundleTag = '<script src="' + bundleMap[url] + '"></script>';
             modified = modified.replace(/<!-- BUILD: bundle-start -->[\s\S]*?<!-- BUILD: bundle-end -->/g, bundleTag);
+        }
+        // Discord Activity launches the game via `play.html?discord=1`; swap external
+        // CDN tags for vendored same-origin copies so the page boots inside the sandbox.
+        if (url === '/play.html' && req.query && req.query.discord) {
+            modified = discordEmbedRewrite(modified);
         }
         res.set('Content-Type', 'text/html');
         // HTML carries the injected version/news/bundle tags and must reflect a

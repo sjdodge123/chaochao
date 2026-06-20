@@ -69,9 +69,11 @@ async function boot() {
     setStatus('Connected (instanceId ' + sdk.instanceId + '). Launching game…');
 
     // Phase 0–2 handoff: navigate to the real game. Same-origin, so it stays
-    // inside the mapped sandbox. Auth + presence wiring replaces this in later
-    // phases (the game would be hosted in this frame rather than redirected to).
-    setTimeout(function () { window.location.href = 'play.html'; }, 600);
+    // inside the mapped sandbox. The `?discord=1` flag tells the server to serve a
+    // sandbox-safe play.html — vendored jQuery/Bootstrap instead of CDN tags the
+    // proxy would CSP-block (jQuery is a hard boot dep). Auth + presence wiring
+    // replaces this redirect in later phases (game hosted in this frame instead).
+    setTimeout(function () { window.location.href = 'play.html?discord=1'; }, 600);
 }
 
 boot().catch(function (e) {
