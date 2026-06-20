@@ -1113,6 +1113,13 @@ function findPathToNearestGoal(map, point, options) {
     addPenalties(options.penaltySet, options.penaltyMult || 1);
     addPenalties(options.penaltySet2, options.penaltyMult2 || 1);
 
+    // Soft ATTRACTION — the mirror of penaltySet: cells the caller wants the route to LEAN
+    // toward, as a cost multiplier < 1 on the destination, so the route detours to one only
+    // when it isn't a big backtrack (e.g. the AI pulling toward a Checkpoint flag it wants to
+    // attune). options.preferCells: { voronoiId -> mult } with 0 < mult <= 1; strongest
+    // (smallest) pull wins on overlap. Unset -> no attraction.
+    var prefer = (options.preferCells && typeof options.preferCells === 'object') ? options.preferCells : null;
+
     // Author barriers are modelled structurally by the nav graph (getNavGraph): cut
     // doorways are absent and bisected cells are split, so reachability/validation are
     // correct without any per-edge option. options.barrierEdges/barrierMult remain a
@@ -1215,7 +1222,10 @@ function findPathToNearestGoal(map, point, options) {
             var tw = (lilyCells != null && lilyCells[navCell(v)]) ? LILY_PADDED_WEIGHT : tileWeight(cellV.id);
             // Speed boon in this cell -> discount its cost so the route leans toward the boost.
             var bw = (boonW != null && boonW[v] != null) ? boonW[v] : 1; // v is the region node
-            var nc = cost[u] + step * tw * bw * cellJitter(cellV.site.voronoiId) * pen * tight * barr;
+            // Caller attraction (e.g. AI pulling toward a Checkpoint): discount the cell so the
+            // route leans through it when it isn't a big detour.
+            var prf = (prefer != null && prefer[cellV.site.voronoiId] != null) ? prefer[cellV.site.voronoiId] : 1;
+            var nc = cost[u] + step * tw * bw * prf * cellJitter(cellV.site.voronoiId) * pen * tight * barr;
             if (nc < cost[v]) {
                 cost[v] = nc;
                 geo[v] = geo[u] + step;

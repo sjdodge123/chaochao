@@ -254,6 +254,23 @@ try {
             if (Math.hypot(eBot.x - VX, eBot.y - VY) > VW.radius) { escaped = true; escTick = f; break; }
         }
         check(escaped, 'a kart flooring outward from the dead centre drives clear of the well' + (escTick >= 0 ? ' (in ' + (escTick * DT).toFixed(1) + 's)' : ' — STILL TRAPPED after 8s'));
+
+        // AI ESCAPE: a BOT held near-stationary in the pull ring arms a tactical lunge
+        // (double-tap dash) to break out, and clears the well instead of getting stuck.
+        const { room: aRoom, bot: aBot } = bootRoom('vw-ai-escape', vmap, SOAK);
+        aBot.isAI = true;
+        // Right side of the ring (between the well and the goal), at rest — its goal-steer points
+        // OUTWARD, and speed 0 (< LUNGE_VORTEX_SPEED_MAX) makes it "held", so the lunge arms.
+        aBot.x = aBot.newX = VX + VW.coreRadius + 18; aBot.y = aBot.newY = VY; aBot.velX = 0; aBot.velY = 0;
+        const lungeAtStart = aBot.lungePendingAt || 0;
+        let lunged = false, aiEscaped = false, aiTick = -1;
+        for (let f = 0; f < 240; f++) {
+            aRoom.update(DT); clock += config.serverTickSpeed; fireDueTimers();
+            if ((aBot.lungePendingAt || 0) > lungeAtStart) { lunged = true; }
+            if (!aBot.alive || aBot.reachedGoal || Math.hypot(aBot.x - VX, aBot.y - VY) > VW.radius) { aiEscaped = true; aiTick = f; break; }
+        }
+        check(aiEscaped, 'an AI bot held in the pull ring clears the well (no roach motel)' + (aiTick >= 0 ? ' (in ' + (aiTick * DT).toFixed(1) + 's)' : ' — STILL TRAPPED after 8s'));
+        check(lunged, 'the held bot armed a tactical lunge to break out of the vortex ring');
     }
 } finally {
     Date.now = realNow;

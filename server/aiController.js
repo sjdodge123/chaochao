@@ -642,6 +642,11 @@ var LUNGE_SAFE_PROBE = 58;       // px: a dodge-lunge is suppressed if lava OR i
 var LUNGE_PUCK_RANGE = 135;      // px: dodge the puck when it's this close and inbound
 var LUNGE_ZOMBIE_RANGE = 92;     // px: shove clear of a zombie about to make contact
 var LUNGE_ANTLION_RANGE = 88;    // px: hop off an antlion bearing down
+var LUNGE_VORTEX_SPEED_MAX = 90; // px/s: only burst out of a vortex ring when genuinely HELD
+                                 // (near-stationary) — a bot still carrying speed drives out on
+                                 // its own (drive thrust >> the well's pull) and shouldn't pay the
+                                 // lunge's net-slowdown. Fires only inside a vortex annulus, which
+                                 // never exists on the ai-fitness control maps (so racing is safe).
 // NOTE: bots lunge ONLY to dodge contact threats (above). ai-fitness A/B retired every
 // "use it to travel" trigger — sand-escape, ice-redirect, goal-dash all made bots finish
 // WORSE (Crossroads/IcyLake regressed, FastAndSlow flat-with-freezes). The lunge is a NET
@@ -665,6 +670,10 @@ var LIGHTNING_FEELER_MULT = 1.45; // see farther ahead when everyone's sped up
 // penalty exists to prevent.
 var HAZARD_PATH_PENALTY = 12;
 var RAIL_PATH_PENALTY = 4;
+// Route ATTRACTION (a cost multiplier < 1) pulling an un-attuned bot toward a live Checkpoint
+// flag (Second Wind Totem): a free revive is worth a modest detour, but not a cross-map
+// backtrack, so it's a soft pull — the bot grabs a flag roughly on its way and keeps racing.
+var CHECKPOINT_PULL = 0.4;
 // Solid author barriers are worse than a bumper (you can't pass at all, only slide),
 // so routing around them is almost always worth it — a heavier soft penalty than a
 // static hazard, but still soft so a barrier in the sole chokepoint never nulls the
@@ -1487,6 +1496,7 @@ function decideAttack(bot, ctx, nav) {
 // Predicate for nearestMatch over ctx.hazardList: a living antlion (nearestMatch already
 // skips !alive, so this just selects the antlion kind).
 function isAntlionH(h) { return h.isAntlion === true; }
+function isVortexH(h) { return h && h.isVortex === true && h.alive !== false; }
 
 // Tactical land lunge: arm a double-tap dash (bot.lungePending) when the instant burst is
 // worth blowing the whole stamina bar. tryLandLunge (player.update, same tick) consumes the
@@ -1544,6 +1554,21 @@ function decideLunge(bot, ctx) {
         // closing = the puck's velocity points toward the bot
         var closing = ((ctx.puck.velX || 0) * (bot.x - ctx.puck.x) + (ctx.puck.velY || 0) * (bot.y - ctx.puck.y)) > 0;
         if (pd < LUNGE_PUCK_RANGE && closing) { why = 'puck'; }
+    }
+    // Held near-stationary in a vortex well's pull RING (not the calm eye): one burst breaks the
+    // inward pull. The bot's steer already points OUT toward the route past the well (bots route
+    // around vortex cores), so lunging along it heads outward — only armed when the steer truly
+    // does (dot > 0.2), never deeper toward the centre. Land/non-ice only (decideLunge's top
+    // guard), matching that swimming karts are now exempt from the pull entirely.
+    if (why == null && mag(bot.velX, bot.velY) < LUNGE_VORTEX_SPEED_MAX) {
+        var vw = nearestMatch(bot, ctx.hazardList, isVortexH);
+        if (vw != null) {
+            var vo = vw.player;
+            if (vw.dist > (vo.coreRadius || 0) && vw.dist < (vo.radius || 0)) {
+                var ovx = bot.x - vo.x, ovy = bot.y - vo.y, ovm = mag(ovx, ovy) || 1;
+                if (ndx * (ovx / ovm) + ndy * (ovy / ovm) > 0.2) { why = 'vortex'; }
+            }
+        }
     }
 
     if (why == null) { return; }
@@ -1878,6 +1903,15 @@ function steerBot(bot, ctx, dt) {
             barrierEdges: ctx.barrierEdges, // solid barriers cut these edges — route around
             barrierMult: BARRIER_PATH_PENALTY
         };
+        // Un-attuned bot: lean the route toward a live Checkpoint flag (Second Wind Totem) — a
+        // free revive is worth a modest detour. A soft attractor, so it only diverts when a flag
+        // is roughly on the way; the moment the bot drives over one (bot.secondWind set) the pull
+        // clears and it races the goal. (ctx.checkpointCells is null during a collapse.)
+        if (bot.secondWind == null && ctx.checkpointCells != null && ctx.checkpointCells.length > 0) {
+            var pc = {};
+            for (var cpi = 0; cpi < ctx.checkpointCells.length; cpi++) { pc[ctx.checkpointCells[cpi]] = CHECKPOINT_PULL; }
+            pathOpts.preferCells = pc;
+        }
         // Bunker round: the goal is buried (no goal tiles), so home the A* on the
         // safe bunker island instead — otherwise findPathToNearestGoal returns null
         // and the bot just sits there.
@@ -2447,6 +2481,24 @@ function update(gameBoard, currentState, dt) {
     var staticHazardCells = null;
     var railCells = null;
     var hazardList = gameBoard.hazardList;
+    // Checkpoint flags (Second Wind Totem boon, a free revive): collect the cells of the LIVE
+    // (un-burned) flags so an un-attuned bot's route can lean toward the nearest. Skipped during
+    // a collapse — a flag the lava is about to consume isn't worth chasing, and the collapse
+    // flee logic owns steering then.
+    var checkpointCells = null;
+    var SECONDWIND = (c.boons && c.boons.secondWindTotem) ? c.boons.secondWindTotem.id : -99999;
+    if (currentState !== c.stateMap.collapsing) {
+        for (var cpk in hazardList) {
+            var cflag = hazardList[cpk];
+            if (cflag == null || cflag.id !== SECONDWIND || cflag.alive === false) { continue; }
+            if (cflag.netState === 0) { continue; } // a burned flag revives no one
+            var cci = cellGraph.nearestCellIndex(map.cells, { x: cflag.x, y: cflag.y });
+            if (map.cells[cci] != null && map.cells[cci].site != null) {
+                if (checkpointCells == null) { checkpointCells = []; }
+                checkpointCells.push(map.cells[cci].site.voronoiId);
+            }
+        }
+    }
     var RAIL_PENALTY_MARGIN = 48; // px from the swept segment to still penalize a cell
     for (var hkey in hazardList) {
         var hz = hazardList[hkey];
@@ -2696,6 +2748,7 @@ function update(gameBoard, currentState, dt) {
         doorIndexByVoronoiId: doorIndexByVoronoiId, // path cell -> the door it is (blocking-door detection)
         staticHazardCells: staticHazardCells, // static bumper cells (harsh path penalty)
         railCells: railCells, // moving-rail swept cells (mild path penalty — timeable)
+        checkpointCells: checkpointCells, // live Checkpoint-flag cells (an un-attuned bot leans toward one)
         barrierEdges: cellGraph.getBarrierBlockedEdges(map), // adjacency edges a solid barrier cuts (route around)
         players: playerList,
         projectileList: gameBoard.projectileList,

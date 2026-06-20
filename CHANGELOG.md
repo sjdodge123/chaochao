@@ -22,6 +22,8 @@ To re-render a past week's digest with the current formatting, run the `Release 
 ### AI Racers
 
 - **Bots steer around barriers.** AI racers used to aim at cell centres and try to drive straight through a wall; they now thread the doorways between walls, following the same line the fairness preview draws.
+- **Bots grab Checkpoints.** AI racers now detour to attune to a Checkpoint flag (Second Wind Totem) when one is roughly on their way — banking the free revive like a smart player would, then carrying on to the goal.
+- **Bots break out of vortex wells.** A bot pulled to a near-stop in a vortex's ring now double-taps a dash to burst free toward its route, instead of crawling against the pull.
 
 ### Gameplay & Balance
 
