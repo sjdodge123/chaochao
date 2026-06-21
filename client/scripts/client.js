@@ -73,6 +73,13 @@ function discordReenter() {
 		if (typeof resetGameboard === "function") { resetGameboard(); }
 		myID = null;
 		myPlayer = null;
+		// The fresh socket is a NEW server session that defaults to a plain kart, so re-arm
+		// the one-shot that re-applies the player's Discord avatar skin — otherwise a re-enter
+		// rejoins as a default colour (the setAvatarSkin emit is keyed off this latch, which
+		// stayed true from the first join). progressionUpdate on the rejoin re-fires
+		// maybeDefaultDiscordAvatar(), which now re-emits in the lobby. (Explicitly-equipped
+		// cart skins are restored separately by reEquipSavedCosmetics in the gameState handler.)
+		discordAvatarDefaulted = false;
 		// Fresh primary socket carrying the (stashed) Discord handshake token.
 		server = clientConnect(true);
 		// Re-enter the same instance room. enterGame is buffered until the socket connects,
@@ -82,6 +89,57 @@ function discordReenter() {
 	} finally {
 		discordReentering = false;
 	}
+}
+
+// Discord Activity "tap to rejoin" panel, shown after the server's deep-idle reclaim kick
+// (the room was freed because we sat idle past the lobby/in-game window). It is deliberately
+// a HUMAN GESTURE gate: an absent player's frame just holds this static panel (no socket, no
+// room → resources stay reclaimed), while a present player taps once and re-enters in place
+// via discordReenter() — the page and the live Discord SDK never reload, so the voice tray /
+// speaking ring survive. Idempotent (one panel at a time). Overlay is inline-styled to avoid
+// touching CSS; the whole overlay is tappable (most forgiving for touch) and the button
+// carries data-gp-nav so a controller's A button can trigger it.
+var discordRejoinPanelEl = null;
+function showDiscordRejoinPanel() {
+	if (discordRejoinPanelEl || typeof document === "undefined") { return; }
+	var overlay = document.createElement("div");
+	overlay.id = "discordRejoinPanel";
+	overlay.style.cssText = "position:fixed;inset:0;z-index:99999;display:flex;flex-direction:column;" +
+		"align-items:center;justify-content:center;gap:18px;background:rgba(12,14,20,0.92);" +
+		"color:#fff;font-family:inherit;text-align:center;padding:24px;cursor:pointer;";
+	var title = document.createElement("div");
+	title.textContent = "Paused — you stepped away";
+	title.style.cssText = "font-size:26px;font-weight:700;";
+	var sub = document.createElement("div");
+	sub.textContent = "Your voice chat is still connected. Tap to jump back in.";
+	sub.style.cssText = "font-size:15px;opacity:0.8;max-width:360px;line-height:1.4;";
+	var btn = document.createElement("button");
+	btn.type = "button";
+	btn.textContent = "Tap to rejoin";
+	btn.setAttribute("data-gp-nav", "");
+	btn.style.cssText = "margin-top:6px;padding:14px 28px;font-size:18px;font-weight:700;color:#0c0e14;" +
+		"background:#7ee787;border:none;border-radius:10px;cursor:pointer;";
+	overlay.appendChild(title);
+	overlay.appendChild(sub);
+	overlay.appendChild(btn);
+	var rejoin = function (e) {
+		if (e) { try { e.preventDefault(); e.stopPropagation(); } catch (e2) {} }
+		hideDiscordRejoinPanel();
+		discordReenter();
+	};
+	// Tap anywhere on the overlay (or the button / its gamepad activation) rejoins.
+	overlay.addEventListener("click", rejoin);
+	btn.addEventListener("click", rejoin);
+	document.body.appendChild(overlay);
+	discordRejoinPanelEl = overlay;
+	try { btn.focus(); } catch (e) { /* focus is best-effort */ }
+	debugLog("[discord] deep-idle reclaim — showing tap-to-rejoin panel");
+}
+function hideDiscordRejoinPanel() {
+	if (discordRejoinPanelEl && discordRejoinPanelEl.parentNode) {
+		discordRejoinPanelEl.parentNode.removeChild(discordRejoinPanelEl);
+	}
+	discordRejoinPanelEl = null;
 }
 
 // Set true when a match-over (startGameover) fires; consumed by the next startLobby
@@ -932,6 +990,18 @@ function registerConnectionHandlers(server) {
 			}
 		}
 		trackEvent('server_kick', { reason: kickReason, state: kickState });
+		// Discord Activity: a kick here is the server's long deep-idle RECLAIM (it freed the
+		// room because we sat idle for the lobby/in-game window). We must NOT auto-reenter —
+		// that would defeat reclaiming an absent player's room (the frame would just rejoin on
+		// a loop). Drop the connection to release the (now roomless) socket, then show a
+		// "tap to rejoin" panel; the tap re-enters IN PLACE so voice/presence survive (no
+		// reload). The human gesture is what tells a present-but-idle player apart from one
+		// who walked away. Other embed hosts / web keep the normal teardown below.
+		if (isDiscordActivity()) {
+			try { server.disconnect(); } catch (e) { /* already gone */ }
+			showDiscordRejoinPanel();
+			return;
+		}
 		// Per-slot teardown (§6.17): drop the primary slot. With no other local
 		// players this disconnects and navigates exactly as before (N=1); with pad
 		// players still in the game it fails over to one of them instead of ending

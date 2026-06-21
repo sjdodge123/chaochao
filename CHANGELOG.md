@@ -25,6 +25,7 @@ To re-render a past week's digest with the current formatting, run the `Release 
 
 ### Quality of Life
 
+- **Gentler idle handling inside Discord Activities.** In a Discord voice-channel Activity you're no longer kicked for a short idle — you sit out the current round and drop back in the moment you move. Only after a long stretch away (about 15 min in the lobby, 20 in a match) does it pause you with a one-tap "rejoin" screen, so an abandoned window stops tying up a game while your voice chat stays connected the whole time.
 - **Connection indicator.** A small ping/latency badge now sits in the bottom-left corner so you can see your connection at a glance — green when it's healthy, amber/red as it climbs. If your connection ever drops onto the slow fallback mode (the cause of "only I was lagging" hitches), it turns into a red "Slow link — tap to fix" chip that reconnects you on the better path; out of a race it also tries to recover on its own.
 
 ## v0.49.1 — 2026-06-20

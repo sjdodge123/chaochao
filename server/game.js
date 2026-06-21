@@ -102,6 +102,8 @@ class Room {
 		return false;
 	}
 	checkAFK() {
+		// Discord Activity instance rooms get a DIFFERENT idle policy (see checkDiscordDeepIdle).
+		if (this.discordInstanceId) { this.checkDiscordDeepIdle(); return; }
 		for (var id in this.playerList) {
 			// Bots have no socket/mailbox; messageClientBySig would throw. They
 			// also never set kick (Player.update skips checkForSleep for AI), but
@@ -113,6 +115,41 @@ class Room {
 				messenger.messageClientBySig(id, "serverKick", null);
 				hostess.kickFromRoom(id);
 			}
+		}
+	}
+	// Discord Activity idle policy. A Discord instance room is PRIVATE to one voice group
+	// (never matchmade into, never advertised), so the public-room reasons for the normal
+	// AFK kick — reclaiming a shared slot, clearing a dead socket so others can matchmake —
+	// don't apply. The normal kick is also self-defeating here: the client re-enters in
+	// place after a serverKick, so a kick at the public thresholds would just force-rejoin
+	// the same player on a loop (churn + a session/skin reset + a frame flicker). So we DON'T
+	// act on the short `kick` flag (lobby/waiting 60s, racing/collapsing 60s sleep + 240s
+	// kick — those state-specific rules in Player.checkAFK still set it; we ignore it).
+	//
+	// What we DO need: stop a SOLO player who opened the Activity and walked away from
+	// pinning a forever-ticking room (bots keep cycling rounds while a connected-but-idle
+	// client holds clientCount > 0). The 60s SLEEP already keeps an idle kart out of round
+	// accounting so the round still concludes — but the room keeps simulating. So as a long
+	// backstop we kick on CONTINUOUS inactivity (Player.sleepTimer = the timestamp of the
+	// last real input; null while active; NOT reset by round transitions — only wakeUp on
+	// real input clears it). The lobby and in-game windows differ deliberately: a player
+	// idling in the LOBBY is more clearly abandoned than one who went quiet mid-match, so the
+	// lobby reclaims sooner. A kick here carries reason 'idleReclaim'; the client shows a
+	// "tap to rejoin" panel (re-enters in place, voice/presence intact) rather than auto-
+	// rejoining — that human gesture is what distinguishes "present but idle" from "gone".
+	checkDiscordDeepIdle() {
+		var now = Date.now();
+		var state = this.game.currentState;
+		var inLobby = (state === c.stateMap.waiting || state === c.stateMap.lobby);
+		var thresholdMs = (inLobby ? c.discordLobbyIdleKickTime : c.discordIdleKickTime) * 1000;
+		for (var id in this.playerList) {
+			var p = this.playerList[id];
+			if (!p || p.isAI) { continue; }
+			if (p.sleepTimer == null) { continue; }                 // actively playing
+			if ((now - p.sleepTimer) < thresholdMs) { continue; }   // idle, but within the grace window
+			debug.log("checkDiscordDeepIdle: reclaiming idle player id=", id, " state=", state, " idleMs=", now - p.sleepTimer);
+			messenger.messageClientBySig(id, "serverKick", { reason: "idleReclaim" });
+			hostess.kickFromRoom(id);
 		}
 	}
 	hasSpace() {
