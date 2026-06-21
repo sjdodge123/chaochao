@@ -3,11 +3,17 @@
 
     /* Safe-area insets (notch / home indicator). Resolve to 0px on devices
        and browsers that don't expose them, so the layout is unchanged there.
-       Requires `viewport-fit=cover` on the viewport meta to be non-zero. */
-    --safe-top: env(safe-area-inset-top, 0px);
-    --safe-bottom: env(safe-area-inset-bottom, 0px);
-    --safe-left: env(safe-area-inset-left, 0px);
-    --safe-right: env(safe-area-inset-right, 0px);
+       Requires `viewport-fit=cover` on the viewport meta to be non-zero.
+       Inside a Discord mobile Activity the iframe doesn't see the device notch
+       via env(); Discord instead injects `--discord-safe-area-inset-*` onto the
+       document root. max() takes whichever is larger, so the SAME vars drive the
+       web build (env) and the Discord build (Discord's vars) with no forking —
+       both Discord vars and env() resolve to 0px off their respective platforms,
+       leaving the layout byte-identical everywhere else. */
+    --safe-top: max(env(safe-area-inset-top, 0px), var(--discord-safe-area-inset-top, 0px));
+    --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--discord-safe-area-inset-bottom, 0px));
+    --safe-left: max(env(safe-area-inset-left, 0px), var(--discord-safe-area-inset-left, 0px));
+    --safe-right: max(env(safe-area-inset-right, 0px), var(--discord-safe-area-inset-right, 0px));
 
     /* Theme palette — light (default). The dark overrides live in the
        [data-theme="dark"] block below; theme.js flips the data-theme
@@ -536,7 +542,10 @@ canvas {
         align-items: center;
         justify-content: center;
         text-align: center;
-        padding: 24px;
+        /* Keep the rotate copy clear of a notch / home indicator if it ever
+           shows on a notched device (web mobile; the Discord build locks
+           landscape so it normally won't appear there at all). */
+        padding: max(24px, var(--safe-top)) max(24px, var(--safe-right)) max(24px, var(--safe-bottom)) max(24px, var(--safe-left));
     }
     #rotatePrompt .rotate-inner {
         max-width: 320px;

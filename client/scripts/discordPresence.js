@@ -173,6 +173,16 @@ async function authorizeForScopes(sdk, clientId) {
         api.channelId = sdk.channelId || api.channelId;
         log('live SDK in game frame — instanceId ' + api.instanceId + ', channelId ' + api.channelId);
 
+        // chaochao is a fixed 16:9 LANDSCAPE arena (portrait shows only a rotate
+        // prompt). On Discord MOBILE, lock the frame to landscape so the player
+        // never lands on that prompt; desktop ignores it (no-op). lock_state 3 =
+        // LANDSCAPE (Common.OrientationLockStateTypeObject). Best-effort — an older
+        // client / unsupported platform just rejects and we carry on.
+        try {
+            await sdk.commands.setOrientationLockState({ lock_state: 3 });
+            log('orientation locked to landscape.');
+        } catch (e) { warn('setOrientationLockState failed (ignored): ' + (e && e.message)); }
+
         // ---- Auth (Phase 4, now in-frame) ----
         var data = null;
         var authUser = null;   // captured from authenticate() — carries our Discord snowflake

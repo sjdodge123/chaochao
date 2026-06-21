@@ -67,18 +67,35 @@ function drawSpeakingIndicator(player, sx, sy) {
         var css = document.createElement('style');
         css.id = 'discordVoiceTrayStyle';
         css.textContent =
-            '#discordVoiceTray{position:fixed;left:10px;top:50%;transform:translateY(-50%);' +
+            // Desktop default: a vertical column down the left edge. left/max-height
+            // honour the device safe-area (notch / home indicator) and keep a long
+            // roster from clipping off the top/bottom (the --safe-* vars also pick up
+            // Discord's injected insets — see styles.css :root).
+            '#discordVoiceTray{position:fixed;left:calc(10px + var(--safe-left, 0px));top:50%;transform:translateY(-50%);' +
             'display:flex;flex-direction:column;gap:8px;z-index:40;pointer-events:none;' +
+            'max-height:calc(100dvh - var(--safe-top, 0px) - var(--safe-bottom, 0px) - 24px);overflow:hidden;' +
             'padding:8px 6px;border-radius:16px;background:rgba(11,12,20,0.45);' +
             'backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);}' +
             '#discordVoiceTray.empty{display:none;}' +
-            '.dvt-row{position:relative;width:40px;height:40px;}' +
+            '.dvt-row{position:relative;width:40px;height:40px;flex:0 0 auto;}' +
             '.dvt-av{width:40px;height:40px;border-radius:50%;display:block;object-fit:cover;' +
             'border:2px solid rgba(255,255,255,0.18);background:#2a3350;}' +
             '.dvt-ring{position:absolute;inset:-3px;border-radius:50%;border:3px solid #43b581;' +
             'opacity:0;transition:opacity .12s ease;box-shadow:0 0 8px #43b581;}' +
             '.dvt-row.speaking .dvt-ring{opacity:1;}' +
-            '.dvt-row.speaking .dvt-av{border-color:#43b581;}';
+            '.dvt-row.speaking .dvt-av{border-color:#43b581;}' +
+            // Narrow / touch screens (a phone-width Discord frame): a left-edge column
+            // would sit right under the floating joystick (left tap region) or the
+            // attack button (right). Re-flow to a horizontal row pinned to the top
+            // CENTRE — the one strip a landscape player's thumbs never cover — below
+            // the navbar + top notch, smaller avatars, and overflow-clipped so a big
+            // voice group can't run off either edge.
+            '@media (pointer:coarse),(max-width:900px){' +
+            '#discordVoiceTray{left:50%;right:auto;top:calc(var(--navbar-height, 0px) + var(--safe-top, 0px) + 6px);' +
+            'transform:translateX(-50%);flex-direction:row;flex-wrap:nowrap;' +
+            'max-height:none;max-width:min(72vw,440px);gap:6px;padding:5px 7px;}' +
+            '#discordVoiceTray .dvt-row,#discordVoiceTray .dvt-av{width:32px;height:32px;}' +
+            '}';
         document.head.appendChild(css);
     }
 
