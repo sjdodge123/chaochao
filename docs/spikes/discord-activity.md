@@ -295,20 +295,30 @@ currently triggers a one-shot `location.reload()` (sessionStorage-guarded). **Th
 reload preserves the SDK — the AFK test below disproves that**, so the reload almost
 certainly does NOT re-establish auth either. Needs reworking the same way as AFK (in-place).
 
-**AFK-rejoin voice-tray-disappears — NOT FIXED (reload attempt failed; operator-confirmed).**
-The AFK/menu-exit path was changed from `window.location.href = <same Activity URL>` to
-`location.reload()` (new `menuExit()`), on the theory a reload preserves the Discord referrer.
-**Operator tested: the voice tray STILL disappears after an AFK rejoin.** So `location.reload()`
-does NOT re-establish the SDK handshake either — confirming the handshake is truly
-**once-per-frame-LAUNCH**: any reload OR navigation within the Activity frame loses it, not
-just cross-page nav. **Lead for the next agent: the ONLY way to keep presence/voice across an
-AFK event (or a late-token re-auth) is to NEVER reload/navigate — re-enter IN-PLACE by
-reconnecting the Socket.IO connection while the page (and its live SDK) stay untouched.** The
-SDK, `window.discordPresence`, and the voice tray are page-level and survive a socket
-reconnect; only the game's room membership needs re-establishing (disconnect → fresh
-`io()` with the auth callback → `enterGame` re-routes to the same instance room via the URL
-`instance_id`). Both the AFK path (`menuExit` / `dropLocalPlayer` N=1 teardown) and the
-late-token P2 path should use this instead of reload.
+**AFK-rejoin voice-tray-disappears — FIXED (in-place re-entry; operator-confirmed in-frame, 2026-06-20).**
+The reload attempt (`menuExit()` → `location.reload()`) failed because the SDK handshake is
+**once-per-frame-LAUNCH** — any reload OR navigation within the frame loses presence/voice.
+The fix re-enters **IN PLACE**: never reload/navigate; the page, the live SDK,
+`window.discordPresence`, and the voice tray are all page-level and survive — only the game's
+Socket.IO connection + room membership are rebuilt.
+- `discordReenter()` (client.js): tears down the old local socket(s), resets room-scoped state
+  (`resetGameboard`), re-arms `discordAvatarDefaulted`, opens a fresh primary socket
+  (`clientConnect(true)` → `forceNew` so the auth handshake re-runs with the stashed token),
+  and `clientSendStart(-1)` re-routes to the SAME instance room via the URL `instance_id`.
+- `menuExit()` (deliberate Leave) and `__onDiscordTokenAdopted` (late-token P2) now call
+  `discordReenter()` instead of reload. Gated on `isDiscordActivity()`; web/portal unchanged.
+- **Skin-on-rejoin bug** (came back as default colour): `discordAvatarDefaulted` is a one-shot
+  latch; `discordReenter()` re-arms it so `maybeDefaultDiscordAvatar()` re-emits `setAvatarSkin`.
+- **Idle AFK loop** (the old rejoin→idle→kick→rejoin churn) — also FIXED via a **tiered idle
+  policy** for Discord instance rooms (commit `acc957d`): 60s sleep unchanged; the short AFK
+  kick is ignored for Discord rooms (a present-but-idle viewer is never interrupted); a long
+  **deep-idle reclaim** (`Room.checkDiscordDeepIdle`, continuous-inactivity via `Player.sleepTimer`)
+  kicks only after `discordLobbyIdleKickTime` 900s / `discordIdleKickTime` 1200s (lobby reclaims
+  sooner — a lobby-sitter is more clearly gone) so a walked-away solo player can't pin a
+  forever-ticking bot room. The kick carries `reason:'idleReclaim'`; the client drops the socket
+  (frees the room) and shows a static **"tap to rejoin" panel** instead of auto-reentering — the
+  tap re-enters in place (voice/presence intact). The human gesture is what tells present-idle
+  from gone. (Commits: `d21d74e` in-place re-entry, `acc957d` tiered idle + skin fix.)
 
 **Verified:** desktop in-frame (routing → `Discord instance … -> room …`; auth OK; tray shows
 participants; ring pulses on speak), `npm run build`, `smoke-test.js`, headless instance-route
@@ -316,17 +326,15 @@ participants; ring pulses on speak), `npm run build`, `smoke-test.js`, headless 
 `DISCORD_DEBUG=1`, `discordPresence.getDiag()`) is in-tree — decide keep-vs-strip before PR.
 
 **Still open:**
-- **AFK rejoin loses voice/presence (NOT fixed)** — the `location.reload()` re-entry did NOT
-  restore the SDK (operator-confirmed); reload/nav within the frame can't re-handshake.
-  Rework AFK re-entry (and the late-token P2 path) to in-place Socket.IO reconnect — keep the
-  page + live SDK, only reconnect the socket. See the AFK note above.
+- ~~AFK rejoin loses voice/presence~~ — **FIXED** (in-place re-entry + tiered idle policy;
+  operator-confirmed in-frame). See the AFK-rejoin note above.
 - **Phase 6 mobile** — portal mobile platform enabled but Discord mobile still returns
   *"This Activity is not currently available on this OS"* (a client-side platform gate before
   our code runs; suspect manifest cache → force-quit the mobile app / propagation delay).
   Phase 6 CODE polish (safe-area insets, `innerWidth<900` perf-tier recheck under embed dims,
   voice-tray sizing on narrow screens) is NOT started.
-- **Idle AFK loop** in the Activity (rejoin→idle→kick→rejoin) — pre-existing follow-up; the
-  proper fix suppresses the AFK kick in Activities or shows a "click to rejoin" panel.
+- ~~Idle AFK loop (rejoin→idle→kick→rejoin)~~ — **FIXED** via the tiered idle policy +
+  tap-to-rejoin panel (see the AFK-rejoin note above).
 - **Dead code:** `discord.html` + `discordActivity.js` (+ the `discord.bundle` build step) are
   unused under approach (b) — delete before PR.
 - **Not pushed / no PR** (operator gate).
