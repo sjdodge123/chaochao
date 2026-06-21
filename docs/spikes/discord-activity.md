@@ -288,16 +288,27 @@ breaks the SDK two ways, both confirmed via a server-logged in-frame diag (`DISC
   authenticated" and left `localUserId` null (no kart ring). The snowflake is captured from
   the single call.
 
-**Codex review (P2) — FIXED.** If the in-frame OAuth finishes *after* the 12s connect-gate
-cap (player lingered on consent), the socket already connected as guest and Socket.IO can't
-re-auth a live connection. `adoptDiscordSession` now triggers a **one-shot `location.reload()`**
-(sessionStorage-guarded) so the now-consented silent auth beats the gate. Safe because a
-reload preserves the original Discord referrer (only cross-*page* nav broke it).
+**Codex review (P2) — attempted, likely INEFFECTIVE (see AFK note).** If the in-frame OAuth
+finishes *after* the 12s connect-gate cap (player lingered on consent), the socket already
+connected as guest and Socket.IO can't re-auth a live connection. `adoptDiscordSession`
+currently triggers a one-shot `location.reload()` (sessionStorage-guarded). **This assumed a
+reload preserves the SDK — the AFK test below disproves that**, so the reload almost
+certainly does NOT re-establish auth either. Needs reworking the same way as AFK (in-place).
 
-**AFK-rejoin voice-tray-disappears — FIXED.** The AFK/menu-exit path did
-`window.location.href = <same Activity URL>` — a navigation that reset `document.referrer`
-and killed the SDK (tray vanished). New `menuExit()` does `location.reload()` in the Activity
-(SDK survives) and the normal nav on web.
+**AFK-rejoin voice-tray-disappears — NOT FIXED (reload attempt failed; operator-confirmed).**
+The AFK/menu-exit path was changed from `window.location.href = <same Activity URL>` to
+`location.reload()` (new `menuExit()`), on the theory a reload preserves the Discord referrer.
+**Operator tested: the voice tray STILL disappears after an AFK rejoin.** So `location.reload()`
+does NOT re-establish the SDK handshake either — confirming the handshake is truly
+**once-per-frame-LAUNCH**: any reload OR navigation within the Activity frame loses it, not
+just cross-page nav. **Lead for the next agent: the ONLY way to keep presence/voice across an
+AFK event (or a late-token re-auth) is to NEVER reload/navigate — re-enter IN-PLACE by
+reconnecting the Socket.IO connection while the page (and its live SDK) stay untouched.** The
+SDK, `window.discordPresence`, and the voice tray are page-level and survive a socket
+reconnect; only the game's room membership needs re-establishing (disconnect → fresh
+`io()` with the auth callback → `enterGame` re-routes to the same instance room via the URL
+`instance_id`). Both the AFK path (`menuExit` / `dropLocalPlayer` N=1 teardown) and the
+late-token P2 path should use this instead of reload.
 
 **Verified:** desktop in-frame (routing → `Discord instance … -> room …`; auth OK; tray shows
 participants; ring pulses on speak), `npm run build`, `smoke-test.js`, headless instance-route
@@ -305,6 +316,10 @@ participants; ring pulses on speak), `npm run build`, `smoke-test.js`, headless 
 `DISCORD_DEBUG=1`, `discordPresence.getDiag()`) is in-tree — decide keep-vs-strip before PR.
 
 **Still open:**
+- **AFK rejoin loses voice/presence (NOT fixed)** — the `location.reload()` re-entry did NOT
+  restore the SDK (operator-confirmed); reload/nav within the frame can't re-handshake.
+  Rework AFK re-entry (and the late-token P2 path) to in-place Socket.IO reconnect — keep the
+  page + live SDK, only reconnect the socket. See the AFK note above.
 - **Phase 6 mobile** — portal mobile platform enabled but Discord mobile still returns
   *"This Activity is not currently available on this OS"* (a client-side platform gate before
   our code runs; suspect manifest cache → force-quit the mobile app / propagation delay).
@@ -397,4 +412,4 @@ The scaffold can't be verified headlessly — it needs a real Discord app + a pu
 
 ## Follow-up prompt (operator-injectable)
 
-> Continue the Discord Activity work from `docs/spikes/discord-activity.md` on `worktree-discord-activity-spike` (NOT pushed). Read the **"⚠️ Architecture correction — approach (b)"** section first: Phases 0–5b are DONE and desktop-live-verified — the game is served in-frame at the Activity root (no discord.html redirect), the SDK inits once in `discordPresence.js` for auth+instance→room routing+voice, and the on-kart speaking ring + avatar voice tray work. Codex's one P2 (late-token guest connect) and the AFK-rejoin tray-disappears bug are both fixed via `location.reload()` re-entry (reload preserves the SDK; cross-page nav does not). Open items, pick per priority: (1) **Phase 6 mobile** — I enabled the portal mobile platform but Discord mobile still says "not available on this OS" (client-side gate, likely manifest cache — confirm force-quit/propagation first); then the CODE polish: safe-area insets, `innerWidth<900` perf-tier recheck under embed dims, voice-tray sizing on narrow screens. (2) **Pre-PR cleanup:** delete the now-dead `discord.html` + `discordActivity.js` + the `discord.bundle` build step (approach (b) doesn't use them), and decide keep-vs-strip on the `DISCORD_DEBUG`/`discordDiag`/`getDiag()` diagnostics. (3) Phase 5b polish if wanted (ring color/steadiness; tray only renders for Discord-voice players by design). A `DISCORD_DEBUG=1` dev server is on :3700 behind the operator's cloudflared tunnel; relaunch the Activity to re-test in-frame (read `[discordDiag]`/`Discord instance` lines from the server log). Don't push or open a PR without the operator's go-ahead.
+> Continue the Discord Activity work from `docs/spikes/discord-activity.md` on `worktree-discord-activity-spike` (NOT pushed). Read the **"⚠️ Architecture correction — approach (b)"** section first: Phases 0–5b are DONE and desktop-live-verified — the game is served in-frame at the Activity root (no discord.html redirect), the SDK inits once in `discordPresence.js` for auth+instance→room routing+voice, and the on-kart speaking ring + avatar voice tray work on the INITIAL launch. Open items, pick per priority: (1) **AFK rejoin loses voice/presence — STILL BROKEN (operator-confirmed).** The attempted fix (re-enter via `location.reload()` instead of a cross-page nav) did NOT work — the voice tray still disappears after an AFK rejoin. This proves `location.reload()` does NOT re-establish the SDK either: Discord completes the RPC handshake only once per frame LAUNCH, so ANY reload/navigation within the Activity frame permanently loses presence/voice. **Fix = re-enter IN-PLACE: never reload/navigate; reconnect only the Socket.IO connection while the page + live SDK stay untouched** (`window.discordPresence`/tray are page-level and survive; just disconnect→fresh `io()` with the auth callback→`enterGame`, which re-routes to the same instance room via the URL `instance_id`). Apply the same in-place reconnect to the late-token P2 path (`adoptDiscordSession` currently reloads — same broken assumption). Touch points: `menuExit()` + the N=1 teardown in `dropLocalPlayer`/`leaveGame` (client.js ~2952/2996), `__onDiscordTokenAdopted` (client.js), and the connect/`handshakeAuth` plumbing. (2) **Phase 6 mobile** — portal mobile enabled but Discord mobile still says "not available on this OS" (client-side gate, likely manifest cache — confirm force-quit/propagation first); then CODE polish: safe-area insets, `innerWidth<900` perf-tier recheck under embed dims, voice-tray sizing on narrow screens. (3) **Pre-PR cleanup:** delete the now-dead `discord.html` + `discordActivity.js` + the `discord.bundle` build step, and decide keep-vs-strip on the `DISCORD_DEBUG`/`discordDiag`/`getDiag()` diagnostics. A `DISCORD_DEBUG=1` dev server is on :3700 behind the operator's cloudflared tunnel; relaunch the Activity to re-test in-frame (read `[discordDiag]`/`Discord instance` lines from the server log). Don't push or open a PR without the operator's go-ahead.
