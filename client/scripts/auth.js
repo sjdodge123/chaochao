@@ -110,8 +110,9 @@
             if (typeof renderAuthUI === 'function') { renderAuthUI(); }
             if (typeof window.updateGAUserProperties === 'function') { window.updateGAUserProperties(); }
             // If the socket already connected as a guest (token arrived after the connect-
-            // gate's cap), let the game decide whether to reload so the handshake re-runs
-            // with the token. No-op if the connect hasn't happened yet (it'll carry the token).
+            // gate's cap), let the game re-enter IN-PLACE so a fresh handshake carries the
+            // token (NOT a reload — that loses the once-per-frame Discord SDK handshake). No-op
+            // if the connect hasn't happened yet (the pending connect will carry the token).
             if (typeof window.__onDiscordTokenAdopted === 'function') { window.__onDiscordTokenAdopted(); }
         }
         if (discordReadyResolve) { discordReadyResolve(); discordReadyResolve = null; }

@@ -489,6 +489,11 @@ function enterLobby() {
 }
 function init() {
     if (loading == false) {
+        // init() re-runs on every room (re)join (setupPage + each gameState, incl. a
+        // Discord in-place re-entry), so clear any prior interval before arming a new one —
+        // otherwise each rejoin leaks a second checkForTimeout ticker (it double-counts the
+        // idle timer and, in a Discord Activity, can wrongly trip the parent-frame reload).
+        if (timeOutChecker) { clearInterval(timeOutChecker); }
         timeOutChecker = setInterval(checkForTimeout, 1000);
     }
     // Schedule (never call animloop() synchronously): a direct call while a rAF

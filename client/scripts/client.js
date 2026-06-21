@@ -28,16 +28,60 @@ function menuExitHref() {
 	return "./index.html"; // web/portal menu-exit destination
 }
 // Where a menu-exit / AFK-kick sends the player. In a Discord Activity we must NOT navigate
-// to a new URL: a cross-DOCUMENT navigation changes document.referrer, which breaks the
-// in-frame SDK's RPC handshake (presence/voice die — the voice tray vanishes). A RELOAD
-// re-enters the SAME Activity URL, preserving the launch context, so the SDK re-establishes
-// and routing (instanceId from the URL param) lands the player back in their instance room.
-// Web/portal builds navigate to the landing page as before.
+// to a new URL AND must NOT reload: the Embedded App SDK completes its RPC handshake only
+// ONCE per Activity frame LAUNCH, so ANY cross-document navigation OR reload permanently
+// loses presence/voice (the voice tray + on-kart speaking ring die — proven live; a reload
+// is no better than a nav). Instead we re-enter IN-PLACE — the page, the live SDK, and
+// window.discordPresence/voice tray all survive; only the game's socket + room membership
+// are rebuilt (discordReenter). Web/portal builds navigate to the landing page as before.
 function menuExit() {
 	if (isDiscordActivity()) {
-		try { window.location.reload(); return; } catch (e) { /* fall through to href */ }
+		try { discordReenter(); return; } catch (e) { /* fall through to href */ }
 	}
 	window.location.href = menuExitHref();
+}
+
+// Discord Activity in-place re-entry. Because the SDK handshake is once-per-frame-LAUNCH
+// (see menuExit), the ONLY way to keep voice/presence across an AFK kick, a menu "leave",
+// or a late-token re-auth is to NEVER reload/navigate. window.discordPresence and the voice
+// tray are page-level and stay intact; we only rebuild the game's Socket.IO connection +
+// room membership: tear down the old local socket(s), reset room-scoped client state, open a
+// FRESH primary socket (forceNew so io() re-runs the auth handshake with the now-stashed
+// Discord token), and re-enter the SAME instance room. Routing is by the URL instance_id
+// launch param (handled in clientSendStart), so -1 (matchmake) lands back in the player's
+// Discord voice-channel room regardless of the dead room's gameID. Discord-only (callers gate
+// on isDiscordActivity()); a re-entrancy guard makes overlapping triggers a no-op.
+var discordReentering = false;
+function discordReenter() {
+	if (discordReentering) { return; }
+	discordReentering = true;
+	try {
+		// Close every existing local socket (primary + any couch slots) and forget the slots,
+		// dropping their handlers so the dead sockets can't fire stale events into the new room.
+		for (var s = 0; s < localPlayers.length; s++) {
+			var lp = localPlayers[s];
+			if (lp && lp.socket) {
+				try { lp.socket.removeAllListeners(); } catch (e) { /* ignore */ }
+				try { lp.socket.disconnect(); } catch (e) { /* ignore */ }
+			}
+			localPlayers[s] = null;
+		}
+		primarySlot = 0;
+		// Reset all room-scoped client state (playerList, gameID, effects, team state, …) so
+		// the fresh join rehydrates from a clean slate instead of layering onto the dead room
+		// — exactly the state a full page load would start from.
+		if (typeof resetGameboard === "function") { resetGameboard(); }
+		myID = null;
+		myPlayer = null;
+		// Fresh primary socket carrying the (stashed) Discord handshake token.
+		server = clientConnect(true);
+		// Re-enter the same instance room. enterGame is buffered until the socket connects,
+		// exactly like the initial join; the server's gameState response rehydrates everything.
+		clientSendStart(-1);
+		debugLog("[discord] re-entered in place (socket rebuilt, presence/voice preserved)");
+	} finally {
+		discordReentering = false;
+	}
 }
 
 // Set true when a match-over (startGameover) fires; consumed by the next startLobby
@@ -326,12 +370,18 @@ function handshakeAuth(cb) {
 // fallback for networks that block WebSockets.
 var SOCKET_TRANSPORT_OPTS = { transports: ["websocket", "polling"], tryAllTransports: true };
 
-function clientConnect() {
+// `forceNew` (Discord in-place re-entry only): open a brand-new Manager instead of
+// reusing io()'s cached one, so the disconnected old socket is fully replaced and the
+// auth handshake re-runs with the freshly-stashed token. The default (initial) call
+// omits it, so the web/portal connect path is byte-identical.
+function clientConnect(forceNew) {
 	// The primary connection (slot 0): the keyboard/mouse player and the sole
 	// owner of rendering, audio, UI and one-shot/timer handlers. The globals
 	// `server`/`myID`/`myPlayer` alias this slot (see game.js localPlayers).
 	// This slot carries the signed-in account's token (if any).
-	var sock = io({ auth: handshakeAuth, transports: SOCKET_TRANSPORT_OPTS.transports, tryAllTransports: SOCKET_TRANSPORT_OPTS.tryAllTransports });
+	var connectOpts = { auth: handshakeAuth, transports: SOCKET_TRANSPORT_OPTS.transports, tryAllTransports: SOCKET_TRANSPORT_OPTS.tryAllTransports };
+	if (forceNew) { connectOpts.forceNew = true; }
+	var sock = io(connectOpts);
 	server = sock;
 	localPlayers[primarySlot] = makeLocalPlayer(primarySlot, sock, true);
 	registerPrimaryHandlers(sock);
@@ -571,20 +621,22 @@ function sendDiscordVoiceId() {
 // Discord (approach b): if the in-frame OAuth/token exchange finishes AFTER the connect-gate
 // already opened the socket as a GUEST (e.g. the player lingered on the consent dialog past
 // the gate's cap), the live socket can't retroactively authenticate — Socket.IO reads auth
-// only at connect. Reload ONCE so the now-consented SILENT auth resolves before the gate and
-// the socket connects authenticated. A reload preserves the Activity launch context (same
-// URL — the in-frame SDK re-establishes, unlike the old cross-page redirect). A one-shot
-// sessionStorage guard prevents any reload loop. auth.js calls this when a token is adopted.
+// only at connect. Re-enter IN-PLACE ONCE so a fresh socket carries the now-stashed token:
+// a reload would lose presence/voice (the SDK handshake is once-per-frame-LAUNCH — see
+// discordReenter), so we rebuild only the socket + room membership while the page + live SDK
+// stay intact. A one-shot in-memory guard prevents any re-auth loop. auth.js calls this when
+// a token is adopted.
+var discordReauthDone = false;
 window.__onDiscordTokenAdopted = function () {
 	try {
 		if (typeof isDiscordActivity !== "function" || !isDiscordActivity()) { return; }
 		var lp = localPlayers[primarySlot];
 		if (!lp || !lp.socket || !lp.socket.connected) { return; } // not open yet → the pending connect carries the token
 		if (window.__lastHandshakeHadToken) { return; }            // this connection is already authenticated
-		if (window.sessionStorage.getItem('chaochao.discordReauthReload')) { return; } // one reload per session
-		window.sessionStorage.setItem('chaochao.discordReauthReload', '1');
-		debugLog('[discord] token arrived after a guest connect — reloading to authenticate');
-		window.location.reload();
+		if (discordReauthDone) { return; }                         // one in-place re-auth per session
+		discordReauthDone = true;
+		debugLog('[discord] token arrived after a guest connect — re-entering in place to authenticate');
+		discordReenter();
 	} catch (e) { /* ignore */ }
 };
 
