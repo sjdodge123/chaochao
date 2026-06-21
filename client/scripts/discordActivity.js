@@ -88,7 +88,18 @@ async function boot() {
     // sandbox-safe play.html — vendored jQuery/Bootstrap instead of CDN tags the
     // proxy would CSP-block (jQuery is a hard boot dep). The stashed token (above)
     // is what makes the game recognize this player rather than a fresh guest.
-    setTimeout(function () { window.location.href = 'play.html?discord=1'; }, 600);
+    //
+    // CRITICAL (Phase 5): forward Discord's launch query params (frame_id, instance_id,
+    // channel_id, …) onto play.html. The Embedded App SDK reads them from the URL, so
+    // play.html's SDK re-init (discordPresence.js) NEEDS frame_id present — a clean
+    // `play.html?discord=1` made `new DiscordSDK()` throw "frame_id query param is not
+    // defined", which is why presence/voice never came up. frame_id is stable across this
+    // same-frame navigation, so reusing it is correct.
+    setTimeout(function () {
+        var params = new URLSearchParams(window.location.search);
+        params.set('discord', '1');
+        window.location.href = 'play.html?' + params.toString();
+    }, 600);
 }
 
 var AUTH_SCOPES = ['identify', 'rpc.activities.write', 'guilds', 'rpc.voice.read'];
@@ -159,10 +170,13 @@ async function establishDiscordAuth(sdk, clientId) {
         }
         var data = await resp.json();
         // Authenticate the SDK with the Discord access token (unlocks the participant
-        // + voice RPC commands the later phases use). Non-fatal if it fails.
-        if (data && data.access_token) {
+        // + voice RPC commands the later phases use). Non-fatal if it fails. NOTE: the
+        // server returns `accessToken` (camelCase, see discordAuth.bridgeDiscordCode) —
+        // reading the snake_case `access_token` here silently skipped this AND left the
+        // stash tokenless, breaking Phase 5/5b presence. Use the camelCase key.
+        if (data && data.accessToken) {
             try {
-                await sdk.commands.authenticate({ access_token: data.access_token });
+                await sdk.commands.authenticate({ access_token: data.accessToken });
             } catch (e) {
                 console.warn('[discord-activity] authenticate failed:', e && e.message);
             }
@@ -181,7 +195,7 @@ async function establishDiscordAuth(sdk, clientId) {
                     // is already spent; the access token is reusable). The clientId
                     // is stashed too so presence can construct `new DiscordSDK(id)`
                     // without play.html needing the <!-- DISCORD_CONFIG --> tag.
-                    accessToken: data.access_token || null,
+                    accessToken: data.accessToken || null,
                     clientId: clientId
                 }));
             } catch (e) {

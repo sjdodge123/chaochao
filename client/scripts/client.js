@@ -14,18 +14,30 @@ var config,
 	// so the game-over screen celebrates Crimson/Jade. null in FFA matches.
 	gameOverTeam = null;
 
-// In a Discord Activity the game is reached via play.html?discord=1, and the
-// marketing landing page (index.html) is a DEAD END there — its Play/Join/Create
-// links don't carry the ?discord=1 the sandbox build needs, so a kick/leave that
-// navigates to index.html strands the player on a page they can't get back from.
-// Detect the Activity by that query flag and send menu-exit navigations back into
-// a fresh game instead. Other embed hosts (CrazyGames/Poki/itch) embed index.html
-// fine, so they keep the normal destination.
+// In a Discord Activity the game IS the Activity entry (approach b: served in-frame at
+// the mapped root with Discord's launch params, incl. frame_id), and the marketing
+// landing page (index.html) is a DEAD END there — its links don't carry those params,
+// so a kick/leave that navigates to index.html strands the player. Detect the Activity by
+// Discord's frame_id launch param (or the legacy ?discord=1) and send menu-exit
+// navigations back into a fresh game instead. Other embed hosts (CrazyGames/Poki/itch)
+// embed index.html fine, so they keep the normal destination.
 function isDiscordActivity() {
-	try { return /[?&]discord=1(?:&|$)/.test(window.location.search); } catch (e) { return false; }
+	try { return /[?&]frame_id=/.test(window.location.search) || /[?&]discord=1(?:&|$)/.test(window.location.search); } catch (e) { return false; }
 }
 function menuExitHref() {
-	return isDiscordActivity() ? "play.html?discord=1" : "./index.html";
+	return "./index.html"; // web/portal menu-exit destination
+}
+// Where a menu-exit / AFK-kick sends the player. In a Discord Activity we must NOT navigate
+// to a new URL: a cross-DOCUMENT navigation changes document.referrer, which breaks the
+// in-frame SDK's RPC handshake (presence/voice die — the voice tray vanishes). A RELOAD
+// re-enters the SAME Activity URL, preserving the launch context, so the SDK re-establishes
+// and routing (instanceId from the URL param) lands the player back in their instance room.
+// Web/portal builds navigate to the landing page as before.
+function menuExit() {
+	if (isDiscordActivity()) {
+		try { window.location.reload(); return; } catch (e) { /* fall through to href */ }
+	}
+	window.location.href = menuExitHref();
 }
 
 // Set true when a match-over (startGameover) fires; consumed by the next startLobby
@@ -295,11 +307,14 @@ function handleMapRatingTap(lx, ly) {
 // Returns { token, deviceId }; token is null for guests, which the server
 // allows. Falls back to {} if auth.js isn't present on the page.
 function handshakeAuth(cb) {
-	if (window.chaochaoAuth && typeof window.chaochaoAuth.getHandshake === "function") {
-		cb(window.chaochaoAuth.getHandshake());
-	} else {
-		cb({});
-	}
+	var hs = (window.chaochaoAuth && typeof window.chaochaoAuth.getHandshake === "function")
+		? window.chaochaoAuth.getHandshake() : {};
+	// Record whether THIS (re)connection carried an auth token, so the Discord late-token
+	// path (onDiscordTokenAdopted) can tell an authenticated connection from a guest one —
+	// Socket.IO reads auth only at connect time, so a token adopted afterwards can't upgrade
+	// a live guest socket.
+	window.__lastHandshakeHadToken = !!(hs && hs.token);
+	cb(hs);
 }
 
 // Connect over WebSocket first and only fall back to HTTP long-polling if it
@@ -552,6 +567,47 @@ function sendDiscordVoiceId() {
 		sendDiscordVoiceId(); // emit now if we're already in a room (else gameState will)
 	}).catch(function () { /* presence disabled — no voice id */ });
 })();
+
+// Discord (approach b): if the in-frame OAuth/token exchange finishes AFTER the connect-gate
+// already opened the socket as a GUEST (e.g. the player lingered on the consent dialog past
+// the gate's cap), the live socket can't retroactively authenticate — Socket.IO reads auth
+// only at connect. Reload ONCE so the now-consented SILENT auth resolves before the gate and
+// the socket connects authenticated. A reload preserves the Activity launch context (same
+// URL — the in-frame SDK re-establishes, unlike the old cross-page redirect). A one-shot
+// sessionStorage guard prevents any reload loop. auth.js calls this when a token is adopted.
+window.__onDiscordTokenAdopted = function () {
+	try {
+		if (typeof isDiscordActivity !== "function" || !isDiscordActivity()) { return; }
+		var lp = localPlayers[primarySlot];
+		if (!lp || !lp.socket || !lp.socket.connected) { return; } // not open yet → the pending connect carries the token
+		if (window.__lastHandshakeHadToken) { return; }            // this connection is already authenticated
+		if (window.sessionStorage.getItem('chaochao.discordReauthReload')) { return; } // one reload per session
+		window.sessionStorage.setItem('chaochao.discordReauthReload', '1');
+		debugLog('[discord] token arrived after a guest connect — reloading to authenticate');
+		window.location.reload();
+	} catch (e) { /* ignore */ }
+};
+
+// Discord diagnostics (debug-only): the in-frame devtools console isn't always
+// reachable, so ship the presence module's state + status log to the SERVER, which logs
+// it when started with DISCORD_DEBUG=1 (no-op otherwise). A few snapshots as the SDK
+// settles (ready/authenticate/participants are async). Lets us see WHERE the in-frame
+// SDK re-init stops without console access.
+var discordDiagScheduled = false;
+function scheduleDiscordDiag() {
+	if (discordDiagScheduled) { return; }
+	if (typeof isDiscordActivity !== "function" || !isDiscordActivity()) { return; }
+	discordDiagScheduled = true;
+	[300, 3000, 7000, 12000].forEach(function (ms) {
+		setTimeout(function () {
+			if (typeof server === "undefined" || !server) { return; }
+			var diag = (window.discordPresence && typeof window.discordPresence.getDiag === "function")
+				? window.discordPresence.getDiag()
+				: { error: 'window.discordPresence undefined — presence bundle did not load/run' };
+			server.emit('discordDiag', { t: ms, diag: diag });
+		}, ms);
+	});
+}
 
 // --- Progression celebration toasts (shown on lobby arrival) -----------------
 // A sequenced queue: one toast at a time, auto-advancing, so a match that earned
@@ -932,6 +988,9 @@ function registerConnectionHandlers(server) {
 		// snowflake so peers can voice-map our kart. No-op off Discord / before the SDK
 		// identifies us (initDiscordVoiceId re-fires it when localUser resolves).
 		sendDiscordVoiceId();
+		// Debug-only (server logs it under DISCORD_DEBUG=1): ship presence state so we can
+		// see the in-frame SDK re-init result without devtools. One-time.
+		scheduleDiscordDiag();
 		// Joined a match already racing/collapsing? The server spawned this player as
 		// a temp spectator (parked off-arena, not alive) who races from the next
 		// round — flag the slot so drawSpectatorBanner explains the wait. The server
@@ -2898,7 +2957,7 @@ function dropLocalPlayer(slot) {
 			return;
 		}
 		try { server.disconnect(); } catch (e) { /* ignore */ }
-		window.location.href = menuExitHref();
+		menuExit();
 		return;
 	}
 	if (typeof onLocalPlayersChanged === "function") {
@@ -2942,7 +3001,7 @@ function handlePrimaryLost() {
 	if (survivor == null) {
 		// Last local player gone — behave as today and leave.
 		try { server.disconnect(); } catch (e) { /* ignore */ }
-		window.location.href = menuExitHref();
+		menuExit();
 		return;
 	}
 	promoteToPrimary(survivor);

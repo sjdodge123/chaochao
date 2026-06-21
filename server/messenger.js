@@ -518,6 +518,23 @@ function checkForMail(client) {
 		client.emit("previewRoomCreated", { gameID: sig });
 	});
 
+	// Discord diagnostics (debug-only): the Activity client ships its in-frame presence
+	// state + status log here so it can be read from the server console when in-frame
+	// devtools isn't reachable. Logged ONLY when started with DISCORD_DEBUG=1 (a no-op in
+	// prod). Untrusted input — cap size, never act on it, just log one truncated line.
+	client.on('discordDiag', function (payload) {
+		if (process.env.DISCORD_DEBUG !== '1') {
+			return;
+		}
+		try {
+			var s = JSON.stringify(payload);
+			if (typeof s === 'string') {
+				if (s.length > 4000) { s = s.slice(0, 4000) + '…'; }
+				console.log('[discordDiag] ' + client.id + ' ' + s);
+			}
+		} catch (e) { console.log('[discordDiag] (unserializable)'); }
+	});
+
 	client.on('enterGame', function (id, coop, opts) {
 		debug.log("enterGame: client=", client.id, " requestedId=", id, " coop=", coop);
 		var roomSig = '';

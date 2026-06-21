@@ -108,6 +108,11 @@
              from ADS_PROVIDER / ADS_PUBLISHER_ID env vars, stripped to provider
              'none' (no-op) locally. Must precede the bundle so ads.js sees it. -->
         <!-- ADS_CONFIG -->
+        <!-- Browser-safe Discord config (PUBLIC client id only); injected server-side from
+             DISCORD_CLIENT_ID, stripped when unset. Approach (b): play.html is the Activity
+             entry, so the in-frame SDK bootstrap reads window.__DISCORD__ here. The client
+             secret is NEVER here (token exchange is server-side, POST /api/token). -->
+        <!-- DISCORD_CONFIG -->
         <!-- Discord Activity presence (Phase 5): a separate esbuild bundle that
              re-inits the Embedded App SDK in this game frame (the discord.html ->
              play.html redirect drops the original instance) for instance->room

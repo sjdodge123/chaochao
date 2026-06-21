@@ -246,6 +246,76 @@ remote `cdn.discordapp.com` avatars), rebuilt from `onParticipants` and class-to
 + `draw_skins.js` (ring calls), `build.js` + `client/play.html` (bundle `discordVoice.js`). No
 `game.js`/`config.json`/`engine.js` change → no CHANGELOG/Codex entry (Discord-only cosmetic UI).
 
+## ⚠️ Architecture correction — approach (a) is dead; we shipped approach (b) (no-navigation, 2026-06-20)
+
+The Phase 5 / 5b sections above describe the FIRST cut (approach (a): re-init the SDK in
+the navigated game frame). **Live testing proved approach (a) cannot work**, and the build
+was reworked to **approach (b): no navigation — the game IS the Activity entry and the SDK
+initialises once, in that frame.** This is now **live-verified on desktop** (routing, in-frame
+auth, participant tray, and the on-kart speaking ring all work). Read THIS section as the
+current truth; the two above are kept for the API shape + the diagnosis trail.
+
+**Why approach (a) failed (proven, not theorised).** The discord.html→play.html redirect
+breaks the SDK two ways, both confirmed via a server-logged in-frame diag (`DISCORD_DEBUG=1`
+→ `discordDiag`):
+1. `new DiscordSDK()` reads its launch params (`frame_id`, `instance_id`, `platform`) from
+   the URL — the clean `play.html?discord=1` dropped them (`"frame_id query param is not
+   defined"`). *Forwarding the params got past this.*
+2. Then `sdk.ready()` hangs forever. Root cause (SDK source `getRPCServerSource`): the SDK
+   posts its handshake — and every later RPC — to `window.parent` with
+   `targetOrigin = document.referrer`. After the same-origin navigation `document.referrer`
+   is *discord.html's own URL*, not the Discord client origin, so the `postMessage` is
+   dropped and `READY` never arrives. Forcing `sdk.sourceOrigin = '*'` + re-handshake STILL
+   got no READY → **the Discord client completes the RPC handshake only ONCE per Activity
+   frame, already consumed by discord.html.** A re-init in a navigated frame is impossible.
+
+**Approach (b) as-built.**
+- **Entry:** `index.js` serves `play.html` (with the Discord rewrite) at the mapped root
+  when `frame_id` is present — *no* discord.html redirect. `<!-- DISCORD_CONFIG -->` +
+  `<!-- DISCORD_PRESENCE -->` are injected into play.html.
+- **One module, one SDK:** `client/scripts/discordPresence.js` is now the unified in-frame
+  bootstrap — `new DiscordSDK()` + `ready()` → `authorize()` → `POST /api/token` →
+  `authenticate()` → instanceId/participants/SPEAKING. The single live handshake (referrer
+  is the Discord origin because there's no navigation) powers everything. `discordActivity.js`
+  / `discord.html` are now DEAD (kept in-tree; candidates to delete before PR).
+- **Auth handoff (no redirect):** the bootstrap calls `chaochaoAuth.adoptDiscordSession(token,
+  profile)` (new in `auth.js`); `auth.js` detects the Activity context (`frame_id`), skips
+  building a Supabase client, and makes `ready` await that adoption. `game.js`'s connect-gate
+  waits on `chaochaoAuth.ready` with a **12s cap for Discord** (vs 2s web) so the socket
+  handshake carries the token.
+- **`isDiscordActivity()`** now keys on `frame_id` (or legacy `discord=1`).
+- **localUserId fix:** `authenticate()` must be called ONCE — a second call throws "Already
+  authenticated" and left `localUserId` null (no kart ring). The snowflake is captured from
+  the single call.
+
+**Codex review (P2) — FIXED.** If the in-frame OAuth finishes *after* the 12s connect-gate
+cap (player lingered on consent), the socket already connected as guest and Socket.IO can't
+re-auth a live connection. `adoptDiscordSession` now triggers a **one-shot `location.reload()`**
+(sessionStorage-guarded) so the now-consented silent auth beats the gate. Safe because a
+reload preserves the original Discord referrer (only cross-*page* nav broke it).
+
+**AFK-rejoin voice-tray-disappears — FIXED.** The AFK/menu-exit path did
+`window.location.href = <same Activity URL>` — a navigation that reset `document.referrer`
+and killed the SDK (tray vanished). New `menuExit()` does `location.reload()` in the Activity
+(SDK survives) and the normal nav on web.
+
+**Verified:** desktop in-frame (routing → `Discord instance … -> room …`; auth OK; tray shows
+participants; ring pulses on speak), `npm run build`, `smoke-test.js`, headless instance-route
++ voice-id e2e. **Diagnostic instrumentation** (`discordDiag` → server log under
+`DISCORD_DEBUG=1`, `discordPresence.getDiag()`) is in-tree — decide keep-vs-strip before PR.
+
+**Still open:**
+- **Phase 6 mobile** — portal mobile platform enabled but Discord mobile still returns
+  *"This Activity is not currently available on this OS"* (a client-side platform gate before
+  our code runs; suspect manifest cache → force-quit the mobile app / propagation delay).
+  Phase 6 CODE polish (safe-area insets, `innerWidth<900` perf-tier recheck under embed dims,
+  voice-tray sizing on narrow screens) is NOT started.
+- **Idle AFK loop** in the Activity (rejoin→idle→kick→rejoin) — pre-existing follow-up; the
+  proper fix suppresses the AFK kick in Activities or shows a "click to rejoin" panel.
+- **Dead code:** `discord.html` + `discordActivity.js` (+ the `discord.bundle` build step) are
+  unused under approach (b) — delete before PR.
+- **Not pushed / no PR** (operator gate).
+
 ## Implementation plan (9 phases; ~7–8 dev-days to testable, +~1d voice-activity delighter, +listing prereqs & ~2–3d skin shop for public/monetized)
 
 ### Phase 0 — Portal & dev harness *(operator-gated; ~0.5d)*
@@ -327,4 +397,4 @@ The scaffold can't be verified headlessly — it needs a real Discord app + a pu
 
 ## Follow-up prompt (operator-injectable)
 
-> Continue the Discord Activity work from `docs/spikes/discord-activity.md`. Phase 0–2 scaffold is on `worktree-discord-activity-spike` (CSP origins added, `discord.html` + `discordActivity.js` SDK bootstrap, `discord.bundle.min.js` build step). I've created the Discord app (APPLICATION_ID=…, secret in env) and a tunnel; the frame loads and the READY handshake fires. Next: (1) verify/fix Socket.IO WS+polling over `/.proxy/` so a match ticks, then (2) implement Phase 3 (vendor jQuery+Bootstrap, gate gtag/ads off when isDiscord) and Phase 4 (`POST /.proxy/api/token` + authorize/authenticate bridged to a Supabase session). Mobile + desktop target — keep Phase 6 in scope.
+> Continue the Discord Activity work from `docs/spikes/discord-activity.md` on `worktree-discord-activity-spike` (NOT pushed). Read the **"⚠️ Architecture correction — approach (b)"** section first: Phases 0–5b are DONE and desktop-live-verified — the game is served in-frame at the Activity root (no discord.html redirect), the SDK inits once in `discordPresence.js` for auth+instance→room routing+voice, and the on-kart speaking ring + avatar voice tray work. Codex's one P2 (late-token guest connect) and the AFK-rejoin tray-disappears bug are both fixed via `location.reload()` re-entry (reload preserves the SDK; cross-page nav does not). Open items, pick per priority: (1) **Phase 6 mobile** — I enabled the portal mobile platform but Discord mobile still says "not available on this OS" (client-side gate, likely manifest cache — confirm force-quit/propagation first); then the CODE polish: safe-area insets, `innerWidth<900` perf-tier recheck under embed dims, voice-tray sizing on narrow screens. (2) **Pre-PR cleanup:** delete the now-dead `discord.html` + `discordActivity.js` + the `discord.bundle` build step (approach (b) doesn't use them), and decide keep-vs-strip on the `DISCORD_DEBUG`/`discordDiag`/`getDiag()` diagnostics. (3) Phase 5b polish if wanted (ring color/steadiness; tray only renders for Discord-voice players by design). A `DISCORD_DEBUG=1` dev server is on :3700 behind the operator's cloudflared tunnel; relaunch the Activity to re-test in-frame (read `[discordDiag]`/`Discord instance` lines from the server log). Don't push or open a PR without the operator's go-ahead.

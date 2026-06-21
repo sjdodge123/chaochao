@@ -58,11 +58,26 @@
         if (rawDiscord) { discordSession = JSON.parse(rawDiscord); }
     } catch (e) { discordSession = null; }
 
+    // Discord Activity (approach b — no navigation): play.html IS the Activity entry, so
+    // the in-frame bootstrap (discordPresence.js) runs the OAuth/token exchange and calls
+    // chaochaoAuth.adoptDiscordSession(token, profile) when done — there's no pre-load
+    // stash. Detect the context (Discord appends frame_id to the iframe URL; the legacy
+    // redirect used ?discord=1) and, when in it, DON'T build a Supabase client (we use the
+    // in-frame session) and make `ready` wait for adoptDiscordSession — capped in game.js —
+    // so the socket handshake carries the token. A deferred fills that role.
+    var isDiscordCtx = false;
+    try {
+        var dsearch = window.location.search || '';
+        isDiscordCtx = /[?&]frame_id=/.test(dsearch) || /[?&]discord=1(?:&|$)/.test(dsearch) || !!(discordSession && discordSession.token);
+    } catch (e) { isDiscordCtx = false; }
+    var discordReadyResolve = null;
+    var discordReady = new Promise(function (res) { discordReadyResolve = res; });
+
     // Build the Supabase client only when both the injected public config and the
     // CDN UMD global are present (and we're NOT in a Discord session). Otherwise we
     // stay in guest-only mode.
     var publicConfig = window.__SUPABASE__ || null;
-    if (!(discordSession && discordSession.token) &&
+    if (!isDiscordCtx &&
         publicConfig && publicConfig.url && publicConfig.anonKey &&
         window.supabase && typeof window.supabase.createClient === 'function') {
         try {
@@ -77,14 +92,35 @@
     // carries the token. A synthetic `currentUser` drives getProfile()/isSignedIn()/
     // getAuthState() off the validated profile; the opaque id is never sent to the
     // server (identity is resolved from the token), it only marks "signed in" locally.
+    // Adopt a Discord session into the local auth state (signed-in look + handshake token).
+    // The opaque id 'discord' is never sent to the server (identity is resolved from the
+    // token); it only marks "signed in" locally and drives getProfile()/getAuthState().
+    // Used by BOTH the legacy stash path (below) and the in-frame bootstrap
+    // (adoptDiscordSession, approach b). token null => stay guest. Always settles the
+    // discordReady deferred so the connect-gate unblocks either way.
+    function applyDiscordSession(token, profile) {
+        if (token) {
+            accessToken = token;
+            var dp = profile || {};
+            currentUser = {
+                id: 'discord',
+                app_metadata: { provider: 'discord' },
+                user_metadata: { full_name: dp.name || null, avatar_url: dp.avatarUrl || null }
+            };
+            if (typeof renderAuthUI === 'function') { renderAuthUI(); }
+            if (typeof window.updateGAUserProperties === 'function') { window.updateGAUserProperties(); }
+            // If the socket already connected as a guest (token arrived after the connect-
+            // gate's cap), let the game decide whether to reload so the handshake re-runs
+            // with the token. No-op if the connect hasn't happened yet (it'll carry the token).
+            if (typeof window.__onDiscordTokenAdopted === 'function') { window.__onDiscordTokenAdopted(); }
+        }
+        if (discordReadyResolve) { discordReadyResolve(); discordReadyResolve = null; }
+    }
+
+    // Legacy navigation path: a stash written by discord.html before the (now removed)
+    // redirect. Adopt synchronously so the first handshake carries the token.
     if (discordSession && discordSession.token) {
-        accessToken = discordSession.token;
-        var dp = discordSession.profile || {};
-        currentUser = {
-            id: 'discord',
-            app_metadata: { provider: 'discord' },
-            user_metadata: { full_name: dp.name || null, avatar_url: dp.avatarUrl || null }
-        };
+        applyDiscordSession(discordSession.token, discordSession.profile);
     }
 
     // A stable key for what the navbar actually shows (identity + name + avatar), so
@@ -163,7 +199,13 @@
     // though the socket handshake uses the callback form below and so reads the
     // token at connection time (after this microtask has settled).
     var ready;
-    if (sb) {
+    if (isDiscordCtx) {
+        // No Supabase client in-frame. The connect-gate (game.js) awaits this; it resolves
+        // when the in-frame bootstrap calls adoptDiscordSession (or already did, via the
+        // legacy stash). game.js caps the wait so a failed/slow Discord auth still connects
+        // (as guest) — see the longer Discord cap there.
+        ready = discordReady;
+    } else if (sb) {
         ready = sb.auth.getSession().then(function (res) {
             applySession(res && res.data ? res.data.session : null);
         }).catch(function (e) {
@@ -414,6 +456,11 @@
         deviceId: deviceId,
         getHandshake: getHandshake,
         getProfile: getProfile,
+        // Discord Activity (approach b): the in-frame bootstrap (discordPresence.js) calls
+        // this with the server-minted handshake token + validated profile (or null,null to
+        // stay guest) once its OAuth/token exchange completes — adopting the session and
+        // releasing the connect-gate so the socket handshake carries the token.
+        adoptDiscordSession: applyDiscordSession,
         signIn: signIn,
         signOut: signOut,
         isSignedIn: function () { return !!currentUser; },

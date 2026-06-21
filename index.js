@@ -320,13 +320,17 @@ const HTML_PAGES = {
 };
 app.use(function (req, res, next) {
     var url = req.path === '/' ? '/index.html' : req.path;
-    // Discord loads the Activity at the mapped ROOT ('/'), which would serve the
-    // marketing landing page. The Discord client always appends launch params to
-    // the iframe URL (frame_id is REQUIRED by the Embedded App SDK), so when we see
-    // one at the root we serve the Activity bootstrap (discord.html) instead. Plain
-    // web visits to '/' (no frame_id) still get the landing page.
+    // Discord loads the Activity at the mapped ROOT ('/'), which would serve the marketing
+    // landing page. The Discord client always appends launch params to the iframe URL
+    // (frame_id is REQUIRED by the Embedded App SDK), so when we see one at the root we
+    // serve the GAME directly (approach b: play.html IS the Activity entry — no discord.html
+    // redirect, because that navigation broke the SDK handshake; the game frame keeps
+    // Discord's launch params on the URL and inits the SDK once, in-frame). Plain web visits
+    // to '/' (no frame_id) still get the landing page.
+    var activityEntry = false;
     if (url === '/index.html' && req.query && req.query.frame_id) {
-        url = '/discord.html';
+        url = '/play.html';
+        activityEntry = true;
     }
     if (!HTML_PAGES[url]) return next();
     fs.readFile(path.join(htmlPath, url), 'utf8', function (err, html) {
@@ -341,9 +345,10 @@ app.use(function (req, res, next) {
             var bundleTag = '<script src="' + bundleMap[url] + '"></script>';
             modified = modified.replace(/<!-- BUILD: bundle-start -->[\s\S]*?<!-- BUILD: bundle-end -->/g, bundleTag);
         }
-        // Discord Activity launches the game via `play.html?discord=1`; swap external
-        // CDN tags for vendored same-origin copies so the page boots inside the sandbox.
-        if (url === '/play.html' && req.query && req.query.discord) {
+        // Discord Activity: the game boots inside the sandbox, so swap external CDN tags for
+        // vendored same-origin copies + inject the in-frame SDK bundle. Fires for the root
+        // Activity entry (frame_id, approach b) and the legacy `play.html?discord=1`.
+        if (url === '/play.html' && (activityEntry || (req.query && req.query.discord))) {
             modified = discordEmbedRewrite(modified);
         }
         // Discord's sandbox caches the Activity's JS aggressively and the filenames are

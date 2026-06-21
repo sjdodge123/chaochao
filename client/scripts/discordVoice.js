@@ -19,25 +19,39 @@
 // populates. Everything no-ops cleanly when presence is absent (web build).
 
 // ---- (a) on-kart speaking ring -------------------------------------------------------
-// Mirror drawTeamUnderglow: cheap arc + stroke only (no shadow/filter surfaces — the GPU
-// killers). Called with the same camera-offset screen coords the kart body is drawn at.
+// A high-contrast ring HUGGING the kart/avatar edge (not a faint halo outside the cart)
+// while this player's Discord user is talking. Drawn AFTER the body (see the call sites in
+// draw.js / draw_skins.js) so it frames the avatar photo. Cheap painters only — a dark
+// backing arc + a bright pulsing green arc, no shadow/filter surfaces (the GPU killers).
+// Called with the same camera-offset screen coords the kart body is drawn at.
 function drawSpeakingIndicator(player, sx, sy) {
     if (typeof window === "undefined" || !window.discordPresence) { return; }
     if (player == null || !player.discordUserId) { return; }
     if (!window.discordPresence.isSpeaking(player.discordUserId)) { return; }
     if (typeof gameContext === "undefined" || gameContext == null) { return; }
+    if (!(player.radius > 0)) { return; }
+    // Match the body's visible radius: shaped cart skins render CART_SKIN_VISUAL_SCALE
+    // larger; the avatar photo + plain sphere fill exactly player.radius. Sit the ring
+    // right ON that edge (+1.5, like the avatar's own outline) so it frames the picture.
     var painter = (typeof cartSkinPainter === "function") ? cartSkinPainter(player.cart) : null;
     var scale = (painter != null && typeof CART_SKIN_VISUAL_SCALE !== "undefined") ? CART_SKIN_VISUAL_SCALE : 1;
-    var baseR = player.radius * scale + 7;
+    var ringR = player.radius * scale + 1.5;
     // Pulse ~1.4Hz so it reads as "live mic" without strobing.
     var t = (Date.now() % 720) / 720;
     var pulse = 0.5 + 0.5 * Math.sin(t * Math.PI * 2);
     gameContext.save();
+    // Dark backing ring first — gives the green contrast over light avatars / busy terrain.
     gameContext.beginPath();
-    gameContext.arc(sx, sy, baseR + pulse * 4, 0, 2 * Math.PI);
-    gameContext.globalAlpha = 0.30 + 0.35 * pulse;
-    gameContext.lineWidth = 3;
-    gameContext.strokeStyle = "#43b581"; // Discord "speaking" green
+    gameContext.arc(sx, sy, ringR, 0, 2 * Math.PI);
+    gameContext.lineWidth = 5;
+    gameContext.strokeStyle = "rgba(0,0,0,0.55)";
+    gameContext.stroke();
+    // Bright green ring on top, near-opaque, width/brightness pulsing for the "live" feel.
+    gameContext.beginPath();
+    gameContext.arc(sx, sy, ringR, 0, 2 * Math.PI);
+    gameContext.lineWidth = 2.5 + pulse * 1.5;
+    gameContext.globalAlpha = 0.85 + 0.15 * pulse;
+    gameContext.strokeStyle = "#57F287"; // Discord's bright "speaking" green
     gameContext.stroke();
     gameContext.restore();
 }

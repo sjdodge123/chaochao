@@ -316,7 +316,14 @@ $(function () {
             server = clientConnect();
         };
         auth.ready.then(go, go);
-        setTimeout(go, 2000);
+        // Discord Activity (approach b): auth runs IN-FRAME (SDK handshake + authorize +
+        // token exchange), which takes longer than a restored Supabase session — and the
+        // socket MUST carry the token, so give it a generous cap. The bootstrap resolves
+        // chaochaoAuth.ready (even on failure, as guest) well before this. Plain web keeps
+        // the snappy 2s guest fallback. Detect via Discord's frame_id launch param.
+        var discordCtx = false;
+        try { discordCtx = /[?&]frame_id=/.test(window.location.search) || /[?&]discord=1(?:&|$)/.test(window.location.search); } catch (e) { discordCtx = false; }
+        setTimeout(go, discordCtx ? 12000 : 2000);
     } else {
         server = clientConnect();
     }

@@ -164,11 +164,6 @@ function drawKartAppearance(player, sx, sy, headingOverride) {
     // rim past the body shows).
     var painter = cartSkinPainter(player.cart);
     drawTeamUnderglow(player, sx, sy);
-    // Discord voice (Phase 5b): speaking ring under the kart in the shared chokepoint
-    // paths (overview scoreboard, ice reflection, recap). No-op off Discord.
-    if (typeof drawSpeakingIndicator === "function") {
-        drawSpeakingIndicator(player, sx, sy);
-    }
     var bid = player.border;
     var bskin = (typeof getSkin === "function" && bid) ? getSkin(bid) : null;
     if (bskin && bskin.slot === 'border') {
@@ -195,6 +190,12 @@ function drawKartAppearance(player, sx, sy, headingOverride) {
                 drawPatternOverlay(player, sx, sy, player.radius, patPainter);
             }
         }
+    }
+    // Discord voice (Phase 5b): speaking ring framing the kart edge, drawn LAST in this
+    // shared chokepoint (overview scoreboard, ice reflection, recap) so it sits on top of
+    // the body. No-op off Discord / for web players.
+    if (typeof drawSpeakingIndicator === "function") {
+        drawSpeakingIndicator(player, sx, sy);
     }
 }
 
