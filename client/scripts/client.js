@@ -709,6 +709,31 @@ window.__onDiscordTokenAdopted = function () {
 // it when started with DISCORD_DEBUG=1 (no-op otherwise). A few snapshots as the SDK
 // settles (ready/authenticate/participants are async). Lets us see WHERE the in-frame
 // SDK re-init stops without console access.
+// Snapshot the real device viewport + how the canvas fit + where the touch HUD
+// landed, so the server log (DISCORD_DEBUG) shows EXACTLY why a mobile frame
+// letterboxes the way it does (aspect vs Discord-chrome height squeeze) without
+// needing the device's devtools. Best-effort; never throws into the diag emit.
+function discordViewportDiag() {
+	try {
+		var c = (typeof gameCanvas !== "undefined" && gameCanvas) ? gameCanvas.getBoundingClientRect() : null;
+		var probe = document.createElement("div");
+		probe.style.cssText = "position:absolute;visibility:hidden;height:0;";
+		document.body.appendChild(probe);
+		function inset(v) { probe.style.width = "var(" + v + ", 0px)"; return Math.round(parseFloat(getComputedStyle(probe).width)) || 0; }
+		var safe = { t: inset("--safe-top"), r: inset("--safe-right"), b: inset("--safe-bottom"), l: inset("--safe-left") };
+		document.body.removeChild(probe);
+		return {
+			win: window.innerWidth + "x" + window.innerHeight, dpr: window.devicePixelRatio,
+			aspect: +(window.innerWidth / Math.max(1, window.innerHeight)).toFixed(3),
+			canvas: c ? (Math.round(c.width) + "x" + Math.round(c.height) + "@" + Math.round(c.x) + "," + Math.round(c.y)) : "n/a",
+			barLR: c ? Math.round((window.innerWidth - c.width) / 2) : -1,
+			barTB: c ? Math.round((window.innerHeight - c.height) / 2) : -1,
+			fitRatio: (typeof fitRatio !== "undefined") ? +fitRatio.toFixed(3) : "n/a",
+			safe: safe
+		};
+	} catch (e) { return { error: (e && e.message) || "viewport diag failed" }; }
+}
+
 var discordDiagScheduled = false;
 function scheduleDiscordDiag() {
 	if (discordDiagScheduled) { return; }
@@ -720,7 +745,7 @@ function scheduleDiscordDiag() {
 			var diag = (window.discordPresence && typeof window.discordPresence.getDiag === "function")
 				? window.discordPresence.getDiag()
 				: { error: 'window.discordPresence undefined — presence bundle did not load/run' };
-			server.emit('discordDiag', { t: ms, diag: diag });
+			server.emit('discordDiag', { t: ms, diag: diag, viewport: discordViewportDiag() });
 		}, ms);
 	});
 }

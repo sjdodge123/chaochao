@@ -478,26 +478,6 @@ function cssToLogical(px) {
     return px / (fitRatio || 1);
 }
 
-// Resolved safe-area inset (CSS px) for one side. Reads the SAME --safe-* custom
-// property the layout uses, so it transparently covers BOTH iOS env() notches and
-// Discord's injected --discord-safe-area-inset-* (see styles.css :root). A custom
-// property's computed value can come back as the unresolved expression in some
-// engines, so we resolve it through a throwaway element's width and read it back in
-// px. Cached probe; returns 0 off notched/Discord-mobile devices.
-var _safeInsetProbe = null;
-function safeInsetCss(side) {
-    if (typeof document === "undefined" || !document.body) { return 0; }
-    if (!_safeInsetProbe) {
-        _safeInsetProbe = document.createElement("div");
-        _safeInsetProbe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;height:0;";
-        document.body.appendChild(_safeInsetProbe);
-    }
-    var vars = { top: "--safe-top", bottom: "--safe-bottom", left: "--safe-left", right: "--safe-right" };
-    _safeInsetProbe.style.width = "var(" + (vars[side] || "--safe-top") + ", 0px)";
-    var px = parseFloat(window.getComputedStyle(_safeInsetProbe).width);
-    return (isFinite(px) && px > 0) ? px : 0;
-}
-
 // (Re)size & position the on-canvas touch controls from the current fit ratio.
 // Called after setup and on every resize, so a thumb-sized joystick/buttons
 // stay thumb-sized on any screen width or orientation (5.2), and the top-corner
@@ -529,18 +509,11 @@ function layoutTouchControls() {
     // and now get a comfortable thumb-sized zone + a visible button backing).
     var hit = Math.max(cssToLogical(72), 48);   // tap zone side (logical)
     var icon = cssToLogical(38);                // drawn icon size (logical)
-    // Pull the corner icons + attack button in by the device safe-area so nothing
-    // sits under a notch / home indicator on a notched phone or a Discord mobile
-    // frame. The insets are CSS px (0 off such devices) -> logical via cssToLogical.
-    var safeL = cssToLogical(safeInsetCss("left"));
-    var safeR = cssToLogical(safeInsetCss("right"));
-    var safeT = cssToLogical(safeInsetCss("top"));
-    var safeB = cssToLogical(safeInsetCss("bottom"));
     var margin = cssToLogical(16);
-    var topInset = cssToLogical(16) + safeT;
+    var topInset = cssToLogical(16);
     // chat (emoji) -> top-left; exit (fullscreen) -> top-right.
-    sizeCornerButton(chatButton, margin + safeL + hit / 2, topInset + hit / 2, hit, icon);
-    sizeCornerButton(exitButton, world.width - margin - safeR - hit / 2, topInset + hit / 2, hit, icon);
+    sizeCornerButton(chatButton, margin + hit / 2, topInset + hit / 2, hit, icon);
+    sizeCornerButton(exitButton, world.width - margin - hit / 2, topInset + hit / 2, hit, icon);
 
     // Reserve the top strip for the corner icons: drop the TOP of the move/attack
     // regions below the corner buttons (+ a little buffer). Without this the attack
@@ -575,8 +548,8 @@ function layoutTouchControls() {
     // loop above left it at the region's vertical middle). The bottom margin leaves
     // room for the "Attack" caption so it never clips off the bottom edge.
     if (attackButton) {
-        attackButton.baseX = world.width - cssToLogical(28) - safeR - attackButton.radius;
-        attackButton.baseY = world.height - cssToLogical(48) - safeB - attackButton.radius;
+        attackButton.baseX = world.width - cssToLogical(28) - attackButton.radius;
+        attackButton.baseY = world.height - cssToLogical(48) - attackButton.radius;
         attackButton.stickX = attackButton.baseX;
         attackButton.stickY = attackButton.baseY;
     }
