@@ -208,8 +208,10 @@
     }
 
     function walkSeen() {
-        // ?walkthrough=1 force-shows it (no devtools needed to replay on a phone); harmless
-        // opt-in in prod, like ?domhud. Otherwise honor the once-only localStorage flag.
+        // Dev server (NODE_ENV!=production) injects __DEV_FORCE_WALKTHROUGH__ so it always
+        // shows on :3700 for iteration; never set in prod. ?walkthrough=1 also force-shows
+        // (handy on a phone, no devtools needed). Otherwise honor the once-only flag.
+        try { if (window.__DEV_FORCE_WALKTHROUGH__) { return false; } } catch (e) { /* ignore */ }
         try {
             if (/[?&]walkthrough=1\b/.test((window.location && window.location.search) || "")) { return false; }
         } catch (e) { /* ignore */ }

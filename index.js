@@ -352,6 +352,13 @@ app.use(function (req, res, next) {
         if (url === '/play.html' && (activityEntry || (req.query && req.query.discord))) {
             modified = discordEmbedRewrite(modified);
         }
+        // DEV-ONLY: force-show the touch-controls walkthrough on every play.html load so
+        // it can be iterated without clearing the browser's once-only localStorage flag.
+        // Gated on NON-production, so prod NEVER gets it (the walkthrough stays once-only
+        // there). Mirrors the perfHarness/env-gated dev seams; inert on the live build.
+        if (url === '/play.html' && process.env.NODE_ENV !== 'production') {
+            modified = modified.replace('</head>', '<script>window.__DEV_FORCE_WALKTHROUGH__=true;<\/script></head>');
+        }
         res.set('Content-Type', 'text/html');
         // HTML carries the injected version/news/bundle tags and must reflect a
         // fresh deploy immediately, so never let a browser/CDN serve it stale —
