@@ -2147,3 +2147,25 @@ html.cc-embedded .cc-toast {
     .cc-level-ring { animation: none; opacity: 0; }
 }
 html.cc-embedded .cc-celebrate { display: none !important; }
+
+/* Landing legal footer (Privacy / Terms links). Fixed bottom-center, muted, theme-aware. */
+.landing-footer {
+    position: fixed;
+    bottom: 10px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: 12px;
+    z-index: 5;
+    pointer-events: none; /* only the links are interactive, so the bar never blocks the CTA */
+}
+.landing-footer a {
+    color: var(--text-muted);
+    text-decoration: none;
+    opacity: 0.85;
+    pointer-events: auto;
+}
+.landing-footer a:hover { opacity: 1; text-decoration: underline; }
+.landing-footer-sep { color: var(--text-muted); opacity: 0.5; margin: 0 6px; }
+/* Embedded (portal/iframe) chrome is trimmed — hide the landing footer there too. */
+html.cc-embedded .landing-footer { display: none; }
