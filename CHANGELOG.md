@@ -14,6 +14,10 @@ To re-render a past week's digest with the current formatting, run the `Release 
 
 ## Unreleased
 
+(none yet)
+
+## v0.49.2 — 2026-06-23
+
 - **Guided touch walkthrough on phones.** First-timers now get a one-time, step-by-step walkthrough through every touch control — move in each direction, punch, hold to kick, then the settings, emoji, and fullscreen buttons — one step at a time, with a Skip option.
 
 ### Controls & Couch Co-op
