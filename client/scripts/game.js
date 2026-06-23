@@ -591,6 +591,17 @@ function resize() {
     var gameWindowRect = canvasWindow.getBoundingClientRect();
     if (gameWindowRect.width === 0 || gameWindowRect.height === 0) return;
     var viewport = { width: gameWindowRect.width, height: gameWindowRect.height };
+    // Discord Activity: the arena is a fixed 16:9 world, so on a wider-than-16:9 frame
+    // (a phone in landscape is ~2.2:1) a min() letterbox leaves ~40% side voids. Widen
+    // the LOGICAL viewport to the frame's aspect (clamped 16:9..21:9; height stays 768)
+    // so the canvas FILLS the frame — the camera just shows a wider slice of the world
+    // while racing (lobby/overview, which frame the whole 16:9 arena, keep a little
+    // letterbox). Gated to the Activity; web/portal keep the fixed 1366x768 logical space.
+    if (typeof isDiscordActivity === "function" && isDiscordActivity() && LOGICAL_HEIGHT > 0 && viewport.height > 0) {
+        var frameAspect = viewport.width / viewport.height;
+        var clampedAspect = Math.max(16 / 9, Math.min(21 / 9, frameAspect));
+        LOGICAL_WIDTH = Math.round(LOGICAL_HEIGHT * clampedAspect);
+    }
     // Fit the canvas to the available space at its native 16:9 aspect ratio,
     // scaling BOTH axes by the same factor so the game is never stretched. This
     // also covers fullscreen: on any screen that isn't exactly 16:9 the canvas
