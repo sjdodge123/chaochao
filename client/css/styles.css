@@ -68,7 +68,11 @@
    clean video player rather than odd white gutters. Class is set by client.js only
    in the Activity (frame_id), so web/portal builds are untouched. */
 html.discord-activity nav { display: none !important; }
-html.discord-activity body { padding-top: var(--safe-top) !important; }
+/* Navbar hidden -> the game owns the WHOLE frame: no body offset, section fills the full
+   dynamic viewport (no reserved navbar/safe strip, so no dead bar at the bottom). All
+   safe-area (notch / Discord header / home indicator) is handled IN-CANVAS — hudTopInset()
+   for the top HUD and the touch-control insets — so the canvas can sit edge-to-edge. */
+html.discord-activity body { padding-top: 0 !important; }
 html.discord-activity { --board-bg: #000000; }
 html.discord-activity #progressContainer { inset: var(--safe-top) 0 0 0; }
 
@@ -336,6 +340,13 @@ nav .auth-control ~ .theme-toggle {
     height: calc(100dvh - var(--navbar-height) - var(--safe-top));
     position: relative;
   }
+/* Discord Activity: section (which bounds the absolutely-positioned #gameWindow) fills the
+   FULL viewport — the navbar is hidden and body padding is 0, so reclaim its height too;
+   otherwise the frame measures ~60px short and leaves a dead strip at the bottom. */
+html.discord-activity section {
+    height: 100vh;
+    height: 100dvh;
+}
 
 canvas {
     position: absolute;

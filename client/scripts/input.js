@@ -438,10 +438,11 @@ function setupVirtualbuttons() {
         return;
     }
     // Movement (left quarter) and attack (right quarter) tap regions. Sized to the
-    // LOGICAL VIEWPORT (the on-screen canvas space), NOT the arena (world) — the two are
-    // equal on web, but a Discord-mobile frame WIDENS the logical viewport to fill the
-    // frame (see resize()), and the tap zones must cover that wider canvas. The exact
-    // bounds are recomputed every layoutTouchControls() from the current LOGICAL_WIDTH.
+    // LOGICAL VIEWPORT (the on-screen canvas space) BY DESIGN, NOT the arena (world): the
+    // two are equal on desktop, but a filled frame (Discord OR touch/mobile, see
+    // fillViewport()/resize()) WIDENS the logical viewport, and the tap zones must cover
+    // that wider canvas, not the 16:9 arena. Recomputed every layoutTouchControls() from
+    // the current LOGICAL_WIDTH (so a future world.* != LOGICAL_* never desyncs them).
     var SW = (typeof LOGICAL_WIDTH === "number" && LOGICAL_WIDTH) ? LOGICAL_WIDTH : world.width;
     var SH = (typeof LOGICAL_HEIGHT === "number" && LOGICAL_HEIGHT) ? LOGICAL_HEIGHT : world.height;
     var leftRect = new VirtualButton(0, 85, SW / 4, SH, false);

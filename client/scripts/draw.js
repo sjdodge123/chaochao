@@ -722,7 +722,12 @@ function focusWorldPoints() {
 // gated behaviors here (goal framing suppressed, look-ahead zeroed) can never
 // drift out of sync with the gated handling in updateWorldCamera.
 function computeFocusedView(dt, gatedNow) {
-    var wholeMap = { cx: LOGICAL_WIDTH / 2, cy: LOGICAL_HEIGHT / 2, scale: 1 };
+    // Whole-map baseline centres on the ARENA centre (world), NOT the viewport centre: a
+    // filled/widened viewport is wider than the fixed 16:9 world, so LOGICAL_WIDTH/2 would
+    // left-anchor the arena with void on the right. Falls back to the viewport pre-world.
+    var wmW = (typeof world !== "undefined" && world && world.width) ? world.width : LOGICAL_WIDTH;
+    var wmH = (typeof world !== "undefined" && world && world.height) ? world.height : LOGICAL_HEIGHT;
+    var wholeMap = { cx: wmW / 2, cy: wmH / 2, scale: 1 };
     var pts = focusWorldPoints();
     if (pts.length === 0) {
         // Nobody local alive to follow -> whole map (watch the action). Drop the
@@ -829,8 +834,12 @@ function computeFocusedView(dt, gatedNow) {
 }
 
 function computeWorldViewTarget(dt) {
-    // Whole-map (identity) baseline — exactly today's view.
-    var wholeMap = { cx: LOGICAL_WIDTH / 2, cy: LOGICAL_HEIGHT / 2, scale: 1 };
+    // Whole-map (identity) baseline — centred on the ARENA centre (world), not the viewport
+    // centre, so a widened/filled viewport doesn't left-anchor the 16:9 arena (see
+    // computeFocusedView). Falls back to the viewport centre until world is known.
+    var wmW = (typeof world !== "undefined" && world && world.width) ? world.width : LOGICAL_WIDTH;
+    var wmH = (typeof world !== "undefined" && world && world.height) ? world.height : LOGICAL_HEIGHT;
+    var wholeMap = { cx: wmW / 2, cy: wmH / 2, scale: 1 };
     if (!cameraZoomEnabled || myPlayer == null || typeof world === "undefined" || world == null) {
         worldViewFocusedElapsed = 0;
         worldLeadSmooth = {};

@@ -30,6 +30,15 @@ function isDiscordActivity() {
 // so the CSS can hide the navbar + darken the letterbox bars and the game owns the
 // whole frame. Web/portal builds never get the class, so they're unchanged.
 try { if (isDiscordActivity()) { document.documentElement.classList.add("discord-activity"); } } catch (e) {}
+// Whether to FILL a wider-than-16:9 frame (widen the logical viewport to the frame
+// aspect) instead of pillarboxing the fixed 16:9 arena. True in a Discord Activity AND
+// on touch devices (phones in landscape) — both see a slightly wider slice of the world.
+// Desktop/laptop keep the classic 16:9 letterbox. Narrow frames (tablets ~4:3) are a
+// no-op: resize() never shrinks LOGICAL_WIDTH below the 16:9 base. See resize().
+function fillViewport() {
+	return (isDiscordActivity()) ||
+		(typeof isTouchScreen !== "undefined" && isTouchScreen === true);
+}
 function menuExitHref() {
 	return "./index.html"; // web/portal menu-exit destination
 }
@@ -719,9 +728,15 @@ function discordViewportDiag() {
 		var probe = document.createElement("div");
 		probe.style.cssText = "position:absolute;visibility:hidden;height:0;";
 		document.body.appendChild(probe);
-		function inset(v) { probe.style.width = "var(" + v + ", 0px)"; return Math.round(parseFloat(getComputedStyle(probe).width)) || 0; }
-		var safe = { t: inset("--safe-top"), r: inset("--safe-right"), b: inset("--safe-bottom"), l: inset("--safe-left") };
-		document.body.removeChild(probe);
+		var safe;
+		try {
+			var inset = function (v) { probe.style.width = "var(" + v + ", 0px)"; return Math.round(parseFloat(getComputedStyle(probe).width)) || 0; };
+			safe = { t: inset("--safe-top"), r: inset("--safe-right"), b: inset("--safe-bottom"), l: inset("--safe-left") };
+		} finally {
+			// Always remove the probe, even if the inset reads throw, so the diag path
+			// can never leak a DOM node.
+			if (probe.parentNode) { probe.parentNode.removeChild(probe); }
+		}
 		return {
 			win: window.innerWidth + "x" + window.innerHeight, dpr: window.devicePixelRatio,
 			aspect: +(window.innerWidth / Math.max(1, window.innerHeight)).toFixed(3),

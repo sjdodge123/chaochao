@@ -26,6 +26,10 @@ var server = null,
     // (see resize() + applyCanvasTransform), so high-DPR displays render crisp.
     LOGICAL_WIDTH = 0,
     LOGICAL_HEIGHT = 0,
+    // Immutable 16:9 base (the canvas HTML attrs). LOGICAL_WIDTH may be WIDENED past this
+    // to fill a wide frame (fillViewport); restored to BASE on every non-fill resize so a
+    // context flip (e.g. touch->kbm, HMR) can't leave it stuck wide. See resize().
+    BASE_LOGICAL_WIDTH = 0,
     fitRatio = 1,   // logical->CSS px scale, for stable physical label sizes
     canvasScaleX = 1,  // logical->backing-store scale applied per frame (DPR-aware)
     canvasScaleY = 1,
@@ -415,6 +419,7 @@ function setupPage() {
     // store for device-pixel rendering.
     LOGICAL_WIDTH = gameCanvas.width;
     LOGICAL_HEIGHT = gameCanvas.height;
+    BASE_LOGICAL_WIDTH = gameCanvas.width;
     init();
     // Use .always() (not .then()) so a single 404 / CORS error in the
     // preload list doesn't leave the lobby never being entered. Once
@@ -591,16 +596,20 @@ function resize() {
     var gameWindowRect = canvasWindow.getBoundingClientRect();
     if (gameWindowRect.width === 0 || gameWindowRect.height === 0) return;
     var viewport = { width: gameWindowRect.width, height: gameWindowRect.height };
-    // Discord Activity: the arena is a fixed 16:9 world, so on a wider-than-16:9 frame
-    // (a phone in landscape is ~2.2:1) a min() letterbox leaves ~40% side voids. Widen
-    // the LOGICAL viewport to the frame's aspect (clamped 16:9..21:9; height stays 768)
-    // so the canvas FILLS the frame — the camera just shows a wider slice of the world
-    // while racing (lobby/overview, which frame the whole 16:9 arena, keep a little
-    // letterbox). Gated to the Activity; web/portal keep the fixed 1366x768 logical space.
-    if (typeof isDiscordActivity === "function" && isDiscordActivity() && LOGICAL_HEIGHT > 0 && viewport.height > 0) {
-        var frameAspect = viewport.width / viewport.height;
-        var clampedAspect = Math.max(16 / 9, Math.min(21 / 9, frameAspect));
-        LOGICAL_WIDTH = Math.round(LOGICAL_HEIGHT * clampedAspect);
+    // The arena is a fixed 16:9 world, so on a wider-than-16:9 frame (a phone in landscape
+    // is ~2.2:1) a min() letterbox leaves big side voids. When fillViewport() (Discord
+    // Activity OR a touch device), WIDEN the LOGICAL viewport to the frame's aspect so the
+    // canvas FILLS — the camera shows a wider slice of the world while racing; whole-map
+    // views (lobby/overview) keep the 16:9 arena centred. Never narrower than the 16:9 BASE
+    // (so ≤16:9 frames like tablets are untouched) and never wider than 21:9. Outside
+    // fillViewport() (desktop/laptop) ALWAYS restore BASE so a context flip can't leave it
+    // stuck wide. Accepted tradeoff: touch/Discord see slightly more world than desktop.
+    if ((typeof fillViewport === "function" && fillViewport()) && LOGICAL_HEIGHT > 0 && viewport.height > 0) {
+        var maxLogicalW = Math.round(LOGICAL_HEIGHT * (21 / 9));
+        LOGICAL_WIDTH = Math.min(maxLogicalW, Math.max(BASE_LOGICAL_WIDTH || LOGICAL_HEIGHT * 16 / 9,
+            Math.round(LOGICAL_HEIGHT * (viewport.width / viewport.height))));
+    } else if (BASE_LOGICAL_WIDTH > 0) {
+        LOGICAL_WIDTH = BASE_LOGICAL_WIDTH;
     }
     // Fit the canvas to the available space at its native 16:9 aspect ratio,
     // scaling BOTH axes by the same factor so the game is never stretched. This
