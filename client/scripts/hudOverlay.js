@@ -5,12 +5,14 @@
 // ----------------------------------------------------------------------------
 // A purely-VISUAL overlay that makes the touch controls read clearly as a
 // gamepad (filled base pad, glossy thumb-knob, directional chevrons, a glossy
-// punch button) plus a one-time first-time hint. It does NOT handle input: the
-// overlay is `pointer-events:none`, so every touch falls through to the canvas
-// and the existing, battle-tested input path (input.js onTouch*, joystick.js)
-// drives the game exactly as before. Each frame we just READ the live control
-// state (joystickMovement / attackButton) and paint a matching DOM control on
-// top, then suppress the canvas-drawn rings (window.__touchHudDom).
+// punch button) plus a first-time, GATED WALKTHROUGH that teaches the controls
+// by making the player actually perform each one. It does NOT handle input: the
+// overlay is `pointer-events:none` (except the Skip button), so every touch
+// falls through to the canvas and the existing, battle-tested input path
+// (input.js onTouch*, joystick.js) drives the game exactly as before. Each frame
+// we READ the live control state (joystickMovement / attackButton) and paint a
+// matching DOM control on top, then suppress the canvas-drawn rings
+// (window.__touchHudDom).
 //
 // Toggle: ?domhud=0 disables it (falls back to the canvas rings) for A/B.
 // Only activates on touch devices (isTouchScreen).
@@ -19,13 +21,30 @@
 (function () {
     var STYLE_ID = "touch-hud-style";
     var ROOT_ID = "touch-hud-root";
-    var HINT_KEY = "touchHudHintSeen";
+    // New key (v2): the gated walkthrough supersedes the old one-shot hint, so it
+    // shows again even to players who saw the previous "touchHudHintSeen" hint.
+    var WALK_KEY = "touchWalkthroughSeen";
 
-    var root = null, hint = null;
+    // Attack tap-vs-hold thresholds (ms). A quick press+release is a "punch"; a
+    // press held past HOLD_MS is a "kick" (the charged punch). See the
+    // kick-equals-hold-punch convention.
+    var HOLD_MS = 350;
+    var TAP_MAX = 280;
+
+    var root = null;
     var elJoyBase, elJoyKnob, elAtk;
     var started = false;
-    var hintDismissed = false;
-    var hintPlaced = false;   // first frame() has positioned the hint (gates dismissal)
+
+    // ---- Walkthrough state ----
+    var walk = null;            // the walkthrough DOM wrapper (null once finished)
+    var walkSteps = [];         // resolved, ordered step list
+    var walkIdx = 0;
+    var walkDone = false;
+    var walkPlaced = false;     // first frame() has positioned the active step (anti-flash + gates taps)
+    var advanceLock = false;    // brief lockout so one gesture advances exactly one step
+    // Attack press tracking (for tap vs hold detection across frames).
+    var atkPressStart = 0;      // ms when the current press began (0 = not pressed)
+    var atkWasPressed = false;
 
     function enabled() {
         // URL opt-out for A/B against the old canvas controls.
@@ -42,9 +61,6 @@
             // position:fixed + viewport coords: fixed is viewport-relative both
             // windowed AND in fullscreen, and gameCanvas.getBoundingClientRect()
             // is too, so the two always agree (no containing-block math to drift).
-            // The root is still parented INTO #gameWindow (below) so it renders in
-            // the fullscreen top layer — a body-level overlay would vanish in
-            // fullscreen since it's outside the fullscreen element's subtree.
             "#" + ROOT_ID + "{position:fixed;inset:0;z-index:30;pointer-events:none;}",
             "#" + ROOT_ID + " .thc{position:absolute;will-change:transform,left,top,width,height;}",
             // ---- joystick base pad ----
@@ -73,19 +89,32 @@
             "box-shadow:0 4px 10px rgba(201,42,29,.6),inset 0 6px 14px rgba(0,0,0,.4);}",
             "#" + ROOT_ID + " .cap{position:absolute;left:50%;transform:translateX(-50%);color:#fff;font-weight:700;",
             "white-space:nowrap;text-shadow:0 1px 2px rgba(0,0,0,.8);letter-spacing:.3px;}",
-            // ---- first-time hint ----
-            "#" + ROOT_ID + " .hint-ring{position:absolute;border-radius:50%;border:3px solid #fff;transform:translate(-50%,-50%);animation:thcRing 1.4s ease-out infinite;}",
+            // ---- walkthrough: highlight ring + pointer + bubble + directional arrow ----
+            "#" + ROOT_ID + " .wt-ring{position:absolute;border-radius:50%;border:3px solid #fff;transform:translate(-50%,-50%);animation:thcRing 1.4s ease-out infinite;}",
             "@keyframes thcRing{0%{opacity:.9;transform:translate(-50%,-50%) scale(.8);}100%{opacity:0;transform:translate(-50%,-50%) scale(1.25);}}",
-            "#" + ROOT_ID + " .hint-finger{position:absolute;transform:translate(-50%,-50%);animation:thcSwipe 1.6s ease-in-out infinite;}",
-            "@keyframes thcSwipe{0%,100%{transform:translate(-90%,-30%);}50%{transform:translate(10%,-80%);}}",
-            "#" + ROOT_ID + " .hint-tap{position:absolute;transform:translate(-50%,-50%);animation:thcTap 1.1s ease-in-out infinite;}",
+            "#" + ROOT_ID + " .wt-finger{position:absolute;transform:translate(-50%,-50%);animation:thcTap 1.1s ease-in-out infinite;}",
             "@keyframes thcTap{0%,100%{transform:translate(-50%,-50%) scale(1);}50%{transform:translate(-50%,-42%) scale(.82);}}",
-            "#" + ROOT_ID + " .bubble{position:absolute;transform:translate(-50%,-50%);background:rgba(15,18,24,.88);color:#fff;",
-            "padding:8px 12px;border-radius:12px;font-weight:700;white-space:nowrap;border:1px solid rgba(255,255,255,.18);",
-            "box-shadow:0 6px 20px rgba(0,0,0,.45);text-align:center;}",
-            "#" + ROOT_ID + " .bubble small{display:block;font-weight:500;opacity:.8;}",
-            "#" + ROOT_ID + " .hint-wrap{transition:opacity .4s ease;}",
-            "#" + ROOT_ID + " .hint-wrap.gone{opacity:0;}"
+            "#" + ROOT_ID + " .wt-arrow{position:absolute;transform:translate(-50%,-50%);color:#7fe3ff;font-weight:900;",
+            "text-shadow:0 2px 6px rgba(0,0,0,.7);line-height:1;}",
+            "@keyframes wtUp{0%,100%{transform:translate(-50%,-30%);}50%{transform:translate(-50%,-90%);}}",
+            "@keyframes wtDown{0%,100%{transform:translate(-50%,-70%);}50%{transform:translate(-50%,-10%);}}",
+            "@keyframes wtLeft{0%,100%{transform:translate(-30%,-50%);}50%{transform:translate(-90%,-50%);}}",
+            "@keyframes wtRight{0%,100%{transform:translate(-70%,-50%);}50%{transform:translate(-10%,-50%);}}",
+            "#" + ROOT_ID + " .wt-arrow.up{animation:wtUp 1s ease-in-out infinite;}",
+            "#" + ROOT_ID + " .wt-arrow.down{animation:wtDown 1s ease-in-out infinite;}",
+            "#" + ROOT_ID + " .wt-arrow.left{animation:wtLeft 1s ease-in-out infinite;}",
+            "#" + ROOT_ID + " .wt-arrow.right{animation:wtRight 1s ease-in-out infinite;}",
+            "#" + ROOT_ID + " .bubble{position:absolute;transform:translate(-50%,-50%);background:rgba(15,18,24,.9);color:#fff;",
+            "padding:9px 14px;border-radius:12px;font-weight:700;white-space:nowrap;border:1px solid rgba(255,255,255,.18);",
+            "box-shadow:0 6px 20px rgba(0,0,0,.5);text-align:center;}",
+            "#" + ROOT_ID + " .bubble .step{display:block;font-weight:600;opacity:.55;font-size:.72em;letter-spacing:.5px;margin-bottom:2px;}",
+            "#" + ROOT_ID + " .bubble small{display:block;font-weight:500;opacity:.82;}",
+            // ---- Skip button (the ONLY interactive element in the overlay) ----
+            "#" + ROOT_ID + " .wt-skip{position:absolute;pointer-events:auto;background:rgba(15,18,24,.82);color:#cfe3ff;",
+            "border:1px solid rgba(255,255,255,.22);border-radius:999px;font-weight:700;cursor:pointer;",
+            "box-shadow:0 4px 14px rgba(0,0,0,.4);-webkit-tap-highlight-color:transparent;}",
+            "#" + ROOT_ID + " .wt-wrap{transition:opacity .4s ease;}",
+            "#" + ROOT_ID + " .wt-wrap.gone{opacity:0;}"
         ].join("");
         var s = document.createElement("style");
         s.id = STYLE_ID;
@@ -100,6 +129,31 @@
         return d;
     }
 
+    // ---- Walkthrough step list -------------------------------------------------
+    // Movement (gated on a real joystick push), punch (tap), kick (hold/charge),
+    // then the corner buttons (pointed out, advance on a tap — actually pressing
+    // them would open their menus). Corner steps are included only when their
+    // control exists; fullscreen is auto-skipped where unsupported (e.g. Discord).
+    var STEP_TEMPLATES = [
+        { id: "up", kind: "dir", dir: "up", glyph: "▲", title: "Move up", sub: "push the stick up" },
+        { id: "down", kind: "dir", dir: "down", glyph: "▼", title: "Move down", sub: "push the stick down" },
+        { id: "left", kind: "dir", dir: "left", glyph: "◀", title: "Move left", sub: "push the stick left" },
+        { id: "right", kind: "dir", dir: "right", glyph: "▶", title: "Move right", sub: "push the stick right" },
+        { id: "punch", kind: "tap", title: "Punch", sub: "tap the button" },
+        { id: "kick", kind: "hold", title: "Kick", sub: "hold the button to charge" },
+        { id: "settings", kind: "point", target: "settings", title: "Settings", sub: "tap to continue" },
+        { id: "emoji", kind: "point", target: "emoji", title: "Emotes", sub: "tap to continue" },
+        { id: "fullscreen", kind: "point", target: "fullscreen", title: "Fullscreen", sub: "tap to continue" }
+    ];
+    function buildSteps() {
+        return STEP_TEMPLATES.filter(function (s) {
+            if (s.target === "fullscreen") {
+                return typeof fullscreenSupported === "function" && fullscreenSupported();
+            }
+            return true; // dir/tap/hold always; settings/emoji re-checked at render and tap-advanceable
+        });
+    }
+
     function buildDom() {
         root = document.createElement("div");
         root.id = ROOT_ID;
@@ -112,79 +166,78 @@
 
         elJoyBase.style.display = "none";
         elJoyKnob.style.display = "none";
-        // Hidden until the first frame() positions it, so it can't flash at the
-        // default top-left/static-flow spot before placement.
-        elAtk.style.visibility = "hidden";
+        elAtk.style.visibility = "hidden"; // until first frame() positions it (anti-flash)
 
         root.appendChild(elJoyBase);
         root.appendChild(elJoyKnob);
         root.appendChild(elAtk);
 
-        // First-time hint (shown once, dismissed on first touch).
-        if (!hintSeen()) {
-            hint = el("hint-wrap");
-            hint._ringJoy = el("hint-ring");
-            hint._ringAtk = el("hint-ring");
-            hint._fingerJoy = el("hint-finger", "👆");
-            hint._tapAtk = el("hint-tap", "👆");
-            hint._bubbleJoy = el("bubble", "Drag to move<small>slide your thumb</small>");
-            hint._bubbleAtk = el("bubble", "Tap to punch<small>hold to charge</small>");
-            hint.appendChild(hint._ringJoy);
-            hint.appendChild(hint._ringAtk);
-            hint.appendChild(hint._fingerJoy);
-            hint.appendChild(hint._tapAtk);
-            hint.appendChild(hint._bubbleJoy);
-            hint.appendChild(hint._bubbleAtk);
-            // Hidden until the first frame() positions every node (anti-flash).
-            hint.style.visibility = "hidden";
-            root.appendChild(hint);
-            // Dismiss only on a real interaction: a touch that lands inside the
-            // game canvas, AFTER the hint has actually been shown. A global
-            // "any touch" listener could burn the once-only flag on a tap on the
-            // rotate prompt / loading UI before the player ever saw the HUD.
-            window.addEventListener("touchstart", onHintTouch, { passive: true });
+        // First-run gated walkthrough.
+        if (!walkSeen()) {
+            walkSteps = buildSteps();
+            walk = el("wt-wrap");
+            walk._ring = el("wt-ring");
+            walk._finger = el("wt-finger", "👆");
+            walk._arrow = el("wt-arrow");
+            walk._bubble = el("bubble");
+            walk._skip = document.createElement("button");
+            walk._skip.type = "button";
+            walk._skip.className = "wt-skip";
+            walk._skip.textContent = "Skip ✕";
+            walk._skip.addEventListener("click", function (e) {
+                if (e && e.preventDefault) e.preventDefault();
+                finishWalk();
+            });
+            walk.appendChild(walk._ring);
+            walk.appendChild(walk._finger);
+            walk.appendChild(walk._arrow);
+            walk.appendChild(walk._bubble);
+            walk.appendChild(walk._skip);
+            walk.style.visibility = "hidden"; // until first frame() places the active step
+            root.appendChild(walk);
+            // Tap-to-continue for the "point" steps (settings/emoji/fullscreen):
+            // any touch advances. Ignored for action steps, which are gated on the
+            // real control instead. Only after the step is actually on screen.
+            window.addEventListener("touchstart", onWalkTouch, { passive: true });
         }
 
         // Parent INTO the fullscreen target (#gameWindow) so the overlay renders in
-        // the fullscreen top layer (and stays visible in fullscreen). Positioning is
-        // viewport-fixed, so no positioning-context tweak to the host is needed.
+        // the fullscreen top layer (and stays visible in fullscreen).
         var host = document.getElementById("gameWindow") || document.body;
         host.appendChild(root);
     }
 
-    function hintSeen() {
-        try { return localStorage.getItem(HINT_KEY) === "1"; } catch (e) { return false; }
+    function walkSeen() {
+        try { return localStorage.getItem(WALK_KEY) === "1"; } catch (e) { return false; }
     }
-    // Dismiss the first-time hint only on a genuine in-canvas touch, and only once
-    // the hint has actually been placed on screen — so a stray early tap (loading
-    // UI, rotate prompt, a tap outside the play area) can't permanently burn the
-    // once-only HINT_KEY before the player has seen or used the controls.
-    function onHintTouch(e) {
-        if (hintDismissed) { window.removeEventListener("touchstart", onHintTouch); return; }
-        if (!hintPlaced) return; // not visible yet — ignore
-        var t = e.changedTouches && e.changedTouches[0];
-        if (!t || typeof gameCanvas === "undefined" || !gameCanvas) return;
-        var r = gameCanvas.getBoundingClientRect();
-        if (t.clientX >= r.left && t.clientX <= r.right && t.clientY >= r.top && t.clientY <= r.bottom) {
-            window.removeEventListener("touchstart", onHintTouch);
-            dismissHint();
-        }
+    // A tap advances ONLY the "point" steps, and only once the step is on screen.
+    function onWalkTouch() {
+        if (walkDone || !walk || !walkPlaced || advanceLock) return;
+        var step = walkSteps[walkIdx];
+        if (step && step.kind === "point") { advanceStep(); }
     }
-    function dismissHint() {
-        if (hintDismissed) return;
-        hintDismissed = true;
-        window.removeEventListener("touchstart", onHintTouch);
-        try { localStorage.setItem(HINT_KEY, "1"); } catch (e) { /* ignore */ }
-        if (hint) {
-            hint.classList.add("gone");
-            setTimeout(function () { if (hint && hint.parentNode) hint.parentNode.removeChild(hint); hint = null; }, 450);
+    function advanceStep() {
+        if (advanceLock || walkDone) return;
+        advanceLock = true;
+        atkPressStart = 0; atkWasPressed = false; // reset attack tracking between steps
+        setTimeout(function () { advanceLock = false; }, 320); // debounce one gesture -> one step
+        walkIdx++;
+        if (walkIdx >= walkSteps.length) { finishWalk(); }
+    }
+    function finishWalk() {
+        if (walkDone) return;
+        walkDone = true;
+        window.removeEventListener("touchstart", onWalkTouch);
+        try { localStorage.setItem(WALK_KEY, "1"); } catch (e) { /* ignore */ }
+        if (walk) {
+            walk.classList.add("gone");
+            var w = walk;
+            setTimeout(function () { if (w && w.parentNode) w.parentNode.removeChild(w); }, 450);
+            walk = null;
         }
     }
 
-    // Map a logical (canvas-space) coordinate to a viewport CSS-px coordinate,
-    // the inverse of input.js' canvasClientToLogical*. Controls are position:fixed
-    // (viewport-relative), so these viewport coords place them correctly both
-    // windowed and in fullscreen (the canvas rect is viewport-relative too).
+    // Map a logical (canvas-space) coordinate to a viewport CSS-px coordinate.
     function mapper() {
         var rect = gameCanvas.getBoundingClientRect();
         var sx = rect.width / (LOGICAL_WIDTH || rect.width || 1);
@@ -192,7 +245,7 @@
         return {
             x: function (lx) { return rect.left + lx * sx; },
             y: function (ly) { return rect.top + ly * sy; },
-            s: (sx + sy) / 2, // near-uniform; controls are circles
+            s: (sx + sy) / 2,
             rect: rect
         };
     }
@@ -204,20 +257,49 @@
         node.style.height = diameter + "px";
     }
 
+    // Viewport-px center of a "point" step target, or null if it isn't on screen now.
+    function targetRect(target, m) {
+        try {
+            if (target === "settings") {
+                var g = document.getElementById("touchSettingsBtn");
+                if (g && g.offsetParent !== null) {
+                    var r = g.getBoundingClientRect();
+                    if (r.width > 0) return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, d: Math.max(r.width, r.height) + 18 };
+                }
+                return null;
+            }
+            if (target === "emoji") {
+                if (typeof chatButton !== "undefined" && chatButton && chatButton.isVisible && chatButton.isVisible()) {
+                    var d1 = (chatButton.radius || 30) * 2 * m.s;
+                    return { cx: m.x(chatButton.baseX), cy: m.y(chatButton.baseY), d: d1 + 14 };
+                }
+                return null;
+            }
+            if (target === "fullscreen") {
+                if (typeof exitButton !== "undefined" && exitButton && exitButton.isVisible && exitButton.isVisible() &&
+                    typeof fullscreenSupported === "function" && fullscreenSupported()) {
+                    var d2 = (exitButton.radius || 30) * 2 * m.s;
+                    return { cx: m.x(exitButton.baseX), cy: m.y(exitButton.baseY), d: d2 + 14 };
+                }
+                return null;
+            }
+        } catch (e) { /* fall through */ }
+        return null;
+    }
+
     function frame() {
         if (!root) return;
         try {
             if (typeof gameCanvas === "undefined" || !gameCanvas) { requestAnimationFrame(frame); return; }
             var m = mapper();
-            var capFont = Math.round(Math.max(13, Math.min(34, 13 / (fitRatio || 1))));
+            var capFont = Math.round(Math.max(13, Math.min(30, 13 / (fitRatio || 1))));
+            var jm = (typeof joystickMovement !== "undefined") ? joystickMovement : null;
+            var ab = (typeof attackButton !== "undefined") ? attackButton : null;
 
             // ---- Joystick (floating: visible only while the thumb is down) ----
-            var jm = (typeof joystickMovement !== "undefined") ? joystickMovement : null;
             if (jm && jm.pressed) {
-                var baseD = jm.baseRadius * 2 * m.s;
-                var knobD = jm.stickRadius * 2 * m.s;
-                place(elJoyBase, m.x(jm.baseX), m.y(jm.baseY), baseD);
-                place(elJoyKnob, m.x(jm.stickX), m.y(jm.stickY), knobD);
+                place(elJoyBase, m.x(jm.baseX), m.y(jm.baseY), jm.baseRadius * 2 * m.s);
+                place(elJoyKnob, m.x(jm.stickX), m.y(jm.stickY), jm.stickRadius * 2 * m.s);
                 elJoyBase.style.display = "";
                 elJoyKnob.style.display = "";
             } else {
@@ -226,48 +308,135 @@
             }
 
             // ---- Attack button (always anchored lower-right) ----
-            var ab = (typeof attackButton !== "undefined") ? attackButton : null;
             if (ab && ab.radius) {
                 var atkD = ab.radius * 2 * m.s;
                 place(elAtk, m.x(ab.baseX), m.y(ab.baseY), atkD);
                 elAtk.style.fontSize = Math.round(atkD * 0.42) + "px";
                 if (ab.pressed) elAtk.classList.add("pressed"); else elAtk.classList.remove("pressed");
                 elAtk.style.display = "";
-                elAtk.style.visibility = ""; // now placed — safe to reveal (anti-flash)
+                elAtk.style.visibility = "";
             } else {
                 elAtk.style.display = "none";
             }
 
-            // ---- First-time hint placement (viewport px) ----
-            if (hint && !hintDismissed) {
-                // Joystick resting hint: a thumb-friendly spot in the lower-left.
-                var hjx = m.rect.left + m.rect.width * 0.16;
-                var hjy = m.rect.top + m.rect.height * 0.74;
-                var ringD = (jm ? jm.baseRadius * 2 * m.s : 140);
-                setRing(hint._ringJoy, hjx, hjy, ringD);
-                setNode(hint._fingerJoy, hjx, hjy, Math.round(ringD * 0.28));
-                setNode(hint._bubbleJoy, hjx, hjy - ringD * 0.75, capFont);
-                // Attack hint: centred on the real punch button.
-                var ax = ab ? m.x(ab.baseX) : m.rect.right - 90;
-                var ay = ab ? m.y(ab.baseY) : m.rect.bottom - 90;
-                var ringA = (ab && ab.radius ? ab.radius * 2 * m.s : 120);
-                setRing(hint._ringAtk, ax, ay, ringA);
-                setNode(hint._tapAtk, ax, ay, Math.round(ringA * 0.3));
-                setNode(hint._bubbleAtk, ax, ay - ringA * 0.78, capFont);
-                hint.style.visibility = ""; // placed — reveal (anti-flash)
-                hintPlaced = true;          // now a real in-canvas touch may dismiss it
+            // ---- Gated walkthrough: detect completion of the active step + place it ----
+            if (walk && !walkDone) {
+                var step = walkSteps[walkIdx];
+                if (step) {
+                    detectStep(step, jm, ab);
+                    placeStep(step, jm, ab, m, capFont);
+                    walk.style.visibility = "";
+                    walkPlaced = true;
+                }
             }
         } catch (e) { /* never let the HUD break the game */ }
         requestAnimationFrame(frame);
     }
 
-    function setRing(node, cx, cy, d) {
-        node.style.left = cx + "px"; node.style.top = cy + "px";
-        node.style.width = d + "px"; node.style.height = d + "px";
+    // Advance the active step when the player performs its gesture.
+    function detectStep(step, jm, ab) {
+        if (advanceLock) return;
+        if (step.kind === "dir") {
+            if (jm && jm.pressed) {
+                var dx = jm.stickX - jm.baseX, dy = jm.stickY - jm.baseY;
+                var thr = (jm.maxPullRadius || jm.baseRadius * 0.5) * 0.5;
+                var ok = false;
+                if (step.dir === "up") ok = dy < -thr && Math.abs(dy) >= Math.abs(dx);
+                else if (step.dir === "down") ok = dy > thr && Math.abs(dy) >= Math.abs(dx);
+                else if (step.dir === "left") ok = dx < -thr && Math.abs(dx) >= Math.abs(dy);
+                else if (step.dir === "right") ok = dx > thr && Math.abs(dx) >= Math.abs(dy);
+                if (ok) advanceStep();
+            }
+            return;
+        }
+        if (step.kind === "tap" || step.kind === "hold") {
+            var pressed = !!(ab && ab.pressed);
+            var now = Date.now();
+            if (pressed && !atkWasPressed) { atkPressStart = now; }        // press begins
+            if (step.kind === "hold" && pressed && atkPressStart && (now - atkPressStart) >= HOLD_MS) {
+                advanceStep();                                              // held long enough = kick
+            }
+            if (!pressed && atkWasPressed) {                                // released
+                var held = atkPressStart ? (now - atkPressStart) : 0;
+                if (step.kind === "tap" && held > 0 && held < TAP_MAX) { advanceStep(); } // quick tap = punch
+                atkPressStart = 0;
+            }
+            atkWasPressed = pressed;
+            return;
+        }
+        // "point" steps advance via onWalkTouch (tap to continue), or auto-skip if
+        // their control isn't on screen at all.
+        if (step.kind === "point") {
+            // handled in placeStep (auto-skip when target is unavailable)
+        }
     }
-    function setNode(node, cx, cy, fontPx) {
-        node.style.left = cx + "px"; node.style.top = cy + "px";
-        node.style.fontSize = fontPx + "px";
+
+    function placeStep(step, jm, ab, m, capFont) {
+        var ring = walk._ring, finger = walk._finger, arrow = walk._arrow, bubble = walk._bubble;
+        var stepLabel = "Step " + (walkIdx + 1) + " / " + walkSteps.length;
+        bubble.innerHTML = '<span class="step">' + stepLabel + "</span>" + step.title +
+            "<small>" + step.sub + "</small>";
+        bubble.style.fontSize = capFont + "px";
+
+        // Skip button: top-center, pushed clear of the notch / Discord header via the
+        // device safe-area inset (the same env() the page's safe-area vars build on).
+        walk._skip.style.left = (m.rect.left + m.rect.width / 2) + "px";
+        walk._skip.style.transform = "translateX(-50%)";
+        walk._skip.style.top = "calc(" + m.rect.top + "px + env(safe-area-inset-top, 0px) + 6px)";
+        walk._skip.style.fontSize = Math.max(12, capFont - 2) + "px";
+        walk._skip.style.padding = "6px 14px";
+
+        function showArrow(dir, cx, cy, sizePx) {
+            arrow.className = "wt-arrow " + dir;
+            arrow.textContent = step.glyph || "";
+            arrow.style.left = cx + "px"; arrow.style.top = cy + "px";
+            arrow.style.fontSize = sizePx + "px";
+            arrow.style.display = "";
+        }
+        function hideArrow() { arrow.style.display = "none"; }
+        function setRing(cx, cy, d) {
+            ring.style.left = cx + "px"; ring.style.top = cy + "px";
+            ring.style.width = d + "px"; ring.style.height = d + "px"; ring.style.display = "";
+        }
+        function setFinger(cx, cy, sizePx) {
+            finger.style.left = cx + "px"; finger.style.top = cy + "px";
+            finger.style.fontSize = sizePx + "px"; finger.style.display = "";
+        }
+        function setBubble(cx, cy) { bubble.style.left = cx + "px"; bubble.style.top = cy + "px"; }
+
+        if (step.kind === "dir") {
+            // Anchor at the thumb-friendly resting spot in the lower-left; if the
+            // player already has the stick down, follow the live base instead.
+            var ax = (jm && jm.pressed) ? m.x(jm.baseX) : (m.rect.left + m.rect.width * 0.16);
+            var ay = (jm && jm.pressed) ? m.y(jm.baseY) : (m.rect.top + m.rect.height * 0.74);
+            var ringD = (jm ? jm.baseRadius * 2 * m.s : 140);
+            setRing(ax, ay, ringD);
+            finger.style.display = "none";
+            showArrow(step.dir, ax, ay, Math.round(ringD * 0.5));
+            setBubble(ax, ay - ringD * 0.85);
+            return;
+        }
+        if (step.kind === "tap" || step.kind === "hold") {
+            var bx = ab ? m.x(ab.baseX) : (m.rect.right - 90);
+            var by = ab ? m.y(ab.baseY) : (m.rect.bottom - 90);
+            var ringA = (ab && ab.radius ? ab.radius * 2 * m.s : 120);
+            setRing(bx, by, ringA);
+            hideArrow();
+            setFinger(bx, by, Math.round(ringA * 0.32));
+            setBubble(bx, by - ringA * 0.85);
+            return;
+        }
+        if (step.kind === "point") {
+            var tr = targetRect(step.target, m);
+            if (!tr) { advanceStep(); return; } // control not on screen — skip this step
+            setRing(tr.cx, tr.cy, tr.d);
+            hideArrow();
+            setFinger(tr.cx, tr.cy, Math.round(tr.d * 0.34));
+            // Keep the bubble on-screen: below the control if it's near the top.
+            var below = tr.cy < (m.rect.top + m.rect.height * 0.4);
+            setBubble(tr.cx, tr.cy + (below ? tr.d * 0.85 : -tr.d * 0.85));
+            return;
+        }
     }
 
     function start() {
