@@ -1026,11 +1026,9 @@ exports.validateMap = function (vMap, config) {
     // left start slips through validation and leaves the map uncompletable.
     // Server-only — the cell graph isn't in the editor bundle, so the editor
     // surfaces this via the preview/submit rejection rather than inline.
-    var effectiveStartEdges = (Array.isArray(vMap.startEdges) && vMap.startEdges.length > 0) ? vMap.startEdges : ["left"];
-    for (var se = 0; se < effectiveStartEdges.length; se++) {
-        if (!cellGraph.reachableFromEdge(vMap, effectiveStartEdges[se])) {
-            return { valid: false, reason: "No goal is reachable from the " + effectiveStartEdges[se] + " start." };
-        }
+    var unreachableEdge = cellGraph.firstUnreachableStartEdge(vMap);
+    if (unreachableEdge != null) {
+        return { valid: false, reason: "No goal is reachable from the " + unreachableEdge + " start." };
     }
     return { valid: true };
 }

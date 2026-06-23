@@ -1214,6 +1214,71 @@ try {
         const onGrass = utils.validateMap(vmap([{ id: LILY.id, x: COLS[1], y: ROWS[1], radius: 30 }]), config);
         check(onGrass.valid === false && /must sit on water/.test(onGrass.reason || ''), 'a lily pad on dry ground is rejected (must sit on water)');
     }
+
+    // --- [R] Route weight: a speed boon steers the shared racing line toward the boost ---
+    // cellGraph.getBoonRouteWeights discounts a speed boon's cell so the fairness overlay AND
+    // the bots (one shared route) lean toward the boost when it isn't a big detour — the mirror
+    // image of avoiding a hazard. Defensive boons carry no route weight and must NOT move it.
+    console.log('[R] speed boons weight the shared racing line');
+    {
+        const GRASS_ = config.tileMap.fast.id, LAVA_ = config.tileMap.lava.id, GOAL_ = config.tileMap.goal.id;
+        const xs = [120, 300, 480, 660, 840, 1020, 1200];
+        // Two grass lanes (y=180 top / y=560 bottom) split by a lava wall, joined only at the
+        // left start column and the right goal column — equal geometry, so the lane is a free
+        // choice the boon weight can tip.
+        function twoLane(haz) {
+            const s = [];
+            const push = (x, y, id) => s.push({ x: x, y: y, id: id });
+            push(120, 180, GRASS_); push(120, 370, GRASS_); push(120, 560, GRASS_);
+            for (let i = 1; i < xs.length - 1; i++) { push(xs[i], 180, GRASS_); push(xs[i], 560, GRASS_); push(xs[i], 370, LAVA_); }
+            push(1200, 180, GRASS_); push(1200, 370, GOAL_); push(1200, 560, GRASS_);
+            return mapFormat.reconstruct({ bbox: { xl: 0, xr: config.worldWidth, yt: 0, yb: config.worldHeight }, sites: s, hazards: haz || [], startEdges: ['left'], name: 'boonlane', author: 'test', id: 'boonlane-' + (haz && haz.length ? 'h' : 'p') });
+        }
+        function laneOf(map, r) {
+            const idx = cellGraph.getAdjacency(map).idToIndex;
+            const ys = r.path.map(v => map.cells[idx[v]].site.y);
+            return ys.filter(y => y < 300).length > ys.filter(y => y > 440).length ? 'top' : 'bottom';
+        }
+        const plain = twoLane();
+        const base = cellGraph.findPathToNearestGoal(plain, { x: 120, y: 370 }, { noiseAmount: 0 });
+        check(base != null, 'two-lane map: a route to the goal exists');
+        const baseLane = base ? laneOf(plain, base) : 'top';
+        const otherY = baseLane === 'top' ? 560 : 180; // the lane the bare route did NOT pick
+        const dashMap = twoLane([{ id: DASH.id, x: 660, y: otherY, angle: 0 }]); // faces +x toward the goal
+        const dashRoute = cellGraph.findPathToNearestGoal(dashMap, { x: 120, y: 370 }, { noiseAmount: 0 });
+        check(dashRoute != null && laneOf(dashMap, dashRoute) !== baseLane,
+            'a Dash Arrows boon off the default lane steers the racing line onto the boost lane');
+        // Direction gate: a boon FACING AWAY from travel (a backward trap) must NOT pull the line —
+        // these boosts only help when you ride them the way they point.
+        const trapMap = twoLane([{ id: DASH.id, x: 660, y: otherY, angle: 180 }]); // faces -x, away from goal
+        const trapRoute = cellGraph.findPathToNearestGoal(trapMap, { x: 120, y: 370 }, { noiseAmount: 0 });
+        check(trapRoute != null && laneOf(trapMap, trapRoute) === baseLane,
+            'a backward-facing speed boon does NOT divert the line (direction gate — no trap)');
+        const haloMap = twoLane([{ id: config.boons.guardHalo.id, x: 660, y: otherY }]);
+        const haloRoute = cellGraph.findPathToNearestGoal(haloMap, { x: 120, y: 370 }, { noiseAmount: 0 });
+        check(haloRoute != null && laneOf(haloMap, haloRoute) === baseLane,
+            'a defensive boon (Guard Halo) carries no route weight — the line does not move');
+    }
+
+    // --- [S] Checkpoint homing: an un-attuned bot drives onto an OFF-CENTRE flag to attune ----
+    // The route pull only gets a bot to the flag's CELL; its 28px trigger needs the exact point.
+    // A flag placed 42px off the single lane's centre line is beyond that trigger from the
+    // straight cell-site line, so ONLY the steer-homing override (within CHECKPOINT_HOME_RANGE)
+    // gets the bot onto it — guards the off-centre-placement gap the Codex review flagged.
+    console.log('[S] bots home onto an off-centre Checkpoint flag to attune');
+    {
+        const SW = config.boons.secondWindTotem; // "Checkpoint"
+        const cpMap = buildMap('cphome', [{ id: SW.id, x: PAD_X, y: ROWS[2] + 42 }], [2]);
+        const { room, bot } = bootRoom('boon-cphome', cpMap, { id: 'r', name: 'R', title: '', skill: 0.85, aggression: 0.2, tempo: 0.5, risk: 0.3, focus: 'race' });
+        let attunedAt = -1;
+        for (let f = 0; f < 2400; f++) {
+            room.game.notchesToWin = 0;
+            room.update(DT); clock += config.serverTickSpeed; fireDueTimers();
+            if (attunedAt < 0 && bot.secondWind != null) { attunedAt = f; }
+            if (attunedAt >= 0 || room.game.currentState === config.stateMap.gameOver) { break; }
+        }
+        check(attunedAt >= 0, 'an un-attuned bot homed onto the off-centre flag and attuned (tick ' + attunedAt + ')');
+    }
 } finally {
     Date.now = realNow;
     Math.random = realRandom;

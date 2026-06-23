@@ -14,19 +14,38 @@ To re-render a past week's digest with the current formatting, run the `Release 
 
 ## Unreleased
 
-### Gameplay & Balance
+### Controls & Couch Co-op
 
-- **You can fight back against antlions now — punch them.** A solid swing knocks an antlion back into the sand and it burrows away, so a well-timed lunge clears a path through the swarm (and a wide swing can scatter a whole cluster at once). Antlion rounds were brutal on sand-heavy maps where there was nowhere to run; now the swarm has a real answer.
-- **Antlion rounds eased up.** Their shove hits softer (so a bump is far less likely to launch you straight into the lava), fewer of them turn up at once, they jab a little slower, and you get a longer grace period on the sand before one erupts. The mode should be survivable on maps where the route forces you across the dunes.
+- **Touch controls got a glow-up.** The on-screen joystick and punch button are redrawn as chunky, tactile pads — a filled thumb-stick with direction arrows and a glossy punch button — so it reads at a glance where to move and attack. First-timers get a one-time "Drag to move / Tap to punch" hint that clears the moment you start playing.
+- **Phone camera sits closer.** On touch devices the race camera zooms in a touch tighter so karts read clearly on smaller screens.
+
+### Map editor
+
+- **Barriers now block exactly where a kart can't drive.** The fairness check used to seal a map off the moment a wall *visually* crossed the straight line between two regions — even when you'd left a clear lane to drive through — so maps got a false "No goal is reachable" rejection. It now traces the actual gaps a kart drives through: weaving wall mazes with real lanes pass, while a wall that genuinely **divides the map** (even one running straight through the middle of a region) is still correctly rejected as unfinishable.
+- **Estimated racing lines respect your walls.** The fairness overlay's routes used to draw straight through solid barriers; they now thread the gaps and route around walls — the exact same path the AI racers steer, so the preview line and the bots agree.
 
 ### AI Racers
 
+- **Bots steer around barriers.** AI racers used to aim at cell centres and try to drive straight through a wall; they now thread the doorways between walls, following the same line the fairness preview draws.
+- **Bots grab Checkpoints.** AI racers now detour to attune to a Checkpoint flag (Second Wind Totem) when one is roughly on their way — banking the free revive like a smart player would, then carrying on to the goal.
+- **Bots break out of vortex wells.** A bot pulled to a near-stop in a vortex's ring now double-taps a dash to burst free toward its route, instead of crawling against the pull.
 - **Bots fight off antlions too.** The racing bots now swing at an antlion that's right on top of them — knocking it back into the sand — instead of only trying to dodge away, so they no longer get helplessly herded into the lava on sand-heavy maps.
+
+### Gameplay & Balance
+
+- **Walls have real thickness.** Barriers are 14px-wide bars, so you now stop with your kart's edge against the wall instead of sliding to its centre line — no more parking in the middle of a wall.
+- **You can fight back against antlions now — punch them.** A solid swing knocks an antlion back into the sand and it burrows away, so a well-timed lunge clears a path through the swarm (and a wide swing can scatter a whole cluster at once). Antlion rounds were brutal on sand-heavy maps where there was nowhere to run; now the swarm has a real answer.
+- **Antlion rounds eased up.** Their shove hits softer (so a bump is far less likely to launch you straight into the lava), fewer of them turn up at once, they jab a little slower, and you get a longer grace period on the sand before one erupts. The mode should be survivable on maps where the route forces you across the dunes.
 
 ### Quality of Life
 
 - **Gentler idle handling inside Discord Activities.** In a Discord voice-channel Activity you're no longer kicked for a short idle — you sit out the current round and drop back in the moment you move. Only after a long stretch away (about 15 min in the lobby, 20 in a match) does it pause you with a one-tap "rejoin" screen, so an abandoned window stops tying up a game while your voice chat stays connected the whole time.
 - **Connection indicator.** A small ping/latency badge now sits in the bottom-left corner so you can see your connection at a glance — green when it's healthy, amber/red as it climbs. If your connection ever drops onto the slow fallback mode (the cause of "only I was lagging" hitches), it turns into a red "Slow link — tap to fix" chip that reconnects you on the better path; out of a race it also tries to recover on its own.
+
+### Bug Fixes
+
+- **Barrier ends don't snag you anymore.** Grazing the tip of a wall — especially where two wall ends meet — used to wedge your kart in the notch. The rounded ends now behave like smooth caps, so you slide cleanly around them instead of getting stuck.
+- **Vortex wells: the calm eye is truly calm, and water sets you free.** The drawn centre of a well now has zero pull, so you can actually rest and wind up speed in the eye before powering out. And a well over deep water no longer traps you — its pull can't grip a swimming kart, so you swim straight through.
 
 ## v0.49.1 — 2026-06-20
 

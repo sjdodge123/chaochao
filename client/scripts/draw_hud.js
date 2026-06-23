@@ -1230,7 +1230,12 @@ function drawTouchControls(ctx) {
     }
 
 
-    if (joystickMovement != null && joystickMovement.isVisible()) {
+    // When the tactile DOM HUD (hudOverlay.js) is active it paints the joystick
+    // and attack button itself, so skip the canvas rings to avoid double-drawing.
+    // The corner emoji/fullscreen icons stay canvas-drawn either way.
+    var domHud = (typeof window !== 'undefined' && window.__touchHudDom === true);
+
+    if (!domHud && joystickMovement != null && joystickMovement.isVisible()) {
         ctx.save();
         ctx.beginPath();
         ctx.lineWidth = 3;
@@ -1269,7 +1274,7 @@ function drawTouchControls(ctx) {
         ctx.stroke();
         ctx.restore();
     }
-    if (attackButton != null && attackButton.isVisible()) {
+    if (!domHud && attackButton != null && attackButton.isVisible()) {
         ctx.save();
         ctx.beginPath();
         ctx.lineWidth = 3;

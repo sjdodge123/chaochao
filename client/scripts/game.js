@@ -68,6 +68,7 @@ var server = null,
     // camera leaves the focused states so no stale lead carries over.
     worldLeadSmooth = {},
     WORLD_ZOOM_MAX = 2.05,     // tightest cruise focus while racing (close enough to read the skin, far enough to navigate)
+    WORLD_ZOOM_MOBILE_MULT = 1.2, // touch devices zoom 20% closer (smaller screens read better tight); 1 on desktop
     WORLD_ZOOM_ENGAGE = 460,   // world-units: nearest goal is FULLY framed within this
     WORLD_ZOOM_RELEASE = 620,  // world-units: goal framing fades smoothly to nothing by here (continuous blend, no pop)
     WORLD_ZOOM_PAD = 120,      // world-units padding around framed points

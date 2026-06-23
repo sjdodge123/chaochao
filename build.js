@@ -32,6 +32,7 @@ const bundles = {
         'client/scripts/audience.js',
         'client/scripts/recap.js',
         'client/scripts/joystick.js',
+        'client/scripts/hudOverlay.js',
         'client/scripts/utils.js',
         'client/scripts/perfharness.js'
     ],

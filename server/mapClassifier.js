@@ -17,6 +17,7 @@
 // classifies. See docs/spikes/map-playlists-and-ratings.md for the rationale.
 
 var cellGraph = require('./cellGraph.js');
+var segmentsCross = require('./geometry.js').segmentsCross;
 var mapDifficulty = require('./mapDifficulty.json');
 
 // Resolve a tileMap name -> numeric id from the live config (don't hardcode).
@@ -88,8 +89,11 @@ function racingLineContext(map, config, pathOpts) {
         if (s != null) { idToCell[s.voronoiId] = map.cells[ci]; }
     }
     var noZip = !!pathOpts.noZip;
+    // Author barriers are respected automatically via the nav graph (findPathToNearestGoal),
+    // so trap-line geometry already weaves around walls — no extra options needed.
+    var opts = pathOpts;
     function driveTime(x, y) {
-        var r = cellGraph.findPathToNearestGoal(map, { x: x, y: y }, pathOpts);
+        var r = cellGraph.findPathToNearestGoal(map, { x: x, y: y }, opts);
         if (r == null) { return Infinity; }
         var t = noZip ? cellGraph.estimatePathTime(map, r.path, true, true)
                       : cellGraph.estimatePathTime(map, r.path, true);
@@ -100,7 +104,7 @@ function racingLineContext(map, config, pathOpts) {
     for (var e = 0; e < edges.length; e++) {
         var samples = cellGraph.edgeSampleOrigins(edges[e]);
         for (var s2 = 0; s2 < samples.length; s2++) {
-            var rr = cellGraph.findPathToNearestGoal(map, samples[s2], pathOpts);
+            var rr = cellGraph.findPathToNearestGoal(map, samples[s2], opts);
             if (rr == null) { continue; }
             var pts = [];
             for (var pi = 0; pi < rr.path.length; pi++) {
@@ -232,42 +236,13 @@ function goalCentrality(map, edges, config) {
     return (c < 0) ? 0 : (c > 1 ? 1 : c);
 }
 
-// Midpoint of the boundary cellA shares with the cell whose voronoiId is bId, or
-// null when no shared edge with usable vertices exists.
-function sharedEdgeMidpoint(cellA, bId) {
-    if (cellA == null || !Array.isArray(cellA.halfedges)) { return null; }
-    for (var h = 0; h < cellA.halfedges.length; h++) {
-        var edge = cellA.halfedges[h] && cellA.halfedges[h].edge;
-        if (!edge || !edge.va || !edge.vb) { continue; }
-        if ((edge.lSite && edge.lSite.voronoiId === bId) || (edge.rSite && edge.rSite.voronoiId === bId)) {
-            return { x: Math.round((edge.va.x + edge.vb.x) / 2), y: Math.round((edge.va.y + edge.vb.y) / 2) };
-        }
-    }
-    return null;
-}
 
-// Resolve a route's voronoiIds back to drawable points (rounded — these go over
-// the wire to the editor overlay, so keep the payload compact). The polyline runs
-// centre -> shared-border midpoint -> next centre rather than centre -> centre:
-// Voronoi cells are convex, so each leg provably stays inside its own (safe) cell,
-// where a straight centre-to-centre segment can visually clip across a lava
-// neighbour's polygon even though the route never enters it.
+// Drawable points for a route — the SHARED cellGraph.pathWaypoints the AI also steers,
+// so the estimated racing line and the bots follow the same doorway-to-doorway line
+// (never through a cell centre that sits across a wall the route skirts). The overlay
+// then straightens this with smoothRoute (lava/hazard clearance) for the drawn line.
 function pathPoints(map, path) {
-    var cells = map.cells, idToIndex = {};
-    for (var i = 0; i < cells.length; i++) {
-        if (cells[i] && cells[i].site) { idToIndex[cells[i].site.voronoiId] = i; }
-    }
-    var pts = [];
-    for (var p = 0; p < path.length; p++) {
-        var ci = idToIndex[path[p]];
-        if (ci == null) { continue; }
-        pts.push({ x: Math.round(cells[ci].site.x), y: Math.round(cells[ci].site.y) });
-        if (p + 1 < path.length) {
-            var mid = sharedEdgeMidpoint(cells[ci], path[p + 1]);
-            if (mid != null) { pts.push(mid); }
-        }
-    }
-    return pts;
+    return cellGraph.pathWaypoints(map, path);
 }
 
 // Cells a real racer must route around: every cell holding (or, for a moving
@@ -432,8 +407,23 @@ function smoothRoute(map, config, pts, penaltyLookup, hazardPoints) {
         }
         return true;
     }
+    // A straightened leg must not cut through a solid author barrier — the
+    // underlying Dijkstra route already goes around (barrier edges are hard-blocked),
+    // but collapsing cell-centre dog-legs into one straight line could re-cross a
+    // wall the route had skirted. Reuse the engine's segment-crossing test.
+    var barriers = Array.isArray(map.barriers) ? map.barriers : null;
+    function segClearsBarriers(a, b) {
+        if (!barriers || barriers.length === 0) { return true; }
+        for (var i = 0; i < barriers.length; i++) {
+            var bar = barriers[i];
+            if (bar == null) { continue; }
+            if (segmentsCross(a.x, a.y, b.x, b.y, bar.x1, bar.y1, bar.x2, bar.y2)) { return false; }
+        }
+        return true;
+    }
     function segmentSafe(a, b) {
         if (!segClearsHazards(a, b)) { return false; }
+        if (!segClearsBarriers(a, b)) { return false; }
         var dx = b.x - a.x, dy = b.y - a.y;
         var len = Math.sqrt(dx * dx + dy * dy) || 1;
         // Perpendicular half-tube: the leg must keep a kart's half-width (plus a
@@ -479,6 +469,10 @@ function edgeParTimes(map, config) {
     var edges = startEdgesOf(map);
     var lavaId = tileId(config, 'lava');
     var avoid = hazardAvoidance(map, config);
+    // Author barriers are respected automatically: findPathToNearestGoal routes on the
+    // nav graph, which drops wall-cut doorways and splits bisected cells — so these
+    // overlay routes weave through the gaps instead of blasting through walls, matching
+    // the validator. (Hazard penalties still need to be passed explicitly.)
     var routeOpts = avoid.penalty ? { penaltySet: avoid.penalty, penaltyMult: HAZARD_PATH_PENALTY } : undefined;
     var nDraw = bal(config, 'fairnessRoutesPerEdge', 4);
     var result = [];
@@ -712,11 +706,17 @@ function penaltyLookupFrom(avoid) {
 // Turn a routed sample ({ path:[voronoiId...], origin:{x,y} }) into the drawable,
 // straightened racing line: gate-side origin first, then the smoothed line. The ONE
 // place this geometry is built, so the editor overlay (balanceDebug) and the CI
-// "competing lines" artifact (competingLines) stay byte-identical.
+// "competing lines" artifact (competingLines) stay byte-identical. pathPoints already
+// threads barriers (shared cellGraph.pathWaypoints); smoothRoute straightens within the
+// lava/hazard clearance, and a final cellGraph.detourBarriers skirts the one leg
+// smoothRoute can't validate — the gate origin -> first doorway — past any wall it clips.
 function routePolyline(map, config, route, penaltyLookup, avoid) {
     var pts = pathPoints(map, route.path);
     pts.unshift({ x: Math.round(route.origin.x), y: Math.round(route.origin.y) });
-    return smoothRoute(map, config, pts, penaltyLookup, avoid.points);
+    var smoothed = smoothRoute(map, config, pts, penaltyLookup, avoid.points);
+    // Keep the smoothed/origin-led line off the wall bars too (smoothRoute can straighten
+    // a leg back toward a wall), then skirt any residual crossing.
+    return cellGraph.detourBarriers(map, cellGraph.pushOffBarriers(map, smoothed));
 }
 
 // Overlay geometry for the editor's "looks unbalanced" nudge: the representative

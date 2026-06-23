@@ -91,6 +91,26 @@ for (const m of result.maps) {
     }
     if (facts.length) { lines.push(''); lines.push('_' + facts.join(' · ') + '_'); }
 
+    // Contents inventory — an honest, scannable list of everything the map places, so a
+    // reviewer doesn't have to decode the JSON or hope the render shows every placeable.
+    if (m.inventory) {
+        const inv = m.inventory;
+        const tally = arr => (arr && arr.length) ? arr.map(x => x.count + '× ' + x.name).join(', ') : 'none';
+        lines.push('');
+        lines.push('**Contents:**');
+        if (inv.tiles && inv.tiles.length) {
+            lines.push('- 🧩 Tiles: ' + inv.tiles.map(t => t.name + ' ' + t.pct + '%').join(' · '));
+        }
+        lines.push('- ⚠️ Hazards: ' + tally(inv.hazards));
+        lines.push('- ✨ Boons: ' + tally(inv.boons));
+        lines.push('- 🧱 Barriers: ' + (inv.barriers ? inv.barriers + ' wall' + (inv.barriers === 1 ? '' : 's') + ' (~' + inv.barrierLen + 'px)' : 'none'));
+        if (inv.doors || inv.keys) {
+            lines.push('- 🚪 Locked doors: ' + inv.doors + ' · keys: ' + inv.keys);
+        }
+        const starts = (inv.startEdges && inv.startEdges.length) ? inv.startEdges.join(', ') : '(default left)';
+        lines.push('- 🚩 Starts: ' + starts + ' · goal cells: ' + inv.goalCells);
+    }
+
     // Difficulty-ramp measurement: estimated tier + the ready-to-paste entry for
     // server/mapDifficulty.json. Submission PRs may only touch client/maps/**, so
     // the data update is a (trivial) follow-up for a maintainer — until then the

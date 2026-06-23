@@ -388,13 +388,25 @@ class VortexWell extends Hazard {
 	applyForce(object) {
 		if (!object.isPlayer || object.alive === false || object.reachedGoal) { return false; }
 		if ((object.isProtected && object.isProtected()) || (object.hasStarPower && object.hasStarPower())) { return false; }
+		// A kart SWIMMING on water can't fight the pull: water's high drag throttles every swim
+		// stroke and stamina caps how often you can punch, so the well over water would be an
+		// inescapable roach motel — the opposite of the escapable design (force is tuned below
+		// DRIVE thrust, but swim thrust is far weaker). Water already impedes a kart plenty; let
+		// swimmers pass through the well instead of getting trapped in it.
+		if (object.onWater) { return false; }
 		var ox = object.newX != null ? object.newX : object.x;
 		var oy = object.newY != null ? object.newY : object.y;
 		var dx = this.x - ox, dy = this.y - oy;
 		var dist = Math.sqrt(dx * dx + dy * dy);
-		if (dist > this.radius || dist < 0.0001) { return false; } // past the rim / dead centre: no pull
-		var r = dist / this.radius;
-		var pull = this.force * 4 * r * (1 - r);  // calm eye: 0 at centre & rim, peak at r=0.5
+		// Past the rim OR inside the calm EYE (coreRadius — the DRAWN calm centre): no pull. The
+		// eye is a true dead spot you can rest in and build speed before punching out, matching
+		// what the well draws and the "build speed in the quiet centre" design. The pull then
+		// ramps over the OUTER annulus [coreRadius, radius]: 0 at the eye edge & the rim, peak
+		// `force` mid-annulus. (Previously the parabola ran from r=0, so the drawn eye still
+		// carried ~0.4·force of pull — calm to look at, not calm to sit in.)
+		if (dist > this.radius || dist <= this.coreRadius) { return false; }
+		var r = (dist - this.coreRadius) / (this.radius - this.coreRadius);
+		var pull = this.force * 4 * r * (1 - r);  // 0 at the eye edge & rim, peak `force` mid-annulus
 		object.velX += (dx / dist) * pull;
 		object.velY += (dy / dist) * pull;
 		return true;

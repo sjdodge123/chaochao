@@ -772,6 +772,13 @@ function computeFocusedView(dt, gatedNow) {
     if (ng && !gatedNow) {
         effMax += WORLD_ZOOM_GOAL_BOOST * smoothstep((WORLD_ZOOM_ENGAGE - nd) / (WORLD_ZOOM_ENGAGE - WORLD_ZOOM_GOAL_FULL));
     }
+    // Touch devices frame ~20% closer: phone/tablet screens are physically small,
+    // so the same cruise zoom reads as a tiny kart. Scaling effMax shrinks the
+    // half-box (below) AND raises the cap together, so the tighter framing is
+    // consistent across cruise, the goal punch-in and the look-ahead box.
+    if (typeof isTouchScreen !== "undefined" && isTouchScreen === true) {
+        effMax *= WORLD_ZOOM_MOBILE_MULT;
+    }
     var halfX = LOGICAL_WIDTH / (2 * effMax);
     var halfY = LOGICAL_HEIGHT / (2 * effMax);
     // Velocity look-ahead: each player's half-box is centred ahead of them along

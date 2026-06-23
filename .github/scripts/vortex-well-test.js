@@ -136,6 +136,9 @@ try {
         check(mid > nearCentre && mid > nearRim, 'the pull peaks in the mid-ring (calm eye at the centre, calm at the rim)');
         check(nearCentre < mid * 0.6, 'the dead centre is a calm eye (much weaker pull than the ring)');
         check(mid <= VW.force + 1e-9, 'peak pull does not exceed force (stays escapable below kart thrust)');
+        // The drawn calm eye (coreRadius) is a TRUE dead zone — zero pull inside it, not just
+        // weaker — so a kart can rest and wind up there instead of being nudged off the centre.
+        check(pullMag(VW.coreRadius - 1) === 0 && pullMag(0.0001) === 0, 'inside the calm eye (< coreRadius) there is zero pull (a true dead spot)');
 
         // No pull past the rim.
         const out = { isPlayer: true, alive: true, reachedGoal: false, x: 500 + VW.radius + 30, y: 400, velX: 0, velY: 0 };
@@ -148,6 +151,10 @@ try {
         check(v.applyForce(star) === false && star.velX === 0, 'a Star Power kart is not pulled');
         const done = { isPlayer: true, alive: true, reachedGoal: true, x: 550, y: 400, velX: 0, velY: 0 };
         check(v.applyForce(done) === false && done.velX === 0, 'a finished kart is not pulled');
+        // A kart SWIMMING on water is exempt — water's high drag + stamina-gated strokes can't
+        // beat the pull, so the well would be an inescapable trap there. Let swimmers pass.
+        const swimmer = { isPlayer: true, alive: true, reachedGoal: false, x: 550, y: 400, velX: 0, velY: 0, onWater: true };
+        check(v.applyForce(swimmer) === false && swimmer.velX === 0, 'a kart swimming on water is not pulled (no water roach-motel)');
 
         // Brutal-round entity interactions:
         // - A ZOMBIE (infection round) is still an alive kart in playerList, so it is
@@ -247,6 +254,23 @@ try {
             if (Math.hypot(eBot.x - VX, eBot.y - VY) > VW.radius) { escaped = true; escTick = f; break; }
         }
         check(escaped, 'a kart flooring outward from the dead centre drives clear of the well' + (escTick >= 0 ? ' (in ' + (escTick * DT).toFixed(1) + 's)' : ' — STILL TRAPPED after 8s'));
+
+        // AI ESCAPE: a BOT held near-stationary in the pull ring arms a tactical lunge
+        // (double-tap dash) to break out, and clears the well instead of getting stuck.
+        const { room: aRoom, bot: aBot } = bootRoom('vw-ai-escape', vmap, SOAK);
+        aBot.isAI = true;
+        // Right side of the ring (between the well and the goal), at rest — its goal-steer points
+        // OUTWARD, and speed 0 (< LUNGE_VORTEX_SPEED_MAX) makes it "held", so the lunge arms.
+        aBot.x = aBot.newX = VX + VW.coreRadius + 18; aBot.y = aBot.newY = VY; aBot.velX = 0; aBot.velY = 0;
+        const lungeAtStart = aBot.lungePendingAt || 0;
+        let lunged = false, aiEscaped = false, aiTick = -1;
+        for (let f = 0; f < 240; f++) {
+            aRoom.update(DT); clock += config.serverTickSpeed; fireDueTimers();
+            if ((aBot.lungePendingAt || 0) > lungeAtStart) { lunged = true; }
+            if (!aBot.alive || aBot.reachedGoal || Math.hypot(aBot.x - VX, aBot.y - VY) > VW.radius) { aiEscaped = true; aiTick = f; break; }
+        }
+        check(aiEscaped, 'an AI bot held in the pull ring clears the well (no roach motel)' + (aiTick >= 0 ? ' (in ' + (aiTick * DT).toFixed(1) + 's)' : ' — STILL TRAPPED after 8s'));
+        check(lunged, 'the held bot armed a tactical lunge to break out of the vortex ring');
     }
 } finally {
     Date.now = realNow;
