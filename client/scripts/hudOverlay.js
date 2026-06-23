@@ -49,6 +49,10 @@
     // Attack press tracking (for tap vs hold detection across frames).
     var atkPressStart = 0;      // ms when the current press began (0 = not pressed)
     var atkWasPressed = false;
+    // Entering/leaving fullscreen fires a resize + releases held touches; for a short
+    // window after a fullscreenchange we freeze step detection + the point-step auto-skip
+    // so the toggle can't spuriously cancel/advance the active step (see start()).
+    var fsGuardUntil = 0;
 
     function enabled() {
         // URL opt-out for A/B against the old canvas controls.
@@ -145,11 +149,11 @@
         { id: "right", kind: "dir", dir: "right", glyph: "▶", title: "Move right", sub: "push the stick right" },
         { id: "punch", kind: "tap", title: "Punch", sub: "tap the button" },
         { id: "kick", kind: "hold", title: "Kick", sub: "hold the button to charge" },
-        // Corner buttons last (each opens its menu when tapped). Settings is LAST so its
-        // full-screen modal opens with nothing drawn over it as the walkthrough ends.
+        // Corner buttons last. Fullscreen is LAST: tapping it toggles fullscreen and ENDS
+        // the walkthrough, so a later fullscreen-exit has no remaining step to cancel.
+        { id: "settings", kind: "point", target: "settings", title: "Settings", sub: "tap the gear" },
         { id: "emoji", kind: "point", target: "emoji", title: "Emotes", sub: "tap the button" },
-        { id: "fullscreen", kind: "point", target: "fullscreen", title: "Fullscreen", sub: "tap the button" },
-        { id: "settings", kind: "point", target: "settings", title: "Settings", sub: "tap the gear" }
+        { id: "fullscreen", kind: "point", target: "fullscreen", title: "Fullscreen", sub: "tap the button" }
     ];
     function buildSteps() {
         return STEP_TEMPLATES.filter(function (s) {
@@ -360,7 +364,7 @@
 
     // Advance the active step when the player performs its gesture.
     function detectStep(step, jm, ab) {
-        if (advanceLock) return;
+        if (advanceLock || Date.now() < fsGuardUntil) return; // frozen briefly across a fullscreen toggle
         if (step.kind === "dir") {
             if (jm && jm.pressed) {
                 var dx = jm.stickX - jm.baseX, dy = jm.stickY - jm.baseY;
@@ -463,7 +467,12 @@
         }
         if (step.kind === "point") {
             var tr = targetRect(step.target, m);
-            if (!tr) { advanceStep(); return; } // control not on screen — skip this step
+            if (!tr) {
+                // Control not on screen — skip it, but NOT during the brief post-
+                // fullscreen-toggle window (the button is mid-relayout, not really gone).
+                if (Date.now() >= fsGuardUntil) { advanceStep(); }
+                return;
+            }
             setRing(tr.cx, tr.cy, tr.d);
             hideArrow();
             setFinger(tr.cx, tr.cy, Math.round(tr.d * 0.34));
@@ -483,6 +492,11 @@
         }
         started = true;
         window.__touchHudDom = true; // tell draw_hud.js to skip the canvas joystick/attack rings
+        // Freeze walkthrough detection briefly across a fullscreen toggle (resize + touch
+        // release) so entering/EXITING fullscreen can't cancel/skip the active step.
+        function onFsChange() { fsGuardUntil = Date.now() + 700; }
+        document.addEventListener("fullscreenchange", onFsChange, false);
+        document.addEventListener("webkitfullscreenchange", onFsChange, false);
         injectStyle();
         buildDom();
         requestAnimationFrame(frame);
