@@ -38,11 +38,17 @@ app.use(compression());
 // Outside production we ALSO allow localhost origins so the documented local
 // embed test (embed-test.html served from a different port, framing
 // localhost:3000) can load; prod stays locked to the portals only.
+// Discord Activities load the game inside an <iframe> hosted at
+// https://discord.com (and the iframe's own sandbox origin
+// <APPLICATION_ID>.discordsays.com). Both must be allowed to frame us, or the
+// Activity shows a blank/blocked frame. discordsays.com is included so a nested
+// reframe by the proxy is also permitted. Harmless for the normal web build.
 var FRAME_ANCESTORS =
     "frame-ancestors 'self' " +
     "https://crazygames.com https://*.crazygames.com " +
     "https://poki.com https://*.poki.com " +
-    "https://itch.io https://*.itch.io https://*.itch.zone" +
+    "https://itch.io https://*.itch.io https://*.itch.zone " +
+    "https://discord.com https://*.discord.com https://*.discordsays.com" +
     (process.env.NODE_ENV === 'production'
         ? ''
         : " http://localhost:* http://127.0.0.1:*");
@@ -55,6 +61,11 @@ app.use(function (req, res, next) {
 // browser-safe Supabase config injected into served pages. No-ops when the
 // Supabase env vars are absent, so the server boots and everyone is a guest.
 const auth = require('./server/auth.js');
+
+// Discord Activity in-frame auth bridge (Phase 4). Owns the DISCORD_CLIENT_SECRET +
+// the OAuth code exchange; backs the POST /api/token route below. Disabled (route
+// 404s) when the secret is absent, so the normal web build is unaffected.
+const discordAuth = require('./server/discordAuth.js');
 
 // Browser-safe Supabase config (URL + anon key only) injected via the
 // <!-- SUPABASE_CONFIG --> placeholder. null when auth is disabled, in which
@@ -96,11 +107,81 @@ function adsConfigTag() {
     return '<script>window.__ADS__ = ' + json + ';<\/script>';
 }
 
+// Browser-safe Discord Activity config (PUBLIC client id only) injected via the
+// <!-- DISCORD_CONFIG --> placeholder. Approach (b): play.html IS the Activity entry,
+// so the in-frame SDK bootstrap (discordPresence.js) reads window.__DISCORD__ from the
+// game frame. The client SECRET is never referenced here — token exchange is
+// server-side (POST /api/token). Stripped to '' when DISCORD_CLIENT_ID is unset. (No
+// mappingTarget: we don't call patchUrlMappings — same-origin requests ride the root
+// URL Mapping.)
+function discordConfigTag() {
+    if (!process.env.DISCORD_CLIENT_ID) {
+        return '';
+    }
+    var cfg = { clientId: process.env.DISCORD_CLIENT_ID };
+    // Escape '<' so a value cannot terminate the inline <script> (defense-in-depth;
+    // the client id is a numeric snowflake, so it can't carry the U+2028/U+2029
+    // separators the other tags guard against).
+    var json = JSON.stringify(cfg).replace(/</g, '\\u003c');
+    return '<script>window.__DISCORD__ = ' + json + ';<\/script>';
+}
+
+// Discord's iframe sandbox forces every request through https://<id>.discordsays.com
+// and CSP-blocks any unmapped external origin. URL Mappings / patchUrlMappings can
+// reroute fetch/WebSocket/XHR, but NOT resources the HTML parser loads via
+// <script src> / <link href>. play.html pulls jQuery (a HARD boot dep — game.js wraps
+// its entire boot in `$(function(){…})`) and Bootstrap CSS from external CDNs, so in
+// the Activity the page would throw before a match could ever connect. The Activity
+// serves play.html in-frame (root frame_id entry, or the legacy `?discord=1`); for
+// those requests only we swap those two CDN tags for local same-origin copies (proxied
+// transparently through `/.proxy/`) and drop the gtag loader (analytics is irrelevant
+// in-frame and off-policy for Discord). supabase-js is left as-is — the in-frame SDK
+// bootstrap mints its own handshake token (POST /api/token), so no supabase-js client is
+// needed. The normal web build is served byte-identical (this only fires for the Activity
+// requests). Keep these strings in lockstep with client/play.html.
+function discordEmbedRewrite(html) {
+    return html
+        // Phase 5 presence: inject the SDK bundle (auth + instance->room routing +
+        // participant presence) INTO the game frame — approach (b) inits the SDK once
+        // here, no discord.html redirect. Empty comment on the web build. Placed before
+        // the game bundle so window.discordPresence exists in time; the cache-bust replace
+        // below stamps its ?v= too (it matches the scripts/ regex).
+        .replace(
+            '<!-- DISCORD_PRESENCE -->',
+            '<script src="scripts/dist/discord-presence.bundle.min.js"></script>'
+        )
+        // jQuery 3.5.1 (boot-critical) -> vendored same-origin copy.
+        .replace(
+            'https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js',
+            'vendor/jquery-3.5.1.min.js'
+        )
+        // Bootstrap 4.1.3 CSS -> vendored copy; drop SRI/crossorigin (same-origin now).
+        .replace(
+            /<link rel="stylesheet" href="https:\/\/stackpath\.bootstrapcdn\.com\/bootstrap\/4\.1\.3\/css\/bootstrap\.min\.css"[^>]*>/,
+            '<link rel="stylesheet" href="vendor/bootstrap-4.1.3.min.css">'
+        )
+        // Drop the external gtag loader; the inline `function gtag(){…}` fallback stays
+        // so trackEvent() calls remain harmless no-ops.
+        .replace(
+            /<script async src="https:\/\/www\.googletagmanager\.com\/gtag\/js\?id=[^"]*"><\/script>/,
+            '<!-- gtag loader disabled in Discord Activity -->'
+        )
+        // Discord's sandbox caches the in-frame JS aggressively, so stamp every
+        // same-origin script src with the server-boot id. A redeploy/restart changes
+        // the stamp -> the proxy/browser refetches; within a run the URL is stable.
+        // Only fires on play.html?discord=1, so the normal web build is untouched.
+        .replace(/(src="(?:scripts|vendor)\/[^"?]+\.js)"/g, '$1?v=' + BOOT_STAMP + '"');
+}
+
 // Inject the running server's version and the latest release headline into
 // index.html so the landing page always reflects what's actually deployed.
 // Runs in both dev and prod; read once at startup so we don't hit disk on
 // every request.
 const APP_VERSION = require('./package.json').version;
+
+// Server-boot id, used to cache-bust the in-frame Activity scripts (Discord caches
+// JS hard and the filenames are stable). Changes every restart/deploy.
+const BOOT_STAMP = Date.now().toString(36);
 
 // The banner must never take more vertical room than three of the landing
 // menu buttons, so the headline is capped to this many characters (CSS also
@@ -240,6 +321,18 @@ const HTML_PAGES = {
 };
 app.use(function (req, res, next) {
     var url = req.path === '/' ? '/index.html' : req.path;
+    // Discord loads the Activity at the mapped ROOT ('/'), which would serve the marketing
+    // landing page. The Discord client always appends launch params to the iframe URL
+    // (frame_id is REQUIRED by the Embedded App SDK), so when we see one at the root we
+    // serve the GAME directly (approach b: play.html IS the Activity entry — no discord.html
+    // redirect, because that navigation broke the SDK handshake; the game frame keeps
+    // Discord's launch params on the URL and inits the SDK once, in-frame). Plain web visits
+    // to '/' (no frame_id) still get the landing page.
+    var activityEntry = false;
+    if (url === '/index.html' && req.query && req.query.frame_id) {
+        url = '/play.html';
+        activityEntry = true;
+    }
     if (!HTML_PAGES[url]) return next();
     fs.readFile(path.join(htmlPath, url), 'utf8', function (err, html) {
         if (err) return next();
@@ -247,10 +340,24 @@ app.use(function (req, res, next) {
             .replace(/<!-- VERSION -->/g, 'v' + APP_VERSION)
             .replace(/<!-- NEWS_BANNER -->/g, newsBannerHtml())
             .replace(/<!-- SUPABASE_CONFIG -->/g, supabaseConfigTag())
-            .replace(/<!-- ADS_CONFIG -->/g, adsConfigTag());
+            .replace(/<!-- ADS_CONFIG -->/g, adsConfigTag())
+            .replace(/<!-- DISCORD_CONFIG -->/g, discordConfigTag());
         if (process.env.NODE_ENV === 'production' && (url in bundleMap)) {
             var bundleTag = '<script src="' + bundleMap[url] + '"></script>';
             modified = modified.replace(/<!-- BUILD: bundle-start -->[\s\S]*?<!-- BUILD: bundle-end -->/g, bundleTag);
+        }
+        // Discord Activity: the game boots inside the sandbox, so swap external CDN tags for
+        // vendored same-origin copies + inject the in-frame SDK bundle. Fires for the root
+        // Activity entry (frame_id, approach b) and the legacy `play.html?discord=1`.
+        if (url === '/play.html' && (activityEntry || (req.query && req.query.discord))) {
+            modified = discordEmbedRewrite(modified);
+        }
+        // DEV-ONLY: force-show the touch-controls walkthrough on every play.html load so
+        // it can be iterated without clearing the browser's once-only localStorage flag.
+        // Gated on NON-production, so prod NEVER gets it (the walkthrough stays once-only
+        // there). Mirrors the perfHarness/env-gated dev seams; inert on the live build.
+        if (url === '/play.html' && process.env.NODE_ENV !== 'production') {
+            modified = modified.replace('</head>', '<script>window.__DEV_FORCE_WALKTHROUGH__=true;<\/script></head>');
         }
         res.set('Content-Type', 'text/html');
         // HTML carries the injected version/news/bundle tags and must reflect a
@@ -404,6 +511,70 @@ app.get('/ops/status', function (req, res) {
         maintenance: maintenance.getState()
     });
 });
+
+// Discord Activity in-frame auth (Phase 4). The Activity POSTs the one-time OAuth
+// `code` from sdk.commands.authorize() here; discordAuth exchanges it server-side
+// (the client secret never leaves the env), re-validates the Discord identity via
+// the Discord API, bridges it to a real Supabase user, and returns the token the
+// socket handshake uses. Mounted at BOTH /api/token and /.proxy/api/token: Discord's
+// sandbox forwards requests with a /.proxy prefix and may or may not strip it before
+// it reaches our origin, so accept either. 404s when Discord auth isn't configured,
+// so the route can't be probed on the normal web build. Rate-limited per IP (the
+// exchange hits Discord + Supabase) using the same trusted-proxy IP resolution as
+// /feedback. Body is tiny (just { code }).
+var discordTokenRateLimited = makeRateLimiter(60 * 1000, 30);
+// Reject a token exchange whose browser Origin/Referer is a site OTHER than Discord's.
+// The legitimate caller is the in-frame fetch from discord(says).com; a malicious page
+// trying to replay a victim's one-time code would carry its own origin and be blocked.
+// LENIENT by design: the Discord proxy may strip Origin/Referer, so an ABSENT header is
+// allowed (we can't fingerprint a server-side replay anyway — the single-use, short-lived
+// code + rate limit are the backstop there). Only a PRESENT, non-Discord origin is refused.
+function discordOriginOk(req) {
+    var src = req.headers.origin || req.headers.referer || '';
+    if (!src) { return true; } // no header (proxy-stripped) — allow
+    try {
+        var host = new URL(src).hostname;
+        return host === 'discord.com' ||
+            host.slice(-12) === '.discord.com' ||
+            host.slice(-16) === '.discordsays.com';
+    } catch (e) {
+        return false; // a present-but-unparseable origin is suspicious — refuse
+    }
+}
+// Gate (config + origin + per-IP RATE LIMIT) as the FIRST middleware in the route
+// chain — runs before express.json, so a 404/403/rate-limited request never even has
+// its body parsed, and the rate limiter is visible at the route level.
+// Strip control chars (incl. CR/LF) + cap length on any user-supplied value before it
+// reaches a log line, so request data can't forge/split log entries.
+function logSafe(v) {
+    return String(v == null ? "" : v).replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 200);
+}
+function discordTokenGate(req, res, next) {
+    if (!discordAuth.enabled) { return res.status(404).end(); }
+    if (!discordOriginOk(req)) {
+        console.log('[discord] /api/token refused: non-Discord origin ' + logSafe(req.headers.origin || req.headers.referer));
+        return res.status(403).json({ error: 'bad_origin' });
+    }
+    var ip = botGuard.resolveClientIp(req.headers['x-forwarded-for'], req.ip) || 'unknown';
+    if (discordTokenRateLimited(ip)) {
+        return res.status(429).json({ error: 'rate_limited' });
+    }
+    next();
+}
+function handleDiscordToken(req, res) {
+    var code = req.body && req.body.code;
+    console.log('[discord] /api/token hit (path ' + logSafe(req.path) + ', code ' + (code ? 'present' : 'MISSING') + ')');
+    discordAuth.authorize(code).then(function (out) {
+        console.log('[discord] exchange OK -> name=' + logSafe(out.profile && out.profile.name) +
+            ', handshake token ' + (out.token ? 'minted' : 'NULL (player will be guest)'));
+        res.json(out);
+    }).catch(function (e) {
+        console.log('[discord] token exchange failed:', logSafe(e && e.message));
+        res.status(400).json({ error: 'exchange_failed' });
+    });
+}
+app.post('/api/token', discordTokenGate, express.json({ limit: '8kb' }), handleDiscordToken);
+app.post('/.proxy/api/token', discordTokenGate, express.json({ limit: '8kb' }), handleDiscordToken);
 
 // Dev-only render-perf harness sink (client/scripts/perfharness.js). Registered ONLY
 // when PERF_HARNESS is set (c.perfHarness) so prod never exposes the route. The page

@@ -1131,6 +1131,10 @@ function lobbyBannerRowY(row) {
     if (typeof serverMaintenance !== "undefined" && serverMaintenance != null) {
         base = 102;
     }
+    // Drop the top-centre lobby column (status card + intro banners) below a Discord
+    // mobile frame's notch / Discord header so it isn't tucked under the chrome. 0 on
+    // web/desktop. Keep it in lockstep with the session readout (drawGameInfo).
+    if (typeof hudTopInset === "function") { base += hudTopInset(); }
     return base + row * LOBBY_BANNER_ROW_H;
 }
 

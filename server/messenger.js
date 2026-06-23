@@ -518,9 +518,41 @@ function checkForMail(client) {
 		client.emit("previewRoomCreated", { gameID: sig });
 	});
 
-	client.on('enterGame', function (id, coop) {
+	// Discord diagnostics (debug-only): the Activity client ships its in-frame presence
+	// state + status log here so it can be read from the server console when in-frame
+	// devtools isn't reachable. Logged ONLY when started with DISCORD_DEBUG=1 (a no-op in
+	// prod). Untrusted input — cap size, never act on it, just log one truncated line.
+	client.on('discordDiag', function (payload) {
+		if (process.env.DISCORD_DEBUG !== '1') {
+			return;
+		}
+		try {
+			var s = JSON.stringify(payload);
+			if (typeof s === 'string') {
+				if (s.length > 4000) { s = s.slice(0, 4000) + '…'; }
+				console.log('[discordDiag] ' + client.id + ' ' + s);
+			}
+		} catch (e) { console.log('[discordDiag] (unserializable)'); }
+	});
+
+	client.on('enterGame', function (id, coop, opts) {
 		debug.log("enterGame: client=", client.id, " requestedId=", id, " coop=", coop);
 		var roomSig = '';
+		// Discord Activity instance routing (Phase 5): a Discord client passes its
+		// `instanceId` (the SDK launch-param shared by everyone who opened the Activity
+		// in the same voice channel). We key a room to it so the whole voice group lands
+		// in one match, regardless of the matchmaking `id`. Untrusted client-supplied
+		// string — used ONLY as a grouping key, never a trust boundary — so cap it.
+		// botGuard still wins (a flagged bot can't instance-route past the tarpit). When
+		// absent (every web client), the normal matchmaking path below is byte-for-byte
+		// unchanged.
+		var instanceId = (opts && typeof opts.discordInstanceId === "string") ? opts.discordInstanceId : null;
+		if (instanceId != null && instanceId.length > 0 && instanceId.length <= 128) {
+			// keep only the safe key chars Discord uses; defensive against odd payloads
+			instanceId = instanceId.replace(/[^A-Za-z0-9_.:-]/g, "");
+		} else {
+			instanceId = null;
+		}
 		// botGuard: divert a flagged client (datacenter connection in tarpit mode, or one
 		// that tripped the invisible honeypot) into the dead tarpit room — checked BEFORE
 		// matchmaking so findARoom() never spins up and then abandons an empty real room on a
@@ -528,6 +560,9 @@ function checkForMail(client) {
 		// bot can't pick its own way into a live room.
 		if (botGuard.shouldTarpit(client.id)) {
 			roomSig = hostess.getTarpitRoom();
+		} else if (instanceId != null) {
+			// Discord voice group -> shared room (takes precedence over matchmaking).
+			roomSig = hostess.findOrCreateRoomForInstance(instanceId);
 		} else if (id == -1) {
 			roomSig = hostess.findARoom(client.id);
 		} else if (id == -2) {
@@ -791,6 +826,38 @@ function checkForMail(client) {
 		player.name = (name && name.length) ? name : null;
 		console.log('[skin] avatar skin equipped: socket', client.id, 'user', client.userId, 'name', player.name);
 		messageRoomBySig(room.sig, "playerAvatarChanged", { id: client.id, avatarUrl: player.avatarUrl, name: player.name });
+	});
+
+	// Discord voice (Phase 5b): a Discord-Activity client reports its own Discord user
+	// snowflake so every client can map an SDK SPEAKING event (keyed by Discord user_id)
+	// to this player's kart and pulse a speaking ring. COSMETIC-ONLY and client-supplied
+	// — never a trust boundary (worst-case spoof just lights the wrong kart's ring, no
+	// gameplay effect), which is exactly the trust model Phase 5 set for presence data.
+	// Allowed in any state (voice matters mid-race); stamped on the player so it ships in
+	// the spawn/append packet to late joiners (compressor newPlayerPacket[18]) AND
+	// broadcast live here for ids that resolve after spawn (the usual case — the Discord
+	// authenticate() that yields the snowflake settles after enterGame).
+	client.on('setVoiceId', function (payload) {
+		var room = hostess.getRoomBySig(roomMailList[client.id]);
+		if (room == undefined) {
+			return;
+		}
+		var player = room.playerList[client.id];
+		if (player == null) {
+			return;
+		}
+		var uid = payload && payload.discordUserId;
+		// Discord snowflakes are numeric strings (<= 20 digits). Bound + validate; "" / null clears.
+		if (uid === "" || uid == null) {
+			player.discordUserId = null;
+			messageRoomBySig(room.sig, "playerVoiceId", { id: client.id, discordUserId: null });
+			return;
+		}
+		if (typeof uid !== "string" || !/^[0-9]{1,20}$/.test(uid)) {
+			return;
+		}
+		player.discordUserId = uid;
+		messageRoomBySig(room.sig, "playerVoiceId", { id: client.id, discordUserId: uid });
 	});
 
 	// Equip one of the three independent cosmetic slots (cart / pattern / trail). Each

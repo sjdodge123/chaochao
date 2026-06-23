@@ -86,7 +86,7 @@
                 <canvas id="overlayCanvas" width="1366" height="768"></canvas>
             </div>
             <div class="emojiMenu" id="emojiMenu">
-                <a onclick="closeEmojiWindow('cancel')" href="#" aria-label="Close emoji menu">
+                <a data-emoji-close href="#" aria-label="Close emoji menu">
                 <i class="fas fa-window-close"></i>
                 </a>
             </div>
@@ -108,6 +108,19 @@
              from ADS_PROVIDER / ADS_PUBLISHER_ID env vars, stripped to provider
              'none' (no-op) locally. Must precede the bundle so ads.js sees it. -->
         <!-- ADS_CONFIG -->
+        <!-- Browser-safe Discord config (PUBLIC client id only); injected server-side from
+             DISCORD_CLIENT_ID, stripped when unset. Approach (b): play.html is the Activity
+             entry, so the in-frame SDK bootstrap reads window.__DISCORD__ here. The client
+             secret is NEVER here (token exchange is server-side, POST /api/token). -->
+        <!-- DISCORD_CONFIG -->
+        <!-- Discord Activity presence (Phase 5): a separate esbuild bundle that
+             re-inits the Embedded App SDK in this game frame (the discord.html ->
+             play.html redirect drops the original instance) for instance->room
+             routing + participant presence. Injected server-side ONLY for
+             play.html?discord=1 (index.js discordEmbedRewrite); empty comment on the
+             web build. Must precede the game bundle so window.discordPresence exists
+             before clientConnect/enterGame. -->
+        <!-- DISCORD_PRESENCE -->
         <!-- BUILD: bundle-start -->
         <script src="scripts/rhill-voronoi-core.js"></script>
         <script src="scripts/barrierArt.js"></script>
@@ -116,6 +129,7 @@
         <script src="scripts/metrics.js"></script>
         <script src="scripts/ads.js"></script>
         <script src="scripts/client.js"></script>
+        <script src="scripts/discordVoice.js"></script>
         <script src="scripts/connectionHud.js"></script>
         <script src="scripts/audio.js"></script>
         <script src="scripts/input.js"></script>

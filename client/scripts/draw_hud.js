@@ -1114,6 +1114,16 @@ function hudChromeAlpha() {
 // reads over any terrain, with small dot separators. GAME + PLAYERS always
 // show (friends read the room id off the host's screen); ROUND joins once a
 // race exists. The whole row fades to a watermark while racing (hudChromeAlpha).
+// Extra top padding (LOGICAL units) for top-anchored HUD (session readout, lobby
+// status card / banners) so it clears a Discord-mobile frame's notch + Discord header
+// (safe-top). 0 on web/desktop — there the canvas is letterboxed, so the inset lives in
+// the bars, not over the HUD. Gated to the Activity (matches the touch-HUD insets).
+function hudTopInset() {
+    if (typeof isDiscordActivity !== "function" || !isDiscordActivity()) { return 0; }
+    if (typeof cssToLogical !== "function" || typeof safeInsetCss !== "function") { return 0; }
+    return cssToLogical(safeInsetCss("top"));
+}
+
 function drawGameInfo() {
     var segs = [
         { label: "GAME", value: (gameID != null && gameID !== "") ? ("" + gameID) : "—" },
@@ -1145,7 +1155,7 @@ function drawGameInfo() {
     }
     var w = total + (segs.length - 1) * sepGap * 2;
     var cx = (LOGICAL_WIDTH - w) / 2;
-    var cy = 21;
+    var cy = 21 + hudTopInset();
 
     gameContext.textBaseline = "middle";
     gameContext.textAlign = "left";

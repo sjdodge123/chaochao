@@ -150,6 +150,16 @@ function detectPerfTier() {
     var named = namedDeviceTier(ua);
     if (named) { return named; }
 
+    // Discord mobile Activity: the embedded webview can report an unreliable
+    // pointer/touch signal, so the touch branch below might not catch a phone
+    // frame and would leave it on BALANCED — too high for phone-class GPUs under
+    // heavy cosmetic load (see ipad-device-render-perf-findings). Anything this
+    // physically small in the Activity is a phone; pin LOW. Gated to the Activity
+    // context so the web/portal builds are byte-identical.
+    if (minDim <= 480 && typeof isDiscordActivity === "function" && isDiscordActivity()) {
+        return "low";
+    }
+
     // Coarse-pointer (touch) screens: bucket by physical size. LOW is reserved
     // for phone-sized touch screens — a mouse/desktop never auto-drops to LOW,
     // so the desktop audience keeps the full show (CHANGELOG promise).

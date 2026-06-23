@@ -14,9 +14,11 @@ To re-render a past week's digest with the current formatting, run the `Release 
 
 ## Unreleased
 
+- **Guided touch walkthrough on phones.** First-timers now get a one-time, step-by-step walkthrough through every touch control — move in each direction, punch, hold to kick, then the settings, emoji, and fullscreen buttons — one step at a time, with a Skip option.
+
 ### Controls & Couch Co-op
 
-- **Touch controls got a glow-up.** The on-screen joystick and punch button are redrawn as chunky, tactile pads — a filled thumb-stick with direction arrows and a glossy punch button — so it reads at a glance where to move and attack. First-timers get a one-time "Drag to move / Tap to punch" hint that clears the moment you start playing.
+- **Touch controls got a glow-up.** The on-screen joystick and punch button are redrawn as chunky, tactile pads — a filled thumb-stick with direction arrows and a glossy punch button — so it reads at a glance where to move and attack.
 - **Phone camera sits closer.** On touch devices the race camera zooms in a touch tighter so karts read clearly on smaller screens.
 
 ### Map editor
@@ -39,6 +41,7 @@ To re-render a past week's digest with the current formatting, run the `Release 
 
 ### Quality of Life
 
+- **Gentler idle handling inside Discord Activities.** In a Discord voice-channel Activity you're no longer kicked for a short idle — you sit out the current round and drop back in the moment you move. Only after a long stretch away (about 15 min in the lobby, 20 in a match) does it pause you with a one-tap "rejoin" screen, so an abandoned window stops tying up a game while your voice chat stays connected the whole time.
 - **Connection indicator.** A small ping/latency badge now sits in the bottom-left corner so you can see your connection at a glance — green when it's healthy, amber/red as it climbs. If your connection ever drops onto the slow fallback mode (the cause of "only I was lagging" hitches), it turns into a red "Slow link — tap to fix" chip that reconnects you on the better path; out of a race it also tries to recover on its own.
 
 ### Bug Fixes

@@ -14,6 +14,149 @@ var config,
 	// so the game-over screen celebrates Crimson/Jade. null in FFA matches.
 	gameOverTeam = null;
 
+// In a Discord Activity the game IS the Activity entry (approach b: served in-frame at
+// the mapped root with Discord's launch params, incl. frame_id), and the marketing
+// landing page (index.html) is a DEAD END there — its links don't carry those params,
+// so a kick/leave that navigates to index.html strands the player. Detect the Activity by
+// Discord's frame_id launch param (or the legacy ?discord=1) and send menu-exit
+// navigations back into a fresh game instead. Other embed hosts (CrazyGames/Poki/itch)
+// embed index.html fine, so they keep the normal destination.
+function isDiscordActivity() {
+	try { return /[?&]frame_id=/.test(window.location.search) || /[?&]discord=1(?:&|$)/.test(window.location.search); } catch (e) { return false; }
+}
+// In a Discord Activity, Discord already wraps us in its own chrome (navbar, the
+// native participant/voice shelf, fullscreen), so the web navbar is redundant and
+// just steals the top of the frame. Tag <html> at parse time (before first paint)
+// so the CSS can hide the navbar + darken the letterbox bars and the game owns the
+// whole frame. Web/portal builds never get the class, so they're unchanged.
+try { if (isDiscordActivity()) { document.documentElement.classList.add("discord-activity"); } } catch (e) {}
+// Whether to FILL a wider-than-16:9 frame (widen the logical viewport to the frame
+// aspect) instead of pillarboxing the fixed 16:9 arena. True in a Discord Activity AND
+// on touch devices (phones in landscape) — both see a slightly wider slice of the world.
+// Desktop/laptop keep the classic 16:9 letterbox. Narrow frames (tablets ~4:3) are a
+// no-op: resize() never shrinks LOGICAL_WIDTH below the 16:9 base. See resize().
+function fillViewport() {
+	return (isDiscordActivity()) ||
+		(typeof isTouchScreen !== "undefined" && isTouchScreen === true);
+}
+function menuExitHref() {
+	return "./index.html"; // web/portal menu-exit destination
+}
+// Where a menu-exit / AFK-kick sends the player. In a Discord Activity we must NOT navigate
+// to a new URL AND must NOT reload: the Embedded App SDK completes its RPC handshake only
+// ONCE per Activity frame LAUNCH, so ANY cross-document navigation OR reload permanently
+// loses presence/voice (the voice tray + on-kart speaking ring die — proven live; a reload
+// is no better than a nav). Instead we re-enter IN-PLACE — the page, the live SDK, and
+// window.discordPresence/voice tray all survive; only the game's socket + room membership
+// are rebuilt (discordReenter). Web/portal builds navigate to the landing page as before.
+function menuExit() {
+	if (isDiscordActivity()) {
+		try { discordReenter(); return; } catch (e) { /* fall through to href */ }
+	}
+	window.location.href = menuExitHref();
+}
+
+// Discord Activity in-place re-entry. Because the SDK handshake is once-per-frame-LAUNCH
+// (see menuExit), the ONLY way to keep voice/presence across an AFK kick, a menu "leave",
+// or a late-token re-auth is to NEVER reload/navigate. window.discordPresence and the voice
+// tray are page-level and stay intact; we only rebuild the game's Socket.IO connection +
+// room membership: tear down the old local socket(s), reset room-scoped client state, open a
+// FRESH primary socket (forceNew so io() re-runs the auth handshake with the now-stashed
+// Discord token), and re-enter the SAME instance room. Routing is by the URL instance_id
+// launch param (handled in clientSendStart), so -1 (matchmake) lands back in the player's
+// Discord voice-channel room regardless of the dead room's gameID. Discord-only (callers gate
+// on isDiscordActivity()); a re-entrancy guard makes overlapping triggers a no-op.
+var discordReentering = false;
+function discordReenter() {
+	if (discordReentering) { return; }
+	discordReentering = true;
+	try {
+		// Close every existing local socket (primary + any couch slots) and forget the slots,
+		// dropping their handlers so the dead sockets can't fire stale events into the new room.
+		for (var s = 0; s < localPlayers.length; s++) {
+			var lp = localPlayers[s];
+			if (lp && lp.socket) {
+				try { lp.socket.removeAllListeners(); } catch (e) { /* ignore */ }
+				try { lp.socket.disconnect(); } catch (e) { /* ignore */ }
+			}
+			localPlayers[s] = null;
+		}
+		primarySlot = 0;
+		// Reset all room-scoped client state (playerList, gameID, effects, team state, …) so
+		// the fresh join rehydrates from a clean slate instead of layering onto the dead room
+		// — exactly the state a full page load would start from.
+		if (typeof resetGameboard === "function") { resetGameboard(); }
+		myID = null;
+		myPlayer = null;
+		// The fresh socket is a NEW server session that defaults to a plain kart, so re-arm
+		// the one-shot that re-applies the player's Discord avatar skin — otherwise a re-enter
+		// rejoins as a default colour (the setAvatarSkin emit is keyed off this latch, which
+		// stayed true from the first join). progressionUpdate on the rejoin re-fires
+		// maybeDefaultDiscordAvatar(), which now re-emits in the lobby. (Explicitly-equipped
+		// cart skins are restored separately by reEquipSavedCosmetics in the gameState handler.)
+		discordAvatarDefaulted = false;
+		// Fresh primary socket carrying the (stashed) Discord handshake token.
+		server = clientConnect(true);
+		// Re-enter the same instance room. enterGame is buffered until the socket connects,
+		// exactly like the initial join; the server's gameState response rehydrates everything.
+		clientSendStart(-1);
+		debugLog("[discord] re-entered in place (socket rebuilt, presence/voice preserved)");
+	} finally {
+		discordReentering = false;
+	}
+}
+
+// Discord Activity "tap to rejoin" panel, shown after the server's deep-idle reclaim kick
+// (the room was freed because we sat idle past the lobby/in-game window). It is deliberately
+// a HUMAN GESTURE gate: an absent player's frame just holds this static panel (no socket, no
+// room → resources stay reclaimed), while a present player taps once and re-enters in place
+// via discordReenter() — the page and the live Discord SDK never reload, so the voice tray /
+// speaking ring survive. Idempotent (one panel at a time). Overlay is inline-styled to avoid
+// touching CSS; the whole overlay is tappable (most forgiving for touch) and the button
+// carries data-gp-nav so a controller's A button can trigger it.
+var discordRejoinPanelEl = null;
+function showDiscordRejoinPanel() {
+	if (discordRejoinPanelEl || typeof document === "undefined") { return; }
+	var overlay = document.createElement("div");
+	overlay.id = "discordRejoinPanel";
+	overlay.style.cssText = "position:fixed;inset:0;z-index:99999;display:flex;flex-direction:column;" +
+		"align-items:center;justify-content:center;gap:18px;background:rgba(12,14,20,0.92);" +
+		"color:#fff;font-family:inherit;text-align:center;padding:24px;cursor:pointer;";
+	var title = document.createElement("div");
+	title.textContent = "Paused — you stepped away";
+	title.style.cssText = "font-size:26px;font-weight:700;";
+	var sub = document.createElement("div");
+	sub.textContent = "Your voice chat is still connected. Tap to jump back in.";
+	sub.style.cssText = "font-size:15px;opacity:0.8;max-width:360px;line-height:1.4;";
+	var btn = document.createElement("button");
+	btn.type = "button";
+	btn.textContent = "Tap to rejoin";
+	btn.setAttribute("data-gp-nav", "");
+	btn.style.cssText = "margin-top:6px;padding:14px 28px;font-size:18px;font-weight:700;color:#0c0e14;" +
+		"background:#7ee787;border:none;border-radius:10px;cursor:pointer;";
+	overlay.appendChild(title);
+	overlay.appendChild(sub);
+	overlay.appendChild(btn);
+	var rejoin = function (e) {
+		if (e) { try { e.preventDefault(); e.stopPropagation(); } catch (e2) {} }
+		hideDiscordRejoinPanel();
+		discordReenter();
+	};
+	// Tap anywhere on the overlay (or the button / its gamepad activation) rejoins.
+	overlay.addEventListener("click", rejoin);
+	btn.addEventListener("click", rejoin);
+	document.body.appendChild(overlay);
+	discordRejoinPanelEl = overlay;
+	try { btn.focus(); } catch (e) { /* focus is best-effort */ }
+	debugLog("[discord] deep-idle reclaim — showing tap-to-rejoin panel");
+}
+function hideDiscordRejoinPanel() {
+	if (discordRejoinPanelEl && discordRejoinPanelEl.parentNode) {
+		discordRejoinPanelEl.parentNode.removeChild(discordRejoinPanelEl);
+	}
+	discordRejoinPanelEl = null;
+}
+
 // Set true when a match-over (startGameover) fires; consumed by the next startLobby
 // to gate the between-matches interstitial. An explicit flag is required because the
 // server emits startWaiting (currentState -> waiting) BETWEEN startGameover and the
@@ -281,11 +424,14 @@ function handleMapRatingTap(lx, ly) {
 // Returns { token, deviceId }; token is null for guests, which the server
 // allows. Falls back to {} if auth.js isn't present on the page.
 function handshakeAuth(cb) {
-	if (window.chaochaoAuth && typeof window.chaochaoAuth.getHandshake === "function") {
-		cb(window.chaochaoAuth.getHandshake());
-	} else {
-		cb({});
-	}
+	var hs = (window.chaochaoAuth && typeof window.chaochaoAuth.getHandshake === "function")
+		? window.chaochaoAuth.getHandshake() : {};
+	// Record whether THIS (re)connection carried an auth token, so the Discord late-token
+	// path (onDiscordTokenAdopted) can tell an authenticated connection from a guest one —
+	// Socket.IO reads auth only at connect time, so a token adopted afterwards can't upgrade
+	// a live guest socket.
+	window.__lastHandshakeHadToken = !!(hs && hs.token);
+	cb(hs);
 }
 
 // Connect over WebSocket first and only fall back to HTTP long-polling if it
@@ -297,12 +443,18 @@ function handshakeAuth(cb) {
 // fallback for networks that block WebSockets.
 var SOCKET_TRANSPORT_OPTS = { transports: ["websocket", "polling"], tryAllTransports: true };
 
-function clientConnect() {
+// `forceNew` (Discord in-place re-entry only): open a brand-new Manager instead of
+// reusing io()'s cached one, so the disconnected old socket is fully replaced and the
+// auth handshake re-runs with the freshly-stashed token. The default (initial) call
+// omits it, so the web/portal connect path is byte-identical.
+function clientConnect(forceNew) {
 	// The primary connection (slot 0): the keyboard/mouse player and the sole
 	// owner of rendering, audio, UI and one-shot/timer handlers. The globals
 	// `server`/`myID`/`myPlayer` alias this slot (see game.js localPlayers).
 	// This slot carries the signed-in account's token (if any).
-	var sock = io({ auth: handshakeAuth, transports: SOCKET_TRANSPORT_OPTS.transports, tryAllTransports: SOCKET_TRANSPORT_OPTS.tryAllTransports });
+	var connectOpts = { auth: handshakeAuth, transports: SOCKET_TRANSPORT_OPTS.transports, tryAllTransports: SOCKET_TRANSPORT_OPTS.tryAllTransports };
+	if (forceNew) { connectOpts.forceNew = true; }
+	var sock = io(connectOpts);
 	server = sock;
 	localPlayers[primarySlot] = makeLocalPlayer(primarySlot, sock, true);
 	registerPrimaryHandlers(sock);
@@ -450,6 +602,19 @@ function registerLobbyHubHandlers(server) {
 			p[field] = payload.value || null;
 		}
 	});
+	// Discord voice (Phase 5b): a player's Discord snowflake resolved after spawn (the
+	// usual case — Discord authenticate() settles after enterGame), so the spawn packet
+	// carried null. Stamp it live so the speaking-ring can map this kart. Cosmetic-only.
+	server.on("playerVoiceId", function (payload) {
+		if (payload == null) {
+			return;
+		}
+		var p = playerList[payload.id];
+		if (p == null) {
+			return;
+		}
+		p.discordUserId = payload.discordUserId || null;
+	});
 	// The primary's skin request was rejected (color taken). Flash the picker.
 	server.on("skinRejected", function (payload) {
 		if (typeof flagSkinRejected === "function") {
@@ -468,6 +633,137 @@ function registerLobbyHubHandlers(server) {
 // progressionUpdate on join + after each match). null = guest / not yet loaded.
 // Drives the lobby Lv/XP badge + the skin-unlock UI; never trusted for equips.
 var myProgression = null;
+
+// Discord Activity skin default: a player who signed in through the Activity should
+// wear their Discord picture by DEFAULT, unless they've equipped a kart skin. Done
+// once per session (so a later manual change isn't fought) and only when no cart skin
+// and no avatar are already set — a persisted cart skin (restored just before the
+// progressionUpdate that calls this) means they made an explicit choice we respect.
+// Reuses the existing opt-in avatar-skin path (setAvatarSkin), so the server validates
+// the URL (Discord CDN is allowlisted) and broadcasts it like any avatar pick.
+var discordAvatarDefaulted = false;
+function maybeDefaultDiscordAvatar() {
+	if (discordAvatarDefaulted) { return; }
+	var auth = window.chaochaoAuth;
+	// getAuthState() === 'discord' is the play.html-side signal that this session was
+	// established through the Activity (window.isDiscord from discord.html is lost on
+	// the redirect; the auth stash drives getAuthState instead).
+	if (!auth || typeof auth.getAuthState !== "function" || auth.getAuthState() !== "discord") { return; }
+	var profile = (typeof auth.getProfile === "function") ? auth.getProfile() : null;
+	if (!profile || !profile.avatarUrl) { return; }
+	var me = (typeof myID !== "undefined" && typeof playerList !== "undefined" && playerList) ? playerList[myID] : null;
+	if (!me) { return; }
+	// Respect an explicit look: a persisted cart skin or an avatar already showing. That's
+	// a settled decision regardless of game state, so latch the one-shot and stop.
+	if (me.cart || me.avatarUrl) { discordAvatarDefaulted = true; return; }
+	// The server only APPLIES setAvatarSkin while the room is in the lobby. If we're
+	// mid-match (a join-in-progress launch), DON'T latch — the emit would be dropped and
+	// the one-shot wasted. progressionUpdate fires again on the next lobby arrival, which
+	// retries here. Only latch once we actually emit in a state the server will honor.
+	var inLobby = (typeof config !== "undefined" && config && config.stateMap && currentState === config.stateMap.lobby);
+	if (!inLobby) { return; }
+	discordAvatarDefaulted = true;
+	if (typeof server !== "undefined" && server) {
+		server.emit("setAvatarSkin", { url: profile.avatarUrl, name: profile.name });
+	}
+}
+
+// Discord voice (Phase 5b): report our own Discord snowflake to the server so every
+// peer can map our kart and pulse a speaking ring when we talk. The id comes from the
+// re-initialised in-frame SDK (discordPresence.localUser); we (re)send it whenever we
+// (re)join a room (a reconnect gets a fresh socket id the server must re-stamp).
+// Cosmetic-only and idempotent — the server just re-stamps the same value.
+var myDiscordUserId = null;
+function sendDiscordVoiceId() {
+	if (!myDiscordUserId) { return; }
+	if (typeof server !== "undefined" && server) {
+		server.emit("setVoiceId", { discordUserId: myDiscordUserId });
+	}
+}
+(function initDiscordVoiceId() {
+	if (typeof isDiscordActivity !== "function" || !isDiscordActivity()) { return; }
+	var p = window.discordPresence;
+	if (!p || !p.localUser) { return; }
+	p.localUser.then(function (uid) {
+		if (!uid) { return; }
+		myDiscordUserId = uid;
+		sendDiscordVoiceId(); // emit now if we're already in a room (else gameState will)
+	}).catch(function () { /* presence disabled — no voice id */ });
+})();
+
+// Discord (approach b): if the in-frame OAuth/token exchange finishes AFTER the connect-gate
+// already opened the socket as a GUEST (e.g. the player lingered on the consent dialog past
+// the gate's cap), the live socket can't retroactively authenticate — Socket.IO reads auth
+// only at connect. Re-enter IN-PLACE ONCE so a fresh socket carries the now-stashed token:
+// a reload would lose presence/voice (the SDK handshake is once-per-frame-LAUNCH — see
+// discordReenter), so we rebuild only the socket + room membership while the page + live SDK
+// stay intact. A one-shot in-memory guard prevents any re-auth loop. auth.js calls this when
+// a token is adopted.
+var discordReauthDone = false;
+window.__onDiscordTokenAdopted = function () {
+	try {
+		if (typeof isDiscordActivity !== "function" || !isDiscordActivity()) { return; }
+		var lp = localPlayers[primarySlot];
+		if (!lp || !lp.socket || !lp.socket.connected) { return; } // not open yet → the pending connect carries the token
+		if (window.__lastHandshakeHadToken) { return; }            // this connection is already authenticated
+		if (discordReauthDone) { return; }                         // one in-place re-auth per session
+		discordReauthDone = true;
+		debugLog('[discord] token arrived after a guest connect — re-entering in place to authenticate');
+		discordReenter();
+	} catch (e) { /* ignore */ }
+};
+
+// Discord diagnostics (debug-only): the in-frame devtools console isn't always
+// reachable, so ship the presence module's state + status log to the SERVER, which logs
+// it when started with DISCORD_DEBUG=1 (no-op otherwise). A few snapshots as the SDK
+// settles (ready/authenticate/participants are async). Lets us see WHERE the in-frame
+// SDK re-init stops without console access.
+// Snapshot the real device viewport + how the canvas fit + where the touch HUD
+// landed, so the server log (DISCORD_DEBUG) shows EXACTLY why a mobile frame
+// letterboxes the way it does (aspect vs Discord-chrome height squeeze) without
+// needing the device's devtools. Best-effort; never throws into the diag emit.
+function discordViewportDiag() {
+	try {
+		var c = (typeof gameCanvas !== "undefined" && gameCanvas) ? gameCanvas.getBoundingClientRect() : null;
+		var probe = document.createElement("div");
+		probe.style.cssText = "position:absolute;visibility:hidden;height:0;";
+		document.body.appendChild(probe);
+		var safe;
+		try {
+			var inset = function (v) { probe.style.width = "var(" + v + ", 0px)"; return Math.round(parseFloat(getComputedStyle(probe).width)) || 0; };
+			safe = { t: inset("--safe-top"), r: inset("--safe-right"), b: inset("--safe-bottom"), l: inset("--safe-left") };
+		} finally {
+			// Always remove the probe, even if the inset reads throw, so the diag path
+			// can never leak a DOM node.
+			if (probe.parentNode) { probe.parentNode.removeChild(probe); }
+		}
+		return {
+			win: window.innerWidth + "x" + window.innerHeight, dpr: window.devicePixelRatio,
+			aspect: +(window.innerWidth / Math.max(1, window.innerHeight)).toFixed(3),
+			canvas: c ? (Math.round(c.width) + "x" + Math.round(c.height) + "@" + Math.round(c.x) + "," + Math.round(c.y)) : "n/a",
+			barLR: c ? Math.round((window.innerWidth - c.width) / 2) : -1,
+			barTB: c ? Math.round((window.innerHeight - c.height) / 2) : -1,
+			fitRatio: (typeof fitRatio !== "undefined") ? +fitRatio.toFixed(3) : "n/a",
+			safe: safe
+		};
+	} catch (e) { return { error: (e && e.message) || "viewport diag failed" }; }
+}
+
+var discordDiagScheduled = false;
+function scheduleDiscordDiag() {
+	if (discordDiagScheduled) { return; }
+	if (typeof isDiscordActivity !== "function" || !isDiscordActivity()) { return; }
+	discordDiagScheduled = true;
+	[300, 3000, 7000, 12000].forEach(function (ms) {
+		setTimeout(function () {
+			if (typeof server === "undefined" || !server) { return; }
+			var diag = (window.discordPresence && typeof window.discordPresence.getDiag === "function")
+				? window.discordPresence.getDiag()
+				: { error: 'window.discordPresence undefined — presence bundle did not load/run' };
+			server.emit('discordDiag', { t: ms, diag: diag, viewport: discordViewportDiag() });
+		}, ms);
+	});
+}
 
 // --- Progression celebration toasts (shown on lobby arrival) -----------------
 // A sequenced queue: one toast at a time, auto-advancing, so a match that earned
@@ -621,6 +917,11 @@ function registerConnectionHandlers(server) {
 		// Refresh the player_level GA user property so a level change moves this
 		// player's cohort mid-session (and the first update fills it post-join).
 		if (typeof updateGAUserProperties === "function") { updateGAUserProperties(); }
+		// Discord Activity: default the kart to the player's Discord picture unless
+		// they've equipped a cart skin. Runs here because the persisted cart (if any)
+		// arrives via playerCosmeticChanged just BEFORE this event (ordered), so the
+		// gate below sees the accurate equipped state.
+		maybeDefaultDiscordAvatar();
 	});
 	// Celebration toasts earned in a prior match, delivered on lobby arrival (NOT on
 	// the game-over screen). Server sends an ordered batch; we sequence them as
@@ -735,6 +1036,18 @@ function registerConnectionHandlers(server) {
 			}
 		}
 		trackEvent('server_kick', { reason: kickReason, state: kickState });
+		// Discord Activity: a kick here is the server's long deep-idle RECLAIM (it freed the
+		// room because we sat idle for the lobby/in-game window). We must NOT auto-reenter —
+		// that would defeat reclaiming an absent player's room (the frame would just rejoin on
+		// a loop). Drop the connection to release the (now roomless) socket, then show a
+		// "tap to rejoin" panel; the tap re-enters IN PLACE so voice/presence survive (no
+		// reload). The human gesture is what tells a present-but-idle player apart from one
+		// who walked away. Other embed hosts / web keep the normal teardown below.
+		if (isDiscordActivity()) {
+			try { server.disconnect(); } catch (e) { /* already gone */ }
+			showDiscordRejoinPanel();
+			return;
+		}
 		// Per-slot teardown (§6.17): drop the primary slot. With no other local
 		// players this disconnects and navigates exactly as before (N=1); with pad
 		// players still in the game it fails over to one of them instead of ending
@@ -839,6 +1152,13 @@ function registerConnectionHandlers(server) {
 		if (playerList[myID] != null) {
 			myPlayer = playerList[myID];
 		}
+		// Discord voice (Phase 5b): now that we're in a room, (re)send our Discord
+		// snowflake so peers can voice-map our kart. No-op off Discord / before the SDK
+		// identifies us (initDiscordVoiceId re-fires it when localUser resolves).
+		sendDiscordVoiceId();
+		// Debug-only (server logs it under DISCORD_DEBUG=1): ship presence state so we can
+		// see the in-frame SDK re-init result without devtools. One-time.
+		scheduleDiscordDiag();
 		// Joined a match already racing/collapsing? The server spawned this player as
 		// a temp spectator (parked off-arena, not alive) who races from the next
 		// round — flag the slot so drawSpectatorBanner explains the wait. The server
@@ -2805,7 +3125,7 @@ function dropLocalPlayer(slot) {
 			return;
 		}
 		try { server.disconnect(); } catch (e) { /* ignore */ }
-		window.location.href = "./index.html";
+		menuExit();
 		return;
 	}
 	if (typeof onLocalPlayersChanged === "function") {
@@ -2849,7 +3169,7 @@ function handlePrimaryLost() {
 	if (survivor == null) {
 		// Last local player gone — behave as today and leave.
 		try { server.disconnect(); } catch (e) { /* ignore */ }
-		window.location.href = "./index.html";
+		menuExit();
 		return;
 	}
 	promoteToPrimary(survivor);
@@ -2895,9 +3215,27 @@ function promoteToPrimary(lp) {
 }
 
 function clientSendStart(id) {
-	if (id != null) {
-		server.emit('enterGame', id);
+	if (id == null) {
+		return;
 	}
+	// Discord Activity (Phase 5): route the whole voice-channel instance into one
+	// room. discordPresence.js re-inits the SDK in this game frame (the discord.html
+	// -> play.html redirect dropped the original instance) and resolves `.ready` with
+	// the instanceId. We DEFER the join until then so the player lands in the correct
+	// instance room first time rather than being matchmade and migrated. If presence
+	// init failed (instanceId null) or isn't present, we fall through to the normal
+	// web path unchanged. The `true` arg is the legacy/ignored coop flag; the
+	// instanceId rides the new 3rd opts arg.
+	if (isDiscordActivity() && window.discordPresence && window.discordPresence.ready) {
+		window.discordPresence.ready.then(function (info) {
+			var iid = info && info.instanceId;
+			server.emit('enterGame', id, true, iid ? { discordInstanceId: iid } : undefined);
+		}).catch(function () {
+			server.emit('enterGame', id);
+		});
+		return;
+	}
+	server.emit('enterGame', id);
 }
 
 // In a preview session, the round ends when a player dies or reaches the goal

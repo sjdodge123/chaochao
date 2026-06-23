@@ -80,6 +80,25 @@ function initEventHandlers() {
             ev.preventDefault();
             return false;
         }, false);
+
+        // Inside an iframe (Discord Activity, or the CrazyGames/Poki/itch portals)
+        // the game window only receives keyboard events while it holds focus. If the
+        // player clicks the host UI around the frame — e.g. Discord's voice-channel
+        // chat box — focus leaves and WASD is captured by the host until the frame is
+        // refocused. Worse, the first click back into a cross-origin frame is often
+        // swallowed by the browser just to focus it, so a DOM control like the emoji
+        // wheel's X appears dead on that click. Reclaim focus on any pointer/touch
+        // interaction (capture phase, before the game's own handlers) so clicking the
+        // game always restores keyboard control. Gated to embeds so the standalone
+        // web build is untouched.
+        if (typeof window.isEmbedded === "function" && window.isEmbedded()) {
+            var reclaimFocus = function () { try { window.focus(); } catch (e) { } };
+            window.addEventListener("mousedown", reclaimFocus, true);
+            window.addEventListener("touchstart", reclaimFocus, { passive: true, capture: true });
+            // Best-effort focus on init too, so WASD works without a priming click
+            // when the frame loads already foregrounded.
+            reclaimFocus();
+        }
     }
     isTouchScreen = isTouchDevice();
     try { touchDebug = /[?&]debugtouch/.test(window.location.search); } catch (e) { touchDebug = false; }
@@ -418,11 +437,16 @@ function setupVirtualbuttons() {
     if (typeof world === "undefined" || world == null) {
         return;
     }
-    // Movement (left quarter) and attack (right quarter) tap regions. These are
-    // proportional to the world so they always cover their half of the screen;
-    // the control sizes within them are physical (see layoutTouchControls).
-    var leftRect = new VirtualButton(0, 85, world.width / 4, world.height, false);
-    var rightRect = new VirtualButton(0 + world.width - (world.width / 4), 50, world.width / 4, world.height, false);
+    // Movement (left quarter) and attack (right quarter) tap regions. Sized to the
+    // LOGICAL VIEWPORT (the on-screen canvas space) BY DESIGN, NOT the arena (world): the
+    // two are equal on desktop, but a filled frame (Discord OR touch/mobile, see
+    // fillViewport()/resize()) WIDENS the logical viewport, and the tap zones must cover
+    // that wider canvas, not the 16:9 arena. Recomputed every layoutTouchControls() from
+    // the current LOGICAL_WIDTH (so a future world.* != LOGICAL_* never desyncs them).
+    var SW = (typeof LOGICAL_WIDTH === "number" && LOGICAL_WIDTH) ? LOGICAL_WIDTH : world.width;
+    var SH = (typeof LOGICAL_HEIGHT === "number" && LOGICAL_HEIGHT) ? LOGICAL_HEIGHT : world.height;
+    var leftRect = new VirtualButton(0, 85, SW / 4, SH, false);
+    var rightRect = new VirtualButton(SW - (SW / 4), 50, SW / 4, SH, false);
     // Top-corner icon hit zones — sized & positioned in layoutTouchControls()
     // (>=44px square, below the top safe strip). Placeholders until then.
     var upperLeftRect = new VirtualButton(0, 0, 1, 1, false);
@@ -459,6 +483,27 @@ function cssToLogical(px) {
     return px / (fitRatio || 1);
 }
 
+// Resolved safe-area inset (CSS px) for one side, read off the same --safe-* custom
+// property the layout uses (covers iOS env() notches AND Discord's injected
+// --discord-safe-area-inset-*). A custom property can compute to the unresolved
+// expression, so resolve it through a throwaway element's width. Cached probe; 0 off
+// notched devices. ONLY meaningful for the on-canvas HUD when the canvas FILLS the
+// screen (Discord activity, see resize()); on a letterboxed web canvas the notch is in
+// the bar, so callers gate this on isDiscordActivity().
+var _safeInsetProbe = null;
+function safeInsetCss(side) {
+    if (typeof document === "undefined" || !document.body) { return 0; }
+    if (!_safeInsetProbe) {
+        _safeInsetProbe = document.createElement("div");
+        _safeInsetProbe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;height:0;";
+        document.body.appendChild(_safeInsetProbe);
+    }
+    var vars = { top: "--safe-top", bottom: "--safe-bottom", left: "--safe-left", right: "--safe-right" };
+    _safeInsetProbe.style.width = "var(" + (vars[side] || "--safe-top") + ", 0px)";
+    var px = parseFloat(window.getComputedStyle(_safeInsetProbe).width);
+    return (isFinite(px) && px > 0) ? px : 0;
+}
+
 // (Re)size & position the on-canvas touch controls from the current fit ratio.
 // Called after setup and on every resize, so a thumb-sized joystick/buttons
 // stay thumb-sized on any screen width or orientation (5.2), and the top-corner
@@ -493,26 +538,43 @@ function layoutTouchControls() {
     var hit = Math.max(cssToLogical(72), 48);   // tap zone side (logical)
     var icon = cssToLogical(38);                // drawn icon size (logical)
     var margin = cssToLogical(16);
-    var topInset = cssToLogical(16);
-    // chat (emoji) -> top-left; exit (fullscreen) -> top-right.
-    sizeCornerButton(chatButton, margin + hit / 2, topInset + hit / 2, hit, icon);
-    sizeCornerButton(exitButton, world.width - margin - hit / 2, topInset + hit / 2, hit, icon);
+    // Screen-space viewport (NOT the arena): a Discord-mobile frame widens this so the
+    // canvas fills the frame, so all on-screen HUD anchors off SW/SH, not world.*.
+    var SW = (typeof LOGICAL_WIDTH === "number" && LOGICAL_WIDTH) ? LOGICAL_WIDTH : world.width;
+    var SH = (typeof LOGICAL_HEIGHT === "number" && LOGICAL_HEIGHT) ? LOGICAL_HEIGHT : world.height;
+    // Device safe-area, in LOGICAL units. Applied ONLY in the Discord activity, where
+    // the canvas fills the screen so its edges meet the notch / home indicator / Discord
+    // header+control-bar; on a letterboxed web canvas the insets live in the bars, so we
+    // leave them 0 (applying them there wrongly pushes the HUD inward — see git history).
+    var safeL = 0, safeR = 0, safeT = 0, safeB = 0;
+    if (typeof isDiscordActivity === "function" && isDiscordActivity()) {
+        safeL = cssToLogical(safeInsetCss("left"));
+        safeR = cssToLogical(safeInsetCss("right"));
+        safeT = cssToLogical(safeInsetCss("top"));
+        safeB = cssToLogical(safeInsetCss("bottom"));
+    }
+    var topInset = cssToLogical(16) + safeT;
+    // chat (emoji) -> top-left; exit (fullscreen) -> top-right. In the Activity the emoji
+    // button hugs the left edge tighter (operator pref) — the canvas fills the frame, so a
+    // small gap reads as "in the corner"; web/portal keep the standard corner margin.
+    var emojiLeftMargin = (typeof isDiscordActivity === "function" && isDiscordActivity()) ? cssToLogical(4) : margin;
+    sizeCornerButton(chatButton, emojiLeftMargin + safeL + hit / 2, topInset + hit / 2, hit, icon);
+    sizeCornerButton(exitButton, SW - margin - safeR - hit / 2, topInset + hit / 2, hit, icon);
 
-    // Reserve the top strip for the corner icons: drop the TOP of the move/attack
-    // regions below the corner buttons (+ a little buffer). Without this the attack
-    // region reaches all the way into the top-right corner, so a tap aimed at the
-    // fullscreen icon that lands even slightly off it throws a punch instead. Now
-    // the strip around the corner icons is a no-punch zone — the icon (or nothing).
+    // Re-span the move/attack tap regions across the CURRENT logical viewport (it may
+    // have widened for a Discord frame since setupVirtualbuttons ran) and drop their TOP
+    // below the corner icons (+ buffer) so a near-miss on the emoji/fullscreen icon
+    // doesn't throw a punch. joystick -> left quarter, attack -> right quarter.
     var regionTop = topInset + hit + cssToLogical(10);
     for (var t = 0; t < virtualButtonList.length; t++) {
         var entry = virtualButtonList[t];
-        if (entry.button === joystickMovement || entry.button === attackButton) {
-            var r = entry.bound;
-            var keepBottom = r.y + r.height;
-            r.y = regionTop;
-            r.top = regionTop;
-            r.height = keepBottom - regionTop;
-            r.bottom = keepBottom;
+        var r = entry.bound;
+        if (entry.button === joystickMovement) {
+            r.x = 0; r.left = 0; r.width = SW / 4; r.right = SW / 4;
+            r.y = regionTop; r.top = regionTop; r.bottom = SH; r.height = SH - regionTop;
+        } else if (entry.button === attackButton) {
+            r.x = SW - SW / 4; r.left = r.x; r.width = SW / 4; r.right = SW;
+            r.y = regionTop; r.top = regionTop; r.bottom = SH; r.height = SH - regionTop;
         }
     }
 
@@ -527,12 +589,13 @@ function layoutTouchControls() {
         b.stickY = b.baseY;
     }
 
-    // Anchor the visible attack button in the lower-right thumb zone (the centring
-    // loop above left it at the region's vertical middle). The bottom margin leaves
-    // room for the "Attack" caption so it never clips off the bottom edge.
+    // Anchor the visible attack button in the lower-right thumb zone, clear of the
+    // home indicator / Discord control bar (safeB). The centring loop above left it at
+    // the region's vertical middle; the bottom margin leaves room for the "Attack"
+    // caption so it never clips off the bottom edge.
     if (attackButton) {
-        attackButton.baseX = world.width - cssToLogical(28) - attackButton.radius;
-        attackButton.baseY = world.height - cssToLogical(48) - attackButton.radius;
+        attackButton.baseX = SW - cssToLogical(28) - safeR - attackButton.radius;
+        attackButton.baseY = SH - cssToLogical(48) - safeB - attackButton.radius;
         attackButton.stickX = attackButton.baseX;
         attackButton.stickY = attackButton.baseY;
     }

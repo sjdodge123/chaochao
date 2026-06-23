@@ -1,0 +1,185 @@
+<!doctype html>
+<!--
+  DRAFT — Privacy Policy starter for Chao Chao. NOT legal advice; have it reviewed
+  before publishing. Fill every [BRACKETED] placeholder. Served statically at
+  /privacy.html (Discord Discovery requires a public Privacy Policy URL).
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Chao Chao — Privacy Policy</title>
+    <link rel="icon" type="image/svg+xml" href="assets/img/favicon.svg">
+    <style>
+        :root { color-scheme: dark; }
+        html, body { margin: 0; background: #0b0c14; color: #cfe3ff;
+            font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6; }
+        .wrap { max-width: 820px; margin: 0 auto; padding: 32px 20px 80px; }
+        h1 { font-size: 30px; margin: 0 0 4px; }
+        h2 { font-size: 20px; margin: 36px 0 10px; color: #7aa2ff; }
+        h3 { font-size: 16px; margin: 22px 0 6px; }
+        p, li { font-size: 15px; color: #c4d4ee; }
+        a { color: #7aa2ff; }
+        .meta { color: #8aa0c4; font-size: 13px; margin-bottom: 8px; }
+        .note { background: #161a2b; border: 1px solid #2a3350; border-radius: 8px;
+            padding: 12px 16px; font-size: 14px; color: #aab8d6; margin: 18px 0; }
+        code { background: #161a2b; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+        table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 14px; }
+        th, td { border: 1px solid #2a3350; padding: 8px 10px; text-align: left; vertical-align: top; }
+        th { background: #161a2b; }
+        footer { margin-top: 48px; font-size: 13px; color: #8aa0c4; }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <h1>Privacy Policy</h1>
+    <p class="meta">Chao Chao · Last updated: <strong>June 21, 2026</strong></p>
+
+    <p>This Privacy Policy explains what information <strong>Chao Chao</strong> ("the Game",
+    "we", "us") collects, how we use it, and the choices you have. It applies to the Game
+    wherever you play it — on the web at <a href="https://www.chaochaogame.com">chaochaogame.com</a>, embedded in partner sites
+    (CrazyGames, Poki, itch.io), and as a <strong>Discord Activity</strong>.</p>
+
+    <p>Chao Chao is operated by <strong>Steven Dodge</strong>. If you have
+    questions, contact us at <a href="mailto:sjdodge@outlook.com">sjdodge@outlook.com</a>.</p>
+
+    <div class="note"><strong>The short version.</strong> We collect the minimum needed to run
+    a multiplayer game and save your progress: a sign-in identity (only if you choose to sign
+    in), your in-game progression and cosmetics, and anonymous gameplay analytics. We do not
+    sell your data. You can play as a guest with no account. In the Discord Activity we read who
+    is talking to show a speaking indicator — <strong>we never access or record audio</strong>.</p>
+
+    <h2>1. Information we collect</h2>
+
+    <h3>a. Account &amp; identity (only if you sign in)</h3>
+    <p>You can play entirely as a guest. If you choose to sign in, we receive:</p>
+    <ul>
+        <li><strong>Discord</strong> (web sign-in or the Discord Activity): your Discord user ID,
+        username, global/display name, and avatar; and — with your consent — the list of servers
+        you are in (used only to group players from the same server into a match). Provided via
+        Discord's OAuth2 / Embedded App SDK.</li>
+        <li><strong>Google</strong> (web sign-in): your name and profile picture from Google OAuth.</li>
+        <li>A randomly generated <strong>device identifier</strong> stored in your browser to link
+        your progress to your account and recognize returning devices.</li>
+    </ul>
+    <p>We do not receive or store your Discord/Google password. We do not publicly display your
+    email address.</p>
+
+    <h3>b. Gameplay &amp; progression</h3>
+    <p>For signed-in players we store a progression record: experience points and level, unlocked
+    and equipped cosmetics, lifetime medal/achievement counts, win counts, and the device
+    identifiers associated with the account. Guests' progress is not saved on our servers.</p>
+
+    <h3>c. Usage &amp; performance analytics</h3>
+    <p>We use <strong>Google Analytics 4</strong> (with BigQuery export) to understand how the Game
+    is played and to improve performance. This includes gameplay events (e.g. matches started/
+    finished, sign-ins), coarse device/performance signals (input method, rendering tier), and the
+    embedding host (e.g. Discord, a partner site). Analytics is tied to a pseudonymous identifier,
+    not to your real name. Analytics is disabled / runs as a no-op inside the Discord Activity.</p>
+
+    <h3>d. Content you create or share</h3>
+    <ul>
+        <li><strong>Display name &amp; avatar</strong> shown to other players in a match.</li>
+        <li><strong>In-game emotes/expressions</strong> you send during play.</li>
+        <li><strong>Map submissions</strong> from the in-game map editor. A submitted map is
+        published <strong>publicly</strong> as a pull request to our open-source GitHub repository
+        and, if accepted, ships in the Game.</li>
+        <li><strong>Feedback / bug reports</strong> you send through the in-game widget, including
+        any email address, page, and diagnostic context you choose to include. These are filed as
+        issues in our GitHub repository.</li>
+    </ul>
+
+    <h3>e. Technical &amp; connection data</h3>
+    <p>To run real-time multiplayer and protect the service we process your IP address (for
+    region/datacenter and anti-abuse checks) and basic connection diagnostics. We do not use this
+    to build advertising profiles, and we do not retain raw IP addresses long-term.</p>
+
+    <h3>f. Voice activity (Discord Activity only)</h3>
+    <p>When you launch Chao Chao as a Discord Activity, with the <code>rpc.voice.read</code> scope
+    you grant, we read <strong>voice-activity state</strong> from Discord — i.e. <em>which</em>
+    participant is currently speaking — to show an in-game "speaking" indicator. <strong>We do not
+    access, transmit, record, or store any audio.</strong></p>
+
+    <h2>2. How we use your information</h2>
+    <ul>
+        <li>Run the Game and real-time multiplayer matches.</li>
+        <li>Save and restore your progression and cosmetics across sessions and devices.</li>
+        <li>Match you into rooms (including grouping a Discord voice channel into one match).</li>
+        <li>Detect and prevent cheating, abuse, and automated/bot traffic.</li>
+        <li>Measure usage and performance to improve the Game.</li>
+        <li>Respond to your feedback and bug reports.</li>
+    </ul>
+
+    <h2>3. Legal bases (EEA/UK users)</h2>
+    <p>Where the GDPR/UK GDPR applies, we rely on: <strong>performance of a contract</strong> (to
+    provide the Game you requested), <strong>legitimate interests</strong> (security, anti-abuse,
+    and product improvement), and <strong>consent</strong> (e.g. the Discord scopes you approve,
+    and analytics where consent is required).</p>
+
+    <h2>4. How we share information</h2>
+    <p>We do not sell your personal information. We share it only with service providers that help
+    us run the Game, each under its own terms:</p>
+    <table>
+        <tr><th>Provider</th><th>Purpose</th></tr>
+        <tr><td>Discord</td><td>Activity platform, sign-in, voice-activity state, presence (governed also by Discord's Privacy Policy)</td></tr>
+        <tr><td>Supabase</td><td>Authentication and the progression database</td></tr>
+        <tr><td>Google Analytics</td><td>Usage &amp; performance analytics (web only)</td></tr>
+        <tr><td>Heroku / cloud hosting</td><td>Running the game server</td></tr>
+        <tr><td>Cloudflare</td><td>Content delivery / network</td></tr>
+        <tr><td>GitHub</td><td>Public map submissions and feedback issues</td></tr>
+    </table>
+    <p>We may also disclose information if required by law or to protect the rights, safety, and
+    security of our users and the service.</p>
+
+    <h2>5. Cookies &amp; local storage</h2>
+    <p>The Game uses browser local/session storage for essential functions: your device identifier,
+    your sign-in session, and a local mirror of your cosmetic choices when playing as a guest. Web
+    analytics may set cookies as described above. We do not use cross-site advertising cookies in
+    the Discord Activity.</p>
+
+    <h2>6. Data retention</h2>
+    <p>We keep your progression record while your account is active. Analytics data is retained for
+    up to <strong>14 months</strong>. Public map submissions and feedback issues persist in our
+    GitHub repository as part of the project's history. You can request deletion as described below.</p>
+
+    <h2>7. Your rights &amp; choices</h2>
+    <ul>
+        <li>Play as a guest and sign in nothing at all.</li>
+        <li>Request access to, correction of, export of, or deletion of your account data by
+        emailing <a href="mailto:sjdodge@outlook.com">sjdodge@outlook.com</a>.</li>
+        <li>Revoke the Game's access from your <a href="https://discord.com/" target="_blank" rel="noopener">Discord</a>
+        or Google account settings at any time.</li>
+        <li>Depending on your region (e.g. EEA/UK/California), you may have additional rights
+        including the right to object, to restrict processing, and to lodge a complaint with a
+        supervisory authority.</li>
+    </ul>
+
+    <h2>8. Children</h2>
+    <p>Chao Chao is not directed to children under <strong>13</strong> (or the minimum age required
+    by Discord and by your local law, whichever is higher). Do not use the Game if you are under
+    that age. If you believe a child has provided us personal information, contact us and we will
+    delete it.</p>
+
+    <h2>9. Security</h2>
+    <p>We use reasonable technical and organizational measures to protect your information,
+    including encrypted transport (HTTPS/WSS) and access-controlled server credentials. No method
+    of transmission or storage is 100% secure.</p>
+
+    <h2>10. International transfers</h2>
+    <p>Our providers may process data in the United States and other countries. Where required, we
+    rely on appropriate safeguards for such transfers.</p>
+
+    <h2>11. Changes to this policy</h2>
+    <p>We may update this policy from time to time. Material changes will be reflected by updating
+    the "Last updated" date above and, where appropriate, an in-game notice.</p>
+
+    <h2>12. Contact</h2>
+    <p>Steven Dodge · <a href="mailto:sjdodge@outlook.com">sjdodge@outlook.com</a></p>
+
+    <footer>
+        <a href="/">← Back to Chao Chao</a> · <a href="/terms.html">Terms of Service</a>
+    </footer>
+</div>
+</body>
+</html>

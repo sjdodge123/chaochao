@@ -26,6 +26,10 @@ var server = null,
     // (see resize() + applyCanvasTransform), so high-DPR displays render crisp.
     LOGICAL_WIDTH = 0,
     LOGICAL_HEIGHT = 0,
+    // Immutable 16:9 base (the canvas HTML attrs). LOGICAL_WIDTH may be WIDENED past this
+    // to fill a wide frame (fillViewport); restored to BASE on every non-fill resize so a
+    // context flip (e.g. touch->kbm, HMR) can't leave it stuck wide. See resize().
+    BASE_LOGICAL_WIDTH = 0,
     fitRatio = 1,   // logical->CSS px scale, for stable physical label sizes
     canvasScaleX = 1,  // logical->backing-store scale applied per frame (DPR-aware)
     canvasScaleY = 1,
@@ -317,7 +321,14 @@ $(function () {
             server = clientConnect();
         };
         auth.ready.then(go, go);
-        setTimeout(go, 2000);
+        // Discord Activity (approach b): auth runs IN-FRAME (SDK handshake + authorize +
+        // token exchange), which takes longer than a restored Supabase session — and the
+        // socket MUST carry the token, so give it a generous cap. The bootstrap resolves
+        // chaochaoAuth.ready (even on failure, as guest) well before this. Plain web keeps
+        // the snappy 2s guest fallback. Detect via Discord's frame_id launch param.
+        var discordCtx = false;
+        try { discordCtx = /[?&]frame_id=/.test(window.location.search) || /[?&]discord=1(?:&|$)/.test(window.location.search); } catch (e) { discordCtx = false; }
+        setTimeout(go, discordCtx ? 12000 : 2000);
     } else {
         server = clientConnect();
     }
@@ -409,6 +420,7 @@ function setupPage() {
     // store for device-pixel rendering.
     LOGICAL_WIDTH = gameCanvas.width;
     LOGICAL_HEIGHT = gameCanvas.height;
+    BASE_LOGICAL_WIDTH = gameCanvas.width;
     init();
     // Use .always() (not .then()) so a single 404 / CORS error in the
     // preload list doesn't leave the lobby never being entered. Once
@@ -483,6 +495,11 @@ function enterLobby() {
 }
 function init() {
     if (loading == false) {
+        // init() re-runs on every room (re)join (setupPage + each gameState, incl. a
+        // Discord in-place re-entry), so clear any prior interval before arming a new one —
+        // otherwise each rejoin leaks a second checkForTimeout ticker (it double-counts the
+        // idle timer and, in a Discord Activity, can wrongly trip the parent-frame reload).
+        if (timeOutChecker) { clearInterval(timeOutChecker); }
         timeOutChecker = setInterval(checkForTimeout, 1000);
     }
     // Schedule (never call animloop() synchronously): a direct call while a rAF
@@ -580,6 +597,21 @@ function resize() {
     var gameWindowRect = canvasWindow.getBoundingClientRect();
     if (gameWindowRect.width === 0 || gameWindowRect.height === 0) return;
     var viewport = { width: gameWindowRect.width, height: gameWindowRect.height };
+    // The arena is a fixed 16:9 world, so on a wider-than-16:9 frame (a phone in landscape
+    // is ~2.2:1) a min() letterbox leaves big side voids. When fillViewport() (Discord
+    // Activity OR a touch device), WIDEN the LOGICAL viewport to the frame's aspect so the
+    // canvas FILLS — the camera shows a wider slice of the world while racing; whole-map
+    // views (lobby/overview) keep the 16:9 arena centred. Never narrower than the 16:9 BASE
+    // (so ≤16:9 frames like tablets are untouched) and never wider than 21:9. Outside
+    // fillViewport() (desktop/laptop) ALWAYS restore BASE so a context flip can't leave it
+    // stuck wide. Accepted tradeoff: touch/Discord see slightly more world than desktop.
+    if ((typeof fillViewport === "function" && fillViewport()) && LOGICAL_HEIGHT > 0 && viewport.height > 0) {
+        var maxLogicalW = Math.round(LOGICAL_HEIGHT * (21 / 9));
+        LOGICAL_WIDTH = Math.min(maxLogicalW, Math.max(BASE_LOGICAL_WIDTH || LOGICAL_HEIGHT * 16 / 9,
+            Math.round(LOGICAL_HEIGHT * (viewport.width / viewport.height))));
+    } else if (BASE_LOGICAL_WIDTH > 0) {
+        LOGICAL_WIDTH = BASE_LOGICAL_WIDTH;
+    }
     // Fit the canvas to the available space at its native 16:9 aspect ratio,
     // scaling BOTH axes by the same factor so the game is never stretched. This
     // also covers fullscreen: on any screen that isn't exactly 16:9 the canvas
@@ -639,8 +671,12 @@ function resize() {
         layoutTouchControls();
     }
     // Keep the DOM settings gear pinned to the canvas's top-right as the letterbox
-    // fit changes (orientation / fullscreen / URL-bar collapse).
-    if (typeof positionTouchSettingsButton === "function") {
+    // fit changes (orientation / fullscreen / URL-bar collapse). Also re-evaluate its
+    // visibility here: in a Discord Activity no fullscreenchange event ever fires, so this
+    // is what reveals the gear once the touch canvas is ready (positions before showing).
+    if (typeof updateTouchSettingsButtonVisibility === "function") {
+        updateTouchSettingsButtonVisibility();
+    } else if (typeof positionTouchSettingsButton === "function") {
         positionTouchSettingsButton();
     }
 
@@ -776,6 +812,11 @@ function updateColorblindToggleUI() {
 // support so we can hide the dead control and skip a doomed request rather than
 // drawing a button that does nothing.
 function fullscreenSupported() {
+    // Inside a Discord Activity, Discord owns fullscreen (the iframe can't usefully
+    // go fullscreen and the request is a no-op/blocked). Report unsupported so the
+    // in-game Fullscreen button + its label don't draw and goFullScreen() no-ops —
+    // a dead "Fullscreen" affordance just confused players (operator-reported).
+    if (typeof isDiscordActivity === "function" && isDiscordActivity()) { return false; }
     return !!(document.fullscreenEnabled &&
         typeof gameWindow !== "undefined" && gameWindow &&
         gameWindow.requestFullscreen);

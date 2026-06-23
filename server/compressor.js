@@ -220,6 +220,13 @@ function newPlayerPacket(player) {
 	// Team id (0/1) in a teams game mode, null in FFA. Spawn/append only — mid-match
 	// (re)assignments ride the one-shot `teamUpdate` broadcast, not the tick stream.
 	packet[17] = (player.teamId != null) ? player.teamId : null;
+	// Discord voice user id (Phase 5b): the player's Discord snowflake, so every client
+	// can map an SDK SPEAKING event (keyed by Discord user_id) to this kart and pulse a
+	// speaking ring. null for web players / before the id is known. Cosmetic-only and
+	// client-supplied (see messenger setVoiceId) — never a trust boundary. Spawn/append
+	// only (static), like name/avatar; the live "id resolved after spawn" case rides the
+	// one-shot `playerVoiceId` broadcast. Decoded in lockstep in gameboard.updatePlayerList.
+	packet[18] = player.discordUserId || null;
 	return packet;
 }
 

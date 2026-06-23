@@ -191,6 +191,12 @@ function drawKartAppearance(player, sx, sy, headingOverride) {
             }
         }
     }
+    // Discord voice (Phase 5b): speaking ring framing the kart edge, drawn LAST in this
+    // shared chokepoint (overview scoreboard, ice reflection, recap) so it sits on top of
+    // the body. No-op off Discord / for web players.
+    if (typeof drawSpeakingIndicator === "function") {
+        drawSpeakingIndicator(player, sx, sy);
+    }
 }
 
 // Shaped cart bodies render 20% larger than the physics radius so they read

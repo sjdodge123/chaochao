@@ -772,6 +772,8 @@
     "playerKilledNearVictoryBonus": 500,
     "playerStartSleepTime": 60,
     "playerAFKKickTime": 240,
+    "discordLobbyIdleKickTime": 900,
+    "discordIdleKickTime": 1200,
     "playerPunchCooldown": 200,
     "punchMomentum": {
         "_doc": "Punch knockback scales with how fast you're moving TOWARD your aim. floor/ceil are the bonus multiplier at zero vs full charge; refFrac is the fraction of maxVelocity (along facing) that counts as full charge.",

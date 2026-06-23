@@ -347,10 +347,10 @@ group('compressor', function () {
     eq(created[1][8], null, 'created[8] = radius (null for non-sizable kinds)');
     eq(created[2][8], 95, 'created[8] = per-instance radius for a sizable kind (vortex well)');
 
-    // spawn/append packet (static fields, sent once) — pin ALL 18 indices so any
+    // spawn/append packet (static fields, sent once) — pin ALL 19 indices so any
     // reorder of the spawn layout trips the test, not just a length change.
     const spawn = JSON.parse(compressor.appendPlayer(fakePlayer));
-    eq(spawn.length, 18, 'spawn packet has 18 fields');
+    eq(spawn.length, 19, 'spawn packet has 19 fields');
     eq(spawn[0], 'p1', 'spawn[0] = id');
     eq(spawn[1], 10, 'spawn[1] = x');
     eq(spawn[2], 20, 'spawn[2] = y');
@@ -369,6 +369,7 @@ group('compressor', function () {
     eq(spawn[15], 'comet', 'spawn[15] = trailFx');
     eq(spawn[16], 'border_ring', 'spawn[16] = border');
     eq(spawn[17], null, 'spawn[17] = teamId (null in FFA modes)');
+    eq(spawn[18], null, 'spawn[18] = discordUserId (null for web players)');
 });
 
 // ---------------------------------------------------------------------------

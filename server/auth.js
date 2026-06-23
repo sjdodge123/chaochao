@@ -14,6 +14,8 @@
 var progression = require('./progression.js');
 var skinRegistry = require('./skinRegistry.js');
 
+var crypto = require('crypto');
+
 var SUPABASE_URL = process.env.SUPABASE_URL || null;
 var SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || null;
 var JWT_SECRET = process.env.SUPABASE_JWT_SECRET || null;
@@ -21,6 +23,37 @@ var JWT_SECRET = process.env.SUPABASE_JWT_SECRET || null;
 var supabase = null;
 var jwt = null;
 var enabled = false;
+
+// jsonwebtoken is needed for BOTH the legacy Supabase HS256 verify (when a JWT secret
+// is configured) AND the Discord Activity session ticket (below), so require it
+// unconditionally rather than only when SUPABASE_JWT_SECRET is set.
+try {
+    jwt = require('jsonwebtoken');
+} catch (e) {
+    console.log('[auth] jsonwebtoken unavailable:', e.message);
+}
+
+// Discord Activity session ticket secret. The Activity bridge can't mint a real
+// Supabase token (this project signs with asymmetric keys — there's no shared HS256
+// secret to reproduce; the server already falls back to network getUser). So instead
+// the bridge mints OUR OWN short-lived ticket, HS256-signed with this server-only
+// secret, and verifyToken() accepts it (issuer-scoped) before the Supabase paths.
+//
+// PREFER an explicit DISCORD_TICKET_SECRET — that decouples the ticket lifecycle from
+// any other credential. When it's unset we DERIVE one from the service-role key (so the
+// common deploy needs no new env var and the secret is stable across restarts), but that
+// couples two lifecycles: rotating the service-role key, or a multi-instance deploy with
+// any key skew, silently invalidates live tickets (Activity players drop to guest on
+// reconnect). We warn loudly in that case (below) so it's a known trade-off, not a
+// surprise. A random fallback covers guest-only dev (no key), where tickets are never
+// minted anyway.
+var TICKET_ISSUER = 'chaochao-activity';
+var TICKET_SECRET_EXPLICIT = !!process.env.DISCORD_TICKET_SECRET;
+var TICKET_SECRET_DERIVED = !TICKET_SECRET_EXPLICIT && !!SERVICE_ROLE_KEY;
+var TICKET_SECRET = process.env.DISCORD_TICKET_SECRET ||
+    (SERVICE_ROLE_KEY
+        ? crypto.createHash('sha256').update('chaochao-discord-ticket|' + SERVICE_ROLE_KEY).digest('hex')
+        : crypto.randomBytes(32).toString('hex'));
 
 if (SUPABASE_URL && SERVICE_ROLE_KEY) {
     try {
@@ -57,16 +90,13 @@ if (enabled && !writesEnabled) {
         'Use the DEV project locally, or set ALLOW_PROD_WRITES=true to override.');
 }
 
-if (JWT_SECRET) {
-    try {
-        jwt = require('jsonwebtoken');
-    } catch (e) {
-        console.log('[auth] jsonwebtoken unavailable, will fall back to network verify:', e.message);
-    }
-}
-
 if (enabled) {
     console.log('[auth] Supabase auth ENABLED (' + (jwt && JWT_SECRET ? 'local JWT verify' : 'network verify') + '), writes ' + (writesEnabled ? 'ENABLED' : 'BLOCKED') + ' (target: ' + SUPABASE_URL + ').');
+    if (TICKET_SECRET_DERIVED) {
+        console.log('[auth] Discord ticket secret is DERIVED from the service-role key. ' +
+            'Set DISCORD_TICKET_SECRET to decouple it — otherwise rotating the service-role key ' +
+            '(or a multi-instance deploy with key skew) silently demotes active Activity players to guests.');
+    }
 } else {
     console.log('[auth] Supabase env vars absent — auth DISABLED, all clients are guests.');
 }
@@ -102,6 +132,18 @@ function tokenExpSeconds(token) {
     }
 }
 
+// Bounded-map insert shared by the token cache and the Discord snowflake cache: when at
+// capacity, drop the OLDEST entry (FIFO) rather than clearing the whole map (a full wipe
+// would force a thundering-herd re-verify of every live session). Overwriting an existing
+// key doesn't grow the map, so it never evicts in that case.
+function boundedMapSet(map, key, value, max) {
+    if (map.size >= max && !map.has(key)) {
+        var oldest = map.keys().next().value;
+        if (oldest !== undefined) { map.delete(oldest); }
+    }
+    map.set(key, value);
+}
+
 function cachePut(token, userId, ttl) {
     var expiresAt = Date.now() + ttl;
     if (userId) {
@@ -109,13 +151,7 @@ function cachePut(token, userId, ttl) {
         var exp = tokenExpSeconds(token);
         if (exp) { expiresAt = Math.min(expiresAt, exp * 1000); }
     }
-    // Bounded LRU-ish: drop the OLDEST entry rather than clearing the whole cache
-    // (a full wipe would force a thundering-herd re-verify of every live session).
-    if (tokenCache.size >= TOKEN_CACHE_MAX) {
-        var oldest = tokenCache.keys().next().value;
-        if (oldest !== undefined) { tokenCache.delete(oldest); }
-    }
-    tokenCache.set(token, { userId: userId, expiresAt: expiresAt });
+    boundedMapSet(tokenCache, token, { userId: userId, expiresAt: expiresAt }, TOKEN_CACHE_MAX);
     return userId;
 }
 
@@ -137,6 +173,21 @@ async function verifyToken(token) {
     var hit = tokenCache.get(token);
     if (hit && hit.expiresAt > Date.now()) {
         return hit.userId;
+    }
+    // Discord Activity session ticket (issuer-scoped, HS256 with our server secret).
+    // Checked first — it's a cheap local verify, and a ticket would never validate on
+    // the Supabase paths. A normal Supabase token has a different issuer/signature, so
+    // jwt.verify throws here and we fall through. The ticket's sub is the already-
+    // resolved Supabase user id, so it's a verified user id with no network hop.
+    if (jwt) {
+        try {
+            var ticket = jwt.verify(token, TICKET_SECRET, { algorithms: ['HS256'], issuer: TICKET_ISSUER });
+            if (ticket && ticket.sub) {
+                return cachePut(token, ticket.sub, VERIFY_OK_TTL_MS);
+            }
+        } catch (e) {
+            // Not our ticket (or expired/tampered) — fall through to the Supabase paths.
+        }
     }
     if (jwt && JWT_SECRET) {
         try {
@@ -631,6 +682,133 @@ async function requeuePendingToasts(userId, toasts) {
     }
 }
 
+// --- Discord Activity bridge (Phase 4) -----------------------------------------
+// In-frame Discord auth identifies a player WITHOUT a full-page OAuth redirect, then
+// bridges that identity onto a REAL Supabase user so the existing cosmetic/progression
+// path (which keys on a verified user_id) works unchanged. server/discordAuth.js owns
+// the Discord HTTP exchange + the client secret; these two helpers own the Supabase
+// side (the admin client + JWT secret live here and are never re-exported).
+
+// mintAccessToken: sign a Discord Activity SESSION TICKET (HS256 with our server-only
+// TICKET_SECRET, issuer-scoped) for a resolved Supabase user id. verifyToken() accepts
+// it locally with NO Supabase round-trip — so the socket handshake treats a Discord
+// player exactly like a signed-in web player. We mint our own ticket rather than a
+// Supabase token because this project signs with asymmetric keys (no shared HS256
+// secret to reproduce). Requires the jwt lib; returns null otherwise (then Discord
+// auth degrades to guest rather than minting a ticket the server can't verify). 12h
+// TTL: an Activity session can run long, and the ticket is reused across reconnects.
+function mintAccessToken(userId, opts) {
+    opts = opts || {};
+    if (!jwt || !userId) {
+        return null;
+    }
+    var ttl = opts.ttlSeconds || (12 * 60 * 60);
+    var nowSec = Math.floor(Date.now() / 1000);
+    var claims = {
+        sub: userId,
+        iss: TICKET_ISSUER,
+        src: 'discord',
+        iat: nowSec,
+        exp: nowSec + ttl
+    };
+    try {
+        return jwt.sign(claims, TICKET_SECRET, { algorithm: 'HS256' });
+    } catch (e) {
+        console.log('[auth] mintAccessToken failed:', e.message);
+        return null;
+    }
+}
+
+// Resolve a VALIDATED Discord identity ({ id, name, avatarUrl }) to a Supabase user id,
+// reusing the existing account when one already owns this Discord snowflake (web login
+// OR a prior Activity launch) and creating + linking a fresh one otherwise. Returns
+// { userId, name, avatarUrl } or null (auth off / lookup+create both failed). Never
+// throws. A short snowflake->userId cache spares repeat launches the admin round-trip.
+var discordUserCache = new Map();
+var DISCORD_USER_TTL_MS = 10 * 60 * 1000;
+var DISCORD_USER_CACHE_MAX = 5000;
+function cachePutDiscord(snowflake, userId) {
+    boundedMapSet(discordUserCache, snowflake, { userId: userId, expiresAt: Date.now() + DISCORD_USER_TTL_MS }, DISCORD_USER_CACHE_MAX);
+}
+async function findOrCreateDiscordUser(discord) {
+    if (!enabled || !supabase || !discord || !discord.id) {
+        return null;
+    }
+    var snowflake = String(discord.id);
+    var name = sanitizeDisplayName(discord.name) || null;
+    var avatarUrl = (typeof discord.avatarUrl === 'string') ? discord.avatarUrl : null;
+
+    var cached = discordUserCache.get(snowflake);
+    if (cached && cached.expiresAt > Date.now()) {
+        return { userId: cached.userId, name: name, avatarUrl: avatarUrl };
+    }
+    try {
+        // Read side: an account already owns this Discord identity — reuse it so its
+        // cosmetics/progression are exactly what the player sees in the Activity.
+        var found = await supabase.rpc('find_user_by_discord_id', { p_discord_id: snowflake });
+        if (found.error) {
+            console.log('[auth] find_user_by_discord_id failed:', found.error.message);
+        } else if (found.data) {
+            cachePutDiscord(snowflake, found.data);
+            return { userId: found.data, name: name, avatarUrl: avatarUrl };
+        }
+
+        // No existing account. Creating one is a WRITE (admin.createUser + the identity
+        // link), so it must honor the same writesEnabled tripwire as every progression
+        // write — otherwise a non-Heroku host accidentally pointed at the PROD project
+        // would create real auth.users/auth.identities rows in prod, the exact pollution
+        // writesEnabled exists to prevent. The read above still runs (an existing player
+        // resolves fine); we only refuse to WRITE a new account when writes are blocked.
+        if (!writesEnabled) {
+            console.log('[auth] findOrCreateDiscordUser: writes BLOCKED — not creating a new Supabase user for Discord id ' + snowflake + '.');
+            return null;
+        }
+
+        // Create one. The synthetic email + the discord_id stamped
+        // into user_metadata both make this user re-findable (the latter is the fallback
+        // the lookup uses if the identity link below didn't land).
+        var meta = { provider: 'discord', discord_id: snowflake };
+        if (name) { meta.full_name = name; meta.name = name; }
+        if (avatarUrl) { meta.avatar_url = avatarUrl; }
+        var created = await supabase.auth.admin.createUser({
+            email: 'discord_' + snowflake + '@discord.chaochao.local',
+            email_confirm: true,
+            user_metadata: meta,
+            app_metadata: { provider: 'discord', providers: ['discord'] }
+        });
+        if (created.error || !created.data || !created.data.user) {
+            // A concurrent first-launch may have created it (email collision) — re-resolve.
+            var retry = await supabase.rpc('find_user_by_discord_id', { p_discord_id: snowflake });
+            if (!retry.error && retry.data) {
+                cachePutDiscord(snowflake, retry.data);
+                return { userId: retry.data, name: name, avatarUrl: avatarUrl };
+            }
+            console.log('[auth] createUser(discord) failed:', created.error && created.error.message);
+            return null;
+        }
+        var userId = created.data.user.id;
+        // Best-effort: link a provider='discord' identity so a LATER web Discord login
+        // adopts this same account. A failure here doesn't block play (the metadata
+        // stamp above still makes the user re-findable from the Activity side).
+        var identityData = { sub: snowflake, provider_id: snowflake };
+        if (name) { identityData.name = name; identityData.full_name = name; }
+        if (avatarUrl) { identityData.avatar_url = avatarUrl; }
+        var linked = await supabase.rpc('link_discord_identity', {
+            p_user_id: userId, p_discord_id: snowflake, p_identity_data: identityData
+        });
+        if (linked.error) {
+            console.log('[auth] link_discord_identity (best-effort) failed:', linked.error.message);
+        }
+        cachePutDiscord(snowflake, userId);
+        return { userId: userId, name: name, avatarUrl: avatarUrl };
+    } catch (e) {
+        console.log('[auth] findOrCreateDiscordUser error:', e.message);
+        return null;
+    }
+}
+
+exports.mintAccessToken = mintAccessToken;
+exports.findOrCreateDiscordUser = findOrCreateDiscordUser;
 exports.requeuePendingToasts = requeuePendingToasts;
 exports.enabled = enabled;
 exports.writesEnabled = writesEnabled;

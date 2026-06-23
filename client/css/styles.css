@@ -3,11 +3,17 @@
 
     /* Safe-area insets (notch / home indicator). Resolve to 0px on devices
        and browsers that don't expose them, so the layout is unchanged there.
-       Requires `viewport-fit=cover` on the viewport meta to be non-zero. */
-    --safe-top: env(safe-area-inset-top, 0px);
-    --safe-bottom: env(safe-area-inset-bottom, 0px);
-    --safe-left: env(safe-area-inset-left, 0px);
-    --safe-right: env(safe-area-inset-right, 0px);
+       Requires `viewport-fit=cover` on the viewport meta to be non-zero.
+       Inside a Discord mobile Activity the iframe doesn't see the device notch
+       via env(); Discord instead injects `--discord-safe-area-inset-*` onto the
+       document root. max() takes whichever is larger, so the SAME vars drive the
+       web build (env) and the Discord build (Discord's vars) with no forking —
+       both Discord vars and env() resolve to 0px off their respective platforms,
+       leaving the layout byte-identical everywhere else. */
+    --safe-top: max(env(safe-area-inset-top, 0px), var(--discord-safe-area-inset-top, 0px));
+    --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--discord-safe-area-inset-bottom, 0px));
+    --safe-left: max(env(safe-area-inset-left, 0px), var(--discord-safe-area-inset-left, 0px));
+    --safe-right: max(env(safe-area-inset-right, 0px), var(--discord-safe-area-inset-right, 0px));
 
     /* Theme palette — light (default). The dark overrides live in the
        [data-theme="dark"] block below; theme.js flips the data-theme
@@ -55,6 +61,20 @@
     --canvas-ink: #e6e6e6;
     --canvas-ink-outline: #000000;
 }
+
+/* Discord Activity: Discord supplies its own chrome around the frame, so hide the
+   web navbar, reclaim the space it reserved at the top, and paint the 16:9 letterbox
+   bars black (instead of the light --board-bg) so a phone's wide frame reads like a
+   clean video player rather than odd white gutters. Class is set by client.js only
+   in the Activity (frame_id), so web/portal builds are untouched. */
+html.discord-activity nav { display: none !important; }
+/* Navbar hidden -> the game owns the WHOLE frame: no body offset, section fills the full
+   dynamic viewport (no reserved navbar/safe strip, so no dead bar at the bottom). All
+   safe-area (notch / Discord header / home indicator) is handled IN-CANVAS — hudTopInset()
+   for the top HUD and the touch-control insets — so the canvas can sit edge-to-edge. */
+html.discord-activity body { padding-top: 0 !important; }
+html.discord-activity { --board-bg: #000000; }
+html.discord-activity #progressContainer { inset: var(--safe-top) 0 0 0; }
 
 html,body {
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
@@ -320,6 +340,13 @@ nav .auth-control ~ .theme-toggle {
     height: calc(100dvh - var(--navbar-height) - var(--safe-top));
     position: relative;
   }
+/* Discord Activity: section (which bounds the absolutely-positioned #gameWindow) fills the
+   FULL viewport — the navbar is hidden and body padding is 0, so reclaim its height too;
+   otherwise the frame measures ~60px short and leaves a dead strip at the bottom. */
+html.discord-activity section {
+    height: 100vh;
+    height: 100dvh;
+}
 
 canvas {
     position: absolute;
@@ -536,7 +563,10 @@ canvas {
         align-items: center;
         justify-content: center;
         text-align: center;
-        padding: 24px;
+        /* Keep the rotate copy clear of a notch / home indicator if it ever
+           shows on a notched device (web mobile; the Discord build locks
+           landscape so it normally won't appear there at all). */
+        padding: max(24px, var(--safe-top)) max(24px, var(--safe-right)) max(24px, var(--safe-bottom)) max(24px, var(--safe-left));
     }
     #rotatePrompt .rotate-inner {
         max-width: 320px;
@@ -2117,3 +2147,25 @@ html.cc-embedded .cc-toast {
     .cc-level-ring { animation: none; opacity: 0; }
 }
 html.cc-embedded .cc-celebrate { display: none !important; }
+
+/* Landing legal footer (Privacy / Terms links). Fixed bottom-center, muted, theme-aware. */
+.landing-footer {
+    position: fixed;
+    bottom: 10px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: 12px;
+    z-index: 5;
+    pointer-events: none; /* only the links are interactive, so the bar never blocks the CTA */
+}
+.landing-footer a {
+    color: var(--text-muted);
+    text-decoration: none;
+    opacity: 0.85;
+    pointer-events: auto;
+}
+.landing-footer a:hover { opacity: 1; text-decoration: underline; }
+.landing-footer-sep { color: var(--text-muted); opacity: 0.5; margin: 0 6px; }
+/* Embedded (portal/iframe) chrome is trimmed — hide the landing footer there too. */
+html.cc-embedded .landing-footer { display: none; }

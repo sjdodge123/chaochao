@@ -11,6 +11,7 @@ const bundles = {
         'client/scripts/metrics.js',
         'client/scripts/ads.js',
         'client/scripts/client.js',
+        'client/scripts/discordVoice.js',
         'client/scripts/connectionHud.js',
         'client/scripts/audio.js',
         'client/scripts/input.js',
@@ -55,6 +56,17 @@ const bundles = {
 
 const outDir = 'client/scripts/dist';
 
+// The Discord Activity presence module is the exception to the concat-globals model: it
+// IMPORTS the Embedded App SDK from node_modules, so it needs a real module bundle
+// (esbuild `build`, not `transform`) emitted as a self-contained IIFE. It's injected
+// INTO play.html (approach b: the game frame IS the Activity entry — index.js
+// discordEmbedRewrite + the <!-- DISCORD_PRESENCE --> placeholder) and inits the SDK
+// once in-frame for auth + instance->room routing + participant presence. See
+// docs/spikes/discord-activity.md.
+const discordBundles = {
+    'discord-presence.bundle.min.js': 'client/scripts/discordPresence.js'
+};
+
 async function buildAll() {
     fs.mkdirSync(outDir, { recursive: true });
     for (const [outFile, sources] of Object.entries(bundles)) {
@@ -63,6 +75,21 @@ async function buildAll() {
         const target = path.join(outDir, outFile);
         fs.writeFileSync(target, result.code);
         console.log(target + ' (' + result.code.length + ' bytes)');
+    }
+    // Discord Activity bundles (module resolution + tree-shake of the SDK).
+    for (const [outFile, entry] of Object.entries(discordBundles)) {
+        if (!fs.existsSync(entry)) { continue; }
+        const target = path.join(outDir, outFile);
+        await esbuild.build({
+            entryPoints: [entry],
+            bundle: true,
+            minify: true,
+            format: 'iife',
+            target: ['es2018'],
+            outfile: target,
+            logLevel: 'silent'
+        });
+        console.log(target + ' (' + fs.statSync(target).size + ' bytes)');
     }
 }
 
