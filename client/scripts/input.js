@@ -551,8 +551,11 @@ function layoutTouchControls() {
         safeB = cssToLogical(safeInsetCss("bottom"));
     }
     var topInset = cssToLogical(16) + safeT;
-    // chat (emoji) -> top-left; exit (fullscreen) -> top-right.
-    sizeCornerButton(chatButton, margin + safeL + hit / 2, topInset + hit / 2, hit, icon);
+    // chat (emoji) -> top-left; exit (fullscreen) -> top-right. In the Activity the emoji
+    // button hugs the left edge tighter (operator pref) — the canvas fills the frame, so a
+    // small gap reads as "in the corner"; web/portal keep the standard corner margin.
+    var emojiLeftMargin = (typeof isDiscordActivity === "function" && isDiscordActivity()) ? cssToLogical(4) : margin;
+    sizeCornerButton(chatButton, emojiLeftMargin + safeL + hit / 2, topInset + hit / 2, hit, icon);
     sizeCornerButton(exitButton, SW - margin - safeR - hit / 2, topInset + hit / 2, hit, icon);
 
     // Re-span the move/attack tap regions across the CURRENT logical viewport (it may
