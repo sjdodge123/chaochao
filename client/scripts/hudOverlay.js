@@ -141,9 +141,9 @@
         { id: "right", kind: "dir", dir: "right", glyph: "▶", title: "Move right", sub: "push the stick right" },
         { id: "punch", kind: "tap", title: "Punch", sub: "tap the button" },
         { id: "kick", kind: "hold", title: "Kick", sub: "hold the button to charge" },
-        { id: "settings", kind: "point", target: "settings", title: "Settings", sub: "tap to continue" },
-        { id: "emoji", kind: "point", target: "emoji", title: "Emotes", sub: "tap to continue" },
-        { id: "fullscreen", kind: "point", target: "fullscreen", title: "Fullscreen", sub: "tap to continue" }
+        { id: "settings", kind: "point", target: "settings", title: "Settings", sub: "tap the gear" },
+        { id: "emoji", kind: "point", target: "emoji", title: "Emotes", sub: "tap the button" },
+        { id: "fullscreen", kind: "point", target: "fullscreen", title: "Fullscreen", sub: "tap the button" }
     ];
     function buildSteps() {
         return STEP_TEMPLATES.filter(function (s) {
@@ -215,11 +215,22 @@
         } catch (e) { /* ignore */ }
         try { return localStorage.getItem(WALK_KEY) === "1"; } catch (e) { return false; }
     }
-    // A tap advances ONLY the "point" steps, and only once the step is on screen.
-    function onWalkTouch() {
+    // For the "point" steps, advance only when the touch lands ON the actual button
+    // (its mapped hit area, with a forgiving pad) — not anywhere on screen. The button's
+    // own handler still fires (settings/emoji/fullscreen open/toggle), which is fine.
+    function onWalkTouch(e) {
         if (walkDone || !walk || !walkPlaced || advanceLock) return;
         var step = walkSteps[walkIdx];
-        if (step && step.kind === "point") { advanceStep(); }
+        if (!step || step.kind !== "point") return;
+        var t = e && e.changedTouches && e.changedTouches[0];
+        if (!t) return;
+        var tr;
+        try { tr = targetRect(step.target, mapper()); } catch (err) { tr = null; }
+        if (!tr) { advanceStep(); return; } // control vanished — don't trap the player
+        var pad = tr.d * 0.45; // generous, but still localized to the button
+        if (Math.abs(t.clientX - tr.cx) <= tr.d / 2 + pad && Math.abs(t.clientY - tr.cy) <= tr.d / 2 + pad) {
+            advanceStep();
+        }
     }
     function advanceStep() {
         if (advanceLock || walkDone) return;
@@ -407,7 +418,17 @@
             finger.style.left = cx + "px"; finger.style.top = cy + "px";
             finger.style.fontSize = sizePx + "px"; finger.style.display = "";
         }
-        function setBubble(cx, cy) { bubble.style.left = cx + "px"; bubble.style.top = cy + "px"; }
+        function setBubble(cx, cy) {
+            // The bubble is nowrap + center-anchored (translate(-50%,-50%)), so near an
+            // edge (e.g. above the bottom-right attack button) it would run off-screen.
+            // Clamp its center so the whole box stays inside the canvas with a margin.
+            var w = bubble.offsetWidth || 0, h = bubble.offsetHeight || 0, margin = 8;
+            var minX = m.rect.left + margin + w / 2, maxX = m.rect.right - margin - w / 2;
+            var minY = m.rect.top + margin + h / 2, maxY = m.rect.bottom - margin - h / 2;
+            if (minX <= maxX) cx = Math.max(minX, Math.min(maxX, cx));
+            if (minY <= maxY) cy = Math.max(minY, Math.min(maxY, cy));
+            bubble.style.left = cx + "px"; bubble.style.top = cy + "px";
+        }
 
         if (step.kind === "dir") {
             // Anchor at the thumb-friendly resting spot in the lower-left; if the
