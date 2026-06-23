@@ -541,7 +541,10 @@ function discordOriginOk(req) {
         return false; // a present-but-unparseable origin is suspicious — refuse
     }
 }
-function handleDiscordToken(req, res) {
+// Gate (config + origin + per-IP RATE LIMIT) as the FIRST middleware in the route
+// chain — runs before express.json, so a 404/403/rate-limited request never even has
+// its body parsed, and the rate limiter is visible at the route level.
+function discordTokenGate(req, res, next) {
     if (!discordAuth.enabled) { return res.status(404).end(); }
     if (!discordOriginOk(req)) {
         console.log('[discord] /api/token refused: non-Discord origin ' + (req.headers.origin || req.headers.referer));
@@ -551,6 +554,9 @@ function handleDiscordToken(req, res) {
     if (discordTokenRateLimited(ip)) {
         return res.status(429).json({ error: 'rate_limited' });
     }
+    next();
+}
+function handleDiscordToken(req, res) {
     var code = req.body && req.body.code;
     console.log('[discord] /api/token hit (path ' + req.path + ', code ' + (code ? 'present' : 'MISSING') + ')');
     discordAuth.authorize(code).then(function (out) {
@@ -562,8 +568,8 @@ function handleDiscordToken(req, res) {
         res.status(400).json({ error: 'exchange_failed' });
     });
 }
-app.post('/api/token', express.json({ limit: '8kb' }), handleDiscordToken);
-app.post('/.proxy/api/token', express.json({ limit: '8kb' }), handleDiscordToken);
+app.post('/api/token', discordTokenGate, express.json({ limit: '8kb' }), handleDiscordToken);
+app.post('/.proxy/api/token', discordTokenGate, express.json({ limit: '8kb' }), handleDiscordToken);
 
 // Dev-only render-perf harness sink (client/scripts/perfharness.js). Registered ONLY
 // when PERF_HARNESS is set (c.perfHarness) so prod never exposes the route. The page
