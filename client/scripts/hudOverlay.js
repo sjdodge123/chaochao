@@ -21,6 +21,10 @@
 (function () {
     var STYLE_ID = "touch-hud-style";
     var ROOT_ID = "touch-hud-root";
+    // The walkthrough lives in its OWN top layer (above the corner buttons — the settings
+    // gear is a z-index:3001 DOM button), separate from the control art (#ROOT_ID, z-30,
+    // which must stay BELOW the settings modal). See injectStyle / buildDom.
+    var WALK_ID = "touch-walk-layer";
     // New key (v2): the gated walkthrough supersedes the old one-shot hint, so it
     // shows again even to players who saw the previous "touchHudHintSeen" hint.
     var WALK_KEY = "touchWalkthroughSeen";
@@ -89,32 +93,32 @@
             "box-shadow:0 4px 10px rgba(201,42,29,.6),inset 0 6px 14px rgba(0,0,0,.4);}",
             "#" + ROOT_ID + " .cap{position:absolute;left:50%;transform:translateX(-50%);color:#fff;font-weight:700;",
             "white-space:nowrap;text-shadow:0 1px 2px rgba(0,0,0,.8);letter-spacing:.3px;}",
-            // ---- walkthrough: highlight ring + pointer + bubble + directional arrow ----
-            "#" + ROOT_ID + " .wt-ring{position:absolute;border-radius:50%;border:3px solid #fff;transform:translate(-50%,-50%);animation:thcRing 1.4s ease-out infinite;}",
+            // ---- walkthrough layer (own stacking context ABOVE the corner buttons) ----
+            "#" + WALK_ID + "{position:fixed;inset:0;z-index:3100;pointer-events:none;transition:opacity .4s ease;}",
+            "#" + WALK_ID + ".gone{opacity:0;}",
+            "#" + WALK_ID + " .wt-ring{position:absolute;border-radius:50%;border:3px solid #fff;transform:translate(-50%,-50%);animation:thcRing 1.4s ease-out infinite;}",
             "@keyframes thcRing{0%{opacity:.9;transform:translate(-50%,-50%) scale(.8);}100%{opacity:0;transform:translate(-50%,-50%) scale(1.25);}}",
-            "#" + ROOT_ID + " .wt-finger{position:absolute;transform:translate(-50%,-50%);animation:thcTap 1.1s ease-in-out infinite;}",
+            "#" + WALK_ID + " .wt-finger{position:absolute;transform:translate(-50%,-50%);animation:thcTap 1.1s ease-in-out infinite;}",
             "@keyframes thcTap{0%,100%{transform:translate(-50%,-50%) scale(1);}50%{transform:translate(-50%,-42%) scale(.82);}}",
-            "#" + ROOT_ID + " .wt-arrow{position:absolute;transform:translate(-50%,-50%);color:#7fe3ff;font-weight:900;",
+            "#" + WALK_ID + " .wt-arrow{position:absolute;transform:translate(-50%,-50%);color:#7fe3ff;font-weight:900;",
             "text-shadow:0 2px 6px rgba(0,0,0,.7);line-height:1;}",
             "@keyframes wtUp{0%,100%{transform:translate(-50%,-30%);}50%{transform:translate(-50%,-90%);}}",
             "@keyframes wtDown{0%,100%{transform:translate(-50%,-70%);}50%{transform:translate(-50%,-10%);}}",
             "@keyframes wtLeft{0%,100%{transform:translate(-30%,-50%);}50%{transform:translate(-90%,-50%);}}",
             "@keyframes wtRight{0%,100%{transform:translate(-70%,-50%);}50%{transform:translate(-10%,-50%);}}",
-            "#" + ROOT_ID + " .wt-arrow.up{animation:wtUp 1s ease-in-out infinite;}",
-            "#" + ROOT_ID + " .wt-arrow.down{animation:wtDown 1s ease-in-out infinite;}",
-            "#" + ROOT_ID + " .wt-arrow.left{animation:wtLeft 1s ease-in-out infinite;}",
-            "#" + ROOT_ID + " .wt-arrow.right{animation:wtRight 1s ease-in-out infinite;}",
-            "#" + ROOT_ID + " .bubble{position:absolute;transform:translate(-50%,-50%);background:rgba(15,18,24,.9);color:#fff;",
+            "#" + WALK_ID + " .wt-arrow.up{animation:wtUp 1s ease-in-out infinite;}",
+            "#" + WALK_ID + " .wt-arrow.down{animation:wtDown 1s ease-in-out infinite;}",
+            "#" + WALK_ID + " .wt-arrow.left{animation:wtLeft 1s ease-in-out infinite;}",
+            "#" + WALK_ID + " .wt-arrow.right{animation:wtRight 1s ease-in-out infinite;}",
+            "#" + WALK_ID + " .bubble{position:absolute;transform:translate(-50%,-50%);background:rgba(15,18,24,.92);color:#fff;",
             "padding:9px 14px;border-radius:12px;font-weight:700;white-space:nowrap;border:1px solid rgba(255,255,255,.18);",
             "box-shadow:0 6px 20px rgba(0,0,0,.5);text-align:center;}",
-            "#" + ROOT_ID + " .bubble .step{display:block;font-weight:600;opacity:.55;font-size:.72em;letter-spacing:.5px;margin-bottom:2px;}",
-            "#" + ROOT_ID + " .bubble small{display:block;font-weight:500;opacity:.82;}",
-            // ---- Skip button (the ONLY interactive element in the overlay) ----
-            "#" + ROOT_ID + " .wt-skip{position:absolute;pointer-events:auto;background:rgba(15,18,24,.82);color:#cfe3ff;",
+            "#" + WALK_ID + " .bubble .step{display:block;font-weight:600;opacity:.55;font-size:.72em;letter-spacing:.5px;margin-bottom:2px;}",
+            "#" + WALK_ID + " .bubble small{display:block;font-weight:500;opacity:.82;}",
+            // ---- Skip button (the ONLY interactive element in the walkthrough) ----
+            "#" + WALK_ID + " .wt-skip{position:absolute;pointer-events:auto;background:rgba(15,18,24,.82);color:#cfe3ff;",
             "border:1px solid rgba(255,255,255,.22);border-radius:999px;font-weight:700;cursor:pointer;",
-            "box-shadow:0 4px 14px rgba(0,0,0,.4);-webkit-tap-highlight-color:transparent;}",
-            "#" + ROOT_ID + " .wt-wrap{transition:opacity .4s ease;}",
-            "#" + ROOT_ID + " .wt-wrap.gone{opacity:0;}"
+            "box-shadow:0 4px 14px rgba(0,0,0,.4);-webkit-tap-highlight-color:transparent;}"
         ].join("");
         var s = document.createElement("style");
         s.id = STYLE_ID;
@@ -141,9 +145,11 @@
         { id: "right", kind: "dir", dir: "right", glyph: "▶", title: "Move right", sub: "push the stick right" },
         { id: "punch", kind: "tap", title: "Punch", sub: "tap the button" },
         { id: "kick", kind: "hold", title: "Kick", sub: "hold the button to charge" },
-        { id: "settings", kind: "point", target: "settings", title: "Settings", sub: "tap the gear" },
+        // Corner buttons last (each opens its menu when tapped). Settings is LAST so its
+        // full-screen modal opens with nothing drawn over it as the walkthrough ends.
         { id: "emoji", kind: "point", target: "emoji", title: "Emotes", sub: "tap the button" },
-        { id: "fullscreen", kind: "point", target: "fullscreen", title: "Fullscreen", sub: "tap the button" }
+        { id: "fullscreen", kind: "point", target: "fullscreen", title: "Fullscreen", sub: "tap the button" },
+        { id: "settings", kind: "point", target: "settings", title: "Settings", sub: "tap the gear" }
     ];
     function buildSteps() {
         return STEP_TEMPLATES.filter(function (s) {
@@ -175,7 +181,8 @@
         // First-run gated walkthrough.
         if (!walkSeen()) {
             walkSteps = buildSteps();
-            walk = el("wt-wrap");
+            walk = document.createElement("div");
+            walk.id = WALK_ID;
             walk._ring = el("wt-ring");
             walk._finger = el("wt-finger", "👆");
             walk._arrow = el("wt-arrow");
@@ -194,17 +201,17 @@
             walk.appendChild(walk._bubble);
             walk.appendChild(walk._skip);
             walk.style.visibility = "hidden"; // until first frame() places the active step
-            root.appendChild(walk);
-            // Tap-to-continue for the "point" steps (settings/emoji/fullscreen):
-            // any touch advances. Ignored for action steps, which are gated on the
-            // real control instead. Only after the step is actually on screen.
+            // Advance the "point" steps when the player touches the real target button.
             window.addEventListener("touchstart", onWalkTouch, { passive: true });
         }
 
-        // Parent INTO the fullscreen target (#gameWindow) so the overlay renders in
-        // the fullscreen top layer (and stays visible in fullscreen).
+        // Parent INTO the fullscreen target (#gameWindow) so the overlay renders in the
+        // fullscreen top layer. The control art (root, z-30) and the walkthrough (its own
+        // z-3100 layer, above the corner buttons) are SIBLINGS here — the walkthrough must
+        // not be nested under root's z-30 stacking context or it'd hide behind the gear.
         var host = document.getElementById("gameWindow") || document.body;
         host.appendChild(root);
+        if (walk) { host.appendChild(walk); }
     }
 
     function walkSeen() {
@@ -460,9 +467,11 @@
             setRing(tr.cx, tr.cy, tr.d);
             hideArrow();
             setFinger(tr.cx, tr.cy, Math.round(tr.d * 0.34));
-            // Keep the bubble on-screen: below the control if it's near the top.
-            var below = tr.cy < (m.rect.top + m.rect.height * 0.4);
-            setBubble(tr.cx, tr.cy + (below ? tr.d * 0.85 : -tr.d * 0.85));
+            // Bubble in a CLEAR central spot — the corners are crowded (the fullscreen
+            // button and the settings gear stack in the top-right), so anchoring the
+            // bubble on the button would clip its neighbor. The ring + finger mark the
+            // actual button; the text sits in the open upper-middle.
+            setBubble(m.rect.left + m.rect.width / 2, m.rect.top + m.rect.height * 0.32);
             return;
         }
     }
