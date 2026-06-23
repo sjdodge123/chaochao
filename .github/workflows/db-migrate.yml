@@ -17,6 +17,11 @@ on:
     paths: ['supabase/migrations/**', 'supabase/config.toml']
   pull_request:
     paths: ['supabase/migrations/**', 'supabase/config.toml']
+  # Manual trigger: a push to main via GitHub's native auto-merge is performed with the
+  # Actions GITHUB_TOKEN, and GITHUB_TOKEN pushes do NOT cascade to `on: push` workflows —
+  # so an auto-merged migration never applies on its own. Run this workflow by hand
+  # (Actions tab or `gh workflow run`) to apply pending migrations to prod in that case.
+  workflow_dispatch:
 
 # Never let two migration runs race against the same database.
 concurrency:
@@ -66,7 +71,7 @@ jobs:
 
   # On merge to main: apply any not-yet-applied migrations to prod.
   migrate:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
