@@ -145,10 +145,37 @@ async function authorizeForScopes(sdk, clientId) {
 
     // Hand a (possibly guest) session to auth.js so the game's connect-gate (which awaits
     // chaochaoAuth.ready) always unblocks — even if Discord auth fails, we connect as guest.
-    function adoptSession(token, profile) {
+    //
+    // RACE GUARD: this presence bundle is injected BEFORE the deferred scripts/auth.js, so
+    // the SDK/token path can resolve while the parser is still blocked on the game bundle /
+    // CDNs and auth.js hasn't run yet — at which point window.chaochaoAuth is undefined and a
+    // direct call is silently DROPPED. The player would then wait out auth.js's ~12s
+    // connect-gate cap and connect as a GUEST despite Discord auth having succeeded. So we
+    // BUFFER the latest result and deliver it as soon as adoptDiscordSession exists (bounded
+    // poll, comfortably under that cap). Re-delivery is supported (e.g. a guest-then-real
+    // token sequence) — pendingSession always holds the latest and a live poll picks it up.
+    var pendingSession = null;
+    var adoptPollTimer = null;
+    function deliverPendingSession() {
+        if (!pendingSession) { return false; }
         if (window.chaochaoAuth && typeof window.chaochaoAuth.adoptDiscordSession === 'function') {
-            window.chaochaoAuth.adoptDiscordSession(token || null, profile || null);
+            window.chaochaoAuth.adoptDiscordSession(pendingSession.token || null, pendingSession.profile || null);
+            return true;
         }
+        return false;
+    }
+    function adoptSession(token, profile) {
+        pendingSession = { token: token, profile: profile };
+        if (deliverPendingSession()) { return; }   // auth.js already up — delivered now
+        if (adoptPollTimer) { return; }            // already polling — it'll pick up the latest pendingSession
+        var waited = 0;
+        adoptPollTimer = setInterval(function () {
+            waited += 50;
+            if (deliverPendingSession() || waited >= 10000) {
+                clearInterval(adoptPollTimer);
+                adoptPollTimer = null;
+            }
+        }, 50);
     }
 
     if (!clientId) {
