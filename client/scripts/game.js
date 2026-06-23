@@ -661,8 +661,12 @@ function resize() {
         layoutTouchControls();
     }
     // Keep the DOM settings gear pinned to the canvas's top-right as the letterbox
-    // fit changes (orientation / fullscreen / URL-bar collapse).
-    if (typeof positionTouchSettingsButton === "function") {
+    // fit changes (orientation / fullscreen / URL-bar collapse). Also re-evaluate its
+    // visibility here: in a Discord Activity no fullscreenchange event ever fires, so this
+    // is what reveals the gear once the touch canvas is ready (positions before showing).
+    if (typeof updateTouchSettingsButtonVisibility === "function") {
+        updateTouchSettingsButtonVisibility();
+    } else if (typeof positionTouchSettingsButton === "function") {
         positionTouchSettingsButton();
     }
 

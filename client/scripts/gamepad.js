@@ -1409,7 +1409,11 @@ function updateTouchSettingsButtonVisibility() {
         return;
     }
     var touch = (typeof isTouchScreen !== "undefined" && isTouchScreen);
-    var show = !!(touch && inFullscreen());
+    // In a Discord Activity the navbar is hidden and fullscreen is disabled, so the gear is
+    // the ONLY way to reach settings — show it on touch there even without fullscreen. The
+    // web build stays fullscreen-only (the navbar already exposes every setting).
+    var discord = (typeof isDiscordActivity === "function" && isDiscordActivity());
+    var show = !!(touch && (inFullscreen() || discord));
     // Position BEFORE revealing so the gear never flashes at the 0,0 CSS fallback.
     if (show) {
         positionTouchSettingsButton();
