@@ -208,6 +208,11 @@
     }
 
     function walkSeen() {
+        // ?walkthrough=1 force-shows it (no devtools needed to replay on a phone); harmless
+        // opt-in in prod, like ?domhud. Otherwise honor the once-only localStorage flag.
+        try {
+            if (/[?&]walkthrough=1\b/.test((window.location && window.location.search) || "")) { return false; }
+        } catch (e) { /* ignore */ }
         try { return localStorage.getItem(WALK_KEY) === "1"; } catch (e) { return false; }
     }
     // A tap advances ONLY the "point" steps, and only once the step is on screen.
