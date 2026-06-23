@@ -468,11 +468,12 @@ function layoutTouchControls() {
         return;
     }
     // Joystick: thumb-sized base ring + stick, preserving the original ratios.
-    joystickMovement.baseRadius = cssToLogical(90);
+    // Scaled to ~0.64 of the original 90/54/45 (two 20% steps) for a compact pad.
+    joystickMovement.baseRadius = cssToLogical(58);
     joystickMovement.width = joystickMovement.baseRadius;
     joystickMovement.height = joystickMovement.baseRadius;
-    joystickMovement.stickRadius = cssToLogical(54);
-    joystickMovement.maxPullRadius = cssToLogical(45);
+    joystickMovement.stickRadius = cssToLogical(34);
+    joystickMovement.maxPullRadius = cssToLogical(29);
     joystickMovement.deadzone = cssToLogical(5);
 
     // Attack: a thumb-sized button drawn in the LOWER-right corner (where a
@@ -481,7 +482,8 @@ function layoutTouchControls() {
     // no longer matters that a fixed physical radius looks small on a big tablet
     // (that shrinking centre circle is what made punch impossible to land there).
     if (attackButton) {
-        attackButton.radius = cssToLogical(78);
+        // Scaled to ~0.64 of the original 78 to match the joystick's reduction.
+        attackButton.radius = cssToLogical(50);
     }
 
     // Top-corner icon buttons: generous tap zones (the fullscreen icon shares the

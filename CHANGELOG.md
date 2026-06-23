@@ -14,6 +14,11 @@ To re-render a past week's digest with the current formatting, run the `Release 
 
 ## Unreleased
 
+### Controls & Couch Co-op
+
+- **Touch controls got a glow-up.** The on-screen joystick and punch button are redrawn as chunky, tactile pads — a filled thumb-stick with direction arrows and a glossy punch button — so it reads at a glance where to move and attack. First-timers get a one-time "Drag to move / Tap to punch" hint that clears the moment you start playing.
+- **Phone camera sits closer.** On touch devices the race camera zooms in a touch tighter so karts read clearly on smaller screens.
+
 ### Map editor
 
 - **Barriers now block exactly where a kart can't drive.** The fairness check used to seal a map off the moment a wall *visually* crossed the straight line between two regions — even when you'd left a clear lane to drive through — so maps got a false "No goal is reachable" rejection. It now traces the actual gaps a kart drives through: weaving wall mazes with real lanes pass, while a wall that genuinely **divides the map** (even one running straight through the middle of a region) is still correctly rejected as unfinishable.
