@@ -544,10 +544,15 @@ function discordOriginOk(req) {
 // Gate (config + origin + per-IP RATE LIMIT) as the FIRST middleware in the route
 // chain — runs before express.json, so a 404/403/rate-limited request never even has
 // its body parsed, and the rate limiter is visible at the route level.
+// Strip control chars (incl. CR/LF) + cap length on any user-supplied value before it
+// reaches a log line, so request data can't forge/split log entries.
+function logSafe(v) {
+    return String(v == null ? "" : v).replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 200);
+}
 function discordTokenGate(req, res, next) {
     if (!discordAuth.enabled) { return res.status(404).end(); }
     if (!discordOriginOk(req)) {
-        console.log('[discord] /api/token refused: non-Discord origin ' + (req.headers.origin || req.headers.referer));
+        console.log('[discord] /api/token refused: non-Discord origin ' + logSafe(req.headers.origin || req.headers.referer));
         return res.status(403).json({ error: 'bad_origin' });
     }
     var ip = botGuard.resolveClientIp(req.headers['x-forwarded-for'], req.ip) || 'unknown';
@@ -558,13 +563,13 @@ function discordTokenGate(req, res, next) {
 }
 function handleDiscordToken(req, res) {
     var code = req.body && req.body.code;
-    console.log('[discord] /api/token hit (path ' + req.path + ', code ' + (code ? 'present' : 'MISSING') + ')');
+    console.log('[discord] /api/token hit (path ' + logSafe(req.path) + ', code ' + (code ? 'present' : 'MISSING') + ')');
     discordAuth.authorize(code).then(function (out) {
-        console.log('[discord] exchange OK -> name=' + (out.profile && out.profile.name) +
+        console.log('[discord] exchange OK -> name=' + logSafe(out.profile && out.profile.name) +
             ', handshake token ' + (out.token ? 'minted' : 'NULL (player will be guest)'));
         res.json(out);
     }).catch(function (e) {
-        console.log('[discord] token exchange failed:', e && e.message);
+        console.log('[discord] token exchange failed:', logSafe(e && e.message));
         res.status(400).json({ error: 'exchange_failed' });
     });
 }
