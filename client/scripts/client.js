@@ -24,6 +24,12 @@ var config,
 function isDiscordActivity() {
 	try { return /[?&]frame_id=/.test(window.location.search) || /[?&]discord=1(?:&|$)/.test(window.location.search); } catch (e) { return false; }
 }
+// In a Discord Activity, Discord already wraps us in its own chrome (navbar, the
+// native participant/voice shelf, fullscreen), so the web navbar is redundant and
+// just steals the top of the frame. Tag <html> at parse time (before first paint)
+// so the CSS can hide the navbar + darken the letterbox bars and the game owns the
+// whole frame. Web/portal builds never get the class, so they're unchanged.
+try { if (isDiscordActivity()) { document.documentElement.classList.add("discord-activity"); } } catch (e) {}
 function menuExitHref() {
 	return "./index.html"; // web/portal menu-exit destination
 }

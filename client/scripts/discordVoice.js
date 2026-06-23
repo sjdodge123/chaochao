@@ -148,14 +148,14 @@ function drawSpeakingIndicator(player, sx, sy) {
     }
 
     function init() {
-        if (built) { return; }
-        // Discord context only. isDiscordActivity() lives in client.js (same bundle/global
-        // scope); guard with typeof so a stray load order can't throw.
-        if (typeof isDiscordActivity !== "function" || !isDiscordActivity()) { return; }
-        if (!window.discordPresence) { return; }
-        built = true;
-        window.discordPresence.onParticipants(renderParticipants);
-        window.discordPresence.onSpeaking(applySpeaking);
+        // DOM voice tray intentionally DISABLED. Discord renders its OWN participant /
+        // voice shelf inside the Activity frame (the avatar tile + "›" on mobile), so our
+        // tray was a visible duplicate ("2 voice trays", operator-reported on device). The
+        // on-kart SPEAKING RING (drawSpeakingIndicator, above) is the unique game-native
+        // surface and stays — it's fed by window.discordPresence.isSpeaking, independent of
+        // this tray. To bring the custom tray back on a surface Discord doesn't cover,
+        // restore the build() path: ensureTray() + the two onParticipants/onSpeaking hooks.
+        return;
     }
 
     if (document.readyState === "loading") {

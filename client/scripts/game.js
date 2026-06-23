@@ -787,6 +787,11 @@ function updateColorblindToggleUI() {
 // support so we can hide the dead control and skip a doomed request rather than
 // drawing a button that does nothing.
 function fullscreenSupported() {
+    // Inside a Discord Activity, Discord owns fullscreen (the iframe can't usefully
+    // go fullscreen and the request is a no-op/blocked). Report unsupported so the
+    // in-game Fullscreen button + its label don't draw and goFullScreen() no-ops —
+    // a dead "Fullscreen" affordance just confused players (operator-reported).
+    if (typeof isDiscordActivity === "function" && isDiscordActivity()) { return false; }
     return !!(document.fullscreenEnabled &&
         typeof gameWindow !== "undefined" && gameWindow &&
         gameWindow.requestFullscreen);

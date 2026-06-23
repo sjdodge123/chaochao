@@ -62,6 +62,16 @@
     --canvas-ink-outline: #000000;
 }
 
+/* Discord Activity: Discord supplies its own chrome around the frame, so hide the
+   web navbar, reclaim the space it reserved at the top, and paint the 16:9 letterbox
+   bars black (instead of the light --board-bg) so a phone's wide frame reads like a
+   clean video player rather than odd white gutters. Class is set by client.js only
+   in the Activity (frame_id), so web/portal builds are untouched. */
+html.discord-activity nav { display: none !important; }
+html.discord-activity body { padding-top: var(--safe-top) !important; }
+html.discord-activity { --board-bg: #000000; }
+html.discord-activity #progressContainer { inset: var(--safe-top) 0 0 0; }
+
 html,body {
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
     /* Stop iOS from auto-inflating text in landscape (it ignores our sizing
