@@ -1,16 +1,16 @@
 // Discord Activity in-frame auth bridge (Phase 4). Server-side OAuth code exchange +
 // identity validation. The CLIENT SECRET lives ONLY here (env), never in any bundle.
 //
-// Flow: the Activity (client/scripts/discordActivity.js) runs the Embedded SDK
-// authorize() inside the iframe and POSTs the resulting one-time `code` to /api/token.
-// This module exchanges it for a Discord access token using the secret, RE-VALIDATES
-// the identity via the Discord API (we never trust the SDK-supplied user object),
-// bridges it to a real Supabase user (server/auth.js), and mints a Supabase-compatible
-// token for the socket handshake. The client also gets the raw Discord access token to
-// hand to sdk.commands.authenticate() (needed for the participant/voice phases).
+// Flow: the in-frame SDK bootstrap (client/scripts/discordPresence.js, approach b) runs
+// the Embedded SDK authorize() inside the iframe and POSTs the resulting one-time `code`
+// to /api/token. This module exchanges it for a Discord access token using the secret,
+// RE-VALIDATES the identity via the Discord API (we never trust the SDK-supplied user
+// object), bridges it to a real Supabase user (server/auth.js), and mints a handshake
+// token for the socket. The client also gets the raw Discord access token to hand to
+// sdk.commands.authenticate() (needed for the participant/voice phases).
 //
 // Env (server-only):
-//   DISCORD_CLIENT_ID      — public app id (also injected into discord.html).
+//   DISCORD_CLIENT_ID      — public app id (also injected into the Activity game frame).
 //   DISCORD_CLIENT_SECRET  — OAuth2 client secret. SERVER ONLY. Never bundled.
 //
 // Uses Node's global fetch (Node 18+); no new dependency. Degrades to disabled (the

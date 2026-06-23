@@ -108,11 +108,12 @@ function adsConfigTag() {
 }
 
 // Browser-safe Discord Activity config (PUBLIC client id only) injected via the
-// <!-- DISCORD_CONFIG --> placeholder (discord.html only). The client SECRET is
-// never referenced here — token exchange is server-side (POST /api/token).
-// Stripped to '' when DISCORD_CLIENT_ID is unset, so discord.html shows a clear
-// "not configured" message instead of failing the SDK handshake. (No mappingTarget:
-// we no longer call patchUrlMappings — same-origin requests ride the root URL Mapping.)
+// <!-- DISCORD_CONFIG --> placeholder. Approach (b): play.html IS the Activity entry,
+// so the in-frame SDK bootstrap (discordPresence.js) reads window.__DISCORD__ from the
+// game frame. The client SECRET is never referenced here — token exchange is
+// server-side (POST /api/token). Stripped to '' when DISCORD_CLIENT_ID is unset. (No
+// mappingTarget: we don't call patchUrlMappings — same-origin requests ride the root
+// URL Mapping.)
 function discordConfigTag() {
     if (!process.env.DISCORD_CLIENT_ID) {
         return '';
@@ -130,20 +131,21 @@ function discordConfigTag() {
 // reroute fetch/WebSocket/XHR, but NOT resources the HTML parser loads via
 // <script src> / <link href>. play.html pulls jQuery (a HARD boot dep — game.js wraps
 // its entire boot in `$(function(){…})`) and Bootstrap CSS from external CDNs, so in
-// the Activity the page would throw before a match could ever connect. The Discord
-// handoff navigates to `play.html?discord=1`; for that request only we swap those two
-// CDN tags for local same-origin copies (proxied transparently through `/.proxy/`) and
-// drop the gtag loader (analytics is irrelevant in-frame and off-policy for Discord).
-// supabase-js is left as-is — it degrades to guest if blocked; real in-frame auth is a
-// later phase. The normal web build is served byte-identical (this only fires on the
-// ?discord=1 query). Keep these strings in lockstep with client/play.html.
+// the Activity the page would throw before a match could ever connect. The Activity
+// serves play.html in-frame (root frame_id entry, or the legacy `?discord=1`); for
+// those requests only we swap those two CDN tags for local same-origin copies (proxied
+// transparently through `/.proxy/`) and drop the gtag loader (analytics is irrelevant
+// in-frame and off-policy for Discord). supabase-js is left as-is — the in-frame SDK
+// bootstrap mints its own handshake token (POST /api/token), so no supabase-js client is
+// needed. The normal web build is served byte-identical (this only fires for the Activity
+// requests). Keep these strings in lockstep with client/play.html.
 function discordEmbedRewrite(html) {
     return html
-        // Phase 5 presence: inject the SDK-re-init bundle (instance->room routing +
-        // participant presence). Loaded into the game frame because the discord.html
-        // handoff drops the original SDK instance. Empty comment on the web build.
-        // Placed before the game bundle so window.discordPresence exists in time; the
-        // cache-bust replace below stamps its ?v= too (it matches the scripts/ regex).
+        // Phase 5 presence: inject the SDK bundle (auth + instance->room routing +
+        // participant presence) INTO the game frame — approach (b) inits the SDK once
+        // here, no discord.html redirect. Empty comment on the web build. Placed before
+        // the game bundle so window.discordPresence exists in time; the cache-bust replace
+        // below stamps its ?v= too (it matches the scripts/ regex).
         .replace(
             '<!-- DISCORD_PRESENCE -->',
             '<script src="scripts/dist/discord-presence.bundle.min.js"></script>'
@@ -315,8 +317,7 @@ const HTML_PAGES = {
     '/index.html': true,
     '/play.html': true,
     '/create.html': true,
-    '/join.html': true,
-    '/discord.html': true
+    '/join.html': true
 };
 app.use(function (req, res, next) {
     var url = req.path === '/' ? '/index.html' : req.path;
@@ -350,17 +351,6 @@ app.use(function (req, res, next) {
         // Activity entry (frame_id, approach b) and the legacy `play.html?discord=1`.
         if (url === '/play.html' && (activityEntry || (req.query && req.query.discord))) {
             modified = discordEmbedRewrite(modified);
-        }
-        // Discord's sandbox caches the Activity's JS aggressively and the filenames are
-        // stable, so stamp the in-frame scripts with BOOT_STAMP (the same id used for the
-        // play.html scripts in discordEmbedRewrite — ONE cache-bust mechanism). A
-        // restart/redeploy changes the stamp so the proxy/browser refetches; discord.html
-        // is no-cache and reloaded per launch, so the fresh stamp always reaches the client.
-        if (url === '/discord.html') {
-            modified = modified.replace(
-                'scripts/dist/discord.bundle.min.js',
-                'scripts/dist/discord.bundle.min.js?v=' + BOOT_STAMP
-            );
         }
         res.set('Content-Type', 'text/html');
         // HTML carries the injected version/news/bundle tags and must reflect a

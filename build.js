@@ -55,17 +55,14 @@ const bundles = {
 
 const outDir = 'client/scripts/dist';
 
-// The Discord Activity entries are the exception to the concat-globals model: they
-// IMPORT the Embedded App SDK from node_modules, so each needs a real module bundle
-// (esbuild `build`, not `transform`) emitted as a self-contained IIFE. See
-// client/discord.html and docs/spikes/discord-activity.md.
-//   - discordActivity.js  -> the discord.html bootstrap (Phase 4 auth + handoff).
-//   - discordPresence.js   -> loaded INTO play.html?discord=1 (Phase 5): re-inits the
-//                             SDK in the game frame for instance->room routing +
-//                             participant presence (the redirect drops the original
-//                             SDK instance).
+// The Discord Activity presence module is the exception to the concat-globals model: it
+// IMPORTS the Embedded App SDK from node_modules, so it needs a real module bundle
+// (esbuild `build`, not `transform`) emitted as a self-contained IIFE. It's injected
+// INTO play.html (approach b: the game frame IS the Activity entry — index.js
+// discordEmbedRewrite + the <!-- DISCORD_PRESENCE --> placeholder) and inits the SDK
+// once in-frame for auth + instance->room routing + participant presence. See
+// docs/spikes/discord-activity.md.
 const discordBundles = {
-    'discord.bundle.min.js': 'client/scripts/discordActivity.js',
     'discord-presence.bundle.min.js': 'client/scripts/discordPresence.js'
 };
 

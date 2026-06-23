@@ -46,12 +46,14 @@
     var currentUser = null;
     var sb = null;
 
-    // Discord Activity in-frame session (Phase 4). discordActivity.js validated the
-    // player server-side and stashed a minted handshake token + profile here before
-    // handing off to play.html?discord=1. In that mode we DON'T build a Supabase
-    // client (its CDN is sandbox-blocked anyway): the handshake token and profile
-    // come straight from the stash, and the existing socket path treats this exactly
-    // like a signed-in web player (the server resolves the real user_id from the token).
+    // Discord Activity in-frame session (Phase 4). LEGACY stash path: the removed
+    // discord.html bootstrap validated the player server-side and stashed a minted
+    // handshake token + profile here before handing off to play.html?discord=1. Approach
+    // (b) no longer redirects (discordPresence.js calls adoptDiscordSession() in-frame
+    // instead — see below), but the stash read is kept as a harmless fallback. Either
+    // way, in Discord mode we DON'T build a Supabase client (its CDN is sandbox-blocked):
+    // the handshake token + profile drive the socket path exactly like a signed-in web
+    // player (the server resolves the real user_id from the token).
     var discordSession = null;
     try {
         var rawDiscord = window.sessionStorage.getItem('chaochao.discordAuth');
