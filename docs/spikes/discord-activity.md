@@ -328,16 +328,65 @@ participants; ring pulses on speak), `npm run build`, `smoke-test.js`, headless 
 **Still open:**
 - ~~AFK rejoin loses voice/presence~~ — **FIXED** (in-place re-entry + tiered idle policy;
   operator-confirmed in-frame). See the AFK-rejoin note above.
-- **Phase 6 mobile** — portal mobile platform enabled but Discord mobile still returns
-  *"This Activity is not currently available on this OS"* (a client-side platform gate before
-  our code runs; suspect manifest cache → force-quit the mobile app / propagation delay).
-  Phase 6 CODE polish (safe-area insets, `innerWidth<900` perf-tier recheck under embed dims,
-  voice-tray sizing on narrow screens) is NOT started.
+- ~~**Phase 6 mobile**~~ — **DONE & operator-device-confirmed** (commits `d0574b1..b734c04`).
+  See the "Phase 6 — Mobile (as-built)" note below. The *"not available on this OS"* launch
+  block was NOT our code (no client OS gate) — it was a dead `cloudflared` quick tunnel
+  (NXDOMAIN at the edge); fixed by a stable named tunnel (see that note).
 - ~~Idle AFK loop (rejoin→idle→kick→rejoin)~~ — **FIXED** via the tiered idle policy +
   tap-to-rejoin panel (see the AFK-rejoin note above).
 - **Dead code:** `discord.html` + `discordActivity.js` (+ the `discord.bundle` build step) are
-  unused under approach (b) — delete before PR.
+  unused under approach (b) — delete before PR (pre-PR cleanup, below).
 - **Not pushed / no PR** (operator gate).
+
+**Phase 6 — Mobile (as-built; commits `d0574b1..b734c04`, operator-device-confirmed iOS + web mobile).**
+The arena is a fixed 16:9 world; a phone in landscape is ~2.2:1, so the original min()
+letterbox left ~40% black side voids. The build now **fills the frame** and makes the HUD
+coexist with Discord's mobile chrome. All gated; desktop web keeps the classic 16:9 view.
+- **Fill the frame:** `resize()` (game.js) widens `LOGICAL_WIDTH` to the frame's aspect
+  (clamped 16:9..21:9, height fixed 768) when `fillViewport()` (client.js) is true —
+  **Discord Activity OR any touch device**. Immutable `BASE_LOGICAL_WIDTH` is restored on
+  every non-fill resize (desktop/laptop, or a context flip). No distortion (scaleX==scaleY),
+  no crop; the camera just shows a wider slice while racing. Whole-map views (lobby/overview/
+  spectator) centre on the **arena** centre (`world.*`), not the widened viewport, so the
+  16:9 arena never left-anchors (`computeFocusedView`/`computeWorldViewTarget` in draw.js).
+- **Operator decision (FAIRNESS):** the wider view is intentionally shared with **web mobile**
+  too — touch phones see a slightly wider slice than desktop. Accepted. ⇒ the web build is
+  **no longer byte-identical for touch devices**; needs a player-facing CHANGELOG bullet at
+  PR time (no `server/` files touched, so the CI gate won't trip — don't forget it manually).
+- **Chrome:** in the Activity, `<html>.discord-activity` (set at parse time, client.js) hides
+  the web navbar, zeroes body padding + makes `section` full `100dvh` so `#gameWindow` fills
+  the WHOLE viewport (kills a ~60px bottom dead strip), and paints letterbox bars black.
+- **Safe-area, in-canvas:** `--safe-*` vars now `max(env(), var(--discord-safe-area-inset-*))`.
+  The touch controls (input.js) + the top HUD column (`hudTopInset()` in draw_hud.js shifting
+  the session readout + `lobbyBannerRowY` lobby card) inset by the device safe area so nothing
+  sits under the notch / Discord's ~66px header / ~36px home-indicator. Emoji button hugs the
+  left edge. These insets are gated to the Activity (on a letterboxed web canvas the inset is
+  in the bars, not over the HUD).
+- **Voice tray:** the Phase-5b DOM tray is DISABLED — Discord renders its own native
+  participant/voice shelf in-frame, so ours was a duplicate. The on-kart speaking ring stays.
+- **Fullscreen:** `fullscreenSupported()` returns false in the Activity (the iframe can't
+  usefully go fullscreen) → the in-game button + label don't draw. Because the navbar is also
+  hidden, the **touch settings gear** (gamepad.js) now shows on touch in the Activity (was
+  `inFullscreen()`-only) — the sole settings access on mobile; re-evaluated from `resize()`
+  since no fullscreenchange event fires in the frame.
+- **Perf:** Auto pins LOW for a tiny embedded frame (`minDim<=480` + Activity).
+- **Landscape lock:** `discordPresence.js` calls `setOrientationLockState(LANDSCAPE)` after
+  `ready()` so mobile never lands on the portrait rotate prompt (no-op on desktop).
+- **Diagnostics:** `discordViewportDiag()` (client.js) ships the real device viewport / fit /
+  bar widths / safe insets in the `discordDiag` payload (server log under `DISCORD_DEBUG=1`) —
+  invaluable for the remote mobile-layout debugging; decide keep-vs-strip before PR.
+- Codex-reviewed (`b734c04`); all findings resolved. `npm run build` + `smoke-test` +
+  `test:mobile-layout` green.
+
+**Dev/test infra (STABLE — see memory `discord-dev-tunnel-port-3700`).** The flaky
+`cloudflared tunnel --url` quick tunnels (trycloudflare hostnames went NXDOMAIN every ~½ day →
+white screen in Discord; the server was fine, the tunnel was dead) were REPLACED by a stable
+**named** cloudflared tunnel: portal URL Mapping `/` → `discord-dev.chaochaogame.com` →
+ingress (`~/.cloudflared/config.yml`) → `http://localhost:3700`. Tunnel `chaochao-dev`
+(zone chaochaogame.com), auto-starts + self-heals via a LaunchAgent
+(`~/Library/LaunchAgents/com.chaochao.cloudflared.plist`). ⇒ **the dev server MUST run on
+`PORT=3700`** (`cd <worktree> && PORT=3700 DISCORD_DEBUG=1 node index.js`); the portal mapping
+is permanent (set once).
 
 ## Implementation plan (9 phases; ~7–8 dev-days to testable, +~1d voice-activity delighter, +listing prereqs & ~2–3d skin shop for public/monetized)
 
@@ -369,8 +418,8 @@ Show who's talking, in-game — the touch that makes the Activity feel genuinely
 - **Render (two surfaces, like other Discord Activities):** (a) a speaking indicator **on the kart** — reuse an existing draw path (a pulsing underglow ring like the team glow, or a small mic glyph above the kart in `draw.js` / `draw_skins.js`); and (b) an optional **voice tray** — a small row of participant avatars (`cdn.discordapp.com`, already allowlisted) that highlight the active speaker. Both gate on `isDiscord`; web/portal builds unaffected.
 - **Caveat:** events fire only for the subscribed channel and need scope consent — degrade silently if denied. Confirm `SPEAKING_*` is exposed by the current SDK during build (historically gated; supported for Activities now, but verify).
 
-### Phase 6 — Mobile polish *(~1d; mobile enabled per operator choice)*
-Enable mobile in the portal; wire `--discord-safe-area-inset-*` (with `env()` fallback); re-check `innerWidth<900` Auto perf demotion under embed dims; optional thermal-state subscription → degrade rendering (chaochao already has perf tiers).
+### Phase 6 — Mobile polish *(~1d; mobile enabled per operator choice)* — **DONE & operator-device-confirmed**
+See the "Phase 6 — Mobile (as-built)" note above (commits `d0574b1..b734c04`): frame-fill via a widened logical viewport (Discord + web mobile), in-canvas safe-area for the touch + top HUD, navbar hidden / full-viewport section, duplicate voice tray removed, fullscreen disabled + settings gear shown on mobile, landscape lock, perf-tier recheck, and the stable named-tunnel dev infra. (Original plan: enable mobile in the portal; wire `--discord-safe-area-inset-*` with `env()` fallback; re-check the `innerWidth<900` Auto perf demotion; optional thermal-state subscription — chaochao already has perf tiers.)
 
 ### Phase 7 — Listing prerequisites *(non-code; public-only)*
 Publish **Privacy Policy + ToS** (neither exists today — hard blocker for Discovery); app **verification** → fill Discovery settings → Enable Discovery; confirm content-policy compliance. No allowlist/partner gating remains.
