@@ -16,7 +16,7 @@ To re-render a past week's digest with the current formatting, run the `Release 
 
 ### Controls & Couch Co-op
 
-- **Touch controls got a glow-up.** The on-screen joystick and punch button are redrawn as chunky, tactile pads — a filled thumb-stick with direction arrows and a glossy punch button — so it reads at a glance where to move and attack. First-timers get a one-time "Drag to move / Tap to punch" hint that clears the moment you start playing.
+- **Touch controls got a glow-up.** The on-screen joystick and punch button are redrawn as chunky, tactile pads — a filled thumb-stick with direction arrows and a glossy punch button — so it reads at a glance where to move and attack. First-timers now get a one-time guided walkthrough that takes them through every control one step at a time — move in each direction, punch, hold to kick, then the settings / emoji / fullscreen buttons — and you can Skip it anytime.
 - **Phone camera sits closer.** On touch devices the race camera zooms in a touch tighter so karts read clearly on smaller screens.
 
 ### Map editor

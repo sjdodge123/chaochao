@@ -41,6 +41,7 @@ const ALLOW = {
     reach: {
         themeToggle: 'reachable in-game via the Settings panel (gamepad.js); secondary navbar affordance on menu pages',
         freeRewardButton: 'invisible anti-bot honeypot decoy — must NOT be gamepad-reachable; only a DOM-scraping bot should ever reach it (see botGuard.js)',
+        wtSkipBtn: 'first-run touch-controls walkthrough Skip — the walkthrough only renders on touch devices (isTouchScreen, hudOverlay.js); gamepad/keyboard players never see it, so it is intentionally not gamepad-reachable',
     },
 };
 

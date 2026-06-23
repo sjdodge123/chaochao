@@ -122,6 +122,7 @@
             // ---- Skip button (the ONLY interactive element in the walkthrough) ----
             "#" + WALK_ID + " .wt-skip{position:absolute;pointer-events:auto;background:rgba(15,18,24,.82);color:#cfe3ff;",
             "border:1px solid rgba(255,255,255,.22);border-radius:999px;font-weight:700;cursor:pointer;",
+            "min-height:44px;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;",
             "box-shadow:0 4px 14px rgba(0,0,0,.4);-webkit-tap-highlight-color:transparent;}"
         ].join("");
         var s = document.createElement("style");
@@ -193,6 +194,7 @@
             walk._bubble = el("bubble");
             walk._skip = document.createElement("button");
             walk._skip.type = "button";
+            walk._skip.id = "wtSkipBtn"; // for the button-gate reach allowlist (touch-only control)
             walk._skip.className = "wt-skip";
             walk._skip.textContent = "Skip ✕";
             walk._skip.addEventListener("click", function (e) {
