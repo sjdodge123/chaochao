@@ -60,6 +60,10 @@ var lastPadInputAt = 0;        // to ignore stray mouse motion during active pad
 var gpPromptTimer = null;      // drops the toast a few seconds after a scheme change
 var gpFadeTimer = null;        // dims the hint bar after a period of no scheme change
 var HINT_FADE_MS = 60000;      // ~60s on screen, then fade to mostly transparent
+// Touch retires the bar fast: the labelled HUD buttons + the first-run walkthrough already
+// teach the controls, so the bar just duplicates them and eats bottom real estate. Dim, then
+// fully hide so the space is freed (vs the long 60s dim kept for keyboard/controller).
+var TOUCH_HINT_HIDE_MS = 5000;
 
 // --- leave-game confirmation modal ---
 var leaveModalEl = null;
@@ -1574,6 +1578,20 @@ function setInputMethod(method) {
                 hintBarEl.classList.add("compact");
             }
         }, 4000);
+    }
+    if (method === "touch") {
+        // Touch: retire the bar quickly — dim, then fully hide so it frees the bottom
+        // real estate (the labelled HUD + walkthrough cover it). Returns only on a switch
+        // to keyboard/controller (which re-runs setInputMethod and resets the className).
+        clearTimeout(gpFadeTimer);
+        gpFadeTimer = setTimeout(function () {
+            if (!hintBarEl || activeInputMethod !== "touch") { return; }
+            hintBarEl.classList.add("faded");
+            setTimeout(function () {
+                if (hintBarEl && activeInputMethod === "touch") { hintBarEl.classList.add("hidden"); }
+            }, 900);
+        }, TOUCH_HINT_HIDE_MS);
+        return;
     }
     scheduleHintFade();
 }
