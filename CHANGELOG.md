@@ -14,6 +14,10 @@ To re-render a past week's digest with the current formatting, run the `Release 
 
 ## Unreleased
 
+(none yet)
+
+## v0.49.3 — 2026-06-25
+
 ### Bug Fixes
 
 - Fixed a dark shadow that fell over the whole map (everything except your own kart) along with a heavy frame-rate drop that could strike mid-race when other signed-in players with profile-picture karts were in the match.
