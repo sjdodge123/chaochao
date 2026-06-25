@@ -45,6 +45,10 @@
     var walkIdx = 0;
     var walkDone = false;
     var walkPlaced = false;     // first frame() has positioned the active step (anti-flash + gates taps)
+    var walkBuilt = false;      // the walkthrough DOM has been created this session (idempotency)
+    var walkDeferred = false;   // signed-in: deferred at buildDom, waiting on the account flag
+    var dirArmed = true;        // dir-step gate: a deferred build on a held stick must re-center first
+    var walkFallbackTimer = null; // grace-period build if the account flag never arrives
     var advanceLock = false;    // brief lockout so one gesture advances exactly one step
     // Attack press tracking (for tap vs hold detection across frames).
     var atkPressStart = 0;      // ms when the current press began (0 = not pressed)
@@ -183,51 +187,110 @@
         root.appendChild(elJoyKnob);
         root.appendChild(elAtk);
 
-        // First-run gated walkthrough.
-        if (!walkSeen()) {
-            walkSteps = buildSteps();
-            walk = document.createElement("div");
-            walk.id = WALK_ID;
-            walk._ring = el("wt-ring");
-            walk._finger = el("wt-finger", "👆");
-            walk._arrow = el("wt-arrow");
-            walk._bubble = el("bubble");
-            walk._skip = document.createElement("button");
-            walk._skip.type = "button";
-            walk._skip.id = "wtSkipBtn"; // for the button-gate reach allowlist (touch-only control)
-            walk._skip.className = "wt-skip";
-            walk._skip.textContent = "Skip ✕";
-            walk._skip.addEventListener("click", function (e) {
-                if (e && e.preventDefault) e.preventDefault();
-                finishWalk();
-            });
-            walk.appendChild(walk._ring);
-            walk.appendChild(walk._finger);
-            walk.appendChild(walk._arrow);
-            walk.appendChild(walk._bubble);
-            walk.appendChild(walk._skip);
-            walk.style.visibility = "hidden"; // until first frame() places the active step
-            // Advance the "point" steps when the player touches the real target button.
-            window.addEventListener("touchstart", onWalkTouch, { passive: true });
-        }
-
-        // Parent INTO the fullscreen target (#gameWindow) so the overlay renders in the
-        // fullscreen top layer. The control art (root, z-30) and the walkthrough (its own
-        // z-3100 layer, above the corner buttons) are SIBLINGS here — the walkthrough must
-        // not be nested under root's z-30 stacking context or it'd hide behind the gear.
+        // Parent the control art INTO the fullscreen target (#gameWindow) so the overlay
+        // renders in the fullscreen top layer. The control art (root, z-30) and the
+        // walkthrough (its own z-3100 layer, above the corner buttons) are SIBLINGS — the
+        // walkthrough must not nest under root's z-30 stacking context or it'd hide behind
+        // the gear (buildWalkthrough parents it into the same host).
         var host = document.getElementById("gameWindow") || document.body;
         host.appendChild(root);
-        if (walk) { host.appendChild(walk); }
+
+        // First-run walkthrough. localStorage is the GUEST store only; a signed-in player is
+        // decided by the server account flag (delivered via progressionUpdate). DEFER the build
+        // for them until that flag arrives — this avoids leaking a shared-device guest's
+        // localStorage onto a different account AND avoids flashing the walkthrough on every
+        // load before the flag is known. Force-show (?walkthrough=1 / dev) always builds.
+        if (forceShowWalkthrough()) {
+            buildWalkthrough();
+        } else if (isWalkthroughSignedIn() || inDiscordActivity()) {
+            // Signed-in, OR in a Discord Activity where the auth token bridge is still settling
+            // (isSignedIn can read false for a beat) — either way the account flag is the
+            // authority, so DEFER rather than risk the guest branch flashing the overlay before
+            // auth lands.
+            var acctState = window.__walkthroughAccountState; // "seen" | "unseen" | undefined
+            if (acctState === "unseen") { buildWalkthrough(); }
+            else if (acctState !== "seen") {
+                walkDeferred = true; // the resolve hook builds/suppresses once the flag arrives
+                // Safety net: if the account flag never arrives (a dropped progressionUpdate, or a
+                // true guest in an Activity whose token never lands), fall back to the GUEST rule
+                // after a grace period — build unless this device's localStorage already says seen
+                // — so a first-run player still gets the tutorial without re-showing it to someone
+                // who finished it here. A late progressionUpdate(seen) self-corrects by dismissing.
+                walkFallbackTimer = setTimeout(function () {
+                    walkFallbackTimer = null;
+                    if (walkDeferred && !walkBuilt && !walkDone && !guestWalkSeen()) { buildWalkthrough(); }
+                }, 8000);
+            }
+        } else if (!guestWalkSeen()) {
+            buildWalkthrough();
+        }
     }
 
-    function walkSeen() {
+    function inDiscordActivity() {
+        try { return typeof isDiscordActivity === "function" && isDiscordActivity(); } catch (e) { return false; }
+    }
+
+    // Build the walkthrough overlay + wire it up, parenting it into the fullscreen host.
+    // Eager for guests / force-show; lazy for a signed-in first-run player once
+    // progressionUpdate confirms "unseen". Idempotent and a no-op once finished.
+    function buildWalkthrough() {
+        if (walkBuilt || walkDone) { return; }
+        walkBuilt = true;
+        if (walkFallbackTimer) { clearTimeout(walkFallbackTimer); walkFallbackTimer = null; }
+        // A deferred (signed-in/Activity) build can land while the player is already holding the
+        // joystick from lobby movement — require a fresh re-centered gesture before the first
+        // 'Move' step counts, so the held direction can't auto-satisfy and skip it. Eager guest /
+        // force-show builds happen at load before any gesture, so they start armed.
+        dirArmed = !walkDeferred;
+        walkSteps = buildSteps();
+        walk = document.createElement("div");
+        walk.id = WALK_ID;
+        walk._ring = el("wt-ring");
+        walk._finger = el("wt-finger", "👆");
+        walk._arrow = el("wt-arrow");
+        walk._bubble = el("bubble");
+        walk._skip = document.createElement("button");
+        walk._skip.type = "button";
+        walk._skip.id = "wtSkipBtn"; // for the button-gate reach allowlist (touch-only control)
+        walk._skip.className = "wt-skip";
+        walk._skip.textContent = "Skip ✕";
+        walk._skip.addEventListener("click", function (e) {
+            if (e && e.preventDefault) e.preventDefault();
+            finishWalk();
+        });
+        walk.appendChild(walk._ring);
+        walk.appendChild(walk._finger);
+        walk.appendChild(walk._arrow);
+        walk.appendChild(walk._bubble);
+        walk.appendChild(walk._skip);
+        walk.style.visibility = "hidden"; // until first frame() places the active step
+        // Advance the "point" steps when the player touches the real target button.
+        window.addEventListener("touchstart", onWalkTouch, { passive: true });
+        var wHost = document.getElementById("gameWindow") || document.body;
+        wHost.appendChild(walk);
+    }
+
+    function forceShowWalkthrough() {
         // Dev server (NODE_ENV!=production) injects __DEV_FORCE_WALKTHROUGH__ so it always
         // shows on :3700 for iteration; never set in prod. ?walkthrough=1 also force-shows
-        // (handy on a phone, no devtools needed). Otherwise honor the once-only flag.
-        try { if (window.__DEV_FORCE_WALKTHROUGH__) { return false; } } catch (e) { /* ignore */ }
+        // (handy on a phone, no devtools needed). A force-show is never auto-dismissed by the
+        // account flag — a signed-in dev/QA tester can still re-watch it.
+        try { if (window.__DEV_FORCE_WALKTHROUGH__) { return true; } } catch (e) { /* ignore */ }
         try {
-            if (/[?&]walkthrough=1\b/.test((window.location && window.location.search) || "")) { return false; }
+            if (/[?&]walkthrough=1\b/.test((window.location && window.location.search) || "")) { return true; }
         } catch (e) { /* ignore */ }
+        return false;
+    }
+    function isWalkthroughSignedIn() {
+        try {
+            return !!(window.chaochaoAuth && typeof window.chaochaoAuth.isSignedIn === "function" &&
+                window.chaochaoAuth.isSignedIn());
+        } catch (e) { return false; }
+    }
+    // GUEST-only "seen" flag. Signed-in players are decided by the account flag, never this —
+    // localStorage is shared across accounts on a device, so reading it for a signed-in user
+    // would leak a prior guest's/user's state onto them.
+    function guestWalkSeen() {
         try { return localStorage.getItem(WALK_KEY) === "1"; } catch (e) { return false; }
     }
     // For the "point" steps, advance only when the touch lands ON the actual button
@@ -255,11 +318,28 @@
         walkIdx++;
         if (walkIdx >= walkSteps.length) { finishWalk(); }
     }
-    function finishWalk() {
+    function finishWalk(fromAccount) {
         if (walkDone) return;
         walkDone = true;
+        if (walkFallbackTimer) { clearTimeout(walkFallbackTimer); walkFallbackTimer = null; }
         window.removeEventListener("touchstart", onWalkTouch);
-        try { localStorage.setItem(WALK_KEY, "1"); } catch (e) { /* ignore */ }
+        if (isWalkthroughSignedIn()) {
+            // Signed-in: persist to the account on a real completion/skip so it follows the player
+            // cross-device / into the Activity — but NOT to localStorage (guest-only, so it can't
+            // suppress a different account on a shared device). SKIP during a force-show
+            // (?walkthrough=1 / dev): a re-watch must not flip a real production account flag.
+            // fromAccount = the account flag itself drove this teardown, nothing new to persist.
+            try {
+                if (!fromAccount && !forceShowWalkthrough() && typeof window.__markTouchWalkthroughSeen === "function") {
+                    window.__markTouchWalkthroughSeen();
+                }
+            } catch (e) { /* ignore */ }
+        } else {
+            // Guest: localStorage is their only store. Written even on a force-show — matches
+            // origin/main (a guest who completes ?walkthrough=1 isn't re-shown on a normal load),
+            // and is harmless on the dev :3700 force build (the force flag re-shows regardless).
+            try { localStorage.setItem(WALK_KEY, "1"); } catch (e) { /* ignore */ }
+        }
         if (walk) {
             walk.classList.add("gone");
             var w = walk;
@@ -267,6 +347,19 @@
             walk = null;
         }
     }
+    // client.js calls this on every progressionUpdate (signed-in only) with the account's
+    // walkthroughSeen. seen=true  -> ensure it never shows (tear down a deferred/built overlay,
+    // unless a force-show is active). seen=false -> a genuine first-run signed-in player, so
+    // build it now if buildDom deferred (and we haven't already shown/finished it). Handles
+    // either event order: if progressionUpdate beat buildDom, buildDom reads the cached
+    // window.__walkthroughAccountState instead.
+    window.__touchHudResolveWalkthrough = function (seen) {
+        if (seen) {
+            if (!forceShowWalkthrough()) { finishWalk(true); }
+        } else if (walkDeferred && !walkBuilt && !walkDone) {
+            buildWalkthrough();
+        }
+    };
 
     // Map a logical (canvas-space) coordinate to a viewport CSS-px coordinate.
     function mapper() {
@@ -368,16 +461,21 @@
     function detectStep(step, jm, ab) {
         if (advanceLock || Date.now() < fsGuardUntil) return; // frozen briefly across a fullscreen toggle
         if (step.kind === "dir") {
-            if (jm && jm.pressed) {
-                var dx = jm.stickX - jm.baseX, dy = jm.stickY - jm.baseY;
-                var thr = (jm.maxPullRadius || jm.baseRadius * 0.5) * 0.5;
-                var ok = false;
-                if (step.dir === "up") ok = dy < -thr && Math.abs(dy) >= Math.abs(dx);
-                else if (step.dir === "down") ok = dy > thr && Math.abs(dy) >= Math.abs(dx);
-                else if (step.dir === "left") ok = dx < -thr && Math.abs(dx) >= Math.abs(dy);
-                else if (step.dir === "right") ok = dx > thr && Math.abs(dx) >= Math.abs(dy);
-                if (ok) advanceStep();
+            if (!jm || !jm.pressed) { dirArmed = true; return; } // released -> armed for a fresh push
+            var dx = jm.stickX - jm.baseX, dy = jm.stickY - jm.baseY;
+            var thr = (jm.maxPullRadius || jm.baseRadius * 0.5) * 0.5;
+            if (!dirArmed) {
+                // A deferred build landed on a held stick — wait until it re-centers so the
+                // already-held direction can't auto-satisfy (and skip) this teach step.
+                if (dx * dx + dy * dy < thr * thr) { dirArmed = true; }
+                return;
             }
+            var ok = false;
+            if (step.dir === "up") ok = dy < -thr && Math.abs(dy) >= Math.abs(dx);
+            else if (step.dir === "down") ok = dy > thr && Math.abs(dy) >= Math.abs(dx);
+            else if (step.dir === "left") ok = dx < -thr && Math.abs(dx) >= Math.abs(dy);
+            else if (step.dir === "right") ok = dx > thr && Math.abs(dx) >= Math.abs(dy);
+            if (ok) advanceStep();
             return;
         }
         if (step.kind === "tap" || step.kind === "hold") {
