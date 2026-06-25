@@ -589,19 +589,25 @@ function drawCometTrail(ctx, verts, color, now, fadeMs, anim) {
     }
   };
   tfxGlowPaint(ctx, verts, color, GLOW, WIDTH, null, cometRibbon);
-  // Core stroke: a single op, so a direct shadow stays cheap.
-  if (tfxGlow()) { ctx.shadowColor = color; ctx.shadowBlur = GLOW * 0.5; }
+  // Core stroke: route its halo through the SAME scratch+blit the body ribbon uses (one
+  // shadowed blit, downsampled by perfGlowScale on Balanced/Low) instead of a direct
+  // full-res main-canvas gaussian. tfxGlowBlit's gs===1 path is bit-for-bit the old direct
+  // shadow on HIGH, and gs<1 keeps the halo SIZE (only the blur resolution drops) — so the
+  // core looks identical on every tier, just cheaper. Low (no glow) draws straight, as before.
   var coreStart = -1;
   for (var c = 0; c < m; c++) { if (af[c] > 0.35) { coreStart = c; break; } }
   if (coreStart >= 0 && coreStart < m - 1) {
-    tfxAlpha(ctx, 0.85);
-    ctx.strokeStyle = tfxHot(color, 0.55, 1);
-    ctx.lineCap = "round";
-    ctx.lineWidth = Math.max(0.8, WIDTH * 0.18);
-    ctx.beginPath();
-    ctx.moveTo(verts[idx[coreStart]].x, verts[idx[coreStart]].y);
-    for (var cc = coreStart + 1; cc < m; cc++) ctx.lineTo(verts[idx[cc]].x, verts[idx[cc]].y);
-    ctx.stroke();
+    var coreBody = function (cx) {
+      tfxAlpha(cx, 0.85);
+      cx.strokeStyle = tfxHot(color, 0.55, 1);
+      cx.lineCap = "round";
+      cx.lineWidth = Math.max(0.8, WIDTH * 0.18);
+      cx.beginPath();
+      cx.moveTo(verts[idx[coreStart]].x, verts[idx[coreStart]].y);
+      for (var cc = coreStart + 1; cc < m; cc++) cx.lineTo(verts[idx[cc]].x, verts[idx[cc]].y);
+      cx.stroke();
+    };
+    tfxGlowPaint(ctx, verts, color, GLOW * 0.5, WIDTH, null, coreBody);
   }
   var head = verts[n - 1];
   var R = WIDTH * 0.9;
@@ -654,16 +660,27 @@ function drawAuroraTrail(ctx, verts, color, now, fadeMs, anim) {
   if (n < 2) return;
   var AMP = TP('aurora','AMP',7), FREQ = TP('aurora','FREQ',32), GLOW = TP('aurora','GLOW',27), SOFT = TP('aurora','SOFT',2);
   var layers = Math.max(1, Math.round(SOFT));
+  // Stride the STROKE geometry to ~50 samples (the soft 7px wave is heavily oversampled,
+  // so the ~dozen bucketed strokes ran over the full buffer for no visible gain). The wave
+  // PHASE still accumulates the true per-vertex arc length (cum over ALL n, then sampled at
+  // the strided vertices via cum[vi]) so the wave-along-path is unchanged vs origin/main —
+  // accumulating chord lengths between strided samples instead would shift the phase.
+  var stride = Math.max(1, Math.floor(n / 50));
+  var idx = [];
+  for (var si = 0; si < n; si += stride) idx.push(si);
+  if (idx[idx.length - 1] !== n - 1) idx.push(n - 1);
+  var m = idx.length;
   var cum = new Array(n); cum[0] = 0;
   for (var k = 1; k < n; k++) cum[k] = cum[k - 1] + Math.hypot(verts[k].x - verts[k - 1].x, verts[k].y - verts[k - 1].y);
   var bucketMs = fadeMs / TFX_BUCKETS;
-  var wx = new Array(n), wy = new Array(n), bk = new Array(n);
-  for (var i = 0; i < n; i++) {
-    var w = AMP * Math.sin(cum[i] * (FREQ * 0.01) - anim * 0.003);
-    var tn = tfxTangent(verts, i);
-    wx[i] = verts[i].x - tn.y * w;
-    wy[i] = verts[i].y + tn.x * w;
-    var age = now - verts[i].t;
+  var wx = new Array(m), wy = new Array(m), bk = new Array(m);
+  for (var i = 0; i < m; i++) {
+    var vi = idx[i];
+    var w = AMP * Math.sin(cum[vi] * (FREQ * 0.01) - anim * 0.003);
+    var tn = tfxTangent(verts, vi);
+    wx[i] = verts[vi].x - tn.y * w;
+    wy[i] = verts[vi].y + tn.x * w;
+    var age = now - verts[vi].t;
     bk[i] = (age >= fadeMs) ? TFX_BUCKETS : Math.floor(age / bucketMs);
   }
   ctx.save();
@@ -682,7 +699,7 @@ function drawAuroraTrail(ctx, verts, color, now, fadeMs, anim) {
       for (var b = 0; b < TFX_BUCKETS; b++) {
         tfxAlpha(c, layerA * (1 - (b + 0.5) / TFX_BUCKETS));
         var run = false;
-        for (var vv = 1; vv < n; vv++) {
+        for (var vv = 1; vv < m; vv++) {
           if (bk[vv] !== b) { if (run) { c.stroke(); run = false; } continue; }
           if (!run) { c.beginPath(); c.moveTo(wx[vv - 1], wy[vv - 1]); run = true; }
           c.lineTo(wx[vv], wy[vv]);
