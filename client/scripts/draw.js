@@ -4005,11 +4005,6 @@ function drawAvatarSkin(player, sprite) {
     gameContext.arc(cx, cy, r, 0, 2 * Math.PI);
     gameContext.lineWidth = 1.5;
     gameContext.strokeStyle = "rgba(0,0,0,0.45)";
-    gameContext.save();                            // thin edge outline for definition
-    gameContext.beginPath();
-    gameContext.arc(cx, cy, r, 0, 2 * Math.PI);
-    gameContext.lineWidth = 1.5;
-    gameContext.strokeStyle = "rgba(0,0,0,0.45)";
     gameContext.stroke();
     gameContext.restore();
 }
