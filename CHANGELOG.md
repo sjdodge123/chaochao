@@ -14,6 +14,10 @@ To re-render a past week's digest with the current formatting, run the `Release 
 
 ## Unreleased
 
+(none yet)
+
+## v0.49.4 — 2026-06-25
+
 ### Bug Fixes
 
 - "NEW WORLD record!!!" now only celebrates the actual fastest time on a map. A strong-but-not-#1 finish correctly reads as a personal record, so you no longer see several world-record banners pop up at once when a couple of people score on a rarely-played map.
