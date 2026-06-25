@@ -1555,14 +1555,18 @@ class Game {
 				// before this async chain returns, the PB write is still valid
 				// but the float/banner would fire on the WRONG race. Skip emit.
 				if (!self.isStillOnMap(mapId)) { return; }
-				// World-record check: rank <= 10 globally on this map after the upsert.
+				// World-record check: rank === 1 globally on this map after the upsert.
+				// A WORLD record is the single fastest time on the map; a top-10-but-
+				// not-#1 finish is still just a personal best. (rank<=10 mis-flagged
+				// EVERY finisher as a world record on sparse maps with <10 total times,
+				// so two people scoring spawned multiple "NEW WORLD record!!!" floats.)
 				var ranked = await leaderboard.getLeaderboardForPlayers(mapId, [userId]);
 				if (!self.isStillOnMap(mapId)) { return; } // re-check after second await
 				var myRank = (ranked[0] && ranked[0].rank) || null;
 				messenger.messageRoomBySig(roomSig, 'playerPbResult', {
 					playerId: playerId,
 					isNewRecord: true,
-					isWorldRecord: myRank != null && myRank <= 10,
+					isWorldRecord: myRank === 1,
 					finishMs: Math.round(elapsed),
 					rank: myRank,
 					// Display name + map name carried in the payload so the world-
