@@ -63,7 +63,7 @@ jobs:
           fi
 
       - name: Check out main
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0          # need full history + tags for versioning
@@ -191,7 +191,7 @@ jobs:
           fi
 
       - name: Check out main
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: main
           token: ${{ secrets.RELEASE_TOKEN }}
