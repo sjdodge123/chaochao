@@ -100,7 +100,25 @@ function initEventHandlers() {
             reclaimFocus();
         }
     }
-    isTouchScreen = isTouchDevice();
+    // isTouchDevice() trusts matchMedia('(pointer:coarse)')/('hover:none'), which the
+    // iOS Discord Activity webview reports UNRELIABLY (it claims a fine/hover pointer —
+    // see the same signal noted in perf.js), so an iPhone in the Activity reads as
+    // non-touch and the on-screen controls (virtualButtonList) never build, leaving every
+    // game touch dead while the DOM Settings button still works. In a Discord Activity on a
+    // MOBILE device, fall back to the touch HARDWARE probe so a real touchscreen phone/tablet
+    // is detected regardless of the bad media query. The mobile-UA gate is load-bearing: a
+    // touchscreen Windows laptop / Chromebook running the Activity in Discord DESKTOP also
+    // reports maxTouchPoints > 0, and flipping it to touch-first would kill its mouse controls
+    // (the desktop pointer handlers short-circuit when isTouchScreen). Android already worked
+    // via matchMedia, so in practice this only rescues iOS.
+    // iPadOS 13+ Safari reports a "Macintosh" UA by default; no Mac has a touchscreen, so
+    // Macintosh + maxTouchPoints > 1 is unambiguously an iPad (real Macs report 0).
+    var ua = navigator.userAgent || "";
+    var mobileUA = /iPhone|iPad|iPod|Android/i.test(ua) ||
+        (/Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1);
+    isTouchScreen = isTouchDevice() ||
+        (typeof isDiscordActivity === "function" && isDiscordActivity() && mobileUA &&
+            (("ontouchstart" in window) || (navigator.maxTouchPoints > 0)));
     try { touchDebug = /[?&]debugtouch/.test(window.location.search); } catch (e) { touchDebug = false; }
     // Experiment: dynamic camera defaults ON for every input method (still
     // toggleable via the navbar camera button). It auto-falls back to the
