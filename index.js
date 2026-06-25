@@ -356,7 +356,7 @@ app.use(function (req, res, next) {
         // it can be iterated without clearing the browser's once-only localStorage flag.
         // Gated on NON-production, so prod NEVER gets it (the walkthrough stays once-only
         // there). Mirrors the perfHarness/env-gated dev seams; inert on the live build.
-        if (url === '/play.html' && process.env.NODE_ENV !== 'production') {
+        if (url === '/play.html' && process.env.NODE_ENV !== 'production' && process.env.NO_DEV_FORCE_WALKTHROUGH !== '1') {
             modified = modified.replace('</head>', '<script>window.__DEV_FORCE_WALKTHROUGH__=true;<\/script></head>');
         }
         res.set('Content-Type', 'text/html');

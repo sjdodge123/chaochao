@@ -338,6 +338,16 @@ async function getDisplayName(userId) {
 // Read a user's progression row. Only `enabled` (can we talk to Supabase at all)
 // gates it. Returns a normalized row, or null when auth is disabled / the user has
 // no row yet (caller falls back to a default).
+// Progression read column lists. touch_walkthrough_seen is the newest column; if a server
+// build reaches a DB whose migration hasn't run yet, PostgREST 42703s on the missing column.
+// We retry with the legacy list (the flag then reads false) rather than returning null — XP,
+// level, unlocks and equipped cosmetics must NEVER depend on one additive column's migration
+// timing, or a code-before-migration deploy would reset every signed-in player to defaults.
+var PROGRESSION_COLS = 'xp, level, unlocked_skins, medal_counts, wins, selected_cart, selected_pattern, selected_trail, selected_border, touch_walkthrough_seen';
+var PROGRESSION_COLS_LEGACY = 'xp, level, unlocked_skins, medal_counts, wins, selected_cart, selected_pattern, selected_trail, selected_border';
+function isMissingColumnError(err) {
+    return !!err && (err.code === '42703' || /column .* does not exist/i.test(err.message || ''));
+}
 async function getProgression(userId) {
     if (!enabled || !userId || !supabase) {
         return null;
@@ -345,9 +355,18 @@ async function getProgression(userId) {
     try {
         var res = await supabase
             .from('progression')
-            .select('xp, level, unlocked_skins, medal_counts, wins, selected_cart, selected_pattern, selected_trail, selected_border')
+            .select(PROGRESSION_COLS)
             .eq('user_id', userId)
             .maybeSingle();
+        if (res.error && isMissingColumnError(res.error)) {
+            // touch_walkthrough_seen migration hasn't reached this DB yet — load everything
+            // else so the read degrades to "flag unseen" instead of nulling the whole payload.
+            res = await supabase
+                .from('progression')
+                .select(PROGRESSION_COLS_LEGACY)
+                .eq('user_id', userId)
+                .maybeSingle();
+        }
         if (res.error) {
             console.log('[auth] getProgression failed:', res.error.message);
             return null;
@@ -382,6 +401,15 @@ function normalizeProgression(row) {
         selected_pattern: (row && typeof row.selected_pattern === 'string') ? row.selected_pattern : null,
         selected_trail: (row && typeof row.selected_trail === 'string') ? row.selected_trail : null,
         selected_border: (row && typeof row.selected_border === 'string') ? row.selected_border : null,
+        // Account-backed "mobile touch walkthrough seen" latch — restored so a signed-in
+        // player never re-sees the first-run walkthrough on a new device, or in the Discord
+        // Activity whose iframe localStorage is partitioned/ephemeral. Preserve "absent" as
+        // undefined rather than coercing to false: the legacy/missing-column getProgression
+        // fallback AND the addProgression writer payload both omit this column, and a coerced
+        // `false` would defeat buildProgressionPayload's typeof-boolean omission guard and
+        // re-show the walkthrough to a returning player (during the migration window, or after
+        // every match/XP write). Only a row that genuinely carries the boolean is authoritative.
+        touch_walkthrough_seen: (row && typeof row.touch_walkthrough_seen === "boolean") ? row.touch_walkthrough_seen : undefined,
         // { cosmetic_id: ISO8601 } — when each cosmetic was first unlocked (adoption analytics).
         unlock_dates: (row && row.unlock_dates && typeof row.unlock_dates === 'object') ? row.unlock_dates : {}
     };
@@ -410,6 +438,31 @@ async function saveCosmetic(userId, slot, id) {
         return true;
     } catch (e) {
         console.log('[auth] saveCosmetic error:', e.message);
+        return null;
+    }
+}
+
+// Persist the "mobile touch walkthrough seen" latch for a signed-in player. Monotonic — only
+// ever sets true (a player can't "un-see" the walkthrough). A no-op when no DB is configured
+// (guest-only dev). Upserts so a player with no row yet still records it. Touches ONLY the one
+// column. Mirrors saveCosmetic: gates on userId/supabase, NOT writesEnabled (that flag is only
+// for irreversible new-user creation + join logging; this latch is harmless adoption state).
+async function saveTouchWalkthroughSeen(userId) {
+    if (!userId || !supabase) {
+        return null;
+    }
+    try {
+        var upd = await supabase
+            .from('progression')
+            .upsert({ user_id: userId, touch_walkthrough_seen: true, updated_at: new Date().toISOString() },
+                { onConflict: 'user_id' });
+        if (upd.error) {
+            console.log('[auth] saveTouchWalkthroughSeen write failed:', upd.error.message);
+            return null;
+        }
+        return true;
+    } catch (e) {
+        console.log('[auth] saveTouchWalkthroughSeen error:', e.message);
         return null;
     }
 }
@@ -819,6 +872,7 @@ exports.ensureProgressionRow = ensureProgressionRow;
 exports.getProgression = getProgression;
 exports.addProgression = addProgression;
 exports.saveCosmetic = saveCosmetic;
+exports.saveTouchWalkthroughSeen = saveTouchWalkthroughSeen;
 exports.grantSeasonalClaims = grantSeasonalClaims;
 exports.drainPendingToasts = drainPendingToasts;
 exports.getDisplayName = getDisplayName;

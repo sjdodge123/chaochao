@@ -828,6 +828,19 @@ function checkForMail(client) {
 		messageRoomBySig(room.sig, "playerAvatarChanged", { id: client.id, avatarUrl: player.avatarUrl, name: player.name });
 	});
 
+	// Persist the "mobile touch walkthrough seen" latch to the signed-in player's account so
+	// it follows them cross-device and survives the Discord Activity's partitioned localStorage.
+	// Guests are ignored (they keep the localStorage-only flag). Global to the user — no room /
+	// seat lookup needed, allowed in any state (the walkthrough runs at first game load).
+	client.on('setWalkthroughSeen', function () {
+		if (client.userId == null) {
+			return; // guests use localStorage only
+		}
+		Promise.resolve(auth.saveTouchWalkthroughSeen(client.userId)).catch(function (e) {
+			console.log('[walkthrough] persist failed:', e && e.message);
+		});
+	});
+
 	// Discord voice (Phase 5b): a Discord-Activity client reports its own Discord user
 	// snowflake so every client can map an SDK SPEAKING event (keyed by Discord user_id)
 	// to this player's kart and pulse a speaking ring. COSMETIC-ONLY and client-supplied
@@ -1170,6 +1183,13 @@ function buildProgressionPayload(row) {
 		unlocked_skins: row.unlocked_skins || [],
 		medal_counts: row.medal_counts || {},
 		wins: row.wins || 0,
+		// Account-backed walkthrough latch (mobile). Send the REAL boolean only from a row that
+		// actually carries the column (a normalized getProgression load). For a default row (a
+		// transient getProgression failure) or an addProgression writer result (whose CAS column
+		// list omits it) this is undefined -> omitted from the payload, so the client leaves the
+		// walkthrough decision untouched instead of reading a spurious `false` and re-showing the
+		// tutorial to a returning player.
+		walkthroughSeen: (typeof row.touch_walkthrough_seen === "boolean") ? row.touch_walkthrough_seen : undefined,
 		xpThisLevel: prog.xpThisLevel,
 		xpForNextLevel: prog.xpForNextLevel,
 		nextUnlock: nextUnlock

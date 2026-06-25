@@ -913,6 +913,22 @@ function registerConnectionHandlers(server) {
 	// Authoritative progression for the signed-in player (XP/level/unlocked skins).
 	server.on('progressionUpdate', function (prog) {
 		myProgression = prog || null;
+		// Account-backed touch-walkthrough latch. progressionUpdate fires only for signed-in
+		// players, so the account flag is authoritative here: cache it for hudOverlay's buildDom
+		// (whichever runs first) and let the touch HUD decide — build it for a genuine first-run
+		// player, or keep it suppressed. We never touch localStorage; that's the guest-only
+		// store, and writing account state there would suppress a different guest on a shared
+		// device.
+		// Only a payload that actually carries the boolean is authoritative; a writer-fed or
+		// transient-default update OMITS walkthroughSeen (see buildProgressionPayload), so we
+		// leave the walkthrough decision untouched rather than treating "absent" as "unseen"
+		// and re-showing the tutorial to a returning player.
+		if (prog && typeof prog.walkthroughSeen === "boolean") {
+			window.__walkthroughAccountState = prog.walkthroughSeen ? "seen" : "unseen";
+			if (typeof window.__touchHudResolveWalkthrough === "function") {
+				window.__touchHudResolveWalkthrough(prog.walkthroughSeen);
+			}
+		}
 		debugLog("progressionUpdate level=", prog && prog.level, "xp=", prog && prog.xp);
 		// Refresh the player_level GA user property so a level change moves this
 		// player's cohort mid-session (and the first update fills it post-join).
@@ -923,6 +939,11 @@ function registerConnectionHandlers(server) {
 		// gate below sees the accurate equipped state.
 		maybeDefaultDiscordAvatar();
 	});
+	// hudOverlay (a separate IIFE with no socket handle) calls this to persist the touch
+	// walkthrough-seen latch to the account when a signed-in player finishes/skips it.
+	window.__markTouchWalkthroughSeen = function () {
+		try { server.emit("setWalkthroughSeen"); } catch (e) { /* socket mid-reconnect */ }
+	};
 	// Celebration toasts earned in a prior match, delivered on lobby arrival (NOT on
 	// the game-over screen). Server sends an ordered batch; we sequence them as
 	// individual toasts. Each event: {type:'xp',amount} | {type:'level',level} |
