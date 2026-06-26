@@ -1116,6 +1116,14 @@ function findPathToNearestGoal(map, point, options) {
     // over-open every door and overstate the saving on a multi-door map.
     var DOOR = (c.tileMap.door != null) ? c.tileMap.door.id : -999;
     var allowDoors = options.passableDoors === true;
+    // options.passableLava: treat lava cells as walkable terrain (default OFF, so every
+    // existing AI/fairness/validation route is unchanged). The Bunker emerge uses it to
+    // find a route to the risen goal THROUGH the closed lava ring, then un-lavas exactly
+    // the cells that route crosses to carve a guaranteed corridor for the lone survivor.
+    // Lava is priced high (LAVA_PASSABLE_WEIGHT) so the route dips into lava only as far
+    // as it must to bridge the ring — keeping the carved corridor thin and short.
+    var allowLava = options.passableLava === true;
+    var LAVA_PASSABLE_WEIGHT = 8;
     var openDoorSet = null;
     if (options.openDoorIds != null) {
         openDoorSet = {};
@@ -1261,7 +1269,7 @@ function findPathToNearestGoal(map, point, options) {
             // lava. A door cell is a wall unless passableDoors opens all of them, or this
             // specific door is in openDoorIds.
             var doorOpen = allowDoors || (openDoorSet != null && openDoorSet[cellV.site.voronoiId]);
-            if ((cellV.id === LAVA || cellV.id === EMPTY || (cellV.id === DOOR && !doorOpen)) && cellV.id !== GOAL) {
+            if (((cellV.id === LAVA && !allowLava) || cellV.id === EMPTY || (cellV.id === DOOR && !doorOpen)) && cellV.id !== GOAL) {
                 continue;
             }
             if (blocked && blocked[cellV.site.voronoiId]) {
@@ -1280,6 +1288,9 @@ function findPathToNearestGoal(map, point, options) {
             // A lily pad over this water cell makes it solid to skim — price it like ~ground
             // instead of deep water so bots route ACROSS a pad path rather than around the water.
             var tw = (lilyCells != null && lilyCells[navCell(v)]) ? LILY_PADDED_WEIGHT : tileWeight(cellV.id);
+            // Lava is normally impassable; when passableLava bridges the Bunker ring, price
+            // it high so the carved corridor crosses the least lava possible.
+            if (allowLava && cellV.id === LAVA) { tw = LAVA_PASSABLE_WEIGHT; }
             // Speed boon in this cell -> discount its cost so the route leans toward the boost,
             // but ONLY when the travel direction INTO it (u -> v) aligns with the boost's facing:
             // these pads are directional, so a backward/off-course one is a trap, not a help, and

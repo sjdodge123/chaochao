@@ -14,9 +14,14 @@ To re-render a past week's digest with the current formatting, run the `Release 
 
 ## Unreleased
 
+### Gameplay & Balance
+
+- **Bunker rounds breathe a little now.** The lava ring holds off for a few seconds at the start so you can size up the arena, then closes in noticeably slower — less of a panicked scramble, more of a tightening squeeze.
+
 ### Bug Fixes
 
 - **Lightning rounds no longer set world records.** A Lightning round speeds up the whole field, so a time set there isn't comparable to a normal run — it can still be your personal best, but it won't be crowned the map's fastest-ever anymore.
+- **The risen Bunker goal is always reachable.** When you're the last one standing, the game now guarantees a walkable path through the lava to the goal that bursts open — no more being stranded on a safe patch with the win ringed off by fire.
 
 ## v0.49.4 — 2026-06-25
 

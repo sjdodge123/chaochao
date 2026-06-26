@@ -145,11 +145,21 @@ console.log('Using map: ' + picked.name);
     check(islandSurvivedBlast, 'explosions cannot lava/alter the bunker island');
 
     room.game.startRace();
+    // The ring now holds fully open for `startDelay` seconds before any lava creeps
+    // in (a calm beat to read the arena), so stamp the start with one tick and jump
+    // the clock past the grace window before asserting the ring actually closes.
+    const openLine = gb.collapseLine;
+    tick(room); // first racing tick stamps bunkerStartTime; still inside the grace window
+    check(gb.collapseLine === openLine, 'ring held fully open during the start delay');
+    fakeNow += (c.brutalRounds.bunker.startDelay + 1) * 1000;
     const lavaBefore = countId(gb, c.tileMap.lava.id);
     const lineBefore = gb.collapseLine;
-    for (let f = 0; f < 90; f++) { tick(room); }
-    check(gb.collapseLine < lineBefore, 'ring closed inward');
-    check(countId(gb, c.tileMap.lava.id) > lavaBefore, 'ring converted cells to lava');
+    // ringSpeed was halved (0.85 -> 0.4), so it takes proportionally more ticks to
+    // close past the opening buffer and start converting cells; ~200 ticks reproduces
+    // the original ~76u of closure (and keeps the lone survivor clear of the lava).
+    for (let f = 0; f < 200; f++) { tick(room); }
+    check(gb.collapseLine < lineBefore, 'ring closed inward (after start delay)');
+    check(countId(gb, c.tileMap.lava.id) > lavaBefore, 'ring converted cells to lava (after start delay)');
     check(countId(gb, c.tileMap.goal.id) === 0, 'goal still buried mid-race');
 
     const ids = Object.keys(room.playerList);
