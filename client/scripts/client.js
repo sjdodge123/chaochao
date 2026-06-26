@@ -1125,6 +1125,16 @@ function registerConnectionHandlers(server) {
 			return;
 		}
 		debugLog("socket dropped during maintenance -- waiting for server, then reloading");
+		// Seamless reconnect (Phase 1): stash where we are so the post-reload boot
+		// routes us straight back to THIS room (not a fresh matchmake) and keeps the
+		// "Reconnecting…" banner up across the page reload — which wipes the canvas and
+		// the serverMaintenance global. Own absolute TTL (deadline/expiresAt are gone
+		// after the reload); ~90s covers the poll wait + new-dyno boot + re-join.
+		try {
+			if (gameID != null) {
+				sessionStorage.setItem("reconnecting", JSON.stringify({ sig: gameID, slot: 0, until: Date.now() + 90000 }));
+			}
+		} catch (e) { /* sessionStorage unavailable — degrade to a plain reload */ }
 		var attempts = 0;
 		var waitForServer = setInterval(function () {
 			attempts++;
@@ -1191,6 +1201,13 @@ function registerConnectionHandlers(server) {
 		gameLength = config.baseNotchesToWin;
 		clientList = gameState.clientList;
 		gameID = gameState.gameID;
+		// Seamless reconnect (Phase 1) HIDE trigger: we're verifiably back in a room,
+		// so drop the reconnect stash + the "Reconnecting…" banner. A normal first join
+		// is a harmless no-op (no stash, banner not in the reconnecting state).
+		try { sessionStorage.removeItem("reconnecting"); } catch (e) {}
+		if (typeof serverMaintenance !== "undefined" && serverMaintenance != null && serverMaintenance.reason === "reconnecting") {
+			serverMaintenance = null;
+		}
 		checkGameState(gameState.game);
 		connectSpawnPlayers(gameState.playerList);
 		worldResize(gameState.world);

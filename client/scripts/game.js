@@ -474,6 +474,30 @@ function enterLobby() {
             }
         }
     }
+    // Seamless reconnect (Phase 1): if this boot is a reload from a maintenance
+    // restart, a stash (written in the disconnect handler before the reload) tells us
+    // which room to rejoin and keeps the "Reconnecting…" banner up across the reload
+    // (which wiped the canvas + the serverMaintenance global). Honour it only while
+    // fresh — its own absolute TTL — and drop a stale one. An explicit ?gameid=/?new=1
+    // navigation still wins (a deliberate user action), so this only replaces the
+    // default matchmake.
+    var reconnectSig = null;
+    try {
+        var rcRaw = sessionStorage.getItem("reconnecting");
+        if (rcRaw != null) {
+            var rc = JSON.parse(rcRaw);
+            if (rc != null && rc.sig != null && rc.until != null && Date.now() <= rc.until) {
+                reconnectSig = rc.sig;
+                // Rehydrate the banner immediately, before any socket reply, by reusing the
+                // maintenance renderer via a synthetic 'reconnecting' state that self-expires
+                // at the same TTL. Cleared in the gameState handler once we're back in.
+                serverMaintenance = { reason: "reconnecting", deadline: null, expiresAt: rc.until };
+            } else {
+                sessionStorage.removeItem("reconnecting");
+            }
+        }
+    } catch (e) { try { sessionStorage.removeItem("reconnecting"); } catch (e2) {} }
+
     if (playParams.has("gameid")) {
         var paramGameID = playParams.get("gameid");
         clientSendStart(paramGameID);
@@ -488,6 +512,12 @@ function enterLobby() {
             var qs = playParams.toString();
             history.replaceState(null, "", window.location.pathname + (qs ? "?" + qs : ""));
         } catch (e) { /* ignore — cosmetic only */ }
+    } else if (reconnectSig != null) {
+        // Maintenance-reload reconnect: rejoin the stashed room directly (a literal sig
+        // lands back in a started/locked room as a late-join spectator; matchmaking
+        // would skip it). The stash is cleared on success in the gameState handler; if
+        // the room was reaped, the server's roomNotFound path recovers.
+        clientSendStart(reconnectSig);
     } else {
         clientSendStart(-1);
     }
