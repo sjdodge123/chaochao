@@ -201,7 +201,7 @@
                   detail: "Banks of cloud roll across the arena, blotting out patches of the track as they drift. Hazards and rivals vanish into the fog and reappear without warning — you're racing half-blind through the gaps." },
                 { id: "brutal-lightning", name: "Lightning", icon: svg("bolt-solid.svg"), anim: "lightning",
                   blurb: "Every racer is sped up.",
-                  detail: "Everyone gets a jolt: every racer is sped up for the whole round and the hazards whip around faster too. The pace turns twitchy and unforgiving, with far less time to read the track before you overshoot it." },
+                  detail: "Everyone gets a jolt: every racer is sped up for the whole round and the hazards whip around faster too. The pace turns twitchy and unforgiving, with far less time to read the track before you overshoot it. Because the whole field is sped up, a finish here can still set your personal best, but it never counts as a map world record — those stay reserved for normal runs so the comparison is fair." },
                 { id: "brutal-volcano", name: "Volcano", icon: svg("volcano-solid.svg"), anim: "volcano",
                   blurb: "The ground erupts mid-round.",
                   detail: "Partway through, the arena erupts — lava blooms out and floods inward with only a brief warning before it blows. Read the rumble, get clear of where it's about to open, and ride out the eruption to claim the goal." },

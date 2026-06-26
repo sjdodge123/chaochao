@@ -14,7 +14,9 @@ To re-render a past week's digest with the current formatting, run the `Release 
 
 ## Unreleased
 
-(none yet)
+### Bug Fixes
+
+- **Lightning rounds no longer set world records.** A Lightning round speeds up the whole field, so a time set there isn't comparable to a normal run — it can still be your personal best, but it won't be crowned the map's fastest-ever anymore.
 
 ## v0.49.4 — 2026-06-25
 

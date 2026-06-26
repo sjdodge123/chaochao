@@ -1541,6 +1541,12 @@ class Game {
 		var mapName = currentMap.name || null;
 		var roomSig = this.roomSig;
 		var self = this;
+		// Read the brutal context at FINISH time, before the async awaits — a round
+		// transition between awaits must not flip it. Lightning speeds up moving
+		// hazards and the volcano collapse, so its times aren't comparable to a normal
+		// run; a "world record" set on a lightning round would be unfair. We still
+		// record the PB (the float shows), we just don't crown it the map's WR.
+		var isLightning = this.gameBoard.checkForActiveBrutal(c.brutalRounds.lightning.id);
 		// Track the promise so publishMapLeaderboard can wait for in-flight PB
 		// writes to settle before issuing the round-end rank query — otherwise
 		// the very last finisher's PB read can run before their own upsert
@@ -1566,7 +1572,7 @@ class Game {
 				messenger.messageRoomBySig(roomSig, 'playerPbResult', {
 					playerId: playerId,
 					isNewRecord: true,
-					isWorldRecord: myRank === 1,
+					isWorldRecord: (myRank === 1 && !isLightning),
 					finishMs: Math.round(elapsed),
 					rank: myRank,
 					// Display name + map name carried in the payload so the world-
