@@ -2427,9 +2427,18 @@ class GameBoard {
 	// remains. No-op outside a racing Bunker round.
 	bunkerRingTick(currentState) {
 		if (!this.bunkerRingActive || currentState != c.stateMap.racing) { return; }
+		// Stamp the round start on the first racing tick. We keep stamping it HERE (not at
+		// the delayed moment) so the maxRoundTime anti-camp void window (game.js) keeps
+		// measuring from the same anchor it always has.
 		if (this.bunkerStartTime == null) { this.bunkerStartTime = Date.now(); }
-		if (this.collapseLine > this.bunkerArenaRadius) {
-			this.collapseLine -= c.brutalRounds.bunker.ringSpeed;
+		// Grace period: hold the ring fully open for startDelay seconds so racers get a
+		// calm beat to read the arena before the lava starts closing. While collapseLine
+		// stays at its opening value (maxDist + 50) no cell is ever outside it, so no lava
+		// forms during the delay — gating just the shrink gates the encroachment too.
+		var bunker = c.brutalRounds.bunker;
+		var delayMs = (bunker.startDelay || 0) * 1000;
+		if (Date.now() - this.bunkerStartTime >= delayMs && this.collapseLine > this.bunkerArenaRadius) {
+			this.collapseLine -= bunker.ringSpeed;
 			if (this.collapseLine < this.bunkerArenaRadius) { this.collapseLine = this.bunkerArenaRadius; }
 		}
 		var collapsedCells = [];
@@ -2467,8 +2476,47 @@ class GameBoard {
 				tileDelta[cells[i].site.voronoiId] = cells[i].id;
 			}
 		}
+		// The closing ring has already lavaed everything outside the tiny island, so the
+		// risen goal can end up fully lava-ringed with the lone survivor stranded on a
+		// separate safe patch — an unwinnable round. Carve a guaranteed walkable corridor
+		// from each survivor to the goal (a no-op when one already exists). Folds its tile
+		// flips into the same tileDelta so they ride the one tileChanges broadcast below.
+		this.carveBunkerCorridors(tileDelta);
 		messenger.messageRoomBySig(this.roomSig, "tileChanges", JSON.stringify(tileDelta));
 		messenger.messageRoomBySig(this.roomSig, "bunkerEmerge", { x: this.bunkerLoc.x, y: this.bunkerLoc.y, lid: this.bunkerLidIds });
+	}
+	// Guarantee every living survivor can WALK to the risen goal. For each, if no
+	// non-lava route to a lid cell exists, route again allowing lava (priced high so the
+	// route is the shortest lava crossing) and revert exactly those lava cells to ground,
+	// carving a thin corridor through the ring. Carved cells join bunkerSafeIds so a
+	// griefer's tileSwap / ability blast can't instantly re-lava the corridor out from
+	// under the survivor — but the post-emerge par collapse ignores bunkerSafeIds and
+	// still sweeps inward to swallow a staller, so this can't become a safe haven.
+	carveBunkerCorridors(tileDelta) {
+		if (this.bunkerLidIds == null || this.bunkerLidIds.length === 0) { return; }
+		var cells = this.currentMap.cells;
+		var byId = {};
+		for (var i = 0; i < cells.length; i++) { byId[cells[i].site.voronoiId] = cells[i]; }
+		var ground = c.tileMap.normal.id;
+		var lava = c.tileMap.lava.id;
+		for (var pid in this.playerList) {
+			var p = this.playerList[pid];
+			if (p == null || !p.alive || p.isZombie || p.reachedGoal) { continue; }
+			var pt = { x: p.x, y: p.y };
+			// Already reachable over real (non-lava) ground? Then nothing to carve.
+			if (cellGraph.findPathToNearestGoal(this.currentMap, pt, { goalSet: this.bunkerLidIds }) != null) { continue; }
+			// Lava-ringed: find the cheapest route allowing lava and un-lava just its cells.
+			var route = cellGraph.findPathToNearestGoal(this.currentMap, pt, { goalSet: this.bunkerLidIds, passableLava: true });
+			if (route == null || !Array.isArray(route.path)) { continue; } // truly walled off — leave as-is
+			for (var k = 0; k < route.path.length; k++) {
+				var cell = byId[route.path[k]];
+				if (cell == null || cell.id != lava) { continue; }
+				cell.id = ground;
+				this.tileChanges[cell.site.voronoiId] = cell.id;
+				tileDelta[cell.site.voronoiId] = cell.id;
+				this.bunkerSafeIds[cell.site.voronoiId] = true;
+			}
+		}
 	}
 	// --- Heatwave (brutal id 1013) ---
 	// Tile-name decoder for everything below: config `slow` renders as SAND,

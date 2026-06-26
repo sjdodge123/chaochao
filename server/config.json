@@ -426,7 +426,8 @@
         "bunker": {
             "id": 1012,
             "active": true,
-            "ringSpeed": 0.85,
+            "ringSpeed": 0.4,
+            "startDelay": 6,
             "clusterGap": 90,
             "maxRoundTime": 100,
             "title": "Bunker"
