@@ -51,6 +51,16 @@ check(snap && snap.notchesToWin === 5 && snap.gameModeId === 'standard_ffa', 'sn
 const aSnap = snap && snap.players.filter(function (p) { return p.key === reconnect.reconnectKey(null, 'dev-recon-A', 0); })[0];
 check(aSnap && aSnap.notches === 3 && aSnap.teamId === 0 && aSnap.cart === 'firetruck', "Alice's notches/team/cosmetics captured");
 
+// Regression (a real-restart e2e caught this): snapshotAllRooms must iterate the RAW
+// room list (hostess.getAllRooms), NOT the join-page-curated getRooms() view, or live
+// rooms get silently skipped at SIGTERM. Inject the room into the live list and assert
+// snapshotAllRooms finds it, then remove it so the restore step's sig stays free.
+check(typeof hostess.getAllRooms === 'function', 'hostess.getAllRooms() exists (raw room list for snapshotting)');
+hostess.getAllRooms()[SIG] = oldRoom;
+const allSnaps = roomSnapshot.snapshotAllRooms(hostess, reconnect, NOW);
+check(allSnaps.some(function (s) { return s.sig === SIG; }), 'snapshotAllRooms finds the live room via the raw list');
+delete hostess.getAllRooms()[SIG];
+
 // --- 2. Persist to the (cross-process) store, then SIMULATE A RESTART -------------
 const store = roomSnapshot.makeMemoryStore();
 store.writeAll([snap]); // the snapshot survives the process death (the store does)

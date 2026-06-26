@@ -321,6 +321,14 @@ function generateNewRoom() {
 	return sig;
 }
 
+// EVERY live room, unfiltered — for the reconnect SIGTERM snapshot (Phase 2). NOT
+// getRooms(), which is the join-page-curated view (drops preview/tarpit/discord +
+// applies advertising criteria) and would skip rooms that still need snapshotting.
+// serializeRoom does its own preview/tarpit/discord filtering, so the raw list is right.
+exports.getAllRooms = function () {
+	return roomList;
+};
+
 // Reconnect restore (Phase 2 of seamless-reconnect): re-create a room at a SPECIFIC
 // saved sig on boot. Returns the room, or null if that sig is already taken (a
 // collision with a freshly-generated room — the snapshot is then skipped). Seeding the

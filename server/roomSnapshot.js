@@ -66,7 +66,10 @@ function serializeRoom(room, reconnect, nowMs) {
 // Snapshot every eligible room. Returns an array of snapshots (callers persist them).
 function snapshotAllRooms(hostess, reconnect, nowMs) {
     var out = [];
-    var rooms = hostess.getRooms();
+    // getAllRooms() = the RAW room list. NOT getRooms() (the join-page-curated view,
+    // which drops rooms we still need to snapshot). serializeRoom filters preview/
+    // tarpit/discord itself.
+    var rooms = hostess.getAllRooms();
     for (var sig in rooms) {
         var snap = serializeRoom(rooms[sig], reconnect, nowMs);
         if (snap != null) { out.push(snap); }
