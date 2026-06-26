@@ -400,6 +400,12 @@ var hostess = require('./server/hostess.js');
 var botGuard = require('./server/botGuard.js');
 var maintenance = require('./server/maintenance.js');
 var reconnect = require('./server/reconnect.js');
+var roomSnapshot = require('./server/roomSnapshot.js');
+// Cross-process room-snapshot store for seamless-reconnect (Phase 2). Supabase is the
+// ONLY store that survives a Heroku dyno cutover (the FS is per-dyno/ephemeral, no
+// Redis), so without it reconnect-across-restart degrades to a no-op (an in-memory
+// store can't outlive the dying process). Created once auth has resolved its client.
+var reconnectStore = (auth && auth.enabled) ? roomSnapshot.makeSupabaseStore(auth) : roomSnapshot.makeMemoryStore();
 var crypto = require('crypto');
 var c = utils.loadConfig();
 
@@ -645,6 +651,18 @@ var serverSleeping = true,
 server.listen(c.port, () => {
   console.log('listening on *:' + c.port);
   messenger.build(io);
+  // Seamless-reconnect (Phase 2): restore any rooms the previous process snapshotted
+  // before its restart, so returning players re-seat with standings intact. Best-effort
+  // and bounded — purges what it consumes; a miss just means those players re-matchmake.
+  try {
+    Promise.resolve(reconnectStore.readAllFresh(Date.now())).then(function (snaps) {
+      if (!snaps || snaps.length === 0) { return; }
+      var n = roomSnapshot.restoreAll(snaps, { hostess: hostess, reconnect: reconnect }, Date.now());
+      console.log('[reconnect] restored ' + n + '/' + snaps.length + ' room(s) from snapshot');
+      var sigs = snaps.map(function (s) { return s.sig; });
+      Promise.resolve(reconnectStore.purge(sigs)).catch(function () {});
+    }).catch(function () { /* never block boot on reconnect restore */ });
+  } catch (e) { /* ignore */ }
 });
 
 // Refresh per-map rating aggregates from Supabase into each map's classifier meta
@@ -779,6 +797,17 @@ process.on('SIGTERM', function () {
     }
     console.log('Server shutting down (SIGTERM) — announcing 28s restart countdown to ' + clientCount + ' client(s)');
     maintenance.begin(28, 'restart');
+    // Seamless-reconnect (Phase 2): snapshot each live room's roster + standings to the
+    // cross-process store so the new dyno can restore them and re-seat returning players.
+    // Best-effort and non-blocking — the 28s exit timer below is the hard backstop, and a
+    // store failure just means no reconnect (degrade, never delay the restart).
+    try {
+        var snaps = roomSnapshot.snapshotAllRooms(hostess, reconnect, Date.now());
+        if (snaps.length > 0) {
+            console.log('[reconnect] snapshotting ' + snaps.length + ' room(s) before restart');
+            Promise.resolve(reconnectStore.writeAll(snaps)).catch(function () {});
+        }
+    } catch (e) { console.log('[reconnect] snapshot failed:', e.message); }
     setTimeout(function () { process.exit(0); }, 28 * 1000);
 });
 

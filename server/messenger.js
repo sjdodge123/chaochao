@@ -2,6 +2,7 @@ var utils = require('./utils.js');
 var hostess = require('./hostess.js');
 var botGuard = require('./botGuard.js');
 var reconnect = require('./reconnect.js');
+var roomSnapshot = require('./roomSnapshot.js');
 var c = utils.loadConfig();
 // Skin station: expose the curated named-color palette to the client (via the
 // config payload that already ships to every client) so the skin picker's swatches
@@ -657,7 +658,18 @@ function checkForMail(client) {
 		// (new socket.id) can be re-seated here (Phase 0 of seamless-reconnect). Keyed
 		// by userId (signed-in) or deviceId (guest); a no-identity socket / bot keys to
 		// null and is skipped. No wire change — player.id stays the socket.id.
-		reconnect.recordSeat(reconnect.reconnectKey(client.userId, client.deviceId, 0), roomSig, null);
+		// Phase 2 re-seat: if a RESTORED seat for this identity is waiting in THIS room
+		// (a snapshot persisted before a server restart), restore their notches/team/name/
+		// cosmetics onto the fresh kart and reopen the held room. Read it BEFORE recordSeat
+		// overwrites the seat; only apply when they returned to their actual saved room.
+		var rcKey = reconnect.reconnectKey(client.userId, client.deviceId, 0);
+		var savedSeat = reconnect.lookupSeat(rcKey, Date.now());
+		if (savedSeat != null && savedSeat.roomSig === roomSig && savedSeat.seat != null &&
+			savedSeat.seat.restore === true && savedSeat.seat.standings != null) {
+			roomSnapshot.applyStandings(room.playerList[client.id], savedSeat.seat.standings);
+			room.awaitingReconnect = false; // a returning player claimed it -> open for normal play
+		}
+		reconnect.recordSeat(rcKey, roomSig, null);
 		loadPlayerProgression(client, room.playerList[client.id]);
 		room.game.determineGameState(room.playerList[client.id]);
 		// Bots yield to the joining human so humans + bots can never exceed the room

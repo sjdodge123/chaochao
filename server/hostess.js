@@ -112,7 +112,10 @@ exports.findARoom = function (clientID) {
 		// hold several local-co-op players (capacity > 1), and they get unlocked at
 		// game-over (resetGame), so the old "locked + capacity 1" implicit guard no
 		// longer keeps them private — exclude them explicitly here.
-		if (roomList[sig2].hasSpace() && !roomList[sig2].isLocked() && !roomList[sig2].isPreview && !roomList[sig2].isTarpit && !roomList[sig2].discordInstanceId) {
+		// A reconnect-restored room (awaitingReconnect) is reserved for its returning
+		// players (matched by identity in enterGame), so matchmaking must skip it until
+		// it's re-seated — otherwise a stranger fills a saved seat.
+		if (roomList[sig2].hasSpace() && !roomList[sig2].isLocked() && !roomList[sig2].isPreview && !roomList[sig2].isTarpit && !roomList[sig2].discordInstanceId && !roomList[sig2].awaitingReconnect) {
 			return sig2;
 		}
 	}
@@ -317,3 +320,13 @@ function generateNewRoom() {
 	roomList[sig] = game.getRoom(sig, maxPlayersInRoom);
 	return sig;
 }
+
+// Reconnect restore (Phase 2 of seamless-reconnect): re-create a room at a SPECIFIC
+// saved sig on boot. Returns the room, or null if that sig is already taken (a
+// collision with a freshly-generated room — the snapshot is then skipped). Seeding the
+// sig back into roomList means generateRoomSig() won't reissue it to a new room.
+exports.restoreRoomAtSig = function (sig) {
+	if (sig == null || roomList[sig] != null) { return null; }
+	roomList[sig] = game.getRoom(sig, maxPlayersInRoom);
+	return roomList[sig];
+};
