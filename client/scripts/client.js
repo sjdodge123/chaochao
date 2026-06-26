@@ -1133,6 +1133,10 @@ function registerConnectionHandlers(server) {
 		try {
 			if (gameID != null) {
 				sessionStorage.setItem("reconnecting", JSON.stringify({ sig: gameID, slot: 0, until: Date.now() + 90000 }));
+				// Reconnect funnel (Phase 3): the START of a maintenance-driven reconnect,
+				// distinct from a plain disconnect, so the dashboard can measure how often
+				// reconnect fires and (with reconnect_success below) how often it lands.
+				if (typeof trackEvent === "function") { trackEvent('reconnect_started', { reason: reason || 'unknown' }); }
 			}
 		} catch (e) { /* sessionStorage unavailable — degrade to a plain reload */ }
 		var attempts = 0;
@@ -1204,7 +1208,12 @@ function registerConnectionHandlers(server) {
 		// Seamless reconnect (Phase 1) HIDE trigger: we're verifiably back in a room,
 		// so drop the reconnect stash + the "Reconnecting…" banner. A normal first join
 		// is a harmless no-op (no stash, banner not in the reconnecting state).
-		try { sessionStorage.removeItem("reconnecting"); } catch (e) {}
+		var wasReconnecting = false;
+		try { wasReconnecting = sessionStorage.getItem("reconnecting") != null; sessionStorage.removeItem("reconnecting"); } catch (e) {}
+		// Reconnect funnel (Phase 3): a re-entry that completes a stashed reconnect — the
+		// SUCCESS end of reconnect_started, so the dashboard can split reconnect-driven
+		// reloads from real disconnects and measure the success rate.
+		if (wasReconnecting && typeof trackEvent === "function") { trackEvent('reconnect_success'); }
 		if (typeof serverMaintenance !== "undefined" && serverMaintenance != null && serverMaintenance.reason === "reconnecting") {
 			serverMaintenance = null;
 		}
