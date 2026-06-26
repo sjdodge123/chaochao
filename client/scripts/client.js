@@ -1129,6 +1129,36 @@ function registerConnectionHandlers(server) {
 		}, 2000);
 	});
 
+	// Primary-socket auto-rejoin on RECONNECT. socket.io fires 'connect' on the
+	// initial connect AND on every reconnect; the initial entry is driven by
+	// enterLobby()/clientSendStart on boot, so only a reconnect needs to act here.
+	// Until this existed, ONLY the pad slots re-emitted enterGame on reconnect — a
+	// transient mid-match drop (a Discord iframe suspend/resume, a network blip)
+	// auto-reconnected the primary socket but nothing re-entered the room, leaving
+	// the player roomless and able to re-seat as a guest/default kart. Mirrors the
+	// secondary-slot reconnect handler. The gate is the primary slot's everJoined
+	// latch (set in the gameState handler), tied to the localPlayer object so
+	// discordReenter's teardown resets it and a rebuilt socket's first connect
+	// doesn't double-enter.
+	server.on("connect", function () {
+		var lp = localPlayers[primarySlot];
+		if (!lp || !lp.everJoined || gameID == null) { return; } // initial connect / never joined
+		// The maintenance path (disconnect handler above) owns reconnect via a full
+		// page reload + re-route; defer to it so we don't double-enter underneath it.
+		if (typeof serverMaintenance !== "undefined" && serverMaintenance != null) { return; }
+		debugLog("primary socket reconnected — re-entering room", gameID);
+		// A reconnect is a fresh server session that defaults to a plain kart, so re-arm
+		// the Discord-avatar one-shot — otherwise the rejoin shows a default colour even
+		// though the re-read handshake token re-authenticates the player server-side.
+		// Mirrors discordReenter's discordAvatarDefaulted reset; a no-op off Discord.
+		discordAvatarDefaulted = false;
+		// Route via clientSendStart so the Discord instanceId routing is preserved (it
+		// re-attaches the instanceId once presence resolves); on web it re-emits
+		// enterGame(gameID). If the room was reaped during a long drop, roomNotFound
+		// bounces to the join page — a clean recovery, better than a frozen roomless tab.
+		clientSendStart(gameID != null ? gameID : -1);
+	});
+
 	// Couldn't reach the server at all (engine.io-level failure). Once per page
 	// session — socket.io retries in a loop and would otherwise spam GA. Catches
 	// "players who tried to play but never connected", invisible in every other
@@ -1161,6 +1191,11 @@ function registerConnectionHandlers(server) {
 		if (localPlayers[primarySlot]) {
 			localPlayers[primarySlot].myID = myID;
 			localPlayers[primarySlot].joined = true;
+			// Latch that the primary has been in a room at least once — the reconnect
+			// auto-rejoin handler reads this to tell an initial connect from a reconnect.
+			// Tied to the localPlayer object (like the pad slots) so discordReenter's
+			// teardown resets it and a rebuilt socket's first connect doesn't double-enter.
+			localPlayers[primarySlot].everJoined = true;
 			// Re-equip saved cosmetics NOW that we're actually in the room. The `welcome`
 			// re-equip fires before enterGame (roomMailList unset server-side), so those
 			// setCosmetic emits are dropped; this is the effective restore, esp. for guests
