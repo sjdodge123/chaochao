@@ -1,6 +1,7 @@
 var utils = require('./utils.js');
 var hostess = require('./hostess.js');
 var botGuard = require('./botGuard.js');
+var reconnect = require('./reconnect.js');
 var c = utils.loadConfig();
 // Skin station: expose the curated named-color palette to the client (via the
 // config payload that already ships to every client) so the skin picker's swatches
@@ -652,6 +653,11 @@ function checkForMail(client) {
 		// skin-unlock gating + the lobby Lv/XP badge. Defaults immediately so gating
 		// has something to check, then pushes the real row via progressionUpdate when
 		// it loads. Guests get no progression. Reads work even with writes gated off.
+		// Record which room this stable identity now holds, so a reconnecting socket
+		// (new socket.id) can be re-seated here (Phase 0 of seamless-reconnect). Keyed
+		// by userId (signed-in) or deviceId (guest); a no-identity socket / bot keys to
+		// null and is skipped. No wire change — player.id stays the socket.id.
+		reconnect.recordSeat(reconnect.reconnectKey(client.userId, client.deviceId, 0), roomSig, null);
 		loadPlayerProgression(client, room.playerList[client.id]);
 		room.game.determineGameState(room.playerList[client.id]);
 		// Bots yield to the joining human so humans + bots can never exceed the room

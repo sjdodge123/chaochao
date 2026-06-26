@@ -399,6 +399,7 @@ var messenger = require('./server/messenger.js');
 var hostess = require('./server/hostess.js');
 var botGuard = require('./server/botGuard.js');
 var maintenance = require('./server/maintenance.js');
+var reconnect = require('./server/reconnect.js');
 var crypto = require('crypto');
 var c = utils.loadConfig();
 
@@ -742,6 +743,15 @@ io.on('connection', (client) => {
 
     client.on('disconnect', () => {
       botGuard.unregister(client.id);
+      // Park this identity's room seat so a reconnecting socket can re-adopt it
+      // (Phase 0 of seamless-reconnect). MUST read identity BEFORE removeMailBox
+      // clears it. A maintenance-window drop holds the seat longer (the whole room
+      // is restarting); a normal drop parks briefly then self-evicts.
+      var idn = messenger.getIdentity(client.id);
+      if (idn) {
+        reconnect.onDisconnect(reconnect.reconnectKey(idn.userId, idn.deviceId, 0), Date.now(), maintenance.isRaceBlocked());
+        reconnect.sweep(Date.now());
+      }
       hostess.kickFromRoom(client.id);
       messenger.removeMailBox(client.id);
       clientCount--;
