@@ -216,8 +216,16 @@ function recapCaptureFrame() {
 			cart: (p.cart != null) ? p.cart : null,
 			pattern: (p.pattern != null) ? p.pattern : null,
 			trailFx: (p.trailFx != null) ? p.trailFx : null,
-			border: (p.border != null) ? p.border : null
+			border: (p.border != null) ? p.border : null,
+			// Discord/photo avatar skin — a static per-match cosmetic like cart/pattern,
+			// so it rides the static look (no per-frame tuple slot). Without this the
+			// recap rendered avatar-wearers as a plain coloured disc.
+			avatarUrl: (p.avatarUrl != null) ? p.avatarUrl : null
 		};
+		// Warm the avatar image so it's decoded by the time the gameOver recap loops.
+		if (recapMeta[p.id].avatarUrl && typeof preloadAvatarImage === "function") {
+			try { preloadAvatarImage(recapMeta[p.id].avatarUrl); } catch (e) {}
+		}
 	}
 	// Resolve any pending knockback-slide watches against this tick's live positions.
 	recapCheckSlides(now);
@@ -1475,6 +1483,7 @@ function recapDrawCar(pr, exits, frameT) {
 		radius: meta.radius, onFire: pr[RF_FIRE], ability: pr[RF_ABILITY],
 		name: meta.name,
 		cart: meta.cart, pattern: meta.pattern, trailFx: meta.trailFx, border: meta.border,
+		avatarUrl: meta.avatarUrl,
 		// rebuild the buff/debuff window flags drawSpeedFx checks (future expiry = active)
 		speedBuffUntil: pr[RF_SPEEDFX] === 1 ? Date.now() + 99999 : null,
 		speedDebuffUntil: pr[RF_SPEEDFX] === 2 ? Date.now() + 99999 : null
@@ -1551,6 +1560,11 @@ function recapDrawCar(pr, exits, frameT) {
 		try {
 			gameContext.drawImage(sprite, p.x - sprite.halfSize, p.y - sprite.halfSize);
 		} catch (e) { /* an undecoded sprite — skip this kart, keep the montage alive */ }
+		// Avatar (Discord photo) skin — drawn right after the base sprite, mirroring
+		// live play (draw.js, in the !hasCartSkin branch). This branch is only reached
+		// when no cart skin is equipped, so a cart skin still suppresses the avatar
+		// exactly like live play. drawAvatarSkin no-ops until its image is decoded.
+		if (typeof drawAvatarSkin === "function") { try { drawAvatarSkin(p, sprite); } catch (e) {} }
 		// Pattern overlay on the plain sphere cart (patterns are sphere-scoped).
 		var recapPskin = (typeof getSkin === "function" && p.pattern) ? getSkin(p.pattern) : null;
 		if (recapPskin && recapPskin.slot === 'pattern') {
