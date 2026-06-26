@@ -1207,8 +1207,8 @@ function drawFoundersFlareTrail(ctx, verts, color, now, fadeMs, anim) {
   }
   ctx.save();
   ctx.lineJoin = "round";
-  // Molten body ribbon: ~50 alpha-faded quad fills — the per-op shadowBlur here made
-  // this the single most expensive trail. Glow it via ONE shadowed scratch blit.
+  // Molten body ribbon: ~50 alpha-faded quad fills. Painted into the SHARED glow scratch
+  // together with the core + embers below and blitted ONCE (see the merged tfxGlowPaint).
   var flareRibbon = function (c) {
     c.lineJoin = "round";
     c.fillStyle = gold;
@@ -1226,9 +1226,7 @@ function drawFoundersFlareTrail(ctx, verts, color, now, fadeMs, anim) {
       c.fill();
     }
   };
-  tfxGlowPaint(ctx, verts, gold, GLOW, WIDTH, null, flareRibbon);
-  // White-hot inner core + ember flecks, both glowing at the softer radius — the
-  // core is one stroke but the embers are ~20 small fills, so share a scratch blit.
+  // White-hot inner core + ember flecks.
   var flareCoreEmbers = function (c2) {
     var coreStart = -1;
     for (var c = 0; c < m; c++) { if (af[c] > 0.3) { coreStart = c; break; } }
@@ -1261,7 +1259,14 @@ function drawFoundersFlareTrail(ctx, verts, color, now, fadeMs, anim) {
       c2.beginPath(); c2.arc(ex, ey, er, 0, TFX_TAU); c2.fill();
     }
   };
-  tfxGlowPaint(ctx, verts, gold, GLOW * 0.45, WIDTH * 2, null, flareCoreEmbers);
+  // MERGED glow: paint the ribbon + core + embers into one shared scratch and blit ONCE at the
+  // body's GLOW radius (margin WIDTH*2 contains the ember rise). Halves founders' glow cost (its
+  // two bbox-overlapping blits -> one; ~1.9x cheaper render measured). The core/embers pick up
+  // the body's wider, softer bloom instead of a separate tighter halo — visually near-identical.
+  tfxGlowPaint(ctx, verts, gold, GLOW, WIDTH * 2, null, function (c) {
+    flareRibbon(c);
+    flareCoreEmbers(c);
+  });
   // Radiant head — bright sun-like blob.
   var head = verts[n - 1];
   var R = WIDTH * 1.0;
