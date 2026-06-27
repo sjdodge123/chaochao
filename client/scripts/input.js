@@ -164,6 +164,11 @@ function initEventHandlers() {
         // button (onTouchStart -> goFullScreen), and that button is hidden where
         // fullscreen is unsupported.
     }
+    // Arm the client-side AFK idle watcher (idempotent). It predicts the server's
+    // idle-kick from config + our last-input time and warns a few seconds early.
+    if (typeof startAfkIdleWatch === "function") {
+        startAfkIdleWatch();
+    }
 
 }
 
@@ -271,7 +276,7 @@ function handleClick(event) {
                 // moving the player via keyboard or mouse-move claims P1 (so a
                 // controller-only player keeps P1). See keyDown / handleDblClick.
                 attack = true;
-                server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
+                if (typeof markPlayerInput === "function") { markPlayerInput(); } server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
             }
             break;
         }
@@ -300,7 +305,7 @@ function handleUnClick(event) {
         case 1: {
             if (!primaryOwnsWheel()) {
                 attack = false;
-                server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
+                if (typeof markPlayerInput === "function") { markPlayerInput(); } server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
             }
             break;
         }
@@ -395,7 +400,7 @@ function keyDown(evt) {
         calcAngleFromKeys(playerList[myID]);
         server.emit('mousemove', playerList[myID].angle);
     }
-    server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
+    if (typeof markPlayerInput === "function") { markPlayerInput(); } server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
 }
 function keyUp(evt) {
     if (movingByMouse) {
@@ -413,7 +418,7 @@ function keyUp(evt) {
         calcAngleFromKeys(playerList[myID]);
         server.emit('mousemove', playerList[myID].angle);
     }
-    server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
+    if (typeof markPlayerInput === "function") { markPlayerInput(); } server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
 }
 
 function determineMovement() {
@@ -469,7 +474,7 @@ function determineMovement() {
             if (backwardCone) {
                 moveBackward = true;
             }
-            server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
+            if (typeof markPlayerInput === "function") { markPlayerInput(); } server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
         }
     }
 }
@@ -753,7 +758,7 @@ function onTouchStart(evt) {
                     // on every screen size.
                     button.pressed = true;
                     attack = true;
-                    server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
+                    if (typeof markPlayerInput === "function") { markPlayerInput(); } server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
                 }
                 // NOTE: fullscreen (exitButton) is requested in onTouchEnd, NOT
                 // here. requestFullscreen() needs "transient activation", which
@@ -806,7 +811,7 @@ function onTouchEnd(evt) {
                 }
                 if (button == attackButton) {
                     attack = false;
-                    server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
+                    if (typeof markPlayerInput === "function") { markPlayerInput(); } server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
                 }
                 if (button == exitButton) {
                     // Fire fullscreen on finger-UP: touchend carries the transient
@@ -842,7 +847,7 @@ function onTouchCancel(evt) {
                 }
                 if (button == attackButton) {
                     attack = false;
-                    server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
+                    if (typeof markPlayerInput === "function") { markPlayerInput(); } server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
                 }
                 button.touchIdx = null;
                 button.onUp();
@@ -931,7 +936,7 @@ function touchMovement() {
         calcAngleFromKeys(playerList[myID]);
         server.emit('mousemove', playerList[myID].angle);
     }
-    server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
+    if (typeof markPlayerInput === "function") { markPlayerInput(); } server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
 }
 
 function cancelMovement(evt) {

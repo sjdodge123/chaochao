@@ -14,6 +14,7 @@ const bundles = {
         'client/scripts/discordVoice.js',
         'client/scripts/connectionHud.js',
         'client/scripts/reconnectOverlay.js',
+        'client/scripts/afkOverlay.js',
         'client/scripts/audio.js',
         'client/scripts/input.js',
         'client/scripts/gamepad.js',

@@ -116,6 +116,9 @@ function clearSlotNearStation(slot, id) {
 function noteHubActivity(lp) {
     if (lp && lp.socket && typeof lp.socket.emit === "function") {
         lp.socket.emit("lobbyActivity");
+        // Primary-slot menu browsing is local activity too (the server's wakeUp()
+        // resets on this ping), so the AFK warning shouldn't fire mid-shop-browse.
+        if (lp.isPrimary && typeof markPlayerInput === "function") { markPlayerInput(); }
     }
 }
 

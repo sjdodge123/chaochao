@@ -753,6 +753,9 @@ function emitMovement(lp) {
     var inp = lp.isPrimary
         ? { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack }
         : { turnLeft: lp.input.turnLeft, moveForward: lp.input.moveForward, turnRight: lp.input.turnRight, moveBackward: lp.input.moveBackward, attack: lp.input.attack };
+    // Pad input on the primary slot counts as local activity (mirror of the keyboard/touch
+    // paths) so the AFK warning doesn't fire while a controller player is driving.
+    if (lp.isPrimary && typeof markPlayerInput === "function") { markPlayerInput(); }
     lp.socket.emit('movement', inp);
 }
 

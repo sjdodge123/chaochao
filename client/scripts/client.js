@@ -1099,6 +1099,38 @@ function registerConnectionHandlers(server) {
 			showDiscordRejoinPanel();
 			return;
 		}
+		// Web AFK kick, single-player session: don't navigate away silently. Show a
+		// full-screen "Removed for inactivity" overlay (same look as the reconnect
+		// overlay) with Rejoin / Leave. We only intercept when there's no surviving
+		// couch player and we're not in an editor preview — otherwise fall through to
+		// the normal per-slot failover/teardown so a couch game keeps going.
+		var afkHasSurvivor = false;
+		for (var afkS = 0; afkS < localPlayers.length; afkS++) {
+			if (localPlayers[afkS] && !localPlayers[afkS].isPrimary) { afkHasSurvivor = true; break; }
+		}
+		var afkPreview = (typeof previewMode !== "undefined" && previewMode);
+		if (!afkHasSurvivor && !afkPreview && typeof afkKickedShow === "function") {
+			afkKickedShow({
+				onRejoin: function () {
+					if (typeof afkKickedHide === "function") { afkKickedHide(); }
+					// Clean room-scoped state so the rejoin rehydrates from scratch (the kick
+					// only removed us from the room; the socket is still connected), then
+					// matchmake back in. Reset the AFK activity baseline so we don't instantly
+					// re-warn. clientSendStart preserves Discord instance routing (no-op here).
+					if (typeof resetGameboard === "function") { resetGameboard(); }
+					myID = null;
+					myPlayer = null;
+					if (typeof markPlayerInput === "function") { markPlayerInput(); }
+					clientSendStart(-1);
+				},
+				onLeave: function () {
+					if (typeof afkKickedHide === "function") { afkKickedHide(); }
+					try { server.disconnect(); } catch (e) { /* already gone */ }
+					menuExit();
+				}
+			});
+			return;
+		}
 		// Per-slot teardown (§6.17): drop the primary slot. With no other local
 		// players this disconnects and navigates exactly as before (N=1); with pad
 		// players still in the game it fails over to one of them instead of ending
