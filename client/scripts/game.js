@@ -482,16 +482,27 @@ function enterLobby() {
     // navigation still wins (a deliberate user action), so this only replaces the
     // default matchmake.
     var reconnectSig = null;
+    // A deliberate ?gameid=/?new=1 navigation overrides a stale reconnect stash — and
+    // the overlay/serverMaintenance rehydration must respect that too (not only the
+    // routing below), or clicking "Leave" and starting a fresh game within the TTL would
+    // flash a false "Reconnecting…" over an intentional start.
+    var deliberateNav = playParams.has("gameid") || playParams.get("new") === "1";
     try {
         var rcRaw = sessionStorage.getItem("reconnecting");
         if (rcRaw != null) {
             var rc = JSON.parse(rcRaw);
-            if (rc != null && rc.sig != null && rc.until != null && Date.now() <= rc.until) {
+            if (!deliberateNav && rc != null && rc.sig != null && rc.until != null && Date.now() <= rc.until) {
                 reconnectSig = rc.sig;
                 // Rehydrate the banner immediately, before any socket reply, by reusing the
                 // maintenance renderer via a synthetic 'reconnecting' state that self-expires
                 // at the same TTL. Cleared in the gameState handler once we're back in.
                 serverMaintenance = { reason: "reconnecting", deadline: null, expiresAt: rc.until };
+                // The maintenance reload wiped the canvas + overlay, so bring the
+                // prominent reconnect overlay back up from the very first frame after
+                // reload; the gameState handler hides it once we're verifiably re-joined.
+                if (typeof reconnectOverlayShow === "function") {
+                    reconnectOverlayShow({ title: "Reconnecting…", sub: "Bringing you back to your game…" });
+                }
             } else {
                 sessionStorage.removeItem("reconnecting");
             }
@@ -518,6 +529,21 @@ function enterLobby() {
         // would skip it). The stash is cleared on success in the gameState handler; if
         // the room was reaped, the server's roomNotFound path recovers.
         clientSendStart(reconnectSig);
+        // Post-reload watchdog: the pre-reload poll loop is gone after the reload, so if
+        // this rejoin never yields a gameState AND never roomNotFound (slow re-seat, a
+        // silent stall) the overlay would spin forever. Give up into the manual choice
+        // after the budget. gameState's clearReconnectTimers() cancels this on success.
+        if (typeof reconnectOverlayFail === "function" && typeof RECONNECT_BACKOFF !== "undefined") {
+            window.__reconnectGiveUpTimer = setTimeout(function () {
+                reconnectOverlayFail({
+                    onRetry: function () {
+                        try { sessionStorage.setItem("reconnecting", JSON.stringify({ sig: reconnectSig, slot: 0, until: Date.now() + 180000 })); } catch (e) {}
+                        window.location.reload();
+                    },
+                    onLeave: function () { try { sessionStorage.removeItem("reconnecting"); } catch (e) {} window.location.href = "./join.html"; }
+                });
+            }, RECONNECT_BACKOFF.GIVE_UP_MS);
+        }
     } else {
         clientSendStart(-1);
     }

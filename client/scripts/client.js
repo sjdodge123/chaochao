@@ -453,6 +453,13 @@ function clientConnect(forceNew) {
 	// `server`/`myID`/`myPlayer` alias this slot (see game.js localPlayers).
 	// This slot carries the signed-in account's token (if any).
 	var connectOpts = { auth: handshakeAuth, transports: SOCKET_TRANSPORT_OPTS.transports, tryAllTransports: SOCKET_TRANSPORT_OPTS.tryAllTransports };
+	// Wait longer between auto-reconnect tries on a real outage (matches the overlay's
+	// exponential-backoff cadence): start at 1s, cap at 30s, with jitter to avoid a
+	// thundering-herd reconnect storm when a restarted dyno comes back. Doesn't touch the
+	// Discord forceNew path (it just sets forceNew below on the same opts object).
+	connectOpts.reconnectionDelay = 1000;
+	connectOpts.reconnectionDelayMax = 30000;
+	connectOpts.randomizationFactor = 0.5;
 	if (forceNew) { connectOpts.forceNew = true; }
 	var sock = io(connectOpts);
 	server = sock;
@@ -1053,6 +1060,14 @@ function registerConnectionHandlers(server) {
 		// path once dismissed. Disconnect and bounce them back to the join
 		// page so they can pick a real room (or start a new one).
 		debugLog("roomNotFound -- redirecting to join page");
+		// A reconnect that resolves to a reaped room ends here. Clear the reconnect stash +
+		// state + overlay/timers FIRST so the synchronous server.disconnect() below can't
+		// re-enter the maintenance path (serverMaintenance 'reconnecting' still set) and
+		// re-stash, and a return to play.html within the TTL won't loop back to the dead sig.
+		try { sessionStorage.removeItem("reconnecting"); } catch (e) {}
+		if (typeof serverMaintenance !== "undefined" && serverMaintenance != null && serverMaintenance.reason === "reconnecting") { serverMaintenance = null; }
+		if (typeof clearReconnectTimers === "function") { clearReconnectTimers(); }
+		if (typeof reconnectOverlayHide === "function") { reconnectOverlayHide(); }
 		server.disconnect();
 		window.location.href = "./join.html?notfound=1";
 	});
@@ -1107,6 +1122,22 @@ function registerConnectionHandlers(server) {
 	// bare auto-reconnect would strand them roomless (nothing re-sends
 	// enterGame on the primary socket). Rather than guessing how long the new
 	// dyno takes to boot, poll until the server actually answers, then reload.
+	// Clear every reconnect-overlay timer (poll/countdown/grace/give-up). Idempotent —
+	// clearing an unset timer is a no-op. Called on every resolution (success in the
+	// gameState handler, transport reconnect in the connect handler) so a stale give-up
+	// can't fire under us and rapid re-drops don't stack overlapping schedulers.
+	// keepGiveUp: clear the poll/countdown/grace timers but LEAVE the give-up watchdog
+	// armed. The transport-reconnect (connect) path uses this so that if the re-entry
+	// stalls (gameState never arrives after clientSendStart), the give-up still fires and
+	// offers the manual Try-again/Leave choice instead of a stuck overlay. Full clear
+	// (no arg) is used once we're verifiably back in a room (gameState) or on give-up/leave.
+	function clearReconnectTimers(keepGiveUp) {
+		if (window.__reconnectPollTimer) { clearTimeout(window.__reconnectPollTimer); window.__reconnectPollTimer = null; }
+		if (window.__reconnectCountdownTimer) { clearInterval(window.__reconnectCountdownTimer); window.__reconnectCountdownTimer = null; }
+		if (window.__reconnectGraceTimer) { clearTimeout(window.__reconnectGraceTimer); window.__reconnectGraceTimer = null; }
+		if (!keepGiveUp && window.__reconnectGiveUpTimer) { clearTimeout(window.__reconnectGiveUpTimer); window.__reconnectGiveUpTimer = null; }
+	}
+
 	server.on("disconnect", function (reason) {
 		// Connection-quality telemetry: ONE disconnect event per page session
 		// (socket.io auto-reconnect can cycle; the first drop is the signal). The
@@ -1116,7 +1147,40 @@ function registerConnectionHandlers(server) {
 			window.__disconnectSent = true;
 			trackEvent('disconnect', { reason: reason || 'unknown' });
 		}
-		if (serverMaintenance == null) { return; }
+		if (serverMaintenance == null) {
+			// PATH B — transient / general drop (network blip, iframe suspend, ping
+			// timeout). socket.io owns the actual reconnect (its own backoff); we just
+			// surface the prominent overlay so a real outage isn't a silently frozen
+			// world. Don't flash it on a brief blip: a short grace lets a sub-second
+			// reconnect pass unnoticed. A give-up timer hands a manual retry/leave choice
+			// to the player once the whole budget is spent.
+			if (typeof reconnectOverlayShow !== "function") { return; }
+			clearReconnectTimers();
+			window.__reconnectGraceTimer = setTimeout(function () {
+				reconnectOverlayShow({ title: "Connection lost", sub: "Reconnecting…" });
+			}, 2500);
+			var armTransientGiveUp = function () {
+				if (window.__reconnectGiveUpTimer) { clearTimeout(window.__reconnectGiveUpTimer); }
+				window.__reconnectGiveUpTimer = setTimeout(function () {
+					clearReconnectTimers();
+					// Make "gave up" real: stop socket.io's background retry loop (default
+					// attempts = Infinity) so a late success can't yank the Try-again/Leave
+					// choice out from under the player.
+					try { server.io.reconnection(false); } catch (e) {}
+					reconnectOverlayFail({
+						onRetry: function () {
+							clearReconnectTimers();
+							reconnectOverlayShow({ title: "Connection lost", sub: "Reconnecting…" });
+							try { server.io.reconnection(true); server.connect(); } catch (e) { /* manager may already be retrying */ }
+							armTransientGiveUp();
+						},
+						onLeave: function () { try { sessionStorage.removeItem("reconnecting"); } catch (e) {} window.location.href = "./join.html"; }
+					});
+				}, RECONNECT_BACKOFF.GIVE_UP_MS);
+			};
+			armTransientGiveUp();
+			return;
+		}
 		// Stale state guard: a hidden tab's draw loop never runs, so the
 		// banner's own expiry can't clear serverMaintenance — don't treat a
 		// long-expired drain as a live restart hours later.
@@ -1125,6 +1189,13 @@ function registerConnectionHandlers(server) {
 			return;
 		}
 		debugLog("socket dropped during maintenance -- waiting for server, then reloading");
+		// PATH A — maintenance restart cutover. Bring up the prominent overlay (fades the
+		// frozen canvas) immediately, then HEAD-poll the dyno on exponential backoff until
+		// it answers, and reload. The overlay survives the reload via the sessionStorage
+		// stash + enterLobby() re-showing it on the next boot.
+		if (typeof reconnectOverlayShow === "function") {
+			reconnectOverlayShow({ title: "Reconnecting…", sub: "Server is updating — hang tight, we'll bring you back." });
+		}
 		// Seamless reconnect (Phase 1): stash where we are so the post-reload boot
 		// routes us straight back to THIS room (not a fresh matchmake) and keeps the
 		// "Reconnecting…" banner up across the page reload — which wipes the canvas and
@@ -1132,30 +1203,67 @@ function registerConnectionHandlers(server) {
 		// after the reload); ~90s covers the poll wait + new-dyno boot + re-join.
 		try {
 			if (gameID != null) {
-				sessionStorage.setItem("reconnecting", JSON.stringify({ sig: gameID, slot: 0, until: Date.now() + 90000 }));
+				// TTL must exceed the pre-reload give-up budget (GIVE_UP_MS ~2.5min) + boot
+				// slack, or a slow dyno answering after 90s would reload to a stale stash and
+				// matchmake into the wrong room. ~3min covers poll wait + new-dyno boot + rejoin.
+				sessionStorage.setItem("reconnecting", JSON.stringify({ sig: gameID, slot: 0, until: Date.now() + 180000 }));
 				// Reconnect funnel (Phase 3): the START of a maintenance-driven reconnect,
 				// distinct from a plain disconnect, so the dashboard can measure how often
 				// reconnect fires and (with reconnect_success below) how often it lands.
 				if (typeof trackEvent === "function") { trackEvent('reconnect_started', { reason: reason || 'unknown' }); }
 			}
 		} catch (e) { /* sessionStorage unavailable — degrade to a plain reload */ }
-		var attempts = 0;
-		var waitForServer = setInterval(function () {
-			attempts++;
-			if (attempts > 30) { // ~60s: stop probing and just try the reload
-				clearInterval(waitForServer);
-				window.location.reload();
-				return;
-			}
+		clearReconnectTimers();
+		var maintFirstDrop = Date.now();
+		var maintAttempt = 0;
+		// One HEAD probe; on 200 reload, else fall through to the next backoff step.
+		function maintPoll() {
 			fetch(window.location.pathname, { method: "HEAD", cache: "no-store" })
 				.then(function (res) {
-					if (res.ok) {
-						clearInterval(waitForServer);
-						window.location.reload();
-					}
+					if (res.ok) { clearReconnectTimers(); window.location.reload(); return; }
+					maintSchedule();
 				})
-				.catch(function () { /* server not up yet — keep polling */ });
-		}, 2000);
+				.catch(function () { maintSchedule(); /* dyno not up yet — keep polling */ });
+		}
+		// Schedule the next probe with exponential backoff + a live "trying again in Ns"
+		// countdown; once the whole budget (~2.5 min) is spent, hand off to a manual retry.
+		function maintSchedule() {
+			if (Date.now() - maintFirstDrop > RECONNECT_BACKOFF.GIVE_UP_MS) {
+				clearReconnectTimers(); // kill the live countdown interval so it can't overwrite the fail copy
+				if (typeof reconnectOverlayFail === "function") {
+					reconnectOverlayFail({
+						onRetry: function () {
+							clearReconnectTimers();
+							maintFirstDrop = Date.now();
+							maintAttempt = 0;
+							if (typeof reconnectOverlayShow === "function") {
+								reconnectOverlayShow({ title: "Reconnecting…", sub: "Server is updating — hang tight, we'll bring you back." });
+							}
+							maintSchedule();
+						},
+						onLeave: function () { try { sessionStorage.removeItem("reconnecting"); } catch (e) {} window.location.href = "./join.html"; }
+					});
+				}
+				return;
+			}
+			var delay = RECONNECT_BACKOFF.delayFor(maintAttempt);
+			maintAttempt++;
+			var remain = Math.round(delay / 1000);
+			if (typeof reconnectOverlayNote === "function") { reconnectOverlayNote("Trying again in " + remain + "s…"); }
+			if (window.__reconnectCountdownTimer) { clearInterval(window.__reconnectCountdownTimer); }
+			window.__reconnectCountdownTimer = setInterval(function () {
+				remain--;
+				if (remain > 0) {
+					if (typeof reconnectOverlayNote === "function") { reconnectOverlayNote("Trying again in " + remain + "s…"); }
+				} else {
+					if (typeof reconnectOverlayNote === "function") { reconnectOverlayNote("Trying again…"); }
+					clearInterval(window.__reconnectCountdownTimer);
+					window.__reconnectCountdownTimer = null;
+				}
+			}, 1000);
+			window.__reconnectPollTimer = setTimeout(maintPoll, delay);
+		}
+		maintSchedule();
 	});
 
 	// Primary-socket auto-rejoin on RECONNECT. socket.io fires 'connect' on the
@@ -1169,12 +1277,31 @@ function registerConnectionHandlers(server) {
 	// latch (set in the gameState handler), tied to the localPlayer object so
 	// discordReenter's teardown resets it and a rebuilt socket's first connect
 	// doesn't double-enter.
+	// PATH B status feed: socket.io's Manager fires 'reconnect_attempt' (with the attempt
+	// number) on each automatic retry. reconnectOverlayNote is a no-op until the overlay is
+	// up (past the grace window), so this is safe to bind once and stays quiet on brief blips.
+	if (server.io && typeof server.io.on === "function" && !server.io.__reconnectNoteBound) {
+		server.io.__reconnectNoteBound = true; // bind once per Manager — forceNew rebuilds would otherwise stack handlers
+		server.io.on("reconnect_attempt", function (n) {
+			if (typeof serverMaintenance !== "undefined" && serverMaintenance != null) { return; } // Path A owns its own poll/copy
+			if (typeof reconnectOverlayNote === "function") { reconnectOverlayNote("Reconnecting… (attempt " + n + ")"); }
+		});
+	}
+
 	server.on("connect", function () {
 		var lp = localPlayers[primarySlot];
-		if (!lp || !lp.everJoined || gameID == null) { return; } // initial connect / never joined
-		// The maintenance path (disconnect handler above) owns reconnect via a full
-		// page reload + re-route; defer to it so we don't double-enter underneath it.
+		// Initial connect / never joined: nothing to re-enter. Do NOT clear timers here —
+		// a pre-join blip's give-up watchdog should stay armed.
+		if (!lp || !lp.everJoined || gameID == null) { return; }
+		// The maintenance path (disconnect handler above) owns reconnect via its OWN
+		// HEAD-poll + full page reload. Defer to it WITHOUT clearing its poll/give-up
+		// timers — otherwise this socket.io auto-reconnect (which fires independently)
+		// would kill the poll loop and strand the overlay on a dead "Trying again…".
 		if (typeof serverMaintenance !== "undefined" && serverMaintenance != null) { return; }
+		// Transport is back and we're re-entering for real now — clear grace/poll/countdown
+		// but KEEP the give-up watchdog armed until gameState confirms re-entry, so a stalled
+		// re-join (no gameState, no roomNotFound) still gives the player a way out.
+		clearReconnectTimers(true);
 		debugLog("primary socket reconnected — re-entering room", gameID);
 		// A reconnect is a fresh server session that defaults to a plain kart, so re-arm
 		// the Discord-avatar one-shot — otherwise the rejoin shows a default colour even
@@ -1217,6 +1344,10 @@ function registerConnectionHandlers(server) {
 		if (typeof serverMaintenance !== "undefined" && serverMaintenance != null && serverMaintenance.reason === "reconnecting") {
 			serverMaintenance = null;
 		}
+		// Verifiably back in a room — tear down the reconnect overlay (both outage paths)
+		// and kill any pending poll/grace/give-up timers so nothing fires under us.
+		if (typeof clearReconnectTimers === "function") { clearReconnectTimers(); }
+		if (typeof reconnectOverlayHide === "function") { reconnectOverlayHide(); }
 		checkGameState(gameState.game);
 		connectSpawnPlayers(gameState.playerList);
 		worldResize(gameState.world);
