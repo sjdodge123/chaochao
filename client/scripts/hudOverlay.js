@@ -56,6 +56,10 @@
     // 60fps was the walkthrough's dominant per-frame cost.)
     var walkRenderedIdx = -1;
     var walkRenderedCap = -1;
+    // Set when the player explicitly replays the tutorial from Settings. A deliberate
+    // replay (like a dev force-show) is exempt from the race auto-dismiss — they asked to
+    // watch it now, even mid-round.
+    var walkUserReplay = false;
     // Attack press tracking (for tap vs hold detection across frames).
     var atkPressStart = 0;      // ms when the current press began (0 = not pressed)
     var atkWasPressed = false;
@@ -276,6 +280,29 @@
         wHost.appendChild(walk);
     }
 
+    // Public hook for the Settings "Replay controls tutorial" button: tear down any
+    // current/finished overlay and rebuild it from step 1. An explicit user replay, so it
+    // BYPASSES the seen-gating (calls buildWalkthrough directly, not buildDom's gated
+    // paths) and is exempt from the race auto-dismiss via walkUserReplay. No-op off touch
+    // / before the HUD started. Re-running finishWalk on completion re-persists "seen" —
+    // an idempotent latch for a signed-in player, and harmless localStorage for a guest.
+    function replayWalkthrough() {
+        if (!started || !enabled()) { return; }
+        if (walkFallbackTimer) { clearTimeout(walkFallbackTimer); walkFallbackTimer = null; }
+        window.removeEventListener("touchstart", onWalkTouch);
+        if (walk && walk.parentNode) { walk.parentNode.removeChild(walk); }
+        walk = null;
+        // Reset every walkthrough flag back to first-run.
+        walkBuilt = false; walkDone = false; walkDeferred = false;
+        walkIdx = 0; walkPlaced = false;
+        walkRenderedIdx = -1; walkRenderedCap = -1;
+        advanceLock = false; atkPressStart = 0; atkWasPressed = false;
+        dirArmed = true; fsGuardUntil = 0;
+        walkUserReplay = true;
+        buildWalkthrough();
+    }
+    window.__replayTouchWalkthrough = replayWalkthrough;
+
     function forceShowWalkthrough() {
         // Dev server (NODE_ENV!=production) injects __DEV_FORCE_WALKTHROUGH__ so it always
         // shows on :3700 for iteration; never set in prod. ?walkthrough=1 also force-shows
@@ -342,6 +369,7 @@
     function finishWalk(fromAccount, noPersist) {
         if (walkDone) return;
         walkDone = true;
+        walkUserReplay = false;
         if (walkFallbackTimer) { clearTimeout(walkFallbackTimer); walkFallbackTimer = null; }
         window.removeEventListener("touchstart", onWalkTouch);
         if (noPersist) {
@@ -378,7 +406,9 @@
     // window.__walkthroughAccountState instead.
     window.__touchHudResolveWalkthrough = function (seen) {
         if (seen) {
-            if (!forceShowWalkthrough()) { finishWalk(true); }
+            // Don't let a late account-flag(seen) tear down a deliberate replay / force-show
+            // the player is actively watching.
+            if (!forceShowWalkthrough() && !walkUserReplay) { finishWalk(true); }
         } else if (walkDeferred && !walkBuilt && !walkDone) {
             buildWalkthrough();
         }
@@ -468,11 +498,12 @@
 
             // ---- Gated walkthrough: detect completion of the active step + place it ----
             if (walk && !walkDone) {
-                if (gameStarted()) {
+                if (gameStarted() && !walkUserReplay && !forceShowWalkthrough()) {
                     // Race has begun — fade it out, don't render over gameplay. Only burn the
                     // 'seen' flag if the player actually ENGAGED (advanced past the first step);
                     // someone who loaded into the tail of a lobby and saw it for a frame or two
-                    // shouldn't be denied the tutorial forever.
+                    // shouldn't be denied the tutorial forever. A deliberate replay / dev
+                    // force-show is exempt (handled above) — they asked to watch it now.
                     finishWalk(false, walkIdx === 0);
                 } else {
                     var step = walkSteps[walkIdx];
