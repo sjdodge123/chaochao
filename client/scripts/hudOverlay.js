@@ -50,6 +50,12 @@
     var dirArmed = true;        // dir-step gate: a deferred build on a held stick must re-center first
     var walkFallbackTimer = null; // grace-period build if the account flag never arrives
     var advanceLock = false;    // brief lockout so one gesture advances exactly one step
+    // Per-step chrome (bubble HTML, Skip-button text scale) is static for the life of a
+    // step, so we rebuild it only when the step index or text scale changes — not every
+    // frame. -1 = nothing rendered yet. (Re-parsing innerHTML + reading offsetWidth at
+    // 60fps was the walkthrough's dominant per-frame cost.)
+    var walkRenderedIdx = -1;
+    var walkRenderedCap = -1;
     // Attack press tracking (for tap vs hold detection across frames).
     var atkPressStart = 0;      // ms when the current press began (0 = not pressed)
     var atkWasPressed = false;
@@ -318,12 +324,29 @@
         walkIdx++;
         if (walkIdx >= walkSteps.length) { finishWalk(); }
     }
-    function finishWalk(fromAccount) {
+    // True once the round is live (countdown or beyond). The walkthrough is a lobby/
+    // pre-game teacher; once gameplay starts we tear it down so it can't linger over the
+    // race (visually AND as per-frame work). currentState is a numeric stateMap id and
+    // config arrives via socket — read both defensively.
+    function gameStarted() {
+        try {
+            if (typeof currentState !== "number" || typeof config === "undefined" || !config || !config.stateMap) return false;
+            var gated = config.stateMap.gated;
+            if (typeof gated !== "number") return false; // missing key -> don't silently no-op via `>= undefined`
+            return currentState >= gated; // gated/racing/collapsing/gameOver
+        } catch (e) { return false; }
+    }
+    // noPersist = tear down WITHOUT recording "seen" anywhere (account or localStorage).
+    // Used when the race forces the overlay away but the player never engaged with it, so
+    // a brand-new player who loaded into the tail of a lobby still gets taught next time.
+    function finishWalk(fromAccount, noPersist) {
         if (walkDone) return;
         walkDone = true;
         if (walkFallbackTimer) { clearTimeout(walkFallbackTimer); walkFallbackTimer = null; }
         window.removeEventListener("touchstart", onWalkTouch);
-        if (isWalkthroughSignedIn()) {
+        if (noPersist) {
+            // skip all persistence — fall straight through to the fade-out below
+        } else if (isWalkthroughSignedIn()) {
             // Signed-in: persist to the account on a real completion/skip so it follows the player
             // cross-device / into the Activity — but NOT to localStorage (guest-only, so it can't
             // suppress a different account on a shared device). SKIP during a force-show
@@ -445,12 +468,20 @@
 
             // ---- Gated walkthrough: detect completion of the active step + place it ----
             if (walk && !walkDone) {
-                var step = walkSteps[walkIdx];
-                if (step) {
-                    detectStep(step, jm, ab);
-                    placeStep(step, jm, ab, m, capFont);
-                    walk.style.visibility = "";
-                    walkPlaced = true;
+                if (gameStarted()) {
+                    // Race has begun — fade it out, don't render over gameplay. Only burn the
+                    // 'seen' flag if the player actually ENGAGED (advanced past the first step);
+                    // someone who loaded into the tail of a lobby and saw it for a frame or two
+                    // shouldn't be denied the tutorial forever.
+                    finishWalk(false, walkIdx === 0);
+                } else {
+                    var step = walkSteps[walkIdx];
+                    if (step) {
+                        detectStep(step, jm, ab);
+                        placeStep(step, jm, ab, m, capFont);
+                        walk.style.visibility = "";
+                        walkPlaced = true;
+                    }
                 }
             }
         } catch (e) { /* never let the HUD break the game */ }
@@ -502,18 +533,33 @@
 
     function placeStep(step, jm, ab, m, capFont) {
         var ring = walk._ring, finger = walk._finger, arrow = walk._arrow, bubble = walk._bubble;
-        var stepLabel = "Step " + (walkIdx + 1) + " / " + walkSteps.length;
-        bubble.innerHTML = '<span class="step">' + stepLabel + "</span>" + step.title +
-            "<small>" + step.sub + "</small>";
-        bubble.style.fontSize = capFont + "px";
 
-        // Skip button: top-center, pushed clear of the notch / Discord header via the
-        // device safe-area inset (the same env() the page's safe-area vars build on).
+        // The bubble TEXT and the Skip-button text scale are constant for the life of a
+        // step, so rebuild them only when the step index or text scale (capFont, which
+        // tracks resize/fullscreen) changes — NOT every frame (the innerHTML reparse was
+        // the dominant cost). We also cache the bubble's measured size here so setBubble
+        // can clamp without forcing a reflow per frame.
+        if (walkIdx !== walkRenderedIdx || capFont !== walkRenderedCap) {
+            walkRenderedIdx = walkIdx;
+            walkRenderedCap = capFont;
+            var stepLabel = "Step " + (walkIdx + 1) + " / " + walkSteps.length;
+            bubble.innerHTML = '<span class="step">' + stepLabel + "</span>" + step.title +
+                "<small>" + step.sub + "</small>";
+            bubble.style.fontSize = capFont + "px";
+            walk._skip.style.fontSize = Math.max(12, capFont - 2) + "px";
+            walk._skip.style.padding = "6px 14px";
+            walk._bw = bubble.offsetWidth || 0;  // measured once per step (one reflow, then cached)
+            walk._bh = bubble.offsetHeight || 0;
+        }
+
+        // Skip-button POSITION derives from the live canvas rect, which moves on resize/
+        // rotation/URL-bar collapse WITHOUT necessarily changing the clamped capFont — so it
+        // must update every frame, or the player's only dismiss control can drift off-screen.
+        // Top-center, pushed clear of the notch / Discord header via the device safe-area
+        // inset (the same env() the page's safe-area vars build on).
         walk._skip.style.left = (m.rect.left + m.rect.width / 2) + "px";
         walk._skip.style.transform = "translateX(-50%)";
         walk._skip.style.top = "calc(" + m.rect.top + "px + env(safe-area-inset-top, 0px) + 6px)";
-        walk._skip.style.fontSize = Math.max(12, capFont - 2) + "px";
-        walk._skip.style.padding = "6px 14px";
 
         function showArrow(dir, cx, cy, sizePx) {
             arrow.className = "wt-arrow " + dir;
@@ -535,7 +581,10 @@
             // The bubble is nowrap + center-anchored (translate(-50%,-50%)), so near an
             // edge (e.g. above the bottom-right attack button) it would run off-screen.
             // Clamp its center so the whole box stays inside the canvas with a margin.
-            var w = bubble.offsetWidth || 0, h = bubble.offsetHeight || 0, margin = 8;
+            // Use the cached per-step dims only — never fall back to offsetWidth here, or a
+            // step that happened to measure 0 would force a synchronous reflow every frame
+            // (the very cost the cache exists to avoid). A 0 dim just skips the clamp below.
+            var w = walk._bw || 0, h = walk._bh || 0, margin = 8;
             var minX = m.rect.left + margin + w / 2, maxX = m.rect.right - margin - w / 2;
             var minY = m.rect.top + margin + h / 2, maxY = m.rect.bottom - margin - h / 2;
             if (minX <= maxX) cx = Math.max(minX, Math.min(maxX, cx));
