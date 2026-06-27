@@ -14,6 +14,10 @@ To re-render a past week's digest with the current formatting, run the `Release 
 
 ## Unreleased
 
+### Quality of Life
+
+- **Live medal progress ticker.** Pull off a skill play — a kill, a fully-charged punch, a bumper bounce, an ability, a zombie bite, a brutal-round or clean Heatwave finish — and a little bar pops up bottom-left showing how close you are to that skill's medal (e.g. "Heavy Hitter 3 / 4"), lighting up gold the moment you've done enough this match.
+
 ### Gameplay & Balance
 - **Karts handle more fluidly (sample feel).** Steering now carves an arc instead of snapping between eight headings, your speed carries through smooth turns instead of being cut on every direction change, and letting go of the keys coasts to a smooth stop instead of stomping the brakes. Yanking a hard reverse still scrubs a little speed — a gentle nudge now, not the old hard reset. Top speed and each surface's grip are unchanged — it just eases in and out instead of feeling on/off. *Why:* a toggle-gated experiment for a softer, less rigid drive (bots keep the classic model).
 - **Bunker rounds breathe a little now.** The lava ring holds off for a few seconds at the start so you can size up the arena, then closes in noticeably slower — less of a panicked scramble, more of a tightening squeeze.

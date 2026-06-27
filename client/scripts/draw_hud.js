@@ -86,6 +86,7 @@ function drawHUD() {
     drawTeamScoreHud();
     drawBrutalBadges();
     drawCombatLog();
+    drawSkillProgressHud();
     drawSpectatorLeaderboard();
     drawWorldRecordBanner();
     drawHeatwaveWarnBanner();
@@ -661,6 +662,116 @@ function drawCombatLog() {
             }
             cx += sg.w + segGap;
         }
+    }
+    gameContext.restore();
+}
+
+// ---- Live skill-progress ticker (bottom-left) ------------------------------------------
+// A transient personal corner bar for SKILL-EXPRESSING plays only (kills, charged
+// punches, bumper bonks, ability use, zombie kills, brutal/heatwave finishes — NOT just
+// reaching the goal). The server pushes `medalProgress` each such action with the local
+// player's in-match counter vs that skill medal's nominal target; we flash "+N <Skill>"
+// and sweep the bar prevCurrent->current toward "earned!". Latest-wins single slot, wall-
+// clock timed, fades in/out. Deliberately bottom-left so it never collides with the combat
+// log (top-right). Screen-space, logical coords — no camera offset, no DPR multiply.
+var skillProgressHud = null;
+var SKILL_HUD_LIFE_MS = 2800;     // total on-screen envelope
+var SKILL_HUD_SWEEP_MS = 460;     // bar sweep prevCurrent->current
+function skillProgressReset() { skillProgressHud = null; }
+// Set/replace the single live slot. If the SAME medal is still showing, continue its bar
+// from where it was (current); otherwise start the sweep from current-minus-this-delta.
+function setSkillProgressHud(p) {
+    if (p == null || p.medal == null) { return; }
+    var prev = skillProgressHud;
+    var target = (p.target && p.target > 0) ? p.target : 1;
+    var delta = (p.delta && p.delta > 0) ? p.delta : 1;
+    var prevCurrent = (prev != null && prev.medal === p.medal)
+        ? prev.current
+        : Math.max(0, p.current - delta);
+    skillProgressHud = {
+        medal: p.medal,
+        label: p.label || p.medal,
+        current: p.current,
+        target: target,
+        delta: delta,
+        earned: !!p.earned,
+        prevCurrent: prevCurrent,
+        bornAt: Date.now()
+    };
+}
+function drawSkillProgressHud() {
+    if (skillProgressHud == null) { return; }
+    if (typeof config === "undefined" || config == null || config.stateMap == null) { return; }
+    // Skill plays only happen mid-race; keep the ticker to racing/collapsing.
+    if (currentState != config.stateMap.racing && currentState != config.stateMap.collapsing) {
+        skillProgressHud = null;
+        return;
+    }
+    var h = skillProgressHud;
+    var now = Date.now();
+    var t = (now - h.bornAt) / SKILL_HUD_LIFE_MS;
+    if (t >= 1) { skillProgressHud = null; return; }
+
+    // Envelope: fade+rise in (first 12%), hold, fade+drop out (last 25%).
+    var alpha, rise;
+    if (t < 0.12) { var k = t / 0.12; alpha = k; rise = 14 * (1 - k); }
+    else if (t > 0.75) { var k2 = (t - 0.75) / 0.25; alpha = 1 - k2; rise = 10 * k2; }
+    else { alpha = 1; rise = 0; }
+    alpha = clamp01(alpha);
+
+    // Eased bar sweep prevCurrent -> current.
+    var sweepT = clamp01((now - h.bornAt) / SKILL_HUD_SWEEP_MS);
+    var ease = 1 - Math.pow(1 - sweepT, 3);
+    var shown = h.prevCurrent + (h.current - h.prevCurrent) * ease;
+    var ratio = clamp01(shown / h.target);
+    var shownNum = Math.min(h.current, h.target);
+
+    var accent = h.earned ? "#ffd54a" : "#5ad1ff";
+    // The reward beat sits at full strength so a just-earned medal pops over the fade.
+    var beat = h.earned ? (0.85 + 0.15 * Math.sin(now / 90)) : 1;
+
+    var padX = 12, padY = 9;
+    var w = 214, h2 = 48;
+    var x = 16;
+    var y = LOGICAL_HEIGHT - h2 - 78; // clear of the bottom touch controls
+    var barH = 9;
+    var barY = y + h2 - padY - barH;
+    var barX = x + padX;
+    var barW = w - padX * 2;
+
+    gameContext.save();
+    gameContext.globalAlpha = alpha;
+    drawHudPanel(x, y, w, h2, {
+        fill: "rgba(10,12,16,0.82)",
+        alpha: alpha,
+        borderAlpha: alpha,
+        radius: 9,
+        border: h.earned ? "rgba(255,213,74,0.85)" : "rgba(255,255,255,0.28)",
+        glow: h.earned ? "rgba(255,213,74,0.55)" : null
+    });
+
+    // "+N <Skill>" flash (top-left) + the count (top-right).
+    gameContext.globalAlpha = alpha * beat;
+    gameContext.textBaseline = "alphabetic";
+    gameContext.textAlign = "left";
+    gameContext.font = "bold 14px Arial";
+    gameContext.fillStyle = accent;
+    var flash = "+" + h.delta + "  " + h.label;
+    gameContext.fillText(flash, x + padX, y + padY + 12);
+    gameContext.textAlign = "right";
+    gameContext.font = "bold 12px Arial";
+    gameContext.fillStyle = h.earned ? accent : "#cfd6dd";
+    gameContext.fillText(h.earned ? "EARNED!" : (shownNum + " / " + h.target), x + w - padX, y + padY + 12);
+
+    // Track + fill (reuse the rounded-rect helper).
+    gameContext.globalAlpha = alpha;
+    gameContext.fillStyle = "rgba(255,255,255,0.14)";
+    roundRectPath(gameContext, barX, barY, barW, barH, barH / 2);
+    gameContext.fill();
+    if (ratio > 0) {
+        gameContext.fillStyle = accent;
+        roundRectPath(gameContext, barX, barY, Math.max(barH, barW * ratio), barH, barH / 2);
+        gameContext.fill();
     }
     gameContext.restore();
 }

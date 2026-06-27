@@ -160,6 +160,30 @@ var MEDAL_TITLES = {
     pinball: 'Pinball', iceSkater: 'Ice Skater', smoothOperator: 'Smooth Operator',
     firewalker: 'Firewalker'
 };
+// Nominal in-match qualifying targets for the live skill-progress HUD ticker. The REAL
+// per-match SKILL medals are best-in-match (achievements.js: whoever ends highest holds
+// it — there is NO fixed config threshold to "reach"), so these are display-only goals the
+// in-game corner bar fills toward as you rack up the matching counter (totalKills,
+// heavyHitCount, bumperHitCount, …). They never gate anything server-side; the medal is
+// still awarded best-in-match at gameOver. Only the discrete, clearly skill-EXPRESSING
+// medals are listed — participation stats (goalsReached) and noisy/continuous ones (bully,
+// iceSkater/smoothOperator distance, the negative "Picked on") are intentionally absent so
+// the ticker only ever celebrates a deliberate play. Keys match MEDAL_TITLES.
+var MEDAL_MATCH_TARGETS = {
+    mostKills: 3,      // Serial killer — a real killing run, not a lucky bonk
+    savior: 1,         // Savior — one match-saving takedown earns it
+    heavyHitter: 4,    // Heavy Hitter — committed fully-charged swings
+    pinball: 3,        // Pinball — bounced around the bumpers a few times
+    resourceful: 3,    // Resouceful — leaned on pickups
+    zombieSlayer: 2,   // Zombie Slayer — bites landed while infected
+    survivalist: 3,    // Survivalist — kept reaching the goal
+    brutalist: 2,      // Brutalist — finished brutal rounds the hard way
+    firewalker: 1      // Firewalker — one clean Heatwave finish
+};
+// The nominal HUD target for a medal stat, or 0 when the medal isn't tracked live.
+function medalMatchTarget(stat) {
+    return MEDAL_MATCH_TARGETS[stat] || 0;
+}
 function describeAchievement(u) {
     var n = u.threshold;
     switch (u.stat) {
@@ -275,6 +299,8 @@ module.exports = {
     levelProgress: levelProgress,
     ACHIEVEMENT_UNLOCKS: ACHIEVEMENT_UNLOCKS,
     MEDAL_TITLES: MEDAL_TITLES,
+    MEDAL_MATCH_TARGETS: MEDAL_MATCH_TARGETS,
+    medalMatchTarget: medalMatchTarget,
     describeAchievement: describeAchievement,
     clientAchievementDefs: clientAchievementDefs,
     achievementsUnlocked: achievementsUnlocked,

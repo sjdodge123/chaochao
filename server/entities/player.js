@@ -469,6 +469,7 @@ class Player extends Circle {
 			// No scoring in the lobby (the resourceful stat isn't gated by checkForWinners).
 			if (currentState != c.stateMap.lobby) {
 				this.resourceful += 1;
+				this.reportSkillProgress('resourceful', this.resourceful);
 				this.abilitiesUsedMatch += 1;
 			}
 			this.ability.use();
@@ -813,6 +814,7 @@ class Player extends Circle {
 			// free bite never charges, so it's naturally excluded.
 			if (frac >= c.punchCharge.chargedHitFrac) {
 				this.heavyHitCount += 1;
+				this.reportSkillProgress('heavyHitter', this.heavyHitCount);
 			}
 		}
 		messenger.messageRoomBySig(this.roomSig, "punch", compressor.sendPunch(this.punch));
@@ -1422,6 +1424,14 @@ class Player extends Circle {
 			}
 		}, c.playerKillWindow, this);
 	}
+	// Live skill-progress HUD ticker: push this human's progress toward earning one
+	// skill medal (current in-match counter vs progression.medalMatchTarget). Bots are
+	// skipped (the HUD is the local player's own bar); the medal is still awarded
+	// best-in-match at gameOver — this is display-only. One-liner at each skill site.
+	reportSkillProgress(medal, current) {
+		if (this.isAI) { return; }
+		messenger.sendMedalProgress(this.id, medal, current);
+	}
 	addKill(player) {
 		if (this.alive == false || this.isZombie == true) {
 			return;
@@ -1430,10 +1440,12 @@ class Player extends Circle {
 		clearTimeout(multiKillIndex);
 		this.roundKills += 1;
 		this.totalKills += 1;
+		this.reportSkillProgress('mostKills', this.totalKills);
 		emitBotEmote(this, "kill");
 		this.addFire(c.playerKillFireBonus);
 		if (player.fellFromVictory) {
 			this.savior += 1;
+			this.reportSkillProgress('savior', this.savior);
 			this.addFire(c.playerKilledNearVictoryBonus);
 		}
 		if (this.openMultiKillWindow == true) {
@@ -1768,6 +1780,7 @@ class Player extends Circle {
 			if (!object.pinballCountedFor[this.id]) {
 				object.pinballCountedFor[this.id] = true;
 				this.bumperHitCount += 1;
+				this.reportSkillProgress('pinball', this.bumperHitCount);
 			}
 		}
 		_engine.punchPlayer(this, object);

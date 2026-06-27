@@ -939,6 +939,13 @@ function registerConnectionHandlers(server) {
 		// gate below sees the accurate equipped state.
 		maybeDefaultDiscordAvatar();
 	});
+	// Live skill-progress ticker: the server pushes the local player's progress toward
+	// earning one skill medal this match (a kill, a charged punch, a bumper bonk, …).
+	// Latest-wins single HUD slot (drawSkillProgressHud); the bar sweeps prevCurrent->current.
+	server.on('medalProgress', function (p) {
+		if (p == null || p.medal == null) { return; }
+		if (typeof setSkillProgressHud === "function") { setSkillProgressHud(p); }
+	});
 	// hudOverlay (a separate IIFE with no socket handle) calls this to persist the touch
 	// walkthrough-seen latch to the account when a signed-in player finishes/skips it.
 	window.__markTouchWalkthroughSeen = function () {
@@ -1668,6 +1675,7 @@ function registerStateHandlers(server) {
 		resetTrails();
 		resetPlayerRanks();
 		if (typeof combatLogReset === "function") { combatLogReset(); } // fresh feed each round
+		if (typeof skillProgressReset === "function") { skillProgressReset(); } // clear the live medal ticker
 		recapReset(); // start a fresh recap buffer for this round's map
 		// Anchor the HUD timer to the CLIENT's Date.now() at receipt — mixing
 		// server's Date.now() with the browser's local Date.now() would drift

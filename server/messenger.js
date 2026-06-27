@@ -213,6 +213,11 @@ exports.addMailBox = function (id, client, identity) {
 exports.removeMailBox = function (id) {
 	delete mailBoxList[id];
 	delete identityList[id];
+	// Drop this socket's live skill-progress throttle state so the map can't grow
+	// across reconnects (keys are "<sig>|<medal>").
+	for (var k in medalProgressState) {
+		if (k.indexOf(id + '|') === 0) { delete medalProgressState[k]; }
+	}
 }
 // Resolve a connected client id to its account identity ({ userId, deviceId }).
 // userId is null for guests. Returns null if the client isn't connected.
@@ -264,6 +269,48 @@ exports.sendProgressionToClient = function (sig, row) {
 		client.emit('progressionUpdate', payload);
 	}
 }
+
+// ---- Live skill-progress HUD ticker ----------------------------------------------------
+// Per-(socket+medal) throttle state for sendMedalProgress, keyed "<sig>|<medal>" ->
+// { lastAt, lastSent }. Pruned on disconnect (removeMailBox) so it can't grow.
+var medalProgressState = {};
+var MEDAL_PROGRESS_THROTTLE_MS = 250;
+// Push a single LOCAL player's live progress toward earning ONE skill medal this match.
+// `current` is their in-match counter (totalKills, heavyHitCount, …); the target + label
+// come from progression.js (the medal is still awarded best-in-match at gameOver — this is
+// a display-only ticker). Guarded exactly like sendProgressionToClient: a disconnected sig
+// is a no-op. Throttled per (sig+medal) to ~250ms so a burst of bonks doesn't spam the wire,
+// but the EARNED beat (crossing the target) always sends. No DB / signed-in gate — it reads
+// only this-match counters, so guests get the ticker too.
+exports.sendMedalProgress = function (sig, medal, current) {
+	var client = mailBoxList[sig];
+	if (!client) { return; }
+	var target = progression.medalMatchTarget(medal);
+	if (!target) { return; }
+	var key = sig + '|' + medal;
+	var st = medalProgressState[key];
+	if (!st) { st = medalProgressState[key] = { lastAt: 0, lastSent: 0 }; }
+	// Counter went backwards => the match reset (counters reset at match end); start fresh
+	// so the next match's "1/3" doesn't read as a negative delta off last match's total.
+	if (current < st.lastSent) { st.lastSent = 0; }
+	var earned = current >= target;
+	var justEarned = earned && st.lastSent < target;
+	var now = Date.now();
+	// Throttle ordinary ticks; never throttle the moment the medal is earned.
+	if (!justEarned && (now - st.lastAt) < MEDAL_PROGRESS_THROTTLE_MS) { return; }
+	var delta = current - st.lastSent;
+	if (delta <= 0 && !justEarned) { return; }
+	st.lastAt = now;
+	st.lastSent = current;
+	client.emit('medalProgress', {
+		medal: medal,
+		label: progression.MEDAL_TITLES[medal] || medal,
+		current: current,
+		target: target,
+		delta: delta,
+		earned: earned
+	});
+};
 
 // In-memory pending celebration toasts for the LOCAL-DEV (writes-off) path only,
 // keyed by userId. With writes ON the durable queue lives in the DB's pending_toasts
