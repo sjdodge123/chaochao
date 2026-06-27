@@ -275,40 +275,37 @@ exports.sendProgressionToClient = function (sig, row) {
 // { lastAt, lastSent }. Pruned on disconnect (removeMailBox) so it can't grow.
 var medalProgressState = {};
 var MEDAL_PROGRESS_THROTTLE_MS = 250;
-// Push a single LOCAL player's live progress toward earning ONE skill medal this match.
-// `current` is their in-match counter (totalKills, heavyHitCount, …); the target + label
-// come from progression.js (the medal is still awarded best-in-match at gameOver — this is
-// a display-only ticker). Guarded exactly like sendProgressionToClient: a disconnected sig
-// is a no-op. Throttled per (sig+medal) to ~250ms so a burst of bonks doesn't spam the wire,
-// but the EARNED beat (crossing the target) always sends. No DB / signed-in gate — it reads
-// only this-match counters, so guests get the ticker too.
+// Signal a single LOCAL player that they just did a skill play that CONTRIBUTES toward an
+// achievement skin. This is only the "you did a skillful thing" nudge — `current` is their
+// in-match counter (totalKills, heavyHitCount, …) for the "N this match" tally, and `delta`
+// is how much this action added for the "+N <Skill>" pop. The lifetime bar (base/target ->
+// skin) is derived entirely CLIENT-side from medal_counts + config.achievementDefs, so no
+// target/label-math lives here anymore. Only fires for stats that gate a skin
+// (isAchievementStat) — there's nothing to progress toward otherwise. Guarded like
+// sendProgressionToClient (disconnected sig = no-op) and throttled per (sig+medal) to ~250ms
+// so a burst of bonks doesn't spam the wire. No DB / signed-in gate — guests still get the
+// contribution pop (they just won't see a lifetime bar, which the client decides).
 exports.sendMedalProgress = function (sig, medal, current) {
 	var client = mailBoxList[sig];
 	if (!client) { return; }
-	var target = progression.medalMatchTarget(medal);
-	if (!target) { return; }
+	if (!progression.isAchievementStat(medal)) { return; }
 	var key = sig + '|' + medal;
 	var st = medalProgressState[key];
 	if (!st) { st = medalProgressState[key] = { lastAt: 0, lastSent: 0 }; }
-	// Counter went backwards => the match reset (counters reset at match end); start fresh
-	// so the next match's "1/3" doesn't read as a negative delta off last match's total.
+	// Counter went backwards => the match reset (in-match counters reset each match); start
+	// fresh so the next match's first contribution doesn't read as a negative delta.
 	if (current < st.lastSent) { st.lastSent = 0; }
-	var earned = current >= target;
-	var justEarned = earned && st.lastSent < target;
 	var now = Date.now();
-	// Throttle ordinary ticks; never throttle the moment the medal is earned.
-	if (!justEarned && (now - st.lastAt) < MEDAL_PROGRESS_THROTTLE_MS) { return; }
+	if ((now - st.lastAt) < MEDAL_PROGRESS_THROTTLE_MS) { return; }
 	var delta = current - st.lastSent;
-	if (delta <= 0 && !justEarned) { return; }
+	if (delta <= 0) { return; }
 	st.lastAt = now;
 	st.lastSent = current;
 	client.emit('medalProgress', {
 		medal: medal,
 		label: progression.MEDAL_TITLES[medal] || medal,
 		current: current,
-		target: target,
-		delta: delta,
-		earned: earned
+		delta: delta
 	});
 };
 

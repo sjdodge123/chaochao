@@ -666,72 +666,218 @@ function drawCombatLog() {
     gameContext.restore();
 }
 
-// ---- Live skill-progress ticker (bottom-left) ------------------------------------------
-// A transient personal corner bar for SKILL-EXPRESSING plays only (kills, charged
-// punches, bumper bonks, ability use, zombie kills, brutal/heatwave finishes — NOT just
-// reaching the goal). The server pushes `medalProgress` each such action with the local
-// player's in-match counter vs that skill medal's nominal target; we flash "+N <Skill>"
-// and sweep the bar prevCurrent->current toward "earned!". Latest-wins single slot, wall-
-// clock timed, fades in/out. Deliberately bottom-left so it never collides with the combat
-// log (top-right). Screen-space, logical coords — no camera offset, no DPR multiply.
+// ---- Live achievement-skin ticker (bottom-left) ----------------------------------------
+// A transient personal corner bar tracking LIFETIME progress toward the next achievement
+// SKIN for a skill stat. Two beats:
+//   • CONTRIBUTION (mid-race): the server pushes `medalProgress` on each skill play (a kill,
+//     a charged punch, a bumper bonk, …). We flash "+N <Skill>" + the in-match tally
+//     ("N this match") and show the LIFETIME bar as the GOAL — base = your lifetime
+//     medal_count for that stat, target = the next ACHIEVEMENT_UNLOCKS threshold above it,
+//     labelled with the skin it unlocks ("Heavy Hitter 6/20 → Plasma"). The bar is STATIC
+//     during the match: lifetime medals only bank at match-end, so a hint reminds you that
+//     holding/winning this match's medal banks the next +1.
+//   • ADVANCE (post-match): when progressionUpdate arrives with a higher lifetime count, the
+//     bar animates old→new with a celebration, and an unlock flourish if it crossed a
+//     threshold (new skin name).
+// Signed-in only for the lifetime bar (guests have no medal_counts) — guests get just the
+// "+N <Skill>" contribution pop. Latest-wins single slot, wall-clock timed, fades in/out.
+// Bottom-left so it never collides with the combat log (top-right). Screen-space, logical
+// coords — no camera offset, no DPR multiply.
 var skillProgressHud = null;
-var SKILL_HUD_LIFE_MS = 2800;     // total on-screen envelope
-var SKILL_HUD_SWEEP_MS = 460;     // bar sweep prevCurrent->current
+var SKILL_HUD_LIFE_MS = 3000;        // contribution envelope
+var SKILL_HUD_ADVANCE_MS = 4200;     // match-end advance envelope (a touch longer to read)
+var SKILL_HUD_SWEEP_MS = 620;        // bar sweep base->shown
 function skillProgressReset() { skillProgressHud = null; }
-// Set/replace the single live slot. If the SAME medal is still showing, continue its bar
-// from where it was (current); otherwise start the sweep from current-minus-this-delta.
+
+// LIFETIME achievement-skin progress for a medal stat: the player's lifetime count for that
+// stat and the NEXT unearned ACHIEVEMENT_UNLOCKS threshold above it, labelled with the skin
+// it unlocks. Mirrors the server's achievementsUnlocked (>= rule) and the lobby picker's
+// val-vs-threshold derivation, but resolved per-STAT (next unmet rung). Returns null for
+// guests (no myProgression — no lifetime ledger) or unknown/unladdered stats.
+//   { base, target, skinName, skinId, maxed }   (maxed => every skin for the stat is earned)
+function achievementProgressForStat(stat) {
+    if (stat == null) { return null; }
+    var prog = (typeof myProgression !== "undefined") ? myProgression : null;
+    if (!prog) { return null; } // guests have no lifetime medal_counts
+    var defs = (typeof config !== "undefined" && config && config.achievementDefs) ? config.achievementDefs : null;
+    if (!defs) { return null; }
+    var base = (stat === 'wins') ? (prog.wins || 0) : ((prog.medal_counts || {})[stat] || 0);
+    var next = null;
+    for (var i = 0; i < defs.length; i++) {
+        var d = defs[i];
+        if (d.stat !== stat) { continue; }
+        if (base < d.threshold && (next == null || d.threshold < next.threshold)) { next = d; }
+    }
+    if (next == null) { return { base: base, target: null, skinName: null, skinId: null, maxed: true }; }
+    return { base: base, target: next.threshold, skinName: next.name, skinId: next.id, maxed: false };
+}
+
+// CONTRIBUTION beat (mid-race medalProgress). Flash "+N <Skill>" + the in-match tally; the
+// bar reflects the (static) lifetime base/target. Guests (life == null) get the pop only.
 function setSkillProgressHud(p) {
     if (p == null || p.medal == null) { return; }
-    var prev = skillProgressHud;
-    var target = (p.target && p.target > 0) ? p.target : 1;
     var delta = (p.delta && p.delta > 0) ? p.delta : 1;
-    var prevCurrent = (prev != null && prev.medal === p.medal)
-        ? prev.current
-        : Math.max(0, p.current - delta);
+    var matchCount = (typeof p.current === "number" && p.current > 0) ? p.current : delta;
     skillProgressHud = {
+        mode: 'contribution',
         medal: p.medal,
         label: p.label || p.medal,
-        current: p.current,
-        target: target,
         delta: delta,
-        earned: !!p.earned,
-        prevCurrent: prevCurrent,
+        matchCount: matchCount,
+        life: achievementProgressForStat(p.medal), // {base,target,skinName,maxed} | null (guest)
         bornAt: Date.now()
     };
 }
+
+// ADVANCE beat (post-match): the lifetime bar actually moved. Animate base(old)->base(new)
+// toward the same target it was chasing; if the new count crossed the target, flag the
+// unlock so the draw shows the skin-unlocked flourish. Called from the progressionUpdate
+// diff (noteProgressionAdvance). `prevBase`/`newBase` are lifetime counts for the stat.
+function setSkillAdvanceHud(opts) {
+    if (opts == null || opts.medal == null) { return; }
+    skillProgressHud = {
+        mode: 'advance',
+        medal: opts.medal,
+        label: opts.label || opts.medal,
+        prevBase: opts.prevBase,
+        newBase: opts.newBase,
+        target: opts.target,            // threshold the OLD count was chasing (may be null if maxed)
+        crossed: !!opts.crossed,        // newBase >= that target
+        skinName: opts.skinName || null,// skin unlocked when crossed
+        nextTarget: opts.nextTarget,    // next rung after crossing (for the post-cross fill), may be null
+        bornAt: Date.now()
+    };
+}
+
+// The skill stats the live ticker follows (mirrors the reportSkillProgress call sites in
+// server/entities/player.js). Only these drive the post-match advance beat, so banking a
+// participation stat (gamesPlayed +1 every match, goalsReached, …) doesn't hijack the
+// skill-play ticker every single round.
+var SKILL_TICKER_STATS = ['mostKills', 'savior', 'heavyHitter', 'pinball'];
+
+// The ascending ACHIEVEMENT_UNLOCKS defs for a stat (from config.achievementDefs), or [].
+function achievementDefsForStat(stat) {
+    var defs = (typeof config !== "undefined" && config && config.achievementDefs) ? config.achievementDefs : null;
+    if (!defs) { return []; }
+    var out = [];
+    for (var i = 0; i < defs.length; i++) { if (defs[i].stat === stat) { out.push(defs[i]); } }
+    out.sort(function (a, b) { return a.threshold - b.threshold; });
+    return out;
+}
+
+// Compare the pre- and post-match progression rows and, if a tracked SKILL medal's lifetime
+// count went up, play the advance beat (old->new) on the corner bar — celebrating the bank
+// and flourishing an unlock if it crossed a skin threshold. Signed-in only (guests have no
+// medal_counts). Called from the progressionUpdate handler with the row it's replacing.
+function noteProgressionAdvance(prevProg, newProg) {
+    if (!prevProg || !newProg || !prevProg.medal_counts || !newProg.medal_counts) { return; }
+    var best = null; // prefer an advance that crossed a threshold (an unlock) over a plain bank
+    for (var i = 0; i < SKILL_TICKER_STATS.length; i++) {
+        var stat = SKILL_TICKER_STATS[i];
+        var prevCount = prevProg.medal_counts[stat] || 0;
+        var newCount = newProg.medal_counts[stat] || 0;
+        if (newCount <= prevCount) { continue; }
+        var defs = achievementDefsForStat(stat);
+        if (!defs.length) { continue; }
+        // The rung the OLD count was chasing (first threshold above it).
+        var chasing = null, nextRung = null;
+        for (var d = 0; d < defs.length; d++) {
+            if (chasing == null && prevCount < defs[d].threshold) { chasing = defs[d]; }
+            if (nextRung == null && newCount < defs[d].threshold) { nextRung = defs[d]; }
+        }
+        if (chasing == null) { continue; } // every skin for this stat already earned — nothing to show
+        var crossed = newCount >= chasing.threshold;
+        var cand = {
+            medal: stat,
+            label: chasing.title || stat,
+            prevBase: prevCount,
+            newBase: newCount,
+            target: chasing.threshold,
+            crossed: crossed,
+            skinName: crossed ? chasing.name : null,
+            nextTarget: nextRung ? nextRung.threshold : null
+        };
+        if (crossed) { best = cand; break; }   // an unlock wins outright
+        if (best == null) { best = cand; }      // else remember the first plain bank
+    }
+    if (best) { setSkillAdvanceHud(best); }
+}
+
 function drawSkillProgressHud() {
     if (skillProgressHud == null) { return; }
     if (typeof config === "undefined" || config == null || config.stateMap == null) { return; }
-    // Skill plays only happen mid-race; keep the ticker to racing/collapsing.
-    if (currentState != config.stateMap.racing && currentState != config.stateMap.collapsing) {
+    var h = skillProgressHud;
+    var isAdvance = (h.mode === 'advance');
+    // Contribution plays only happen mid-race; the post-match advance shows on the
+    // game-over / overview / lobby screens where progressionUpdate lands.
+    if (!isAdvance) {
+        if (currentState != config.stateMap.racing && currentState != config.stateMap.collapsing) {
+            skillProgressHud = null;
+            return;
+        }
+    } else if (currentState == config.stateMap.racing || currentState == config.stateMap.gated) {
+        // A fresh round started before the advance could play — drop it.
         skillProgressHud = null;
         return;
     }
-    var h = skillProgressHud;
-    var now = Date.now();
-    var t = (now - h.bornAt) / SKILL_HUD_LIFE_MS;
-    if (t >= 1) { skillProgressHud = null; return; }
 
-    // Envelope: fade+rise in (first 12%), hold, fade+drop out (last 25%).
-    var alpha, rise;
-    if (t < 0.12) { var k = t / 0.12; alpha = k; rise = 14 * (1 - k); }
-    else if (t > 0.75) { var k2 = (t - 0.75) / 0.25; alpha = 1 - k2; rise = 10 * k2; }
-    else { alpha = 1; rise = 0; }
+    var now = Date.now();
+    var life = (now - h.bornAt) / (isAdvance ? SKILL_HUD_ADVANCE_MS : SKILL_HUD_LIFE_MS);
+    if (life >= 1) { skillProgressHud = null; return; }
+
+    // Envelope: fade in (first 10%), hold, fade out (last 22%).
+    var alpha;
+    if (life < 0.10) { alpha = life / 0.10; }
+    else if (life > 0.78) { alpha = 1 - (life - 0.78) / 0.22; }
+    else { alpha = 1; }
     alpha = clamp01(alpha);
 
-    // Eased bar sweep prevCurrent -> current.
-    var sweepT = clamp01((now - h.bornAt) / SKILL_HUD_SWEEP_MS);
-    var ease = 1 - Math.pow(1 - sweepT, 3);
-    var shown = h.prevCurrent + (h.current - h.prevCurrent) * ease;
-    var ratio = clamp01(shown / h.target);
-    var shownNum = Math.min(h.current, h.target);
+    // Resolve the bar numbers per mode.
+    var hasBar, ratio, gold, headRight, hint, flashLeft;
+    if (isAdvance) {
+        hasBar = (typeof h.target === "number" && h.target > 0);
+        // Sweep old->new lifetime count.
+        var sweepT = clamp01((now - h.bornAt) / SKILL_HUD_SWEEP_MS);
+        var ease = 1 - Math.pow(1 - sweepT, 3);
+        var shown = h.prevBase + (h.newBase - h.prevBase) * ease;
+        var fillTarget = (h.crossed && typeof h.nextTarget === "number" && h.nextTarget > 0) ? h.nextTarget : h.target;
+        ratio = hasBar ? clamp01(shown / (fillTarget || 1)) : 0;
+        gold = true; // a banked medal is always a celebratory beat
+        flashLeft = "+1  " + h.label;
+        if (h.crossed && h.skinName) {
+            headRight = "UNLOCKED!";
+            hint = h.skinName + " skin unlocked";
+        } else if (hasBar) {
+            headRight = Math.round(shown) + " / " + (fillTarget || h.target);
+            hint = "Banked! → " + (h.skinName || "next skin");
+        } else {
+            headRight = "+1 lifetime";
+            hint = "All " + h.label + " skins earned";
+        }
+    } else {
+        var lf = h.life; // {base,target,skinName,maxed} | null
+        hasBar = !!(lf && !lf.maxed && lf.target);
+        gold = false;
+        flashLeft = "+" + h.delta + "  " + h.label;
+        if (lf == null) {
+            // Guest: contribution pop only, no lifetime bar.
+            headRight = h.matchCount + " this match";
+            hint = null;
+        } else if (lf.maxed) {
+            headRight = h.matchCount + " this match";
+            hint = "All " + h.label + " skins earned";
+        } else {
+            ratio = clamp01(lf.base / lf.target);
+            headRight = lf.base + " / " + lf.target;
+            hint = "Hold the medal to bank +1 → " + lf.skinName;
+        }
+    }
 
-    var accent = h.earned ? "#ffd54a" : "#5ad1ff";
-    // The reward beat sits at full strength so a just-earned medal pops over the fade.
-    var beat = h.earned ? (0.85 + 0.15 * Math.sin(now / 90)) : 1;
+    var accent = gold ? "#ffd54a" : "#5ad1ff";
+    var beat = gold ? (0.85 + 0.15 * Math.sin(now / 90)) : 1;
 
     var padX = 12, padY = 9;
-    var w = 214, h2 = 48;
+    var w = 230, h2 = hasBar ? 58 : 44;
     var x = 16;
     var y = LOGICAL_HEIGHT - h2 - 78; // clear of the bottom touch controls
     var barH = 9;
@@ -746,32 +892,42 @@ function drawSkillProgressHud() {
         alpha: alpha,
         borderAlpha: alpha,
         radius: 9,
-        border: h.earned ? "rgba(255,213,74,0.85)" : "rgba(255,255,255,0.28)",
-        glow: h.earned ? "rgba(255,213,74,0.55)" : null
+        border: gold ? "rgba(255,213,74,0.85)" : "rgba(255,255,255,0.28)",
+        glow: gold ? "rgba(255,213,74,0.55)" : null
     });
 
-    // "+N <Skill>" flash (top-left) + the count (top-right).
+    // "+N <Skill>" flash (top-left) + the headline number / state (top-right).
     gameContext.globalAlpha = alpha * beat;
     gameContext.textBaseline = "alphabetic";
     gameContext.textAlign = "left";
     gameContext.font = "bold 14px Arial";
     gameContext.fillStyle = accent;
-    var flash = "+" + h.delta + "  " + h.label;
-    gameContext.fillText(flash, x + padX, y + padY + 12);
+    gameContext.fillText(flashLeft, x + padX, y + padY + 12);
     gameContext.textAlign = "right";
     gameContext.font = "bold 12px Arial";
-    gameContext.fillStyle = h.earned ? accent : "#cfd6dd";
-    gameContext.fillText(h.earned ? "QUALIFIED!" : (shownNum + " / " + h.target), x + w - padX, y + padY + 12);
+    gameContext.fillStyle = accent;
+    gameContext.fillText(headRight, x + w - padX, y + padY + 12);
 
-    // Track + fill (reuse the rounded-rect helper).
-    gameContext.globalAlpha = alpha;
-    gameContext.fillStyle = "rgba(255,255,255,0.14)";
-    roundRectPath(gameContext, barX, barY, barW, barH, barH / 2);
-    gameContext.fill();
-    if (ratio > 0) {
-        gameContext.fillStyle = accent;
-        roundRectPath(gameContext, barX, barY, Math.max(barH, barW * ratio), barH, barH / 2);
+    // Hint line ("→ <Skin>" goal / bank reminder / unlock) under the headline.
+    if (hint) {
+        gameContext.globalAlpha = alpha;
+        gameContext.textAlign = "left";
+        gameContext.font = "10px Arial";
+        gameContext.fillStyle = gold ? "#ffe9a8" : "#aeb6c0";
+        gameContext.fillText(hint, x + padX, y + padY + 27);
+    }
+
+    // Track + fill (only when there's a lifetime target to chase).
+    if (hasBar) {
+        gameContext.globalAlpha = alpha;
+        gameContext.fillStyle = "rgba(255,255,255,0.14)";
+        roundRectPath(gameContext, barX, barY, barW, barH, barH / 2);
         gameContext.fill();
+        if (ratio > 0) {
+            gameContext.fillStyle = accent;
+            roundRectPath(gameContext, barX, barY, Math.max(barH, barW * ratio), barH, barH / 2);
+            gameContext.fill();
+        }
     }
     gameContext.restore();
 }

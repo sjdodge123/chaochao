@@ -469,7 +469,6 @@ class Player extends Circle {
 			// No scoring in the lobby (the resourceful stat isn't gated by checkForWinners).
 			if (currentState != c.stateMap.lobby) {
 				this.resourceful += 1;
-				this.reportSkillProgress('resourceful', this.resourceful);
 				this.abilitiesUsedMatch += 1;
 			}
 			this.ability.use();
@@ -1424,10 +1423,11 @@ class Player extends Circle {
 			}
 		}, c.playerKillWindow, this);
 	}
-	// Live skill-progress HUD ticker: push this human's progress toward earning one
-	// skill medal (current in-match counter vs progression.medalMatchTarget). Bots are
-	// skipped (the HUD is the local player's own bar); the medal is still awarded
-	// best-in-match at gameOver — this is display-only. One-liner at each skill site.
+	// Live achievement-skin ticker: signal this human that a skill play just CONTRIBUTED
+	// toward an achievement skin (current = this-match counter for the "+N <Skill>" pop +
+	// tally). Bots are skipped (the HUD is the local player's own bar); the lifetime bar +
+	// next-skin target are derived client-side. One-liner at each skill site. Only stats
+	// that gate a skin actually emit (messenger gates on isAchievementStat).
 	reportSkillProgress(medal, current) {
 		if (this.isAI) { return; }
 		messenger.sendMedalProgress(this.id, medal, current);

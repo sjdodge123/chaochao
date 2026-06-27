@@ -931,7 +931,6 @@ class Game {
 					if (this.gameBoard.checkForActiveBrutal(c.brutalRounds.heatwave.id) &&
 						!this.playerList[player].touchedScorchedTile) {
 						this.playerList[player].firewalkerCount += 1;
-						this.playerList[player].reportSkillProgress('firewalker', this.playerList[player].firewalkerCount);
 					}
 				}
 				if (this.firstPlaceSig == null) {

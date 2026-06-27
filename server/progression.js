@@ -160,26 +160,22 @@ var MEDAL_TITLES = {
     pinball: 'Pinball', iceSkater: 'Ice Skater', smoothOperator: 'Smooth Operator',
     firewalker: 'Firewalker'
 };
-// Nominal in-match qualifying targets for the live skill-progress HUD ticker. The REAL
-// per-match SKILL medals are best-in-match (achievements.js: whoever ends highest holds
-// it — there is NO fixed config threshold to "reach"), so these are display-only goals the
-// in-game corner bar fills toward as you rack up the matching counter (totalKills,
-// heavyHitCount, bumperHitCount, …). They never gate anything server-side; the medal is
-// still awarded best-in-match at gameOver. Only the discrete, clearly skill-EXPRESSING
-// medals are listed — participation stats (goalsReached) and noisy/continuous ones (bully,
-// iceSkater/smoothOperator distance, the negative "Picked on") are intentionally absent so
-// the ticker only ever celebrates a deliberate play. Keys match MEDAL_TITLES.
-var MEDAL_MATCH_TARGETS = {
-    mostKills: 3,      // Serial killer — a real killing run, not a lucky bonk
-    savior: 1,         // Savior — one match-saving takedown earns it
-    heavyHitter: 4,    // Heavy Hitter — committed fully-charged swings
-    pinball: 3,        // Pinball — bounced around the bumpers a few times
-    resourceful: 3,    // Resouceful — leaned on pickups
-    firewalker: 1      // Firewalker — one clean Heatwave finish
-};
-// The nominal HUD target for a medal stat, or 0 when the medal isn't tracked live.
-function medalMatchTarget(stat) {
-    return MEDAL_MATCH_TARGETS[stat] || 0;
+// The set of medal stats that gate an achievement skin (i.e. appear in ACHIEVEMENT_UNLOCKS).
+// The live skill-progress HUD ticker only fires for these: each per-action contribution
+// (a kill, a charged punch, a bumper bonk, …) advances the player toward a REAL lifetime
+// unlock, so the corner bar always has a skin to chase. Stats with no skin ladder
+// (firewalker, resourceful, the negative "Picked on", …) are intentionally excluded — there
+// is nothing to progress toward. This replaces the old nominal-per-match-target framing:
+// the bar now shows LIFETIME medal_count vs the next ACHIEVEMENT_UNLOCKS threshold, derived
+// CLIENT-side from medal_counts + config.achievementDefs.
+var ACHIEVEMENT_STATS = (function () {
+    var s = {};
+    for (var i = 0; i < ACHIEVEMENT_UNLOCKS.length; i++) { s[ACHIEVEMENT_UNLOCKS[i].stat] = true; }
+    return s;
+})();
+// True when a medal stat unlocks an achievement skin (so it's worth a live ticker push).
+function isAchievementStat(stat) {
+    return !!ACHIEVEMENT_STATS[stat];
 }
 function describeAchievement(u) {
     var n = u.threshold;
@@ -205,7 +201,10 @@ function describeAchievement(u) {
 // client-side mirror of ACHIEVEMENT_UNLOCKS to keep in lockstep.
 function clientAchievementDefs() {
     return ACHIEVEMENT_UNLOCKS.map(function (u) {
-        return { id: u.id, name: u.name, slot: u.slot, stat: u.stat, threshold: u.threshold, desc: describeAchievement(u) };
+        // `title` = the plain medal/skill name for that stat (e.g. "Heavy Hitter"), used by
+        // the live skill-ticker's match-end advance label; null for non-medal stats (wins,
+        // gamesPlayed, …) which the ticker doesn't follow.
+        return { id: u.id, name: u.name, slot: u.slot, stat: u.stat, threshold: u.threshold, desc: describeAchievement(u), title: MEDAL_TITLES[u.stat] || null };
     });
 }
 
@@ -296,8 +295,8 @@ module.exports = {
     levelProgress: levelProgress,
     ACHIEVEMENT_UNLOCKS: ACHIEVEMENT_UNLOCKS,
     MEDAL_TITLES: MEDAL_TITLES,
-    MEDAL_MATCH_TARGETS: MEDAL_MATCH_TARGETS,
-    medalMatchTarget: medalMatchTarget,
+    ACHIEVEMENT_STATS: ACHIEVEMENT_STATS,
+    isAchievementStat: isAchievementStat,
     describeAchievement: describeAchievement,
     clientAchievementDefs: clientAchievementDefs,
     achievementsUnlocked: achievementsUnlocked,

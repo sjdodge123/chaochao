@@ -912,7 +912,13 @@ function registerConnectionHandlers(server) {
 	});
 	// Authoritative progression for the signed-in player (XP/level/unlocked skins).
 	server.on('progressionUpdate', function (prog) {
+		var prevProgression = myProgression;
 		myProgression = prog || null;
+		// Match-end advance beat for the live achievement-skin ticker: if a tracked skill
+		// medal's LIFETIME count just went up (a medal banked this match), animate the corner
+		// bar old->new with a celebration + unlock flourish. Reads the row being replaced, so
+		// it must run before anything else consumes myProgression.
+		if (typeof noteProgressionAdvance === "function") { noteProgressionAdvance(prevProgression, myProgression); }
 		// Account-backed touch-walkthrough latch. progressionUpdate fires only for signed-in
 		// players, so the account flag is authoritative here: cache it for hudOverlay's buildDom
 		// (whichever runs first) and let the touch HUD decide — build it for a genuine first-run
@@ -939,9 +945,11 @@ function registerConnectionHandlers(server) {
 		// gate below sees the accurate equipped state.
 		maybeDefaultDiscordAvatar();
 	});
-	// Live skill-progress ticker: the server pushes the local player's progress toward
-	// earning one skill medal this match (a kill, a charged punch, a bumper bonk, …).
-	// Latest-wins single HUD slot (drawSkillProgressHud); the bar sweeps prevCurrent->current.
+	// Live achievement-skin ticker: the server pushes a per-action CONTRIBUTION signal each
+	// time the local player does a skill play (a kill, a charged punch, a bumper bonk, …).
+	// We pop "+N <Skill>" + the in-match tally; the corner bar shows LIFETIME progress toward
+	// the next achievement skin (derived client-side from medal_counts). Latest-wins single
+	// slot (drawSkillProgressHud).
 	server.on('medalProgress', function (p) {
 		if (p == null || p.medal == null) { return; }
 		if (typeof setSkillProgressHud === "function") { setSkillProgressHud(p); }
