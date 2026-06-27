@@ -243,7 +243,59 @@ class Engine {
 			// walls instead of powering out (measured via ai-fitness). A bot keeps the old
 			// physics (momentum stays 1 → factor 1).
 			var ramp = c.momentumRamp;
-			if (ramp != null && !player.isAI) {
+			// SAMPLE fluid-feel model (config.physicsFluid), humans only -- bots keep the
+			// classic snap physics so AI pathing/fitness is untouched. It (1) eases the
+			// drive HEADING toward held input, (2) preserves momentum through turns by
+			// decaying the ramp gradually instead of dumping it, and (3) coasts to rest on
+			// a gentler brake. The classic 8-way drive direction is the *target* it eases
+			// toward; with the toggle off everything falls through to the old code.
+			var fluid = c.physicsFluid;
+			var useFluid = (fluid != null && fluid.enabled && !player.isAI);
+			// thrust* = the direction the drive force is actually applied along this tick.
+			var thrustX = dirX;
+			var thrustY = dirY;
+			if (useFluid) {
+				if (braking) {
+					// No input: coast. Bleed the momentum ramp gradually (no instant dump)
+					// and keep the eased heading so re-pressing continues the arc.
+					player.momentum = Math.max(0, player.momentum - this.dt / fluid.momentumDecayTime);
+				}
+				else {
+					var fmoveMag = utils.getMag(dirX, dirY);
+					var ftx = fmoveMag > 0 ? dirX / fmoveMag : 0;
+					var fty = fmoveMag > 0 ? dirY / fmoveMag : 0;
+					var headMag = utils.getMag(player.driveHeadingX, player.driveHeadingY);
+					var fspeed = utils.getMag(player.velX, player.velY);
+					var snapSpeed = (ramp != null) ? ramp.resetSpeedMin : 15;
+					if (headMag < 1e-4 || fspeed < snapSpeed) {
+						// Launching from (near) a stop: snap heading to intent so the kart
+						// leaves the line crisply; the ease only kicks in once moving.
+						player.driveHeadingX = ftx;
+						player.driveHeadingY = fty;
+					}
+					else {
+						// Carving at speed: rotate the heading toward held input over
+						// turnTau, then renormalize so thrust magnitude stays full.
+						var blend = 1 - Math.exp(-this.dt / fluid.turnTau);
+						var hx = player.driveHeadingX + (ftx - player.driveHeadingX) * blend;
+						var hy = player.driveHeadingY + (fty - player.driveHeadingY) * blend;
+						var hMag = utils.getMag(hx, hy);
+						if (hMag > 1e-4) { hx /= hMag; hy /= hMag; }
+						else { hx = ftx; hy = fty; }
+						player.driveHeadingX = hx;
+						player.driveHeadingY = hy;
+					}
+					thrustX = player.driveHeadingX;
+					thrustY = player.driveHeadingY;
+					// Build momentum on committed movement; no hard-turn dump (the eased
+					// heading is what makes a turn feel smooth instead of a drive cut).
+					var fRampTime = (ramp != null) ? ramp.rampTime : 2.5;
+					player.momentum = Math.min(1, player.momentum + this.dt / fRampTime);
+					player.lastMoveDirX = ftx;
+					player.lastMoveDirY = fty;
+				}
+			}
+			else if (ramp != null && !player.isAI) {
 				if (braking) {
 					player.momentum = 0;
 					player.lastMoveDirX = 0;
@@ -270,15 +322,17 @@ class Engine {
 					player.lastMoveDirY = ndy;
 				}
 			}
-			var momentumFactor = (ramp != null && !player.isAI) ? player.getMomentumFactor() : 1;
+			var momentumFactor = ((ramp != null || useFluid) && !player.isAI) ? player.getMomentumFactor() : 1;
 
 			var newVelX, newVelY, newVel, newDirX, newDirY;
-			newVelX = player.velX + (player.acel + player.getSpeedBonus()) * driveMult * momentumFactor * dirX * this.dt;
-			newVelY = player.velY + (player.acel + player.getSpeedBonus()) * driveMult * momentumFactor * dirY * this.dt;
+			newVelX = player.velX + (player.acel + player.getSpeedBonus()) * driveMult * momentumFactor * thrustX * this.dt;
+			newVelY = player.velY + (player.acel + player.getSpeedBonus()) * driveMult * momentumFactor * thrustY * this.dt;
 
 			if (braking) {
-				newVelX -= player.brakeCoeff * player.velX;
-				newVelY -= player.brakeCoeff * player.velY;
+				// Fluid model coasts to rest on a gentler brake; classic stomps the stop.
+				var brakeC = useFluid ? fluid.releaseBrakeCoeff : player.brakeCoeff;
+				newVelX -= brakeC * player.velX;
+				newVelY -= brakeC * player.velY;
 			}
 			else {
 				newVelX -= player.dragCoeff * player.getDragBonus() * player.velX;

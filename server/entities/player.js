@@ -352,6 +352,13 @@ class Player extends Circle {
 		this.lastMoveDirX = 0;
 		this.lastMoveDirY = 0;
 
+		// Fluid-physics (config.physicsFluid) eased drive heading: the actual
+		// direction thrust is applied along, lerped toward held input so turns carve
+		// instead of snapping between the 8 headings. (0,0 = not yet moving → snaps to
+		// intent on the first committed tick.) Unused by bots and in the classic model.
+		this.driveHeadingX = 0;
+		this.driveHeadingY = 0;
+
 		this.currentSpeedBonus = 0;
 
 		//AI (set on bot players by world.createNewBot; humans leave these untouched)

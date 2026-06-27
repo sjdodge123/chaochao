@@ -16,6 +16,7 @@ To re-render a past week's digest with the current formatting, run the `Release 
 
 ### Gameplay & Balance
 
+- **Karts handle more fluidly (sample feel).** Steering now carves an arc instead of snapping between eight headings, your speed carries through turns rather than getting cut, and letting go of the keys coasts to a smooth stop instead of stomping the brakes. Top speed and each surface's grip are unchanged — it just eases in and out instead of feeling on/off. *Why:* a toggle-gated experiment for a softer, less rigid drive (bots keep the classic model).
 - **Bunker rounds breathe a little now.** The lava ring holds off for a few seconds at the start so you can size up the arena, then closes in noticeably slower — less of a panicked scramble, more of a tightening squeeze.
 
 ### Bug Fixes
