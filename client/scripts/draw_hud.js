@@ -761,7 +761,7 @@ function drawSkillProgressHud() {
     gameContext.textAlign = "right";
     gameContext.font = "bold 12px Arial";
     gameContext.fillStyle = h.earned ? accent : "#cfd6dd";
-    gameContext.fillText(h.earned ? "EARNED!" : (shownNum + " / " + h.target), x + w - padX, y + padY + 12);
+    gameContext.fillText(h.earned ? "QUALIFIED!" : (shownNum + " / " + h.target), x + w - padX, y + padY + 12);
 
     // Track + fill (reuse the rounded-rect helper).
     gameContext.globalAlpha = alpha;

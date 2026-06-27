@@ -871,7 +871,6 @@ class Game {
 							// both killer and victim are in hand.
 							if (killer.isZombie) {
 								killer.zombieKillCount += 1;
-								killer.reportSkillProgress('zombieSlayer', killer.zombieKillCount);
 							}
 							killer.addKill(this.playerList[player]);
 							this.gameBoard.checkForFirstBlood();
@@ -916,14 +915,12 @@ class Game {
 				// firing every tick while reachedGoal stays true is harmless).
 				this.recordPlayerFinish(this.playerList[player]);
 				this.playerList[player].survivalist += 1;
-				this.playerList[player].reportSkillProgress('survivalist', this.playerList[player].survivalist);
 				// Escaped the horde: a human reaching the goal during an infection round.
 				if (this.gameBoard.checkForActiveBrutal(c.brutalRounds.infection.id)) {
 					this.playerList[player].recapWorthy = true;
 				}
 				if (this.gameBoard.brutalRound) {
 					this.playerList[player].brutalist += 1;
-					this.playerList[player].reportSkillProgress('brutalist', this.playerList[player].brutalist);
 				}
 				// Firewalker: finished a Heatwave round without ever touching a
 				// heatwave-converted (scorched) tile. Latched once per round — this

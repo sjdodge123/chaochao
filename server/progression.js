@@ -175,9 +175,6 @@ var MEDAL_MATCH_TARGETS = {
     heavyHitter: 4,    // Heavy Hitter — committed fully-charged swings
     pinball: 3,        // Pinball — bounced around the bumpers a few times
     resourceful: 3,    // Resouceful — leaned on pickups
-    zombieSlayer: 2,   // Zombie Slayer — bites landed while infected
-    survivalist: 3,    // Survivalist — kept reaching the goal
-    brutalist: 2,      // Brutalist — finished brutal rounds the hard way
     firewalker: 1      // Firewalker — one clean Heatwave finish
 };
 // The nominal HUD target for a medal stat, or 0 when the medal isn't tracked live.
