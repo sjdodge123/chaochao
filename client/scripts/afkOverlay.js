@@ -39,6 +39,16 @@ var _afkWarnEl = null, _afkWarnSubEl = null;
 var _afkKickedEl = null;
 var _afkIdleTimer = null;
 var _afkPrevMyID = null;
+// Whether the current idle period STARTED in-game. The server latches the long sleep+kick
+// path once 60s of in-game idle elapses and does NOT re-shorten to the 60s lobby threshold
+// when the round ends into lobby — so once idle began in-game we must keep predicting the
+// long threshold (else we'd show a lying "removed in 0s" sitting in the post-round lobby).
+var _afkIdleStartedInGame = false;
+
+function _afkInLobby() {
+	return (typeof config !== "undefined" && config && config.stateMap && typeof currentState !== "undefined") &&
+		(currentState === config.stateMap.waiting || currentState === config.stateMap.lobby);
+}
 
 // --- activity stamping --------------------------------------------------------------------
 
@@ -48,6 +58,7 @@ var _afkPrevMyID = null;
 // ignores it for AFK) or it would suppress the warning while the kick still lands.
 function markPlayerInput() {
 	afkLastInputAt = (typeof Date !== "undefined") ? Date.now() : 0;
+	_afkIdleStartedInGame = !_afkInLobby(); // remember which threshold governs this idle period
 	if (_afkWarnEl) { afkWarningHide(); }
 }
 
@@ -155,6 +166,9 @@ function afkKickedShow(o) {
 	if (typeof document === "undefined" || !document.body) { return; }
 	o = o || {};
 	afkWarningHide(); // a kick supersedes any lingering warning
+	// A kick supersedes the reconnect outage overlay too (mutually exclusive in practice, but
+	// be safe): tear it down so its scrim doesn't sit under the kicked screen.
+	if (document.getElementById("reconnectOverlay") && typeof reconnectOverlayHide === "function") { reconnectOverlayHide(); }
 	if (_afkKickedEl) { return; } // already up (idempotent)
 	var overlay = _afkMakeOverlay("afkKickedOverlay");
 	var title = _afkMakeTitle("Removed for inactivity");
@@ -187,15 +201,18 @@ function afkKickedHide() {
 // can't/shouldn't predict (no config yet). Mirrors player.js/game.js (see file header).
 function _afkKickThresholdMs() {
 	if (typeof config === "undefined" || !config || !config.stateMap) { return null; }
-	var inLobby = (typeof currentState !== "undefined") &&
-		(currentState === config.stateMap.waiting || currentState === config.stateMap.lobby);
+	var inLobby = _afkInLobby();
 	var isDiscord = (typeof isDiscordActivity === "function") && isDiscordActivity();
 	var sec;
 	if (isDiscord) {
+		// Discord deep-idle reclaim reads the live state each tick, so no latch needed.
 		sec = inLobby ? (config.discordLobbyIdleKickTime || 900) : (config.discordIdleKickTime || 1200);
 	} else {
 		var sleep = (config.playerStartSleepTime || 60);
-		sec = inLobby ? sleep : (sleep + (config.playerAFKKickTime || 240));
+		// Use the long (sleep+kick) threshold whenever we're in-game OR the idle period began
+		// in-game (the server latched it and won't re-shorten on the round-end → lobby roll).
+		var treatInGame = !inLobby || _afkIdleStartedInGame;
+		sec = treatInGame ? (sleep + (config.playerAFKKickTime || 240)) : sleep;
 	}
 	return sec * 1000;
 }
@@ -209,10 +226,18 @@ function _afkIdleTick() {
 	if (typeof previewMode !== "undefined" && previewMode) { afkWarningHide(); return; }
 	// A fresh join / rejoin (new id) resets the activity baseline so the player isn't warned
 	// off a stale timestamp from a previous session.
-	if (myID !== _afkPrevMyID) { afkLastInputAt = Date.now(); _afkPrevMyID = myID; afkWarningHide(); return; }
+	if (myID !== _afkPrevMyID) { markPlayerInput(); _afkPrevMyID = myID; afkWarningHide(); return; }
 	// Don't stack on top of the reconnect outage overlay — a dropped socket is a different,
 	// louder story and the AFK clock is meaningless while disconnected.
 	if (document.getElementById("reconnectOverlay")) { afkWarningHide(); return; }
+	// Couch co-op: never cover an actively-played shared screen. If any non-primary local
+	// (pad) seat is in the game, suppress the primary's idle warning — mirrors the kicked
+	// path's afkHasSurvivor failover (client.js). P2's input doesn't reset P1's clock.
+	if (typeof localPlayers !== "undefined" && localPlayers) {
+		for (var _s = 0; _s < localPlayers.length; _s++) {
+			if (localPlayers[_s] && !localPlayers[_s].isPrimary) { afkWarningHide(); return; }
+		}
+	}
 	var threshold = _afkKickThresholdMs();
 	if (threshold == null) { return; }
 	var idle = Date.now() - afkLastInputAt;
@@ -231,6 +256,6 @@ function _afkIdleTick() {
 function startAfkIdleWatch() {
 	if (typeof document === "undefined" || typeof setInterval === "undefined") { return; }
 	if (_afkIdleTimer) { return; }
-	afkLastInputAt = Date.now();
+	markPlayerInput();
 	_afkIdleTimer = setInterval(_afkIdleTick, 1000);
 }

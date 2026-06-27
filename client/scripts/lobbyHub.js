@@ -690,6 +690,9 @@ function stationPickSkin(lp, color) {
     // would recolour the wrong player; if this slot has no live socket, drop it.
     if (lp.socket) {
         lp.socket.emit("setSkin", { color: color });
+        // The server treats setSkin as activity (player.wakeUp); mirror it on the client so
+        // the AFK warning's idle clock stays in sync when the primary recolours via the hub.
+        if (lp.isPrimary && typeof markPlayerInput === "function") { markPlayerInput(); }
     }
 }
 // Flash a "taken" note on a slot's open skin panel for a short beat.
