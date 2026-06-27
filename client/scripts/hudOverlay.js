@@ -60,6 +60,11 @@
     // replay (like a dev force-show) is exempt from the race auto-dismiss — they asked to
     // watch it now, even mid-round.
     var walkUserReplay = false;
+    // Inter-step breather: after a step is completed we hold the NEXT step's visuals for a
+    // short beat so the tutorial doesn't snap from one to the next too fast. stepReadyAt is
+    // the earliest time (ms) the active step may render/advance; 0 = ready now (first step).
+    var STEP_GAP_MS = 450;
+    var stepReadyAt = 0;
     // Attack press tracking (for tap vs hold detection across frames).
     var atkPressStart = 0;      // ms when the current press began (0 = not pressed)
     var atkWasPressed = false;
@@ -297,7 +302,7 @@
         walkIdx = 0; walkPlaced = false;
         walkRenderedIdx = -1; walkRenderedCap = -1;
         advanceLock = false; atkPressStart = 0; atkWasPressed = false;
-        dirArmed = true; fsGuardUntil = 0;
+        dirArmed = true; fsGuardUntil = 0; stepReadyAt = 0;
         walkUserReplay = true;
         buildWalkthrough();
     }
@@ -349,7 +354,18 @@
         atkPressStart = 0; atkWasPressed = false; // reset attack tracking between steps
         setTimeout(function () { advanceLock = false; }, 320); // debounce one gesture -> one step
         walkIdx++;
+        walkPlaced = false;                 // new step isn't tap-advanceable until it's placed
+        stepReadyAt = Date.now() + STEP_GAP_MS; // brief breather before the next step appears
         if (walkIdx >= walkSteps.length) { finishWalk(); }
+    }
+    // The active step is "held" — don't render/detect/advance it yet — during the brief
+    // inter-step breather, OR while the emoji wheel (#emojiMenu) is open. The emoji step
+    // advances on the tap that OPENS the wheel, so without this the next step would pop up
+    // on top of the open wheel; wait for the player to close it first.
+    function stepHeld() {
+        if (Date.now() < stepReadyAt) return true;
+        try { if (typeof menuOpen !== "undefined" && menuOpen) return true; } catch (e) { /* ignore */ }
+        return false;
     }
     // True once the round is live (countdown or beyond). The walkthrough is a lobby/
     // pre-game teacher; once gameplay starts we tear it down so it can't linger over the
@@ -505,13 +521,31 @@
                     // shouldn't be denied the tutorial forever. A deliberate replay / dev
                     // force-show is exempt (handled above) — they asked to watch it now.
                     finishWalk(false, walkIdx === 0);
+                } else if (stepHeld()) {
+                    // Inter-step breather, or waiting for the emoji wheel to close — hide the
+                    // step visuals (instant, no opacity fade) so nothing flashes over the wheel,
+                    // and don't detect/advance. walkPlaced stays false so a stray tap (e.g. on
+                    // the open wheel) can't advance the held step.
+                    walk.style.visibility = "hidden";
+                    walkPlaced = false;
                 } else {
                     var step = walkSteps[walkIdx];
                     if (step) {
                         detectStep(step, jm, ab);
-                        placeStep(step, jm, ab, m, capFont);
-                        walk.style.visibility = "";
-                        walkPlaced = true;
+                        // detectStep may have ADVANCED walkIdx this frame. `step` is the old
+                        // object, but placeStep's label/memo key on the new index — rendering
+                        // it now would cache stale text against the new step (showing the
+                        // previous step's wording, and masking which gesture is really wanted).
+                        // After an advance stepHeld() is true (the breather), so hold instead;
+                        // the next render rebuilds the bubble for the correct new step.
+                        if (stepHeld()) {
+                            walk.style.visibility = "hidden";
+                            walkPlaced = false;
+                        } else {
+                            placeStep(step, jm, ab, m, capFont);
+                            walk.style.visibility = "";
+                            walkPlaced = true;
+                        }
                     }
                 }
             }

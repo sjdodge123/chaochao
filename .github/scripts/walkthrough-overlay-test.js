@@ -125,7 +125,7 @@ function setup(opts) {
         window: window, document: document, localStorage: localStorage,
         isTouchScreen: opts.touch === false ? false : true,
         gameCanvas: canvas, LOGICAL_WIDTH: 360, LOGICAL_HEIGHT: 640, fitRatio: 1,
-        joystickMovement: null, attackButton: null,
+        joystickMovement: null, attackButton: null, menuOpen: false,
         config: { stateMap: STATE }, currentState: (opts.state == null ? STATE.waiting : opts.state),
         chatButton: null, exitButton: null,
         fullscreenSupported: function () { return true; },
@@ -136,6 +136,12 @@ function setup(opts) {
     };
     Object.keys(globals).forEach(function (k) { saved[k] = g[k]; g[k] = globals[k]; });
 
+    // Controllable clock so tests can step past the inter-step breather deterministically
+    // (hudOverlay reads Date.now() for stepReadyAt / step pacing).
+    var clock = 1000000;
+    var savedDateNow = Date.now;
+    Date.now = function () { return clock; };
+
     delete require.cache[require.resolve(HUD_PATH)];
     require(HUD_PATH);
 
@@ -143,6 +149,8 @@ function setup(opts) {
         window: window, store: store, canvas: canvas, host: host,
         setState: function (s) { g.currentState = s; },
         setInput: function (jm, ab) { g.joystickMovement = jm; g.attackButton = ab; },
+        setMenuOpen: function (v) { g.menuOpen = v; },
+        tick: function (ms) { clock += ms; },
         setRect: function (r) { canvas._rect = r; },
         step: function () { var c = rafCb; rafCb = null; if (c) c(); },
         flush: function () { var p = timers.splice(0); p.forEach(function (t) { try { t.fn(); } catch (e) {} }); },
@@ -150,7 +158,7 @@ function setup(opts) {
         attached: function () { var w = api.walk(); return !!(w && w.parentNode !== null); },
         bubble: function () { var w = api.walk(); if (!w) return null; for (var i = 0; i < w.children.length; i++) { if (w.children[i]._classSet.bubble) return w.children[i]; } return null; },
         skip: function () { var w = api.walk(); if (!w) return null; for (var i = 0; i < w.children.length; i++) { if (w.children[i]._classSet["wt-skip"]) return w.children[i]; } return null; },
-        teardown: function () { Object.keys(globals).forEach(function (k) { g[k] = saved[k]; }); }
+        teardown: function () { Date.now = savedDateNow; Object.keys(globals).forEach(function (k) { g[k] = saved[k]; }); }
     };
     return api;
 }
@@ -204,11 +212,14 @@ console.log("Walkthrough overlay test\n");
     a.teardown();
 
     var b = setup({ state: STATE.waiting });
+    b.step();                               // render step 1 (up)
     b.setInput(stickUp(), null);
-    b.step(); // detectStep advances the first 'up' dir step -> walkIdx = 1
+    b.step();                               // gesture advances 1 -> 2; this frame holds (breather)
+    b.setInput(null, null);
+    b.tick(500); b.step();                  // breather elapsed -> render step 2 (down)
     var bubble = b.bubble();
     assert(bubble && /Step 2 \//.test(bubble.innerHTML), "performing the gesture advances to step 2");
-    b.setInput(null, null);
+    assert(bubble && /down/i.test(bubble.innerHTML), "the new step shows its OWN text, not the previous step's [regression]");
     b.setState(STATE.racing);
     b.step(); b.flush();
     assert(!b.attached(), "overlay dismisses on race start after engagement too");
@@ -259,6 +270,31 @@ console.log("Walkthrough overlay test\n");
     r.window.__touchHudResolveWalkthrough(true);
     assert(r.attached(), "a late resolve(true) does not tear down an active replay");
     r.teardown();
+})();
+
+// Group 5 — inter-step pacing + emoji-wheel hold
+(function () {
+    console.log("\n5) pacing: inter-step breather + wait for the emoji wheel to close");
+
+    var d = setup({ state: STATE.waiting });
+    d.step();
+    assert(d.walk().style.visibility !== "hidden", "first step shows immediately (no initial gap)");
+    d.setInput(stickUp(), null);
+    d.step();                       // gesture advances -> the just-advanced frame holds
+    assert(d.walk().style.visibility === "hidden", "the just-advanced step is held (hidden) during the breather");
+    d.setInput(null, null);
+    d.tick(500); d.step();          // breather elapsed -> the next step appears
+    assert(d.walk().style.visibility !== "hidden", "the next step appears once the breather elapses");
+    d.teardown();
+
+    var e = setup({ state: STATE.waiting });
+    e.setMenuOpen(true);
+    e.step();
+    assert(e.walk().style.visibility === "hidden", "step is held while the emoji wheel (menuOpen) is open");
+    e.setMenuOpen(false);
+    e.step();
+    assert(e.walk().style.visibility !== "hidden", "step resumes once the emoji wheel closes");
+    e.teardown();
 })();
 
 console.log("");
