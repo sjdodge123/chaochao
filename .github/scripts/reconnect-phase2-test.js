@@ -88,8 +88,11 @@ setTimeout(function () {
     const seat = reconnect.lookupSeat(aKey, NOW + 1000);
     check(seat != null && seat.roomSig === SIG && seat.seat && seat.seat.restore === true, "Alice's restore seat is indexed for the right room");
 
-    // --- 4. Re-seat: Alice returns (new socket, same deviceId) via her stashed sig ---
+    // --- 4. Re-seat: Alice returns (new socket, same deviceId) WITH her HMAC seat token ---
+    // A guest must now present the token (a spoofed deviceId alone no longer re-seats).
+    const aTok = reconnect.mintToken(aKey, SIG, null, NOW + 10 * 60 * 1000);
     const sock = makeFakeSocket('alice-reconnect', 'dev-recon-A', null);
+    sock.reconnectToken = aTok;
     messenger.addMailBox(sock.id, sock, { userId: null, deviceId: 'dev-recon-A' });
     sock.fire('enterGame', SIG); // route back to the held room by its sig
     const reRoom = hostess.getRoomBySig(SIG);
@@ -97,10 +100,34 @@ setTimeout(function () {
     check(reAlice != null, 'Alice re-joined the restored room');
     check(reAlice && reAlice.notches === 3, "Alice's notches restored (3) onto her fresh kart");
     check(reAlice && reAlice.name === 'Alice', "Alice's name restored");
-    check(reRoom && reRoom.awaitingReconnect === false, 'restored room reopened once a player re-seated');
+    // Held until ALL saved seats return: reopening on the FIRST return would let a stranger
+    // fill Bob's still-saved seat, so the room must stay held while Bob is pending.
+    check(reRoom && reRoom.awaitingReconnect === true, 'room STAYS held until every saved seat returns (not on first return)');
+
+    // --- 4b. A tokenless imposter spoofing Bob's deviceId cannot claim Bob's held seat ---
+    const imposter = makeFakeSocket('imposter', 'dev-recon-B', null); // no reconnectToken
+    messenger.addMailBox(imposter.id, imposter, { userId: null, deviceId: 'dev-recon-B' });
+    imposter.fire('enterGame', SIG);
+    const impRoom = hostess.getRoomForClient(imposter.id);
+    check(!impRoom || String(impRoom.sig) !== String(SIG), 'tokenless imposter is re-routed OUT of the held room (not seated in it)');
+    const bSeatStill = reconnect.lookupSeat(reconnect.reconnectKey(null, 'dev-recon-B', 0), NOW + 1000);
+    check(bSeatStill != null && bSeatStill.seat && bSeatStill.seat.restore === true, "Bob's saved seat survives the imposter (not clobbered)");
+    hostess.kickFromRoom(imposter.id); messenger.removeMailBox(imposter.id);
+
+    // --- 5. Bob returns with his token -> last saved seat fills -> room reopens ---
+    const bKey = reconnect.reconnectKey(null, 'dev-recon-B', 0);
+    const bTok = reconnect.mintToken(bKey, SIG, null, NOW + 10 * 60 * 1000);
+    const bsock = makeFakeSocket('bob-reconnect', 'dev-recon-B', null);
+    bsock.reconnectToken = bTok;
+    messenger.addMailBox(bsock.id, bsock, { userId: null, deviceId: 'dev-recon-B' });
+    bsock.fire('enterGame', SIG);
+    const reBob = reRoom && reRoom.playerList[bsock.id];
+    check(reBob != null && reBob.notches === 1, "Bob re-seated with his notches (1)");
+    check(reRoom && reRoom.awaitingReconnect === false, 'room reopens once EVERY saved seat has returned');
 
     // cleanup
     hostess.kickFromRoom(sock.id); messenger.removeMailBox(sock.id);
+    hostess.kickFromRoom(bsock.id); messenger.removeMailBox(bsock.id);
 
     if (failures > 0) { console.log('\nReconnect Phase 2 test FAILED (' + failures + ').'); process.exit(1); }
     console.log('\nReconnect Phase 2 test passed.');

@@ -426,6 +426,13 @@ function handleMapRatingTap(lx, ly) {
 function handshakeAuth(cb) {
 	var hs = (window.chaochaoAuth && typeof window.chaochaoAuth.getHandshake === "function")
 		? window.chaochaoAuth.getHandshake() : {};
+	// Carry the stashed seamless-reconnect seat token so a returning GUEST can re-seat with
+	// standings intact (the server verifies it; an absent/garbage token just means no re-seat,
+	// never a rejection). Signed-in players re-seat on their verified account and don't need it.
+	try {
+		var rcRaw = sessionStorage.getItem("rcToken");
+		if (rcRaw) { var rcObj = JSON.parse(rcRaw); if (rcObj && rcObj.token) { hs.reconnectToken = rcObj.token; } }
+	} catch (e) { /* storage unavailable — guest just re-matchmakes */ }
 	// Record whether THIS (re)connection carried an auth token, so the Discord late-token
 	// path (onDiscordTokenAdopted) can tell an authenticated connection from a guest one —
 	// Socket.IO reads auth only at connect time, so a token adopted afterwards can't upgrade
@@ -471,6 +478,18 @@ function clientConnect(forceNew) {
 // Registers the FULL handler set on the primary connection. The bodies use the
 // `server`/`myID`/`playerList`/`myPlayer` globals, which alias the primary slot.
 function registerPrimaryHandlers(server) {
+
+	// Seamless-reconnect seat token: the server hands us a fresh HMAC token (bound to our
+	// identity + room) each time we (re)seat. Stash it — sessionStorage survives the Phase-1
+	// reconnect reload AND is re-read by handshakeAuth on a transient socket.io reconnect — so
+	// a returning guest proves it owns its seat instead of relying on a spoofable deviceId.
+	server.on("reconnectToken", function (d) {
+		try {
+			if (d && typeof d.token === "string") {
+				sessionStorage.setItem("rcToken", JSON.stringify({ sig: d.sig, token: d.token }));
+			}
+		} catch (e) { /* storage unavailable — guest just won't survive a restart */ }
+	});
 
 	//Let audio.js report a finished background track so the server picks the next one.
 	musicTrackEndedHandler = function (trackName) {

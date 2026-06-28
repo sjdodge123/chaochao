@@ -400,14 +400,20 @@ function keyDown(evt) {
         calcAngleFromKeys(playerList[myID]);
         server.emit('mousemove', playerList[myID].angle);
     }
-    if (typeof markPlayerInput === "function") { markPlayerInput(); } server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
+    // Only an actual movement/attack key counts as activity. Emitting (and resetting the AFK
+    // idle watcher) on ANY key let an idle player defer the AFK kick by tapping e.g. the music
+    // toggle — the server treats every 'movement' packet as a wakeUp.
+    if (action) {
+        if (typeof markPlayerInput === "function") { markPlayerInput(); } server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
+    }
 }
 function keyUp(evt) {
     if (movingByMouse) {
         movingByMouse = false;
     }
 
-    switch (movementActionFor(evt)) {
+    var action = movementActionFor(evt);
+    switch (action) {
         case "turnLeft": { turnLeft = false; break; }
         case "moveForward": { moveForward = false; break; }
         case "turnRight": { turnRight = false; break; }
@@ -418,7 +424,12 @@ function keyUp(evt) {
         calcAngleFromKeys(playerList[myID]);
         server.emit('mousemove', playerList[myID].angle);
     }
-    if (typeof markPlayerInput === "function") { markPlayerInput(); } server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
+    // Mirror keyDown: a non-movement key release is not activity and must not emit a
+    // movement packet (it would reset the server-side AFK timer). A movement-key release
+    // still emits so the held direction actually stops.
+    if (action) {
+        if (typeof markPlayerInput === "function") { markPlayerInput(); } server.emit('movement', { turnLeft: turnLeft, moveForward: moveForward, turnRight: turnRight, moveBackward: moveBackward, attack: attack });
+    }
 }
 
 function determineMovement() {
