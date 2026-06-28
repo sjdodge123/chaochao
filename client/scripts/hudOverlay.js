@@ -454,10 +454,14 @@
     function targetRect(target, m) {
         try {
             if (target === "settings") {
+                // NOTE: the gear (#touchSettingsBtn) is position:fixed, so offsetParent is
+                // ALWAYS null even when it's visible — don't gate on it (that silently skipped
+                // this whole step). A hidden (display:none) button reports a zero-size rect,
+                // which is the reliable visibility test here.
                 var g = document.getElementById("touchSettingsBtn");
-                if (g && g.offsetParent !== null) {
+                if (g) {
                     var r = g.getBoundingClientRect();
-                    if (r.width > 0) return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, d: Math.max(r.width, r.height) + 18 };
+                    if (r.width > 0 && r.height > 0) return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, d: Math.max(r.width, r.height) + 18 };
                 }
                 return null;
             }

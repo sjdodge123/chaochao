@@ -85,6 +85,19 @@ function setup(opts) {
     var canvas = track(makeNode("canvas")); canvas._rect = hostRect;
     var host = track(makeNode("div")); host.id = "gameWindow";
 
+    // Optional settings gear (#touchSettingsBtn). It's position:fixed in the real CSS, so
+    // offsetParent is null even when visible — replicate that so the test would catch a
+    // regression back to the offsetParent visibility check. A hidden button reports a
+    // zero-size rect (display:none), which is the reliable visibility signal.
+    if (opts.gear) {
+        var gear = track(makeNode("button")); gear.id = "touchSettingsBtn";
+        gear.offsetParent = null; // position:fixed -> always null, even when shown
+        gear._rect = (opts.gear === "hidden")
+            ? { left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0 }
+            : { left: 300, top: 12, width: 44, height: 44, right: 344, bottom: 56 };
+        host.appendChild(gear);
+    }
+
     var document = {
         readyState: "complete",
         head: makeNode("head"),
@@ -167,6 +180,32 @@ function setup(opts) {
 function stickUp() {
     return { pressed: true, baseX: 100, baseY: 400, stickX: 100, stickY: 360,
         baseRadius: 50, stickRadius: 25, maxPullRadius: 50 };
+}
+// A joystick pushed firmly in a given direction.
+function stick(dir) {
+    var b = { pressed: true, baseX: 100, baseY: 400, stickX: 100, stickY: 400,
+        baseRadius: 50, stickRadius: 25, maxPullRadius: 50 };
+    if (dir === "up") b.stickY = 360; else if (dir === "down") b.stickY = 440;
+    else if (dir === "left") b.stickX = 60; else if (dir === "right") b.stickX = 140;
+    return b;
+}
+function atk(pressed) { return { pressed: pressed, radius: 40, baseX: 300, baseY: 600 }; }
+
+// Complete the active step with the right gesture, cross the breather, and render the next.
+// (flush() clears advanceLock; tick(500) clears the inter-step breather.)
+function doDir(api, dir) {
+    api.setInput(stick(dir), null); api.step();          // detect + advance (held frame)
+    api.setInput(null, null); api.flush(); api.tick(500); api.step(); // render next
+}
+function doTap(api) {
+    api.setInput(null, atk(true)); api.step();           // press begins
+    api.setInput(null, atk(false)); api.tick(50); api.step(); // quick release -> advance
+    api.flush(); api.tick(500); api.step();              // render next
+}
+function doHold(api) {
+    api.setInput(null, atk(true)); api.step();           // press begins
+    api.tick(400); api.step();                           // held >= HOLD_MS -> advance
+    api.setInput(null, atk(false)); api.flush(); api.tick(500); api.step(); // render next
 }
 
 // ---------------------------------------------------------------------------
@@ -295,6 +334,22 @@ console.log("Walkthrough overlay test\n");
     e.step();
     assert(e.walk().style.visibility !== "hidden", "step resumes once the emoji wheel closes");
     e.teardown();
+})();
+
+// Group 6 — settings point-step visibility (the position:fixed / offsetParent regression)
+(function () {
+    console.log("\n6) settings point-step shows when the gear is visible (offsetParent regression)");
+
+    var sv = setup({ state: STATE.waiting, gear: "visible" });
+    sv.step();                                            // step 1
+    doDir(sv, "up"); doDir(sv, "down"); doDir(sv, "left"); doDir(sv, "right");
+    doTap(sv);                                            // punch
+    doHold(sv);                                           // kick -> now on the settings step
+    var bub = sv.bubble();
+    assert(sv.attached(), "walkthrough still active at the settings step (didn't run off the end)");
+    assert(bub && /Settings/i.test(bub.innerHTML),
+        "settings step is shown when the gear is visible — NOT skipped despite offsetParent===null");
+    sv.teardown();
 })();
 
 console.log("");
