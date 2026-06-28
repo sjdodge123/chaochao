@@ -697,8 +697,18 @@
             // Bubble in a CLEAR central spot — the corners are crowded (the fullscreen
             // button and the settings gear stack in the top-right), so anchoring the
             // bubble on the button would clip its neighbor. The ring + finger mark the
-            // actual button; the text sits in the open upper-middle.
-            setBubble(m.rect.left + m.rect.width / 2, m.rect.top + m.rect.height * 0.32);
+            // actual button; the text sits in the open upper-middle. Keep it clear of the
+            // top-center Skip button: in landscape the 32%-height anchor collides with it,
+            // and Skip's exact bottom depends on the env() safe-area inset (unknown to JS),
+            // so MEASURE Skip and drop the bubble below it when needed.
+            var pointBubbleY = m.rect.top + m.rect.height * 0.32;
+            try {
+                var sr = walk._skip.getBoundingClientRect();
+                if (sr && sr.bottom) {
+                    pointBubbleY = Math.max(pointBubbleY, sr.bottom + 14 + (walk._bh || 0) / 2);
+                }
+            } catch (e) { /* ignore — fall back to the 32% anchor */ }
+            setBubble(m.rect.left + m.rect.width / 2, pointBubbleY);
             return;
         }
     }
