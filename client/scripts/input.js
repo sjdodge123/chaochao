@@ -34,6 +34,33 @@ var isTouchScreen = false,
     chatButton = null,
     attackButton = null;
 
+// Touch movement control scheme: "joystick" (floating thumb-stick) or "dpad" (a fixed
+// on-screen cross). The D-pad is the SAME joystickMovement object with a STATIC base — so
+// the touch->direction-boolean pipeline (touchMovement) and the tutorial detection are
+// identical; only the base anchoring + the on-screen render differ. Default: dpad (trial).
+var controlSchemePref = "dpad";
+function controlSchemeIsDpad() { return controlSchemePref === "dpad"; }
+function loadControlSchemePref() {
+    try {
+        var v = localStorage.getItem("controlSchemePref");
+        controlSchemePref = (v === "joystick") ? "joystick" : "dpad"; // default dpad
+    } catch (e) { controlSchemePref = "dpad"; }
+}
+function applyControlScheme() {
+    if (!joystickMovement) { return; }
+    // Drop any in-progress press so switching can't leave a stuck direction.
+    if (typeof cancelMovement === "function") { cancelMovement(); }
+    joystickMovement.pressed = false;
+    joystickMovement.touchIdx = null;
+    // staticBase + the D-pad bound are set by layoutTouchControls (the single authority).
+    if (typeof layoutTouchControls === "function") { layoutTouchControls(); }
+}
+function setControlScheme(scheme) {
+    controlSchemePref = (scheme === "dpad") ? "dpad" : "joystick";
+    try { localStorage.setItem("controlSchemePref", controlSchemePref); } catch (e) { /* ignore */ }
+    applyControlScheme();
+}
+
 // initEventHandlers() can run more than once per session (init() is called at
 // page load AND from the gameState handler, which re-fires on reconnect/re-join),
 // so the window/document listeners are bound exactly once behind this flag to
@@ -471,7 +498,9 @@ function setupVirtualbuttons() {
     var upperRightRect = new VirtualButton(0, 0, 1, 1, false);
 
     virtualButtonList = [];
-    joystickMovement = new Joystick(0, 0, false, false);
+    loadControlSchemePref(); // decide joystick vs dpad before layoutTouchControls anchors the base
+    // staticBase is (re)set from the scheme in layoutTouchControls; the ctor arg is moot.
+    joystickMovement = new Joystick(0, 0, controlSchemeIsDpad(), false);
     // Attack is now a PERSISTENT, VISIBLE button (autoHide=false, visible=true).
     // It used to be invisible, so on big-screen tablets — where the old centred
     // hit-circle shrank to the screen middle — players had no on-screen target
@@ -617,6 +646,35 @@ function layoutTouchControls() {
         attackButton.stickX = attackButton.baseX;
         attackButton.stickY = attackButton.baseY;
     }
+
+    // D-pad scheme: a STATIC base anchored in the lower-left thumb zone (mirrors the
+    // attack button on the right), with a tight square hit zone centred on it so up/down/
+    // left/right read balanced from the fixed centre and a thumb can rock between two (or
+    // straddle two for a diagonal). The joystick scheme leaves the base floating (it's
+    // overridden to the finger on touch-down), so we only override in dpad mode.
+    if (controlSchemeIsDpad()) {
+        joystickMovement.staticBase = true;
+        var dpR = joystickMovement.baseRadius;
+        joystickMovement.baseX = cssToLogical(28) + safeL + dpR;
+        joystickMovement.baseY = SH - cssToLogical(48) - safeB - dpR;
+        joystickMovement.stickX = joystickMovement.baseX;
+        joystickMovement.stickY = joystickMovement.baseY;
+        // Generous square hit zone around the pad (the fixed pad isn't the full left quarter the
+        // floating joystick claimed, so make it forgiving — a comfortable margin past the visible
+        // cross — to avoid dead touches near the pad).
+        var dpHalf = dpR * 2.4;
+        for (var d = 0; d < virtualButtonList.length; d++) {
+            if (virtualButtonList[d].button === joystickMovement) {
+                var rb = virtualButtonList[d].bound;
+                rb.x = joystickMovement.baseX - dpHalf; rb.left = rb.x;
+                rb.width = dpHalf * 2; rb.right = rb.x + dpHalf * 2;
+                rb.y = joystickMovement.baseY - dpHalf; rb.top = rb.y;
+                rb.height = dpHalf * 2; rb.bottom = rb.y + dpHalf * 2;
+            }
+        }
+    } else {
+        joystickMovement.staticBase = false;
+    }
 }
 
 // Centre a corner icon button's tap zone (its bound rect) on (cx,cy) and set the
@@ -710,6 +768,13 @@ function onTouchStart(evt) {
                         // Touch: open centred on the viewport.
                         openEmojiWindow(window.innerWidth / 2, window.innerHeight / 2);
                     }
+                }
+                if (button === joystickMovement) {
+                    // Register direction on PRESS, not just on touchmove: a static-base D-pad
+                    // press that holds still never fires touchmove, so without this a held
+                    // press would never move. The floating joystick reads neutral here (its
+                    // base just snapped to the finger), so this is a harmless no-op for it.
+                    touchMovement();
                 }
                 // One touch claims exactly one control (priority order set in
                 // setupVirtualbuttons), so overlapping bounds — e.g. the

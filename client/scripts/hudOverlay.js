@@ -34,9 +34,12 @@
     // kick-equals-hold-punch convention.
     var HOLD_MS = 350;
     var TAP_MAX = 280;
+    // Two quick taps within DASH_GAP_MS = the double-tap "Dash" (land lunge).
+    var DASH_GAP_MS = 400;
 
     var root = null;
     var elJoyBase, elJoyKnob, elAtk;
+    var elDpad, elDpadCross;
     var started = false;
 
     // ---- Walkthrough state ----
@@ -50,9 +53,30 @@
     var dirArmed = true;        // dir-step gate: a deferred build on a held stick must re-center first
     var walkFallbackTimer = null; // grace-period build if the account flag never arrives
     var advanceLock = false;    // brief lockout so one gesture advances exactly one step
+    // Per-step chrome (bubble HTML, Skip-button text scale) is static for the life of a
+    // step, so we rebuild it only when the step index or text scale changes — not every
+    // frame. -1 = nothing rendered yet. (Re-parsing innerHTML + reading offsetWidth at
+    // 60fps was the walkthrough's dominant per-frame cost.)
+    var walkRenderedIdx = -1;
+    var walkRenderedCap = -1;
+    var walkRenderedDpad = null; // movement scheme the active step's text was rendered for
+    // Last-placed D-pad geometry, so the static pad is only re-placed on an actual change
+    // (not rewritten 60x/s). NaN forces the first placement.
+    var dpadLx = NaN, dpadLy = NaN, dpadLd = NaN;
+    var dpadLastSweep = ""; // last cross-fill string set, so the press fill only repaints on change
+    // Set when the player explicitly replays the tutorial from Settings. A deliberate
+    // replay (like a dev force-show) is exempt from the race auto-dismiss — they asked to
+    // watch it now, even mid-round.
+    var walkUserReplay = false;
+    // Inter-step breather: after a step is completed we hold the NEXT step's visuals for a
+    // short beat so the tutorial doesn't snap from one to the next too fast. stepReadyAt is
+    // the earliest time (ms) the active step may render/advance; 0 = ready now (first step).
+    var STEP_GAP_MS = 450;
+    var stepReadyAt = 0;
     // Attack press tracking (for tap vs hold detection across frames).
     var atkPressStart = 0;      // ms when the current press began (0 = not pressed)
     var atkWasPressed = false;
+    var lastTapAt = 0;          // ms of the previous quick tap (for the Dash double-tap)
     // Entering/leaving fullscreen fires a resize + releases held touches; for a short
     // window after a fullscreenchange we freeze step detection + the point-step auto-skip
     // so the toggle can't spuriously cancel/advance the active step (see start()).
@@ -90,6 +114,24 @@
             "background:radial-gradient(circle at 50% 30%,#6fe0ff,#2ad1ff 55%,#1199c6 100%);",
             "border:2px solid rgba(255,255,255,.55);",
             "box-shadow:0 8px 16px rgba(0,0,0,.5),inset 0 4px 8px rgba(255,255,255,.55),inset 0 -6px 10px rgba(0,0,0,.3);}",
+            // ---- D-pad: one cohesive clip-path CROSS on a dark circular base + four arrow
+            // glyphs. The cross is flat grey at rest; on press its fill is swapped (in frame())
+            // to a linear gradient sweeping grey->cyan FROM the pressed side, so a diagonal
+            // reads as one continuous blended highlight (no seams, no overhanging corners). The
+            // clip-path + drop-shadow are static — only the fill changes, and only on a
+            // direction change — so it's cheap on mobile. ----
+            "#" + ROOT_ID + " .dpad{position:absolute;border-radius:50%;",
+            "background:radial-gradient(circle at 50% 36%,#464c56,#161a21);",
+            "border:2px solid rgba(255,255,255,.28);",
+            "box-shadow:inset 0 4px 14px rgba(0,0,0,.5),0 8px 22px rgba(0,0,0,.42);}",
+            "#" + ROOT_ID + " .dpad .dpad-cross{position:absolute;inset:8%;background:#8e96a3;",
+            "filter:drop-shadow(0 2px 2px rgba(0,0,0,.4));",
+            "clip-path:polygon(28% 6%,34% 0,66% 0,72% 6%,72% 28%,94% 28%,100% 34%,100% 66%,94% 72%,72% 72%,72% 94%,66% 100%,34% 100%,28% 94%,28% 72%,6% 72%,0 66%,0 34%,6% 28%,28% 28%);}",
+            "#" + ROOT_ID + " .dpad .dpad-glyph{position:absolute;color:#171b21;line-height:1;}",
+            "#" + ROOT_ID + " .dpad .dpad-glyph.up{top:15%;left:50%;transform:translateX(-50%);}",
+            "#" + ROOT_ID + " .dpad .dpad-glyph.down{bottom:15%;left:50%;transform:translateX(-50%);}",
+            "#" + ROOT_ID + " .dpad .dpad-glyph.left{left:15%;top:50%;transform:translateY(-50%);}",
+            "#" + ROOT_ID + " .dpad .dpad-glyph.right{right:15%;top:50%;transform:translateY(-50%);}",
             // ---- attack button ----
             "#" + ROOT_ID + " .atk{border-radius:50%;display:grid;place-items:center;color:#fff;",
             "background:radial-gradient(circle at 50% 30%,#ff7a6e,#ff4838 55%,#c92a1d 100%);",
@@ -142,28 +184,57 @@
         return d;
     }
 
+    // True when the player's movement scheme is the fixed D-pad (vs the floating joystick).
+    // Read defensively — controlSchemePref is an input.js global, absent in non-game contexts.
+    function dpadActive() {
+        try { return typeof controlSchemePref !== "undefined" && controlSchemePref === "dpad"; }
+        catch (e) { return false; }
+    }
+    // The D-pad cross fill for the current press: grey at rest, or a grey->cyan gradient
+    // sweeping FROM the pressed side (a diagonal sweeps from the corner, so it reads as one
+    // blended highlight). Returned as a CSS background string; frame() only assigns it when it
+    // changes, so a steady direction doesn't repaint.
+    function dpadSweep(u, dn, lf, rt) {
+        var v = u ? "top" : (dn ? "bottom" : "");
+        var h = rt ? "right" : (lf ? "left" : "");
+        var dir = v + ((v && h) ? " " : "") + h;
+        if (!dir) { return "#8e96a3"; } // neutral
+        return "linear-gradient(to " + dir + ",#8e96a3 38%,#57d4f3 100%)";
+    }
+
     // ---- Walkthrough step list -------------------------------------------------
     // Movement (gated on a real joystick push), punch (tap), kick (hold/charge),
     // then the corner buttons (pointed out, advance on a tap — actually pressing
     // them would open their menus). Corner steps are included only when their
     // control exists; fullscreen is auto-skipped where unsupported (e.g. Discord).
     var STEP_TEMPLATES = [
-        { id: "up", kind: "dir", dir: "up", glyph: "▲", title: "Move up", sub: "push the stick up" },
-        { id: "down", kind: "dir", dir: "down", glyph: "▼", title: "Move down", sub: "push the stick down" },
-        { id: "left", kind: "dir", dir: "left", glyph: "◀", title: "Move left", sub: "push the stick left" },
-        { id: "right", kind: "dir", dir: "right", glyph: "▶", title: "Move right", sub: "push the stick right" },
+        { id: "up", kind: "dir", dir: "up", glyph: "▲", title: "Move up", sub: "push the stick up", subDpad: "press up on the D-pad" },
+        { id: "down", kind: "dir", dir: "down", glyph: "▼", title: "Move down", sub: "push the stick down", subDpad: "press down on the D-pad" },
+        { id: "left", kind: "dir", dir: "left", glyph: "◀", title: "Move left", sub: "push the stick left", subDpad: "press left on the D-pad" },
+        { id: "right", kind: "dir", dir: "right", glyph: "▶", title: "Move right", sub: "push the stick right", subDpad: "press right on the D-pad" },
         { id: "punch", kind: "tap", title: "Punch", sub: "tap the button" },
         { id: "kick", kind: "hold", title: "Kick", sub: "hold the button to charge" },
-        // Corner buttons last. Fullscreen is LAST: tapping it toggles fullscreen and ENDS
-        // the walkthrough, so a later fullscreen-exit has no remaining step to cancel.
+        { id: "dash", kind: "dash", title: "Dash", sub: "double-tap on a full charge" },
+        // Corner buttons. Fullscreen FIRST: the settings gear is fullscreen-only, so entering
+        // fullscreen here is what REVEALS it for the settings step that follows — otherwise
+        // settings could never be taught (and teaching fullscreen last used to END the tour
+        // before settings was reachable). The fullscreen step advances when the player ENTERS
+        // fullscreen (detectStep), and the fullscreenchange guard (fsGuardUntil) keeps the
+        // relayout from spuriously skipping settings/emoji.
+        { id: "fullscreen", kind: "point", target: "fullscreen", title: "Fullscreen", sub: "tap to go fullscreen" },
         { id: "settings", kind: "point", target: "settings", title: "Settings", sub: "tap the gear" },
-        { id: "emoji", kind: "point", target: "emoji", title: "Emotes", sub: "tap the button" },
-        { id: "fullscreen", kind: "point", target: "fullscreen", title: "Fullscreen", sub: "tap the button" }
+        { id: "emoji", kind: "point", target: "emoji", title: "Emotes", sub: "tap the button" }
     ];
     function buildSteps() {
         return STEP_TEMPLATES.filter(function (s) {
             if (s.target === "fullscreen") {
-                return typeof fullscreenSupported === "function" && fullscreenSupported();
+                // Only teach entering fullscreen when it's supported AND we're not ALREADY in it
+                // (e.g. a replay from Settings — the gear is only reachable in fullscreen, so the
+                // player is already there; the toggle would read "Exit" and tapping it would hide
+                // the gear the next step needs).
+                if (!(typeof fullscreenSupported === "function" && fullscreenSupported())) return false;
+                try { if (typeof inFullscreen === "function" && inFullscreen()) return false; } catch (e) { /* ignore */ }
+                return true;
             }
             return true; // dir/tap/hold always; settings/emoji re-checked at render and tap-advanceable
         });
@@ -179,12 +250,26 @@
         elJoyKnob = el("thc joy-knob");
         elAtk = el("thc atk", '<span class="glyph">👊</span>');
 
+        // D-pad cross (fixed scheme). Four direction buttons; the centre stays open as a
+        // thumb rest so the player can rock between two or straddle two for a diagonal.
+        // One cohesive clip-path cross on the dark disc + four arrow glyphs. A press sweeps the
+        // cross's fill grey->cyan FROM the pressed side (set on .dpad-cross in frame()), so a
+        // diagonal reads as one continuous blended highlight with no seams or overhanging
+        // corners. The clip-path + drop-shadow are static (only the fill swaps), so it's cheap.
+        elDpad = el("thc dpad",
+            '<div class="dpad-cross"></div>' +
+            '<span class="dpad-glyph up">▲</span><span class="dpad-glyph down">▼</span>' +
+            '<span class="dpad-glyph left">◀</span><span class="dpad-glyph right">▶</span>');
+        elDpadCross = elDpad.querySelector(".dpad-cross");
+
         elJoyBase.style.display = "none";
         elJoyKnob.style.display = "none";
+        elDpad.style.display = "none";
         elAtk.style.visibility = "hidden"; // until first frame() positions it (anti-flash)
 
         root.appendChild(elJoyBase);
         root.appendChild(elJoyKnob);
+        root.appendChild(elDpad);
         root.appendChild(elAtk);
 
         // Parent the control art INTO the fullscreen target (#gameWindow) so the overlay
@@ -270,6 +355,29 @@
         wHost.appendChild(walk);
     }
 
+    // Public hook for the Settings "Replay controls tutorial" button: tear down any
+    // current/finished overlay and rebuild it from step 1. An explicit user replay, so it
+    // BYPASSES the seen-gating (calls buildWalkthrough directly, not buildDom's gated
+    // paths) and is exempt from the race auto-dismiss via walkUserReplay. No-op off touch
+    // / before the HUD started. Re-running finishWalk on completion re-persists "seen" —
+    // an idempotent latch for a signed-in player, and harmless localStorage for a guest.
+    function replayWalkthrough() {
+        if (!started || !enabled()) { return; }
+        if (walkFallbackTimer) { clearTimeout(walkFallbackTimer); walkFallbackTimer = null; }
+        window.removeEventListener("touchstart", onWalkTouch);
+        if (walk && walk.parentNode) { walk.parentNode.removeChild(walk); }
+        walk = null;
+        // Reset every walkthrough flag back to first-run.
+        walkBuilt = false; walkDone = false; walkDeferred = false;
+        walkIdx = 0; walkPlaced = false;
+        walkRenderedIdx = -1; walkRenderedCap = -1;
+        advanceLock = false; atkPressStart = 0; atkWasPressed = false;
+        dirArmed = true; fsGuardUntil = 0; stepReadyAt = 0;
+        walkUserReplay = true;
+        buildWalkthrough();
+    }
+    window.__replayTouchWalkthrough = replayWalkthrough;
+
     function forceShowWalkthrough() {
         // Dev server (NODE_ENV!=production) injects __DEV_FORCE_WALKTHROUGH__ so it always
         // shows on :3700 for iteration; never set in prod. ?walkthrough=1 also force-shows
@@ -307,23 +415,74 @@
         if (!tr) { advanceStep(); return; } // control vanished — don't trap the player
         var pad = tr.d * 0.45; // generous, but still localized to the button
         if (Math.abs(t.clientX - tr.cx) <= tr.d / 2 + pad && Math.abs(t.clientY - tr.cy) <= tr.d / 2 + pad) {
+            // Tapping the fullscreen toggle requests fullscreen (async, in onTouchEnd). Advance
+            // on the tap REGARDLESS of whether the request is granted — so a denied/declined
+            // request can't trap the player on a step that inFullscreen() never satisfies. Guard
+            // the next (settings) step from auto-skipping during the request+relayout window: if
+            // granted the gear appears within it, if denied settings then skips gracefully.
+            if (step.target === "fullscreen") { fsGuardUntil = Date.now() + 1500; }
             advanceStep();
         }
     }
     function advanceStep() {
         if (advanceLock || walkDone) return;
         advanceLock = true;
-        atkPressStart = 0; atkWasPressed = false; // reset attack tracking between steps
+        atkPressStart = 0; atkWasPressed = false; lastTapAt = 0; // reset attack tracking between steps
         setTimeout(function () { advanceLock = false; }, 320); // debounce one gesture -> one step
         walkIdx++;
+        walkPlaced = false;                 // new step isn't tap-advanceable until it's placed
+        stepReadyAt = Date.now() + STEP_GAP_MS; // brief breather before the next step appears
         if (walkIdx >= walkSteps.length) { finishWalk(); }
     }
-    function finishWalk(fromAccount) {
+    // The active step is "held" — don't render/detect/advance it yet — during the brief
+    // inter-step breather, OR while the emoji wheel (#emojiMenu) is open. The emoji step
+    // advances on the tap that OPENS the wheel, so without this the next step would pop up
+    // on top of the open wheel; wait for the player to close it first.
+    function stepHeld() {
+        if (Date.now() < stepReadyAt) return true;
+        // Wait for a menu the player just opened from a step to close before showing the next,
+        // so the next tooltip doesn't pop up on top of it: the emoji wheel (settings/emoji
+        // steps) and the settings modal (tapping the gear opens it).
+        try { if (typeof menuOpen !== "undefined" && menuOpen) return true; } catch (e) { /* ignore */ }
+        try { if (typeof settingsModalIsOpen === "function" && settingsModalIsOpen()) return true; } catch (e) { /* ignore */ }
+        return false;
+    }
+    // True once the round is live (countdown or beyond). The walkthrough is a lobby/
+    // pre-game teacher; once gameplay starts we tear it down so it can't linger over the
+    // race (visually AND as per-frame work). currentState is a numeric stateMap id and
+    // config arrives via socket — read both defensively.
+    function gameStarted() {
+        try {
+            if (typeof currentState !== "number" || typeof config === "undefined" || !config || !config.stateMap) return false;
+            var gated = config.stateMap.gated;
+            if (typeof gated !== "number") return false; // missing key -> don't silently no-op via `>= undefined`
+            return currentState >= gated; // gated/racing/collapsing/gameOver
+        } catch (e) { return false; }
+    }
+    // The fixed D-pad is persistent (unlike the floating joystick, which only appeared while
+    // touched), so hide it on the non-steering screens — pre-join, the map overview, and the
+    // game-over recap — where it would otherwise sit over their UI. Show it where a kart is
+    // actually driven (lobby hub, countdown, race, collapse). Defaults to visible if state is
+    // unknown.
+    function movementPadVisible() {
+        try {
+            if (typeof currentState !== "number" || typeof config === "undefined" || !config || !config.stateMap) return true;
+            var sm = config.stateMap;
+            return currentState !== sm.waiting && currentState !== sm.overview && currentState !== sm.gameOver;
+        } catch (e) { return true; }
+    }
+    // noPersist = tear down WITHOUT recording "seen" anywhere (account or localStorage).
+    // Used when the race forces the overlay away but the player never engaged with it, so
+    // a brand-new player who loaded into the tail of a lobby still gets taught next time.
+    function finishWalk(fromAccount, noPersist) {
         if (walkDone) return;
         walkDone = true;
+        walkUserReplay = false;
         if (walkFallbackTimer) { clearTimeout(walkFallbackTimer); walkFallbackTimer = null; }
         window.removeEventListener("touchstart", onWalkTouch);
-        if (isWalkthroughSignedIn()) {
+        if (noPersist) {
+            // skip all persistence — fall straight through to the fade-out below
+        } else if (isWalkthroughSignedIn()) {
             // Signed-in: persist to the account on a real completion/skip so it follows the player
             // cross-device / into the Activity — but NOT to localStorage (guest-only, so it can't
             // suppress a different account on a shared device). SKIP during a force-show
@@ -355,7 +514,9 @@
     // window.__walkthroughAccountState instead.
     window.__touchHudResolveWalkthrough = function (seen) {
         if (seen) {
-            if (!forceShowWalkthrough()) { finishWalk(true); }
+            // Don't let a late account-flag(seen) tear down a deliberate replay / force-show
+            // the player is actively watching.
+            if (!forceShowWalkthrough() && !walkUserReplay) { finishWalk(true); }
         } else if (walkDeferred && !walkBuilt && !walkDone) {
             buildWalkthrough();
         }
@@ -385,10 +546,14 @@
     function targetRect(target, m) {
         try {
             if (target === "settings") {
+                // NOTE: the gear (#touchSettingsBtn) is position:fixed, so offsetParent is
+                // ALWAYS null even when it's visible — don't gate on it (that silently skipped
+                // this whole step). A hidden (display:none) button reports a zero-size rect,
+                // which is the reliable visibility test here.
                 var g = document.getElementById("touchSettingsBtn");
-                if (g && g.offsetParent !== null) {
+                if (g) {
                     var r = g.getBoundingClientRect();
-                    if (r.width > 0) return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, d: Math.max(r.width, r.height) + 18 };
+                    if (r.width > 0 && r.height > 0) return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, d: Math.max(r.width, r.height) + 18 };
                 }
                 return null;
             }
@@ -420,15 +585,37 @@
             var jm = (typeof joystickMovement !== "undefined") ? joystickMovement : null;
             var ab = (typeof attackButton !== "undefined") ? attackButton : null;
 
-            // ---- Joystick (floating: visible only while the thumb is down) ----
-            if (jm && jm.pressed) {
+            // ---- Left-hand movement control: fixed D-pad OR floating joystick ----
+            if (dpadActive() && jm && movementPadVisible()) {
+                // D-pad: a persistent cross anchored at the (static) base. Its position/size are
+                // constant for the match, so only place + resize on an ACTUAL change (cache),
+                // not 60x/second. Then light the active arm(s) + hub (setOn no-ops when
+                // unchanged, so a steady direction doesn't repaint).
+                var dpD = (jm.baseRadius ? jm.baseRadius * 2 * m.s : 120);
+                var dpcx = m.x(jm.baseX), dpcy = m.y(jm.baseY);
+                if (dpcx !== dpadLx || dpcy !== dpadLy || dpD !== dpadLd) {
+                    place(elDpad, dpcx, dpcy, dpD);
+                    elDpad.style.fontSize = Math.round(dpD * 0.17) + "px";
+                    dpadLx = dpcx; dpadLy = dpcy; dpadLd = dpD;
+                }
+                if (typeof jm.up === "function" && elDpadCross) {
+                    var sweep = dpadSweep(jm.up(), jm.down(), jm.left(), jm.right());
+                    if (sweep !== dpadLastSweep) { elDpadCross.style.background = sweep; dpadLastSweep = sweep; }
+                }
+                elDpad.style.display = "";
+                elJoyBase.style.display = "none";
+                elJoyKnob.style.display = "none";
+            } else if (!dpadActive() && jm && jm.pressed) {
+                // Joystick (floating: visible only while the thumb is down).
                 place(elJoyBase, m.x(jm.baseX), m.y(jm.baseY), jm.baseRadius * 2 * m.s);
                 place(elJoyKnob, m.x(jm.stickX), m.y(jm.stickY), jm.stickRadius * 2 * m.s);
                 elJoyBase.style.display = "";
                 elJoyKnob.style.display = "";
+                elDpad.style.display = "none";
             } else {
                 elJoyBase.style.display = "none";
                 elJoyKnob.style.display = "none";
+                elDpad.style.display = "none";
             }
 
             // ---- Attack button (always anchored lower-right) ----
@@ -445,12 +632,39 @@
 
             // ---- Gated walkthrough: detect completion of the active step + place it ----
             if (walk && !walkDone) {
-                var step = walkSteps[walkIdx];
-                if (step) {
-                    detectStep(step, jm, ab);
-                    placeStep(step, jm, ab, m, capFont);
-                    walk.style.visibility = "";
-                    walkPlaced = true;
+                if (gameStarted() && !walkUserReplay && !forceShowWalkthrough()) {
+                    // Race has begun — fade it out, don't render over gameplay. Only burn the
+                    // 'seen' flag if the player actually ENGAGED (advanced past the first step);
+                    // someone who loaded into the tail of a lobby and saw it for a frame or two
+                    // shouldn't be denied the tutorial forever. A deliberate replay / dev
+                    // force-show is exempt (handled above) — they asked to watch it now.
+                    finishWalk(false, walkIdx === 0);
+                } else if (stepHeld()) {
+                    // Inter-step breather, or waiting for the emoji wheel to close — hide the
+                    // step visuals (instant, no opacity fade) so nothing flashes over the wheel,
+                    // and don't detect/advance. walkPlaced stays false so a stray tap (e.g. on
+                    // the open wheel) can't advance the held step.
+                    walk.style.visibility = "hidden";
+                    walkPlaced = false;
+                } else {
+                    var step = walkSteps[walkIdx];
+                    if (step) {
+                        detectStep(step, jm, ab);
+                        // detectStep may have ADVANCED walkIdx this frame. `step` is the old
+                        // object, but placeStep's label/memo key on the new index — rendering
+                        // it now would cache stale text against the new step (showing the
+                        // previous step's wording, and masking which gesture is really wanted).
+                        // After an advance stepHeld() is true (the breather), so hold instead;
+                        // the next render rebuilds the bubble for the correct new step.
+                        if (stepHeld()) {
+                            walk.style.visibility = "hidden";
+                            walkPlaced = false;
+                        } else {
+                            placeStep(step, jm, ab, m, capFont);
+                            walk.style.visibility = "";
+                            walkPlaced = true;
+                        }
+                    }
                 }
             }
         } catch (e) { /* never let the HUD break the game */ }
@@ -493,27 +707,78 @@
             atkWasPressed = pressed;
             return;
         }
+        if (step.kind === "dash") {
+            // Double-tap the attack button = Dash (land lunge). Count two quick taps within
+            // DASH_GAP_MS; a long press (kick-style hold) breaks the sequence.
+            var dpressed = !!(ab && ab.pressed);
+            var dnow = Date.now();
+            if (dpressed && !atkWasPressed) { atkPressStart = dnow; }
+            if (!dpressed && atkWasPressed) {
+                var dheld = atkPressStart ? (dnow - atkPressStart) : 0;
+                if (dheld > 0 && dheld < TAP_MAX) {
+                    if (lastTapAt && (dnow - lastTapAt) <= DASH_GAP_MS) { advanceStep(); lastTapAt = 0; }
+                    else { lastTapAt = dnow; }
+                } else {
+                    lastTapAt = 0; // a hold isn't a tap — reset the double-tap window
+                }
+                atkPressStart = 0;
+            }
+            atkWasPressed = dpressed;
+            return;
+        }
         // "point" steps advance via onWalkTouch (tap to continue), or auto-skip if
         // their control isn't on screen at all.
         if (step.kind === "point") {
-            // handled in placeStep (auto-skip when target is unavailable)
+            // The fullscreen step advances when the player actually ENTERS fullscreen (which
+            // reveals the gear for the settings step that follows) — NOT on the raw tap, which
+            // fires before the fullscreenchange. The early return above already respects the
+            // fsGuardUntil window, so we only land here once the change has settled. settings/
+            // emoji still advance via onWalkTouch / auto-skip in placeStep.
+            if (step.target === "fullscreen" && typeof inFullscreen === "function") {
+                try { if (inFullscreen()) { advanceStep(); } } catch (e) { /* ignore */ }
+            }
         }
     }
 
     function placeStep(step, jm, ab, m, capFont) {
         var ring = walk._ring, finger = walk._finger, arrow = walk._arrow, bubble = walk._bubble;
-        var stepLabel = "Step " + (walkIdx + 1) + " / " + walkSteps.length;
-        bubble.innerHTML = '<span class="step">' + stepLabel + "</span>" + step.title +
-            "<small>" + step.sub + "</small>";
-        bubble.style.fontSize = capFont + "px";
 
-        // Skip button: top-center, pushed clear of the notch / Discord header via the
-        // device safe-area inset (the same env() the page's safe-area vars build on).
+        // The bubble TEXT and the Skip-button text scale are constant for the life of a
+        // step, so rebuild them only when the step index or text scale (capFont, which
+        // tracks resize/fullscreen) changes — NOT every frame (the innerHTML reparse was
+        // the dominant cost). We also cache the bubble's measured size here so setBubble
+        // can clamp without forcing a reflow per frame.
+        // Also key on the movement scheme: the dir-step wording is scheme-dependent, and the
+        // player can toggle joystick<->D-pad mid-walkthrough — without this the bubble would
+        // keep showing stale wording for a control no longer on screen.
+        var dp = dpadActive();
+        if (walkIdx !== walkRenderedIdx || capFont !== walkRenderedCap || dp !== walkRenderedDpad) {
+            walkRenderedIdx = walkIdx;
+            walkRenderedCap = capFont;
+            walkRenderedDpad = dp;
+            var stepLabel = "Step " + (walkIdx + 1) + " / " + walkSteps.length;
+            // Dir steps get D-pad-specific wording when that scheme is active (press a button
+            // vs push a stick); everything else uses the single `sub`.
+            var subText = (step.kind === "dir" && dp && step.subDpad) ? step.subDpad : step.sub;
+            bubble.innerHTML = '<span class="step">' + stepLabel + "</span>" + step.title +
+                "<small>" + subText + "</small>";
+            bubble.style.fontSize = capFont + "px";
+            walk._skip.style.fontSize = Math.max(12, capFont - 2) + "px";
+            walk._skip.style.padding = "6px 14px";
+            walk._bw = bubble.offsetWidth || 0;  // measured once per step (one reflow, then cached)
+            walk._bh = bubble.offsetHeight || 0;
+            walk._skipBottom = 0;
+            try { var sr0 = walk._skip.getBoundingClientRect(); if (sr0) walk._skipBottom = sr0.bottom; } catch (e) { /* ignore */ }
+        }
+
+        // Skip-button POSITION derives from the live canvas rect, which moves on resize/
+        // rotation/URL-bar collapse WITHOUT necessarily changing the clamped capFont — so it
+        // must update every frame, or the player's only dismiss control can drift off-screen.
+        // Top-center, pushed clear of the notch / Discord header via the device safe-area
+        // inset (the same env() the page's safe-area vars build on).
         walk._skip.style.left = (m.rect.left + m.rect.width / 2) + "px";
         walk._skip.style.transform = "translateX(-50%)";
         walk._skip.style.top = "calc(" + m.rect.top + "px + env(safe-area-inset-top, 0px) + 6px)";
-        walk._skip.style.fontSize = Math.max(12, capFont - 2) + "px";
-        walk._skip.style.padding = "6px 14px";
 
         function showArrow(dir, cx, cy, sizePx) {
             arrow.className = "wt-arrow " + dir;
@@ -535,7 +800,10 @@
             // The bubble is nowrap + center-anchored (translate(-50%,-50%)), so near an
             // edge (e.g. above the bottom-right attack button) it would run off-screen.
             // Clamp its center so the whole box stays inside the canvas with a margin.
-            var w = bubble.offsetWidth || 0, h = bubble.offsetHeight || 0, margin = 8;
+            // Use the cached per-step dims only — never fall back to offsetWidth here, or a
+            // step that happened to measure 0 would force a synchronous reflow every frame
+            // (the very cost the cache exists to avoid). A 0 dim just skips the clamp below.
+            var w = walk._bw || 0, h = walk._bh || 0, margin = 8;
             var minX = m.rect.left + margin + w / 2, maxX = m.rect.right - margin - w / 2;
             var minY = m.rect.top + margin + h / 2, maxY = m.rect.bottom - margin - h / 2;
             if (minX <= maxX) cx = Math.max(minX, Math.min(maxX, cx));
@@ -544,7 +812,22 @@
         }
 
         if (step.kind === "dir") {
-            // Anchor at the thumb-friendly resting spot in the lower-left; if the
+            if (dpadActive() && jm) {
+                // D-pad: the base is FIXED, so anchor on it and nudge the ring onto the
+                // specific direction button being taught (so the tooltip points at the
+                // exact button, not the whole pad).
+                var dcx = m.x(jm.baseX), dcy = m.y(jm.baseY);
+                var off = (jm.baseRadius ? jm.baseRadius * 0.62 * m.s : 40);
+                if (step.dir === "up") dcy -= off; else if (step.dir === "down") dcy += off;
+                else if (step.dir === "left") dcx -= off; else if (step.dir === "right") dcx += off;
+                var dRingD = (jm.baseRadius ? jm.baseRadius * 0.85 * m.s : 70);
+                setRing(dcx, dcy, dRingD);
+                finger.style.display = "none";
+                showArrow(step.dir, dcx, dcy, Math.round(dRingD * 0.5));
+                setBubble(m.x(jm.baseX), m.y(jm.baseY) - (jm.baseRadius ? jm.baseRadius * 1.5 * m.s : 90));
+                return;
+            }
+            // Joystick: anchor at the thumb-friendly resting spot in the lower-left; if the
             // player already has the stick down, follow the live base instead.
             var ax = (jm && jm.pressed) ? m.x(jm.baseX) : (m.rect.left + m.rect.width * 0.16);
             var ay = (jm && jm.pressed) ? m.y(jm.baseY) : (m.rect.top + m.rect.height * 0.74);
@@ -555,7 +838,7 @@
             setBubble(ax, ay - ringD * 0.85);
             return;
         }
-        if (step.kind === "tap" || step.kind === "hold") {
+        if (step.kind === "tap" || step.kind === "hold" || step.kind === "dash") {
             var bx = ab ? m.x(ab.baseX) : (m.rect.right - 90);
             var by = ab ? m.y(ab.baseY) : (m.rect.bottom - 90);
             var ringA = (ab && ab.radius ? ab.radius * 2 * m.s : 120);
@@ -579,8 +862,16 @@
             // Bubble in a CLEAR central spot — the corners are crowded (the fullscreen
             // button and the settings gear stack in the top-right), so anchoring the
             // bubble on the button would clip its neighbor. The ring + finger mark the
-            // actual button; the text sits in the open upper-middle.
-            setBubble(m.rect.left + m.rect.width / 2, m.rect.top + m.rect.height * 0.32);
+            // actual button; the text sits in the open upper-middle. Keep it clear of the
+            // top-center Skip button: in landscape the 32%-height anchor collides with it, and
+            // Skip's exact bottom depends on the env() safe-area inset (unknown to JS). Use the
+            // Skip bottom MEASURED ONCE per step (walk._skipBottom, cached in the memo block
+            // above) — reading getBoundingClientRect here every frame forced a layout reflow.
+            var pointBubbleY = m.rect.top + m.rect.height * 0.32;
+            if (walk._skipBottom) {
+                pointBubbleY = Math.max(pointBubbleY, walk._skipBottom + 14 + (walk._bh || 0) / 2);
+            }
+            setBubble(m.rect.left + m.rect.width / 2, pointBubbleY);
             return;
         }
     }

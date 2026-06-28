@@ -1173,6 +1173,34 @@ function settingsRowDefs() {
             defs.push({ id: "signInDiscord", icon: "fas fa-user", label: "Sign in with Discord", value: function () { return ""; } });
         }
     }
+    // Touch-only: switch between the floating joystick and the fixed on-screen D-pad.
+    // Self-contained `action` (no navbar proxy) that flips + persists the scheme and
+    // re-renders the row to show the new value.
+    if (typeof isTouchScreen !== "undefined" && isTouchScreen === true &&
+        typeof setControlScheme === "function" && typeof controlSchemeIsDpad === "function") {
+        defs.push({
+            id: "controlScheme", icon: "fas fa-arrows-alt", label: "Movement",
+            value: function () { return controlSchemeIsDpad() ? "D-pad" : "Joystick"; },
+            action: function () {
+                setControlScheme(controlSchemeIsDpad() ? "joystick" : "dpad");
+                renderSettingsRows(); // reflect the new value without closing the menu
+            }
+        });
+    }
+    // Touch-only: replay the first-run controls walkthrough on demand. Unlike the other
+    // rows this isn't a proxy for a hidden navbar control — it carries its own `action`
+    // (see toggleSettingRow), closing the menu first so the tutorial isn't behind it.
+    if (typeof isTouchScreen !== "undefined" && isTouchScreen === true &&
+        typeof window !== "undefined" && typeof window.__replayTouchWalkthrough === "function") {
+        defs.push({
+            id: "replayWalkthrough", icon: "fas fa-hand-pointer", label: "Replay controls tutorial",
+            value: function () { return ""; },
+            action: function () {
+                closeSettingsModal();
+                if (typeof window.__replayTouchWalkthrough === "function") { window.__replayTouchWalkthrough(); }
+            }
+        });
+    }
     return defs;
 }
 
@@ -1281,6 +1309,10 @@ function toggleSettingRow(idx) {
     var defs = settingsRowDefs();
     if (idx < 0 || idx >= defs.length) {
         return;
+    }
+    if (typeof defs[idx].action === "function") {
+        defs[idx].action(); // self-contained action (e.g. replay tutorial) — no navbar proxy
+        return;             // action owns any menu teardown / re-render
     }
     var ctrl = document.getElementById(defs[idx].id);
     if (ctrl) {

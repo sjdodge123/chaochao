@@ -147,6 +147,9 @@ jobs:
       - name: Headless game-loop smoke test
         run: node .github/scripts/smoke-test.js
 
+      - name: "Headless touch-walkthrough overlay test (auto-dismiss on race / engaged-persist / memoization / replay)"
+        run: node .github/scripts/walkthrough-overlay-test.js
+
       - name: Headless Bunker brutal-round test (bury -> ring -> emerge -> claim/void)
         run: node .github/scripts/bunker-test.js
 
