@@ -275,15 +275,22 @@ class Engine {
 					}
 					else {
 						// Carving at speed: rotate the heading toward held input over
-						// turnTau, then renormalize so thrust magnitude stays full.
+						// turnTau by the SHORTEST ARC (angular ease). NOT a vector lerp:
+						// lerping two unit vectors and renormalizing is degenerate near a
+						// reversal -- a ~180 deg flip collapses the heading toward zero and
+						// snaps back to the ORIGINAL direction (kart ignores the input), and
+						// wide turns waste their motion shrinking magnitude instead of
+						// rotating (laggy feel). Easing the angle rotates at a uniform,
+						// predictable rate, handles reversals cleanly, and stays unit-length.
+						var curAng = Math.atan2(player.driveHeadingY, player.driveHeadingX);
+						var tgtAng = Math.atan2(fty, ftx);
+						var dAng = tgtAng - curAng;
+						while (dAng > Math.PI) dAng -= 2 * Math.PI;
+						while (dAng < -Math.PI) dAng += 2 * Math.PI;
 						var blend = 1 - Math.exp(-this.dt / fluid.turnTau);
-						var hx = player.driveHeadingX + (ftx - player.driveHeadingX) * blend;
-						var hy = player.driveHeadingY + (fty - player.driveHeadingY) * blend;
-						var hMag = utils.getMag(hx, hy);
-						if (hMag > 1e-4) { hx /= hMag; hy /= hMag; }
-						else { hx = ftx; hy = fty; }
-						player.driveHeadingX = hx;
-						player.driveHeadingY = hy;
+						var newAng = curAng + dAng * blend;
+						player.driveHeadingX = Math.cos(newAng);
+						player.driveHeadingY = Math.sin(newAng);
 					}
 					thrustX = player.driveHeadingX;
 					thrustY = player.driveHeadingY;
@@ -330,7 +337,13 @@ class Engine {
 
 			if (braking) {
 				// Fluid model coasts to rest on a gentler brake; classic stomps the stop.
-				var brakeC = useFluid ? fluid.releaseBrakeCoeff : player.brakeCoeff;
+				// Cap the ease at the TILE's own brake so a slippery surface stays slippery:
+				// ice sets brakeCoeff ~0.0001 (you slide on release), but a flat
+				// releaseBrakeCoeff (0.08) is ~800x grippier and would kill the ice slide.
+				// min() = "ease the brake on release, but never make a low-friction tile
+				// grippier than it already was." On normal ground min(0.235, 0.08) = 0.08,
+				// so the soft coast is unchanged there.
+				var brakeC = useFluid ? Math.min(player.brakeCoeff, fluid.releaseBrakeCoeff) : player.brakeCoeff;
 				newVelX -= brakeC * player.velX;
 				newVelY -= brakeC * player.velY;
 			}

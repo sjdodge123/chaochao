@@ -5,6 +5,10 @@
 **Worktree:** `/Users/sdodge/Documents/Projects/chaochao/.claude/worktrees/physics-fluidity`
 **Status:** Built + verified locally. **Not pushed, no PR** (per the operator-permission rule). This is a feel sample for an A/B, not a ship-ready PR.
 
+> **Revision 2026-06-28 (live demo feedback).** Two real bugs surfaced by driving the demo, both fixed:
+> 1. **Steering reversal / input-lag bug.** The drive-heading ease was a *linear lerp of two unit vectors + renormalize*, which is degenerate near a reversal: pressing the opposite direction collapsed the heading back toward the *original* way and snapped it to full length there (kart ignored the input), and wide turns wasted motion shrinking magnitude instead of rotating (laggy feel). **Fix:** ease the heading **angle** (shortest-arc rotation) instead of the vector — uniform, predictable turn rate, clean 180° reversals, always unit-length. `turnTau` also lowered `0.12 → 0.08` for snappier response.
+> 2. **Ice release-brake bug.** The soft-coast used a *flat* `releaseBrakeCoeff` (0.08) on release regardless of surface, which is ~800× grippier than ice's own `brakeCoeff` (0.0001) — so letting go on ice scrubbed speed instead of sliding. **Fix:** cap the eased brake at the tile's own brake — `min(player.brakeCoeff, releaseBrakeCoeff)` — so ice stays slippery (0.0001) while normal ground keeps the soft 0.08 coast.
+
 > TL;DR for a fresh agent: a new `config.physicsFluid` block makes **human** karts steer like they carve an arc, carry speed through turns, and coast to a smooth stop. It is **default ON** in this branch. Flip `physicsFluid.enabled` to `false` in `server/config.json` to get the classic snap-and-stop model back, restart the server, and feel the difference side by side. Bots are never touched.
 
 ---
@@ -18,11 +22,11 @@ Today's kart movement is **rigid**: there are only 8 fixed drive headings (the k
 
 All three are **human-players-only**. Bots stay on the exact classic snap model, mirroring the existing `momentumRamp` bot-exemption precedent — so **AI pathing/fitness is provably untouched** (bots never enter the new code branch). All three preserve cruise/terminal speed, the per-tile grip table, brutal-round speed mods, the hard max-speed clamp, and collision.
 
-1. **Eased steering** (the #1 cited cause of rigidity). Each kart now carries a `driveHeadingX/Y` — the direction the drive force is *actually* applied along. Each tick it exponentially lerps toward the held 8-way input over `turnTau` (time constant, seconds), then is renormalized so thrust magnitude stays full. Turns **carve an arc** instead of flicking between the 8 headings. **Crispness guard:** from a near-stop (`speed < momentumRamp.resetSpeedMin`, i.e. < 15 px/s) the heading **snaps** straight to intent — the ease only engages once you're moving, so launches off the line stay sharp.
+1. **Eased steering** (the #1 cited cause of rigidity). Each kart now carries a `driveHeadingX/Y` — the direction the drive force is *actually* applied along. Each tick its **angle** exponentially eases toward the held 8-way input's angle along the **shortest arc** over `turnTau` (time constant, seconds); the heading stays unit-length by construction (`cos`/`sin` of the eased angle). Turns **carve an arc** instead of flicking between the 8 headings. *(Originally a vector lerp + renormalize — replaced because that was degenerate on a ~180° reversal; see the Revision note above.)* **Crispness guard:** from a near-stop (`speed < momentumRamp.resetSpeedMin`, i.e. < 15 px/s) the heading **snaps** straight to intent — the ease only engages once you're moving, so launches off the line stay sharp.
 
 2. **Momentum carried through direction changes.** Instead of dumping the momentum ramp to zero on a hard turn or stop, it **bleeds down gradually** over `momentumDecayTime` seconds when coasting, and keeps building while you hold input regardless of turn angle. The eased heading is what makes the turn feel smooth; the preserved ramp is what keeps you from re-winding speed from scratch after every corner.
 
-3. **Softer coast on release.** Releasing all keys brakes on `releaseBrakeCoeff` (`0.08`, a gentle glide) instead of the classic `brakeCoeff` (`0.235`, a stomp). Measured: **82 → 6.8 px/s over 1 s** of coasting vs the classic model's near-instant stop (~0.05 px/s). You glide to rest instead of nailing the brakes.
+3. **Softer coast on release.** Releasing all keys brakes on `min(tile.brakeCoeff, releaseBrakeCoeff)` — the eased `releaseBrakeCoeff` (`0.08`, a gentle glide) on normal ground (vs the classic `brakeCoeff` `0.235`, a stomp), but **capped at the tile's own brake so a slippery surface stays slippery** (ice's `0.0001` is preserved, not overridden). Measured on normal ground: **82 → 6.8 px/s over 1 s** of coasting vs the classic model's near-instant stop (~0.05 px/s). You glide to rest instead of nailing the brakes; on ice you keep sliding. *(The `min()` cap was added after the demo — a flat 0.08 was ~800× grippier than ice and killed the slide; see the Revision note above.)*
 
 **Why a toggle rather than a hard swap:** this is a feel experiment. The classic code path is kept 100% intact behind `else`/`else if` branches, so an A/B is a one-boolean flip + restart, and reverting the whole sample is deleting one config key.
 
@@ -36,16 +40,16 @@ All three are **human-players-only**. Bots stay on the exact classic snap model,
 "physicsFluid": {
     "_doc": "... (long inline explanation of the model) ...",
     "enabled": true,
-    "turnTau": 0.12,
+    "turnTau": 0.08,
     "momentumDecayTime": 0.6,
     "releaseBrakeCoeff": 0.08
 }
 ```
 
 - **`enabled`** — `true` (default in this branch) = new fluid feel; `false` = classic snap-and-stop model. **If the whole `physicsFluid` key is absent or `null`, it also falls back to classic** (`fluid != null && fluid.enabled` guard).
-- **`turnTau`** (`0.12`) — exponential time-constant of the drive-heading ease, in seconds. **Smaller = snappier turns**, larger = floatier.
+- **`turnTau`** (`0.08`) — exponential time-constant of the drive-heading **angle** ease, in seconds. **Smaller = snappier turns**, larger = floatier. *(Was `0.12`; lowered after the demo for responsiveness.)*
 - **`momentumDecayTime`** (`0.6`) — seconds to bleed the momentum ramp to zero while coasting.
-- **`releaseBrakeCoeff`** (`0.08`) — per-tick velocity bleed while coasting with no input. Larger = stops sooner; the classic value is `0.235`.
+- **`releaseBrakeCoeff`** (`0.08`) — per-tick velocity bleed while coasting with no input, **capped per-tile at `min(tile.brakeCoeff, releaseBrakeCoeff)`** so slippery tiles aren't made grippier. Larger = stops sooner; the classic normal-ground value is `0.235`.
 
 **A/B procedure:** edit `enabled`, **restart the dev server** (config is read at boot and re-delivered to clients), drive, compare. There is no live hot-reload.
 
@@ -55,13 +59,13 @@ All three are **human-players-only**. Bots stay on the exact classic snap model,
 
 | File | Lines | What |
 |---|---|---|
-| `server/config.json` | ~836–842 | New `physicsFluid` block (`_doc`, `enabled:true`, `turnTau:0.12`, `momentumDecayTime:0.6`, `releaseBrakeCoeff:0.08`). |
+| `server/config.json` | ~836–842 | New `physicsFluid` block (`_doc`, `enabled:true`, `turnTau:0.08`, `momentumDecayTime:0.6`, `releaseBrakeCoeff:0.08`). |
 | `server/engine.js` | 246–253 | New comment + `var fluid = c.physicsFluid;` + `var useFluid = (fluid != null && fluid.enabled && !player.isAI);` |
 | `server/engine.js` | 255–256 | `var thrustX = dirX; var thrustY = dirY;` — the direction drive force is applied along this tick (eased in fluid mode, raw otherwise). |
-| `server/engine.js` | 257–322 | `if (useFluid) { … }` branch: coast = gradual `momentum` decay over `momentumDecayTime`; moving = ease `driveHeadingX/Y` toward normalized input via `blend = 1 - exp(-dt/turnTau)`, renormalize, set `thrustX/Y`, build momentum over `ramp.rampTime`, snap-on-near-stop guard (`headMag < 1e-4 || fspeed < snapSpeed`). The classic momentum block became `else if (ramp != null && !player.isAI)`. |
+| `server/engine.js` | ~257–328 | `if (useFluid) { … }` branch: coast = gradual `momentum` decay over `momentumDecayTime`; moving = ease the heading **angle** toward the input angle along the shortest arc (`atan2` cur/target, wrap `dAng` to ±π, `blend = 1 - exp(-dt/turnTau)`, `cos/sin` of `curAng + dAng*blend`), set `thrustX/Y`, build momentum over `ramp.rampTime`, snap-on-near-stop guard (`headMag < 1e-4 || fspeed < snapSpeed`). The classic momentum block became `else if (ramp != null && !player.isAI)`. |
 | `server/engine.js` | 325 | `momentumFactor` now enabled under fluid too: `((ramp != null \|\| useFluid) && !player.isAI) ? player.getMomentumFactor() : 1`. |
 | `server/engine.js` | 328–329 | Velocity integration now uses `thrustX/thrustY` instead of raw `dirX/dirY`. |
-| `server/engine.js` | 332–335 | Brake uses `var brakeC = useFluid ? fluid.releaseBrakeCoeff : player.brakeCoeff;` then bleeds `velX/velY` by `brakeC`. |
+| `server/engine.js` | ~338–349 | Brake uses `var brakeC = useFluid ? Math.min(player.brakeCoeff, fluid.releaseBrakeCoeff) : player.brakeCoeff;` then bleeds `velX/velY` by `brakeC` — the `min()` keeps slippery tiles (ice `0.0001`) from being made grippier by the flat ease. |
 | `server/entities/player.js` | 354–360 | New fields `this.driveHeadingX = 0; this.driveHeadingY = 0;` (eased drive heading; `0,0` = not yet moving → snaps to intent on first committed tick). |
 | `CHANGELOG.md` | 19 | Player-facing bullet under `## Unreleased` → Gameplay & Balance. |
 | `client/scripts/learn.js` | 70–72 | Refreshed the "Building Speed" Codex card `detail` prose to describe the fluid feel. |
