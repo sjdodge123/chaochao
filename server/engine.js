@@ -255,51 +255,13 @@ class Engine {
 			var thrustX = dirX;
 			var thrustY = dirY;
 			if (useFluid) {
-				if (braking) {
-					// No input: coast. Bleed the momentum ramp gradually (no instant dump)
-					// and keep the eased heading so re-pressing continues the arc.
-					player.momentum = Math.max(0, player.momentum - this.dt / fluid.momentumDecayTime);
-				}
-				else {
-					var fmoveMag = utils.getMag(dirX, dirY);
-					var ftx = fmoveMag > 0 ? dirX / fmoveMag : 0;
-					var fty = fmoveMag > 0 ? dirY / fmoveMag : 0;
-					var headMag = utils.getMag(player.driveHeadingX, player.driveHeadingY);
-					var fspeed = utils.getMag(player.velX, player.velY);
-					var snapSpeed = (ramp != null) ? ramp.resetSpeedMin : 15;
-					if (headMag < 1e-4 || fspeed < snapSpeed) {
-						// Launching from (near) a stop: snap heading to intent so the kart
-						// leaves the line crisply; the ease only kicks in once moving.
-						player.driveHeadingX = ftx;
-						player.driveHeadingY = fty;
-					}
-					else {
-						// Carving at speed: rotate the heading toward held input over
-						// turnTau by the SHORTEST ARC (angular ease). NOT a vector lerp:
-						// lerping two unit vectors and renormalizing is degenerate near a
-						// reversal -- a ~180 deg flip collapses the heading toward zero and
-						// snaps back to the ORIGINAL direction (kart ignores the input), and
-						// wide turns waste their motion shrinking magnitude instead of
-						// rotating (laggy feel). Easing the angle rotates at a uniform,
-						// predictable rate, handles reversals cleanly, and stays unit-length.
-						var curAng = Math.atan2(player.driveHeadingY, player.driveHeadingX);
-						var tgtAng = Math.atan2(fty, ftx);
-						var dAng = tgtAng - curAng;
-						while (dAng > Math.PI) dAng -= 2 * Math.PI;
-						while (dAng < -Math.PI) dAng += 2 * Math.PI;
-						var blend = 1 - Math.exp(-this.dt / fluid.turnTau);
-						var newAng = curAng + dAng * blend;
-						player.driveHeadingX = Math.cos(newAng);
-						player.driveHeadingY = Math.sin(newAng);
-					}
+				// Fluid-feel steering (humans only): mutates player.driveHeadingX/Y +
+				// player.momentum. Thrust follows the eased heading while moving; while
+				// coasting it stays the (zero) input so only the brake acts.
+				this.applyFluidSteering(player, dirX, dirY, braking, fluid, ramp);
+				if (!braking) {
 					thrustX = player.driveHeadingX;
 					thrustY = player.driveHeadingY;
-					// Build momentum on committed movement; no hard-turn dump (the eased
-					// heading is what makes a turn feel smooth instead of a drive cut).
-					var fRampTime = (ramp != null) ? ramp.rampTime : 2.5;
-					player.momentum = Math.min(1, player.momentum + this.dt / fRampTime);
-					player.lastMoveDirX = ftx;
-					player.lastMoveDirY = fty;
 				}
 			}
 			else if (ramp != null && !player.isAI) {
@@ -367,6 +329,67 @@ class Engine {
 			player.newX += player.velX * this.dt;
 			player.newY += player.velY * this.dt;
 		}
+	}
+	applyFluidSteering(player, dirX, dirY, braking, fluid, ramp) {
+		// SAMPLE fluid-feel steering (config.physicsFluid), HUMAN players only — the
+		// caller gates useFluid on !player.isAI, so bots keep the classic snap physics
+		// and AI pathing/fitness is untouched. Eases the drive HEADING toward the held
+		// 8-way input so turns carve an arc, and carries momentum through turns by
+		// building the ramp without the classic hard-turn dump. Mutates
+		// player.driveHeadingX/Y, player.momentum, and player.wasBraking; the caller
+		// reads driveHeadingX/Y as the thrust direction while moving.
+		if (braking) {
+			// No input: coast. Bleed momentum gradually (no instant dump); the eased
+			// heading is left as-is so a pure coast keeps its line (velocity only
+			// scales, not rotates) and is re-seeded from velocity on the next press if
+			// an external force rotated us mid-coast.
+			player.momentum = Math.max(0, player.momentum - this.dt / fluid.momentumDecayTime);
+			player.wasBraking = true;
+			return;
+		}
+		// Held input is one of the fixed 8-way headings, already unit length, so use
+		// dirX/dirY directly (no re-normalize needed).
+		var snapSpeed = (ramp != null) ? ramp.resetSpeedMin : 15;
+		var fspeed = utils.getMag(player.velX, player.velY);
+		if (player.wasBraking && fspeed >= snapSpeed) {
+			// Coming out of a coast: re-seed the heading from actual motion so a
+			// knockback (bumper/punch/bounce) that rotated our velocity mid-coast does
+			// not leave us briefly thrusting along the stale pre-coast heading. For a
+			// pure coast this equals the kept heading (a no-op).
+			player.driveHeadingX = player.velX / fspeed;
+			player.driveHeadingY = player.velY / fspeed;
+		}
+		var headMag = utils.getMag(player.driveHeadingX, player.driveHeadingY);
+		if (headMag < 1e-4 || fspeed < snapSpeed) {
+			// Launching from (near) a stop: snap heading to intent so the kart leaves
+			// the line crisply; the ease only kicks in once moving.
+			player.driveHeadingX = dirX;
+			player.driveHeadingY = dirY;
+		}
+		else {
+			// Carving at speed: rotate the unit heading toward held input by the
+			// SHORTEST ARC over turnTau. Rotate the heading vector directly — dot is
+			// cos and the 2D cross is sin of the signed angle between heading and input,
+			// so atan2(cross, dot) is the wrapped shortest angle — instead of round-
+			// tripping through atan2/cos/sin of two absolute angles (fewer trig calls,
+			// no manual ±π wrap). NOT a vector lerp: lerping two unit vectors and
+			// renormalizing is degenerate on a ~180° reversal (it collapses toward the
+			// original heading, so the kart ignores the input).
+			var hx = player.driveHeadingX, hy = player.driveHeadingY;
+			var dot = hx * dirX + hy * dirY;
+			var cross = hx * dirY - hy * dirX;
+			var theta = Math.atan2(cross, dot);
+			var blend = 1 - Math.exp(-this.dt / fluid.turnTau);
+			var d = theta * blend;
+			var cosD = Math.cos(d), sinD = Math.sin(d);
+			player.driveHeadingX = hx * cosD - hy * sinD;
+			player.driveHeadingY = hx * sinD + hy * cosD;
+		}
+		// Build momentum on committed movement; no hard-turn dump (the eased heading
+		// is what makes a turn feel smooth instead of a drive cut).
+		var fRampTime = (ramp != null) ? ramp.rampTime : 2.5;
+		player.momentum = Math.min(1, player.momentum + this.dt / fRampTime);
+		player.wasBraking = false;
 	}
 	updateProjectiles() {
 		for (var id in this.projectileList) {
