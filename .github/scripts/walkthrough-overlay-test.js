@@ -142,6 +142,7 @@ function setup(opts) {
         gameCanvas: canvas, LOGICAL_WIDTH: 360, LOGICAL_HEIGHT: 640, fitRatio: 1,
         joystickMovement: null, attackButton: null, menuOpen: false,
         config: { stateMap: STATE }, currentState: (opts.state == null ? STATE.waiting : opts.state),
+        controlSchemePref: opts.dpad ? "dpad" : undefined, // undefined -> joystick (default in tests)
         // Corner-button stubs so the fullscreen/emoji point steps can render (targetRect).
         chatButton: { isVisible: function () { return true; }, radius: 30, baseX: 280, baseY: 40 },
         exitButton: { isVisible: function () { return true; }, radius: 30, baseX: 320, baseY: 40 },
@@ -178,6 +179,7 @@ function setup(opts) {
         walk: function () { for (var i = allNodes.length - 1; i >= 0; i--) { if (allNodes[i].id === WALK_ID) return allNodes[i]; } return null; },
         attached: function () { var w = api.walk(); return !!(w && w.parentNode !== null); },
         bubble: function () { var w = api.walk(); if (!w) return null; for (var i = 0; i < w.children.length; i++) { if (w.children[i]._classSet.bubble) return w.children[i]; } return null; },
+        dpadEl: function () { for (var i = allNodes.length - 1; i >= 0; i--) { if (allNodes[i]._classSet && allNodes[i]._classSet.dpad) return allNodes[i]; } return null; },
         skip: function () { var w = api.walk(); if (!w) return null; for (var i = 0; i < w.children.length; i++) { if (w.children[i]._classSet["wt-skip"]) return w.children[i]; } return null; },
         teardown: function () { Date.now = savedDateNow; Object.keys(globals).forEach(function (k) { g[k] = saved[k]; }); }
     };
@@ -198,6 +200,13 @@ function stick(dir) {
     return b;
 }
 function atk(pressed) { return { pressed: pressed, radius: 40, baseX: 300, baseY: 600 }; }
+// A static-base D-pad joystick (the dpad scheme reuses joystickMovement with up()/down()/...).
+function dpadJm() {
+    return { pressed: false, baseX: 80, baseY: 560, stickX: 80, stickY: 560,
+        baseRadius: 58, stickRadius: 34, maxPullRadius: 29, dx: 0, dy: 0,
+        up: function () { return this.dy < -5; }, down: function () { return this.dy > 5; },
+        left: function () { return this.dx < -5; }, right: function () { return this.dx > 5; } };
+}
 
 // Complete the active step with the right gesture, cross the breather, and render the next.
 // (flush() clears advanceLock; tick(500) clears the inter-step breather.)
@@ -387,6 +396,28 @@ console.log("Walkthrough overlay test\n");
     var b2 = alreadyFs.bubble();
     assert(b2 && /Settings/i.test(b2.innerHTML), "when already in fullscreen, the fullscreen step auto-advances to settings");
     alreadyFs.teardown();
+})();
+
+// Group 7 — D-pad control scheme renders + its dir tooltip works
+(function () {
+    console.log("\n7) D-pad scheme: pad renders + dir tooltip anchors on it");
+
+    var dp = setup({ state: STATE.waiting, dpad: true });
+    dp.setInput(dpadJm(), null);
+    dp.step();
+    var pad = dp.dpadEl();
+    assert(pad && pad.style.display !== "none", "the D-pad cross is rendered in dpad scheme");
+    var bub = dp.bubble();
+    assert(bub && /up/i.test(bub.innerHTML), "the dir-step tooltip still works in dpad scheme (Move up)");
+    dp.teardown();
+
+    // Joystick scheme (default): the D-pad is NOT shown.
+    var js = setup({ state: STATE.waiting });
+    js.setInput(stickUp(), null);
+    js.step();
+    var pad2 = js.dpadEl();
+    assert(pad2 && pad2.style.display === "none", "the D-pad is hidden in joystick scheme");
+    js.teardown();
 })();
 
 console.log("");

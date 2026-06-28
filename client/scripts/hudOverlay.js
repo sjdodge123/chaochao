@@ -37,6 +37,7 @@
 
     var root = null;
     var elJoyBase, elJoyKnob, elAtk;
+    var elDpad, elDpadUp, elDpadDown, elDpadLeft, elDpadRight;
     var started = false;
 
     // ---- Walkthrough state ----
@@ -105,6 +106,21 @@
             "background:radial-gradient(circle at 50% 30%,#6fe0ff,#2ad1ff 55%,#1199c6 100%);",
             "border:2px solid rgba(255,255,255,.55);",
             "box-shadow:0 8px 16px rgba(0,0,0,.5),inset 0 4px 8px rgba(255,255,255,.55),inset 0 -6px 10px rgba(0,0,0,.3);}",
+            // ---- D-pad (fixed cross; alternative to the floating joystick) ----
+            "#" + ROOT_ID + " .dpad{position:absolute;}",
+            "#" + ROOT_ID + " .dpad .dpad-btn{position:absolute;display:grid;place-items:center;color:#fff;",
+            "width:38%;height:38%;border-radius:22%;line-height:1;",
+            "background:radial-gradient(circle at 50% 32%,rgba(70,80,96,.92),rgba(26,32,42,.94));",
+            "border:2px solid rgba(255,255,255,.42);",
+            "box-shadow:0 5px 12px rgba(0,0,0,.42),inset 0 2px 6px rgba(255,255,255,.18),inset 0 -3px 7px rgba(0,0,0,.32);",
+            "text-shadow:0 1px 2px rgba(0,0,0,.6);transition:background .06s ease,border-color .06s ease,transform .06s ease;}",
+            "#" + ROOT_ID + " .dpad .dpad-btn.up{top:0;left:31%;}",
+            "#" + ROOT_ID + " .dpad .dpad-btn.down{bottom:0;left:31%;}",
+            "#" + ROOT_ID + " .dpad .dpad-btn.left{left:0;top:31%;}",
+            "#" + ROOT_ID + " .dpad .dpad-btn.right{right:0;top:31%;}",
+            "#" + ROOT_ID + " .dpad .dpad-btn.active{transform:scale(.94);border-color:rgba(255,255,255,.7);",
+            "background:radial-gradient(circle at 50% 32%,#6fe0ff,#2ad1ff 58%,#1199c6 100%);",
+            "box-shadow:0 3px 8px rgba(17,153,198,.5),inset 0 3px 8px rgba(0,0,0,.32);}",
             // ---- attack button ----
             "#" + ROOT_ID + " .atk{border-radius:50%;display:grid;place-items:center;color:#fff;",
             "background:radial-gradient(circle at 50% 30%,#ff7a6e,#ff4838 55%,#c92a1d 100%);",
@@ -157,6 +173,17 @@
         return d;
     }
 
+    // True when the player's movement scheme is the fixed D-pad (vs the floating joystick).
+    // Read defensively — controlSchemePref is an input.js global, absent in non-game contexts.
+    function dpadActive() {
+        try { return typeof controlSchemePref !== "undefined" && controlSchemePref === "dpad"; }
+        catch (e) { return false; }
+    }
+    function setActive(node, on) {
+        if (!node) { return; }
+        if (on) { node.classList.add("active"); } else { node.classList.remove("active"); }
+    }
+
     // ---- Walkthrough step list -------------------------------------------------
     // Movement (gated on a real joystick push), punch (tap), kick (hold/charge),
     // then the corner buttons (pointed out, advance on a tap — actually pressing
@@ -198,12 +225,24 @@
         elJoyKnob = el("thc joy-knob");
         elAtk = el("thc atk", '<span class="glyph">👊</span>');
 
+        // D-pad cross (fixed scheme). Four direction buttons; the centre stays open as a
+        // thumb rest so the player can rock between two or straddle two for a diagonal.
+        elDpad = el("thc dpad",
+            '<span class="dpad-btn up">▲</span><span class="dpad-btn down">▼</span>' +
+            '<span class="dpad-btn left">◀</span><span class="dpad-btn right">▶</span>');
+        elDpadUp = elDpad.querySelector(".up");
+        elDpadDown = elDpad.querySelector(".down");
+        elDpadLeft = elDpad.querySelector(".left");
+        elDpadRight = elDpad.querySelector(".right");
+
         elJoyBase.style.display = "none";
         elJoyKnob.style.display = "none";
+        elDpad.style.display = "none";
         elAtk.style.visibility = "hidden"; // until first frame() positions it (anti-flash)
 
         root.appendChild(elJoyBase);
         root.appendChild(elJoyKnob);
+        root.appendChild(elDpad);
         root.appendChild(elAtk);
 
         // Parent the control art INTO the fullscreen target (#gameWindow) so the overlay
@@ -505,15 +544,34 @@
             var jm = (typeof joystickMovement !== "undefined") ? joystickMovement : null;
             var ab = (typeof attackButton !== "undefined") ? attackButton : null;
 
-            // ---- Joystick (floating: visible only while the thumb is down) ----
-            if (jm && jm.pressed) {
+            // ---- Left-hand movement control: fixed D-pad OR floating joystick ----
+            if (dpadActive() && jm) {
+                // D-pad: a persistent cross anchored at the (static) base; light up the
+                // active direction(s) so a diagonal shows both. jm.up()/down()/... mirror
+                // the same booleans the input pipeline sends to the server.
+                var dpD = (jm.baseRadius ? jm.baseRadius * 2 * m.s : 120);
+                place(elDpad, m.x(jm.baseX), m.y(jm.baseY), dpD);
+                elDpad.style.fontSize = Math.round(dpD * 0.17) + "px";
+                if (typeof jm.up === "function") {
+                    setActive(elDpadUp, jm.up());
+                    setActive(elDpadDown, jm.down());
+                    setActive(elDpadLeft, jm.left());
+                    setActive(elDpadRight, jm.right());
+                }
+                elDpad.style.display = "";
+                elJoyBase.style.display = "none";
+                elJoyKnob.style.display = "none";
+            } else if (jm && jm.pressed) {
+                // Joystick (floating: visible only while the thumb is down).
                 place(elJoyBase, m.x(jm.baseX), m.y(jm.baseY), jm.baseRadius * 2 * m.s);
                 place(elJoyKnob, m.x(jm.stickX), m.y(jm.stickY), jm.stickRadius * 2 * m.s);
                 elJoyBase.style.display = "";
                 elJoyKnob.style.display = "";
+                elDpad.style.display = "none";
             } else {
                 elJoyBase.style.display = "none";
                 elJoyKnob.style.display = "none";
+                elDpad.style.display = "none";
             }
 
             // ---- Attack button (always anchored lower-right) ----
@@ -681,7 +739,22 @@
         }
 
         if (step.kind === "dir") {
-            // Anchor at the thumb-friendly resting spot in the lower-left; if the
+            if (dpadActive() && jm) {
+                // D-pad: the base is FIXED, so anchor on it and nudge the ring onto the
+                // specific direction button being taught (so the tooltip points at the
+                // exact button, not the whole pad).
+                var dcx = m.x(jm.baseX), dcy = m.y(jm.baseY);
+                var off = (jm.baseRadius ? jm.baseRadius * 0.62 * m.s : 40);
+                if (step.dir === "up") dcy -= off; else if (step.dir === "down") dcy += off;
+                else if (step.dir === "left") dcx -= off; else if (step.dir === "right") dcx += off;
+                var dRingD = (jm.baseRadius ? jm.baseRadius * 0.85 * m.s : 70);
+                setRing(dcx, dcy, dRingD);
+                finger.style.display = "none";
+                showArrow(step.dir, dcx, dcy, Math.round(dRingD * 0.5));
+                setBubble(m.x(jm.baseX), m.y(jm.baseY) - (jm.baseRadius ? jm.baseRadius * 1.5 * m.s : 90));
+                return;
+            }
+            // Joystick: anchor at the thumb-friendly resting spot in the lower-left; if the
             // player already has the stick down, follow the live base instead.
             var ax = (jm && jm.pressed) ? m.x(jm.baseX) : (m.rect.left + m.rect.width * 0.16);
             var ay = (jm && jm.pressed) ? m.y(jm.baseY) : (m.rect.top + m.rect.height * 0.74);
