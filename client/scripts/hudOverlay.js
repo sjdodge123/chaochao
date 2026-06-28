@@ -372,7 +372,11 @@
     // on top of the open wheel; wait for the player to close it first.
     function stepHeld() {
         if (Date.now() < stepReadyAt) return true;
+        // Wait for a menu the player just opened from a step to close before showing the next,
+        // so the next tooltip doesn't pop up on top of it: the emoji wheel (settings/emoji
+        // steps) and the settings modal (tapping the gear opens it).
         try { if (typeof menuOpen !== "undefined" && menuOpen) return true; } catch (e) { /* ignore */ }
+        try { if (typeof settingsModalIsOpen === "function" && settingsModalIsOpen()) return true; } catch (e) { /* ignore */ }
         return false;
     }
     // True once the round is live (countdown or beyond). The walkthrough is a lobby/

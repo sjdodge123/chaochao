@@ -131,6 +131,7 @@ function setup(opts) {
     var rafCb = null;
     var timers = [];
     var fsFlag = !!opts.fullscreen; // inFullscreen() state, toggled via api.setFullscreen
+    var modalFlag = false;          // settingsModalIsOpen() state, toggled via api.setSettingsModal
 
     // Install globals BEFORE require (the IIFE runs + polls on load).
     var g = global;
@@ -146,6 +147,7 @@ function setup(opts) {
         exitButton: { isVisible: function () { return true; }, radius: 30, baseX: 320, baseY: 40 },
         fullscreenSupported: function () { return true; },
         inFullscreen: function () { return fsFlag; },
+        settingsModalIsOpen: function () { return modalFlag; },
         isDiscordActivity: function () { return false; },
         requestAnimationFrame: function (fn) { rafCb = fn; return 1; },
         setTimeout: function (fn, delay) { var t = { fn: fn, delay: delay }; timers.push(t); return t; },
@@ -168,6 +170,7 @@ function setup(opts) {
         setInput: function (jm, ab) { g.joystickMovement = jm; g.attackButton = ab; },
         setMenuOpen: function (v) { g.menuOpen = v; },
         setFullscreen: function (v) { fsFlag = v; },
+        setSettingsModal: function (v) { modalFlag = v; },
         tick: function (ms) { clock += ms; },
         setRect: function (r) { canvas._rect = r; },
         step: function () { var c = rafCb; rafCb = null; if (c) c(); },
@@ -344,6 +347,15 @@ console.log("Walkthrough overlay test\n");
     e.step();
     assert(e.walk().style.visibility !== "hidden", "step resumes once the emoji wheel closes");
     e.teardown();
+
+    var sm = setup({ state: STATE.waiting });
+    sm.setSettingsModal(true);
+    sm.step();
+    assert(sm.walk().style.visibility === "hidden", "step is held while the settings modal is open");
+    sm.setSettingsModal(false);
+    sm.step();
+    assert(sm.walk().style.visibility !== "hidden", "step resumes once the settings modal closes");
+    sm.teardown();
 })();
 
 // Group 6 — fullscreen-then-settings flow (entering fullscreen must NOT end the tour) +
