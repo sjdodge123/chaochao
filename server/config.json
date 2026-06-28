@@ -833,6 +833,15 @@
         "resetDot": 0.4,
         "resetSpeedMin": 15
     },
+    "physicsFluid": {
+        "_doc": "SAMPLE 'fluid feel' physics for HUMAN players only (bots keep the classic snap model, exactly like momentumRamp's bot exemption — so AI pathing/fitness is untouched). When enabled, three things change vs the classic model: (1) STEERING EASES — once you're actually moving, the drive-force direction rotates toward your held input over turnTau seconds instead of snapping between the 8 fixed headings, so turns carve an arc and your velocity blends toward your new intent instead of fighting it. From a near-stop (speed < momentumRamp.resetSpeedMin) the heading still snaps to your input so launches stay crisp. (2) MOMENTUM IS PRESERVED THROUGH TURNS — instead of dumping the momentum ramp to the floor on a hard turn or a stop, it bleeds down gradually over momentumDecayTime seconds, so a direction change feels like a carved transition rather than an abrupt drive cut. (3) GENTLER COAST — releasing all keys coasts to rest on releaseBrakeCoeff (a much smaller per-tick velocity bleed than the classic brakeCoeff) instead of stomping a hard stop. Terminal/cruise speeds, the per-tile grip table, brutal-round speed mods, and the hard max-speed clamp are ALL unchanged — this only reshapes how you reach and shed speed and how you turn. Set enabled=false to restore the classic model. turnTau = exponential time-constant (s) of the drive-heading ease (smaller = snappier); momentumDecayTime = seconds to bleed the momentum ramp to zero when stopped/turning; releaseBrakeCoeff = per-tick velocity bleed while coasting with no input. A SOFT version of the classic hard-turn speed cost still applies: when the held input points more than turnPenaltyDot (cos, 0.4 ≈ 66°) away from the current heading, momentum bleeds at a rate scaled by how sharp the turn is, reaching a full drain over turnPenaltyTime seconds at a dead reversal — so a gentle carve keeps your speed but a hard reverse scrubs some, without the classic model's instant dump-to-floor. Set turnPenaltyTime to 0/null to disable the penalty.",
+        "enabled": true,
+        "turnTau": 0.08,
+        "momentumDecayTime": 0.6,
+        "releaseBrakeCoeff": 0.08,
+        "turnPenaltyDot": 0.4,
+        "turnPenaltyTime": 0.1
+    },
     "lobbyRespawnInvulnMs": 8000,
     "lobbyAbilityTileRespawnMs": 4000,
     "lobbyIdleResetMs": 15000

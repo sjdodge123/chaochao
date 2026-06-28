@@ -31,6 +31,14 @@ messenger.build({ to() { return { emit() { } }; }, sockets: { emit() { } } });
 const DT = c.serverTickSpeed / 1000;
 const ramp = c.momentumRamp;
 
+// This test covers the CLASSIC momentum ramp (floor start, hard-turn dump-to-floor).
+// The fluid model (config.physicsFluid) is a separate, default-on human feel with
+// its own coverage in physics-fluid-test.js — and it intentionally REPLACES the
+// hard dump with a soft graduated bleed, so it would fail the assertions below.
+// Pin it off here so this keeps regressing the classic path, which is still live
+// for bots and whenever the toggle is off.
+if (c.physicsFluid) c.physicsFluid.enabled = false;
+
 if (ramp == null) {
     console.log('::error::config.momentumRamp is missing — the momentum ramp was removed?');
     process.exit(1);

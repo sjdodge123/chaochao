@@ -1385,6 +1385,13 @@ class Game {
 				this.playerList[rid].momentum = 0;
 				this.playerList[rid].lastMoveDirX = 0;
 				this.playerList[rid].lastMoveDirY = 0;
+				// Same reason for the fluid-physics eased heading: clear it so a player
+				// who juked along the start line during the countdown launches straight
+				// (the engine's near-stop snap guard re-seeds it from intent) instead of
+				// carving out of the gate along a stale lateral heading.
+				this.playerList[rid].driveHeadingX = 0;
+				this.playerList[rid].driveHeadingY = 0;
+				this.playerList[rid].wasBraking = false;
 			}
 		}
 

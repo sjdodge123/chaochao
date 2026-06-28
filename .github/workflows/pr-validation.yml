@@ -213,6 +213,9 @@ jobs:
       - name: "Headless momentum-ramp test (human slow-start/wind-up, hard-turn reset, bots exempt, no gate pre-charge)"
         run: node .github/scripts/momentum-ramp-test.js
 
+      - name: "Headless fluid-physics test (eased carve, snap launch, coast re-seed, soft turn cost, ice cap, bots exempt, gate reset)"
+        run: node .github/scripts/physics-fluid-test.js
+
       - name: "Headless rotor test (orbit geometry, streamAngle wire, sweep + bonk)"
         run: node .github/scripts/rotor-test.js
 

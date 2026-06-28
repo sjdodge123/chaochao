@@ -69,7 +69,7 @@
                 {
                     id: "momentum", name: "Building Speed", icon: swatch("#5ad1ff"), anim: "goalRun",
                     blurb: "Hold a line to wind up to top speed.",
-                    detail: "Your kart doesn't snap to full pace the instant you push a direction — it starts a touch slower and winds up to its top speed over a couple of seconds of holding a steady heading. Small steering corrections keep that momentum, but cut a hard turn or stomp the brakes and you dump it and have to wind back up. Your top speed itself hasn't changed; you just have to earn it, so committing to a clean racing line beats constantly jinking around. (Surface still rules: this rides on top of each tile's own grip.)"
+                    detail: "Your kart doesn't snap to full pace the instant you push a direction — it starts a touch slower and winds up to its top speed over a couple of seconds of holding a steady heading. The drive feels fluid rather than rigid: steering carves an arc toward your new direction instead of flicking instantly between the eight compass points, your speed carries through a smooth turn rather than getting cut on every nudge, and releasing the keys lets you coast to a smooth stop instead of stomping the brakes. A hard reverse still costs you a little speed — gentler than before, but jinking back and forth no longer comes free. Your top speed itself hasn't changed; you just have to earn it, so committing to a clean racing line beats constantly jinking around. (Surface still rules: this rides on top of each tile's own grip.)"
                 },
                 {
                     id: "collapse", name: "The Collapse", icon: tex("lava.png"), anim: "collapse",

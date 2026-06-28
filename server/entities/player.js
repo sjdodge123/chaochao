@@ -352,6 +352,18 @@ class Player extends Circle {
 		this.lastMoveDirX = 0;
 		this.lastMoveDirY = 0;
 
+		// Fluid-physics (config.physicsFluid) eased drive heading: the actual
+		// direction thrust is applied along, eased toward held input so turns carve
+		// instead of snapping between the 8 headings. (0,0 = not yet moving → snaps to
+		// intent on the first committed tick.) Unused by bots and in the classic model.
+		this.driveHeadingX = 0;
+		this.driveHeadingY = 0;
+		// Was this player coasting (no input) last fluid tick? On the coast→move
+		// transition the eased heading is re-seeded from actual velocity, so a
+		// knockback that rotated us mid-coast doesn't leave us thrusting along a
+		// stale pre-coast heading. Fluid model only.
+		this.wasBraking = false;
+
 		this.currentSpeedBonus = 0;
 
 		//AI (set on bot players by world.createNewBot; humans leave these untouched)
