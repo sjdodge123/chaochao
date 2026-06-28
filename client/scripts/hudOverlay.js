@@ -106,21 +106,25 @@
             "background:radial-gradient(circle at 50% 30%,#6fe0ff,#2ad1ff 55%,#1199c6 100%);",
             "border:2px solid rgba(255,255,255,.55);",
             "box-shadow:0 8px 16px rgba(0,0,0,.5),inset 0 4px 8px rgba(255,255,255,.55),inset 0 -6px 10px rgba(0,0,0,.3);}",
-            // ---- D-pad (fixed cross; alternative to the floating joystick) ----
-            "#" + ROOT_ID + " .dpad{position:absolute;}",
-            "#" + ROOT_ID + " .dpad .dpad-btn{position:absolute;display:grid;place-items:center;color:#fff;",
-            "width:38%;height:38%;border-radius:22%;line-height:1;",
-            "background:radial-gradient(circle at 50% 32%,rgba(70,80,96,.92),rgba(26,32,42,.94));",
-            "border:2px solid rgba(255,255,255,.42);",
-            "box-shadow:0 5px 12px rgba(0,0,0,.42),inset 0 2px 6px rgba(255,255,255,.18),inset 0 -3px 7px rgba(0,0,0,.32);",
-            "text-shadow:0 1px 2px rgba(0,0,0,.6);transition:background .06s ease,border-color .06s ease,transform .06s ease;}",
-            "#" + ROOT_ID + " .dpad .dpad-btn.up{top:0;left:31%;}",
-            "#" + ROOT_ID + " .dpad .dpad-btn.down{bottom:0;left:31%;}",
-            "#" + ROOT_ID + " .dpad .dpad-btn.left{left:0;top:31%;}",
-            "#" + ROOT_ID + " .dpad .dpad-btn.right{right:0;top:31%;}",
-            "#" + ROOT_ID + " .dpad .dpad-btn.active{transform:scale(.94);border-color:rgba(255,255,255,.7);",
-            "background:radial-gradient(circle at 50% 32%,#6fe0ff,#2ad1ff 58%,#1199c6 100%);",
-            "box-shadow:0 3px 8px rgba(17,153,198,.5),inset 0 3px 8px rgba(0,0,0,.32);}",
+            // ---- D-pad: one cohesive unit — a flat light-grey cross on a dark circular base.
+            // The four arms are half-bars that OVERLAP at the centre; flat fill + a single
+            // drop-shadow on the .dpad-cross wrapper (not per arm) makes them read as one
+            // rounded plus, with the dark base showing through the four concave corners. ----
+            "#" + ROOT_ID + " .dpad{position:absolute;border-radius:50%;",
+            "background:radial-gradient(circle at 50% 36%,rgba(70,76,86,.97),rgba(20,24,31,.98));",
+            "border:2px solid rgba(255,255,255,.28);",
+            "box-shadow:inset 0 4px 14px rgba(0,0,0,.5),inset 0 -3px 8px rgba(255,255,255,.07),0 8px 22px rgba(0,0,0,.42);}",
+            "#" + ROOT_ID + " .dpad .dpad-cross{position:absolute;inset:0;filter:drop-shadow(0 2px 3px rgba(0,0,0,.45));}",
+            "#" + ROOT_ID + " .dpad .dpad-btn{position:absolute;display:grid;place-items:center;color:#171b21;line-height:1;",
+            "background:#8e96a3;box-sizing:border-box;transition:background .06s ease,color .06s ease;}",
+            // Half-bars: each runs from its outer edge PAST the centre (rounded outer tip,
+            // square inner) so the vertical (up+down) and horizontal (left+right) bars merge.
+            "#" + ROOT_ID + " .dpad .dpad-btn.up{left:28%;top:7%;width:44%;height:45%;border-radius:42% 42% 0 0;align-items:start;padding-top:9%;}",
+            "#" + ROOT_ID + " .dpad .dpad-btn.down{left:28%;top:48%;width:44%;height:45%;border-radius:0 0 42% 42%;align-items:end;padding-bottom:9%;}",
+            "#" + ROOT_ID + " .dpad .dpad-btn.left{top:28%;left:7%;height:44%;width:45%;border-radius:42% 0 0 42%;justify-items:start;padding-left:9%;}",
+            "#" + ROOT_ID + " .dpad .dpad-btn.right{top:28%;left:48%;height:44%;width:45%;border-radius:0 42% 42% 0;justify-items:end;padding-right:9%;}",
+            // Active arm: cyan + raised above the overlapping bar so it reads as a full press.
+            "#" + ROOT_ID + " .dpad .dpad-btn.active{background:#3ad3ff;color:#06384a;z-index:3;}",
             // ---- attack button ----
             "#" + ROOT_ID + " .atk{border-radius:50%;display:grid;place-items:center;color:#fff;",
             "background:radial-gradient(circle at 50% 30%,#ff7a6e,#ff4838 55%,#c92a1d 100%);",
@@ -190,10 +194,10 @@
     // them would open their menus). Corner steps are included only when their
     // control exists; fullscreen is auto-skipped where unsupported (e.g. Discord).
     var STEP_TEMPLATES = [
-        { id: "up", kind: "dir", dir: "up", glyph: "▲", title: "Move up", sub: "push the stick up" },
-        { id: "down", kind: "dir", dir: "down", glyph: "▼", title: "Move down", sub: "push the stick down" },
-        { id: "left", kind: "dir", dir: "left", glyph: "◀", title: "Move left", sub: "push the stick left" },
-        { id: "right", kind: "dir", dir: "right", glyph: "▶", title: "Move right", sub: "push the stick right" },
+        { id: "up", kind: "dir", dir: "up", glyph: "▲", title: "Move up", sub: "push the stick up", subDpad: "press up on the D-pad" },
+        { id: "down", kind: "dir", dir: "down", glyph: "▼", title: "Move down", sub: "push the stick down", subDpad: "press down on the D-pad" },
+        { id: "left", kind: "dir", dir: "left", glyph: "◀", title: "Move left", sub: "push the stick left", subDpad: "press left on the D-pad" },
+        { id: "right", kind: "dir", dir: "right", glyph: "▶", title: "Move right", sub: "push the stick right", subDpad: "press right on the D-pad" },
         { id: "punch", kind: "tap", title: "Punch", sub: "tap the button" },
         { id: "kick", kind: "hold", title: "Kick", sub: "hold the button to charge" },
         // Corner buttons. Fullscreen FIRST: the settings gear is fullscreen-only, so entering
@@ -228,8 +232,10 @@
         // D-pad cross (fixed scheme). Four direction buttons; the centre stays open as a
         // thumb rest so the player can rock between two or straddle two for a diagonal.
         elDpad = el("thc dpad",
+            '<div class="dpad-cross">' +
             '<span class="dpad-btn up">▲</span><span class="dpad-btn down">▼</span>' +
-            '<span class="dpad-btn left">◀</span><span class="dpad-btn right">▶</span>');
+            '<span class="dpad-btn left">◀</span><span class="dpad-btn right">▶</span>' +
+            '</div>');
         elDpadUp = elDpad.querySelector(".up");
         elDpadDown = elDpad.querySelector(".down");
         elDpadLeft = elDpad.querySelector(".left");
@@ -689,8 +695,11 @@
             walkRenderedIdx = walkIdx;
             walkRenderedCap = capFont;
             var stepLabel = "Step " + (walkIdx + 1) + " / " + walkSteps.length;
+            // Dir steps get D-pad-specific wording when that scheme is active (press a button
+            // vs push a stick); everything else uses the single `sub`.
+            var subText = (step.kind === "dir" && dpadActive() && step.subDpad) ? step.subDpad : step.sub;
             bubble.innerHTML = '<span class="step">' + stepLabel + "</span>" + step.title +
-                "<small>" + step.sub + "</small>";
+                "<small>" + subText + "</small>";
             bubble.style.fontSize = capFont + "px";
             walk._skip.style.fontSize = Math.max(12, capFont - 2) + "px";
             walk._skip.style.padding = "6px 14px";
