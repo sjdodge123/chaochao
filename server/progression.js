@@ -160,6 +160,23 @@ var MEDAL_TITLES = {
     pinball: 'Pinball', iceSkater: 'Ice Skater', smoothOperator: 'Smooth Operator',
     firewalker: 'Firewalker'
 };
+// The set of medal stats that gate an achievement skin (i.e. appear in ACHIEVEMENT_UNLOCKS).
+// The live skill-progress HUD ticker only fires for these: each per-action contribution
+// (a kill, a charged punch, a bumper bonk, …) advances the player toward a REAL lifetime
+// unlock, so the corner bar always has a skin to chase. Stats with no skin ladder
+// (firewalker, resourceful, the negative "Picked on", …) are intentionally excluded — there
+// is nothing to progress toward. This replaces the old nominal-per-match-target framing:
+// the bar now shows LIFETIME medal_count vs the next ACHIEVEMENT_UNLOCKS threshold, derived
+// CLIENT-side from medal_counts + config.achievementDefs.
+var ACHIEVEMENT_STATS = (function () {
+    var s = {};
+    for (var i = 0; i < ACHIEVEMENT_UNLOCKS.length; i++) { s[ACHIEVEMENT_UNLOCKS[i].stat] = true; }
+    return s;
+})();
+// True when a medal stat unlocks an achievement skin (so it's worth a live ticker push).
+function isAchievementStat(stat) {
+    return !!ACHIEVEMENT_STATS[stat];
+}
 function describeAchievement(u) {
     var n = u.threshold;
     switch (u.stat) {
@@ -184,7 +201,10 @@ function describeAchievement(u) {
 // client-side mirror of ACHIEVEMENT_UNLOCKS to keep in lockstep.
 function clientAchievementDefs() {
     return ACHIEVEMENT_UNLOCKS.map(function (u) {
-        return { id: u.id, name: u.name, slot: u.slot, stat: u.stat, threshold: u.threshold, desc: describeAchievement(u) };
+        // `title` = the plain medal/skill name for that stat (e.g. "Heavy Hitter"), used by
+        // the live skill-ticker's match-end advance label; null for non-medal stats (wins,
+        // gamesPlayed, …) which the ticker doesn't follow.
+        return { id: u.id, name: u.name, slot: u.slot, stat: u.stat, threshold: u.threshold, desc: describeAchievement(u), title: MEDAL_TITLES[u.stat] || null };
     });
 }
 
@@ -275,6 +295,8 @@ module.exports = {
     levelProgress: levelProgress,
     ACHIEVEMENT_UNLOCKS: ACHIEVEMENT_UNLOCKS,
     MEDAL_TITLES: MEDAL_TITLES,
+    ACHIEVEMENT_STATS: ACHIEVEMENT_STATS,
+    isAchievementStat: isAchievementStat,
     describeAchievement: describeAchievement,
     clientAchievementDefs: clientAchievementDefs,
     achievementsUnlocked: achievementsUnlocked,

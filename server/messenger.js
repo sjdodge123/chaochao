@@ -213,6 +213,11 @@ exports.addMailBox = function (id, client, identity) {
 exports.removeMailBox = function (id) {
 	delete mailBoxList[id];
 	delete identityList[id];
+	// Drop this socket's live skill-progress throttle state so the map can't grow
+	// across reconnects (keys are "<sig>|<medal>").
+	for (var k in medalProgressState) {
+		if (k.indexOf(id + '|') === 0) { delete medalProgressState[k]; }
+	}
 }
 // Resolve a connected client id to its account identity ({ userId, deviceId }).
 // userId is null for guests. Returns null if the client isn't connected.
@@ -264,6 +269,45 @@ exports.sendProgressionToClient = function (sig, row) {
 		client.emit('progressionUpdate', payload);
 	}
 }
+
+// ---- Live skill-progress HUD ticker ----------------------------------------------------
+// Per-(socket+medal) throttle state for sendMedalProgress, keyed "<sig>|<medal>" ->
+// { lastAt, lastSent }. Pruned on disconnect (removeMailBox) so it can't grow.
+var medalProgressState = {};
+var MEDAL_PROGRESS_THROTTLE_MS = 250;
+// Signal a single LOCAL player that they just did a skill play that CONTRIBUTES toward an
+// achievement skin. This is only the "you did a skillful thing" nudge — `current` is their
+// in-match counter (totalKills, heavyHitCount, …) for the "N this match" tally, and `delta`
+// is how much this action added for the "+N <Skill>" pop. The lifetime bar (base/target ->
+// skin) is derived entirely CLIENT-side from medal_counts + config.achievementDefs, so no
+// target/label-math lives here anymore. Only fires for stats that gate a skin
+// (isAchievementStat) — there's nothing to progress toward otherwise. Guarded like
+// sendProgressionToClient (disconnected sig = no-op) and throttled per (sig+medal) to ~250ms
+// so a burst of bonks doesn't spam the wire. No DB / signed-in gate — guests still get the
+// contribution pop (they just won't see a lifetime bar, which the client decides).
+exports.sendMedalProgress = function (sig, medal, current) {
+	var client = mailBoxList[sig];
+	if (!client) { return; }
+	if (!progression.isAchievementStat(medal)) { return; }
+	var key = sig + '|' + medal;
+	var st = medalProgressState[key];
+	if (!st) { st = medalProgressState[key] = { lastAt: 0, lastSent: 0 }; }
+	// Counter went backwards => the match reset (in-match counters reset each match); start
+	// fresh so the next match's first contribution doesn't read as a negative delta.
+	if (current < st.lastSent) { st.lastSent = 0; }
+	var now = Date.now();
+	if ((now - st.lastAt) < MEDAL_PROGRESS_THROTTLE_MS) { return; }
+	var delta = current - st.lastSent;
+	if (delta <= 0) { return; }
+	st.lastAt = now;
+	st.lastSent = current;
+	client.emit('medalProgress', {
+		medal: medal,
+		label: progression.MEDAL_TITLES[medal] || medal,
+		current: current,
+		delta: delta
+	});
+};
 
 // In-memory pending celebration toasts for the LOCAL-DEV (writes-off) path only,
 // keyed by userId. With writes ON the durable queue lives in the DB's pending_toasts

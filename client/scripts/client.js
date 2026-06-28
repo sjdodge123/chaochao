@@ -912,7 +912,13 @@ function registerConnectionHandlers(server) {
 	});
 	// Authoritative progression for the signed-in player (XP/level/unlocked skins).
 	server.on('progressionUpdate', function (prog) {
+		var prevProgression = myProgression;
 		myProgression = prog || null;
+		// Match-end advance beat for the live achievement-skin ticker: if a tracked skill
+		// medal's LIFETIME count just went up (a medal banked this match), animate the corner
+		// bar old->new with a celebration + unlock flourish. Reads the row being replaced, so
+		// it must run before anything else consumes myProgression.
+		if (typeof noteProgressionAdvance === "function") { noteProgressionAdvance(prevProgression, myProgression); }
 		// Account-backed touch-walkthrough latch. progressionUpdate fires only for signed-in
 		// players, so the account flag is authoritative here: cache it for hudOverlay's buildDom
 		// (whichever runs first) and let the touch HUD decide — build it for a genuine first-run
@@ -938,6 +944,15 @@ function registerConnectionHandlers(server) {
 		// arrives via playerCosmeticChanged just BEFORE this event (ordered), so the
 		// gate below sees the accurate equipped state.
 		maybeDefaultDiscordAvatar();
+	});
+	// Live achievement-skin ticker: the server pushes a per-action CONTRIBUTION signal each
+	// time the local player does a skill play (a kill, a charged punch, a bumper bonk, …).
+	// We pop "+N <Skill>" + the in-match tally; the corner bar shows LIFETIME progress toward
+	// the next achievement skin (derived client-side from medal_counts). Latest-wins single
+	// slot (drawSkillProgressHud).
+	server.on('medalProgress', function (p) {
+		if (p == null || p.medal == null) { return; }
+		if (typeof setSkillProgressHud === "function") { setSkillProgressHud(p); }
 	});
 	// hudOverlay (a separate IIFE with no socket handle) calls this to persist the touch
 	// walkthrough-seen latch to the account when a signed-in player finishes/skips it.
@@ -1668,6 +1683,7 @@ function registerStateHandlers(server) {
 		resetTrails();
 		resetPlayerRanks();
 		if (typeof combatLogReset === "function") { combatLogReset(); } // fresh feed each round
+		if (typeof skillProgressReset === "function") { skillProgressReset(); } // clear the live medal ticker
 		recapReset(); // start a fresh recap buffer for this round's map
 		// Anchor the HUD timer to the CLIENT's Date.now() at receipt — mixing
 		// server's Date.now() with the browser's local Date.now() would drift
