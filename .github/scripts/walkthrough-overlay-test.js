@@ -224,6 +224,14 @@ function doHold(api) {
     api.tick(400); api.step();                           // held >= HOLD_MS -> advance
     api.setInput(null, atk(false)); api.flush(); api.tick(500); api.step(); // render next
 }
+// Two quick taps within the dash window = the Dash (double-tap) step.
+function doDash(api) {
+    api.setInput(null, atk(true)); api.step();               // press 1
+    api.setInput(null, atk(false)); api.tick(50); api.step(); // release 1 (first tap)
+    api.setInput(null, atk(true)); api.tick(100); api.step(); // press 2 (within the window)
+    api.setInput(null, atk(false)); api.tick(50); api.step(); // release 2 -> dash
+    api.flush(); api.tick(500); api.step();                  // render next
+}
 // The fullscreen step advances when the player ENTERS fullscreen (not on a tap).
 function doFullscreen(api) {
     api.setFullscreen(true); api.step();                 // detectStep advances on inFullscreen
@@ -376,9 +384,10 @@ console.log("Walkthrough overlay test\n");
     sv.step();                                            // step 1
     doDir(sv, "up"); doDir(sv, "down"); doDir(sv, "left"); doDir(sv, "right");
     doTap(sv);                                            // punch
-    doHold(sv);                                           // kick -> now on the FULLSCREEN step
+    doHold(sv);                                           // kick
+    doDash(sv);                                           // dash -> now on the FULLSCREEN step
     var fbub = sv.bubble();
-    assert(fbub && /Fullscreen/i.test(fbub.innerHTML), "after kick, the Fullscreen step is shown (taught before settings)");
+    assert(fbub && /Fullscreen/i.test(fbub.innerHTML), "after the move steps, the Fullscreen step is shown (taught before settings)");
     doFullscreen(sv);                                     // ENTER fullscreen -> should advance to settings, not end
     assert(sv.attached(), "entering fullscreen ADVANCES the tour (does not exit it)");
     var bub = sv.bubble();
@@ -391,10 +400,11 @@ console.log("Walkthrough overlay test\n");
     alreadyFs.step();
     doDir(alreadyFs, "up"); doDir(alreadyFs, "down"); doDir(alreadyFs, "left"); doDir(alreadyFs, "right");
     doTap(alreadyFs);
-    doHold(alreadyFs); // kick -> fullscreen step auto-advances (already fs, held)
+    doHold(alreadyFs); // kick
+    doDash(alreadyFs); // dash -> next step (fullscreen is EXCLUDED at build when already fs)
     alreadyFs.flush(); alreadyFs.tick(500); alreadyFs.step(); // render the settings step
     var b2 = alreadyFs.bubble();
-    assert(b2 && /Settings/i.test(b2.innerHTML), "when already in fullscreen, the fullscreen step auto-advances to settings");
+    assert(b2 && /Settings/i.test(b2.innerHTML), "when already in fullscreen, the fullscreen step is skipped and settings is reachable");
     alreadyFs.teardown();
 })();
 
@@ -402,22 +412,59 @@ console.log("Walkthrough overlay test\n");
 (function () {
     console.log("\n7) D-pad scheme: pad renders + dir tooltip anchors on it");
 
-    var dp = setup({ state: STATE.waiting, dpad: true });
+    var dp = setup({ state: STATE.lobby, dpad: true });   // lobby = a steering state -> pad shown
     dp.setInput(dpadJm(), null);
     dp.step();
     var pad = dp.dpadEl();
-    assert(pad && pad.style.display !== "none", "the D-pad cross is rendered in dpad scheme");
+    assert(pad && pad.style.display !== "none", "the D-pad cross is rendered in dpad scheme (steering state)");
     var bub = dp.bubble();
     assert(bub && /up/i.test(bub.innerHTML), "the dir-step tooltip still works in dpad scheme (Move up)");
     dp.teardown();
 
+    // D-pad is hidden on non-steering screens (overview/recap/pre-join) even in dpad scheme.
+    var ov = setup({ state: STATE.overview, dpad: true });
+    ov.setInput(dpadJm(), null);
+    ov.step();
+    var pad3 = ov.dpadEl();
+    assert(pad3 && pad3.style.display === "none", "the D-pad is hidden on non-steering screens (overview)");
+    ov.teardown();
+
     // Joystick scheme (default): the D-pad is NOT shown.
-    var js = setup({ state: STATE.waiting });
+    var js = setup({ state: STATE.lobby });
     js.setInput(stickUp(), null);
     js.step();
     var pad2 = js.dpadEl();
     assert(pad2 && pad2.style.display === "none", "the D-pad is hidden in joystick scheme");
     js.teardown();
+})();
+
+// Group 8 — Dash step (double-tap punch)
+(function () {
+    console.log("\n8) Dash step advances on a double-tap (not a single tap)");
+
+    var d = setup({ state: STATE.waiting });
+    d.step();
+    doDir(d, "up"); doDir(d, "down"); doDir(d, "left"); doDir(d, "right");
+    doTap(d);   // punch
+    doHold(d);  // kick -> now on the Dash step
+    var bub = d.bubble();
+    assert(bub && /Dash/i.test(bub.innerHTML), "after kick, the Dash step is shown");
+
+    // First tap (no advance) — then a render frame with no clock advance so the next tap
+    // stays inside the dash window.
+    d.setInput(null, atk(true)); d.step();
+    d.setInput(null, atk(false)); d.tick(50); d.step();
+    d.step();
+    var bub2 = d.bubble();
+    assert(bub2 && /Dash/i.test(bub2.innerHTML), "a single tap does NOT complete the Dash step");
+
+    // Second quick tap within the window -> Dash completes.
+    d.setInput(null, atk(true)); d.tick(60); d.step();
+    d.setInput(null, atk(false)); d.tick(50); d.step();
+    d.flush(); d.tick(500); d.step();
+    var bub3 = d.bubble();
+    assert(bub3 && !/Dash/i.test(bub3.innerHTML), "a second quick tap completes the Dash step (advances past it)");
+    d.teardown();
 })();
 
 console.log("");

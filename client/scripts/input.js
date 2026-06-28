@@ -52,7 +52,7 @@ function applyControlScheme() {
     if (typeof cancelMovement === "function") { cancelMovement(); }
     joystickMovement.pressed = false;
     joystickMovement.touchIdx = null;
-    joystickMovement.staticBase = controlSchemeIsDpad();
+    // staticBase + the D-pad bound are set by layoutTouchControls (the single authority).
     if (typeof layoutTouchControls === "function") { layoutTouchControls(); }
 }
 function setControlScheme(scheme) {
@@ -659,7 +659,10 @@ function layoutTouchControls() {
         joystickMovement.baseY = SH - cssToLogical(48) - safeB - dpR;
         joystickMovement.stickX = joystickMovement.baseX;
         joystickMovement.stickY = joystickMovement.baseY;
-        var dpHalf = dpR * 1.9;
+        // Generous square hit zone around the pad (the fixed pad isn't the full left quarter the
+        // floating joystick claimed, so make it forgiving — a comfortable margin past the visible
+        // cross — to avoid dead touches near the pad).
+        var dpHalf = dpR * 2.4;
         for (var d = 0; d < virtualButtonList.length; d++) {
             if (virtualButtonList[d].button === joystickMovement) {
                 var rb = virtualButtonList[d].bound;
