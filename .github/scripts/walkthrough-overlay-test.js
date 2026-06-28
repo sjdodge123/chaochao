@@ -130,6 +130,7 @@ function setup(opts) {
 
     var rafCb = null;
     var timers = [];
+    var fsFlag = !!opts.fullscreen; // inFullscreen() state, toggled via api.setFullscreen
 
     // Install globals BEFORE require (the IIFE runs + polls on load).
     var g = global;
@@ -140,8 +141,11 @@ function setup(opts) {
         gameCanvas: canvas, LOGICAL_WIDTH: 360, LOGICAL_HEIGHT: 640, fitRatio: 1,
         joystickMovement: null, attackButton: null, menuOpen: false,
         config: { stateMap: STATE }, currentState: (opts.state == null ? STATE.waiting : opts.state),
-        chatButton: null, exitButton: null,
+        // Corner-button stubs so the fullscreen/emoji point steps can render (targetRect).
+        chatButton: { isVisible: function () { return true; }, radius: 30, baseX: 280, baseY: 40 },
+        exitButton: { isVisible: function () { return true; }, radius: 30, baseX: 320, baseY: 40 },
         fullscreenSupported: function () { return true; },
+        inFullscreen: function () { return fsFlag; },
         isDiscordActivity: function () { return false; },
         requestAnimationFrame: function (fn) { rafCb = fn; return 1; },
         setTimeout: function (fn, delay) { var t = { fn: fn, delay: delay }; timers.push(t); return t; },
@@ -163,6 +167,7 @@ function setup(opts) {
         setState: function (s) { g.currentState = s; },
         setInput: function (jm, ab) { g.joystickMovement = jm; g.attackButton = ab; },
         setMenuOpen: function (v) { g.menuOpen = v; },
+        setFullscreen: function (v) { fsFlag = v; },
         tick: function (ms) { clock += ms; },
         setRect: function (r) { canvas._rect = r; },
         step: function () { var c = rafCb; rafCb = null; if (c) c(); },
@@ -206,6 +211,11 @@ function doHold(api) {
     api.setInput(null, atk(true)); api.step();           // press begins
     api.tick(400); api.step();                           // held >= HOLD_MS -> advance
     api.setInput(null, atk(false)); api.flush(); api.tick(500); api.step(); // render next
+}
+// The fullscreen step advances when the player ENTERS fullscreen (not on a tap).
+function doFullscreen(api) {
+    api.setFullscreen(true); api.step();                 // detectStep advances on inFullscreen
+    api.flush(); api.tick(500); api.step();              // render next (settings)
 }
 
 // ---------------------------------------------------------------------------
@@ -336,20 +346,35 @@ console.log("Walkthrough overlay test\n");
     e.teardown();
 })();
 
-// Group 6 — settings point-step visibility (the position:fixed / offsetParent regression)
+// Group 6 — fullscreen-then-settings flow (entering fullscreen must NOT end the tour) +
+// settings point-step visibility (the position:fixed / offsetParent regression)
 (function () {
-    console.log("\n6) settings point-step shows when the gear is visible (offsetParent regression)");
+    console.log("\n6) fullscreen reveals the gear -> settings step is reachable (not ended)");
 
     var sv = setup({ state: STATE.waiting, gear: "visible" });
     sv.step();                                            // step 1
     doDir(sv, "up"); doDir(sv, "down"); doDir(sv, "left"); doDir(sv, "right");
     doTap(sv);                                            // punch
-    doHold(sv);                                           // kick -> now on the settings step
+    doHold(sv);                                           // kick -> now on the FULLSCREEN step
+    var fbub = sv.bubble();
+    assert(fbub && /Fullscreen/i.test(fbub.innerHTML), "after kick, the Fullscreen step is shown (taught before settings)");
+    doFullscreen(sv);                                     // ENTER fullscreen -> should advance to settings, not end
+    assert(sv.attached(), "entering fullscreen ADVANCES the tour (does not exit it)");
     var bub = sv.bubble();
-    assert(sv.attached(), "walkthrough still active at the settings step (didn't run off the end)");
     assert(bub && /Settings/i.test(bub.innerHTML),
-        "settings step is shown when the gear is visible — NOT skipped despite offsetParent===null");
+        "settings step is now reachable + shown (gear visible, offsetParent===null notwithstanding)");
     sv.teardown();
+
+    // Already in fullscreen: the fullscreen step auto-advances (nothing to teach) -> settings.
+    var alreadyFs = setup({ state: STATE.waiting, gear: "visible", fullscreen: true });
+    alreadyFs.step();
+    doDir(alreadyFs, "up"); doDir(alreadyFs, "down"); doDir(alreadyFs, "left"); doDir(alreadyFs, "right");
+    doTap(alreadyFs);
+    doHold(alreadyFs); // kick -> fullscreen step auto-advances (already fs, held)
+    alreadyFs.flush(); alreadyFs.tick(500); alreadyFs.step(); // render the settings step
+    var b2 = alreadyFs.bubble();
+    assert(b2 && /Settings/i.test(b2.innerHTML), "when already in fullscreen, the fullscreen step auto-advances to settings");
+    alreadyFs.teardown();
 })();
 
 console.log("");

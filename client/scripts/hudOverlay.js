@@ -169,11 +169,15 @@
         { id: "right", kind: "dir", dir: "right", glyph: "▶", title: "Move right", sub: "push the stick right" },
         { id: "punch", kind: "tap", title: "Punch", sub: "tap the button" },
         { id: "kick", kind: "hold", title: "Kick", sub: "hold the button to charge" },
-        // Corner buttons last. Fullscreen is LAST: tapping it toggles fullscreen and ENDS
-        // the walkthrough, so a later fullscreen-exit has no remaining step to cancel.
+        // Corner buttons. Fullscreen FIRST: the settings gear is fullscreen-only, so entering
+        // fullscreen here is what REVEALS it for the settings step that follows — otherwise
+        // settings could never be taught (and teaching fullscreen last used to END the tour
+        // before settings was reachable). The fullscreen step advances when the player ENTERS
+        // fullscreen (detectStep), and the fullscreenchange guard (fsGuardUntil) keeps the
+        // relayout from spuriously skipping settings/emoji.
+        { id: "fullscreen", kind: "point", target: "fullscreen", title: "Fullscreen", sub: "tap to go fullscreen" },
         { id: "settings", kind: "point", target: "settings", title: "Settings", sub: "tap the gear" },
-        { id: "emoji", kind: "point", target: "emoji", title: "Emotes", sub: "tap the button" },
-        { id: "fullscreen", kind: "point", target: "fullscreen", title: "Fullscreen", sub: "tap the button" }
+        { id: "emoji", kind: "point", target: "emoji", title: "Emotes", sub: "tap the button" }
     ];
     function buildSteps() {
         return STEP_TEMPLATES.filter(function (s) {
@@ -338,6 +342,10 @@
         if (walkDone || !walk || !walkPlaced || advanceLock) return;
         var step = walkSteps[walkIdx];
         if (!step || step.kind !== "point") return;
+        // The fullscreen step advances on ENTERING fullscreen (detectStep), not on the tap —
+        // a tap fires before the fullscreenchange, which would jump to the settings step while
+        // still windowed (gear hidden) and skip it.
+        if (step.target === "fullscreen") return;
         var t = e && e.changedTouches && e.changedTouches[0];
         if (!t) return;
         var tr;
@@ -596,7 +604,14 @@
         // "point" steps advance via onWalkTouch (tap to continue), or auto-skip if
         // their control isn't on screen at all.
         if (step.kind === "point") {
-            // handled in placeStep (auto-skip when target is unavailable)
+            // The fullscreen step advances when the player actually ENTERS fullscreen (which
+            // reveals the gear for the settings step that follows) — NOT on the raw tap, which
+            // fires before the fullscreenchange. The early return above already respects the
+            // fsGuardUntil window, so we only land here once the change has settled. settings/
+            // emoji still advance via onWalkTouch / auto-skip in placeStep.
+            if (step.target === "fullscreen" && typeof inFullscreen === "function") {
+                try { if (inFullscreen()) { advanceStep(); } } catch (e) { /* ignore */ }
+            }
         }
     }
 
