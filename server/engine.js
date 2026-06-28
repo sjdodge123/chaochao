@@ -384,9 +384,19 @@ class Engine {
 			var cosD = Math.cos(d), sinD = Math.sin(d);
 			player.driveHeadingX = hx * cosD - hy * sinD;
 			player.driveHeadingY = hx * sinD + hy * cosD;
+				// Soft hard-turn speed cost: a gentle, graduated version of the classic
+				// momentum dump. A smooth carve (dot near 1) costs nothing; the sharper the
+				// input points away from the current heading, the more momentum bleeds — but
+				// it bleeds over turnPenaltyTime instead of dumping to the floor in one tick,
+				// so a hard reverse scrubs some speed without killing the carve. (Only reached
+				// at speed: the ease branch already requires fspeed >= snapSpeed.)
+				if (fluid.turnPenaltyTime && dot < fluid.turnPenaltyDot) {
+					var sharp = (fluid.turnPenaltyDot - dot) / (fluid.turnPenaltyDot + 1);
+					player.momentum = Math.max(0, player.momentum - sharp * this.dt / fluid.turnPenaltyTime);
+				}
 		}
-		// Build momentum on committed movement; no hard-turn dump (the eased heading
-		// is what makes a turn feel smooth instead of a drive cut).
+		// Build momentum on committed movement; the only turn cost is the soft,
+		// graduated turnPenalty above — never the classic instant dump-to-floor.
 		var fRampTime = (ramp != null) ? ramp.rampTime : 2.5;
 		player.momentum = Math.min(1, player.momentum + this.dt / fRampTime);
 		player.wasBraking = false;
