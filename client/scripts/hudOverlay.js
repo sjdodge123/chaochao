@@ -37,7 +37,7 @@
 
     var root = null;
     var elJoyBase, elJoyKnob, elAtk;
-    var elDpad, elDpadUp, elDpadDown, elDpadLeft, elDpadRight;
+    var elDpad, elDpadPress, elDpadGlow;
     var started = false;
 
     // ---- Walkthrough state ----
@@ -123,8 +123,15 @@
             "#" + ROOT_ID + " .dpad .dpad-btn.down{left:28%;top:48%;width:44%;height:45%;border-radius:0 0 42% 42%;align-items:end;padding-bottom:9%;}",
             "#" + ROOT_ID + " .dpad .dpad-btn.left{top:28%;left:7%;height:44%;width:45%;border-radius:42% 0 0 42%;justify-items:start;padding-left:9%;}",
             "#" + ROOT_ID + " .dpad .dpad-btn.right{top:28%;left:48%;height:44%;width:45%;border-radius:0 42% 42% 0;justify-items:end;padding-right:9%;}",
-            // Active arm: cyan + raised above the overlapping bar so it reads as a full press.
-            "#" + ROOT_ID + " .dpad .dpad-btn.active{background:#3ad3ff;color:#06384a;z-index:3;}",
+            // Press highlight: one soft cyan glow clipped to the plus, slid toward the pressed
+            // direction(s). Static cross + a moving glow = the highlight blends smoothly across
+            // arms (and the centre for diagonals). Only transform/opacity change per frame.
+            "#" + ROOT_ID + " .dpad .dpad-press{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .08s ease;",
+            "clip-path:polygon(28% 7%,72% 7%,72% 28%,93% 28%,93% 72%,72% 72%,72% 93%,28% 93%,28% 72%,7% 72%,7% 28%,28% 28%);}",
+            "#" + ROOT_ID + " .dpad .dpad-press.on{opacity:1;}",
+            "#" + ROOT_ID + " .dpad .dpad-glow{position:absolute;left:50%;top:50%;width:96%;height:96%;border-radius:50%;",
+            "background:radial-gradient(circle,rgba(74,216,255,.92) 0%,rgba(58,200,250,.55) 38%,rgba(58,200,250,0) 66%);",
+            "transform:translate(-50%,-50%);will-change:transform;}",
             // ---- attack button ----
             "#" + ROOT_ID + " .atk{border-radius:50%;display:grid;place-items:center;color:#fff;",
             "background:radial-gradient(circle at 50% 30%,#ff7a6e,#ff4838 55%,#c92a1d 100%);",
@@ -183,10 +190,6 @@
         try { return typeof controlSchemePref !== "undefined" && controlSchemePref === "dpad"; }
         catch (e) { return false; }
     }
-    function setActive(node, on) {
-        if (!node) { return; }
-        if (on) { node.classList.add("active"); } else { node.classList.remove("active"); }
-    }
 
     // ---- Walkthrough step list -------------------------------------------------
     // Movement (gated on a real joystick push), punch (tap), kick (hold/charge),
@@ -231,15 +234,17 @@
 
         // D-pad cross (fixed scheme). Four direction buttons; the centre stays open as a
         // thumb rest so the player can rock between two or straddle two for a diagonal.
+        // Grey cross (static — never recoloured) + a single soft cyan glow overlay clipped to
+        // the cross, which slides toward the pressed direction(s). One cohesive highlight that
+        // blends across arms (and the centre for diagonals) instead of separate per-arm fills.
         elDpad = el("thc dpad",
             '<div class="dpad-cross">' +
             '<span class="dpad-btn up">▲</span><span class="dpad-btn down">▼</span>' +
             '<span class="dpad-btn left">◀</span><span class="dpad-btn right">▶</span>' +
-            '</div>');
-        elDpadUp = elDpad.querySelector(".up");
-        elDpadDown = elDpad.querySelector(".down");
-        elDpadLeft = elDpad.querySelector(".left");
-        elDpadRight = elDpad.querySelector(".right");
+            '</div>' +
+            '<div class="dpad-press"><div class="dpad-glow"></div></div>');
+        elDpadPress = elDpad.querySelector(".dpad-press");
+        elDpadGlow = elDpad.querySelector(".dpad-glow");
 
         elJoyBase.style.display = "none";
         elJoyKnob.style.display = "none";
@@ -558,11 +563,18 @@
                 var dpD = (jm.baseRadius ? jm.baseRadius * 2 * m.s : 120);
                 place(elDpad, m.x(jm.baseX), m.y(jm.baseY), dpD);
                 elDpad.style.fontSize = Math.round(dpD * 0.17) + "px";
-                if (typeof jm.up === "function") {
-                    setActive(elDpadUp, jm.up());
-                    setActive(elDpadDown, jm.down());
-                    setActive(elDpadLeft, jm.left());
-                    setActive(elDpadRight, jm.right());
+                // Slide the single glow toward the pressed direction(s); a diagonal lands it on
+                // the corner so both arms light as one blended highlight. Cheap: only a CSS
+                // transform + an opacity class change (compositor ops), no per-arm repaint.
+                if (typeof jm.up === "function" && elDpadGlow && elDpadPress) {
+                    var gx = (jm.right() ? 1 : 0) - (jm.left() ? 1 : 0);
+                    var gy = (jm.down() ? 1 : 0) - (jm.up() ? 1 : 0);
+                    if (gx || gy) {
+                        elDpadGlow.style.transform = "translate(" + (-50 + gx * 28) + "%," + (-50 + gy * 28) + "%)";
+                        elDpadPress.classList.add("on");
+                    } else {
+                        elDpadPress.classList.remove("on");
+                    }
                 }
                 elDpad.style.display = "";
                 elJoyBase.style.display = "none";
