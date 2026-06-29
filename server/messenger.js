@@ -726,18 +726,22 @@ function checkForMail(client) {
 		// not clobber the real owner's still-pending seat).
 		if (ownsSavedSeat) {
 			reconnect.releaseSeat(rcKey);
-			// Single-use: spend the guest's token here so a captured copy can't be replayed
-			// to re-seat / displace this player later. (A signed-in re-seat uses no token.)
-			if (client.userId == null && client.reconnectToken) {
-				reconnect.consumeToken(client.reconnectToken, rcNow);
-			}
 		}
 		if (ownsSavedSeat || savedSeat == null || String(savedSeat.roomSig) === String(roomSig)) {
 			reconnect.recordSeat(rcKey, roomSig, null);
 		}
-		// Hand the client a fresh HMAC token bound to (identity, room) for its NEXT reconnect.
+		// Hand the client a FRESH token bound to (identity, room) for its NEXT reconnect, and
+		// only THEN spend the old one. Emitting the replacement before consuming the old token
+		// means a guest is never left holding a now-consumed token with no usable replacement
+		// if the socket drops between the two (Codex re-review). The new token has a different
+		// expiry -> different mac, so consuming the old never invalidates the new.
 		if (rcKey != null) {
 			client.emit('reconnectToken', { sig: roomSig, token: reconnect.mintToken(rcKey, roomSig, null, Date.now() + reconnect.TOKEN_TTL_MS) });
+		}
+		// Single-use: spend the guest's just-used token so a captured copy can't be replayed to
+		// re-seat / displace this player. (A signed-in re-seat uses no token.)
+		if (ownsSavedSeat && client.userId == null && client.reconnectToken) {
+			reconnect.consumeToken(client.reconnectToken, rcNow);
 		}
 		loadPlayerProgression(client, room.playerList[client.id]);
 		room.game.determineGameState(room.playerList[client.id]);
