@@ -698,7 +698,7 @@ function checkForMail(client) {
 		// One identity == one live seat: remove any stale duplicate player for this identity
 		// (defensive — the disconnect path normally clears it; also resolves a racey double
 		// join before the old socket's disconnect fires). Deleting a key mid for-in is safe.
-		if (rcKey != null) {
+		if (ownsSavedSeat) {
 			for (var dupId in room.playerList) {
 				if (dupId === client.id) { continue; }
 				var dupP = room.playerList[dupId];
@@ -726,13 +726,18 @@ function checkForMail(client) {
 		// not clobber the real owner's still-pending seat).
 		if (ownsSavedSeat) {
 			reconnect.releaseSeat(rcKey);
+			// Single-use: spend the guest's token here so a captured copy can't be replayed
+			// to re-seat / displace this player later. (A signed-in re-seat uses no token.)
+			if (client.userId == null && client.reconnectToken) {
+				reconnect.consumeToken(client.reconnectToken, rcNow);
+			}
 		}
 		if (ownsSavedSeat || savedSeat == null || String(savedSeat.roomSig) === String(roomSig)) {
 			reconnect.recordSeat(rcKey, roomSig, null);
 		}
 		// Hand the client a fresh HMAC token bound to (identity, room) for its NEXT reconnect.
 		if (rcKey != null) {
-			client.emit('reconnectToken', { sig: roomSig, token: reconnect.mintToken(rcKey, roomSig, null, Date.now() + reconnect.MAINTENANCE_GRACE_MS) });
+			client.emit('reconnectToken', { sig: roomSig, token: reconnect.mintToken(rcKey, roomSig, null, Date.now() + reconnect.TOKEN_TTL_MS) });
 		}
 		loadPlayerProgression(client, room.playerList[client.id]);
 		room.game.determineGameState(room.playerList[client.id]);

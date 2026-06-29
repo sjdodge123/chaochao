@@ -47,6 +47,14 @@ check(reconnect.verifyToken(tok.slice(0, -1) + (tok.slice(-1) === 'A' ? 'B' : 'A
 check(reconnect.verifyToken(tok.split('.')[0] + '.deadbeefdeadbeefdeadbeefdeadbeef', 5000) == null, 'forged MAC is rejected');
 check(reconnect.verifyToken('not-a-token', 5000) == null, 'malformed token is rejected');
 
+// --- single-use: a consumed token no longer verifies (replay protection) ---
+const tokSU = reconnect.mintToken('d:dev-SU|s:0', 11, null, 50000);
+check(reconnect.verifyToken(tokSU, 5000) != null, 'fresh token verifies before consume');
+reconnect.consumeToken(tokSU, 5000);
+check(reconnect.verifyToken(tokSU, 5000) == null, 'consumed token is rejected (single-use)');
+const tokSU2 = reconnect.mintToken('d:dev-SU|s:0', 11, null, 50001); // different expiry -> different mac
+check(reconnect.verifyToken(tokSU2, 5000) != null, 'a different (unconsumed) token for the same key still verifies');
+
 // --- integration: the REAL enterGame records a guest's seat (messenger wiring) ---
 function makeFakeSocket(id, deviceId, userId) {
     const h = {};

@@ -780,22 +780,31 @@ io.on('connection', (client) => {
       var rcKey = idn ? reconnect.reconnectKey(idn.userId, idn.deviceId, 0) : null;
       var now = Date.now();
       if (rcKey != null) {
-        // Capture this player's CURRENT standings into the parked seat so a transient
-        // blip-reconnect restores notches/team/name/cosmetics — not just a full restart.
-        // (Codex finding: normal reconnects previously dropped standings.) Read the live
-        // player BEFORE leaving the room.
         var room = hostess.getRoomForClient(client.id);
-        var lp = room ? room.playerList[client.id] : null;
-        if (lp != null && !lp.isAI) {
-          reconnect.recordSeat(rcKey, room.sig, { restore: false, standings: roomSnapshot.captureStandings(lp) });
+        // Only manage THIS identity's seat entry when it's actually ours: no entry yet, or the
+        // indexed seat points at the room we're in. A different-room entry under the same key
+        // means a deviceId collision (an imposter, or the real owner's still-pending seat) —
+        // never overwrite or re-park that on our disconnect (Codex re-review: doing so let a
+        // spoofed-deviceId disconnect clobber the real owner's pending seat).
+        var existingSeat = reconnect.lookupSeat(rcKey, now);
+        var ownsSeatHere = (existingSeat == null) || (room != null && String(existingSeat.roomSig) === String(room.sig));
+        if (ownsSeatHere) {
+          // Capture this player's CURRENT standings into the parked seat so a transient
+          // blip-reconnect restores notches/team/name/cosmetics — not just a full restart.
+          // Read the live player BEFORE leaving the room.
+          var lp = room ? room.playerList[client.id] : null;
+          if (lp != null && !lp.isAI) {
+            reconnect.recordSeat(rcKey, room.sig, { restore: false, standings: roomSnapshot.captureStandings(lp) });
+          }
+          reconnect.onDisconnect(rcKey, now, maintenance.isRaceBlocked());
         }
-        reconnect.onDisconnect(rcKey, now, maintenance.isRaceBlocked());
         reconnect.sweep(now);
         // Preserve a now-empty room for the grace window so the last player can come back
-        // (Codex finding: parking a seat was pointless when the room got deleted). Multi-
-        // player rooms are untouched (others remain); preview/tarpit/Discord never held.
+        // (parking a seat was pointless when the room got deleted). Only hold under OUR key
+        // (ownsSeatHere) — a colliding/imposter socket leaving doesn't get to hold the room.
+        // Multi-player rooms are untouched (others remain); preview/tarpit/Discord never held.
         var graceMs = maintenance.isRaceBlocked() ? reconnect.MAINTENANCE_GRACE_MS : reconnect.GRACE_MS;
-        hostess.holdOrKickFromRoom(client.id, rcKey, now + graceMs);
+        hostess.holdOrKickFromRoom(client.id, ownsSeatHere ? rcKey : null, now + graceMs);
       } else {
         hostess.kickFromRoom(client.id);
       }
@@ -825,30 +834,40 @@ process.on('SIGTERM', function () {
     }
     console.log('Server shutting down (SIGTERM) — announcing 28s restart countdown to ' + clientCount + ' client(s)');
     maintenance.begin(28, 'restart');
-    // Seamless-reconnect (Phase 2): snapshot each live room's roster + standings to the
-    // cross-process store so the new dyno can restore them and re-seat returning players.
-    // Best-effort and non-blocking — the 28s exit timer below is the hard backstop, and a
-    // store failure just means no reconnect (degrade, never delay the restart).
+    // Use the fixed ~28s grace window for two things at once: (1) DRAIN the reconnect snapshot
+    // write before exiting, and (2) keep ticking so in-flight races finish + clients reconnect
+    // to the new dyno. We exit only AFTER the snapshot write settles (so we never die with the
+    // write in flight — Codex re-review), but never EARLIER than the window (so races aren't cut
+    // short). A hard backstop guarantees we still exit if the write hangs (Heroku SIGKILLs ~30s).
+    var EXIT_MS = 28 * 1000;
+    var sigtermT0 = Date.now();
+    var sigtermExited = false;
+    function sigtermExit(why) {
+        if (sigtermExited) { return; }
+        sigtermExited = true;
+        console.log('[reconnect] shutdown exit (' + why + ')');
+        process.exit(0);
+    }
+    // Hard backstop: exit no later than the grace window even if the write never settles.
+    setTimeout(function () { sigtermExit('deadline'); }, EXIT_MS);
     try {
         var snaps = roomSnapshot.snapshotAllRooms(hostess, reconnect, Date.now());
         if (snaps.length > 0) {
             console.log('[reconnect] snapshotting ' + snaps.length + ' room(s) before restart');
-            // Kick the write NOW (t~=0 of the 28s window) and TRACK its outcome — not the old
-            // fire-and-forget-and-swallow. The tick loop runs on a separate setInterval, so this
-            // async write doesn't block in-flight races; we just log success/failure so a lost
-            // snapshot is never silent. The write has the full 28s window to land before the hard
-            // exit below (Heroku SIGKILLs the dyno at ~30s — that is the one unavoidable cutoff).
-            var snapSettled = false;
-            Promise.resolve(reconnectStore.writeAll(snaps)).then(function (n) {
-                snapSettled = true;
-                console.log('[reconnect] persisted ' + n + '/' + snaps.length + ' room snapshot(s)');
-            }).catch(function (e) { snapSettled = true; console.log('[reconnect] snapshot write error:', e && e.message); });
-            // If the write is still in flight near the deadline it may be cut off by SIGKILL —
-            // surface that (the only loss case we can't prevent within Heroku's grace budget).
-            setTimeout(function () { if (!snapSettled) { console.log('[reconnect] WARNING: snapshot write still pending at the shutdown deadline'); } }, 26 * 1000);
+            // Async I/O — does NOT block the tick loop (separate setInterval), so races keep
+            // playing while it lands. When it settles, hold the REST of the window, then exit.
+            Promise.resolve(reconnectStore.writeAll(snaps))
+                .then(function (n) { console.log('[reconnect] persisted ' + n + '/' + snaps.length + ' room snapshot(s)'); })
+                .catch(function (e) { console.log('[reconnect] snapshot write error:', e && e.message); })
+                .then(function () {
+                    var remaining = EXIT_MS - (Date.now() - sigtermT0);
+                    if (remaining <= 0) { sigtermExit('drained-late'); }
+                    else { setTimeout(function () { sigtermExit('drained'); }, remaining); }
+                });
         }
+        // No rooms to snapshot: the hard backstop above still holds the window for any
+        // in-flight lobby/clients, then exits.
     } catch (e) { console.log('[reconnect] snapshot failed:', e.message); }
-    setTimeout(function () { process.exit(0); }, 28 * 1000);
 });
 
 
