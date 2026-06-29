@@ -128,6 +128,7 @@ setTimeout(function () {
     // cleanup
     hostess.kickFromRoom(sock.id); messenger.removeMailBox(sock.id);
     hostess.kickFromRoom(bsock.id); messenger.removeMailBox(bsock.id);
+    Date.now = realNow; // restore the real clock we stubbed at the top
 
     if (failures > 0) { console.log('\nReconnect Phase 2 test FAILED (' + failures + ').'); process.exit(1); }
     console.log('\nReconnect Phase 2 test passed.');

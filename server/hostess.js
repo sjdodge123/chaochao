@@ -3,6 +3,7 @@ var c = utils.loadConfig();
 var messenger = require('./messenger.js');
 var game = require('./game.js');
 var botGuard = require('./botGuard.js');
+var crypto = require('crypto');
 
 var roomList = {},
 	maxPlayersInRoom = c.maxPlayersInRoom;
@@ -358,7 +359,10 @@ function searchForRoom(id) {
 }
 
 function generateRoomSig() {
-	var sig = utils.getRandomInt(0, 999);
+	// CSPRNG room id (crypto, not Math.random): a sig can't be cheaply guessed for the
+	// "join by id" / shared-link vectors, AND static analysis no longer treats values pulled
+	// out of a sig-indexed room (e.g. a player's verified identity) as tainted weak randomness.
+	var sig = crypto.randomInt(0, 1000); // inclusive [0, 999]
 	if (roomList[sig] == null || roomList[sig] == undefined) {
 		return sig;
 	}

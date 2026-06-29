@@ -1085,7 +1085,7 @@ function registerConnectionHandlers(server) {
 		// re-stash, and a return to play.html within the TTL won't loop back to the dead sig.
 		try { sessionStorage.removeItem("reconnecting"); } catch (e) {}
 		if (typeof serverMaintenance !== "undefined" && serverMaintenance != null && serverMaintenance.reason === "reconnecting") { serverMaintenance = null; }
-		if (typeof clearReconnectTimers === "function") { clearReconnectTimers(); }
+		clearReconnectTimers(); // hoisted function declaration below — always defined
 		if (typeof reconnectOverlayHide === "function") { reconnectOverlayHide(); }
 		server.disconnect();
 		window.location.href = "./join.html?notfound=1";
@@ -1397,7 +1397,7 @@ function registerConnectionHandlers(server) {
 		}
 		// Verifiably back in a room — tear down the reconnect overlay (both outage paths)
 		// and kill any pending poll/grace/give-up timers so nothing fires under us.
-		if (typeof clearReconnectTimers === "function") { clearReconnectTimers(); }
+		clearReconnectTimers(); // hoisted function declaration below — always defined
 		if (typeof reconnectOverlayHide === "function") { reconnectOverlayHide(); }
 		checkGameState(gameState.game);
 		connectSpawnPlayers(gameState.playerList);
