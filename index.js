@@ -399,6 +399,13 @@ var messenger = require('./server/messenger.js');
 var hostess = require('./server/hostess.js');
 var botGuard = require('./server/botGuard.js');
 var maintenance = require('./server/maintenance.js');
+var reconnect = require('./server/reconnect.js');
+var roomSnapshot = require('./server/roomSnapshot.js');
+// Cross-process room-snapshot store for seamless-reconnect (Phase 2). Supabase is the
+// ONLY store that survives a Heroku dyno cutover (the FS is per-dyno/ephemeral, no
+// Redis), so without it reconnect-across-restart degrades to a no-op (an in-memory
+// store can't outlive the dying process). Created once auth has resolved its client.
+var reconnectStore = (auth && auth.enabled) ? roomSnapshot.makeSupabaseStore(auth) : roomSnapshot.makeMemoryStore();
 var crypto = require('crypto');
 var c = utils.loadConfig();
 
@@ -644,6 +651,23 @@ var serverSleeping = true,
 server.listen(c.port, () => {
   console.log('listening on *:' + c.port);
   messenger.build(io);
+  // Seamless-reconnect (Phase 2): restore any rooms the previous process snapshotted
+  // before its restart, so returning players re-seat with standings intact. Best-effort
+  // and bounded — purges what it consumes; a miss just means those players re-matchmake.
+  try {
+    Promise.resolve(reconnectStore.readAllFresh(Date.now())).then(function (snaps) {
+      if (!snaps || snaps.length === 0) { return; }
+      var n = roomSnapshot.restoreAll(snaps, { hostess: hostess, reconnect: reconnect }, Date.now());
+      console.log('[reconnect] restored ' + n + '/' + snaps.length + ' room(s) from snapshot');
+      var sigs = snaps.map(function (s) { return s.sig; });
+      Promise.resolve(reconnectStore.purge(sigs)).catch(function () {});
+    }).catch(function () { /* never block boot on reconnect restore */ });
+    // Drop any snapshot rows whose TTL already lapsed (a dyno that never came back, or
+    // rows nobody reclaimed) so the table can't accumulate stale rows forever. Best-effort.
+    if (typeof reconnectStore.sweepExpired === 'function') {
+      Promise.resolve(reconnectStore.sweepExpired(Date.now())).catch(function () {});
+    }
+  } catch (e) { /* ignore */ }
 });
 
 // Refresh per-map rating aggregates from Supabase into each map's classifier meta
@@ -692,6 +716,12 @@ function sanitizeDeviceId(raw) {
 io.use(async (socket, next) => {
     var handshake = socket.handshake.auth || {};
     socket.deviceId = sanitizeDeviceId(handshake.deviceId);
+    // Seamless-reconnect seat token (HMAC, minted server-side and stashed by the client).
+    // A returning GUEST presents it so we don't trust a spoofable deviceId for the re-seat
+    // (signed-in players re-seat on their verified userId and don't need it). Bounded length;
+    // verified in messenger.enterGame — never trusted here.
+    socket.reconnectToken = (typeof handshake.reconnectToken === 'string' && handshake.reconnectToken.length <= 512)
+        ? handshake.reconnectToken : null;
     socket.userId = null;
     if (handshake.token) {
         try {
@@ -742,7 +772,42 @@ io.on('connection', (client) => {
 
     client.on('disconnect', () => {
       botGuard.unregister(client.id);
-      hostess.kickFromRoom(client.id);
+      // Park this identity's room seat so a reconnecting socket can re-adopt it
+      // (Phase 0 of seamless-reconnect). MUST read identity BEFORE removeMailBox
+      // clears it. A maintenance-window drop holds the seat longer (the whole room
+      // is restarting); a normal drop parks briefly then self-evicts.
+      var idn = messenger.getIdentity(client.id);
+      var rcKey = idn ? reconnect.reconnectKey(idn.userId, idn.deviceId, 0) : null;
+      var now = Date.now();
+      if (rcKey != null) {
+        var room = hostess.getRoomForClient(client.id);
+        // Only manage THIS identity's seat entry when it's actually ours: no entry yet, or the
+        // indexed seat points at the room we're in. A different-room entry under the same key
+        // means a deviceId collision (an imposter, or the real owner's still-pending seat) —
+        // never overwrite or re-park that on our disconnect (Codex re-review: doing so let a
+        // spoofed-deviceId disconnect clobber the real owner's pending seat).
+        var existingSeat = reconnect.lookupSeat(rcKey, now);
+        var ownsSeatHere = (existingSeat == null) || (room != null && String(existingSeat.roomSig) === String(room.sig));
+        if (ownsSeatHere) {
+          // Capture this player's CURRENT standings into the parked seat so a transient
+          // blip-reconnect restores notches/team/name/cosmetics — not just a full restart.
+          // Read the live player BEFORE leaving the room.
+          var lp = room ? room.playerList[client.id] : null;
+          if (lp != null && !lp.isAI) {
+            reconnect.recordSeat(rcKey, room.sig, { restore: false, standings: roomSnapshot.captureStandings(lp) });
+          }
+          reconnect.onDisconnect(rcKey, now, maintenance.isRaceBlocked());
+        }
+        reconnect.sweep(now);
+        // Preserve a now-empty room for the grace window so the last player can come back
+        // (parking a seat was pointless when the room got deleted). Only hold under OUR key
+        // (ownsSeatHere) — a colliding/imposter socket leaving doesn't get to hold the room.
+        // Multi-player rooms are untouched (others remain); preview/tarpit/Discord never held.
+        var graceMs = maintenance.isRaceBlocked() ? reconnect.MAINTENANCE_GRACE_MS : reconnect.GRACE_MS;
+        hostess.holdOrKickFromRoom(client.id, ownsSeatHere ? rcKey : null, now + graceMs);
+      } else {
+        hostess.kickFromRoom(client.id);
+      }
       messenger.removeMailBox(client.id);
       clientCount--;
       checkForSleep();
@@ -769,7 +834,40 @@ process.on('SIGTERM', function () {
     }
     console.log('Server shutting down (SIGTERM) — announcing 28s restart countdown to ' + clientCount + ' client(s)');
     maintenance.begin(28, 'restart');
-    setTimeout(function () { process.exit(0); }, 28 * 1000);
+    // Use the fixed ~28s grace window for two things at once: (1) DRAIN the reconnect snapshot
+    // write before exiting, and (2) keep ticking so in-flight races finish + clients reconnect
+    // to the new dyno. We exit only AFTER the snapshot write settles (so we never die with the
+    // write in flight — Codex re-review), but never EARLIER than the window (so races aren't cut
+    // short). A hard backstop guarantees we still exit if the write hangs (Heroku SIGKILLs ~30s).
+    var EXIT_MS = 28 * 1000;
+    var sigtermT0 = Date.now();
+    var sigtermExited = false;
+    function sigtermExit(why) {
+        if (sigtermExited) { return; }
+        sigtermExited = true;
+        console.log('[reconnect] shutdown exit (' + why + ')');
+        process.exit(0);
+    }
+    // Hard backstop: exit no later than the grace window even if the write never settles.
+    setTimeout(function () { sigtermExit('deadline'); }, EXIT_MS);
+    try {
+        var snaps = roomSnapshot.snapshotAllRooms(hostess, reconnect, Date.now());
+        if (snaps.length > 0) {
+            console.log('[reconnect] snapshotting ' + snaps.length + ' room(s) before restart');
+            // Async I/O — does NOT block the tick loop (separate setInterval), so races keep
+            // playing while it lands. When it settles, hold the REST of the window, then exit.
+            Promise.resolve(reconnectStore.writeAll(snaps))
+                .then(function (n) { console.log('[reconnect] persisted ' + n + '/' + snaps.length + ' room snapshot(s)'); })
+                .catch(function (e) { console.log('[reconnect] snapshot write error:', e && e.message); })
+                .then(function () {
+                    var remaining = EXIT_MS - (Date.now() - sigtermT0);
+                    if (remaining <= 0) { sigtermExit('drained-late'); }
+                    else { setTimeout(function () { sigtermExit('drained'); }, remaining); }
+                });
+        }
+        // No rooms to snapshot: the hard backstop above still holds the window for any
+        // in-flight lobby/clients, then exits.
+    } catch (e) { console.log('[reconnect] snapshot failed:', e.message); }
 });
 
 

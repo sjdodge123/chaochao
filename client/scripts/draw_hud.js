@@ -187,17 +187,24 @@ function drawMaintenanceBanner() {
     if (serverMaintenance.reason === "restart") {
         var secsLeft = Math.max(0, Math.ceil((serverMaintenance.deadline - now) / 1000));
         line1 = secsLeft > 0 ? ("Server restarting in " + secsLeft + "s") : "Server restarting…";
-        line2 = "Game update — you'll be back in the action in a moment";
+        // Sit-tight reassurance (Phase 1 of seamless-reconnect): on screen BEFORE the
+        // socket drops, so the player knows to wait rather than refresh/leave.
+        line2 = "Sit tight — we'll reconnect you to your game. Don't navigate away.";
+    } else if (serverMaintenance.reason === "reconnecting") {
+        // Post-reload reconnect state (rehydrated from the sessionStorage stash in
+        // enterLobby). Shown immediately on boot, cleared once gameState confirms re-entry.
+        line1 = "Reconnecting you to your game…";
+        line2 = "Hang tight — restoring your match. Don't navigate away.";
     } else {
         line1 = "Server update coming up";
-        line2 = "New races are paused — a quick restart follows shortly";
+        line2 = "New races are paused — sit tight, we'll reconnect you shortly";
     }
     var cx = LOGICAL_WIDTH / 2;
     var by = 66; // headline baseline — panel sits below the session info bar
     // Urgency pulse on the headline once a restart countdown is live, same
     // accelerating-sine trick as the gate line.
     var alpha = 1;
-    if (serverMaintenance.reason === "restart") {
+    if (serverMaintenance.reason === "restart" || serverMaintenance.reason === "reconnecting") {
         alpha = 0.75 + 0.25 * Math.sin(now / 180);
     }
     gameContext.save();

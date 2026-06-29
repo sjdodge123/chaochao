@@ -1,6 +1,8 @@
 var utils = require('./utils.js');
 var hostess = require('./hostess.js');
 var botGuard = require('./botGuard.js');
+var reconnect = require('./reconnect.js');
+var roomSnapshot = require('./roomSnapshot.js');
 var c = utils.loadConfig();
 // Skin station: expose the curated named-color palette to the client (via the
 // config payload that already ships to every client) so the skin picker's swatches
@@ -622,6 +624,31 @@ function checkForMail(client) {
 		// branch). joinARoom enforces capacity; matchmaking (id == -1) still avoids
 		// locked rooms in findARoom. The legacy `coop` event arg is no longer needed
 		// server-side but clients may still send it — accepted and ignored.
+		//
+		// Seamless-reconnect ownership: does THIS identity own a saved seat in the target
+		// room? Verified by the account userId (resolved + trusted at the handshake) or, for
+		// a guest, a valid HMAC seat token — NOT a raw (spoofable) deviceId. Computed here so
+		// the held-room guard below and the standings re-seat further down share one decision.
+		var rcNow = Date.now();
+		var rcKey = reconnect.reconnectKey(client.userId, client.deviceId, 0);
+		var savedSeat = reconnect.lookupSeat(rcKey, rcNow);
+		var ownsSavedSeat = false;
+		if (savedSeat != null && String(savedSeat.roomSig) === String(roomSig)) {
+			if (client.userId != null) {
+				ownsSavedSeat = true; // account identity is verified at the handshake
+			} else {
+				var rcv = reconnect.verifyToken(client.reconnectToken, rcNow);
+				ownsSavedSeat = (rcv != null && rcv.k === rcKey && String(rcv.r) === String(roomSig));
+			}
+		}
+		// A reconnect-held room is RESERVED for its saved players. Matchmaking (id == -1)
+		// already skips it (findARoom), but a DIRECT join by sig (a shared/guessed link)
+		// would otherwise let a stranger fill a saved seat — re-route non-owners to a real
+		// room instead. Owners fall through and re-seat normally.
+		var heldTarget = hostess.getRoomBySig(roomSig);
+		if (heldTarget != null && heldTarget.awaitingReconnect === true && !ownsSavedSeat) {
+			roomSig = hostess.findARoom(client.id);
+		}
 		var room = hostess.joinARoom(roomSig, client.id);
 		if (room == false) {
 			debug.log("enterGame: joinARoom FAILED for client=", client.id, " roomSig=", roomSig);
@@ -652,6 +679,70 @@ function checkForMail(client) {
 		// skin-unlock gating + the lobby Lv/XP badge. Defaults immediately so gating
 		// has something to check, then pushes the real row via progressionUpdate when
 		// it loads. Guests get no progression. Reads work even with writes gated off.
+		// Record which room this stable identity now holds, so a reconnecting socket
+		// (new socket.id) can be re-seated here (Phase 0 of seamless-reconnect). Keyed
+		// by userId (signed-in) or deviceId (guest); a no-identity socket / bot keys to
+		// null and is skipped. No wire change — player.id stays the socket.id.
+		// Phase 2 re-seat: if a RESTORED seat for this identity is waiting in THIS room
+		// (a snapshot persisted before a server restart), restore their notches/team/name/
+		// cosmetics onto the fresh kart and reopen the held room. Read it BEFORE recordSeat
+		// overwrites the seat; only apply when they returned to their actual saved room.
+		// Re-seat using the ownership decided above (rcKey/savedSeat/ownsSavedSeat). If this
+		// identity OWNS a saved seat in THIS room, restore notches/team/name/cosmetics onto the
+		// fresh kart — covers BOTH a restart-restore seat and a transient blip-park seat (both
+		// carry standings). A spoofed deviceId no longer suffices: a guest must present the HMAC
+		// token we minted to the original socket.
+		if (ownsSavedSeat && savedSeat.seat != null && savedSeat.seat.standings != null) {
+			roomSnapshot.applyStandings(room.playerList[client.id], savedSeat.seat.standings);
+		}
+		// One identity == one live seat: remove any stale duplicate player for this identity
+		// (defensive — the disconnect path normally clears it; also resolves a racey double
+		// join before the old socket's disconnect fires). Deleting a key mid for-in is safe.
+		if (ownsSavedSeat) {
+			for (var dupId in room.playerList) {
+				if (dupId === client.id) { continue; }
+				var dupP = room.playerList[dupId];
+				if (dupP == null || dupP.isAI) { continue; }
+				if (reconnect.reconnectKey(dupP.verifiedUserId, dupP.deviceId, 0) === rcKey) {
+					hostess.kickFromRoom(dupId);
+					exports.removeMailBox(dupId);
+				}
+			}
+		}
+		// A held room reopens to matchmaking only once EVERY saved seat has returned (or the
+		// grace TTL lapses in hostess.updateRooms) — NOT on the first return, which would let a
+		// stranger fill a still-pending saved seat.
+		if (room.awaitingReconnect && ownsSavedSeat && room.pendingReconnectKeys != null) {
+			delete room.pendingReconnectKeys[rcKey];
+			if (Object.keys(room.pendingReconnectKeys).length === 0) {
+				room.awaitingReconnect = false;
+				room.pendingReconnectKeys = null;
+			}
+		}
+		// Update the seat index for this identity. Owner of the saved seat -> consume it
+		// (replay protection) and record the now-live seat here. Otherwise record live ONLY
+		// for a fresh join or a (re)join of this identity's own current room — never overwrite
+		// a parked seat held for a DIFFERENT room that we don't own (a deviceId collision must
+		// not clobber the real owner's still-pending seat).
+		if (ownsSavedSeat) {
+			reconnect.releaseSeat(rcKey);
+		}
+		if (ownsSavedSeat || savedSeat == null || String(savedSeat.roomSig) === String(roomSig)) {
+			reconnect.recordSeat(rcKey, roomSig, null);
+		}
+		// Hand the client a FRESH token bound to (identity, room) for its NEXT reconnect, and
+		// only THEN spend the old one. Emitting the replacement before consuming the old token
+		// means a guest is never left holding a now-consumed token with no usable replacement
+		// if the socket drops between the two (Codex re-review). The new token has a different
+		// expiry -> different mac, so consuming the old never invalidates the new.
+		if (rcKey != null) {
+			client.emit('reconnectToken', { sig: roomSig, token: reconnect.mintToken(rcKey, roomSig, null, Date.now() + reconnect.TOKEN_TTL_MS) });
+		}
+		// Single-use: spend the guest's just-used token so a captured copy can't be replayed to
+		// re-seat / displace this player. (A signed-in re-seat uses no token.)
+		if (ownsSavedSeat && client.userId == null && client.reconnectToken) {
+			reconnect.consumeToken(client.reconnectToken, rcNow);
+		}
 		loadPlayerProgression(client, room.playerList[client.id]);
 		room.game.determineGameState(room.playerList[client.id]);
 		// Bots yield to the joining human so humans + bots can never exceed the room

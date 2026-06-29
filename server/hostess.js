@@ -3,6 +3,7 @@ var c = utils.loadConfig();
 var messenger = require('./messenger.js');
 var game = require('./game.js');
 var botGuard = require('./botGuard.js');
+var crypto = require('crypto');
 
 var roomList = {},
 	maxPlayersInRoom = c.maxPlayersInRoom;
@@ -112,7 +113,10 @@ exports.findARoom = function (clientID) {
 		// hold several local-co-op players (capacity > 1), and they get unlocked at
 		// game-over (resetGame), so the old "locked + capacity 1" implicit guard no
 		// longer keeps them private — exclude them explicitly here.
-		if (roomList[sig2].hasSpace() && !roomList[sig2].isLocked() && !roomList[sig2].isPreview && !roomList[sig2].isTarpit && !roomList[sig2].discordInstanceId) {
+		// A reconnect-restored room (awaitingReconnect) is reserved for its returning
+		// players (matched by identity in enterGame), so matchmaking must skip it until
+		// it's re-seated — otherwise a stranger fills a saved seat.
+		if (roomList[sig2].hasSpace() && !roomList[sig2].isLocked() && !roomList[sig2].isPreview && !roomList[sig2].isTarpit && !roomList[sig2].discordInstanceId && !roomList[sig2].awaitingReconnect) {
 			return sig2;
 		}
 	}
@@ -159,6 +163,35 @@ exports.kickFromRoom = function (clientID) {
 		}
 	}
 }
+// Disconnect-path leave that PRESERVES a now-empty room for a brief reconnect grace
+// instead of deleting it, so the last player in a room can blip out and come back to
+// their standings (seamless-reconnect). Identical to kickFromRoom when there's no
+// reconnect key, when the room still has other clients, or for non-reconnectable rooms
+// (preview/tarpit/Discord). A held room is frozen + excluded from matchmaking by
+// updateRooms/findARoom and GC'd at holdUntilMs if nobody returns.
+exports.holdOrKickFromRoom = function (clientID, holdKey, holdUntilMs) {
+	var room = searchForRoom(clientID);
+	if (room == undefined) { return; }
+	room.leave(clientID);
+	if (room.clientCount != 0) { return; } // others remain — room lives on as normal
+	if (holdKey == null || room.isPreview || room.isTarpit || room.discordInstanceId) {
+		console.log("Deleting room");
+		forgetInstanceRoom(room);
+		delete roomList[room.sig];
+		return;
+	}
+	// Hold it: a returning socket (same identity) re-seats via enterGame within the grace.
+	room.awaitingReconnect = true;
+	room.reconnectExpiresAt = holdUntilMs;
+	room.pendingReconnectKeys = room.pendingReconnectKeys || {};
+	room.pendingReconnectKeys[holdKey] = true;
+	console.log("Holding room " + room.sig + " for reconnect (grace) instead of deleting");
+}
+// Public lookup of the room a given client is in (the disconnect path needs the live
+// player to capture standings before leaving). Wraps the private searchForRoom.
+exports.getRoomForClient = function (clientID) {
+	return searchForRoom(clientID);
+}
 // Drop the instanceId -> sig index entry when a Discord-keyed room is torn down, so a
 // later launch into a recycled instance id starts a clean room (and the map can't grow
 // unboundedly). No-op for non-Discord rooms.
@@ -200,6 +233,7 @@ exports.joinARoom = function (sig, clientID) {
 	return room;
 }
 exports.updateRooms = function (dt) {
+	var nowMs = Date.now();
 	for (var sig in roomList) {
 		var room = roomList[sig];
 		if (room == null) {
@@ -211,6 +245,26 @@ exports.updateRooms = function (dt) {
 		// gameUpdates, no AI fill, no real match. This is the whole tarpit mechanism and
 		// it keeps game.js untouched.
 		if (room.isTarpit) {
+			continue;
+		}
+		// Reconnect-held room (restored from a snapshot, or held after the last player
+		// blipped out). GC it once the grace TTL passes so an abandoned snapshot/held room
+		// can't hold a sig — or pin memory — forever (Codex finding: held rooms had no TTL
+		// eviction). If it expired but somehow still has a client, just reopen it.
+		if (room.awaitingReconnect && room.reconnectExpiresAt != null && nowMs > room.reconnectExpiresAt) {
+			if (room.clientCount == 0) {
+				console.log("Reclaiming expired reconnect-held room " + room.sig);
+				forgetInstanceRoom(room);
+				delete roomList[sig];
+				continue;
+			}
+			room.awaitingReconnect = false;
+			room.pendingReconnectKeys = null;
+		}
+		// A held room with NOBODY present is frozen — don't tick a player-less (or bot-only)
+		// match while it waits for its saved players. Once one returns (clientCount > 0) it
+		// ticks normally again, even while still held for the others.
+		if (room.awaitingReconnect && room.clientCount == 0) {
 			continue;
 		}
 		room.update(dt);
@@ -305,7 +359,10 @@ function searchForRoom(id) {
 }
 
 function generateRoomSig() {
-	var sig = utils.getRandomInt(0, 999);
+	// CSPRNG room id (crypto, not Math.random): a sig can't be cheaply guessed for the
+	// "join by id" / shared-link vectors, AND static analysis no longer treats values pulled
+	// out of a sig-indexed room (e.g. a player's verified identity) as tainted weak randomness.
+	var sig = crypto.randomInt(0, 1000); // inclusive [0, 999]
 	if (roomList[sig] == null || roomList[sig] == undefined) {
 		return sig;
 	}
@@ -317,3 +374,21 @@ function generateNewRoom() {
 	roomList[sig] = game.getRoom(sig, maxPlayersInRoom);
 	return sig;
 }
+
+// EVERY live room, unfiltered — for the reconnect SIGTERM snapshot (Phase 2). NOT
+// getRooms(), which is the join-page-curated view (drops preview/tarpit/discord +
+// applies advertising criteria) and would skip rooms that still need snapshotting.
+// serializeRoom does its own preview/tarpit/discord filtering, so the raw list is right.
+exports.getAllRooms = function () {
+	return roomList;
+};
+
+// Reconnect restore (Phase 2 of seamless-reconnect): re-create a room at a SPECIFIC
+// saved sig on boot. Returns the room, or null if that sig is already taken (a
+// collision with a freshly-generated room — the snapshot is then skipped). Seeding the
+// sig back into roomList means generateRoomSig() won't reissue it to a new room.
+exports.restoreRoomAtSig = function (sig) {
+	if (sig == null || roomList[sig] != null) { return null; }
+	roomList[sig] = game.getRoom(sig, maxPlayersInRoom);
+	return roomList[sig];
+};
