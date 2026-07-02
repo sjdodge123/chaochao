@@ -5,7 +5,7 @@
     "dependencies": {
         "@discord/embedded-app-sdk": "^2.5.0",
         "@octokit/core": "^7.0.6",
-        "@supabase/supabase-js": "^2.108.2",
+        "@supabase/supabase-js": "^2.110.0",
         "compression": "^1.7.4",
         "dotenv": "^17.4.2",
         "express": "^5.2.1",
