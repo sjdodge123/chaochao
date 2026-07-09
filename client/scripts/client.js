@@ -106,6 +106,17 @@ function discordReenter() {
 	}
 }
 
+// Recovery chooser shared by every "reload/navigate to recover" path: inside the
+// Discord Activity a frame reload or navigation silently drops the memory-only
+// session ticket (the player would come back a guest), so rebuild the socket + room
+// membership in place instead; elsewhere run the normal web fallback.
+function discordSafeRecover(fallback) {
+	if (typeof isDiscordActivity === "function" && isDiscordActivity()) {
+		try { discordReenter(); return; } catch (e) { /* fall through to the web fallback */ }
+	}
+	fallback();
+}
+
 // Discord Activity "tap to rejoin" panel, shown after the server's deep-idle reclaim kick
 // (the room was freed because we sat idle past the lobby/in-game window). It is deliberately
 // a HUMAN GESTURE gate: an absent player's frame just holds this static panel (no socket, no
@@ -594,6 +605,14 @@ function registerLobbyHubHandlers(server) {
 		// A colour skin replaces any avatar skin (the server cleared it too).
 		p.avatarUrl = null;
 		p.name = null;
+		// MY colour pick after the avatar default/identity already ran this session is an
+		// explicit opt-out: don't let a later reconnect's one-shot re-arm re-equip the
+		// photo over it. (A saved-cosmetics re-equip at session start lands BEFORE the
+		// first default runs — discordAvatarDefaulted is still false then — so the
+		// pre-existing "default over a saved colour" behavior is preserved.)
+		if (payload.id === myID && discordAvatarDefaulted) {
+			discordAvatarOptedOut = true;
+		}
 	});
 	// A player equipped the opt-in avatar skin: show their picture on the kart
 	// (drawn shrunk inside a border) and their name below it, for everyone.
@@ -609,6 +628,11 @@ function registerLobbyHubHandlers(server) {
 		p.name = payload.name || null;
 		if (p.avatarUrl && typeof preloadAvatarImage === "function") {
 			preloadAvatarImage(p.avatarUrl);
+		}
+		// The server confirmed OUR equip: from here on, a missing avatar means an
+		// involuntary loss (rejoin rebuild), which the one-shot may safely repair.
+		if (payload.id === myID && p.avatarUrl) {
+			discordIdentityEverApplied = true;
 		}
 	});
 	// A player equipped/cleared one of the three cosmetic slots (room broadcast — like
@@ -668,6 +692,15 @@ var myProgression = null;
 // Reuses the existing opt-in avatar-skin path (setAvatarSkin), so the server validates
 // the URL (Discord CDN is allowlisted) and broadcasts it like any avatar pick.
 var discordAvatarDefaulted = false;
+// Session consent tracking for the re-apply paths (reconnects re-arm the one-shot):
+// - discordIdentityEverApplied: the server confirmed OUR avatar equip this session, so a
+//   later loss (a rejoin rebuilt the kart) is involuntary and safe to repair — even for a
+//   cart wearer (the cart keeps suppressing the photo; re-applying restores the NAME).
+// - discordAvatarOptedOut: the player explicitly picked a colour skin AFTER the default/
+//   identity ran this session. Never re-equip over that, no matter how many reconnects
+//   re-arm the one-shot.
+var discordIdentityEverApplied = false;
+var discordAvatarOptedOut = false;
 function maybeDefaultDiscordAvatar() {
 	if (discordAvatarDefaulted) { return; }
 	var auth = window.chaochaoAuth;
@@ -679,9 +712,16 @@ function maybeDefaultDiscordAvatar() {
 	if (!profile || !profile.avatarUrl) { return; }
 	var me = (typeof myID !== "undefined" && typeof playerList !== "undefined" && playerList) ? playerList[myID] : null;
 	if (!me) { return; }
-	// Respect an explicit look: a persisted cart skin or an avatar already showing. That's
-	// a settled decision regardless of game state, so latch the one-shot and stop.
-	if (me.cart || me.avatarUrl) { discordAvatarDefaulted = true; return; }
+	// An explicit in-session colour pick is a standing opt-out — latch and never re-equip.
+	if (discordAvatarOptedOut) { discordAvatarDefaulted = true; return; }
+	// An avatar already showing means identity is intact — settled, latch and stop.
+	if (me.avatarUrl) { discordAvatarDefaulted = true; return; }
+	// A persisted cart skin is an explicit anonymous look — respect it on a fresh session
+	// (cart-only players NEVER have a server-side name, so a name check can't distinguish
+	// them from a rejoin loss). Only when identity WAS applied earlier this session does a
+	// missing avatar mean an involuntary loss worth repairing: the re-emit restores the
+	// display name while the equipped cart keeps suppressing the photo visually.
+	if (me.cart && !discordIdentityEverApplied) { discordAvatarDefaulted = true; return; }
 	// The server only APPLIES setAvatarSkin while the room is in the lobby. If we're
 	// mid-match (a join-in-progress launch), DON'T latch — the emit would be dropped and
 	// the one-shot wasted. progressionUpdate fires again on the next lobby arrival, which
@@ -1087,8 +1127,10 @@ function registerConnectionHandlers(server) {
 		if (typeof serverMaintenance !== "undefined" && serverMaintenance != null && serverMaintenance.reason === "reconnecting") { serverMaintenance = null; }
 		clearReconnectTimers(); // hoisted function declaration below — always defined
 		if (typeof reconnectOverlayHide === "function") { reconnectOverlayHide(); }
-		server.disconnect();
-		window.location.href = "./join.html?notfound=1";
+		discordSafeRecover(function () {
+			server.disconnect();
+			window.location.href = "./join.html?notfound=1";
+		});
 	});
 
 	server.on("serverKick", function (payload) {
@@ -1140,6 +1182,10 @@ function registerConnectionHandlers(server) {
 					myID = null;
 					myPlayer = null;
 					if (typeof markPlayerInput === "function") { markPlayerInput(); }
+					// The rejoin builds a fresh server-side kart (default colour) — re-arm the
+					// Discord-avatar one-shot so identity re-applies, mirroring discordReenter
+					// and the transport-reconnect handler. A no-op off Discord.
+					discordAvatarDefaulted = false;
 					clientSendStart(-1);
 				},
 				onLeave: function () {
@@ -1225,7 +1271,10 @@ function registerConnectionHandlers(server) {
 							try { server.io.reconnection(true); server.connect(); } catch (e) { /* manager may already be retrying */ }
 							armTransientGiveUp();
 						},
-						onLeave: function () { try { sessionStorage.removeItem("reconnecting"); } catch (e) {} window.location.href = "./join.html"; }
+						onLeave: function () {
+							try { sessionStorage.removeItem("reconnecting"); } catch (e) {}
+							discordSafeRecover(function () { window.location.href = "./join.html"; });
+						}
 					});
 				}, RECONNECT_BACKOFF.GIVE_UP_MS);
 			};
@@ -1271,7 +1320,13 @@ function registerConnectionHandlers(server) {
 		function maintPoll() {
 			fetch(window.location.pathname, { method: "HEAD", cache: "no-store" })
 				.then(function (res) {
-					if (res.ok) { clearReconnectTimers(); window.location.reload(); return; }
+					if (res.ok) {
+						// The server is back — recover (web: reload for fresh bundles; Activity:
+						// in-place rebuild, since a frame reload drops the session ticket).
+						clearReconnectTimers();
+						discordSafeRecover(function () { window.location.reload(); });
+						return;
+					}
 					maintSchedule();
 				})
 				.catch(function () { maintSchedule(); /* dyno not up yet — keep polling */ });
@@ -1292,7 +1347,10 @@ function registerConnectionHandlers(server) {
 							}
 							maintSchedule();
 						},
-						onLeave: function () { try { sessionStorage.removeItem("reconnecting"); } catch (e) {} window.location.href = "./join.html"; }
+						onLeave: function () {
+							try { sessionStorage.removeItem("reconnecting"); } catch (e) {}
+							discordSafeRecover(function () { window.location.href = "./join.html"; });
+						}
 					});
 				}
 				return;
@@ -1400,7 +1458,23 @@ function registerConnectionHandlers(server) {
 		clearReconnectTimers(); // hoisted function declaration below — always defined
 		if (typeof reconnectOverlayHide === "function") { reconnectOverlayHide(); }
 		checkGameState(gameState.game);
-		connectSpawnPlayers(gameState.playerList);
+		// Parse the roster ONCE; connectSpawnPlayers accepts the pre-parsed array too.
+		var rosterArr = null;
+		try { rosterArr = JSON.parse(gameState.playerList); } catch (e) { /* spawn path below reports it */ }
+		connectSpawnPlayers(rosterArr != null ? rosterArr : gameState.playerList);
+		// Reconcile: this roster is authoritative at (re)entry. A transport reconnect
+		// re-enters WITHOUT discordReenter's full teardown, so entries for our own old
+		// socket id (and anyone who left during the outage) linger as frozen ghost karts
+		// — no playerLeft ever arrives for them, and they accumulate one per rejoin
+		// (live-reproduced on prod). Mirror the playerLeft cleanup for any id the
+		// server no longer knows about.
+		if (rosterArr != null) {
+			var freshRoster = {};
+			for (var ri = 0; ri < rosterArr.length; ri++) { freshRoster[rosterArr[ri][0]] = true; }
+			for (var staleId in playerList) {
+				if (!freshRoster[staleId]) { delete clientList[staleId]; delete playerList[staleId]; }
+			}
+		}
 		worldResize(gameState.world);
 		interval = config.serverTickSpeed;
 		gameRunning = true;
@@ -1790,6 +1864,11 @@ function registerStateHandlers(server) {
 		recapNewMatch(); // a fresh match is forming — drop last game's recap clips
 		// Set state first so loadNewMap doesn't run its gated-only goal-ping branch.
 		currentState = config.stateMap.lobby;
+		// Identity self-heal: the avatar one-shot's server gate only accepts lobby-state
+		// emits, and progressionUpdate (its other trigger) does NOT fire on lobby arrival —
+		// so a mid-match rejoin that lost name/photo could never repair. This is the retry
+		// the one-shot's non-latching mid-match path counts on. No-op when already latched.
+		maybeDefaultDiscordAvatar();
 		trackEvent('lobby_entered');
 		cosmeticsTrackedThisMatch = false; // new match forming — re-arm the cosmetics event
 		matchStartedAt = null; // re-arm the match clock; the first startRace stamps it
@@ -3559,11 +3638,23 @@ function calcPing() {
 }
 
 function checkForTimeout() {
+	// When the transport is already DOWN, socket.io's auto-reconnect + the reconnect
+	// overlay own recovery — reloading would fight them, and a manual server.disconnect()
+	// would permanently disable auto-reconnect. But a wedged-yet-CONNECTED socket
+	// (updates stopped, no disconnect event ever fires) is exactly the case this
+	// watchdog exists for, so it must keep counting even during a maintenance banner.
+	if (typeof server !== "undefined" && server && server.connected === false) {
+		timeSinceLastCom = 0;
+		return;
+	}
 	timeSinceLastCom++;
 	if (timeSinceLastCom > serverTimeoutWait) {
-		debugLog("client timeout -- no server comm for " + timeSinceLastCom + "s, reloading");
-		server.disconnect();
-		window.parent.location.reload();
+		debugLog("client timeout -- no server comm for " + timeSinceLastCom + "s, recovering");
+		// Last-ditch recovery for the wedged-but-connected session. (The old code called
+		// server.disconnect() then window.parent.location.reload(), which THREW cross-
+		// origin inside the Activity — after already killing auto-reconnect for good.)
+		timeSinceLastCom = 0;
+		discordSafeRecover(function () { window.location.reload(); });
 	}
 }
 

@@ -3952,19 +3952,30 @@ function drawEmoji(player) {
 // solid colour). Images load async and are cached per URL; until one is ready
 // (or if it fails CORS/404) the kart just shows its base colour.
 var avatarImageCache = {};
+var AVATAR_RETRY_MS = 30000;   // wait between retries of a failed avatar load
+var AVATAR_MAX_ATTEMPTS = 3;   // then stay failed (a 404'd/rotated hash never resolves)
 function preloadAvatarImage(url) {
     if (!url) {
         return null;
     }
-    if (avatarImageCache[url] !== undefined) {
-        return avatarImageCache[url];
+    var cached = avatarImageCache[url];
+    if (cached !== undefined) {
+        // A failed load used to latch forever — one transient CDN hiccup (often during
+        // the very network flap that caused a reconnect) hid the photo for the whole
+        // session in live play, the lobby hub AND the recap. Retry a bounded number of
+        // times with a cool-down before giving up for good.
+        if (!cached.failed || cached.attempts >= AVATAR_MAX_ATTEMPTS ||
+            (Date.now() - cached.failedAt) < AVATAR_RETRY_MS) {
+            return cached;
+        }
+        delete avatarImageCache[url]; // cool-down elapsed — rebuild the entry below
     }
-    var entry = { img: new Image(), ready: false, failed: false };
+    var entry = { img: new Image(), ready: false, failed: false, attempts: (cached ? cached.attempts : 0), failedAt: 0 };
     // No crossOrigin: the game canvas is never read back (no getImageData/toDataURL),
     // so a tainted canvas is harmless — and this avoids the avatar failing to load
     // if an avatar CDN omits CORS headers.
-    entry.img.onload = function () { entry.ready = true; };
-    entry.img.onerror = function () { entry.failed = true; };
+    entry.img.onload = function () { entry.ready = true; entry.failed = false; };
+    entry.img.onerror = function () { entry.failed = true; entry.attempts++; entry.failedAt = Date.now(); };
     entry.img.src = url;
     avatarImageCache[url] = entry;
     return entry;

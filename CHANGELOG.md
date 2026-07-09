@@ -14,6 +14,14 @@ To re-render a past week's digest with the current formatting, run the `Release 
 
 ## Unreleased
 
+### Bug Fixes
+
+- **Rejoining a match keeps your name and photo.** Dropping mid-match (a network blip, backgrounding the Discord app, or getting reclaimed for idling) no longer brings you back as a nameless default kart — your display name, Discord/Google photo, notches and team survive the rejoin, on every reconnect path.
+  - *Why:* the re-seat rebuilt a blank kart before your old one's identity could be copied over, the seat snapshot never carried the photo, and the only repair path could never fire mid-match. All three fixed, plus the lobby now re-applies your look if anything still slipped through.
+- **No more ghost karts after a reconnect.** A player who dropped and rejoined used to leave a frozen duplicate of themselves standing on the map (one more per rejoin, following you between rooms). The roster now reconciles on re-entry.
+- **Discord Activity: connection recovery no longer signs you out.** Every recovery path inside the Activity (connection-lost retries, "server restarting" waits, room-not-found bounces, the idle "tap to rejoin") now rebuilds in place instead of reloading the frame — reloading silently dropped your sign-in for the rest of the session.
+- **Avatar photos retry after a failed load.** One flaky image fetch used to hide your photo for the whole session (kart, lobby and recap); it now retries a few times before giving up.
+
 ### Quality of Life
 
 - **Live skin-unlock ticker.** Pull off a skill play — a kill, a fully-charged punch, a bumper bounce — and a little bar pops up bottom-left showing your lifetime progress toward the next skin that skill unlocks (e.g. "Heavy Hitter 6/20 → Gear"), plus how many you've notched this match. Hold the medal at match-end and it banks for real: the bar advances with a celebration, flashing the skin's name the moment you cross an unlock. (Signed-in players see the lifetime bar; guests just get the "+1" pop.)
