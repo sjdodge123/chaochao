@@ -14,6 +14,10 @@ To re-render a past week's digest with the current formatting, run the `Release 
 
 ## Unreleased
 
+(none yet)
+
+## v0.49.5 — 2026-07-09
+
 ### Bug Fixes
 
 - **Rejoining a match keeps your name and photo.** Dropping mid-match (a network blip, backgrounding the Discord app, or getting reclaimed for idling) no longer brings you back as a nameless default kart — your display name, Discord/Google photo, notches and team survive the rejoin, on every reconnect path.
