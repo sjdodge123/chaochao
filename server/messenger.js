@@ -337,27 +337,9 @@ exports._drainToastsInMemoryForTest = drainToastsInMemory;
 // A signed-in player picks their avatar client-side, but the server can't trust the
 // supplied URL — without a host allowlist, a player could broadcast an arbitrary
 // host that every peer's browser then fetches (tracking-pixel / IP-leak vector).
-function isAllowedAvatarUrl(url) {
-	if (typeof url !== "string" || url.length > 512) {
-		return false;
-	}
-	var parsed;
-	try {
-		parsed = new URL(url);
-	} catch (e) {
-		return false;
-	}
-	if (parsed.protocol !== "https:") {
-		return false;
-	}
-	var host = parsed.hostname.toLowerCase();
-	return host === "cdn.discordapp.com" ||
-		host === "media.discordapp.net" ||
-		// Google avatars live on lh3/lh4/lh5/... .googleusercontent.com. Match that
-		// specific pattern rather than any *.googleusercontent.com subdomain (some of
-		// which can host user-controllable content).
-		/^lh[0-9]+\.googleusercontent\.com$/.test(host);
-}
+// Single source of truth lives in roomSnapshot.js: the standings re-apply path must
+// enforce the exact same rule as this equip path.
+var isAllowedAvatarUrl = roomSnapshot.isAllowedAvatarUrl;
 
 function checkForMail(client) {
 	client.emit("welcome", client.id);
@@ -692,8 +674,10 @@ function checkForMail(client) {
 		// fresh kart — covers BOTH a restart-restore seat and a transient blip-park seat (both
 		// carry standings). A spoofed deviceId no longer suffices: a guest must present the HMAC
 		// token we minted to the original socket.
+		var seatStandingsApplied = false;
 		if (ownsSavedSeat && savedSeat.seat != null && savedSeat.seat.standings != null) {
 			roomSnapshot.applyStandings(room.playerList[client.id], savedSeat.seat.standings);
+			seatStandingsApplied = true;
 		}
 		// One identity == one live seat: remove any stale duplicate player for this identity
 		// (defensive — the disconnect path normally clears it; also resolves a racey double
@@ -704,6 +688,17 @@ function checkForMail(client) {
 				var dupP = room.playerList[dupId];
 				if (dupP == null || dupP.isAI) { continue; }
 				if (reconnect.reconnectKey(dupP.verifiedUserId, dupP.deviceId, 0) === rcKey) {
+					// Fast-reconnect race: when this rejoin lands BEFORE the old socket's
+					// disconnect fires, no seat standings were ever parked (live seats record
+					// seat=null) — the old live Player object is the ONLY holder of the
+					// identity/standings. Harvest it before the kick destroys it, or the
+					// rejoiner comes back nameless/photoless with zero notches for the rest
+					// of the match. Gated by the same ownsSavedSeat + identity-key equality
+					// that guards the parked-seat restore above.
+					if (!seatStandingsApplied) {
+						roomSnapshot.applyStandings(room.playerList[client.id], roomSnapshot.captureStandings(dupP));
+						seatStandingsApplied = true;
+					}
 					hostess.kickFromRoom(dupId);
 					exports.removeMailBox(dupId);
 				}

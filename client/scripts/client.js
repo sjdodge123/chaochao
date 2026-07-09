@@ -679,9 +679,13 @@ function maybeDefaultDiscordAvatar() {
 	if (!profile || !profile.avatarUrl) { return; }
 	var me = (typeof myID !== "undefined" && typeof playerList !== "undefined" && playerList) ? playerList[myID] : null;
 	if (!me) { return; }
-	// Respect an explicit look: a persisted cart skin or an avatar already showing. That's
-	// a settled decision regardless of game state, so latch the one-shot and stop.
-	if (me.cart || me.avatarUrl) { discordAvatarDefaulted = true; return; }
+	// An avatar already showing means identity is intact — settled, latch and stop.
+	if (me.avatarUrl) { discordAvatarDefaulted = true; return; }
+	// A persisted cart skin is an explicit look we respect — but only latch when the
+	// display NAME is intact too. After a mid-match rejoin the server rebuilds the kart
+	// with name=null; an equipped cart suppresses the avatar visually (draw order), so
+	// emitting setAvatarSkin below restores the name without changing the cart look.
+	if (me.cart && me.name) { discordAvatarDefaulted = true; return; }
 	// The server only APPLIES setAvatarSkin while the room is in the lobby. If we're
 	// mid-match (a join-in-progress launch), DON'T latch — the emit would be dropped and
 	// the one-shot wasted. progressionUpdate fires again on the next lobby arrival, which
@@ -1087,6 +1091,11 @@ function registerConnectionHandlers(server) {
 		if (typeof serverMaintenance !== "undefined" && serverMaintenance != null && serverMaintenance.reason === "reconnecting") { serverMaintenance = null; }
 		clearReconnectTimers(); // hoisted function declaration below — always defined
 		if (typeof reconnectOverlayHide === "function") { reconnectOverlayHide(); }
+		// Inside the Discord Activity a navigation loses the memory-only session ticket
+		// (the player would come back a guest) — rebuild in place and matchmake fresh.
+		if (typeof isDiscordActivity === "function" && isDiscordActivity()) {
+			try { discordReenter(); return; } catch (e) { /* fall through to href */ }
+		}
 		server.disconnect();
 		window.location.href = "./join.html?notfound=1";
 	});
@@ -1140,6 +1149,10 @@ function registerConnectionHandlers(server) {
 					myID = null;
 					myPlayer = null;
 					if (typeof markPlayerInput === "function") { markPlayerInput(); }
+					// The rejoin builds a fresh server-side kart (default colour) — re-arm the
+					// Discord-avatar one-shot so identity re-applies, mirroring discordReenter
+					// and the transport-reconnect handler. A no-op off Discord.
+					discordAvatarDefaulted = false;
 					clientSendStart(-1);
 				},
 				onLeave: function () {
@@ -1225,7 +1238,16 @@ function registerConnectionHandlers(server) {
 							try { server.io.reconnection(true); server.connect(); } catch (e) { /* manager may already be retrying */ }
 							armTransientGiveUp();
 						},
-						onLeave: function () { try { sessionStorage.removeItem("reconnecting"); } catch (e) {} window.location.href = "./join.html"; }
+						onLeave: function () {
+							try { sessionStorage.removeItem("reconnecting"); } catch (e) {}
+							// Inside the Discord Activity a navigation tears down the frame and
+							// loses the memory-only session ticket (the player would come back a
+							// guest). Rebuild in place instead — same pattern as menuExit.
+							if (typeof isDiscordActivity === "function" && isDiscordActivity()) {
+								try { discordReenter(); return; } catch (e) { /* fall through to href */ }
+							}
+							window.location.href = "./join.html";
+						}
 					});
 				}, RECONNECT_BACKOFF.GIVE_UP_MS);
 			};
@@ -1271,7 +1293,17 @@ function registerConnectionHandlers(server) {
 		function maintPoll() {
 			fetch(window.location.pathname, { method: "HEAD", cache: "no-store" })
 				.then(function (res) {
-					if (res.ok) { clearReconnectTimers(); window.location.reload(); return; }
+					if (res.ok) {
+						clearReconnectTimers();
+						// The server is back. In the Discord Activity a page reload loses the
+						// memory-only session ticket (rejoin lands as a guest) — rebuild the
+						// socket + room membership in place instead; the frame never reloads.
+						if (typeof isDiscordActivity === "function" && isDiscordActivity()) {
+							try { discordReenter(); return; } catch (e) { /* fall through to reload */ }
+						}
+						window.location.reload();
+						return;
+					}
 					maintSchedule();
 				})
 				.catch(function () { maintSchedule(); /* dyno not up yet — keep polling */ });
@@ -1292,7 +1324,16 @@ function registerConnectionHandlers(server) {
 							}
 							maintSchedule();
 						},
-						onLeave: function () { try { sessionStorage.removeItem("reconnecting"); } catch (e) {} window.location.href = "./join.html"; }
+						onLeave: function () {
+							try { sessionStorage.removeItem("reconnecting"); } catch (e) {}
+							// Inside the Discord Activity a navigation tears down the frame and
+							// loses the memory-only session ticket (the player would come back a
+							// guest). Rebuild in place instead — same pattern as menuExit.
+							if (typeof isDiscordActivity === "function" && isDiscordActivity()) {
+								try { discordReenter(); return; } catch (e) { /* fall through to href */ }
+							}
+							window.location.href = "./join.html";
+						}
 					});
 				}
 				return;
@@ -1401,6 +1442,20 @@ function registerConnectionHandlers(server) {
 		if (typeof reconnectOverlayHide === "function") { reconnectOverlayHide(); }
 		checkGameState(gameState.game);
 		connectSpawnPlayers(gameState.playerList);
+		// Reconcile: this roster is authoritative at (re)entry. A transport reconnect
+		// re-enters WITHOUT discordReenter's full teardown, so entries for our own old
+		// socket id (and anyone who left during the outage) linger as frozen ghost karts
+		// — no playerLeft ever arrives for them, and they accumulate one per rejoin
+		// (live-reproduced on prod). Mirror the playerLeft cleanup for any id the
+		// server no longer knows about.
+		try {
+			var freshRoster = {};
+			var rosterArr = JSON.parse(gameState.playerList);
+			for (var ri = 0; ri < rosterArr.length; ri++) { freshRoster[rosterArr[ri][0]] = true; }
+			for (var staleId in playerList) {
+				if (!freshRoster[staleId]) { delete clientList[staleId]; delete playerList[staleId]; }
+			}
+		} catch (e) { /* malformed roster would have thrown in connectSpawnPlayers already */ }
 		worldResize(gameState.world);
 		interval = config.serverTickSpeed;
 		gameRunning = true;
@@ -1790,6 +1845,11 @@ function registerStateHandlers(server) {
 		recapNewMatch(); // a fresh match is forming — drop last game's recap clips
 		// Set state first so loadNewMap doesn't run its gated-only goal-ping branch.
 		currentState = config.stateMap.lobby;
+		// Identity self-heal: the avatar one-shot's server gate only accepts lobby-state
+		// emits, and progressionUpdate (its other trigger) does NOT fire on lobby arrival —
+		// so a mid-match rejoin that lost name/photo could never repair. This is the retry
+		// the one-shot's non-latching mid-match path counts on. No-op when already latched.
+		maybeDefaultDiscordAvatar();
 		trackEvent('lobby_entered');
 		cosmeticsTrackedThisMatch = false; // new match forming — re-arm the cosmetics event
 		matchStartedAt = null; // re-arm the match clock; the first startRace stamps it
@@ -3559,11 +3619,25 @@ function calcPing() {
 }
 
 function checkForTimeout() {
+	// When the transport is already down or a reconnect/maintenance flow owns recovery,
+	// socket.io + the overlay ARE the recovery path — reloading here would fight them,
+	// and a manual server.disconnect() permanently disables socket.io's auto-reconnect.
+	// Hold the counter at zero so a recovered session doesn't instantly re-trip.
+	var recovering = (typeof server !== "undefined" && server && server.connected === false) ||
+		(typeof serverMaintenance !== "undefined" && serverMaintenance != null);
+	if (recovering) { timeSinceLastCom = 0; return; }
 	timeSinceLastCom++;
 	if (timeSinceLastCom > serverTimeoutWait) {
-		debugLog("client timeout -- no server comm for " + timeSinceLastCom + "s, reloading");
-		server.disconnect();
-		window.parent.location.reload();
+		debugLog("client timeout -- no server comm for " + timeSinceLastCom + "s, recovering");
+		// Last-ditch recovery for a wedged session whose socket still LOOKS connected.
+		// In the Discord Activity: window.parent is cross-origin (the old reload line
+		// THREW, after disconnect() had already killed auto-reconnect for good) and a
+		// frame reload loses the memory-only session ticket — rebuild in place instead.
+		if (typeof isDiscordActivity === "function" && isDiscordActivity()) {
+			timeSinceLastCom = 0;
+			try { discordReenter(); return; } catch (e) { /* fall through to reload */ }
+		}
+		window.location.reload();
 	}
 }
 

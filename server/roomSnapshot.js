@@ -32,6 +32,7 @@ var SNAPSHOT_TTL_MS = 2 * 60 * 1000;
 function captureStandings(p) {
     return {
         name: (p.name != null ? p.name : null),
+        avatarUrl: (p.avatarUrl != null ? p.avatarUrl : null),
         notches: (p.notches != null ? p.notches : 0),
         teamId: (p.teamId != null ? p.teamId : null),
         color: (p.color != null ? p.color : null),
@@ -40,6 +41,32 @@ function captureStandings(p) {
         trailFx: (p.trailFx != null ? p.trailFx : null),
         border: (p.border != null ? p.border : null)
     };
+}
+
+// The avatar-skin URL allowlist (Discord/Google CDNs over https only). Lives here —
+// the lowest common layer — because BOTH the setAvatarSkin equip path (messenger.js)
+// and the standings re-apply below must enforce the same rule: a forged snapshot row
+// or a spoofed seat must not be able to plant an arbitrary image URL on a kart.
+function isAllowedAvatarUrl(url) {
+    if (typeof url !== "string" || url.length > 512) {
+        return false;
+    }
+    var parsed;
+    try {
+        parsed = new URL(url);
+    } catch (e) {
+        return false;
+    }
+    if (parsed.protocol !== "https:") {
+        return false;
+    }
+    var host = parsed.hostname.toLowerCase();
+    return host === "cdn.discordapp.com" ||
+        host === "media.discordapp.net" ||
+        // Google avatars live on lh3/lh4/lh5/... .googleusercontent.com. Match that
+        // specific pattern rather than any *.googleusercontent.com subdomain (some of
+        // which can host user-controllable content).
+        /^lh[0-9]+\.googleusercontent\.com$/.test(host);
 }
 
 // Serialize ONE room to a snapshot, or null if it shouldn't be snapshotted
@@ -137,6 +164,9 @@ function applyStandings(player, standings) {
     if (standings.notches != null) { player.notches = standings.notches; }
     if (standings.teamId != null) { player.teamId = standings.teamId; }
     if (standings.name != null) { player.name = standings.name; }
+    // Restore the Discord/Google photo with the SAME allowlist the equip path uses —
+    // never trust a stored URL (snapshot rows round-trip through Supabase).
+    if (standings.avatarUrl != null && isAllowedAvatarUrl(standings.avatarUrl)) { player.avatarUrl = standings.avatarUrl; }
     if (standings.cart != null) { player.cart = standings.cart; }
     if (standings.pattern != null) { player.pattern = standings.pattern; }
     if (standings.trailFx != null) { player.trailFx = standings.trailFx; }
@@ -231,6 +261,7 @@ module.exports = {
     restoreSnapshot: restoreSnapshot,
     restoreAll: restoreAll,
     applyStandings: applyStandings,
+    isAllowedAvatarUrl: isAllowedAvatarUrl,
     makeMemoryStore: makeMemoryStore,
     makeSupabaseStore: makeSupabaseStore
 };
