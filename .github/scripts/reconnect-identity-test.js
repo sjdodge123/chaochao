@@ -16,7 +16,7 @@ const path = require('path');
 const repoRoot = path.join(__dirname, '..', '..');
 const messenger = require(path.join(repoRoot, 'server', 'messenger.js'));
 const hostess = require(path.join(repoRoot, 'server', 'hostess.js'));
-const game = require(path.join(repoRoot, 'server', 'game.js'));
+require(path.join(repoRoot, 'server', 'game.js')); // loads Room wiring used via hostess (CodeQL: no direct binding needed)
 const reconnect = require(path.join(repoRoot, 'server', 'reconnect.js'));
 const roomSnapshot = require(path.join(repoRoot, 'server', 'roomSnapshot.js'));
 
