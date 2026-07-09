@@ -85,6 +85,7 @@ messenger.removeMailBox(sockA1.id);
 // rejoin on a new socket and assert the photo came back through applyStandings.
 const keyA = reconnect.reconnectKey('user-idA', 'dev-idA', 0);
 reconnect.recordSeat(keyA, roomA.sig, { restore: false, standings: roomSnapshot.captureStandings(newA) });
+reconnect.onDisconnect(keyA, fakeNow, false); // the real disconnect path parks WITH the grace clock
 // The old kart leaves with the disconnect (others — a bot here — keep the room alive).
 delete roomA.playerList[sockA2.id];
 messenger.removeMailBox(sockA2.id);
@@ -106,11 +107,26 @@ check(kickedSeat != null && kickedSeat.seat && kickedSeat.seat.standings != null
 check(kickedSeat.seat.standings.name === 'Roknua' && kickedSeat.seat.standings.avatarUrl === AVATAR,
     'C7: parked standings carry name + avatarUrl');
 check(kickedSeat.seat.standings.notches === 6, 'C7: parked standings are CURRENT (post-progress), not stale');
+// Same-socket ownership: a kicked guest's "tap to rejoin" re-enters on the SAME socket,
+// whose handshake token may be consumed — the seat must carry the kicked socket id.
+check(kickedSeat.seat.kickedClientId === sockA3.id, 'C7: parked seat records the kicked socket id (same-socket rejoin ownership)');
+// The kick park must ride the SAME grace clock as a disconnect park — a live seat that
+// never expires would re-inject hours-old standings into a future match (review [0]).
+check(reconnect.lookupSeat(keyA, fakeNow + 44 * 1000) != null, 'C7: kick-parked seat still claimable inside the grace window');
+check(reconnect.lookupSeat(keyA, fakeNow + 46 * 1000) == null, 'C7: kick-parked seat EXPIRES after the grace window (not a live seat)');
 // And a bot/no-identity player must not park anything (no throw, no seat).
 const botP = roomA.world.createNewPlayer('bot-x'); botP.isAI = true; roomA.playerList['bot-x'] = botP;
 roomA.parkKickedStandings('bot-x');
 roomA.parkKickedStandings('never-existed');
 check(true, 'C7: bot/unknown ids are safely ignored by the kick park');
+// Sanitization on the restore path: forged snapshot rows must not smuggle bidi/control
+// chars, over-long names, or oversized cosmetic ids onto a kart (review [5]).
+const forged = {};
+roomSnapshot.applyStandings(forged, { name: 'Rok‮nua' + 'Y'.repeat(40), avatarUrl: 'https://evil.example/x.png', cart: 'x'.repeat(99), notches: 'NaN-ish' });
+check(forged.name != null && forged.name.indexOf('‮') === -1 && Array.from(forged.name).length <= 24,
+    'restore path strips bidi chars + caps name length');
+check(forged.avatarUrl == null && forged.cart == null && forged.notches == null,
+    'restore path rejects bad avatar host / oversized cosmetic id / non-numeric notches');
 
 // cleanup + verdict
 hostess.kickFromRoom(sockA3.id); messenger.removeMailBox(sockA3.id);

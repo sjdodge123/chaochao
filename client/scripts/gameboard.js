@@ -290,7 +290,11 @@ function connectSpawnPlayers(packet) {
 	if (packet == null) {
 		return;
 	}
-	packet = JSON.parse(packet);
+	// Accept a pre-parsed roster too — the gameState handler parses once and shares the
+	// array with its ghost-prune reconcile (avoids deserializing the packet twice).
+	if (typeof packet === "string") {
+		packet = JSON.parse(packet);
+	}
 	for (var i = 0; i < packet.length; i++) {
 		var player = packet[i];
 		if (playerList[player[0]] == null) {

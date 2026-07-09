@@ -159,18 +159,33 @@ function restoreAll(snapshots, deps, nowMs) {
 // enterGame re-seat path). Returns true if standings were applied. Does NOT restore
 // `color` blindly (room-unique invariant) — the caller decides; here we apply notches/
 // team/name/cosmetics, which are the standings a player cares about.
+// Restored fields round-trip through Supabase (and, for the kick/harvest paths, an
+// in-memory seat), so treat them like client input: the same control/bidi/zero-width
+// strip + 24-code-point cap the setAvatarSkin equip path applies to names, and a
+// plain type/length cap for cosmetic id strings.
+function sanitizeRestoredName(name) {
+    if (typeof name !== "string") { return null; }
+    var cleaned = name.replace(/[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060\u2066-\u2069\ufeff]/g, "").trim();
+    cleaned = Array.from(cleaned).slice(0, 24).join("");
+    return cleaned.length ? cleaned : null;
+}
+function isCosmeticId(v) {
+    return (typeof v === "string" && v.length > 0 && v.length <= 64);
+}
+
 function applyStandings(player, standings) {
     if (player == null || standings == null) { return false; }
-    if (standings.notches != null) { player.notches = standings.notches; }
-    if (standings.teamId != null) { player.teamId = standings.teamId; }
-    if (standings.name != null) { player.name = standings.name; }
+    if (typeof standings.notches === "number" && isFinite(standings.notches)) { player.notches = standings.notches; }
+    if (typeof standings.teamId === "number" && isFinite(standings.teamId)) { player.teamId = standings.teamId; }
+    var restoredName = sanitizeRestoredName(standings.name);
+    if (restoredName != null) { player.name = restoredName; }
     // Restore the Discord/Google photo with the SAME allowlist the equip path uses —
     // never trust a stored URL (snapshot rows round-trip through Supabase).
     if (standings.avatarUrl != null && isAllowedAvatarUrl(standings.avatarUrl)) { player.avatarUrl = standings.avatarUrl; }
-    if (standings.cart != null) { player.cart = standings.cart; }
-    if (standings.pattern != null) { player.pattern = standings.pattern; }
-    if (standings.trailFx != null) { player.trailFx = standings.trailFx; }
-    if (standings.border != null) { player.border = standings.border; }
+    if (isCosmeticId(standings.cart)) { player.cart = standings.cart; }
+    if (isCosmeticId(standings.pattern)) { player.pattern = standings.pattern; }
+    if (isCosmeticId(standings.trailFx)) { player.trailFx = standings.trailFx; }
+    if (isCosmeticId(standings.border)) { player.border = standings.border; }
     return true;
 }
 

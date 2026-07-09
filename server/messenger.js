@@ -621,6 +621,12 @@ function checkForMail(client) {
 			} else {
 				var rcv = reconnect.verifyToken(client.reconnectToken, rcNow);
 				ownsSavedSeat = (rcv != null && rcv.k === rcKey && String(rcv.r) === String(roomSig));
+				// A kicked-but-still-connected guest re-entering on the SAME socket owns its
+				// kick-parked seat trivially: the socket id is server-assigned and unguessable,
+				// and its handshake-time token may already be consumed (kicks don't re-handshake).
+				if (!ownsSavedSeat && savedSeat.seat != null && savedSeat.seat.kickedClientId === client.id) {
+					ownsSavedSeat = true;
+				}
 			}
 		}
 		// A reconnect-held room is RESERVED for its saved players. Matchmaking (id == -1)

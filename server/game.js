@@ -128,13 +128,24 @@ class Room {
 	parkKickedStandings(id) {
 		var p = this.playerList[id];
 		if (p == null || p.isAI) { return; }
+		// Kicking a solo Discord player deletes the instance room (hostess.kickFromRoom),
+		// so a seat pointing at the dead sig could never be re-owned — skip the dead weight.
+		if (this.discordInstanceId && this.clientCount <= 1) { return; }
 		var rcKey = reconnect.reconnectKey(p.verifiedUserId, p.deviceId, 0);
 		if (rcKey == null) { return; }
+		var now = Date.now();
 		// Same ownership rule as the disconnect park: never clobber a seat parked for a
 		// DIFFERENT room under a colliding key (imposter / the real owner's pending seat).
-		var existingSeat = reconnect.lookupSeat(rcKey, Date.now());
+		var existingSeat = reconnect.lookupSeat(rcKey, now);
 		if (existingSeat != null && String(existingSeat.roomSig) !== String(this.sig)) { return; }
-		reconnect.recordSeat(rcKey, this.sig, { restore: false, standings: roomSnapshot.captureStandings(p) });
+		// kickedClientId: the kicked socket stays CONNECTED (unlike a disconnect), so its
+		// guest handshake token may already be consumed — a same-socket "tap to rejoin"
+		// proves ownership by the server-assigned socket id instead (unguessable).
+		reconnect.recordSeat(rcKey, this.sig, { restore: false, standings: roomSnapshot.captureStandings(p), kickedClientId: id });
+		// Start the SAME grace clock as the disconnect park — recordSeat alone leaves a
+		// live, never-expiring seat whose stale standings (notches!) could be re-applied
+		// into a completely different match in this (or a sig-recycled) room hours later.
+		reconnect.onDisconnect(rcKey, now, maintenance.isRaceBlocked());
 	}
 	// Discord Activity idle policy. A Discord instance room is PRIVATE to one voice group
 	// (never matchmade into, never advertised), so the public-room reasons for the normal
