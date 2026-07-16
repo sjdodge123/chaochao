@@ -155,7 +155,7 @@ jobs:
       # sorted before Bug Fixes); this just keeps the generated notes tidy. The
       # known set lives in .github/scripts/changelog-lib.mjs.
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 20
       - name: Warn on unrecognised release-notes headings
