@@ -4,7 +4,7 @@
     "description": "Multiplayer web based slow paced racing game",
     "dependencies": {
         "@discord/embedded-app-sdk": "^2.5.0",
-        "@octokit/core": "^7.0.6",
+        "@octokit/core": "^7.0.7",
         "@supabase/supabase-js": "^2.111.0",
         "compression": "^1.7.4",
         "dotenv": "^17.4.2",
@@ -17,7 +17,7 @@
         "@axe-core/playwright": "^4.12.1",
         "axe-core": "^4.12.1",
         "esbuild": "^0.28.1",
-        "playwright": "^1.62.0"
+        "playwright": "^1.62.1"
     },
     "overrides": {
         "ws": "^8.21.0"
