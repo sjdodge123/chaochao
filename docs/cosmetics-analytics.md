@@ -18,15 +18,13 @@ popularity and popular *combinations*.
 Implementation: `client/scripts/client.js` — flag `cosmeticsTrackedThisMatch` (reset in
 `startLobby`, fired in the `round_start` handler).
 
-### GA4 registration (apply after rebasing onto main)
+### GA4 registration (✅ applied 2026-08-19)
 
-`analytics/ga-config.json` lives on `main` (PR #238) — not on this branch yet. After the
-rebase, add these so the params show up as queryable custom dimensions and the event is a
-key event. Mirror the existing entries' shape; then the `ga-config` CI workflow applies them.
-
-- **Custom dimensions** (event-scoped): `cart`, `pattern`, `trail`, `border`
-  (parameterName = the param above, scope = EVENT).
-- **Key event**: `cosmetics_equipped` (optional — lets GA surface it as a conversion).
+`cart`, `pattern`, `trail`, `border` are registered as event-scoped custom dimensions in
+`analytics/ga-config.json` (the `ga-config` CI workflow applies them to the prod property).
+Note GA4 dimensions are not retroactive in reports: events fired before registration are
+sliceable only via the BigQuery export. `cosmetics_equipped` is deliberately NOT a key
+event (optional in the original spec; skipped to keep the key-event list conversion-only).
 
 Reporting: in a GA4 Exploration, dimension = `cart` (etc.) → metric = Event count for
 per-slot popularity; combine `cart` + `pattern` + `trail` + `border` as rows for combos.
