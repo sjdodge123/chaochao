@@ -69,6 +69,30 @@
       "description": "How the cosmetic was earned on cosmetic_unlocked: skin (level ladder) | achievement | seasonal."
     },
     {
+      "parameterName": "cart",
+      "displayName": "Equipped Cart",
+      "scope": "EVENT",
+      "description": "Cart skin raced with on cosmetics_equipped (registry id, or none = plain sphere)."
+    },
+    {
+      "parameterName": "pattern",
+      "displayName": "Equipped Pattern",
+      "scope": "EVENT",
+      "description": "Pattern raced with on cosmetics_equipped (registry id, or none)."
+    },
+    {
+      "parameterName": "trail",
+      "displayName": "Equipped Trail",
+      "scope": "EVENT",
+      "description": "Trail raced with on cosmetics_equipped (registry id, or none = basic)."
+    },
+    {
+      "parameterName": "border",
+      "displayName": "Equipped Border",
+      "scope": "EVENT",
+      "description": "Border raced with on cosmetics_equipped (registry id, or none)."
+    },
+    {
       "parameterName": "method",
       "displayName": "Login Method",
       "scope": "EVENT",
