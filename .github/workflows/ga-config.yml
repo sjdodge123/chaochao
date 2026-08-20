@@ -13,9 +13,13 @@ name: GA config (prod)
 on:
   push:
     branches: [main]
-    paths: ['analytics/ga-config.json', 'analytics/reconcile-ga.js']
+    paths: ['analytics/ga-config.json', 'analytics/reconcile-ga.js', '.github/workflows/ga-config.yml']
   pull_request:
-    paths: ['analytics/ga-config.json', 'analytics/reconcile-ga.js']
+    paths: ['analytics/ga-config.json', 'analytics/reconcile-ga.js', '.github/workflows/ga-config.yml']
+  # Manual apply from main. Needed because auto-merged PRs land as pushes by the
+  # github-actions bot, and GitHub suppresses push-triggered workflows for those —
+  # so a ga-config change that auto-merges never applies on its own.
+  workflow_dispatch:
 
 # Never let two reconciles race against the same property.
 concurrency:
@@ -48,9 +52,9 @@ jobs:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/ga-key.json
         run: node analytics/reconcile-ga.js --dry-run
 
-  # On merge to main: apply config to the prod property.
+  # On merge to main (human-pushed) or manual dispatch: apply config to the prod property.
   apply:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
