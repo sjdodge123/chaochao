@@ -18,6 +18,7 @@ A single Node process hosts both the static client and the Socket.IO server. **G
 - **Cross-platform input** — keyboard/mouse, touch with an on-screen joystick, and full game-controller support.
 - **End-of-match recap** — a buffered highlight montage that zooms and follows the action.
 - **Optional accounts & progression** — Supabase-backed sign-in, XP/levels, and unlockable cart skins (all gated behind env vars; the game runs fully as guest-only with no setup).
+- **CI-gated releases** — every merge to `main` passes a required build/smoke-test/security gate before it ships.
 
 ---
 
