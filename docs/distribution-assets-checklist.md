@@ -16,7 +16,7 @@ Draft copy is provided below — edit in place, then check the box.
    (operator-confirmed; already applied across the 5 client HTML pages,
    `robots.txt`, and `sitemap.xml`). The steps below are kept only as a
    reference in case the domain ever changes again. If the real host differs
-   (custom domain, different Heroku app name), find-and-replace it in **all** of:
+   (custom domain, different hosting service name), find-and-replace it in **all** of:
    - `client/index.html`, `client/play.html`, `client/join.html`,
      `client/create.html`, `client/learn.html` (canonical + `og:url` + `og:image`
      + `twitter:image` + the JSON-LD `url`/`image`)

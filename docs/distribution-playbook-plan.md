@@ -45,7 +45,7 @@ Add a `<script type="application/ld+json">` block to `client/index.html` with a
 Two static files served by the existing `express.static(htmlPath)` in `index.js:126`:
 - `client/robots.txt` — `User-agent: *` / `Allow: /` / `Sitemap: <prod URL>/sitemap.xml`.
 - `client/sitemap.xml` — list `index.html`, `play.html`, `join.html`, `create.html`,
-  `learn.html`. Hardcode the prod URL (Heroku) — no need to template.
+  `learn.html`. Hardcode the prod URL (www.chaochaogame.com) — no need to template.
 
 ### 1d. Portal embeddability
 

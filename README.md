@@ -96,7 +96,7 @@ The game boots fine with **no configuration** — auth is simply disabled and ev
 |---|---|
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY` | Browser-safe client config. |
 | `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET` | **Server-only.** Never expose to the client. The service-role key's presence is what enables auth + DB writes. |
-| `ALLOW_PROD_WRITES` | Escape hatch only. Writes are on automatically wherever a DB is configured; a built-in tripwire blocks writes when a non-Heroku host points at the prod project. Set `true` to override (rarely needed — point local at the **dev** project instead). |
+| `ALLOW_PROD_WRITES` | Escape hatch only. Writes are on automatically wherever a DB is configured; a built-in tripwire blocks writes when a non-production host points at the prod project. Set `true` to override (rarely needed — point local at the **dev** project instead). |
 | `PORT` | Server port (default `3000`). |
 | `GITHUB_AUTH` | Token used by the map editor to open map-submission PRs. |
 
@@ -112,4 +112,4 @@ New maps are submitted straight from the in-browser editor (`create.html`), whic
 
 ## Tech stack
 
-Node.js · Express · Socket.IO · esbuild · Supabase (optional) · vanilla-JS canvas client. Deployed on Heroku.
+Node.js · Express · Socket.IO · esbuild · Supabase (optional) · vanilla-JS canvas client. Deployed on Render (behind Cloudflare).

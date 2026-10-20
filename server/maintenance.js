@@ -3,14 +3,14 @@
 // finish). Two things turn it on:
 //   - POST /ops/drain (index.js) — the deploy workflow calls it minutes ahead
 //     of pushing the prod branch, so players get a heads-up and rooms drain.
-//   - the SIGTERM handler in index.js — Heroku sends SIGTERM at every restart
-//     and SIGKILLs 30s later, so this is the universal "30 seconds to go"
+//   - the SIGTERM handler in index.js — Render sends SIGTERM at every restart
+//     and SIGKILLs after its shutdown delay (30s by default), so this is the universal "30 seconds to go"
 //     announcement, deploys and manual restarts alike.
 // State auto-expires past `expiresAt` so a drained-but-never-restarted server
 // (failed build, canceled run) resumes races on its own — no operator action.
 
 // A drain's deadline marks the deploy *push*; the actual restart follows it by
-// a Heroku build (minutes). The long grace keeps races blocked across that
+// a Render build (minutes). The long grace keeps races blocked across that
 // build window. A restart's deadline is the process exit itself — the small
 // grace only matters if the exit somehow fails.
 var DRAIN_GRACE_MS = 15 * 60 * 1000;

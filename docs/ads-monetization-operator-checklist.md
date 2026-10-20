@@ -132,7 +132,7 @@ side against a real domain** before ads serve — there is no localhost path. St
    so it must be DEPLOYED first, see below), then **Request Activation**.
    - Verify will only pass once the prod site is serving the SDK, i.e. after the
      PR is merged + deployed with `ADS_PROVIDER=gamemonetize` set.
-2. **Set Heroku config vars:**
+2. **Set environment variables on the Render service:**
    - `ADS_PROVIDER=gamemonetize`
    - `ADS_PUBLISHER_ID=elvluveq681cl5oop2bd54ls7oza2mxo`
    Leave unset locally → ads no-op (verified).
@@ -149,7 +149,7 @@ side against a real domain** before ads serve — there is no localhost path. St
 
 ### Deploy → verify order (important)
 GameMonetize's "Verify Game" inspects the LIVE page, so the order is:
-1. Merge this PR + deploy to Heroku with the two config vars set.
+1. Merge this PR + deploy to Render with the two environment variables set.
 2. Load `https://www.chaochaogame.com/play.html`, view source → confirm
    `window.__ADS__ = {"provider":"gamemonetize","publisherId":"elvluveq...mxo"}`
    and that `https://api.gamemonetize.com/sdk.js` loads (Network tab).

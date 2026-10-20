@@ -1,5 +1,5 @@
 // Load local .env (if present) before anything reads process.env. Harmless and
-// silent when there's no .env file — Heroku injects config vars directly.
+// silent when there's no .env file — the host (Render) injects environment variables directly.
 require('dotenv').config({ quiet: true });
 const express = require('express');
 const compression = require('compression');
@@ -402,7 +402,7 @@ var maintenance = require('./server/maintenance.js');
 var reconnect = require('./server/reconnect.js');
 var roomSnapshot = require('./server/roomSnapshot.js');
 // Cross-process room-snapshot store for seamless-reconnect (Phase 2). Supabase is the
-// ONLY store that survives a Heroku dyno cutover (the FS is per-dyno/ephemeral, no
+// ONLY store that survives a Render instance cutover (the FS is per-instance/ephemeral, no
 // Redis), so without it reconnect-across-restart degrades to a no-op (an in-memory
 // store can't outlive the dying process). Created once auth has resolved its client.
 var reconnectStore = (auth && auth.enabled) ? roomSnapshot.makeSupabaseStore(auth) : roomSnapshot.makeMemoryStore();
@@ -475,8 +475,8 @@ app.post('/feedback', express.json({ limit: '16kb' }), function (req, res) {
     });
 });
 
-// Deploy-time ops endpoints, live only when OPS_SECRET is set (a Heroku config
-// var). The deploy workflow POSTs /ops/drain minutes before pushing the prod
+// Deploy-time ops endpoints, live only when OPS_SECRET is set (an environment
+// variable on the Render service). The deploy workflow POSTs /ops/drain minutes before pushing the prod
 // branch — players get a "races paused" banner and rooms stop starting new
 // races — then polls /ops/status until active races finish. Without the secret
 // (local dev) or without the right header both endpoints 404, so probes can't
@@ -707,7 +707,7 @@ function sanitizeDeviceId(raw) {
 // anonymous play must keep working exactly as before. A valid token also ensures
 // the user's durable `progression` row exists and records this device.
 //
-// No per-IP throttle here: behind Heroku's router socket.handshake.address is the
+// No per-IP throttle here: behind the platform proxy (Render, Cloudflare) socket.handshake.address is the
 // PROXY ip shared by every client, so an IP throttle would be a global throttle
 // that silently demotes all signed-in users to guests under normal load. Repeated
 // tokens (good or verified-bad) are already cheap via auth.js's token cache, and
@@ -740,7 +740,7 @@ io.use(async (socket, next) => {
         }
     }
     // Resolve the real client IP for botGuard's datacenter check. socket.handshake.address is
-    // the immediate peer (Heroku's shared router); a bot can PREPEND a spoofed hop to
+    // the immediate peer (the platform's shared proxy); a bot can PREPEND a spoofed hop to
     // x-forwarded-for, so botGuard counts trusted proxies in from the RIGHT rather than
     // trusting the left-most value. Used only to segment automated cloud/VPS traffic, never
     // as a per-IP throttle (see the note above).
@@ -820,8 +820,8 @@ process.on( 'SIGINT', function() {
     process.exit();
 });
 
-// Heroku sends SIGTERM at every restart/deploy and SIGKILLs the dyno 30s
-// later. Use that fixed grace window: announce a restart countdown to every
+// Render sends SIGTERM at every restart/deploy and SIGKILLs the instance after its
+// shutdown delay (30s by default; maxShutdownDelaySeconds can raise it). Use the default 30s grace window: announce a restart countdown to every
 // connected player (and block new races via the maintenance gate), keep
 // ticking so in-flight races play on, then exit just inside the window. The
 // new dyno boots in parallel, so clients reconnect to it right after the
@@ -836,9 +836,9 @@ process.on('SIGTERM', function () {
     maintenance.begin(28, 'restart');
     // Use the fixed ~28s grace window for two things at once: (1) DRAIN the reconnect snapshot
     // write before exiting, and (2) keep ticking so in-flight races finish + clients reconnect
-    // to the new dyno. We exit only AFTER the snapshot write settles (so we never die with the
+    // to the new instance. We exit only AFTER the snapshot write settles (so we never die with the
     // write in flight — Codex re-review), but never EARLIER than the window (so races aren't cut
-    // short). A hard backstop guarantees we still exit if the write hangs (Heroku SIGKILLs ~30s).
+    // short). A hard backstop guarantees we still exit if the write hangs (Render SIGKILLs after its 30s default shutdown delay).
     var EXIT_MS = 28 * 1000;
     var sigtermT0 = Date.now();
     var sigtermExited = false;
