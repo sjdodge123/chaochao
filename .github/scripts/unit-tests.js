@@ -458,8 +458,8 @@ group('utils math/hash/color', function () {
 // auth.resolveWritesEnabled — the write-enable decision after removing the manual
 // ALLOW_SUPABASE_WRITES gate. Pure function (dbConfigured, supabaseUrl, env) so we can
 // pin the full matrix directly. Pins: (1) writes are on automatically when a DB is
-// configured, (2) the old flag is dead, (3) the prod tripwire blocks a non-Heroku host
-// pointed at the prod project, and (4) DYNO / ALLOW_PROD_WRITES lift the tripwire.
+// configured, (2) the old flag is dead, (3) the prod tripwire blocks a non-production host
+// pointed at the prod project, and (4) RENDER / DYNO / ALLOW_PROD_WRITES lift the tripwire.
 // ---------------------------------------------------------------------------
 const DEV_URL = 'https://ukfecygtfghiybasqgtl.supabase.co';   // dev project ref
 const PROD_URL = 'https://spkwpkpiuzshrfwplzyg.supabase.co';  // prod project ref (tripwire target)
@@ -468,9 +468,84 @@ group('auth.resolveWritesEnabled', function () {
     eq(f(false, null, {}), false, 'no DB configured => writes off (guest-only)');
     eq(f(true, DEV_URL, {}), true, 'dev DB configured => writes on (no manual flag needed)');
     eq(f(true, DEV_URL, { ALLOW_SUPABASE_WRITES: 'false' }), true, 'old ALLOW_SUPABASE_WRITES flag is dead (ignored)');
-    eq(f(true, PROD_URL, {}), false, 'prod project from a non-Heroku host => tripwire blocks writes');
+    eq(f(true, PROD_URL, {}), false, 'prod project from a non-production host => tripwire blocks writes');
+    eq(f(true, PROD_URL, { RENDER: 'true' }), true, 'prod project on a Render service => writes on');
     eq(f(true, PROD_URL, { DYNO: 'web.1' }), true, 'prod project on a Heroku dyno => writes on');
     eq(f(true, PROD_URL, { ALLOW_PROD_WRITES: 'true' }), true, 'prod project with ALLOW_PROD_WRITES=true => override');
+});
+
+// ---------------------------------------------------------------------------
+// skinRegistry seasonal claims — the server registry (equip validation + grant) and the
+// client registry (banner / locker / toast copy) carry the SAME seasonal entries, and the
+// claim-window helper honours the half-open [claimStart, claimEnd) contract. The client
+// registry is a browser global script whose SKINS literal references draw.js painters, so
+// it is evaluated in a sandbox where every unknown identifier resolves to a stub.
+// ---------------------------------------------------------------------------
+const skinRegistry = require(path.join(repoRoot, 'server', 'skinRegistry.js'));
+function loadClientGlobals(relPath) {
+    const vm = require('vm');
+    const src = require('fs').readFileSync(path.join(repoRoot, relPath), 'utf8');
+    const store = {};
+    const sandbox = new Proxy(store, {
+        has: function () { return true; },
+        get: function (t, k) {
+            if (k in t) { return t[k]; }
+            if (typeof k === 'symbol') { return undefined; }
+            return function stub() { };
+        }
+    });
+    vm.runInNewContext(src, vm.createContext(sandbox));
+    return store;
+}
+group('skinRegistry seasonal claims', function () {
+    const clientReg = loadClientGlobals('client/scripts/skinRegistry.js');
+    const clientFx = loadClientGlobals('client/scripts/trailEffects.js');
+    const serverSeasonal = skinRegistry.SKINS.filter(function (s) { return s.unlock.kind === 'seasonal'; });
+    const clientSeasonal = (clientReg.SKINS || []).filter(function (s) { return s.unlock && s.unlock.kind === 'seasonal'; });
+    check(serverSeasonal.length >= 2, 'server registry has the Early Adopter + Halloween seasonal entries');
+    eq(clientSeasonal.length, serverSeasonal.length, 'client registry has the same number of seasonal entries');
+    const clientById = {};
+    clientSeasonal.forEach(function (s) { clientById[s.id] = s; });
+    const seasons = {};
+    serverSeasonal.forEach(function (srv) {
+        const cli = clientById[srv.id];
+        check(!!cli, 'client registry carries seasonal id ' + srv.id);
+        if (!cli) { return; }
+        eq(cli.slot, srv.slot, srv.id + ': slot in lockstep');
+        ['season', 'label', 'claimStart', 'claimEnd', 'emoji', 'theme'].forEach(function (k) {
+            eq(cli.unlock[k], srv.unlock[k], srv.id + ': unlock.' + k + ' in lockstep');
+        });
+        eq(cli.rarity, 'seasonal', srv.id + ': client rarity is seasonal (gold locker frame)');
+        check(typeof cli.name === 'string' && cli.name.length > 0, srv.id + ': client has a display name');
+        check(typeof srv.unlock.label === 'string' && srv.unlock.label.length > 0, srv.id + ': has a player-facing season label');
+        const start = Date.parse(srv.unlock.claimStart), end = Date.parse(srv.unlock.claimEnd);
+        check(!isNaN(start) && !isNaN(end) && end > start, srv.id + ': claim window is a valid forward range');
+        check(!seasons[srv.unlock.season], srv.id + ': season key ' + srv.unlock.season + ' is unique');
+        seasons[srv.unlock.season] = true;
+        if (srv.slot === 'trail') {
+            check(!!(clientFx.TRAIL_FX && typeof clientFx.TRAIL_FX[cli.effect] === 'function'), srv.id + ': trail effect "' + cli.effect + '" has a TRAIL_FX renderer');
+        }
+    });
+    // Halloween 2026 window: half-open [Oct 20, Nov 2) UTC.
+    const hw = skinRegistry.getSkin('ghostfire');
+    check(!!hw && hw.slot === 'trail', 'ghostfire is a trail seasonal claim');
+    if (hw) {
+        const u = hw.unlock;
+        const s0 = Date.parse(u.claimStart), e0 = Date.parse(u.claimEnd);
+        eq(u.claimStart, '2026-10-20T00:00:00Z', 'ghostfire claim opens Oct 20 2026 UTC');
+        eq(u.claimEnd, '2026-11-02T00:00:00Z', 'ghostfire claim closes at the start of Nov 2 2026 UTC');
+        eq(skinRegistry.isClaimWindowOpen(u, s0 - 1), false, 'ghostfire: 1ms before claimStart => closed');
+        eq(skinRegistry.isClaimWindowOpen(u, s0), true, 'ghostfire: exactly claimStart => open');
+        eq(skinRegistry.isClaimWindowOpen(u, Date.parse('2026-10-31T23:59:59Z')), true, 'ghostfire: Halloween night => open');
+        eq(skinRegistry.isClaimWindowOpen(u, e0 - 1), true, 'ghostfire: 1ms before claimEnd => open');
+        eq(skinRegistry.isClaimWindowOpen(u, e0), false, 'ghostfire: exactly claimEnd => closed');
+    }
+    eq(JSON.stringify(skinRegistry.currentSeasonalClaims(Date.parse('2026-10-25T12:00:00Z'))), JSON.stringify(['ghostfire']),
+        'late October grants exactly the Halloween claim (Early Adopter stays closed)');
+    eq(JSON.stringify(skinRegistry.currentSeasonalClaims(Date.parse('2026-07-01T00:00:00Z'))), JSON.stringify(['founders_flare']),
+        'July 2026 granted exactly the Early Adopter claim');
+    eq(skinRegistry.currentSeasonalClaims(Date.parse('2026-11-02T00:00:00Z')).length, 0, 'Nov 2 2026: nothing claimable');
+    eq(skinRegistry.isClaimWindowOpen({ kind: 'seasonal', claimStart: 'nope', claimEnd: '2026-11-02T00:00:00Z' }, Date.now()), false, 'malformed claimStart reads as closed');
 });
 
 // ---------------------------------------------------------------------------

@@ -72,21 +72,23 @@ if (SUPABASE_URL && SERVICE_ROLE_KEY) {
 // (`dbConfigured`) — the old ALLOW_SUPABASE_WRITES kill-switch existed only to stop LOCAL
 // dev from clobbering PROD, and local now points at the dedicated dev project. One automatic
 // tripwire replaces that gate: never let a NON-production host write to the PROD project. The
-// only expected prod writer is the Heroku dyno (Heroku sets DYNO on every dyno); if some other
-// process is pointed at the prod URL — e.g. a local `.env` with stale copied prod creds —
-// block writes rather than risk polluting prod. ALLOW_PROD_WRITES=true overrides. Normal paths
-// need no flag: local-at-dev never trips it, Heroku-at-prod is recognised by DYNO.
+// only expected prod writer is the production host — a Render service (Render sets RENDER=true
+// on every service) or a Heroku dyno (DYNO is set on every dyno). If some other process is
+// pointed at the prod URL — e.g. a local `.env` with stale copied prod creds — block writes
+// rather than risk polluting prod. ALLOW_PROD_WRITES=true overrides. Normal paths need no flag:
+// local-at-dev never trips it, Render/Heroku-at-prod are recognised by their platform env var.
 var PROD_PROJECT_REF = 'spkwpkpiuzshrfwplzyg';
 function resolveWritesEnabled(dbConfigured, supabaseUrl, env) {
     env = env || {};
     if (!dbConfigured) { return false; } // guest-only dev: no DB, in-memory fallbacks (game.js) apply
     var targetsProd = !!supabaseUrl && supabaseUrl.indexOf(PROD_PROJECT_REF) !== -1;
-    if (targetsProd && !env.DYNO && env.ALLOW_PROD_WRITES !== 'true') { return false; }
+    var onProdHost = !!env.RENDER || !!env.DYNO;
+    if (targetsProd && !onProdHost && env.ALLOW_PROD_WRITES !== 'true') { return false; }
     return true;
 }
 var writesEnabled = resolveWritesEnabled(enabled, SUPABASE_URL, process.env);
 if (enabled && !writesEnabled) {
-    console.log('[auth] WRITES BLOCKED: pointed at the PROD project from a non-Heroku host. ' +
+    console.log('[auth] WRITES BLOCKED: pointed at the PROD project from a non-production host (no RENDER/DYNO env). ' +
         'Use the DEV project locally, or set ALLOW_PROD_WRITES=true to override.');
 }
 

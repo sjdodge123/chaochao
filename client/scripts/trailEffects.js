@@ -1283,6 +1283,172 @@ function drawFoundersFlareTrail(ctx, verts, color, now, fadeMs, anim) {
   ctx.restore();
 }
 
+// ---- Ghostfire (Halloween 2026 seasonal claim) -------------------------------
+// A spectral flame: the ribbon body is the player's colour pulled toward a haunted
+// violet (same colour-rule exception as founders_flare — the season needs to read
+// at a glance), with a sickly green core, and a sparse scatter of glyph particles
+// that hug the path then float off: little ghosts (pale, two dark eyes), flapping
+// bats (near-black silhouettes) and pumpkin-orange embers. Ribbon + core share one
+// glow blit (like founders); glyphs are drawn direct so the cost stays in the same
+// tier as founders_flare on phone GPUs.
+var GHOSTFIRE_MIX = 0.5;                  // 0 = pure player colour … 1 = pure violet
+var GHOSTFIRE_VIOLET = '#7a2bd6';         // haunted body
+var GHOSTFIRE_GREEN = '#9dff5c';          // sickly core + ghost glow
+var GHOSTFIRE_PALE = '#edfff2';           // ghost sheet
+var GHOSTFIRE_ORANGE = '#ff8c1a';         // pumpkin embers
+var GHOSTFIRE_INK = '#1a0a2e';            // bat silhouette / ghost eyes
+var _ghostfireBlend = {};
+function ghostfireViolet(color) {
+  var k = color + '|' + GHOSTFIRE_MIX;
+  var s = _ghostfireBlend[k];
+  if (s) return s;
+  var pc = tfxRGB(color), vc = tfxRGB(GHOSTFIRE_VIOLET), m = GHOSTFIRE_MIX;
+  s = "rgb(" + Math.round(pc.r + (vc.r - pc.r) * m) + "," +
+    Math.round(pc.g + (vc.g - pc.g) * m) + "," +
+    Math.round(pc.b + (vc.b - pc.b) * m) + ")";
+  _ghostfireBlend[k] = s; return s;
+}
+// Unit-ish glyph paths, filled by the caller. `s` = half-height-ish size in px.
+function tfxGhostPath(ctx, s) {
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.5, s * 0.6);
+  ctx.lineTo(-s * 0.5, -s * 0.1);
+  ctx.arc(0, -s * 0.1, s * 0.5, Math.PI, 0);          // dome
+  ctx.lineTo(s * 0.5, s * 0.6);
+  ctx.quadraticCurveTo(s * 0.33, s * 0.3, s * 0.17, s * 0.6);   // wavy hem
+  ctx.quadraticCurveTo(0, s * 0.3, -s * 0.17, s * 0.6);
+  ctx.quadraticCurveTo(-s * 0.33, s * 0.3, -s * 0.5, s * 0.6);
+  ctx.closePath();
+}
+// `flap` 0..1 lifts the wing tips (animate with a sine for a flutter).
+function tfxBatPath(ctx, s, flap) {
+  var wy = -s * 0.45 * flap;
+  ctx.beginPath();
+  ctx.moveTo(0, -s * 0.05);
+  ctx.quadraticCurveTo(-s * 0.5, -s * 0.55 + wy, -s, wy);
+  ctx.quadraticCurveTo(-s * 0.7, s * 0.15, -s * 0.42, s * 0.08);
+  ctx.quadraticCurveTo(-s * 0.2, s * 0.3, 0, s * 0.22);
+  ctx.quadraticCurveTo(s * 0.2, s * 0.3, s * 0.42, s * 0.08);
+  ctx.quadraticCurveTo(s * 0.7, s * 0.15, s, wy);
+  ctx.quadraticCurveTo(s * 0.5, -s * 0.55 + wy, 0, -s * 0.05);
+  ctx.closePath();
+}
+function drawGhostfireTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length;
+  if (n < 2) return;
+  var violet = ghostfireViolet(color);
+  var WIDTH = TP('ghostfire', 'WIDTH', 22), GLOW = TP('ghostfire', 'GLOW', 24), TAPER = TP('ghostfire', 'TAPER', 0.8);
+  var DENSITY = TP('ghostfire', 'DENSITY', 9), GLYPH = TP('ghostfire', 'GLYPH', 9), RISE = TP('ghostfire', 'RISE', 46);
+  var fadeEff = fadeMs * TP('ghostfire', 'TAIL_PERSIST', 1.3);
+  var stride = Math.max(1, Math.floor(n / 50));
+  var idx = [];
+  for (var i = 0; i < n; i += stride) idx.push(i);
+  if (idx[idx.length - 1] !== n - 1) idx.push(n - 1);
+  var m = idx.length;
+  var hw = new Array(m), nx = new Array(m), ny = new Array(m), af = new Array(m);
+  for (var j = 0; j < m; j++) {
+    var ii = idx[j];
+    var f = tfxAgeAlpha(verts[ii].t, now, fadeEff);
+    af[j] = f;
+    // Slow, uneven lick — a cold flame guttering rather than a roaring one.
+    var flick = 0.8 + 0.2 * Math.sin(anim * 0.009 + verts[ii].t * 0.017);
+    hw[j] = (WIDTH * 0.5) * Math.pow(f, TAPER) * flick;
+    var tan = tfxTangent(verts, ii);
+    nx[j] = -tan.y; ny[j] = tan.x;
+  }
+  ctx.save();
+  ctx.lineJoin = "round";
+  var ribbon = function (c) {
+    c.lineJoin = "round";
+    c.fillStyle = violet;
+    for (var s = 1; s < m; s++) {
+      var alpha = af[s] * 0.5;
+      if (alpha <= 0.02) continue;
+      var p0 = verts[idx[s - 1]], p1 = verts[idx[s]];
+      tfxAlpha(c, alpha);
+      c.beginPath();
+      c.moveTo(p0.x + nx[s - 1] * hw[s - 1], p0.y + ny[s - 1] * hw[s - 1]);
+      c.lineTo(p1.x + nx[s] * hw[s], p1.y + ny[s] * hw[s]);
+      c.lineTo(p1.x - nx[s] * hw[s], p1.y - ny[s] * hw[s]);
+      c.lineTo(p0.x - nx[s - 1] * hw[s - 1], p0.y - ny[s - 1] * hw[s - 1]);
+      c.closePath();
+      c.fill();
+    }
+    // Sickly green core along the fresher half of the flame.
+    var coreStart = -1;
+    for (var cs = 0; cs < m; cs++) { if (af[cs] > 0.35) { coreStart = cs; break; } }
+    if (coreStart >= 0 && coreStart < m - 1) {
+      tfxAlpha(c, 0.8);
+      c.strokeStyle = GHOSTFIRE_GREEN;
+      c.lineCap = "round";
+      c.lineWidth = Math.max(0.9, WIDTH * 0.14);
+      c.beginPath();
+      c.moveTo(verts[idx[coreStart]].x, verts[idx[coreStart]].y);
+      for (var cc = coreStart + 1; cc < m; cc++) c.lineTo(verts[idx[cc]].x, verts[idx[cc]].y);
+      c.stroke();
+    }
+  };
+  tfxGlowPaint(ctx, verts, violet, GLOW, WIDTH, null, ribbon);
+  // Glyph particles: one per time bucket, frame-stable (tfxForEachParticle), hug the
+  // path then drift upward + sway + fade (tfxParticlePhase). Hash picks the species.
+  var interval = Math.max(40, fadeMs / DENSITY);
+  tfxForEachParticle(verts, now, fadeMs, interval, function (v, ts, age) {
+    var ph = tfxParticlePhase(age, fadeMs);
+    if (ph.alpha <= 0.03) return;
+    var h = tfxHash(ts), h2 = tfxHash(ts + 977);
+    var sway = Math.sin(age * 0.0021 + h * TFX_TAU) * 9 * ph.drift;
+    var x = v.x + (h2 - 0.5) * WIDTH * 0.9 + sway;
+    var y = v.y - RISE * ph.drift;
+    ctx.save();
+    ctx.translate(x, y);
+    if (h < 0.55) {
+      // Ghost: pale sheet with a faint green rim glow + two ink eyes.
+      var gs = GLYPH * (0.8 + h2 * 0.5);
+      tfxAlpha(ctx, ph.alpha * 0.85);
+      ctx.fillStyle = GHOSTFIRE_PALE;
+      tfxGhostPath(ctx, gs); ctx.fill();
+      tfxAlpha(ctx, ph.alpha * 0.5);
+      ctx.strokeStyle = GHOSTFIRE_GREEN; ctx.lineWidth = 1;
+      ctx.stroke();
+      tfxAlpha(ctx, ph.alpha * 0.9);
+      ctx.fillStyle = GHOSTFIRE_INK;
+      ctx.beginPath(); ctx.arc(-gs * 0.17, -gs * 0.12, gs * 0.08, 0, TFX_TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(gs * 0.17, -gs * 0.12, gs * 0.08, 0, TFX_TAU); ctx.fill();
+    } else if (h < 0.82) {
+      // Bat: ink silhouette, wings fluttering, drifts a little faster than the ghosts.
+      var bs = GLYPH * (0.7 + h2 * 0.4);
+      ctx.translate(0, -RISE * 0.4 * ph.drift);
+      var flap = 0.5 + 0.5 * Math.sin(anim * 0.03 + h * 40);
+      tfxAlpha(ctx, ph.alpha * 0.95);
+      ctx.fillStyle = GHOSTFIRE_INK;
+      tfxBatPath(ctx, bs, flap); ctx.fill();
+      tfxAlpha(ctx, ph.alpha * 0.35);
+      ctx.strokeStyle = violet; ctx.lineWidth = 1;
+      ctx.stroke();
+    } else {
+      // Pumpkin ember: small, twinkling, warm against the cold flame.
+      var twinkle = 0.55 + 0.45 * Math.sin(anim * 0.02 + h * 31.0);
+      tfxAlpha(ctx, ph.alpha * twinkle);
+      ctx.fillStyle = GHOSTFIRE_ORANGE;
+      ctx.beginPath(); ctx.arc(0, 0, Math.max(0.8, GLYPH * 0.22 * (0.7 + h2 * 0.6)), 0, TFX_TAU); ctx.fill();
+    }
+    ctx.restore();
+  });
+  // Head: violet blob with a green hot-spot.
+  var head = verts[n - 1];
+  var R = WIDTH * 0.95;
+  tfxAlpha(ctx, 1);
+  if (tfxGlow()) ctx.shadowBlur = 0;
+  ctx.save();
+  ctx.translate(head.x, head.y); ctx.scale(R, R);
+  ctx.fillStyle = tfxBlobGrad(ctx, violet);
+  ctx.beginPath(); ctx.arc(0, 0, 1, 0, TFX_TAU); ctx.fill();
+  ctx.restore();
+  tfxAlpha(ctx, 0.9); ctx.fillStyle = GHOSTFIRE_GREEN;
+  ctx.beginPath(); ctx.arc(head.x, head.y, Math.max(1.2, WIDTH * 0.1), 0, TFX_TAU); ctx.fill();
+  ctx.restore();
+}
+
 /* ============================================================================
  * WIRING — how the main session ports these into draw.js drawTrail()
  * ----------------------------------------------------------------------------
@@ -1392,5 +1558,5 @@ var TRAIL_FX = {
   hearts: drawHeartsTrail, smoke: drawSmokeTrail, confetti: drawConfettiTrail,
   snow: drawSnowTrail, tracks: drawTracksTrail, notes: drawNotesTrail,
   neon: drawNeonTrail, ripple: drawRippleTrail, powder: drawPowderTrail,
-  foundersFlare: drawFoundersFlareTrail
+  foundersFlare: drawFoundersFlareTrail, ghostfire: drawGhostfireTrail
 };
