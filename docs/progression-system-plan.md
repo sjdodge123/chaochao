@@ -35,7 +35,7 @@ new skins. Win to earn bonus XP…").
   `Game.gameOver(player)` at `server/game.js:578`. The client only **reads** progression.
 - **All progression writes go through the global Supabase writes gate:** `auth.writesEnabled`
   / the `ALLOW_SUPABASE_WRITES` env var (see `server/auth.js`). **Local dev defaults to OFF**
-  (reads work, writes no-op); Heroku/prod must set `true`. **Every new writer added in
+  (reads work, writes no-op); prod (Render) must set `true`. **Every new writer added in
   this task MUST gate at the call site.** When testing writes locally, flip ON, exercise,
   **clean up the test rows**, flip back OFF.
 - **Schema is already in place.** The `progression` table has `xp int`, `level int`,

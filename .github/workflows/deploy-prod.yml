@@ -1,14 +1,15 @@
-name: Deploy to prod (Heroku)
+name: Deploy to prod
 
-# Prod deploy control. Heroku auto-deploys the `prod` branch (dashboard:
-# Deploy tab → GitHub → automatic deploys from `prod`, NOT main), so merging
+# Prod deploy control. Production (a Render service behind Cloudflare) is
+# expected to auto-deploy the `prod` branch (Render Dashboard → service →
+# Settings → Build & Deploy → Branch = `prod`, NOT main), so merging
 # a PR into main no longer restarts the live server. This workflow is the
 # only thing that advances `prod`:
 #
 #   nightly    — 09:00 UTC (~5am ET, lowest-traffic window for the mostly-US
 #                audience) fast-forwards prod to main. Pushing an unchanged
-#                SHA is a git no-op, so a quiet night produces no Heroku
-#                build and no dyno restart. Before pushing, the drain step
+#                SHA is a git no-op, so a quiet night produces no Render
+#                build and no service restart. Before pushing, the drain step
 #                tells the live server maintenance is coming: players see a
 #                "new races are paused" banner, rooms stop starting races,
 #                and the workflow waits (bounded) for in-flight races to end.
@@ -20,23 +21,25 @@ name: Deploy to prod (Heroku)
 #   manual     — Run workflow from the Actions tab, optionally with a
 #                specific ref and/or the nightly-style drain, to ship right now.
 #
-# Players ALWAYS get a final warning regardless of path: Heroku sends SIGTERM
-# 30s before SIGKILL on every restart, and index.js turns that into an
-# in-game "server restarting in 28s" countdown + race-start block.
+# Players ALWAYS get a final warning regardless of path: Render sends SIGTERM
+# and SIGKILLs after its shutdown delay (30s by default) on every restart, and
+# index.js turns that into an in-game "server restarting in 28s" countdown +
+# race-start block.
 #
 # The drain endpoints are authenticated with the OPS_SECRET repo secret,
-# which must match the OPS_SECRET config var on the Heroku app. If either is
-# missing the drain is skipped (with a warning) and the deploy proceeds —
+# which must match the OPS_SECRET environment variable on the Render service.
+# If either is missing the drain is skipped (with a warning) and the deploy proceeds —
 # the SIGTERM countdown still covers the players.
 #
 # prod only ever moves forward: a non-fast-forward push fails loudly rather
 # than silently rewriting deploy history. To roll back prod, use
-# `heroku rollback -a chaochaogame` (instant, no rebuild) or force-push prod
-# by hand if you really want Heroku to rebuild an older commit.
+# Render Dashboard → service → Events/Deploys → Rollback to a previous deploy
+# (no rebuild), or force-push prod by hand if you really want Render to
+# rebuild an older commit.
 #
-# NOTE: keep Heroku's "Wait for CI to pass before deploy" OFF — no CI runs on
-# pushes to prod (main is already validated by PR checks), so a CI wait would
-# hang every deploy.
+# NOTE: keep Render's Auto-Deploy set to "On Commit" (not "After CI Checks
+# Pass") — no CI runs on pushes to prod (main is already validated by PR
+# checks), so a CI wait would hang every deploy.
 
 on:
   schedule:
@@ -138,8 +141,8 @@ jobs:
           fi
           # Re-anchor the drain to push time: the server's 15-min auto-expiry
           # started at the announcement above, and this step may have waited up
-          # to 13 min — a slow Heroku build after the push could otherwise
-          # outlive the grace and let races resume on the old dyno right
+          # to 13 min — a slow Render build after the push could otherwise
+          # outlive the grace and let races resume on the old instance right
           # before SIGTERM cuts them.
           if ! curl -fsS -X POST -H "x-ops-secret: $OPS_SECRET" \
                "$PROD_URL/ops/drain?seconds=0" > /dev/null; then
@@ -153,4 +156,4 @@ jobs:
         run: |
           # Plain (non-force) push: fails if $TARGET would rewind prod.
           git push origin "$TARGET:refs/heads/prod"
-          echo "Pushed — Heroku auto-deploy of prod will pick this up."
+          echo "Pushed — Render auto-deploy of prod will pick this up."

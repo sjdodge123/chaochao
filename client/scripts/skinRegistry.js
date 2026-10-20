@@ -112,6 +112,11 @@ var SKINS = [
     // entry). The 'founder gold' palette lives in the painter (drawFoundersFlareTrail,
     // trailEffects.js). Keep IN LOCKSTEP with server/skinRegistry.js. ---
     { id: 'founders_flare', name: 'Solar Flare', slot: 'trail', rarity: 'seasonal', unlock: { kind: 'seasonal', season: 'early_adopter_2026', label: 'Early Adopter', claimStart: '2026-06-01T00:00:00Z', claimEnd: '2026-08-01T00:00:00Z' }, effect: 'foundersFlare' },
+    // Halloween 2026 — Ghostfire: a spectral violet flame with a sickly green core, trailing
+    // little ghosts, bats and pumpkin embers (drawGhostfireTrail, trailEffects.js). Optional
+    // `emoji` (banner + toast glyph, default 🌟) and `theme` (lobby band palette, see
+    // STATUS_CARD_THEMES in lobbyHub.js, default gold) let a season skin its own copy.
+    { id: 'ghostfire', name: 'Ghostfire', slot: 'trail', rarity: 'seasonal', unlock: { kind: 'seasonal', season: 'halloween_2026', label: 'Halloween', claimStart: '2026-10-20T00:00:00Z', claimEnd: '2026-11-02T00:00:00Z', emoji: '🎃', theme: 'halloween' }, effect: 'ghostfire' },
     // --- Borders (rim cosmetic; painter tints to player color, drawn AROUND the rim). SHARE the
     // 2nd cosmetic slot with patterns (player.pattern field / selected_pattern column) — distinguished
     // by slot:'border'. ids are border_-prefixed because flames/scales/electric collide with pattern

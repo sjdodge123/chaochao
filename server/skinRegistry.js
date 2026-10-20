@@ -121,6 +121,10 @@ var SKINS = [
     // own id + window (no schema/migration change needed). Times are ISO-8601 UTC; keep these
     // IN LOCKSTEP with client/scripts/skinRegistry.js. ---
     { id: 'founders_flare', slot: 'trail', unlock: { kind: 'seasonal', season: 'early_adopter_2026', label: 'Early Adopter', claimStart: '2026-06-01T00:00:00Z', claimEnd: '2026-08-01T00:00:00Z' } },
+    // Halloween 2026 — Ghostfire trail. Window opens Oct 20 and closes the moment Nov 2 starts
+    // (UTC), so Halloween night + Nov 1 are fully inside it. `emoji`/`theme` are optional
+    // presentation hints read only by the client (banner + toast); the server ignores them.
+    { id: 'ghostfire', slot: 'trail', unlock: { kind: 'seasonal', season: 'halloween_2026', label: 'Halloween', claimStart: '2026-10-20T00:00:00Z', claimEnd: '2026-11-02T00:00:00Z', emoji: '🎃', theme: 'halloween' } },
     // --- Borders (rim cosmetic; SHARE the 2nd slot with patterns). border_-prefixed ids
     // (flames/scales/electric collide with pattern ids). All kind:'open' for testing. ---
     { id: 'border_ring', slot: 'border', unlock: { kind: 'level', level: 10 } },

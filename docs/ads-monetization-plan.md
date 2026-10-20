@@ -221,7 +221,7 @@ data-processing agreements. The agent can't do this step.
   CHANGELOG entry is REQUIRED** (the rule fires on visible mechanic changes, not just
   file paths — and this materially changes how XP is earned).
 - **`auth.writesEnabled` / `ALLOW_SUPABASE_WRITES`** gates the bonus-XP persistence in
-  `auth.addProgression()`. Local default OFF; flip ON in Heroku.
+  `auth.addProgression()`. Local default OFF; flip ON in the prod environment (Render).
 - **Anonymous players** see interstitials but **not** the rewarded button (no progression
   to multiply). Don't hide-then-fail; hide outright when `client.userId == null`.
 - **Fail-open everywhere.** Every ad call has a timeout; every callback fires; gameplay
@@ -237,9 +237,9 @@ data-processing agreements. The agent can't do this step.
 ## Operator prerequisites (only the user can do)
 
 1. **Sign up with AdinPlay** at https://www.adinplay.com — request a publisher account.
-   Provide site URL (the Heroku domain), describe the game, accept TOS.
+   Provide site URL (the production domain, www.chaochaogame.com), describe the game, accept TOS.
 2. **Accept the CMP terms** on their dashboard.
-3. **Provide the publisher / site ID** via Heroku config var (e.g. `ADS_PUBLISHER_ID`,
+3. **Provide the publisher / site ID** via environment variable (e.g. `ADS_PUBLISHER_ID`,
    `ADS_PROVIDER=adinplay`). Local dev leaves them unset → `ads.js` no-ops cleanly.
 4. **If AdinPlay rejects** at current traffic, repeat with **GameMonetize**
    (https://gamemonetize.com) — same workflow, the agent's code stays unchanged because

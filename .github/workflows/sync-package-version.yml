@@ -9,8 +9,8 @@ name: Sync package.json to release tag
 #   1. Cut your release commit on main (CHANGELOG, etc).
 #   2. git tag vX.Y.Z && git push --tags
 #   3. This workflow lands a follow-up commit on main bumping
-#      package.json. Heroku auto-deploys main HEAD so the deployed
-#      runtime picks it up.
+#      package.json. prod (Render) deploys from the `prod` branch, which
+#      fast-forwards to main nightly, so the deployed runtime picks it up then.
 #
 # If you enable branch protection on main that requires PRs, swap the
 # direct push for peter-evans/create-pull-request — see CONTRIBUTING.md.

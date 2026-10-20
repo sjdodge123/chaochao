@@ -31,7 +31,7 @@ Headlines must be **at most 180 characters** (after stripping markdown) — the 
 1. Move the `## Unreleased` block under a new `## vX.Y.Z — YYYY-MM-DD` heading in `CHANGELOG.md`. Leave a fresh empty `## Unreleased` at the top.
 2. Commit and push to `main`.
 3. Tag the commit: `git tag vX.Y.Z && git push --tags`.
-4. The `Sync package.json to release tag` workflow lands a follow-up commit on `main` bumping `package.json` to match the tag. Heroku deploys main HEAD, so the landing page picks up the new version automatically.
+4. The `Sync package.json to release tag` workflow lands a follow-up commit on `main` bumping `package.json` to match the tag. Production (Render) deploys the `prod` branch, which fast-forwards to `main` nightly (or on a `deploy:prod` merge), so the landing page picks up the new version at the next deploy.
 5. Publish a GitHub release with the same tag, pasting the `vX.Y.Z` section of `CHANGELOG.md` as the body.
 
 ### Recommended repo settings

@@ -1188,6 +1188,12 @@ function drawLobbyBanner(text, y, theme) {
 // lobbyAIChanged / lobbyPlaylistChanged + the gameState snapshot).
 
 var STATUS_CARD_GOLD = { fill: "rgba(58,43,6,0.96)", border: "#ffb31f", text: "#ffe9a8", glow: "rgba(255,179,31,0.7)" };
+// Per-season band palettes, picked by the claim's optional `unlock.theme` (skinRegistry);
+// gold is the default so a season without a theme looks exactly like Early Adopter did.
+var STATUS_CARD_THEMES = {
+    gold: STATUS_CARD_GOLD,
+    halloween: { fill: "rgba(40,12,58,0.96)", border: "#ff8c1a", text: "#ffd9a8", glow: "rgba(255,140,26,0.7)" }
+};
 var STATUS_CARD_BAND_H = 28;   // gold CTA band (only while a claim is open)
 var STATUS_CARD_CELLS_H = 42;  // label row + value row
 var STATUS_CARD_CELL_PAD = 26; // horizontal padding inside a cell
@@ -1208,9 +1214,16 @@ function seasonalClaimText() {
     var label = (claim.unlock && claim.unlock.label) ? claim.unlock.label : "Limited";
     var noun = cosmeticSlotNoun(claim.slot);
     var tail = (daysLeft != null ? " — " + daysLeft + "d left" : "");
+    var emoji = (claim.unlock && claim.unlock.emoji) ? claim.unlock.emoji : "🌟";
     return signedIn
-        ? ("🌟 Claim your " + label + " " + nm + " " + noun + tail)
-        : ("🌟 Sign in to claim the limited " + label + " " + nm + " " + noun + tail);
+        ? (emoji + " Claim your " + label + " " + nm + " " + noun + tail)
+        : (emoji + " Sign in to claim the limited " + label + " " + nm + " " + noun + tail);
+}
+// The band palette for the active claim (its `unlock.theme`, else gold).
+function seasonalClaimTheme() {
+    var claim = lobbyBannerSeasonalClaim;
+    var t = (claim && claim.unlock && claim.unlock.theme) ? STATUS_CARD_THEMES[claim.unlock.theme] : null;
+    return t || STATUS_CARD_GOLD;
 }
 
 // Value text for the BOTS cell. The small-caps cell label carries the "AI bots
@@ -1257,6 +1270,7 @@ function drawLobbyStatusCard() {
     var cells = lobbyStatusCells();
     var gold = seasonalClaimText();
     if (!cells.length && gold == null) { return; }
+    var theme = seasonalClaimTheme();
     var ink = hubInk();
     var ctx = gameContext;
     ctx.save();
@@ -1359,7 +1373,7 @@ function drawLobbyStatusCard() {
         fill: hubSurface(),
         alpha: 0.92,
         border: ink,
-        glow: (gold != null) ? STATUS_CARD_GOLD.glow : undefined
+        glow: (gold != null) ? theme.glow : undefined
     });
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -1369,9 +1383,9 @@ function drawLobbyStatusCard() {
         ctx.save();
         lhRoundRect(ctx, x, y, w, h, 9);
         ctx.clip();
-        ctx.fillStyle = STATUS_CARD_GOLD.fill;
+        ctx.fillStyle = theme.fill;
         ctx.fillRect(x, y, w, bandH);
-        ctx.strokeStyle = STATUS_CARD_GOLD.border;
+        ctx.strokeStyle = theme.border;
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(x, y + bandH);
@@ -1383,7 +1397,7 @@ function drawLobbyStatusCard() {
         ctx.lineWidth = 2;
         ctx.stroke();
         ctx.font = "bold 13px sans-serif";
-        ctx.fillStyle = STATUS_CARD_GOLD.text;
+        ctx.fillStyle = theme.text;
         ctx.fillText(gold, x + w / 2, y + bandH / 2 + 1);
     }
     // Cells: dimmed small-caps label over a bold value, thin dividers between.

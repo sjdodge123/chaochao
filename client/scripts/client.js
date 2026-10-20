@@ -869,7 +869,8 @@ function progressionToastText(ev) {
 		// future season needs no edit here); falls back to "Limited" if absent.
 		var sk = (typeof getSkin === "function") ? getSkin(ev.id) : null;
 		var label = (sk && sk.unlock && sk.unlock.label) ? sk.unlock.label : "Limited";
-		return "🌟 " + label + " " + slotWord + " claimed: " + nm;
+		var emoji = (sk && sk.unlock && sk.unlock.emoji) ? sk.unlock.emoji : "🌟";
+		return emoji + " " + label + " " + slotWord + " claimed: " + nm;
 	}
 	if (ev.type === "skin") {
 		return "🎨 New " + slotWord + " unlocked: " + nm;

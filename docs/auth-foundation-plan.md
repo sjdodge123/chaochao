@@ -59,7 +59,7 @@ The repo owner sets these up in Supabase / Google Cloud / Discord and provides e
 Build against the env vars; if absent, the server should boot fine with auth disabled
 (treat everyone as guest) so dev without credentials still works.
 
-Env vars (local `.env` + Heroku config vars, never committed):
+Env vars (local `.env` + Render environment variables, never committed):
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`        — client-safe (exposed to browser)
 - `SUPABASE_SERVICE_ROLE_KEY` — **server only, never sent to client**

@@ -14,7 +14,9 @@ To re-render a past week's digest with the current formatting, run the `Release 
 
 ## Unreleased
 
-(none yet)
+### General
+
+- **Halloween is here — claim the Ghostfire trail! 🎃** Sign in to your account any time through November 1st to permanently unlock the limited **Ghostfire** trail: a haunted violet flame with a sickly green core, trailing little ghosts, fluttering bats and glowing pumpkin embers behind your kart. The lobby shows a Halloween banner while the claim is open. Once claimed it's yours forever — but the claim closes November 2nd and it's gone for good after that.
 
 ## v0.49.5 — 2026-07-09
 

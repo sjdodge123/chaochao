@@ -41,7 +41,7 @@ jobs:
           node-version: 20
       # The reconcile script needs only the GA Admin client — nothing from the app's
       # own deps. Installing it standalone keeps this heavy Google library out of
-      # package.json (and off the Heroku dyno).
+      # package.json (and out of the production build).
       - run: npm install --no-save @google-analytics/admin@^9.1.0
       - name: Write service-account key
         env:
@@ -63,7 +63,7 @@ jobs:
           node-version: 20
       # The reconcile script needs only the GA Admin client — nothing from the app's
       # own deps. Installing it standalone keeps this heavy Google library out of
-      # package.json (and off the Heroku dyno).
+      # package.json (and out of the production build).
       - run: npm install --no-save @google-analytics/admin@^9.1.0
       - name: Write service-account key
         env:
