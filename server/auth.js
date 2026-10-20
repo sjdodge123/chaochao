@@ -808,7 +808,7 @@ async function findOrCreateDiscordUser(discord) {
 
         // No existing account. Creating one is a WRITE (admin.createUser + the identity
         // link), so it must honor the same writesEnabled tripwire as every progression
-        // write — otherwise a non-Heroku host accidentally pointed at the PROD project
+        // write — otherwise a non-production host accidentally pointed at the PROD project
         // would create real auth.users/auth.identities rows in prod, the exact pollution
         // writesEnabled exists to prevent. The read above still runs (an existing player
         // resolves fine); we only refuse to WRITE a new account when writes are blocked.

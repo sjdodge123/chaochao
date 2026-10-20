@@ -43,7 +43,7 @@ var DC_ENABLED = DC.enabled !== false;
 var DC_ACTION = DC.action || 'tarpit';                 // 'tarpit' | 'block' | 'measure'
 var DC_BYPASS_AUTHED = DC.bypassForAuthed !== false;   // signed-in users skip the DC check
 var DC_TRUSTED_PROXY_DEPTH = (typeof DC.trustedProxyDepth === 'number' && DC.trustedProxyDepth >= 1)
-    ? Math.floor(DC.trustedProxyDepth) : 1;             // trusted proxy hops in front (Heroku = 1)
+    ? Math.floor(DC.trustedProxyDepth) : 1;             // trusted proxy hops in front (was 1 on Heroku; re-verify on Render+Cloudflare)
 var HP = cfg.honeypot || {};
 var HP_ACTION = HP.action || 'tarpit';                 // 'tarpit' | 'measure'
 var HV = cfg.humanVerify || {};
@@ -98,7 +98,7 @@ function normalizeIp(ip) {
 // chain APPENDS the peer address it saw, so the right-most entries were observed by our own
 // trusted infrastructure while the left-most are attacker-controllable (a bot can prepend a
 // fake residential hop). We therefore count DC_TRUSTED_PROXY_DEPTH hops in FROM THE RIGHT
-// (Heroku's router = 1) and take that entry, ignoring anything spoofed to its left. Falls
+// (1 = a single trusted proxy) and take that entry, ignoring anything spoofed to its left. Falls
 // back to the socket address when there's no XFF header.
 exports.resolveClientIp = function (xffHeader, fallback) {
     if (!xffHeader) { return fallback || null; }

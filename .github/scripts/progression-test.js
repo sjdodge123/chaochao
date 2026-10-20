@@ -252,7 +252,7 @@ function testNoWritesByDefault() {
     console.log('Writes:');
     // With no Supabase env configured (the test's environment), there's no DB to write to,
     // so writes are off and progression stays in-memory. (The full env matrix for the write
-    // decision — gate removed, prod tripwire, Heroku/override — lives in unit-tests.js.)
+    // decision — gate removed, prod tripwire, Render/Heroku/override — lives in unit-tests.js.)
     check(auth.writesEnabled === false, 'no DB configured -> auth.writesEnabled === false (no persistence)');
 }
 

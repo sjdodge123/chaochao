@@ -175,8 +175,8 @@ full-geometry maps unchanged.
   outside `client/maps/*.json` are blocked. Pure map PRs skip `pr-validation.yml` and
   `release-notes-check.yml` (via `paths-ignore: client/maps/**`) since this workflow
   already covers the map; mixed code+map PRs still run everything.
-- `npm run build` needs `esbuild` (a devDependency installed at deploy via
-  `heroku-postbuild`); it is not present in a fresh/dev checkout, which serves raw
+- `npm run build` needs `esbuild` (a devDependency installed at deploy via the
+  `heroku-postbuild` script — a Heroku-era hook name; on Render it runs only if the service's Build Command invokes it or `npm run build`); it is not present in a fresh/dev checkout, which serves raw
   scripts instead. Use `node --check <file>` for local client syntax validation.
 
 **Conventions** (from the file-size refactor):

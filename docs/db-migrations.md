@@ -16,7 +16,7 @@ you ──► write SQL in supabase/migrations/NNNN_name.sql ──► PR ──
 ```
 
 This is separate from *application data* writes by the game server (those go live wherever a
-Supabase DB is configured, with a built-in tripwire that blocks a non-Heroku host from writing
+Supabase DB is configured, with a built-in tripwire that blocks a non-production host from writing
 to the prod project). This pipeline governs *schema* migrations. Both keep the LLM/agent out of
 the prod-write business.
 

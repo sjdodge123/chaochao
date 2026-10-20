@@ -3,8 +3,8 @@
 // Room roster + standings snapshot — Phase 2 of seamless-reconnect.
 //
 // At SIGTERM we serialize each live room's roster + standings to a CROSS-PROCESS
-// store (Supabase — the only store that survives a Heroku dyno cutover; the FS is
-// per-dyno/ephemeral and there is no Redis). On boot the new process restores those
+// store (Supabase — the only store that survives a Render instance cutover; the FS is
+// per-instance/ephemeral and there is no Redis). On boot the new process restores those
 // rooms (same sig, held at a between-rounds/lobby state, excluded from matchmaking)
 // and seeds the reconnect seat-index so a returning player (matched by userId/
 // deviceId) is re-seated with their notches/team/cosmetics intact. Bots are NOT
