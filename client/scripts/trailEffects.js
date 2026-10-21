@@ -1449,6 +1449,170 @@ function drawGhostfireTrail(ctx, verts, color, now, fadeMs, anim) {
   ctx.restore();
 }
 
+// ---- Yulefire (Christmas 2026 seasonal claim) --------------------------------
+// A hearth flame for the holidays: the ribbon body is the player's colour pulled
+// toward a deep holly red (same colour-rule exception as founders_flare/ghostfire —
+// the season needs to read at a glance), with a warm candle-gold core, and a sparse
+// scatter of glyph particles that hug the path then drift off: white snowflakes
+// that sift downward, red-and-white candy canes that tumble, and twinkling gold
+// stars that float up. Ribbon + core share one glow blit (like ghostfire); glyphs
+// are drawn direct so the cost stays in the same tier on phone GPUs.
+var YULEFIRE_MIX = 0.72;                  // 0 = pure player colour … 1 = pure holly red. Higher than
+                                          // ghostfire's 0.5: red is the complement of cyan/teal player
+                                          // colours, so a 50/50 mix goes muddy — the season has to win.
+var YULEFIRE_RED = '#c41e3a';             // holly-red body
+var YULEFIRE_GOLD = '#ffd45c';            // candle core + stars
+var YULEFIRE_SNOW = '#f4fbff';            // snowflakes / cane base
+var YULEFIRE_CANE = '#e8192c';            // cane stripes
+var YULEFIRE_EVERGREEN = '#1f7a3a';       // snowflake rim tint (reads "pine" against the red)
+var _yulefireBlend = {};
+function yulefireRed(color) {
+  var k = color + '|' + YULEFIRE_MIX;
+  var s = _yulefireBlend[k];
+  if (s) return s;
+  var pc = tfxRGB(color), rc = tfxRGB(YULEFIRE_RED), m = YULEFIRE_MIX;
+  s = "rgb(" + Math.round(pc.r + (rc.r - pc.r) * m) + "," +
+    Math.round(pc.g + (rc.g - pc.g) * m) + "," +
+    Math.round(pc.b + (rc.b - pc.b) * m) + ")";
+  _yulefireBlend[k] = s; return s;
+}
+// Six-arm snowflake, STROKED by the caller's strokeStyle/lineWidth. `s` = arm length.
+function tfxSnowflakeStroke(ctx, s) {
+  for (var a = 0; a < 3; a++) {
+    ctx.rotate(Math.PI / 3);
+    ctx.beginPath();
+    ctx.moveTo(-s, 0); ctx.lineTo(s, 0);
+    ctx.moveTo(s * 0.55, 0); ctx.lineTo(s * 0.4, s * 0.18);
+    ctx.moveTo(s * 0.55, 0); ctx.lineTo(s * 0.4, -s * 0.18);
+    ctx.moveTo(-s * 0.55, 0); ctx.lineTo(-s * 0.4, s * 0.18);
+    ctx.moveTo(-s * 0.55, 0); ctx.lineTo(-s * 0.4, -s * 0.18);
+    ctx.stroke();
+  }
+}
+// Candy-cane centreline (a stem with a hooked top), stroked by the caller. `s` = height.
+function tfxCandyCanePath(ctx, s) {
+  ctx.beginPath();
+  ctx.moveTo(0, s * 0.6);
+  ctx.lineTo(0, -s * 0.25);
+  ctx.arc(s * 0.28, -s * 0.25, s * 0.28, Math.PI, 0);   // hook curls over to the right
+}
+function drawYulefireTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length;
+  if (n < 2) return;
+  var red = yulefireRed(color);
+  var WIDTH = TP('yulefire', 'WIDTH', 22), GLOW = TP('yulefire', 'GLOW', 24), TAPER = TP('yulefire', 'TAPER', 0.8);
+  var DENSITY = TP('yulefire', 'DENSITY', 9), GLYPH = TP('yulefire', 'GLYPH', 9), RISE = TP('yulefire', 'RISE', 46);
+  var fadeEff = fadeMs * TP('yulefire', 'TAIL_PERSIST', 1.3);
+  var stride = Math.max(1, Math.floor(n / 50));
+  var idx = [];
+  for (var i = 0; i < n; i += stride) idx.push(i);
+  if (idx[idx.length - 1] !== n - 1) idx.push(n - 1);
+  var m = idx.length;
+  var hw = new Array(m), nx = new Array(m), ny = new Array(m), af = new Array(m);
+  for (var j = 0; j < m; j++) {
+    var ii = idx[j];
+    var f = tfxAgeAlpha(verts[ii].t, now, fadeEff);
+    af[j] = f;
+    // Cosy hearth flicker — a touch livelier than ghostfire's cold gutter.
+    var flick = 0.82 + 0.18 * Math.sin(anim * 0.012 + verts[ii].t * 0.019);
+    hw[j] = (WIDTH * 0.5) * Math.pow(f, TAPER) * flick;
+    var tan = tfxTangent(verts, ii);
+    nx[j] = -tan.y; ny[j] = tan.x;
+  }
+  ctx.save();
+  ctx.lineJoin = "round";
+  var ribbon = function (c) {
+    c.lineJoin = "round";
+    c.fillStyle = red;
+    for (var s = 1; s < m; s++) {
+      var alpha = af[s] * 0.5;
+      if (alpha <= 0.02) continue;
+      var p0 = verts[idx[s - 1]], p1 = verts[idx[s]];
+      tfxAlpha(c, alpha);
+      c.beginPath();
+      c.moveTo(p0.x + nx[s - 1] * hw[s - 1], p0.y + ny[s - 1] * hw[s - 1]);
+      c.lineTo(p1.x + nx[s] * hw[s], p1.y + ny[s] * hw[s]);
+      c.lineTo(p1.x - nx[s] * hw[s], p1.y - ny[s] * hw[s]);
+      c.lineTo(p0.x - nx[s - 1] * hw[s - 1], p0.y - ny[s - 1] * hw[s - 1]);
+      c.closePath();
+      c.fill();
+    }
+    // Candle-gold core along the fresher half of the flame.
+    var coreStart = -1;
+    for (var cs = 0; cs < m; cs++) { if (af[cs] > 0.35) { coreStart = cs; break; } }
+    if (coreStart >= 0 && coreStart < m - 1) {
+      tfxAlpha(c, 0.9);
+      c.strokeStyle = YULEFIRE_GOLD;
+      c.lineCap = "round";
+      c.lineWidth = Math.max(1.2, WIDTH * 0.18);
+      c.beginPath();
+      c.moveTo(verts[idx[coreStart]].x, verts[idx[coreStart]].y);
+      for (var cc = coreStart + 1; cc < m; cc++) c.lineTo(verts[idx[cc]].x, verts[idx[cc]].y);
+      c.stroke();
+    }
+  };
+  tfxGlowPaint(ctx, verts, red, GLOW, WIDTH, null, ribbon);
+  // Glyph particles: one per time bucket, frame-stable (tfxForEachParticle), hug the
+  // path then drift + sway + fade (tfxParticlePhase). Hash picks the species.
+  var interval = Math.max(40, fadeMs / DENSITY);
+  tfxForEachParticle(verts, now, fadeMs, interval, function (v, ts, age) {
+    var ph = tfxParticlePhase(age, fadeMs);
+    if (ph.alpha <= 0.03) return;
+    var h = tfxHash(ts), h2 = tfxHash(ts + 977);
+    var sway = Math.sin(age * 0.0021 + h * TFX_TAU) * 9 * ph.drift;
+    var x = v.x + (h2 - 0.5) * WIDTH * 0.9 + sway;
+    ctx.save();
+    if (h < 0.5) {
+      // Snowflake: sifts DOWNWARD (the one species that falls), slow spin, pine-tinted rim.
+      ctx.translate(x, v.y + RISE * 0.6 * ph.drift);
+      var ss = GLYPH * (0.55 + h2 * 0.45);
+      ctx.rotate(anim * 0.0012 * (h2 < 0.5 ? 1 : -1) + h * TFX_TAU);
+      tfxAlpha(ctx, ph.alpha * 0.4);
+      ctx.strokeStyle = YULEFIRE_EVERGREEN; ctx.lineWidth = Math.max(1.6, ss * 0.26);
+      tfxSnowflakeStroke(ctx, ss);
+      tfxAlpha(ctx, ph.alpha * 0.95);
+      ctx.strokeStyle = YULEFIRE_SNOW; ctx.lineWidth = Math.max(0.8, ss * 0.12);
+      tfxSnowflakeStroke(ctx, ss);
+    } else if (h < 0.78) {
+      // Candy cane: thick white stem, red stripes dashed over it, tumbling as it lifts.
+      ctx.translate(x, v.y - RISE * 0.5 * ph.drift);
+      var cs2 = GLYPH * (1.3 + h2 * 0.7);
+      ctx.rotate((h - 0.64) * 2.4 + Math.sin(anim * 0.004 + h * 20) * 0.35);
+      ctx.lineCap = "round";
+      tfxAlpha(ctx, ph.alpha * 0.95);
+      ctx.strokeStyle = YULEFIRE_SNOW; ctx.lineWidth = Math.max(2.2, cs2 * 0.26);
+      tfxCandyCanePath(ctx, cs2); ctx.stroke();
+      ctx.strokeStyle = YULEFIRE_CANE;
+      ctx.setLineDash([cs2 * 0.2, cs2 * 0.2]);
+      tfxCandyCanePath(ctx, cs2); ctx.stroke();
+      ctx.setLineDash([]);
+    } else {
+      // Gold star: twinkles, rises fastest of the three.
+      ctx.translate(x, v.y - RISE * ph.drift);
+      var twinkle = 0.55 + 0.45 * Math.sin(anim * 0.02 + h * 31.0);
+      var sr = GLYPH * 0.36 * (0.7 + h2 * 0.6);
+      ctx.rotate(h2 * TFX_TAU);
+      tfxAlpha(ctx, ph.alpha * twinkle);
+      ctx.fillStyle = YULEFIRE_GOLD;
+      tfxStarPath(ctx, Math.max(1.2, sr)); ctx.fill();
+    }
+    ctx.restore();
+  });
+  // Head: holly-red blob with a candle-gold hot-spot.
+  var head = verts[n - 1];
+  var R = WIDTH * 0.95;
+  tfxAlpha(ctx, 1);
+  if (tfxGlow()) ctx.shadowBlur = 0;
+  ctx.save();
+  ctx.translate(head.x, head.y); ctx.scale(R, R);
+  ctx.fillStyle = tfxBlobGrad(ctx, red);
+  ctx.beginPath(); ctx.arc(0, 0, 1, 0, TFX_TAU); ctx.fill();
+  ctx.restore();
+  tfxAlpha(ctx, 0.95); ctx.fillStyle = YULEFIRE_GOLD;
+  ctx.beginPath(); ctx.arc(head.x, head.y, Math.max(1.2, WIDTH * 0.1), 0, TFX_TAU); ctx.fill();
+  ctx.restore();
+}
+
 /* ============================================================================
  * WIRING — how the main session ports these into draw.js drawTrail()
  * ----------------------------------------------------------------------------
@@ -1558,5 +1722,6 @@ var TRAIL_FX = {
   hearts: drawHeartsTrail, smoke: drawSmokeTrail, confetti: drawConfettiTrail,
   snow: drawSnowTrail, tracks: drawTracksTrail, notes: drawNotesTrail,
   neon: drawNeonTrail, ripple: drawRippleTrail, powder: drawPowderTrail,
-  foundersFlare: drawFoundersFlareTrail, ghostfire: drawGhostfireTrail
+  foundersFlare: drawFoundersFlareTrail, ghostfire: drawGhostfireTrail,
+  yulefire: drawYulefireTrail
 };

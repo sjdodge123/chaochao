@@ -56,7 +56,7 @@
     var HOT = {
         cart: ["pizza", "golden_champion", "wheel_of_fortune", "firetruck", "compass", "coin", "dartboard", "clock"],
         pattern: ["nebula"],
-        trailFx: ["comet", "founders_flare", "ghostfire", "bolt", "aurora", "neon", "ripple", "guardian"],
+        trailFx: ["comet", "founders_flare", "ghostfire", "yulefire", "bolt", "aurora", "neon", "ripple", "guardian"],
         border: ["border_runes"]
     };
     var WORST_COMBO = { cart: "warlord", pattern: "nebula", trailFx: "comet", border: "border_runes" };

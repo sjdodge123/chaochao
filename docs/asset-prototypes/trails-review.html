@@ -114,17 +114,17 @@ var GLOW_ON = true;
 window.perfGlow = function () { return GLOW_ON; };
 
 // ---- display names (id -> label), order for the ◄ ► cycle ----
-var ORDER = ['ghostfire','foundersFlare','dashes','sparkle','comet','bubbles','aurora','guardian','survivor',
+var ORDER = ['yulefire','ghostfire','foundersFlare','dashes','sparkle','comet','bubbles','aurora','guardian','survivor',
              'ribbon','bolt','hearts','smoke','confetti','snow','tracks','notes','neon','ripple','powder','basic'];
 var NAMES = { dashes:'Dashes', sparkle:'Sparkle', comet:'Comet', bubbles:'Bubbles', aurora:'Aurora',
   guardian:'Guardian', survivor:'Survivor', ribbon:'Ribbon', bolt:'Lightning', hearts:'Hearts',
   smoke:'Smoke', confetti:'Confetti', snow:'Crystals', tracks:'Tire Tracks', notes:'Music Notes',
   neon:'Neon Wall', ripple:'Ripples', powder:'Powder', basic:'Basic (default)',
-  foundersFlare:'Solar Flare (Early Adopter)', ghostfire:'Ghostfire (Halloween 2026)' };
+  foundersFlare:'Solar Flare (Early Adopter)', ghostfire:'Ghostfire (Halloween 2026)', yulefire:'Yulefire (Christmas 2026)' };
 var PALETTE = ['#e8453c','#4caf50','#f5d142','#4a78e0','#e07b39','#9b5de5','#5ad0ff','#ef6fb0',
   '#2b2f3a','#ffffff','#c0392b','#3fb6c8'];
 
-var cfg = { effect:'ghostfire', color:'#5ad0ff', path:'circle', speed:1, fade:5000, glow:true, dim:false, karts:1 };
+var cfg = { effect:'yulefire', color:'#5ad0ff', path:'circle', speed:1, fade:5000, glow:true, dim:false, karts:1 };
 
 // Per-effect tunable knobs — keys/defaults MIRROR the TP('effect','KEY',default) calls baked
 // into trailEffects.js. Editing a slider sets window.TFX_PARAMS[effect][key], which the live
@@ -152,6 +152,7 @@ var EFFECT_PARAMS = {
   // Seasonal claims (TP keys mirror trailEffects.js; the effect KEY is the TP namespace for
   // ghostfire, while founders' TP namespace is its skin id 'founders_flare').
   ghostfire: [['WIDTH',6,40,1,22],['GLOW',0,40,1,24],['TAPER',0,1,0.05,0.8],['DENSITY',3,20,1,9],['GLYPH',4,20,0.5,9],['RISE',0,100,2,46],['TAIL_PERSIST',0.5,3,0.1,1.3]],
+  yulefire:  [['WIDTH',6,40,1,22],['GLOW',0,40,1,24],['TAPER',0,1,0.05,0.8],['DENSITY',3,20,1,9],['GLYPH',4,20,0.5,9],['RISE',0,100,2,46],['TAIL_PERSIST',0.5,3,0.1,1.3]],
   basic:    []
 };
 

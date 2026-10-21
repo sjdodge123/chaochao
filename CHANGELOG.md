@@ -17,6 +17,7 @@ To re-render a past week's digest with the current formatting, run the `Release 
 ### General
 
 - **Halloween is here — claim the Ghostfire trail! 🎃** Sign in to your account any time through November 1st to permanently unlock the limited **Ghostfire** trail: a haunted violet flame with a sickly green core, trailing little ghosts, fluttering bats and glowing pumpkin embers behind your kart. The lobby shows a Halloween banner while the claim is open. Once claimed it's yours forever — but the claim closes November 2nd and it's gone for good after that.
+- **Next up: the Christmas Yulefire trail arrives December 1st! 🎄** From December 1st through New Year's Day, sign in to your account to permanently claim the limited **Yulefire** trail: a holly-red hearth flame with a candle-gold core, trailing falling snowflakes, tumbling candy canes and twinkling gold stars behind your kart. Until then the trail shows in your locker as "Opens Dec 1" — a Christmas banner lights up the lobby once the claim opens, and it closes for good on January 2nd.
 
 ## v0.49.5 — 2026-07-09
 
