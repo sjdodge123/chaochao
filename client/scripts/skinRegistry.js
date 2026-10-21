@@ -117,10 +117,10 @@ var SKINS = [
     // `emoji` (banner + toast glyph, default 🌟) and `theme` (lobby band palette, see
     // STATUS_CARD_THEMES in lobbyHub.js, default gold) let a season skin its own copy.
     { id: 'ghostfire', name: 'Ghostfire', slot: 'trail', rarity: 'seasonal', unlock: { kind: 'seasonal', season: 'halloween_2026', label: 'Halloween', claimStart: '2026-10-20T00:00:00Z', claimEnd: '2026-11-02T00:00:00Z', emoji: '🎃', theme: 'halloween' }, effect: 'ghostfire' },
-    // Christmas 2026 — Yulefire: a holly-red hearth flame with a candle-gold core, trailing
-    // falling snowflakes, tumbling candy canes and twinkling gold stars (drawYulefireTrail,
-    // trailEffects.js). Dec 1 → Jan 2 2027 (UTC, half-open).
-    { id: 'yulefire', name: 'Yulefire', slot: 'trail', rarity: 'seasonal', unlock: { kind: 'seasonal', season: 'christmas_2026', label: 'Christmas', claimStart: '2026-12-01T00:00:00Z', claimEnd: '2027-01-02T00:00:00Z', emoji: '🎄', theme: 'christmas' }, effect: 'yulefire' },
+    // Christmas 2026 — Fairy Lights: a string of Christmas lights — dark-green wire with
+    // twinkling red/green/gold/blue/pink bulbs plus one in the player's own colour
+    // (drawFairyLightsTrail, trailEffects.js). Dec 1 → Jan 2 2027 (UTC, half-open).
+    { id: 'fairylights', name: 'Fairy Lights', slot: 'trail', rarity: 'seasonal', unlock: { kind: 'seasonal', season: 'christmas_2026', label: 'Christmas', claimStart: '2026-12-01T00:00:00Z', claimEnd: '2027-01-02T00:00:00Z', emoji: '🎄', theme: 'christmas' }, effect: 'fairylights' },
     // --- Borders (rim cosmetic; painter tints to player color, drawn AROUND the rim). SHARE the
     // 2nd cosmetic slot with patterns (player.pattern field / selected_pattern column) — distinguished
     // by slot:'border'. ids are border_-prefixed because flames/scales/electric collide with pattern
