@@ -1449,6 +1449,77 @@ function drawGhostfireTrail(ctx, verts, color, now, fadeMs, anim) {
   ctx.restore();
 }
 
+// ---- Fairy Lights (Christmas 2026 seasonal claim) ----------------------------
+// A string of Christmas lights: a dark-green wire traces the path with bulbs hanging
+// off it on alternating sides — red / green / gold / blue / pink plus the PLAYER'S
+// colour as the sixth bulb (the colour-rule nod: this trail keeps its own palette but
+// the kart's identity is literally on the string). Each bulb twinkles on its own phase
+// and sits in a soft radial-gradient halo. Bulbs don't drift — they stay on the path
+// and fade in place with the wire. NO glow blit at all (the halos are cached gradients),
+// so this is the cheapest seasonal trail by a wide margin.
+var FAIRY_WIRE = '#0f3d22';
+var FAIRY_BULBS = ['#ff3b3b', '#38d66b', '#ffd34d', '#4f8dff', '#ff7ad9'];
+var FAIRY_HEAD = '#fff1b0';
+function drawFairyLightsTrail(ctx, verts, color, now, fadeMs, anim) {
+  var n = verts.length;
+  if (n < 2) return;
+  var WIRE = TP('fairylights', 'WIRE', 2.4), BULB = TP('fairylights', 'BULB', 6), DENSITY = TP('fairylights', 'DENSITY', 14);
+  var HALO = TP('fairylights', 'HALO', 3.2), BLINK = TP('fairylights', 'BLINK', 1);
+  ctx.save();
+  // Wire: one stroke per age bucket so it fades with the trail (same scheme as tracks).
+  var bucketMs = fadeMs / TFX_BUCKETS;
+  ctx.strokeStyle = FAIRY_WIRE; ctx.lineWidth = WIRE; ctx.lineCap = "round"; ctx.lineJoin = "round";
+  for (var b = 0; b < TFX_BUCKETS; b++) {
+    tfxAlpha(ctx, (1 - (b + 0.5) / TFX_BUCKETS) * 0.9);
+    var run = false;
+    ctx.beginPath();
+    for (var i = 0; i < n; i++) {
+      var age = now - verts[i].t; var seg = (age >= fadeMs) ? TFX_BUCKETS : Math.floor(age / bucketMs);
+      if (seg !== b) { run = false; continue; }
+      if (!run) { var p = verts[Math.max(0, i - 1)]; ctx.moveTo(p.x, p.y); run = true; }
+      ctx.lineTo(verts[i].x, verts[i].y);
+    }
+    ctx.stroke();
+  }
+  // Bulbs: one per time bucket (frame-stable), alternating sides of the wire.
+  var interval = Math.max(40, fadeMs / DENSITY), bi = 0;
+  tfxForEachParticle(verts, now, fadeMs, interval, function (v, ts, age, i) {
+    var a = tfxAgeAlpha(ts, now, fadeMs);
+    if (a <= 0.03) return;
+    var h = tfxHash(ts);
+    var slot = Math.floor(h * 6);                       // 5 palette colours + the player colour
+    var col = slot >= 5 ? color : FAIRY_BULBS[slot];
+    var tan = tfxTangent(verts, i), side = (bi++ % 2 === 0) ? 1 : -1;
+    var nx = -tan.y * side, ny = tan.x * side;
+    var bright = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(anim * 0.004 * BLINK + h * TFX_TAU * 3));
+    var cx = v.x + nx * BULB * 1.1, cy = v.y + ny * BULB * 1.1;
+    // halo (cached unit gradient, positioned via translate+scale)
+    ctx.save();
+    ctx.translate(cx, cy); ctx.scale(BULB * HALO, BULB * HALO);
+    tfxAlpha(ctx, a * bright * 0.55); ctx.fillStyle = tfxBlobGrad(ctx, col);
+    ctx.beginPath(); ctx.arc(0, 0, 1, 0, TFX_TAU); ctx.fill();
+    ctx.restore();
+    // bulb body (teardrop pointing away from the wire) + highlight + dark cap at the wire
+    ctx.save();
+    ctx.translate(cx, cy); ctx.rotate(Math.atan2(ny, nx) + Math.PI / 2);
+    tfxAlpha(ctx, a * (0.55 + 0.45 * bright)); ctx.fillStyle = col;
+    ctx.beginPath(); ctx.ellipse(0, 0, BULB * 0.62, BULB * 0.95, 0, 0, TFX_TAU); ctx.fill();
+    tfxAlpha(ctx, a * bright * 0.9); ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.arc(-BULB * 0.18, -BULB * 0.25, BULB * 0.2, 0, TFX_TAU); ctx.fill();
+    tfxAlpha(ctx, a); ctx.fillStyle = FAIRY_WIRE;
+    ctx.fillRect(-BULB * 0.35, -BULB * 1.25, BULB * 0.7, BULB * 0.42);
+    ctx.restore();
+  });
+  // Head: a warm bright bulb on the kart.
+  var head = verts[n - 1];
+  ctx.save();
+  ctx.translate(head.x, head.y); ctx.scale(BULB * 2.2, BULB * 2.2);
+  tfxAlpha(ctx, 0.9); ctx.fillStyle = tfxBlobGrad(ctx, FAIRY_HEAD);
+  ctx.beginPath(); ctx.arc(0, 0, 1, 0, TFX_TAU); ctx.fill();
+  ctx.restore();
+  ctx.restore();
+}
+
 /* ============================================================================
  * WIRING — how the main session ports these into draw.js drawTrail()
  * ----------------------------------------------------------------------------
@@ -1558,5 +1629,6 @@ var TRAIL_FX = {
   hearts: drawHeartsTrail, smoke: drawSmokeTrail, confetti: drawConfettiTrail,
   snow: drawSnowTrail, tracks: drawTracksTrail, notes: drawNotesTrail,
   neon: drawNeonTrail, ripple: drawRippleTrail, powder: drawPowderTrail,
-  foundersFlare: drawFoundersFlareTrail, ghostfire: drawGhostfireTrail
+  foundersFlare: drawFoundersFlareTrail, ghostfire: drawGhostfireTrail,
+  fairylights: drawFairyLightsTrail
 };

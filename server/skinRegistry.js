@@ -125,6 +125,9 @@ var SKINS = [
     // (UTC), so Halloween night + Nov 1 are fully inside it. `emoji`/`theme` are optional
     // presentation hints read only by the client (banner + toast); the server ignores them.
     { id: 'ghostfire', slot: 'trail', unlock: { kind: 'seasonal', season: 'halloween_2026', label: 'Halloween', claimStart: '2026-10-20T00:00:00Z', claimEnd: '2026-11-02T00:00:00Z', emoji: '🎃', theme: 'halloween' } },
+    // Christmas 2026 — Fairy Lights trail. Window opens Dec 1 and closes the moment Jan 2 2027 starts
+    // (UTC), so the whole run-up, Christmas Day and New Year's Day are inside it.
+    { id: 'fairylights', slot: 'trail', unlock: { kind: 'seasonal', season: 'christmas_2026', label: 'Christmas', claimStart: '2026-12-01T00:00:00Z', claimEnd: '2027-01-02T00:00:00Z', emoji: '🎄', theme: 'christmas' } },
     // --- Borders (rim cosmetic; SHARE the 2nd slot with patterns). border_-prefixed ids
     // (flames/scales/electric collide with pattern ids). All kind:'open' for testing. ---
     { id: 'border_ring', slot: 'border', unlock: { kind: 'level', level: 10 } },

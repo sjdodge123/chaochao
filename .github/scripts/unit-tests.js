@@ -502,7 +502,7 @@ group('skinRegistry seasonal claims', function () {
     const clientFx = loadClientGlobals('client/scripts/trailEffects.js');
     const serverSeasonal = skinRegistry.SKINS.filter(function (s) { return s.unlock.kind === 'seasonal'; });
     const clientSeasonal = (clientReg.SKINS || []).filter(function (s) { return s.unlock && s.unlock.kind === 'seasonal'; });
-    check(serverSeasonal.length >= 2, 'server registry has the Early Adopter + Halloween seasonal entries');
+    check(serverSeasonal.length >= 3, 'server registry has the Early Adopter + Halloween + Christmas seasonal entries');
     eq(clientSeasonal.length, serverSeasonal.length, 'client registry has the same number of seasonal entries');
     const clientById = {};
     clientSeasonal.forEach(function (s) { clientById[s.id] = s; });
@@ -540,6 +540,25 @@ group('skinRegistry seasonal claims', function () {
         eq(skinRegistry.isClaimWindowOpen(u, e0 - 1), true, 'ghostfire: 1ms before claimEnd => open');
         eq(skinRegistry.isClaimWindowOpen(u, e0), false, 'ghostfire: exactly claimEnd => closed');
     }
+    // Christmas 2026 window: half-open [Dec 1 2026, Jan 2 2027) UTC.
+    const xm = skinRegistry.getSkin('fairylights');
+    check(!!xm && xm.slot === 'trail', 'fairylights is a trail seasonal claim');
+    if (xm) {
+        const u = xm.unlock;
+        const s0 = Date.parse(u.claimStart), e0 = Date.parse(u.claimEnd);
+        eq(u.claimStart, '2026-12-01T00:00:00Z', 'fairylights claim opens Dec 1 2026 UTC');
+        eq(u.claimEnd, '2027-01-02T00:00:00Z', 'fairylights claim closes at the start of Jan 2 2027 UTC');
+        eq(skinRegistry.isClaimWindowOpen(u, s0 - 1), false, 'fairylights: 1ms before claimStart => closed');
+        eq(skinRegistry.isClaimWindowOpen(u, s0), true, 'fairylights: exactly claimStart => open');
+        eq(skinRegistry.isClaimWindowOpen(u, Date.parse('2026-12-25T12:00:00Z')), true, 'fairylights: Christmas Day => open');
+        eq(skinRegistry.isClaimWindowOpen(u, Date.parse('2027-01-01T23:59:59Z')), true, "fairylights: New Year's Day => open");
+        eq(skinRegistry.isClaimWindowOpen(u, e0 - 1), true, 'fairylights: 1ms before claimEnd => open');
+        eq(skinRegistry.isClaimWindowOpen(u, e0), false, 'fairylights: exactly claimEnd => closed');
+    }
+    eq(JSON.stringify(skinRegistry.currentSeasonalClaims(Date.parse('2026-12-15T12:00:00Z'))), JSON.stringify(['fairylights']),
+        'mid December grants exactly the Christmas claim (Halloween + Early Adopter stay closed)');
+    eq(skinRegistry.currentSeasonalClaims(Date.parse('2026-11-15T12:00:00Z')).length, 0, 'mid November 2026: nothing claimable (Halloween closed, Christmas not yet open)');
+    eq(skinRegistry.currentSeasonalClaims(Date.parse('2027-01-02T00:00:00Z')).length, 0, 'Jan 2 2027: nothing claimable');
     eq(JSON.stringify(skinRegistry.currentSeasonalClaims(Date.parse('2026-10-25T12:00:00Z'))), JSON.stringify(['ghostfire']),
         'late October grants exactly the Halloween claim (Early Adopter stays closed)');
     eq(JSON.stringify(skinRegistry.currentSeasonalClaims(Date.parse('2026-07-01T00:00:00Z'))), JSON.stringify(['founders_flare']),

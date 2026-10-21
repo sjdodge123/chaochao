@@ -1192,7 +1192,8 @@ var STATUS_CARD_GOLD = { fill: "rgba(58,43,6,0.96)", border: "#ffb31f", text: "#
 // gold is the default so a season without a theme looks exactly like Early Adopter did.
 var STATUS_CARD_THEMES = {
     gold: STATUS_CARD_GOLD,
-    halloween: { fill: "rgba(40,12,58,0.96)", border: "#ff8c1a", text: "#ffd9a8", glow: "rgba(255,140,26,0.7)" }
+    halloween: { fill: "rgba(40,12,58,0.96)", border: "#ff8c1a", text: "#ffd9a8", glow: "rgba(255,140,26,0.7)" },
+    christmas: { fill: "rgba(10,46,26,0.96)", border: "#ff4d5a", text: "#fff1cc", glow: "rgba(255,212,92,0.7)" }
 };
 var STATUS_CARD_BAND_H = 28;   // gold CTA band (only while a claim is open)
 var STATUS_CARD_CELLS_H = 42;  // label row + value row
@@ -2646,12 +2647,25 @@ function cartSkinUnlock(id, lp) {
         // whether it's still claimable (sign in during the window) or gone for good.
         var owns = !!(prog && prog.unlocked_skins && prog.unlocked_skins.indexOf(id) !== -1);
         if (owns) { return { locked: false }; }
-        var open = (typeof isClaimWindowOpen === "function") && isClaimWindowOpen(skin.unlock, Date.now());
-        return { locked: true, text: open ? "Sign in to claim" : "Expired" };
+        return { locked: true, text: seasonalClaimLockText(skin.unlock, Date.now()) };
     }
     if (skin.unlock.kind !== "achievement") { return { locked: true, text: "?" }; }
     var owned = !!(prog && prog.unlocked_skins && prog.unlocked_skins.indexOf(id) !== -1);
     return owned ? { locked: false } : { locked: true, text: "🏆" };
+}
+// Lock wording for an UNOWNED seasonal claim, shared by the locker cell (cartSkinUnlock) and the
+// equip-rejected message (flagCosmeticRejected) so the two never drift. A claim that ships ahead
+// of its window (e.g. Christmas merged in November) reads "Opens Dec 1" rather than "Expired".
+var SEASONAL_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function seasonalClaimLockText(unlock, now) {
+    if (!unlock) { return "Expired"; }
+    if (typeof isClaimWindowOpen === "function" && isClaimWindowOpen(unlock, now)) { return "Sign in to claim"; }
+    var start = Date.parse(unlock.claimStart);
+    if (!isNaN(start) && now < start) {
+        var d = new Date(start);
+        return "Opens " + SEASONAL_MONTHS[d.getUTCMonth()] + " " + d.getUTCDate();
+    }
+    return "Expired";
 }
 // Lv badge + an XP-to-next-level bar for signed-in players; a sign-in nudge for guests.
 function drawProgressionBadge(lp, x, y, w, S) {
@@ -2690,11 +2704,9 @@ function flagCosmeticRejected(slot, payload) {
     } else if (payload && payload.reason === "achievement") {
         msg = achievementRequirementLine(lp, payload.id) || "Earn the medal to unlock";
     } else if (payload && payload.reason === "seasonal") {
-        // Seasonal claim the player never claimed in its window. Match the locker's own wording:
-        // still claimable -> "Sign in to claim"; window closed -> "Expired".
+        // Seasonal claim the player doesn't own. Same wording as the locker cell (seasonalClaimLockText).
         var sUnlock = (typeof getSkin === "function" && payload.id) ? (getSkin(payload.id) || {}).unlock : null;
-        var stillOpen = !!(sUnlock && typeof isClaimWindowOpen === "function" && isClaimWindowOpen(sUnlock, Date.now()));
-        msg = stillOpen ? "Sign in to claim" : "Expired";
+        msg = seasonalClaimLockText(sUnlock, Date.now());
     }
     lp._cartLockMsg = msg;
     lp._cartLockAt = Date.now();
